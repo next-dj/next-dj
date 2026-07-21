@@ -24,11 +24,7 @@ class TestParseUrlPatternHappyPath:
             ("item/[uuid:pk]", "item/<uuid:pk>/", {"pk": "pk"}),
             ("files/[[args]]", "files/<path:args>/", {"args": "args"}),
             ("files/[[args]]/", "files/<path:args>/", {"args": "args"}),
-            (
-                "docs/[[doc-path]]",
-                "docs/<path:doc_path>/",
-                {"doc_path": "doc_path"},
-            ),
+            ("docs/[[doc-path]]", "docs/<path:doc_path>/", {"doc_path": "doc_path"}),
             (
                 "user/[int:id]/files/[[rest]]",
                 "user/<int:id>/files/<path:rest>/",
@@ -50,11 +46,7 @@ class TestParseUrlPatternHappyPath:
         ],
     )
     def test_parse_url_pattern(
-        self,
-        url_parser,
-        url_path,
-        expected_pattern,
-        expected_params,
+        self, url_parser, url_path, expected_pattern, expected_params
     ) -> None:
         """Each converter kind maps to its Django path syntax unchanged."""
         pattern, params = url_parser.parse_url_pattern(url_path)
@@ -98,10 +90,7 @@ class TestParseUrlPatternDuplicates:
         ],
     )
     def test_duplicate_names_raise(
-        self,
-        url_parser,
-        url_path,
-        expected_param_name,
+        self, url_parser, url_path, expected_param_name
     ) -> None:
         """Any repeat of a normalised name, wildcard included, raises."""
         with pytest.raises(DuplicateURLParameterError) as excinfo:

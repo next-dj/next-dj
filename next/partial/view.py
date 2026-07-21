@@ -67,9 +67,7 @@ def _version_conflict(intent: "PartialIntent", version: str) -> bool:
 
 
 def _build_envelope(
-    result: "ZoneRenderResult",
-    intent: "PartialIntent",
-    version: str,
+    result: "ZoneRenderResult", intent: "PartialIntent", version: str
 ) -> Envelope:
     """Assemble one envelope patching every rendered zone with its assets.
 
@@ -89,10 +87,7 @@ def _build_envelope(
 
 
 def _patch_zone(
-    patches: Patches,
-    name: str,
-    result: "ZoneRenderResult",
-    merge: "MergeMode | None",
+    patches: Patches, name: str, result: "ZoneRenderResult", merge: "MergeMode | None"
 ) -> None:
     """Patch one zone in place, morphing it or merging deduplicated children.
 

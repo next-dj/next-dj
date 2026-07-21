@@ -24,12 +24,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
-from django.core.checks import (
-    CheckMessage,
-    Error,
-    Warning as DjangoWarning,
-    register,
-)
+from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register
 
 from next.checks import NEXT
 from next.conf import import_class_cached, next_framework_settings
@@ -43,9 +38,7 @@ if TYPE_CHECKING:
 
 
 def _validate_tag_template(
-    tag_name: str,
-    value: object,
-    backend_index: int,
+    tag_name: str, value: object, backend_index: int
 ) -> CheckMessage | None:
     if not isinstance(value, str):
         return None
@@ -63,9 +56,7 @@ def _validate_tag_template(
 
 
 def _check_single_backend(
-    config: object,
-    index: int,
-    seen: set[str],
+    config: object, index: int, seen: set[str]
 ) -> Iterable[CheckMessage]:
     messages: list[CheckMessage] = []
     if not isinstance(config, dict):
@@ -133,18 +124,14 @@ def _check_single_backend(
 
 
 @register(NEXT)
-def check_static_backends(**_kwargs: object) -> list[CheckMessage]:
+def check_static_backends(**kwargs) -> list[CheckMessage]:
     """Validate the structure of `NEXT_FRAMEWORK['STATIC_BACKENDS']`."""
     messages: list[CheckMessage] = []
     try:
         configs = next_framework_settings.STATIC_BACKENDS
     except (AttributeError, ImportError) as e:  # pragma: no cover
         return [
-            Error(
-                f"Unable to read STATIC_BACKENDS: {e}",
-                obj=settings,
-                id="next.E036",
-            )
+            Error(f"Unable to read STATIC_BACKENDS: {e}", obj=settings, id="next.E036")
         ]
 
     if not isinstance(configs, list) or len(configs) == 0:
@@ -170,10 +157,7 @@ def _w042(message: str) -> CheckMessage:
 
 
 @register(NEXT)
-def check_js_context_serializer(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+def check_js_context_serializer(*args, **kwargs) -> list[CheckMessage]:
     """Validate that `JS_CONTEXT_SERIALIZER` resolves to a protocol implementation."""
     message = _js_context_serializer_message()
     return [message] if message is not None else []

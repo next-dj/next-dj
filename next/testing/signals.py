@@ -63,12 +63,7 @@ class SignalRecorder:
             signal.disconnect(self._receiver)
         self._started = False
 
-    def _receiver(
-        self,
-        sender: object,
-        signal: Signal,
-        **kwargs: object,
-    ) -> None:
+    def _receiver(self, sender: object, signal: Signal, **kwargs) -> None:
         self.events.append(
             SignalEvent(signal=signal, sender=sender, kwargs=dict(kwargs))
         )

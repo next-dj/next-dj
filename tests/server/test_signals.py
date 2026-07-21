@@ -13,7 +13,7 @@ from next.server.watcher import _registered_extra_watch_specs
 def capture_watch_specs_ready() -> Generator[list[dict[str, Any]], None, None]:
     events: list[dict[str, Any]] = []
 
-    def _listener(sender, **kwargs: object) -> None:
+    def _listener(sender, **kwargs) -> None:
         events.append({"sender": sender, **kwargs})
 
     watch_specs_ready.connect(_listener)
@@ -32,8 +32,7 @@ class TestWatchSpecsReadySignal:
     ) -> None:
         """Calling ``iter_all_autoreload_watch_specs()`` emits ``watch_specs_ready``."""
         with patch(
-            "next.server.watcher._iter_default_autoreload_watch_specs",
-            return_value=[],
+            "next.server.watcher._iter_default_autoreload_watch_specs", return_value=[]
         ):
             iter_all_autoreload_watch_specs()
         assert len(capture_watch_specs_ready) == 1
@@ -43,8 +42,7 @@ class TestWatchSpecsReadySignal:
     ) -> None:
         """Sender is the ``iter_all_autoreload_watch_specs`` function."""
         with patch(
-            "next.server.watcher._iter_default_autoreload_watch_specs",
-            return_value=[],
+            "next.server.watcher._iter_default_autoreload_watch_specs", return_value=[]
         ):
             iter_all_autoreload_watch_specs()
         assert capture_watch_specs_ready[0]["sender"] is iter_all_autoreload_watch_specs
@@ -54,8 +52,7 @@ class TestWatchSpecsReadySignal:
     ) -> None:
         """``specs`` kwarg is the final deduplicated list."""
         with patch(
-            "next.server.watcher._iter_default_autoreload_watch_specs",
-            return_value=[],
+            "next.server.watcher._iter_default_autoreload_watch_specs", return_value=[]
         ):
             result = iter_all_autoreload_watch_specs()
         assert capture_watch_specs_ready[0]["specs"] == result

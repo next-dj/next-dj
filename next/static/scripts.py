@@ -186,9 +186,7 @@ class NextScriptBuilder:
 
     @classmethod
     def from_options(
-        cls,
-        next_js_url: str,
-        options: Mapping[str, Any] | None = None,
+        cls, next_js_url: str, options: Mapping[str, Any] | None = None
     ) -> NextScriptBuilder:
         """Build a script builder from an options mapping.
 

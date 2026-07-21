@@ -90,12 +90,7 @@ class TestPolitenessHeaders:
         _consume(response)
 
 
-_NO_SSE_BACKEND = [
-    {
-        "BACKEND": "next.partial.PartialProtocolBackend",
-        "OPTIONS": {},
-    },
-]
+_NO_SSE_BACKEND = [{"BACKEND": "next.partial.PartialProtocolBackend", "OPTIONS": {}}]
 
 
 class TestRetryOption:
@@ -115,7 +110,7 @@ class TestRetryOption:
             {
                 "BACKEND": "next.partial.PartialProtocolBackend",
                 "OPTIONS": {"SSE": {"RETRY_MS": "fast"}},
-            },
+            }
         ]
         with _partial_backend_config(backend):
             assert _retry_ms() == 3000
@@ -127,7 +122,7 @@ def _custom_heartbeat_backend(seconds: object) -> list[dict]:
         {
             "BACKEND": "next.partial.PartialProtocolBackend",
             "OPTIONS": {"SSE": {"HEARTBEAT_SECONDS": seconds}},
-        },
+        }
     ]
 
 
@@ -170,7 +165,7 @@ class _Recorder:
         """Start with an empty event list."""
         self.events: list[dict] = []
 
-    def __call__(self, **kwargs: object) -> None:
+    def __call__(self, **kwargs) -> None:
         """Record one signal payload."""
         self.events.append(kwargs)
 

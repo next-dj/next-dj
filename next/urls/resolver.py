@@ -47,10 +47,7 @@ class _TrieNode:
 
 
 def _collect(
-    node: _TrieNode,
-    segments: list[str],
-    depth: int,
-    found: list[_Candidate],
+    node: _TrieNode, segments: list[str], depth: int, found: list[_Candidate]
 ) -> None:
     found.extend(node.tail_terminals)
     if depth == len(segments):

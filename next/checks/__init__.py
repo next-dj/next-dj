@@ -34,8 +34,10 @@ if TYPE_CHECKING:
         check_context_processor_signature,
         check_layout_templates,
         check_page_functions,
+        check_page_module_imports,
         check_pages_structure,
         check_request_in_context,
+        check_single_keyless_context,
         check_template_loaders,
     )
     from next.pages.loaders import _load_python_module
@@ -62,8 +64,10 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_context_processor_signature",
         "check_layout_templates",
         "check_page_functions",
+        "check_page_module_imports",
         "check_pages_structure",
         "check_request_in_context",
+        "check_single_keyless_context",
         "check_template_loaders",
     ),
     "next.pages.loaders": ("_load_python_module",),

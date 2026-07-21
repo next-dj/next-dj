@@ -12,12 +12,4 @@ from .context import Context, ContextResult
 from .manager import Page, context, page
 
 
-__all__ = [
-    "Context",
-    "ContextResult",
-    "Page",
-    "checks",
-    "context",
-    "page",
-    "signals",
-]
+__all__ = ["Context", "ContextResult", "Page", "checks", "context", "page", "signals"]

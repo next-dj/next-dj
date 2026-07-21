@@ -33,7 +33,7 @@ _MISSING: Any = object()
 
 
 @contextlib.contextmanager
-def override_next_settings(**overrides: object) -> Iterator[None]:
+def override_next_settings(**overrides) -> Iterator[None]:
     """Merge `overrides` into `NEXT_FRAMEWORK` for the duration of the block.
 
     The merge is shallow: top-level keys supplied as kwargs replace any
@@ -144,9 +144,7 @@ class StaticCollectorProxy:
 
 @contextlib.contextmanager
 def patch_static_collector(
-    factory: Callable[[], StaticCollector] | None = None,
-    *,
-    capture: bool = False,
+    factory: Callable[[], StaticCollector] | None = None, *, capture: bool = False
 ) -> Iterator[StaticCollectorProxy | None]:
     """Replace `default_manager.create_collector` for the block.
 

@@ -8,10 +8,7 @@ from tests.support.cases import (
     UrlByAnnotationResolveCase,
     UrlKwargsResolveCase,
 )
-from tests.support.forms import (
-    GuardedTenantForm,
-    build_post_request,
-)
+from tests.support.forms import GuardedTenantForm, build_post_request
 from tests.support.helpers import (
     _ctx,
     _full_resolver,

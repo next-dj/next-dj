@@ -53,9 +53,7 @@ class TestRenderZoneBatch:
     def test_context_collected_once_for_the_batch(self) -> None:
         original = render_module.page.build_render_context
         with patch.object(
-            render_module.page,
-            "build_render_context",
-            side_effect=original,
+            render_module.page, "build_render_context", side_effect=original
         ) as spy:
             render_zone(ZONED_PAGE, ("alpha", "beta", "later"), _request())
         assert spy.call_count == 1
@@ -66,10 +64,7 @@ class TestRenderZoneOverrides:
 
     def test_override_replaces_context_value(self) -> None:
         result = render_zone(
-            ZONED_PAGE,
-            ("alpha",),
-            _request(),
-            overrides={"greeting": "override"},
+            ZONED_PAGE, ("alpha",), _request(), overrides={"greeting": "override"}
         )
         assert "override" in result.html["alpha"]
 
@@ -123,7 +118,7 @@ class TestZoneRenderedSignal:
     def test_signal_fires_per_zone(self) -> None:
         seen: list[dict[str, object]] = []
 
-        def receiver(sender: object, **kwargs: object) -> None:
+        def receiver(sender: object, **kwargs) -> None:
             seen.append({"sender": sender, **kwargs})
 
         zone_rendered.connect(receiver)

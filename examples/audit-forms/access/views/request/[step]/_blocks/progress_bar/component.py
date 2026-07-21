@@ -4,11 +4,7 @@ from next.components import component
 from next.forms import FormWizard
 
 
-_STEP_LABELS = {
-    "identity": "Identity",
-    "scope": "Scope",
-    "approval": "Approval",
-}
+_STEP_LABELS = {"identity": "Identity", "scope": "Scope", "approval": "Approval"}
 
 
 def _label(step: str) -> str:

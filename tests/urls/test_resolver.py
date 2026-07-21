@@ -82,11 +82,11 @@ def _write_page(tree: Path, route: str) -> None:
     (directory / "page.py").write_text('template = "ok"\n')
 
 
-def _plain_view(_request, **_kwargs: object) -> HttpResponse:
+def _plain_view(_request, **kwargs) -> HttpResponse:
     return HttpResponse(b"plain")
 
 
-def _other_view(_request, **_kwargs: object) -> HttpResponse:
+def _other_view(_request, **kwargs) -> HttpResponse:
     return HttpResponse(b"other")
 
 

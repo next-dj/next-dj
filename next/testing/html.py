@@ -72,12 +72,7 @@ def _inner_text(fragment: str) -> str:
     return "".join(parser.parts).strip()
 
 
-def find_anchor(
-    html: str,
-    *,
-    href: str | None = None,
-    text: str | None = None,
-) -> str:
+def find_anchor(html: str, *, href: str | None = None, text: str | None = None) -> str:
     """Return the first `<a>...</a>` substring that matches the filters.
 
     `href` is compared for exact equality with the anchor's `href`

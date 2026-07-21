@@ -320,9 +320,7 @@ class TestRouterReloadSignal:
     """`router_reloaded` fires once per article save and once per delete."""
 
     @pytest.mark.parametrize(
-        "trigger",
-        ["save", "delete"],
-        ids=["on-save", "on-delete"],
+        "trigger", ["save", "delete"], ids=["on-save", "on-delete"]
     )
     def test_router_reload_signal_fires(
         self, routing_doc: Article, trigger: str

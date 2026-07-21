@@ -39,14 +39,7 @@ class TestComponentRegistry:
 
         broken_root = MagicMock(spec=Path)
         broken_root.resolve.side_effect = OSError
-        info2 = ComponentInfo(
-            "n",
-            broken_root,
-            "",
-            tmp_path / "n.djx",
-            None,
-            True,
-        )
+        info2 = ComponentInfo("n", broken_root, "", tmp_path / "n.djx", None, True)
         assert info2.resolved_scope_root is broken_root
 
     def test_contains_is_indexed_by_name(self, tmp_path: Path) -> None:
@@ -55,7 +48,7 @@ class TestComponentRegistry:
         root = tmp_path.resolve()
         for i in range(50):
             reg.register(
-                ComponentInfo(f"c{i}", root, "", tmp_path / f"{i}.djx", None, True),
+                ComponentInfo(f"c{i}", root, "", tmp_path / f"{i}.djx", None, True)
             )
         assert "c49" in reg
         assert "missing" not in reg
@@ -107,13 +100,13 @@ class TestComponentExtraRootsFromConfig:
         r1 = component_extra_roots_from_config({"DIRS": (a, b)})
         assert len(r1) == 2
         r2 = component_extra_roots_from_config(
-            {"DIRS": [str(b.resolve()), Path(str(a))]},
+            {"DIRS": [str(b.resolve()), Path(str(a))]}
         )
         assert {Path(p).resolve() for p in r2} == {a.resolve(), b.resolve()}
         missing = tmp_path / "nope"
         assert not missing.exists()
         r3 = component_extra_roots_from_config(
-            {"DIRS": [str(a.resolve()), str(missing)]},
+            {"DIRS": [str(a.resolve()), str(missing)]}
         )
         assert r3 == [a.resolve()]
 
@@ -132,14 +125,7 @@ class TestComponentVisibilityResolver:
         (comp_dir / "c.djx").write_text("x")
         reg = ComponentRegistry()
         reg.register(
-            ComponentInfo(
-                "c",
-                pages.resolve(),
-                "about",
-                comp_dir / "c.djx",
-                None,
-                True,
-            )
+            ComponentInfo("c", pages.resolve(), "about", comp_dir / "c.djx", None, True)
         )
         resolver = ComponentVisibilityResolver(reg)
         outside = tmp_path / "elsewhere" / "t.djx"
@@ -155,12 +141,7 @@ class TestComponentVisibilityResolver:
         reg = ComponentRegistry()
         reg.register(
             ComponentInfo(
-                "c",
-                pages.resolve(),
-                "",
-                pages / "_components" / "c.djx",
-                None,
-                True,
+                "c", pages.resolve(), "", pages / "_components" / "c.djx", None, True
             )
         )
         (pages / "_components").mkdir()
@@ -182,14 +163,7 @@ class TestComponentVisibilityResolver:
         (comp_dir / "c.djx").write_text("x")
         reg = ComponentRegistry()
         reg.register(
-            ComponentInfo(
-                "c",
-                pages.resolve(),
-                "about",
-                comp_dir / "c.djx",
-                None,
-                True,
-            )
+            ComponentInfo("c", pages.resolve(), "about", comp_dir / "c.djx", None, True)
         )
         res = ComponentVisibilityResolver(reg)
         t1 = pages / "about" / "a.djx"
@@ -209,14 +183,7 @@ class TestComponentVisibilityResolver:
         reg = ComponentRegistry()
         reg.mark_as_root(root.resolve())
         reg.register(
-            ComponentInfo(
-                "x",
-                root.resolve(),
-                "onlyhere",
-                root / "x.djx",
-                None,
-                True,
-            )
+            ComponentInfo("x", root.resolve(), "onlyhere", root / "x.djx", None, True)
         )
         res = ComponentVisibilityResolver(reg)
         outsider = tmp_path / "else" / "t.djx"
@@ -228,10 +195,7 @@ class TestComponentVisibilityResolver:
         reg = ComponentRegistry()
         res = ComponentVisibilityResolver(reg)
         assert (
-            res._compute_relative_parts(
-                tmp_path / "a" / "t.djx",
-                tmp_path / "b",
-            )
+            res._compute_relative_parts(tmp_path / "a" / "t.djx", tmp_path / "b")
             is None
         )
 
@@ -262,10 +226,10 @@ class TestComponentVisibilityResolver:
         # call queries `_get_relative_parts_cached` twice for that key: the second
         # lookup hits the cache and exercises `move_to_end`.
         reg.register(
-            ComponentInfo("c1", scope_root, "area", sub / "c1.djx", None, True),
+            ComponentInfo("c1", scope_root, "area", sub / "c1.djx", None, True)
         )
         reg.register(
-            ComponentInfo("c2", scope_root, "area", sub / "c2.djx", None, True),
+            ComponentInfo("c2", scope_root, "area", sub / "c2.djx", None, True)
         )
 
         res = ComponentVisibilityResolver(reg)
@@ -322,12 +286,7 @@ class TestComponentVisibilityResolver:
         reg.mark_as_root(dirs_root)
         reg.register(
             ComponentInfo(
-                "button",
-                pages,
-                "",
-                pages / "_components" / "button.djx",
-                None,
-                True,
+                "button", pages, "", pages / "_components" / "button.djx", None, True
             )
         )
         return reg, pages, dirs_root

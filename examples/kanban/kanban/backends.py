@@ -38,12 +38,7 @@ class ViteManifestBackend(StaticFilesBackend):
         self._manifest_data: dict[str, Any] | None = None
         self._manifest_missing_warned = False
 
-    def register_file(
-        self,
-        source_path: Path,
-        logical_name: str,
-        kind: str,
-    ) -> str:
+    def register_file(self, source_path: Path, logical_name: str, kind: str) -> str:
         """Return the URL for a discovered asset file."""
         if kind != "jsx":
             return super().register_file(source_path, logical_name, kind)

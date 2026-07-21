@@ -147,8 +147,5 @@ class TestBenchClearRegistries:
             return (), {}
 
         benchmark.pedantic(
-            manager.clear_registries,
-            setup=setup,
-            rounds=200,
-            iterations=1,
+            manager.clear_registries, setup=setup, rounds=200, iterations=1
         )

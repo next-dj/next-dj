@@ -7,16 +7,8 @@ from django import forms as django_forms
 from django.contrib.auth.models import Group
 from django.http import Http404, HttpRequest, QueryDict
 
-from next.forms import (
-    ActionRegistration,
-    Form,
-    ModelForm,
-    RegistryFormActionBackend,
-)
-from next.forms.base import (
-    _instance_from_url_db_fields,
-    _instance_lookup_from_spec,
-)
+from next.forms import ActionRegistration, Form, ModelForm, RegistryFormActionBackend
+from next.forms.base import _instance_from_url_db_fields, _instance_lookup_from_spec
 from next.forms.checks import (
     check_instance_from_url_on_non_model_form,
     check_instance_from_url_unknown_field,
@@ -309,7 +301,7 @@ class TestAcceptsVarKeyword:
     def test_true_for_var_keyword(self) -> None:
         """A function declaring **kwargs is reported as accepting var-keyword."""
 
-        def fn(**kwargs: object) -> None:
+        def fn(**kwargs) -> None:
             return None
 
         assert _accepts_var_keyword(fn) is True
@@ -323,9 +315,7 @@ class TestAcceptsVarKeyword:
         assert _accepts_var_keyword(fn) is False
 
     @pytest.mark.parametrize(
-        "uninspectable",
-        [range, object()],
-        ids=("value_error", "type_error"),
+        "uninspectable", [range, object()], ids=("value_error", "type_error")
     )
     def test_false_for_uninspectable(self, uninspectable) -> None:
         """A callable whose signature can't be inspected is reported as False."""
@@ -341,10 +331,7 @@ class TestCallGetInitial:
         group = Group.objects.create(name="reviewers")
         request = mock_http_request(method="POST")
         result = _call_get_initial(
-            GroupByNameForm,
-            request,
-            {"name": "reviewers"},
-            deps=({}, []),
+            GroupByNameForm, request, {"name": "reviewers"}, deps=({}, [])
         )
         assert result == group
 
@@ -363,10 +350,7 @@ class TestCallGetInitial:
 
         request = mock_http_request(method="POST")
         result = _call_get_initial(
-            NamedOnlyForm,
-            request,
-            {"name": "ignored"},
-            deps=({}, []),
+            NamedOnlyForm, request, {"name": "ignored"}, deps=({}, [])
         )
         assert result == {}
         assert "request" in seen["received"]
@@ -393,10 +377,7 @@ class TestSaveUpdatesExistingRow:
         group = Group.objects.create(name="old-name")
         request = mock_http_request(method="POST")
         instance = _call_get_initial(
-            GroupByNameForm,
-            request,
-            {"name": "old-name"},
-            deps=({}, []),
+            GroupByNameForm, request, {"name": "old-name"}, deps=({}, [])
         )
         form = GroupByNameForm(data={"name": "new-name"}, instance=instance)
         assert form.is_valid()

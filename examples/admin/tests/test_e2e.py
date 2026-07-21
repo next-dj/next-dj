@@ -17,9 +17,7 @@ def _action_form_body(body: str, *, action_substring: str = "/_next/form/") -> s
     but with no formset) by picking the last matching form.
     """
     forms = re.findall(
-        r'<form[^>]*?(?<!-)action="([^"]+)"[^>]*>(.+?)</form>',
-        body,
-        re.DOTALL,
+        r'<form[^>]*?(?<!-)action="([^"]+)"[^>]*>(.+?)</form>', body, re.DOTALL
     )
     matching = [text for url, text in forms if action_substring in url]
     return matching[-1] if matching else ""
@@ -36,8 +34,7 @@ def _extract_form_inputs(body: str) -> dict[str, str]:
     target = _action_form_body(body)
     out: dict[str, str] = {}
     for m in re.finditer(
-        r'<input[^>]*name="([^"]+)"(?:[^>]*value="([^"]*)")?[^>]*>',
-        target,
+        r'<input[^>]*name="([^"]+)"(?:[^>]*value="([^"]*)")?[^>]*>', target
     ):
         out[m.group(1)] = m.group(2) or ""
     return out
@@ -143,8 +140,7 @@ class TestActionGuards:
     def test_anonymous_delete_post_redirects_to_login(self, client):
         tag = Tag.objects.create(name="Keep", slug="keep")
         r = client.post_action(
-            "admin:delete",
-            origin=f"/admin/library/tag/{tag.pk}/delete/",
+            "admin:delete", origin=f"/admin/library/tag/{tag.pk}/delete/"
         )
         assert r.status_code == 302
         assert r["Location"].startswith("/admin/login/")
@@ -189,8 +185,7 @@ class TestActionGuards:
         client.force_login(django_user_model.objects.create_user("intruder"))
         tag = Tag.objects.create(name="Keep", slug="keep")
         r = client.post_action(
-            "admin:delete",
-            origin=f"/admin/library/tag/{tag.pk}/delete/",
+            "admin:delete", origin=f"/admin/library/tag/{tag.pk}/delete/"
         )
         assert r.status_code == 403
         assert Tag.objects.filter(pk=tag.pk).exists()
@@ -308,9 +303,7 @@ class TestChangelistChrome:
 class TestBulkAction:
     def test_bulk_action_with_no_selection_redirects(self, admin_client):
         r = admin_client.post_action(
-            "admin:bulk_action",
-            {"action": ""},
-            origin="/admin/library/book/",
+            "admin:bulk_action", {"action": ""}, origin="/admin/library/book/"
         )
         assert r.status_code == 302
         assert r["Location"] == "/admin/library/book/"
@@ -383,8 +376,7 @@ class TestDeleteView:
     def test_delete_post_removes_record(self, admin_client):
         tag = Tag.objects.create(name="Doomed", slug="doomed")
         r = admin_client.post_action(
-            "admin:delete",
-            origin=f"/admin/library/tag/{tag.pk}/delete/",
+            "admin:delete", origin=f"/admin/library/tag/{tag.pk}/delete/"
         )
         assert r.status_code == 302
         assert not Tag.objects.filter(pk=tag.pk).exists()
@@ -395,8 +387,7 @@ class TestDeleteView:
 
     def test_delete_post_unknown_pk_404(self, admin_client):
         r = admin_client.post_action(
-            "admin:delete",
-            origin="/admin/library/tag/99999/delete/",
+            "admin:delete", origin="/admin/library/tag/99999/delete/"
         )
         assert r.status_code == 404
 
@@ -872,10 +863,7 @@ class TestActivityLog:
         book = Book.objects.create(title="B", author=author)
         admin_client.post_action(
             "admin:bulk_action",
-            {
-                "action": "mark_as_published",
-                "_selected_action": [str(book.pk)],
-            },
+            {"action": "mark_as_published", "_selected_action": [str(book.pk)]},
             origin="/admin/library/book/",
         )
         entries = list(AdminActivityLog.objects.filter(action="bulk_action"))
@@ -924,9 +912,7 @@ class TestFlashMessages:
     def test_delete_flashes_success(self, admin_client):
         tag = Tag.objects.create(name="Doomed", slug="doomed")
         r = admin_client.post_action(
-            "admin:delete",
-            origin=f"/admin/library/tag/{tag.pk}/delete/",
-            follow=True,
+            "admin:delete", origin=f"/admin/library/tag/{tag.pk}/delete/", follow=True
         )
         body = r.content.decode()
         assert "The tag Doomed was deleted successfully." in body

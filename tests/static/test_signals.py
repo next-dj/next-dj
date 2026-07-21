@@ -34,7 +34,7 @@ SCRIPTS_PLACEHOLDER = "<!-- next:scripts -->"
 def capture_asset_registered() -> Generator[list[dict[str, Any]], None, None]:
     events: list[dict[str, Any]] = []
 
-    def _listener(sender: object, **kwargs: object) -> None:
+    def _listener(sender: object, **kwargs) -> None:
         events.append({"sender": sender, **kwargs})
 
     asset_registered.connect(_listener)
@@ -48,7 +48,7 @@ def capture_asset_registered() -> Generator[list[dict[str, Any]], None, None]:
 def capture_collector_finalized() -> Generator[list[dict[str, Any]], None, None]:
     events: list[dict[str, Any]] = []
 
-    def _listener(sender: object, **kwargs: object) -> None:
+    def _listener(sender: object, **kwargs) -> None:
         events.append({"sender": sender, **kwargs})
 
     collector_finalized.connect(_listener)
@@ -62,7 +62,7 @@ def capture_collector_finalized() -> Generator[list[dict[str, Any]], None, None]
 def capture_html_injected() -> Generator[list[dict[str, Any]], None, None]:
     events: list[dict[str, Any]] = []
 
-    def _listener(sender: object, **kwargs: object) -> None:
+    def _listener(sender: object, **kwargs) -> None:
         events.append({"sender": sender, **kwargs})
 
     html_injected.connect(_listener)
@@ -76,7 +76,7 @@ def capture_html_injected() -> Generator[list[dict[str, Any]], None, None]:
 def capture_backend_loaded() -> Generator[list[dict[str, Any]], None, None]:
     events: list[dict[str, Any]] = []
 
-    def _listener(sender: object, **kwargs: object) -> None:
+    def _listener(sender: object, **kwargs) -> None:
         events.append({"sender": sender, **kwargs})
 
     backend_loaded.connect(_listener)
@@ -150,20 +150,14 @@ class TestCollectorFinalizedSignal:
     ) -> None:
         collector = StaticCollector()
         sentinel = RequestFactory().get("/")
-        fresh_manager.inject(
-            "<body/>",
-            collector,
-            request=sentinel,
-        )
+        fresh_manager.inject("<body/>", collector, request=sentinel)
 
         assert capture_collector_finalized[0]["request"] is sentinel
 
 
 class TestHtmlInjectedSignal:
     def test_fired_with_before_and_after(
-        self,
-        fresh_manager: StaticManager,
-        capture_html_injected: list[dict[str, Any]],
+        self, fresh_manager: StaticManager, capture_html_injected: list[dict[str, Any]]
     ) -> None:
         collector = StaticCollector()
         collector.add(StaticAsset(url="https://cdn/a.css", kind="css"))
@@ -180,18 +174,14 @@ class TestHtmlInjectedSignal:
         assert event["injected_bytes"] == len(out) - len(html)
 
     def test_reports_no_placeholders_when_html_has_none(
-        self,
-        fresh_manager: StaticManager,
-        capture_html_injected: list[dict[str, Any]],
+        self, fresh_manager: StaticManager, capture_html_injected: list[dict[str, Any]]
     ) -> None:
         collector = StaticCollector()
         fresh_manager.inject("<body/>", collector)
         assert capture_html_injected[0]["placeholders_replaced"] == ()
 
     def test_reports_both_placeholders_when_html_has_both(
-        self,
-        fresh_manager: StaticManager,
-        capture_html_injected: list[dict[str, Any]],
+        self, fresh_manager: StaticManager, capture_html_injected: list[dict[str, Any]]
     ) -> None:
         collector = StaticCollector()
         collector.add(StaticAsset(url="https://cdn/a.css", kind="css"))
@@ -204,17 +194,13 @@ class TestHtmlInjectedSignal:
         )
 
     def test_carries_request_when_provided(
-        self,
-        fresh_manager: StaticManager,
-        capture_html_injected: list[dict[str, Any]],
+        self, fresh_manager: StaticManager, capture_html_injected: list[dict[str, Any]]
     ) -> None:
         collector = StaticCollector()
         collector.add(StaticAsset(url="https://cdn/a.css", kind="css"))
         sentinel = RequestFactory().get("/")
         fresh_manager.inject(
-            f"<head>{STYLES_PLACEHOLDER}</head>",
-            collector,
-            request=sentinel,
+            f"<head>{STYLES_PLACEHOLDER}</head>", collector, request=sentinel
         )
         assert capture_html_injected[0]["request"] is sentinel
 
@@ -228,7 +214,7 @@ class TestLegacyReceiverCompat:
         """A receiver with `(sender, **kwargs)` consumes the new `request` kwarg."""
         seen: list[dict[str, object]] = []
 
-        def legacy(sender: object, **kwargs: object) -> None:
+        def legacy(sender: object, **kwargs) -> None:
             seen.append({"sender": sender, **kwargs})
 
         collector_finalized.connect(legacy)
@@ -250,7 +236,7 @@ class TestLegacyReceiverCompat:
         """A receiver with `(sender, **kwargs)` consumes the new `request` kwarg."""
         seen: list[dict[str, object]] = []
 
-        def legacy(sender: object, **kwargs: object) -> None:
+        def legacy(sender: object, **kwargs) -> None:
             seen.append({"sender": sender, **kwargs})
 
         html_injected.connect(legacy)

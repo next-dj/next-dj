@@ -81,7 +81,7 @@ class TestReadWindowKindIsolation:
         with frozen_now(BASE):
             metrics.incr("pages.rendered", "/a/b:c/page.py", by=4)
             assert metrics.read_window("pages.rendered", minutes=5) == {
-                "/a/b:c/page.py": 4,
+                "/a/b:c/page.py": 4
             }
 
 

@@ -13,10 +13,7 @@ from .models import AuditEntry
 
 @receiver(action_dispatched)
 def _on_action_dispatched(
-    action_name: str,
-    duration_ms: float,
-    response_status: int,
-    **_: object,
+    action_name: str, duration_ms: float, response_status: int, **_: object
 ) -> None:
     """Record one signal-sourced row per successful dispatch.
 
@@ -34,10 +31,7 @@ def _on_action_dispatched(
 
 @receiver(form_validation_failed)
 def _on_form_validation_failed(
-    action_name: str,
-    error_count: int,
-    field_names: tuple[str, ...],
-    **_: object,
+    action_name: str, error_count: int, field_names: tuple[str, ...], **_: object
 ) -> None:
     """Record one signal-sourced row per validation failure."""
     AuditEntry.objects.create(
@@ -51,10 +45,7 @@ def _on_form_validation_failed(
 
 @receiver(form_access_denied)
 def _on_form_access_denied(
-    action_name: str,
-    layer: str,
-    reason: str,
-    **_: object,
+    action_name: str, layer: str, reason: str, **_: object
 ) -> None:
     """Record one signal-sourced row per dynamic permission-hook denial.
 

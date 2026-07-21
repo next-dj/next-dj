@@ -23,9 +23,7 @@ class Category(models.Model):
 
 class Product(models.Model):
     category = models.ForeignKey(
-        Category,
-        on_delete=models.CASCADE,
-        related_name="products",
+        Category, on_delete=models.CASCADE, related_name="products"
     )
     slug = models.SlugField(max_length=80)
     name = models.CharField(max_length=200)
@@ -41,9 +39,8 @@ class Product(models.Model):
         ordering: ClassVar = ["-created_at"]
         constraints: ClassVar = [
             models.UniqueConstraint(
-                fields=["category", "slug"],
-                name="uniq_product_per_cat",
-            ),
+                fields=["category", "slug"], name="uniq_product_per_cat"
+            )
         ]
         indexes: ClassVar = [
             models.Index(fields=["category", "in_stock"]),

@@ -42,10 +42,7 @@ class TestBenchPythonModuleLoader:
 
     @pytest.mark.benchmark(group="pages.loaders")
     def test_python_template_loader_can_load(
-        self,
-        tmp_path: Path,
-        python_template_loader: PythonTemplateLoader,
-        benchmark,
+        self, tmp_path: Path, python_template_loader: PythonTemplateLoader, benchmark
     ) -> None:
         page_path = tmp_path / "page.py"
         page_path.write_text(_PY_SRC)

@@ -28,18 +28,14 @@ class TestShorten:
 
     def test_success_message_flashes_on_home(self, client) -> None:
         response = client.post_action(
-            "create_link_form",
-            {"url": "https://example.com/a"},
-            follow=True,
+            "create_link_form", {"url": "https://example.com/a"}, follow=True
         )
         body = response.content.decode()
         assert "Short link created for https://example.com/a." in body
 
     def test_invalid_url_renders_form_with_errors(self, client) -> None:
         response = client.post_action(
-            "create_link_form",
-            {"url": "not-a-url"},
-            origin="/",
+            "create_link_form", {"url": "not-a-url"}, origin="/"
         )
         assert response.status_code == 200
         assert b"Enter a valid URL" in response.content
@@ -107,19 +103,16 @@ class TestActiveNav:
             find_anchor(body, href="/admin/", text="Links"), "font-semibold"
         )
         assert_missing_class(
-            find_anchor(body, href="/admin/stats/", text="Stats"),
-            "font-semibold",
+            find_anchor(body, href="/admin/stats/", text="Stats"), "font-semibold"
         )
 
     def test_admin_subnav_highlights_stats_when_on_stats(self, client) -> None:
         body = client.get("/admin/stats/").content.decode()
         assert_missing_class(
-            find_anchor(body, href="/admin/", text="Links"),
-            "font-semibold",
+            find_anchor(body, href="/admin/", text="Links"), "font-semibold"
         )
         assert_has_class(
-            find_anchor(body, href="/admin/stats/", text="Stats"),
-            "font-semibold",
+            find_anchor(body, href="/admin/stats/", text="Stats"), "font-semibold"
         )
 
     def test_root_admin_link_is_active_on_detail_page(self, client) -> None:
@@ -132,8 +125,7 @@ class TestActiveNav:
     def test_root_admin_link_not_active_on_home(self, client) -> None:
         body = client.get("/").content.decode()
         assert_missing_class(
-            find_anchor(body, href="/admin/", text="admin"),
-            "font-semibold",
+            find_anchor(body, href="/admin/", text="admin"), "font-semibold"
         )
 
 
@@ -205,9 +197,7 @@ class TestAdminInlineEdit:
     def test_inline_edit_invalid_keeps_the_link(self, client) -> None:
         Link.objects.create(slug="alpha", url="https://example.com/a")
         response = client.post_action(
-            "edit_link_form",
-            {"slug": "alpha", "url": "not-a-url"},
-            origin="/admin/",
+            "edit_link_form", {"slug": "alpha", "url": "not-a-url"}, origin="/admin/"
         )
         assert response.status_code == 200
         assert b"Enter a valid URL" in response.content
@@ -244,10 +234,7 @@ class TestDeleteRemovesRow:
         Link.objects.create(slug="alpha", url="https://example.com/a")
         Link.objects.create(slug="bravo", url="https://example.com/b")
         response = client.post_action(
-            "delete_link",
-            {"slug": "bravo"},
-            origin="/admin/",
-            partial=True,
+            "delete_link", {"slug": "bravo"}, origin="/admin/", partial=True
         )
         assert response.status_code == 200
         envelope = envelope_of(response)
@@ -310,10 +297,7 @@ class TestResetClicksMorphsForeignBadge:
         increment_clicks("hot")
         increment_clicks("cold")
         response = client.post_action(
-            "reset_clicks",
-            {},
-            origin=f"/admin/links/{link.slug}/",
-            partial=True,
+            "reset_clicks", {}, origin=f"/admin/links/{link.slug}/", partial=True
         )
         assert response.status_code == 200
         envelope = envelope_of(response)

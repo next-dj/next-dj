@@ -16,12 +16,10 @@ class VoteForm(Form):
     """
 
     poll = django_forms.ModelChoiceField(
-        queryset=Poll.objects.all(),
-        widget=django_forms.HiddenInput,
+        queryset=Poll.objects.all(), widget=django_forms.HiddenInput
     )
     choice = django_forms.ModelChoiceField(
-        queryset=Choice.objects.none(),
-        widget=django_forms.HiddenInput,
+        queryset=Choice.objects.none(), widget=django_forms.HiddenInput
     )
 
     def __init__(self, *args: object, **kwargs: object) -> None:

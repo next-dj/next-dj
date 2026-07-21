@@ -11,10 +11,7 @@ class PollsConfig(AppConfig):
     def ready(self) -> None:
         """Register the Vue asset kind, the page stem, and signal wiring."""
         default_kinds.register(
-            "vue",
-            extension=".vue",
-            slot="scripts",
-            renderer="render_module_tag",
+            "vue", extension=".vue", slot="scripts", renderer="render_module_tag"
         )
         default_stems.register("template", "page")
 

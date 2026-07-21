@@ -31,17 +31,12 @@ class ComponentsBackend(ABC):
     """Pluggable source of component definitions (files, database, etc.)."""
 
     @abstractmethod
-    def get_component(
-        self,
-        name: str,
-        template_path: Path,
-    ) -> ComponentInfo | None:
+    def get_component(self, name: str, template_path: Path) -> ComponentInfo | None:
         """Return metadata for `name` from this backend, or `None`."""
 
     @abstractmethod
     def collect_visible_components(
-        self,
-        template_path: Path,
+        self, template_path: Path
     ) -> Mapping[str, ComponentInfo]:
         """Return a mapping of visible components for `template_path`."""
 
@@ -57,8 +52,7 @@ class FileComponentsBackend(ComponentsBackend):
         self._registry = ComponentRegistry()
         self._module_loader = ModuleLoader()
         self._scanner = ComponentScanner(
-            self.components_dir,
-            module_loader=self._module_loader,
+            self.components_dir, module_loader=self._module_loader
         )
         self._visibility_resolver = ComponentVisibilityResolver(self._registry)
 
@@ -92,11 +86,7 @@ class FileComponentsBackend(ComponentsBackend):
         self._registry.register_many(components)
 
     @override
-    def get_component(
-        self,
-        name: str,
-        template_path: Path,
-    ) -> ComponentInfo | None:
+    def get_component(self, name: str, template_path: Path) -> ComponentInfo | None:
         """Return the named component visible from `template_path`."""
         self._ensure_loaded()
         visible = self.collect_visible_components(template_path)
@@ -107,8 +97,7 @@ class FileComponentsBackend(ComponentsBackend):
 
     @override
     def collect_visible_components(
-        self,
-        template_path: Path,
+        self, template_path: Path
     ) -> Mapping[str, ComponentInfo]:
         """Return the full visibility map for `template_path`."""
         self._ensure_loaded()
@@ -124,18 +113,13 @@ class DummyBackend(ComponentsBackend):
         self.created = True
 
     @override
-    def get_component(
-        self,
-        _name: str,
-        _template_path: Path,
-    ) -> ComponentInfo | None:
+    def get_component(self, _name: str, _template_path: Path) -> ComponentInfo | None:
         """Return `None` to skip name resolution through this backend."""
         return None
 
     @override
     def collect_visible_components(
-        self,
-        _template_path: Path,
+        self, _template_path: Path
     ) -> Mapping[str, ComponentInfo]:
         """Return an empty mapping because this test double never registers."""
         return {}
@@ -151,18 +135,13 @@ class BoomBackend(ComponentsBackend):
         raise RuntimeError(msg)
 
     @override
-    def get_component(
-        self,
-        _name: str,
-        _template_path: Path,
-    ) -> ComponentInfo | None:
+    def get_component(self, _name: str, _template_path: Path) -> ComponentInfo | None:
         """Unreachable because construction always raises."""
         raise NotImplementedError
 
     @override
     def collect_visible_components(
-        self,
-        _template_path: Path,
+        self, _template_path: Path
     ) -> Mapping[str, ComponentInfo]:
         """Unreachable because construction always raises."""
         raise NotImplementedError
@@ -180,9 +159,7 @@ class ComponentsFactory:
 
 
 def register_components_folder_from_router_walk(
-    folder: Path,
-    pages_root: Path,
-    scope_relative: str,
+    folder: Path, pages_root: Path, scope_relative: str
 ) -> None:
     """Register components for one folder discovered during the URL tree walk."""
     # next.components.manager imports this backends module, so the manager

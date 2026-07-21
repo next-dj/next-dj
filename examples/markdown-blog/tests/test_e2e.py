@@ -78,8 +78,7 @@ class TestActiveNav:
         body = client.get("/").content.decode()
         assert_has_class(find_anchor(body, href="/", text="Home"), "font-semibold")
         assert_missing_class(
-            find_anchor(body, href="/about/", text="About"),
-            "font-semibold",
+            find_anchor(body, href="/about/", text="About"), "font-semibold"
         )
 
     def test_about_link_active_on_about(self, client) -> None:
@@ -87,7 +86,4 @@ class TestActiveNav:
         assert_has_class(
             find_anchor(body, href="/about/", text="About"), "font-semibold"
         )
-        assert_missing_class(
-            find_anchor(body, href="/", text="Home"),
-            "font-semibold",
-        )
+        assert_missing_class(find_anchor(body, href="/", text="Home"), "font-semibold")

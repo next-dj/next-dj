@@ -65,7 +65,7 @@ class TestServerAutoreloadWatchApi:
                         "COMPONENTS_DIR": "_components",
                     },
                 ],
-            },
+            }
         ):
             next_framework_settings.reload()
             specs = _iter_default_autoreload_watch_specs()
@@ -88,21 +88,18 @@ class TestServerAutoreloadWatchApi:
                         "BACKEND": "next.urls.FileRouterBackend",
                         "PAGES_DIR": "pages",
                         "APP_DIRS": False,
-                        "DIRS": [
-                            str(custom.resolve()),
-                            str(pages_tree.resolve()),
-                        ],
+                        "DIRS": [str(custom.resolve()), str(pages_tree.resolve())],
                         "OPTIONS": {},
-                    },
+                    }
                 ],
                 "COMPONENT_BACKENDS": [
                     {
                         "BACKEND": "next.components.FileComponentsBackend",
                         "DIRS": [],
                         "COMPONENTS_DIR": "_",
-                    },
+                    }
                 ],
-            },
+            }
         ):
             next_framework_settings.reload()
             specs = _iter_default_autoreload_watch_specs()

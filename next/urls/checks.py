@@ -9,10 +9,7 @@ from django.core.checks import CheckMessage, Error, Tags, register
 from django.utils.module_loading import import_string
 
 from next.checks import NEXT
-from next.checks.common import (
-    errors_for_unknown_keys,
-    get_router_manager,
-)
+from next.checks.common import errors_for_unknown_keys, get_router_manager
 from next.conf import next_framework_settings
 from next.conf.signals import settings_reloaded
 
@@ -33,13 +30,7 @@ FILE_ROUTER_BACKEND = "next.urls.FileRouterBackend"
 _PAGE_BACKEND_SETTINGS_KEY = "PAGE_BACKENDS"
 
 _FILE_ROUTER_PAGE_CONFIG_KEYS = frozenset(
-    {
-        "BACKEND",
-        "APP_DIRS",
-        "DIRS",
-        "OPTIONS",
-        "PAGES_DIR",
-    },
+    {"BACKEND", "APP_DIRS", "DIRS", "OPTIONS", "PAGES_DIR"}
 )
 
 _NON_FILE_ROUTER_PAGE_CONFIG_KEYS = frozenset({"BACKEND"})
@@ -59,10 +50,7 @@ def _router_backend_path_is_valid(backend_path: str) -> bool:
     return isinstance(resolved, type) and issubclass(resolved, RouterBackend)
 
 
-def _validate_config_structure(
-    config: object,
-    index: int,
-) -> list[CheckMessage]:
+def _validate_config_structure(config: object, index: int) -> list[CheckMessage]:
     """Validate required keys and types for one `PAGE_BACKENDS` entry."""
     errors: list[CheckMessage] = []
 
@@ -73,7 +61,7 @@ def _validate_config_structure(
                 "must be a dictionary.",
                 obj=settings,
                 id="next.E002",
-            ),
+            )
         )
         return errors
 
@@ -84,15 +72,14 @@ def _validate_config_structure(
                 "must specify a BACKEND.",
                 obj=settings,
                 id="next.E003",
-            ),
+            )
         )
 
     return errors
 
 
 def _validate_file_router_backend_fields(
-    config: dict[str, Any],
-    index: int,
+    config: dict[str, Any], index: int
 ) -> list[CheckMessage]:
     """Validate `DIRS`, `PAGES_DIR`, `APP_DIRS`, `OPTIONS` for the file router."""
     rf_routers = f"NEXT_FRAMEWORK['{_PAGE_BACKEND_SETTINGS_KEY}'][{index}]"
@@ -103,10 +90,8 @@ def _validate_file_router_backend_fields(
     errors.extend(_validate_options_field(config, rf_routers))
     errors.extend(
         errors_for_unknown_keys(
-            config,
-            allowed=_FILE_ROUTER_PAGE_CONFIG_KEYS,
-            prefix=rf_routers,
-        ),
+            config, allowed=_FILE_ROUTER_PAGE_CONFIG_KEYS, prefix=rf_routers
+        )
     )
     return errors
 
@@ -119,8 +104,7 @@ def _validate_dirs_field(config: dict[str, Any], prefix: str) -> list[CheckMessa
 
 
 def _validate_pages_dir_field(
-    config: dict[str, Any],
-    prefix: str,
+    config: dict[str, Any], prefix: str
 ) -> list[CheckMessage]:
     """Validate that `PAGES_DIR` is present and a string."""
     if "PAGES_DIR" not in config:
@@ -129,23 +113,16 @@ def _validate_pages_dir_field(
                 f"{prefix} must specify PAGES_DIR when using FileRouterBackend.",
                 obj=settings,
                 id="next.E024",
-            ),
+            )
         ]
     if not isinstance(config["PAGES_DIR"], str):
         return [
-            Error(
-                f"{prefix}.PAGES_DIR must be a string.",
-                obj=settings,
-                id="next.E027",
-            ),
+            Error(f"{prefix}.PAGES_DIR must be a string.", obj=settings, id="next.E027")
         ]
     return []
 
 
-def _validate_app_dirs_field(
-    config: dict[str, Any],
-    prefix: str,
-) -> list[CheckMessage]:
+def _validate_app_dirs_field(config: dict[str, Any], prefix: str) -> list[CheckMessage]:
     """Validate that `APP_DIRS` is present and a boolean."""
     if "APP_DIRS" not in config:
         return [
@@ -153,23 +130,16 @@ def _validate_app_dirs_field(
                 f"{prefix} must specify APP_DIRS when using FileRouterBackend.",
                 obj=settings,
                 id="next.E025",
-            ),
+            )
         ]
     if not isinstance(config["APP_DIRS"], bool):
         return [
-            Error(
-                f"{prefix}.APP_DIRS must be a boolean.",
-                obj=settings,
-                id="next.E005",
-            ),
+            Error(f"{prefix}.APP_DIRS must be a boolean.", obj=settings, id="next.E005")
         ]
     return []
 
 
-def _validate_options_field(
-    config: dict[str, Any],
-    prefix: str,
-) -> list[CheckMessage]:
+def _validate_options_field(config: dict[str, Any], prefix: str) -> list[CheckMessage]:
     """Validate that `OPTIONS` is present, a dict, and only names known keys."""
     if "OPTIONS" not in config:
         return [
@@ -177,13 +147,13 @@ def _validate_options_field(
                 f"{prefix} must specify OPTIONS when using FileRouterBackend.",
                 obj=settings,
                 id="next.E026",
-            ),
+            )
         ]
     if not isinstance(config["OPTIONS"], dict):
         return [
             Error(
                 f"{prefix}.OPTIONS must be a dictionary.", obj=settings, id="next.E006"
-            ),
+            )
         ]
     opts = config["OPTIONS"]
     errors = _validate_context_processors(opts, prefix)
@@ -192,8 +162,7 @@ def _validate_options_field(
 
 
 def _validate_context_processors(
-    opts: dict[str, Any],
-    prefix: str,
+    opts: dict[str, Any], prefix: str
 ) -> list[CheckMessage]:
     """Validate the `context_processors` option as a list of strings."""
     cp = opts.get("context_processors")
@@ -203,7 +172,7 @@ def _validate_context_processors(
                 f"{prefix}.OPTIONS['context_processors'] must be a list.",
                 obj=settings,
                 id="next.E006",
-            ),
+            )
         ]
     if isinstance(cp, list) and any(not isinstance(item, str) for item in cp):
         return [
@@ -211,14 +180,13 @@ def _validate_context_processors(
                 f"{prefix}.OPTIONS['context_processors'] must contain only strings.",
                 obj=settings,
                 id="next.E006",
-            ),
+            )
         ]
     return []
 
 
 def _validate_options_unknown_keys(
-    opts: dict[str, Any],
-    prefix: str,
+    opts: dict[str, Any], prefix: str
 ) -> list[CheckMessage]:
     """Report the first `OPTIONS` key that is not `context_processors`."""
     unknown = next((key for key in opts if key != "context_processors"), None)
@@ -231,14 +199,11 @@ def _validate_options_unknown_keys(
             "Use top-level DIRS for extra page roots.",
             obj=settings,
             id="next.E006",
-        ),
+        )
     ]
 
 
-def _validate_config_fields(
-    config: dict[str, Any],
-    index: int,
-) -> list[CheckMessage]:
+def _validate_config_fields(config: dict[str, Any], index: int) -> list[CheckMessage]:
     """Validate specific fields of a single page-backend configuration."""
     errors: list[CheckMessage] = []
 
@@ -250,7 +215,7 @@ def _validate_config_fields(
                 f'unknown backend "{backend}".',
                 obj=settings,
                 id="next.E004",
-            ),
+            )
         )
 
     is_file_router = False
@@ -275,29 +240,20 @@ def _validate_config_fields(
         rf = f"NEXT_FRAMEWORK['{_PAGE_BACKEND_SETTINGS_KEY}'][{index}]"
         errors.extend(
             errors_for_unknown_keys(
-                config,
-                allowed=_NON_FILE_ROUTER_PAGE_CONFIG_KEYS,
-                prefix=rf,
-            ),
+                config, allowed=_NON_FILE_ROUTER_PAGE_CONFIG_KEYS, prefix=rf
+            )
         )
 
     return errors
 
 
 @register(NEXT)
-def check_next_pages_configuration(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+def check_next_pages_configuration(*args, **kwargs) -> list[CheckMessage]:
     """Validate `PAGE_BACKENDS` inside merged `NEXT_FRAMEWORK`."""
     raw = getattr(settings, "NEXT_FRAMEWORK", None)
     if raw is not None and not isinstance(raw, dict):
         return [
-            Error(
-                "NEXT_FRAMEWORK must be a dictionary.",
-                obj=settings,
-                id="next.E001",
-            ),
+            Error("NEXT_FRAMEWORK must be a dictionary.", obj=settings, id="next.E001")
         ]
 
     next_pages = next_framework_settings.PAGE_BACKENDS
@@ -308,7 +264,7 @@ def check_next_pages_configuration(
                 "configuration dictionaries.",
                 obj=settings,
                 id="next.E001",
-            ),
+            )
         ]
 
     if len(next_pages) == 0:
@@ -318,7 +274,7 @@ def check_next_pages_configuration(
                 "router entry (configure the file router or another backend).",
                 obj=settings,
                 id="next.E022",
-            ),
+            )
         ]
 
     errors: list[CheckMessage] = []
@@ -331,10 +287,7 @@ def check_next_pages_configuration(
 
 
 @register(Tags.urls, NEXT)
-def check_url_patterns(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+def check_url_patterns(*args, **kwargs) -> list[CheckMessage]:
     """Collect patterns from routers and flag duplicate Django path strings."""
     warnings: list[CheckMessage] = []
 
@@ -348,21 +301,14 @@ def check_url_patterns(
         _check_url_conflicts(all_patterns, errors, warnings)
     except (ValueError, TypeError) as e:
         errors.append(
-            Error(
-                f"Error checking URL conflicts: {e}",
-                obj=settings,
-                id="next.E014",
-            ),
+            Error(f"Error checking URL conflicts: {e}", obj=settings, id="next.E014")
         )
 
     return errors + warnings
 
 
 @register(Tags.urls, NEXT)
-def check_reverse_name_collisions(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+def check_reverse_name_collisions(*args, **kwargs) -> list[CheckMessage]:
     """Fail when two distinct routes collapse to the same reverse URL name."""
     errors: list[CheckMessage] = []
 
@@ -379,12 +325,11 @@ def check_reverse_name_collisions(
     grouped: dict[tuple[str, frozenset[str]], dict[str, list[str]]] = {}
     for _pattern, url_path, source, parameters in all_patterns:
         full_name = next_framework_settings.URL_NAME_TEMPLATE.format(
-            name=default_url_parser.prepare_url_name(url_path),
+            name=default_url_parser.prepare_url_name(url_path)
         )
-        grouped.setdefault((full_name, parameters), {}).setdefault(
-            url_path,
-            [],
-        ).append(source)
+        grouped.setdefault((full_name, parameters), {}).setdefault(url_path, []).append(
+            source
+        )
 
     for (full_name, _signature), routes in grouped.items():
         # One trail from several trees is an E015 path conflict, not this.
@@ -400,7 +345,7 @@ def check_reverse_name_collisions(
                 "them. Rename the conflicting directories.",
                 obj=settings,
                 id="next.E039",
-            ),
+            )
         )
 
     return errors
@@ -410,12 +355,11 @@ def check_reverse_name_collisions(
 # manager is compared by identity, and holding a reference to it keeps it alive
 # so its `id` can never be reused by a later manager while the memo is live.
 _COLLECTED_PATTERNS_CACHE: dict[
-    str,
-    tuple[RouterManager, list[_CollectedPattern], list[CheckMessage]] | None,
+    str, tuple[RouterManager, list[_CollectedPattern], list[CheckMessage]] | None
 ] = {"value": None}
 
 
-def reset_collected_patterns_cache(**_kwargs: object) -> None:
+def reset_collected_patterns_cache(**kwargs) -> None:
     """Drop memoised collected patterns so the next check run recollects."""
     _COLLECTED_PATTERNS_CACHE["value"] = None
 
@@ -454,7 +398,7 @@ def _collect_all_patterns_uncached(
                     f"Error collecting patterns from router: {e}",
                     obj=settings,
                     id="next.E016",
-                ),
+                )
             )
 
     return all_patterns, errors
@@ -528,7 +472,7 @@ def _check_url_conflicts(
                     f"multiple locations: {', '.join(sources)}",
                     obj=settings,
                     id="next.E015",
-                ),
+                )
             )
 
 
@@ -550,14 +494,12 @@ def _collect_url_patterns(
 
     for url_path, page_file in scan_pages_tree(pages_path, skip_dir_names):
         try:
-            django_pattern, parameters = default_url_parser.parse_url_pattern(
-                url_path,
-            )
+            django_pattern, parameters = default_url_parser.parse_url_pattern(url_path)
         except DuplicateURLParameterError as exc:
             # Two wildcards with distinct names raise without a name
             # duplicate, so fall back to the name the parser flagged.
             names = default_url_parser.duplicate_parameter_names(url_path) or [
-                exc.param_name,
+                exc.param_name
             ]
             errors.append(
                 Error(
@@ -566,15 +508,13 @@ def _collect_url_patterns(
                     "Each parameter must have a unique name.",
                     obj=str(page_file),
                     id="next.E028",
-                ),
+                )
             )
         except (ValueError, TypeError):
             continue
         else:
             source = f"{context}: {page_file.relative_to(pages_path)}"
-            patterns.append(
-                (django_pattern, url_path, source, frozenset(parameters)),
-            )
+            patterns.append((django_pattern, url_path, source, frozenset(parameters)))
 
     return patterns
 

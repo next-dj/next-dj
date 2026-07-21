@@ -10,16 +10,12 @@ _VALID_TWO_ENTRY = {
     "FORM_ACTION_BACKENDS": [
         {"BACKEND": "next.forms.RegistryFormActionBackend"},
         {"BACKEND": "next.forms.RegistryFormActionBackend", "OPTIONS": {}},
-    ],
+    ]
 }
 
-_INVALID_BACKEND_PATH = {
-    "FORM_ACTION_BACKENDS": [{"BACKEND": "no.such.Module"}],
-}
+_INVALID_BACKEND_PATH = {"FORM_ACTION_BACKENDS": [{"BACKEND": "no.such.Module"}]}
 
-_WRONG_SUBCLASS = {
-    "FORM_ACTION_BACKENDS": [{"BACKEND": "django.http.HttpResponse"}],
-}
+_WRONG_SUBCLASS = {"FORM_ACTION_BACKENDS": [{"BACKEND": "django.http.HttpResponse"}]}
 
 
 class TestBenchFormActionBackendsCheck:

@@ -98,9 +98,7 @@ def action_url(context: template.Context, action_name: str) -> str:
 
 
 def _parse_form_attr(
-    parser: template.base.Parser,
-    tag_name: str,
-    bit: str,
+    parser: template.base.Parser, tag_name: str, bit: str
 ) -> "tuple[str, FilterExpression]":
     """Parse one `key="value"` tag argument into an attribute name and value."""
     name, eq, value = bit.partition("=")

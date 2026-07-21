@@ -156,8 +156,7 @@ class TestFullSubmission:
         _walk_three_steps(client)
         rows = list(
             AuditEntry.objects.filter(
-                source=AuditEntry.SOURCE_BACKEND,
-                kind=AuditEntry.KIND_REQUEST_STARTED,
+                source=AuditEntry.SOURCE_BACKEND, kind=AuditEntry.KIND_REQUEST_STARTED
             )
             .order_by("created_at")
             .values_list("step", "action_name")
@@ -185,8 +184,7 @@ class TestValidationFailure:
         assert AccessRequest.objects.exists() is False
 
         rows = AuditEntry.objects.filter(
-            source=AuditEntry.SOURCE_SIGNAL,
-            kind=AuditEntry.KIND_VALIDATION_FAILED,
+            source=AuditEntry.SOURCE_SIGNAL, kind=AuditEntry.KIND_VALIDATION_FAILED
         )
         assert rows.count() == 1
         row = rows.get()
@@ -236,8 +234,7 @@ class TestAccessDenied:
             _post_step_unacknowledged(client, "identity", IDENTITY)
 
         rows = AuditEntry.objects.filter(
-            source=AuditEntry.SOURCE_SIGNAL,
-            kind=AuditEntry.KIND_ACCESS_DENIED,
+            source=AuditEntry.SOURCE_SIGNAL, kind=AuditEntry.KIND_ACCESS_DENIED
         )
         assert rows.count() == 1
         row = rows.get()
@@ -266,8 +263,7 @@ class TestAccessDenied:
         _post_step_unacknowledged(client, "identity", IDENTITY)
         assert (
             AuditEntry.objects.filter(
-                source=AuditEntry.SOURCE_BACKEND,
-                kind=AuditEntry.KIND_DISPATCHED,
+                source=AuditEntry.SOURCE_BACKEND, kind=AuditEntry.KIND_DISPATCHED
             ).count()
             == 0
         )

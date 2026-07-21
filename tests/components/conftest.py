@@ -56,7 +56,7 @@ def capture_component_registered() -> Generator[list[dict[str, Any]], None, None
     """Capture ``component_registered`` signal events."""
     events: list[dict[str, Any]] = []
 
-    def _listener(sender: object, **kwargs: object) -> None:
+    def _listener(sender: object, **kwargs) -> None:
         events.append({"sender": sender, **kwargs})
 
     component_registered.connect(_listener)
@@ -71,7 +71,7 @@ def capture_components_registered() -> Generator[list[dict[str, Any]], None, Non
     """Capture ``components_registered`` (plural) signal events."""
     events: list[dict[str, Any]] = []
 
-    def _listener(sender: object, **kwargs: object) -> None:
+    def _listener(sender: object, **kwargs) -> None:
         events.append({"sender": sender, **kwargs})
 
     components_registered.connect(_listener)
@@ -86,7 +86,7 @@ def capture_component_backend_loaded() -> Generator[list[dict[str, Any]], None, 
     """Capture ``component_backend_loaded`` signal events."""
     events: list[dict[str, Any]] = []
 
-    def _listener(sender: object, **kwargs: object) -> None:
+    def _listener(sender: object, **kwargs) -> None:
         events.append({"sender": sender, **kwargs})
 
     component_backend_loaded.connect(_listener)
@@ -101,7 +101,7 @@ def capture_component_rendered() -> Generator[list[dict[str, Any]], None, None]:
     """Capture ``component_rendered`` signal events."""
     events: list[dict[str, Any]] = []
 
-    def _listener(sender: object, **kwargs: object) -> None:
+    def _listener(sender: object, **kwargs) -> None:
         events.append({"sender": sender, **kwargs})
 
     component_rendered.connect(_listener)

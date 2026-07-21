@@ -120,15 +120,13 @@ class TestNextScriptBuilderCustomTemplates:
 
     def test_custom_script_tag(self) -> None:
         builder = NextScriptBuilder(
-            URL,
-            script_tag_template='<script defer src="{url}"></script>',
+            URL, script_tag_template='<script defer src="{url}"></script>'
         )
         assert builder.script_tag() == f'<script defer src="{URL}"></script>'
 
     def test_custom_init_template(self) -> None:
         builder = NextScriptBuilder(
-            URL,
-            init_template="<script>window.MyNext.boot({payload})</script>",
+            URL, init_template="<script>window.MyNext.boot({payload})</script>"
         )
         out = builder.init_script({"x": 1})
         assert out == '<script>window.MyNext.boot({"x":1})</script>'

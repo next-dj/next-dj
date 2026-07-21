@@ -475,7 +475,7 @@ class TestCallCheckPermissions:
 
         class _Form(BaseForm):
             @classmethod
-            def check_permissions(cls, **url_kwargs: object) -> PermissionOutcome:
+            def check_permissions(cls, **url_kwargs) -> PermissionOutcome:
                 seen.update(url_kwargs)
                 return None
 
@@ -514,7 +514,7 @@ class TestCallHasObjectPermission:
         class _Form(Form):
             name = django_forms.CharField(max_length=10, required=False)
 
-            def has_object_permission(self, **url_kwargs: object) -> PermissionOutcome:
+            def has_object_permission(self, **url_kwargs) -> PermissionOutcome:
                 seen.update(url_kwargs)
                 return None
 
@@ -533,7 +533,7 @@ class TestEmitFormAccessDenied:
     def test_emits_when_receiver_present(self, mock_http_request) -> None:
         seen: list[dict[str, object]] = []
 
-        def receiver(**kwargs: object) -> None:
+        def receiver(**kwargs) -> None:
             seen.append(kwargs)
 
         request = mock_http_request(method="POST")
@@ -693,9 +693,7 @@ class TestPermissionHookReturnContract:
         "layer", _HOOK_LAYERS, ids=[layer.id for layer in _HOOK_LAYERS]
     )
     @pytest.mark.parametrize(
-        "case",
-        PERMISSION_OUTCOME_CASES,
-        ids=[c.id for c in PERMISSION_OUTCOME_CASES],
+        "case", PERMISSION_OUTCOME_CASES, ids=[c.id for c in PERMISSION_OUTCOME_CASES]
     )
     def test_matrix_via_dispatch(
         self,
@@ -898,11 +896,11 @@ class TestViewDenialShortCircuitsObjectHook:
         assert _ViewDeniesObjectSpyForm.object_calls == []
 
 
-def _board_factory(**_kwargs: object) -> type:
+def _board_factory(**kwargs) -> type:
     return _SpyDBViewForm
 
 
-def _board_tuple_factory(**_kwargs: object) -> tuple[type, dict[str, object]]:
+def _board_tuple_factory(**kwargs) -> tuple[type, dict[str, object]]:
     return _ObjectOwnerModelForm, {}
 
 
@@ -1083,7 +1081,7 @@ class TestDepCacheReuse:
         GuardedTenantForm.resolutions.clear()
         seen: dict[str, object] = {}
 
-        def receiver(**kwargs: object) -> None:
+        def receiver(**kwargs) -> None:
             seen.update(kwargs)
 
         def tenant_provider() -> str:
@@ -1126,7 +1124,7 @@ class TestFormAccessDeniedPayload:
     def captured(self):
         events: list[dict[str, object]] = []
 
-        def receiver(**kwargs: object) -> None:
+        def receiver(**kwargs) -> None:
             events.append(kwargs)
 
         form_access_denied.connect(receiver)

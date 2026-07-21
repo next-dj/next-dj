@@ -27,10 +27,7 @@ def login_state(request: HttpRequest) -> dict[str, Any]:
 
 
 @action("admin:login", form_class=admin_login_form_factory)
-def admin_login(
-    request: HttpRequest,
-    form: AuthenticationForm,
-) -> HttpResponse:
+def admin_login(request: HttpRequest, form: AuthenticationForm) -> HttpResponse:
     """Authenticate via `AuthenticationForm.get_user()` and redirect."""
     user = form.get_user()
     if user is None:  # pragma: no cover

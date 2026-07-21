@@ -26,18 +26,9 @@ def category(category: object) -> Category:
 
 
 @context("page_obj")
-def page_obj(
-    category: Category,
-    filters: DFilters,
-    page: DPage,
-) -> dict:
+def page_obj(category: Category, filters: DFilters, page: DPage) -> dict:
     """Return the cached search payload scoped to the current category."""
-    return cached_search(
-        filters,
-        page.number,
-        page.per_page,
-        category=category,
-    )
+    return cached_search(filters, page.number, page.per_page, category=category)
 
 
 @context("all_brands")

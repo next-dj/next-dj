@@ -127,10 +127,7 @@ class TestNoteEditForm:
         note = _acme_note(acme)
         response = client.post_action(
             "note_edit_form",
-            {
-                "title": note.title,
-                "body": "edited body content",
-            },
+            {"title": note.title, "body": "edited body content"},
             origin=f"/notes/{note.pk}/edit/",
             HTTP_X_TENANT="acme",
         )
@@ -145,10 +142,7 @@ class TestNoteEditForm:
         note = _acme_note(acme)
         response = client.post_action(
             "note_edit_form",
-            {
-                "title": "hijack",
-                "body": "should not save",
-            },
+            {"title": "hijack", "body": "should not save"},
             origin=f"/notes/{note.pk}/edit/",
             HTTP_X_TENANT="globex",
         )
@@ -233,10 +227,7 @@ class TestNoteEditFormErrorRerender:
         note = _acme_note(acme)
         response = client.post_action(
             "note_edit_form",
-            {
-                "title": "",
-                "body": "x",
-            },
+            {"title": "", "body": "x"},
             origin=f"/notes/{note.pk}/edit/",
             HTTP_X_TENANT="acme",
         )
@@ -274,8 +265,8 @@ class TestNoteCreate:
         new_pk = next(
             iter(
                 set(Note.objects.filter(tenant=acme).values_list("pk", flat=True))
-                - existing,
-            ),
+                - existing
+            )
         )
         assert response.url == f"/notes/{new_pk}/edit/"
         created = Note.objects.get(pk=new_pk)
@@ -324,10 +315,7 @@ class TestNoteEditPage:
         self, client: NextClient, acme: Tenant
     ) -> None:
         note = _acme_note(acme)
-        response = client.get(
-            f"/notes/{note.pk}/edit/",
-            HTTP_X_TENANT="acme",
-        )
+        response = client.get(f"/notes/{note.pk}/edit/", HTTP_X_TENANT="acme")
         assert response.status_code == 200
         body = response.content.decode()
         assert note.title in body
@@ -338,10 +326,7 @@ class TestNoteEditPage:
         self, client: NextClient, acme: Tenant
     ) -> None:
         note = _acme_note(acme)
-        response = client.get(
-            f"/notes/{note.pk}/edit/",
-            HTTP_X_TENANT="acme",
-        )
+        response = client.get(f"/notes/{note.pk}/edit/", HTTP_X_TENANT="acme")
         body = response.content.decode()
         assert (
             '<script type="module" '

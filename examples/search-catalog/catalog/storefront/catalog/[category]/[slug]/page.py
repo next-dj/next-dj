@@ -9,8 +9,7 @@ def product(category: Category, slug: str) -> Product:
     """Return the product identified by the inherited category and the URL slug."""
     try:
         return Product.objects.select_related("category").get(
-            category=category,
-            slug=slug,
+            category=category, slug=slug
         )
     except Product.DoesNotExist as exc:
         raise Http404 from exc

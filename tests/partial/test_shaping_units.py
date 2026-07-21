@@ -71,8 +71,7 @@ class TestAdvanceWithoutAResolvableTarget:
 
     def test_missing_redirect_returns_no_content(self) -> None:
         outcome = ActionOutcome(
-            kind=ActionOutcomeKind.WIZARD_ADVANCE,
-            action_name="step_wizard",
+            kind=ActionOutcomeKind.WIZARD_ADVANCE, action_name="step_wizard"
         )
         backend = form_action_manager.default_backend
         response = shape_partial(backend, partial_request(origin=None), outcome)
@@ -264,9 +263,7 @@ class TestFormOverridesWithoutAForm:
 
     def test_no_form_yields_no_overrides(self) -> None:
         outcome = ActionOutcome(
-            kind=ActionOutcomeKind.INVALID,
-            action_name="step_form",
-            form=None,
+            kind=ActionOutcomeKind.INVALID, action_name="step_form", form=None
         )
         assert shaping_module._form_overrides(outcome) == {}
 

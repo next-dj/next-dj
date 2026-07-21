@@ -6,11 +6,7 @@ from django import forms as django_forms
 from django.dispatch import Signal
 from django.http import HttpRequest, HttpResponseRedirect
 
-from next.forms import (
-    ActionRegistration,
-    Form,
-    RegistryFormActionBackend,
-)
+from next.forms import ActionRegistration, Form, RegistryFormActionBackend
 from next.forms.manager import form_action_manager
 from next.forms.signals import (
     action_dispatched,
@@ -44,10 +40,7 @@ class SignalWizard(FormWizard):
     class Meta:
         """Two ordered steps routed through the wizard backend."""
 
-        steps: ClassVar = [
-            ("identity", SignalIdentityStep),
-            ("scope", SignalScopeStep),
-        ]
+        steps: ClassVar = [("identity", SignalIdentityStep), ("scope", SignalScopeStep)]
 
     def done(self, request: HttpRequest, cleaned_data: dict) -> HttpResponseRedirect:
         """Finalise the wizard with a redirect."""
@@ -58,7 +51,7 @@ class SignalWizard(FormWizard):
 def capture_action_registered() -> Generator[list[dict[str, Any]], None, None]:
     events: list[dict[str, Any]] = []
 
-    def _listener(sender: object, **kwargs: object) -> None:
+    def _listener(sender: object, **kwargs) -> None:
         events.append({"sender": sender, **kwargs})
 
     action_registered.connect(_listener)
@@ -72,7 +65,7 @@ def capture_action_registered() -> Generator[list[dict[str, Any]], None, None]:
 def capture_action_dispatched() -> Generator[list[dict[str, Any]], None, None]:
     events: list[dict[str, Any]] = []
 
-    def _listener(sender: object, **kwargs: object) -> None:
+    def _listener(sender: object, **kwargs) -> None:
         events.append({"sender": sender, **kwargs})
 
     action_dispatched.connect(_listener)
@@ -86,7 +79,7 @@ def capture_action_dispatched() -> Generator[list[dict[str, Any]], None, None]:
 def capture_form_validation_failed() -> Generator[list[dict[str, Any]], None, None]:
     events: list[dict[str, Any]] = []
 
-    def _listener(sender: object, **kwargs: object) -> None:
+    def _listener(sender: object, **kwargs) -> None:
         events.append({"sender": sender, **kwargs})
 
     form_validation_failed.connect(_listener)
@@ -100,7 +93,7 @@ def capture_form_validation_failed() -> Generator[list[dict[str, Any]], None, No
 def capture_wizard_step_submitted() -> Generator[list[dict[str, Any]], None, None]:
     events: list[dict[str, Any]] = []
 
-    def _listener(sender: object, **kwargs: object) -> None:
+    def _listener(sender: object, **kwargs) -> None:
         events.append({"sender": sender, **kwargs})
 
     wizard_step_submitted.connect(_listener)
@@ -114,7 +107,7 @@ def capture_wizard_step_submitted() -> Generator[list[dict[str, Any]], None, Non
 def capture_wizard_completed() -> Generator[list[dict[str, Any]], None, None]:
     events: list[dict[str, Any]] = []
 
-    def _listener(sender: object, **kwargs: object) -> None:
+    def _listener(sender: object, **kwargs) -> None:
         events.append({"sender": sender, **kwargs})
 
     wizard_completed.connect(_listener)
@@ -128,7 +121,7 @@ def capture_wizard_completed() -> Generator[list[dict[str, Any]], None, None]:
 def capture_form_access_denied() -> Generator[list[dict[str, Any]], None, None]:
     events: list[dict[str, Any]] = []
 
-    def _listener(sender: object, **kwargs: object) -> None:
+    def _listener(sender: object, **kwargs) -> None:
         events.append({"sender": sender, **kwargs})
 
     form_access_denied.connect(_listener)
@@ -141,10 +134,7 @@ def capture_form_access_denied() -> Generator[list[dict[str, Any]], None, None]:
 def _post_wizard_step(client, step: str, data: dict):
     """POST one wizard step through the dispatch client with the tag's hidden field."""
     url = form_action_manager.get_action_url("signal_wizard")
-    payload = {
-        "_next_form_origin": f"/request/{step}/",
-        **data,
-    }
+    payload = {"_next_form_origin": f"/request/{step}/", **data}
     return client.post(url, data=payload, follow=False)
 
 
@@ -190,7 +180,7 @@ class TestActionRegisteredSignal:
         """After the fixture tears down, the listener is no longer connected."""
         events: list[dict[str, Any]] = []
 
-        def _listener(sender: object, **kwargs: object) -> None:
+        def _listener(sender: object, **kwargs) -> None:
             events.append({"sender": sender})
 
         action_registered.connect(_listener)
@@ -241,7 +231,7 @@ class TestActionDispatchedSignal:
         """After the fixture tears down, the listener is no longer connected."""
         events: list[dict[str, Any]] = []
 
-        def _listener(sender: object, **kwargs: object) -> None:
+        def _listener(sender: object, **kwargs) -> None:
             events.append({"sender": sender})
 
         action_dispatched.connect(_listener)
@@ -292,7 +282,7 @@ class TestFormValidationFailedSignal:
         """After the fixture tears down, the listener is no longer connected."""
         events: list[dict[str, Any]] = []
 
-        def _listener(sender: object, **kwargs: object) -> None:
+        def _listener(sender: object, **kwargs) -> None:
             events.append({"sender": sender})
 
         form_validation_failed.connect(_listener)
@@ -320,11 +310,7 @@ class TestFormAccessDeniedSignal:
     ) -> None:
         """The denial payload preserves layer and reason for receivers."""
         form_access_denied.send(
-            sender=object,
-            action_name="edit",
-            uid="u1",
-            layer="object",
-            reason="denied",
+            sender=object, action_name="edit", uid="u1", layer="object", reason="denied"
         )
         event = capture_form_access_denied[0]
         assert event["action_name"] == "edit"
@@ -340,7 +326,7 @@ class TestFormAccessDeniedSignal:
         """After disconnecting, the listener is no longer notified."""
         events: list[dict[str, Any]] = []
 
-        def _listener(sender: object, **kwargs: object) -> None:
+        def _listener(sender: object, **kwargs) -> None:
             events.append({"sender": sender})
 
         form_access_denied.connect(_listener)
@@ -435,9 +421,7 @@ class TestActionDispatchedWiring:
     """``action_dispatched`` fires when the framework dispatches a real action."""
 
     def test_fires_on_successful_dispatch_without_form(
-        self,
-        client_no_csrf,
-        capture_action_dispatched: list[dict[str, Any]],
+        self, client_no_csrf, capture_action_dispatched: list[dict[str, Any]]
     ) -> None:
         """A handler without form_class fires the signal with response_status."""
         url = form_action_manager.get_action_url("test_no_form")
@@ -456,17 +440,11 @@ class TestActionDispatchedWiring:
         assert event["request"].path == url
 
     def test_fires_on_successful_dispatch_with_form(
-        self,
-        client_no_csrf,
-        capture_action_dispatched: list[dict[str, Any]],
+        self, client_no_csrf, capture_action_dispatched: list[dict[str, Any]]
     ) -> None:
         """A valid bound form fires the signal after on_valid runs."""
         url = form_action_manager.get_action_url("simple_form_redirect")
-        resp = client_no_csrf.post(
-            url,
-            data={"name": "Alice"},
-            follow=False,
-        )
+        resp = client_no_csrf.post(url, data={"name": "Alice"}, follow=False)
         assert resp.status_code == 302
         assert len(capture_action_dispatched) == 1
         event = capture_action_dispatched[0]
@@ -480,9 +458,7 @@ class TestActionDispatchedWiring:
         assert event["request"].method == "POST"
 
     def test_payload_includes_url_kwargs_from_resolved_origin(
-        self,
-        client_no_csrf,
-        capture_action_dispatched: list[dict[str, Any]],
+        self, client_no_csrf, capture_action_dispatched: list[dict[str, Any]]
     ) -> None:
         """The resolved origin's typed URL kwargs surface as `url_kwargs`."""
         url = form_action_manager.get_action_url("test_no_form")
@@ -491,19 +467,12 @@ class TestActionDispatchedWiring:
         assert capture_action_dispatched[0]["url_kwargs"] == {"id": 42}
 
     def test_does_not_fire_on_invalid_form(
-        self,
-        client_no_csrf,
-        capture_action_dispatched: list[dict[str, Any]],
+        self, client_no_csrf, capture_action_dispatched: list[dict[str, Any]]
     ) -> None:
         """An invalid form never reaches the handler, so no dispatched signal."""
         url = form_action_manager.get_action_url("simple_form")
         client_no_csrf.post(
-            url,
-            data={
-                "name": "",
-                "_next_form_origin": "/",
-            },
-            follow=False,
+            url, data={"name": "", "_next_form_origin": "/"}, follow=False
         )
         assert capture_action_dispatched == []
 
@@ -513,19 +482,12 @@ class TestFormValidationFailedWiring:
     """``form_validation_failed`` fires when validation fails during dispatch."""
 
     def test_fires_on_invalid_form_with_error_payload(
-        self,
-        client_no_csrf,
-        capture_form_validation_failed: list[dict[str, Any]],
+        self, client_no_csrf, capture_form_validation_failed: list[dict[str, Any]]
     ) -> None:
         """An invalid POST fires the signal with action_name, errors, fields."""
         url = form_action_manager.get_action_url("simple_form")
         resp = client_no_csrf.post(
-            url,
-            data={
-                "name": "",
-                "_next_form_origin": "/",
-            },
-            follow=False,
+            url, data={"name": "", "_next_form_origin": "/"}, follow=False
         )
         assert resp.status_code == 200
         assert len(capture_form_validation_failed) == 1
@@ -556,9 +518,7 @@ class TestWizardSignalsWiring:
     """Wizard signals fire as steps validate and the wizard finalises."""
 
     def test_step_submitted_fires_per_valid_step(
-        self,
-        client_no_csrf,
-        capture_wizard_step_submitted: list[dict[str, Any]],
+        self, client_no_csrf, capture_wizard_step_submitted: list[dict[str, Any]]
     ) -> None:
         """`wizard_step_submitted` fires once per valid step with its cleaned data."""
         _post_wizard_step(client_no_csrf, "identity", {"name": "Ada"})
@@ -575,9 +535,7 @@ class TestWizardSignalsWiring:
         assert capture_wizard_step_submitted[1]["step"] == "scope"
 
     def test_completed_fires_once_with_merged_data(
-        self,
-        client_no_csrf,
-        capture_wizard_completed: list[dict[str, Any]],
+        self, client_no_csrf, capture_wizard_completed: list[dict[str, Any]]
     ) -> None:
         """`wizard_completed` fires once after the last step's done with merged data."""
         _post_wizard_step(client_no_csrf, "identity", {"name": "Ada"})
@@ -593,9 +551,7 @@ class TestWizardSignalsWiring:
         assert event["request"].method == "POST"
 
     def test_action_dispatched_fires_per_step(
-        self,
-        client_no_csrf,
-        capture_action_dispatched: list[dict[str, Any]],
+        self, client_no_csrf, capture_action_dispatched: list[dict[str, Any]]
     ) -> None:
         """`action_dispatched` fires for each wizard step dispatch."""
         _post_wizard_step(client_no_csrf, "identity", {"name": "Ada"})
@@ -612,10 +568,10 @@ class TestWizardSignalsWiring:
         matched: list[dict[str, Any]] = []
         unmatched: list[dict[str, Any]] = []
 
-        def on_matched(sender: object, **kwargs: object) -> None:
+        def on_matched(sender: object, **kwargs) -> None:
             matched.append({"sender": sender, **kwargs})
 
-        def on_unmatched(sender: object, **kwargs: object) -> None:
+        def on_unmatched(sender: object, **kwargs) -> None:
             unmatched.append({"sender": sender, **kwargs})
 
         wizard_step_submitted.connect(on_matched, sender=SignalWizard)

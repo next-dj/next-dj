@@ -280,10 +280,7 @@ def _component(template_path: Path | None) -> Generator[None, None, None]:
     ]
     with (
         patch("next.partial.checks.next_framework_settings", settings_ns),
-        patch(
-            "next.partial.checks.get_components_manager",
-            return_value=manager,
-        ),
+        patch("next.partial.checks.get_components_manager", return_value=manager),
     ):
         yield
 
@@ -354,7 +351,7 @@ class _PartialUnawareBackend(RegistryFormActionBackend):
 
 
 @contextmanager
-def _form_backends(*backends: object, partial_active: bool) -> Iterator[None]:
+def _form_backends(*backends, partial_active: bool) -> Iterator[None]:
     """Point the W068 check at given form backends and partial-config state."""
     manager = MagicMock()
     manager.backends = tuple(backends)
@@ -519,9 +516,7 @@ class TestBackendNamesPathCheck:
         assert ids == [checks.E_BACKEND_WITHOUT_PATH]
 
     @pytest.mark.parametrize(
-        "config",
-        [[_BACKEND_DICT], "not-a-list"],
-        ids=["valid_entry", "non_sequence"],
+        "config", [[_BACKEND_DICT], "not-a-list"], ids=["valid_entry", "non_sequence"]
     )
     def test_valid_or_non_sequence_config_is_silent(self, config: object) -> None:
         with _partial_backends(config):
@@ -586,7 +581,7 @@ class TestComposedPagesMemo:
     def test_new_manager_invalidates_memo(self, tmp_path: Path) -> None:
         first_page = _page_dir(tmp_path, "one")
         with _composed_pages(
-            (first_page, '{% zone "solo" %}<p>{{ a }}</p>{% endzone %}'),
+            (first_page, '{% zone "solo" %}<p>{{ a }}</p>{% endzone %}')
         ):
             assert checks.check_duplicate_zone_names() == []
         second_page = _page_dir(tmp_path, "two")

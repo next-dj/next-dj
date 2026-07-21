@@ -14,7 +14,7 @@ from next.partial.zone import (
 )
 
 
-def _render(source: str, **ctx: object) -> str:
+def _render(source: str, **ctx) -> str:
     return Template(source).render(Context(ctx))
 
 

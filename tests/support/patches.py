@@ -14,9 +14,7 @@ if TYPE_CHECKING:
 
 @contextmanager
 def patch_checks_router_manager(
-    *,
-    pages_directory: Path,
-    scan_routes: Iterable[tuple[str, Path]],
+    *, pages_directory: Path, scan_routes: Iterable[tuple[str, Path]]
 ) -> Generator[tuple[MagicMock, MagicMock, MagicMock], None, None]:
     """Patch `get_router_manager` and `get_pages_directory` for page checks tests."""
     routes = list(scan_routes)
@@ -27,17 +25,10 @@ def patch_checks_router_manager(
     mock_router.app_dirs = True
     mock_router._scan_pages_directory.return_value = routes
     with (
+        patch("next.pages.checks.get_router_manager", return_value=(mock_mgr, [])),
+        patch("next.urls.checks.get_router_manager", return_value=(mock_mgr, [])),
         patch(
-            "next.pages.checks.get_router_manager",
-            return_value=(mock_mgr, []),
-        ),
-        patch(
-            "next.urls.checks.get_router_manager",
-            return_value=(mock_mgr, []),
-        ),
-        patch(
-            "next.checks.common.get_pages_directory",
-            return_value=pages_directory,
+            "next.checks.common.get_pages_directory", return_value=pages_directory
         ) as mock_get_pages_dir,
     ):
         yield mock_mgr, mock_router, mock_get_pages_dir
@@ -45,29 +36,20 @@ def patch_checks_router_manager(
 
 @contextmanager
 def patch_checks_router_manager_with_routers(
-    *,
-    routers: list[object],
+    *, routers: list[object]
 ) -> Generator[MagicMock, None, None]:
     """Patch `get_router_manager` so the manager exposes the given routers list."""
     mock_mgr = MagicMock()
     mock_mgr._backends = list(routers)
     with (
-        patch(
-            "next.pages.checks.get_router_manager",
-            return_value=(mock_mgr, []),
-        ),
-        patch(
-            "next.urls.checks.get_router_manager",
-            return_value=(mock_mgr, []),
-        ),
+        patch("next.pages.checks.get_router_manager", return_value=(mock_mgr, [])),
+        patch("next.urls.checks.get_router_manager", return_value=(mock_mgr, [])),
     ):
         yield mock_mgr
 
 
 @contextmanager
-def patch_checks_components_manager(
-    *fake_backends: object,
-) -> Generator[MagicMock, None, None]:
+def patch_checks_components_manager(*fake_backends) -> Generator[MagicMock, None, None]:
     """Patch components-check settings and `ComponentsManager` with fake backends."""
     mock_ns = next_framework_settings_for_checks(
         backends=[
@@ -75,16 +57,15 @@ def patch_checks_components_manager(
                 "BACKEND": "next.components.FileComponentsBackend",
                 "DIRS": [],
                 "COMPONENTS_DIR": "_components",
-            },
-        ],
+            }
+        ]
     )
     mock_manager = MagicMock()
     mock_manager._backends = list(fake_backends)
     with (
         patch("next.components.checks.next_framework_settings", mock_ns),
         patch(
-            "next.components.checks.get_components_manager",
-            return_value=mock_manager,
+            "next.components.checks.get_components_manager", return_value=mock_manager
         ),
     ):
         yield mock_manager

@@ -5,11 +5,7 @@ import pytest
 from django.test import RequestFactory
 
 from next.pages import page
-from next.urls import (
-    FileRouterBackend,
-    RouterBackend,
-    RouterFactory,
-)
+from next.urls import FileRouterBackend, RouterBackend, RouterFactory
 from tests.support import file_router_backend_from_params
 
 
@@ -37,15 +33,7 @@ class TestFileRouterBackend:
         ),
         [
             ("defaults", None, None, None, "pages", True, {}),
-            (
-                "custom",
-                "views",
-                False,
-                {"custom": "value"},
-                "views",
-                False,
-                {},
-            ),
+            ("custom", "views", False, {"custom": "value"}, "views", False, {}),
         ],
         ids=["defaults", "custom"],
     )
@@ -102,11 +90,7 @@ class TestFileRouterBackend:
         ids=["same_instance", "different_instance", "wrong_type"],
     )
     def test_equality_variations(
-        self,
-        test_case,
-        router1_params,
-        router2_params,
-        expected_equal,
+        self, test_case, router1_params, router2_params, expected_equal
     ) -> None:
         """Equality and inequality for matching config, different config, and wrong type."""
         router1 = file_router_backend_from_params(router1_params)
@@ -177,12 +161,7 @@ class TestFileRouterBackend:
         ids=["success", "import_error", "no_file"],
     )
     def test_get_app_pages_path_variations(
-        self,
-        router,
-        test_case,
-        import_side_effect,
-        file_path,
-        expected_result,
+        self, router, test_case, import_side_effect, file_path, expected_result
     ) -> None:
         """Resolves app package path or returns None on import error or missing file."""
         with patch("builtins.__import__") as mock_import:
@@ -203,7 +182,7 @@ class TestFileRouterBackend:
                         mock_pages_path.exists.return_value = True
                         mock_path_class.return_value = mock_app_path
                         mock_app_path.parent.__truediv__ = Mock(
-                            return_value=mock_pages_path,
+                            return_value=mock_pages_path
                         )
 
                         result = router._get_app_pages_path("testapp")
@@ -223,13 +202,7 @@ class TestFileRouterBackend:
         ids=["with_base_dir", "string_base_dir", "no_base_dir", "does_not_exist"],
     )
     def test_get_root_pages_path_variations(
-        self,
-        router,
-        mock_settings,
-        test_case,
-        base_dir,
-        exists,
-        expected_result,
+        self, router, mock_settings, test_case, base_dir, exists, expected_result
     ) -> None:
         """Root pages paths from BASE_DIR when directory exists or missing."""
         mock_settings.BASE_DIR = base_dir
@@ -243,10 +216,7 @@ class TestFileRouterBackend:
             mock_pages_path.exists.return_value = exists
             mock_base = Mock()
             mock_base.__truediv__ = Mock(return_value=mock_pages_path)
-            with patch(
-                "next.urls.backends.resolve_base_dir",
-                return_value=mock_base,
-            ):
+            with patch("next.urls.backends.resolve_base_dir", return_value=mock_base):
                 result = root_router._get_root_pages_paths()
             if exists:
                 assert len(result) == 1
@@ -264,10 +234,7 @@ class TestFileRouterBackend:
     def test_get_root_pages_paths_skips_nonexistent(self) -> None:
         """Nonexistent ``extra_root_paths`` entries are omitted."""
         router = FileRouterBackend(
-            extra_root_paths=[
-                Path("/nonexistent/path"),
-                Path("/also/nonexistent"),
-            ],
+            extra_root_paths=[Path("/nonexistent/path"), Path("/also/nonexistent")]
         )
         result = router._get_root_pages_paths()
         assert result == []
@@ -294,9 +261,7 @@ class TestFileRouterBackend:
         """A second generate_urls reuses cached root patterns without re-walking."""
         router = FileRouterBackend(app_dirs=False, extra_root_paths=[tmp_path])
         with patch.object(
-            router,
-            "_generate_patterns_from_directory",
-            return_value=iter(["p1"]),
+            router, "_generate_patterns_from_directory", return_value=iter(["p1"])
         ) as mock_gen:
             first = router.generate_urls()
             second = router.generate_urls()
@@ -319,9 +284,7 @@ class TestFileRouterBackend:
 
         router = _AppendingRouter(app_dirs=False, extra_root_paths=[tmp_path])
         with patch.object(
-            router,
-            "_generate_patterns_from_directory",
-            return_value=iter(["p1"]),
+            router, "_generate_patterns_from_directory", return_value=iter(["p1"])
         ):
             first = router.generate_urls()
             second = router.generate_urls()
@@ -349,9 +312,7 @@ class TestFileRouterBackend:
         with (
             patch.object(router, "_generate_app_urls", return_value=[]),
             patch.object(
-                router,
-                "_generate_patterns_from_directory",
-                return_value=[],
+                router, "_generate_patterns_from_directory", return_value=[]
             ) as mock_gen,
         ):
             urls = router.generate_urls()
@@ -395,9 +356,7 @@ class TestFileRouterBackend:
             assert result == expected_result
         else:
             with patch.object(
-                router,
-                "_get_app_pages_path",
-                return_value=pages_path_return,
+                router, "_get_app_pages_path", return_value=pages_path_return
             ):
                 if pages_path_return:
                     with patch.object(
@@ -427,9 +386,7 @@ class TestFileRouterBackend:
         ):
             mock_create.side_effect = ["pattern1", "pattern2"]
 
-            patterns = list(
-                router._generate_patterns_from_directory(mock_pages_path),
-            )
+            patterns = list(router._generate_patterns_from_directory(mock_pages_path))
             assert patterns == ["pattern1", "pattern2"]
 
     def test_scan_pages_directory_empty(self) -> None:
@@ -489,11 +446,7 @@ class TestFileRouterBackend:
             "def render(request, args):\n    return 'response-' + args\n"
         )
 
-        pattern = page.create_url_pattern(
-            "test/[[args]]",
-            page_py,
-            router._url_parser,
-        )
+        pattern = page.create_url_pattern("test/[[args]]", page_py, router._url_parser)
         assert pattern is not None
         assert pattern.callback is not None
         response = pattern.callback(RequestFactory().get("/"), args="arg1/arg2/arg3")
@@ -523,16 +476,12 @@ class TestRouterFactory:
                 },
                 FileRouterBackend,
                 {"pages_dir": "pages", "app_dirs": True, "options": {}},
-            ),
+            )
         ],
         ids=["success"],
     )
     def test_create_backend_variations(
-        self,
-        test_case,
-        config,
-        expected_type,
-        expected_attrs,
+        self, test_case, config, expected_type, expected_attrs
     ) -> None:
         """Valid FileRouterBackend config produces a router with expected attributes."""
         router = RouterFactory.create_backend(config)
@@ -553,10 +502,7 @@ class TestRouterFactory:
         mock_s = Mock()
         with (
             patch("next.urls.backends.settings", mock_s),
-            patch(
-                "next.utils.settings",
-                mock_s,
-            ),
+            patch("next.utils.settings", mock_s),
         ):
             mock_s.BASE_DIR = "/tmp/next_base_str"
             router = RouterFactory.create_backend(cfg)
@@ -574,10 +520,7 @@ class TestRouterFactory:
         mock_s = Mock()
         with (
             patch("next.urls.backends.settings", mock_s),
-            patch(
-                "next.utils.settings",
-                mock_s,
-            ),
+            patch("next.utils.settings", mock_s),
         ):
             mock_s.BASE_DIR = Path("/tmp")
             router = RouterFactory.create_backend(cfg)
@@ -590,10 +533,7 @@ class TestRouterFactory:
             ({}, "BACKEND"),
             ({"BACKEND": "next.urls.FileRouterBackend"}, "PAGES_DIR"),
             (
-                {
-                    "BACKEND": "next.urls.FileRouterBackend",
-                    "PAGES_DIR": "pages",
-                },
+                {"BACKEND": "next.urls.FileRouterBackend", "PAGES_DIR": "pages"},
                 "APP_DIRS",
             ),
             (
@@ -623,9 +563,7 @@ class TestRouterFactory:
         ],
     )
     def test_create_backend_keyerror_when_required_key_missing(
-        self,
-        config,
-        missing_key,
+        self, config, missing_key
     ) -> None:
         """FileRouterBackend config must list PAGES_DIR, APP_DIRS, OPTIONS, and DIRS."""
         with pytest.raises(KeyError) as exc:
@@ -658,8 +596,7 @@ class TestRouterFactory:
         assert isinstance(router, custom_backend_class)
 
     def test_create_backend_non_file_router_backend_else_branch(
-        self,
-        custom_backend_class,
+        self, custom_backend_class
     ) -> None:
         """Minimal config dict hits the non FileRouterBackend branch."""
         RouterFactory.register_backend("custom", custom_backend_class)
@@ -676,9 +613,7 @@ class TestRouterFactory:
         """Only type objects are treated as router classes."""
         assert RouterFactory.is_filesystem_discovery_router_class(object()) is False
 
-    def test_resolve_components_folder_name_from_first_component_backend(
-        self,
-    ) -> None:
+    def test_resolve_components_folder_name_from_first_component_backend(self) -> None:
         """Skip-folder name comes from the first ``COMPONENT_BACKENDS`` entry."""
         with patch("next.urls.backends.next_framework_settings") as nfs:
             nfs.COMPONENT_BACKENDS = [{"COMPONENTS_DIR": "custom_comp"}]
@@ -716,9 +651,7 @@ class TestRouterFactory:
             is True
         )
 
-    def test_is_filesystem_discovery_router_class_rejects_non_router_type(
-        self,
-    ) -> None:
+    def test_is_filesystem_discovery_router_class_rejects_non_router_type(self) -> None:
         """Types that are not URL router backends are rejected."""
 
         class NotRouter:

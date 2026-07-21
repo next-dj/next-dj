@@ -23,11 +23,7 @@ from next.forms.signals import (
     wizard_completed,
     wizard_step_submitted,
 )
-from next.pages.signals import (
-    context_registered,
-    page_rendered,
-    template_loaded,
-)
+from next.pages.signals import context_registered, page_rendered, template_loaded
 from next.partial.signals import (
     field_validated,
     patch_op_registered,

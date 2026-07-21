@@ -291,7 +291,7 @@ class WizardBackendManager:
 wizard_backend_manager = WizardBackendManager()
 
 
-def _on_settings_reloaded(**_kwargs: object) -> None:
+def _on_settings_reloaded(**kwargs) -> None:
     """Drop the cached backend so a reloaded config takes effect."""
     wizard_backend_manager.reset()
 
@@ -353,7 +353,7 @@ class FormWizard:
         url_param: str = "step"
 
     @override
-    def __init_subclass__(cls, **kwargs: object) -> None:
+    def __init_subclass__(cls, **kwargs) -> None:
         """Register the wizard subclass automatically and stamp the hook flag."""
         super().__init_subclass__(**kwargs)
         cls._has_check_permissions = _stamp_hook_flag(
@@ -566,11 +566,7 @@ class FormWizard:
         """Return the flash message sent after `done`, empty string for none."""
         return _format_success_message(type(self), cleaned_data)
 
-    def done(
-        self,
-        request: HttpRequest,
-        cleaned_data: dict[str, Any],
-    ) -> HttpResponse:
+    def done(self, request: HttpRequest, cleaned_data: dict[str, Any]) -> HttpResponse:
         """Finalise the wizard after the last step. Subclasses must override."""
         msg = f"{type(self).__name__} must implement done(request, cleaned_data)."
         raise NotImplementedError(msg)

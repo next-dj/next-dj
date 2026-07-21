@@ -172,8 +172,7 @@ class TestFullPageRenderEquivalence:
         zoned_dir.mkdir()
         plain_page = _write_zone_page(plain_dir, "<main><p>{{ msg }}</p></main>")
         zoned_page = _write_zone_page(
-            zoned_dir,
-            '<main>{% zone "z" %}<p>{{ msg }}</p>{% endzone %}</main>',
+            zoned_dir, '<main>{% zone "z" %}<p>{{ msg }}</p>{% endzone %}</main>'
         )
 
         plain = page_instance.render(plain_page, msg="hi")
@@ -355,9 +354,7 @@ class TestZoneRequestedGuardsExpensiveProviders:
     def test_provider_runs_only_when_zone_requested(self) -> None:
         hits: list[int] = []
         requested = RequestFactory().get(
-            "/",
-            HTTP_X_NEXT_REQUEST="1",
-            HTTP_X_NEXT_ZONE="report",
+            "/", HTTP_X_NEXT_REQUEST="1", HTTP_X_NEXT_ZONE="report"
         )
         assert _expensive_provider(requested, hits) == "computed"
         assert hits == [1]
@@ -371,9 +368,7 @@ class TestZoneRequestedGuardsExpensiveProviders:
     def test_provider_skips_unrelated_zone_request(self) -> None:
         hits: list[int] = []
         other = RequestFactory().get(
-            "/",
-            HTTP_X_NEXT_REQUEST="1",
-            HTTP_X_NEXT_ZONE="sidebar",
+            "/", HTTP_X_NEXT_REQUEST="1", HTTP_X_NEXT_ZONE="sidebar"
         )
         assert _expensive_provider(other, hits) is None
         assert hits == []

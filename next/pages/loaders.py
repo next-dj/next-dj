@@ -95,7 +95,7 @@ def reset_module_memo() -> None:
 _ADDITIONAL_LAYOUTS_CACHE: dict[str, list[Path] | None] = {"value": None}
 
 
-def _reset_additional_layouts_cache(**_kwargs: object) -> None:
+def _reset_additional_layouts_cache(**kwargs) -> None:
     """Drop cached root-level `layout.djx` paths on settings reload."""
     _ADDITIONAL_LAYOUTS_CACHE["value"] = None
 
@@ -266,8 +266,7 @@ class LayoutTemplateLoader(TemplateLoader):
     def _get_pages_dirs_for_config(self, config: dict) -> list[Path]:
         """Return candidate roots from one router `DIRS` entry (paths only)."""
         path_roots, _ = classify_dirs_entries(
-            list(config.get("DIRS") or []),
-            resolve_base_dir(),
+            list(config.get("DIRS") or []), resolve_base_dir()
         )
         return list(path_roots)
 
@@ -284,9 +283,7 @@ class LayoutTemplateLoader(TemplateLoader):
         return "{% block template %}{% endblock template %}"
 
     def _compose_layout_hierarchy(
-        self,
-        template_content: str,
-        layout_files: list[Path],
+        self, template_content: str, layout_files: list[Path]
     ) -> str:
         """Return layouts wrapped outermost last, with the page in the first slot."""
         result = template_content
@@ -363,8 +360,7 @@ def build_registered_loaders() -> list[TemplateLoader]:
             continue
         if not isinstance(cls, type) or not issubclass(cls, TemplateLoader):
             logger.debug(
-                "TEMPLATE_LOADERS entry %r is not a TemplateLoader subclass",
-                entry,
+                "TEMPLATE_LOADERS entry %r is not a TemplateLoader subclass", entry
             )
             continue
         if cls in seen:
@@ -377,7 +373,7 @@ def build_registered_loaders() -> list[TemplateLoader]:
     return instances
 
 
-def _reset_registered_loaders_cache(**_kwargs: object) -> None:
+def _reset_registered_loaders_cache(**kwargs) -> None:
     """Drop cached loader instances on settings reload."""
     _REGISTERED_LOADERS_CACHE["value"] = None
 

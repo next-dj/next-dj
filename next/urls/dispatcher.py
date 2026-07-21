@@ -42,10 +42,7 @@ class FilesystemTreeDispatcher:
         yield from self._visit(pages_path, pages_path, "")
 
     def _visit(
-        self,
-        current_path: Path,
-        tree_root: Path,
-        url_path: str,
+        self, current_path: Path, tree_root: Path, url_path: str
     ) -> Generator[tuple[str, Path], None, None]:
         try:
             items = list(current_path.iterdir())

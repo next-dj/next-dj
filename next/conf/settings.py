@@ -71,11 +71,7 @@ class NextFrameworkSettings:
         }
     )
     _BOOL_KEYS: ClassVar[frozenset[str]] = frozenset(
-        {
-            "STRICT_CONTEXT",
-            "LAZY_COMPONENT_MODULES",
-            "FORM_AUTODISCOVER",
-        }
+        {"STRICT_CONTEXT", "LAZY_COMPONENT_MODULES", "FORM_AUTODISCOVER"}
     )
 
     def _build_flat_merged(self, user: dict[str, Any] | None) -> dict[str, Any]:

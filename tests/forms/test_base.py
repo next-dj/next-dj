@@ -236,18 +236,12 @@ class TestAutoRegistration:
 
         form_action_manager.register_action(
             ActionRegistration(
-                name="dup_test",
-                file_path=fake_path,
-                scope="shared",
-                handler=handler_v1,
+                name="dup_test", file_path=fake_path, scope="shared", handler=handler_v1
             )
         )
         form_action_manager.register_action(
             ActionRegistration(
-                name="dup_test",
-                file_path=fake_path,
-                scope="shared",
-                handler=handler_v2,
+                name="dup_test", file_path=fake_path, scope="shared", handler=handler_v2
             )
         )
 

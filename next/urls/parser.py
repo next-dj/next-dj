@@ -60,10 +60,7 @@ class DuplicateURLParameterError(ValueError):
     """
 
     def __init__(
-        self,
-        param_name: str,
-        url_path: str,
-        file_path: Path | None = None,
+        self, param_name: str, url_path: str, file_path: Path | None = None
     ) -> None:
         """Build the message from the conflicting name and the source path."""
         self.param_name = param_name
@@ -96,7 +93,7 @@ class URLPatternParser:
     # The wildcard alternative must come first so `[[x]]` never matches
     # the single-bracket branch with a `[` inside the captured name.
     _bracket_pattern: ClassVar[re.Pattern[str]] = re.compile(
-        r"\[\[(?P<wild>[^\[\]]+)\]\]|\[(?P<param>[^\[\]]+)\]",
+        r"\[\[(?P<wild>[^\[\]]+)\]\]|\[(?P<param>[^\[\]]+)\]"
     )
 
     def parse_url_pattern(self, url_path: str) -> tuple[str, dict[str, str]]:
@@ -115,7 +112,7 @@ class URLPatternParser:
                 parameters[name] = name
                 return f"<path:{name}>"
             param_name, param_type = self._parse_param_name_and_type(
-                match.group("param"),
+                match.group("param")
             )
             name = param_name.replace("-", "_")
             if name in parameters:

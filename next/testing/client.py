@@ -124,7 +124,7 @@ class NextClient(Client):
         partial: bool = False,
         zones: str | tuple[str, ...] | None = None,
         version: str | None = None,
-        **extra: object,
+        **extra,
     ) -> HttpResponse:
         """Resolve `action_name` and POST `data` to the resulting URL.
 
@@ -158,7 +158,7 @@ class NextClient(Client):
         zones: str | tuple[str, ...],
         *,
         version: str | None = None,
-        **extra: object,
+        **extra,
     ) -> HttpResponse:
         """GET `url` as a partial request for the named zones.
 

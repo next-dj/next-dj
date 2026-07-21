@@ -156,9 +156,7 @@ class TestAssetDiscoveryPageTemplate:
     """template.css/js are collected from the page directory."""
 
     def test_collects_template_css_and_js(
-        self,
-        tmp_path: Path,
-        file_backend: StaticBackend,
+        self, tmp_path: Path, file_backend: StaticBackend
     ) -> None:
         (tmp_path / "template.css").write_text("body{}")
         (tmp_path / "template.js").write_text("/* js */")
@@ -176,9 +174,7 @@ class TestAssetDiscoveryPageTemplate:
         assert script_urls == ["/static/next/index.js"]
 
     def test_missing_files_are_skipped(
-        self,
-        tmp_path: Path,
-        file_backend: StaticBackend,
+        self, tmp_path: Path, file_backend: StaticBackend
     ) -> None:
         page_path = tmp_path / "page.djx"
         page_path.write_text("")
@@ -195,9 +191,7 @@ class TestAssetDiscoveryLayoutChain:
     """Outer-most layout is collected before inner layouts and template."""
 
     def test_layouts_come_before_template(
-        self,
-        tmp_path: Path,
-        file_backend: StaticBackend,
+        self, tmp_path: Path, file_backend: StaticBackend
     ) -> None:
         (tmp_path / "layout.djx").write_text("")
         (tmp_path / "layout.css").write_text("")
@@ -228,9 +222,7 @@ class TestAssetDiscoveryModuleLists:
     """styles/scripts list vars in page.py are appended to the collector."""
 
     def test_reads_styles_and_scripts(
-        self,
-        tmp_path: Path,
-        file_backend: StaticBackend,
+        self, tmp_path: Path, file_backend: StaticBackend
     ) -> None:
         page_dir = tmp_path / "about"
         page_dir.mkdir()
@@ -253,9 +245,7 @@ class TestAssetDiscoveryModuleLists:
         ]
 
     def test_module_list_cache_skips_reparse(
-        self,
-        tmp_path: Path,
-        file_backend: StaticBackend,
+        self, tmp_path: Path, file_backend: StaticBackend
     ) -> None:
         page_dir = tmp_path / "cached"
         page_dir.mkdir()
@@ -277,10 +267,7 @@ class TestAssetDiscoveryModuleLists:
         ]
 
     def test_module_list_and_layout_caches_evict_oldest(
-        self,
-        tmp_path: Path,
-        file_backend: StaticBackend,
-        monkeypatch,
+        self, tmp_path: Path, file_backend: StaticBackend, monkeypatch
     ) -> None:
         """Both module-list and layout-dir caches drop the oldest key past the limit."""
         monkeypatch.setattr(discovery_mod, "_MODULE_LIST_CACHE_MAX_SIZE", 1)
@@ -324,9 +311,7 @@ class TestAssetDiscoveryModuleListUrlRouting:
     """`scripts`/`styles` list URLs are dropped when their suffix mismatches."""
 
     def test_url_without_extension_is_dropped(
-        self,
-        tmp_path: Path,
-        file_backend: StaticBackend,
+        self, tmp_path: Path, file_backend: StaticBackend
     ) -> None:
         page_dir = tmp_path / "noext"
         page_dir.mkdir()
@@ -341,9 +326,7 @@ class TestAssetDiscoveryModuleListUrlRouting:
         assert collector.assets_in_slot("scripts") == []
 
     def test_url_with_unregistered_extension_is_dropped(
-        self,
-        tmp_path: Path,
-        file_backend: StaticBackend,
+        self, tmp_path: Path, file_backend: StaticBackend
     ) -> None:
         page_dir = tmp_path / "weird"
         page_dir.mkdir()
@@ -358,9 +341,7 @@ class TestAssetDiscoveryModuleListUrlRouting:
         assert collector.assets_in_slot("scripts") == []
 
     def test_url_with_mismatched_slot_is_dropped(
-        self,
-        tmp_path: Path,
-        file_backend: StaticBackend,
+        self, tmp_path: Path, file_backend: StaticBackend
     ) -> None:
         page_dir = tmp_path / "mismatch"
         page_dir.mkdir()
@@ -378,9 +359,7 @@ class TestAssetDiscoveryModuleListUrlRouting:
 
 class TestAssetDiscoveryComponents:
     def test_simple_component_yields_nothing(
-        self,
-        file_backend: StaticBackend,
-        simple_component: ComponentInfo,
+        self, file_backend: StaticBackend, simple_component: ComponentInfo
     ) -> None:
         provider = _Provider(file_backend, ())
         discovery = AssetDiscovery(provider)
@@ -391,9 +370,7 @@ class TestAssetDiscoveryComponents:
         assert collector.assets_in_slot("scripts") == []
 
     def test_composite_component_picks_up_css_js_and_module_lists(
-        self,
-        file_backend: StaticBackend,
-        composite_component: ComponentInfo,
+        self, file_backend: StaticBackend, composite_component: ComponentInfo
     ) -> None:
         provider = _Provider(file_backend, ())
         discovery = AssetDiscovery(provider)
@@ -410,21 +387,14 @@ class TestAssetDiscoveryComponents:
 
 
 class _FailingBackend(StaticFilesBackend):
-    def register_file(
-        self,
-        source_path: Path,
-        logical_name: str,
-        kind: str,
-    ) -> str:
+    def register_file(self, source_path: Path, logical_name: str, kind: str) -> str:
         msg = "cannot resolve"
         raise ValueError(msg)
 
 
 class TestAssetDiscoveryErrorHandling:
     def test_warning_logged_on_value_error(
-        self,
-        tmp_path: Path,
-        caplog: pytest.LogCaptureFixture,
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         (tmp_path / "template.css").write_text("")
         page_path = tmp_path / "page.djx"
@@ -445,9 +415,7 @@ class TestAssetDiscoveryErrorHandling:
 
 class TestAssetDiscoveryCustomStems:
     def test_custom_template_stem_is_picked_up(
-        self,
-        tmp_path: Path,
-        file_backend: StaticBackend,
+        self, tmp_path: Path, file_backend: StaticBackend
     ) -> None:
         stems = StemRegistry()
         stems.register("template", "page")
@@ -469,9 +437,7 @@ class TestMakeDiscoveryFixture:
     """Ensure the conftest helper builds a wired-up AssetDiscovery."""
 
     def test_factory_produces_usable_pair(
-        self,
-        file_backend: StaticBackend,
-        make_discovery: Callable[..., object],
+        self, file_backend: StaticBackend, make_discovery: Callable[..., object]
     ) -> None:
         discovery, manager = make_discovery(file_backend)  # type: ignore[misc]
         assert isinstance(discovery, AssetDiscovery)

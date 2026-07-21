@@ -30,8 +30,7 @@ _progress = _load(
     "audit_progress_bar",
 )
 _audit_row = _load(
-    VIEWS_ROOT / "_blocks" / "audit_row" / "component.py",
-    "audit_audit_row",
+    VIEWS_ROOT / "_blocks" / "audit_row" / "component.py", "audit_audit_row"
 )
 _step_section = _load(
     VIEWS_ROOT / "request" / "[step]" / "_blocks" / "step_section" / "component.py",
@@ -54,9 +53,7 @@ def _wizard(step: str, stored: dict[str, dict[str, object]] | None = None):
     request = HttpRequest()
     request.session = SessionStore()
     wizard = _step_page.AccessRequestWizard(
-        request=request,
-        url_kwargs={"step": step},
-        base_path=f"/request/{step}/",
+        request=request, url_kwargs={"step": step}, base_path=f"/request/{step}/"
     )
     for name, data in (stored or {}).items():
         wizard.save_step(name, data)
@@ -201,9 +198,7 @@ class TestAccessDeniedReceiver:
 
     def test_receiver_stores_layer_and_reason(self) -> None:
         _on_form_access_denied(
-            action_name="access_request_wizard",
-            layer="view",
-            reason="denied",
+            action_name="access_request_wizard", layer="view", reason="denied"
         )
         row = AuditEntry.objects.get(kind=AuditEntry.KIND_ACCESS_DENIED)
         assert row.source == AuditEntry.SOURCE_SIGNAL
@@ -310,18 +305,14 @@ class TestStepFormValidation:
 
     def test_identity_step_requires_email(self) -> None:
         form = _step_page.IdentityStep(
-            data={"full_name": "Ada", "email": "", "team": "Computing"},
+            data={"full_name": "Ada", "email": "", "team": "Computing"}
         )
         assert not form.is_valid()
         assert "email" in form.errors
 
     def test_scope_step_accepts_valid_payload(self) -> None:
         form = _step_page.ScopeStep(
-            data={
-                "project_slug": "engine",
-                "reason": "reads",
-                "expires_in_days": "7",
-            },
+            data={"project_slug": "engine", "reason": "reads", "expires_in_days": "7"}
         )
         assert form.is_valid()
         assert form.cleaned_data["project_slug"] == "engine"
@@ -358,9 +349,7 @@ class TestStepSectionRenderPaths:
 
     def test_invalid_active_step_reports_errors_state(self) -> None:
         wizard = _wizard("identity")
-        form = _step_page.IdentityStep(
-            data={"full_name": "", "email": "", "team": ""},
-        )
+        form = _step_page.IdentityStep(data={"full_name": "", "email": "", "team": ""})
         form.is_valid()
         rendered = _step_section.render(form, wizard)
         assert 'data-state="errors"' in rendered
@@ -375,7 +364,7 @@ class TestStepSectionRenderPaths:
                     "project_slug": "engine",
                     "reason": long_reason,
                     "expires_in_days": 7,
-                },
+                }
             },
         )
         rendered = _step_section.render(wizard.current_form(), wizard)

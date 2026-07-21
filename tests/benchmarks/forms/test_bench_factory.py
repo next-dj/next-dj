@@ -33,10 +33,7 @@ class TestBenchFormActionFactory:
 
         try:
             benchmark.pedantic(
-                FormActionFactory.create_backend,
-                setup=setup,
-                rounds=200,
-                iterations=1,
+                FormActionFactory.create_backend, setup=setup, rounds=200, iterations=1
             )
         finally:
             FormActionFactory.create_backend(_REGISTRY_CONFIG)

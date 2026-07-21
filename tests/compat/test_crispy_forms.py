@@ -112,10 +112,7 @@ class TestCrispyFilter:
         form = CompatCrispyFilterForm(data={"name": "Ada", "email": "nope"})
         assert not form.is_valid()
         html = form_action_manager.default_backend.render_invalid_page(
-            csrf_request,
-            "compat_crispy_filter_form",
-            form,
-            page_file_path=page_file,
+            csrf_request, "compat_crispy_filter_form", form, page_file_path=page_file
         )
         assert "is-invalid" in html
         assert 'value="Ada"' in html

@@ -8,10 +8,7 @@ from django.http import HttpResponse, HttpResponseRedirect
 
 from next.forms import Form
 from next.forms.backends import ActionRegistration, RegistryFormActionBackend
-from next.forms.dispatch import (
-    FormActionDispatch,
-    _normalize_handler_response,
-)
+from next.forms.dispatch import FormActionDispatch, _normalize_handler_response
 from next.forms.origin import (
     _ORIGIN_MATCH_ATTR,
     _filter_reserved_url_kwargs,
@@ -89,7 +86,7 @@ class _BenchForm(Form):
     name = forms.CharField(max_length=32)
 
 
-def _ok_handler(**_kwargs: object) -> HttpResponseRedirect:
+def _ok_handler(**kwargs) -> HttpResponseRedirect:
     return HttpResponseRedirect("/")
 
 
@@ -112,13 +109,7 @@ class TestBenchDispatchEndToEnd:
         post = MagicMock()
         post.items.return_value = [("name", "bench")]
         request = build_mock_http_request(method="POST", POST=post, FILES=None)
-        benchmark(
-            FormActionDispatch.dispatch,
-            backend,
-            request,
-            "bench_action",
-            meta,
-        )
+        benchmark(FormActionDispatch.dispatch, backend, request, "bench_action", meta)
 
     @pytest.mark.benchmark(group="forms.dispatch")
     def test_dispatch_invalid_form(self, benchmark) -> None:
@@ -139,13 +130,7 @@ class TestBenchDispatchEndToEnd:
         post = MagicMock()
         post.items.return_value = []
         request = build_mock_http_request(method="POST", POST=post, FILES=None)
-        benchmark(
-            FormActionDispatch.dispatch,
-            backend,
-            request,
-            "bench_action",
-            meta,
-        )
+        benchmark(FormActionDispatch.dispatch, backend, request, "bench_action", meta)
 
     @pytest.mark.benchmark(group="forms.dispatch")
     def test_dispatch_unguarded_form_no_hook_overhead(self, benchmark) -> None:
@@ -172,13 +157,7 @@ class TestBenchDispatchEndToEnd:
         post = MagicMock()
         post.items.return_value = [("name", "bench")]
         request = build_mock_http_request(method="POST", POST=post, FILES=None)
-        benchmark(
-            FormActionDispatch.dispatch,
-            backend,
-            request,
-            "bench_action",
-            meta,
-        )
+        benchmark(FormActionDispatch.dispatch, backend, request, "bench_action", meta)
 
     @pytest.mark.benchmark(group="forms.dispatch")
     def test_dispatch_through_subclassed_backend(self, benchmark) -> None:
@@ -209,10 +188,4 @@ class TestBenchDispatchEndToEnd:
         post = MagicMock()
         post.items.return_value = [("name", "bench")]
         request = build_mock_http_request(method="POST", POST=post, FILES=None)
-        benchmark(
-            FormActionDispatch.dispatch,
-            backend,
-            request,
-            "bench_action",
-            meta,
-        )
+        benchmark(FormActionDispatch.dispatch, backend, request, "bench_action", meta)

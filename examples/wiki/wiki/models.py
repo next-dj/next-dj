@@ -15,8 +15,7 @@ class Article(models.Model):
     """One DB-backed wiki article served at ``/wiki/<slug>/``."""
 
     SLUG_VALIDATOR = RegexValidator(
-        SLUG_RE,
-        message="Lowercase letters, digits, and dashes only.",
+        SLUG_RE, message="Lowercase letters, digits, and dashes only."
     )
     slug = models.SlugField(max_length=80, unique=True, validators=[SLUG_VALIDATOR])
     title = models.CharField(max_length=200)

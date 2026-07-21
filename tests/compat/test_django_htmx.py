@@ -36,7 +36,7 @@ HX_SOURCE = (
 def htmx_env():
     """Append HtmxMiddleware to the middleware chain for one test."""
     with override_settings(
-        MIDDLEWARE=[*settings.MIDDLEWARE, "django_htmx.middleware.HtmxMiddleware"],
+        MIDDLEWARE=[*settings.MIDDLEWARE, "django_htmx.middleware.HtmxMiddleware"]
     ):
         yield
 
@@ -96,9 +96,7 @@ class TestHtmxMiddlewareDispatch:
 
     def test_plain_post_sees_falsy_htmx(self, htmx_env, next_client):
         resp = next_client.post_action(
-            "compat_htmx_form",
-            {"name": "Ada", "email": "ada@example.com"},
-            origin="/",
+            "compat_htmx_form", {"name": "Ada", "email": "ada@example.com"}, origin="/"
         )
         assert resp.status_code == 302
         assert resp["Location"] == "/plain-submit/"

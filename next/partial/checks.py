@@ -128,7 +128,7 @@ def _collect_composed_pages(
         yield from _iter_router_pages(router, seen)
 
 
-def reset_composed_pages_memo(**_kwargs: object) -> None:
+def reset_composed_pages_memo(**kwargs) -> None:
     """Drop the memoised composed-page list for the next check run.
 
     Identity against the router manager already invalidates the memo when the
@@ -143,8 +143,7 @@ settings_reloaded.connect(reset_composed_pages_memo)
 
 
 def _iter_router_pages(
-    router: "RouterBackend",
-    seen: set[Path],
+    router: "RouterBackend", seen: set[Path]
 ) -> "Iterator[tuple[Path, Template]]":
     """Yield compiled composed templates for one router's scanned pages."""
     for _url_path, page_path in iter_scanned_page_pairs(router):
@@ -185,10 +184,7 @@ def _significant(nodelist: NodeList) -> list[Node]:
 
 
 @register(Tags.templates, NEXT)
-def check_composed_templates_compile(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+def check_composed_templates_compile(*args, **kwargs) -> list[CheckMessage]:
     """Error when a composed page template fails to compile (`next.E072`).
 
     The zone checks skip a page whose composed template does not
@@ -225,10 +221,7 @@ def check_composed_templates_compile(
 
 
 @register(Tags.templates, NEXT)
-def check_duplicate_zone_names(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+def check_duplicate_zone_names(*args, **kwargs) -> list[CheckMessage]:
     """Error when two zones in one composed page share a name (`next.E060`)."""
     messages: list[CheckMessage] = []
     for page_path, template in _iter_composed_pages():
@@ -252,10 +245,7 @@ def check_duplicate_zone_names(
 
 
 @register(Tags.templates, NEXT)
-def check_zone_name_is_slug(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+def check_zone_name_is_slug(*args, **kwargs) -> list[CheckMessage]:
     """Error when a zone name is not an ASCII slug (`next.E061`)."""
     messages: list[CheckMessage] = []
     for page_path, template in _iter_composed_pages():
@@ -275,10 +265,7 @@ def check_zone_name_is_slug(
 
 
 @register(Tags.templates, NEXT)
-def check_zone_not_in_loop(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+def check_zone_not_in_loop(*args, **kwargs) -> list[CheckMessage]:
     """Error when a zone sits inside a `{% for %}` loop (`next.E062`)."""
     return _ancestor_check(
         ancestor=ForNode,
@@ -292,10 +279,7 @@ def check_zone_not_in_loop(
 
 
 @register(Tags.templates, NEXT)
-def check_zone_not_in_if(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+def check_zone_not_in_if(*args, **kwargs) -> list[CheckMessage]:
     """Error when a zone sits inside an `{% if %}` block (`next.E063`)."""
     return _ancestor_check(
         ancestor=IfNode,
@@ -309,10 +293,7 @@ def check_zone_not_in_if(
 
 
 def _ancestor_check(
-    *,
-    ancestor: type[Node],
-    check_id: str,
-    reason: str,
+    *, ancestor: type[Node], check_id: str, reason: str
 ) -> list[CheckMessage]:
     """Return errors for every zone nested under an `ancestor` node type."""
     messages: list[CheckMessage] = []
@@ -329,17 +310,11 @@ def _ancestor_check(
     return messages
 
 
-_TAG_LABELS: Final[dict[type[Node], str]] = {
-    ForNode: "{% for %}",
-    IfNode: "{% if %}",
-}
+_TAG_LABELS: Final[dict[type[Node], str]] = {ForNode: "{% for %}", IfNode: "{% if %}"}
 
 
 def _zones_under(
-    nodelist: NodeList,
-    ancestor: type[Node],
-    *,
-    inside: bool = False,
+    nodelist: NodeList, ancestor: type[Node], *, inside: bool = False
 ) -> "Iterator[str]":
     """Yield names of zones reached while an `ancestor` node is on the path."""
     for node in nodelist:
@@ -352,11 +327,7 @@ def _zones_under(
             yield from _zones_under(child, ancestor, inside=now_inside)
 
 
-def _forms_in_loop(
-    nodelist: NodeList,
-    *,
-    inside: bool = False,
-) -> "Iterator[FormNode]":
+def _forms_in_loop(nodelist: NodeList, *, inside: bool = False) -> "Iterator[FormNode]":
     """Yield each `{% form %}` node reached while a `{% for %}` is on the path."""
     for node in nodelist:
         if isinstance(node, FormNode) and inside:
@@ -372,10 +343,7 @@ def _form_has_partial_attr(node: FormNode, attr: str) -> bool:
 
 
 @register(Tags.templates, NEXT)
-def check_repeated_form_has_key(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+def check_repeated_form_has_key(*args, **kwargs) -> list[CheckMessage]:
     """Warn when a looped `{% form %}` has no key or zone (`next.W070`)."""
     messages: list[CheckMessage] = []
     for page_path, template in _iter_composed_pages():
@@ -399,10 +367,7 @@ def check_repeated_form_has_key(
 
 
 @register(Tags.templates, NEXT)
-def check_lazy_zone_has_placeholder(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+def check_lazy_zone_has_placeholder(*args, **kwargs) -> list[CheckMessage]:
     """Error when a lazy zone declares no `{% placeholder %}` (`next.E064`)."""
     messages: list[CheckMessage] = []
     for page_path, template in _iter_composed_pages():
@@ -422,10 +387,7 @@ def check_lazy_zone_has_placeholder(
 
 
 @register(Tags.templates, NEXT)
-def check_with_directly_over_zone(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+def check_with_directly_over_zone(*args, **kwargs) -> list[CheckMessage]:
     """Warn when a `{% with %}` wraps a zone directly (`next.W067`)."""
     messages: list[CheckMessage] = []
     for page_path, template in _iter_composed_pages():
@@ -455,10 +417,7 @@ def _zones_directly_in_with(nodelist: NodeList) -> "Iterator[str]":
 
 
 @register(Tags.templates, NEXT)
-def check_no_zone_in_component(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+def check_no_zone_in_component(*args, **kwargs) -> list[CheckMessage]:
     """Error when a component template declares a zone (`next.E065`)."""
     configs = next_framework_settings.COMPONENT_BACKENDS
     if not isinstance(configs, list) or not configs:
@@ -505,10 +464,7 @@ _OP_TOKEN = re.compile(r"\A[A-Za-z0-9_.-]+\Z")
 
 
 @register(Tags.templates, NEXT)
-def check_custom_patch_ops_well_formed(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+def check_custom_patch_ops_well_formed(*args, **kwargs) -> list[CheckMessage]:
     """Error when a custom patch verb is malformed or shadows a built-in (`next.E066`).
 
     The runtime guard in `Patches.op()` rejects an unregistered verb on
@@ -542,10 +498,7 @@ def check_custom_patch_ops_well_formed(
 
 
 @register(NEXT)
-def check_form_backend_partial_aware(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+def check_form_backend_partial_aware(*args, **kwargs) -> list[CheckMessage]:
     """Warn when partial rendering is on but a form backend is not aware (`next.W068`).
 
     The base `FormActionBackend.shape_response` routes partial requests
@@ -592,10 +545,7 @@ def _partial_backends_active() -> bool:
 
 
 @register(NEXT)
-def check_single_partial_backend(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+def check_single_partial_backend(*args, **kwargs) -> list[CheckMessage]:
     """Warn when more than one partial protocol backend is configured (`next.W071`).
 
     Partial rendering uses a single protocol backend. Only the first valid
@@ -623,10 +573,7 @@ _STATICFILES_ALIAS: Final = "staticfiles"
 
 
 @register(NEXT)
-def check_partial_backend_names_a_path(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+def check_partial_backend_names_a_path(*args, **kwargs) -> list[CheckMessage]:
     """Error when a PARTIAL_BACKENDS entry omits its BACKEND key (`next.E073`).
 
     The factory refuses such an entry with `ImproperlyConfigured` on the
@@ -649,10 +596,7 @@ def check_partial_backend_names_a_path(
 
 
 @register(NEXT)
-def check_manifest_version_has_manifest_storage(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+def check_manifest_version_has_manifest_storage(*args, **kwargs) -> list[CheckMessage]:
     """Warn when manifest versioning has no manifest storage (`next.W069`).
 
     The `VERSION: "manifest"` option asks the version stamp to track the

@@ -39,9 +39,7 @@ class TestDFormAndFormProvider:
         context.form = MyForm()
 
         param = inspect.Parameter(
-            "my_form",
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=MyForm,
+            "my_form", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=MyForm
         )
         assert provider.can_handle(param, context) is True
 
@@ -65,8 +63,7 @@ class TestDFormAndFormProvider:
         context.form = MyForm()
 
         param = inspect.Parameter(
-            "other_param",
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            "other_param", inspect.Parameter.POSITIONAL_OR_KEYWORD
         )
         assert provider.can_handle(param, context) is False
 

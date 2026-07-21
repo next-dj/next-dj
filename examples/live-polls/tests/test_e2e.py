@@ -222,9 +222,7 @@ class TestVoteAction:
         assert choice.votes == 1
 
     @pytest.mark.parametrize(
-        ("rounds", "expected"),
-        [(1, 1), (3, 3), (7, 7)],
-        ids=["once", "three", "seven"],
+        ("rounds", "expected"), [(1, 1), (3, 3), (7, 7)], ids=["once", "three", "seven"]
     )
     def test_repeated_votes_sum_correctly(
         self, client: NextClient, poll: Poll, rounds: int, expected: int
@@ -392,10 +390,7 @@ class TestBroadcastReceiver:
         assert snapshot["total_votes"] == 1
 
     def test_receiver_invokes_broker_publish_with_new_snapshot(
-        self,
-        client: NextClient,
-        poll: Poll,
-        monkeypatch: pytest.MonkeyPatch,
+        self, client: NextClient, poll: Poll, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A spy on `broker.publish` confirms the receiver is the publish source.
 

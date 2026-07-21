@@ -13,5 +13,5 @@ _localized_page.next_page_path = "/i18n/pages/page.py"
 
 
 urlpatterns = i18n_patterns(
-    path("docs/<slug:slug>/", _localized_page, name="localized_page"),
+    path("docs/<slug:slug>/", _localized_page, name="localized_page")
 )

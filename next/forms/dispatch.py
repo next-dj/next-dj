@@ -26,10 +26,7 @@ from django.shortcuts import resolve_url
 from next.deps import REQUEST_DEP_CACHE_ATTR, resolver
 from next.deps.resolver import cached_signature
 
-from .origin import (
-    _url_kwargs_for_request,
-    resolve_origin,
-)
+from .origin import _url_kwargs_for_request, resolve_origin
 from .signals import (
     action_dispatched,
     form_access_denied,
@@ -99,8 +96,7 @@ def _redirect_to_login(next_url: str) -> HttpResponseRedirect:
 
 
 def _check_access(
-    request: "HttpRequest",
-    guard: "ActionGuard",
+    request: "HttpRequest", guard: "ActionGuard"
 ) -> HttpResponseRedirect | None:
     """Enforce the action guard with `AccessMixin` semantics.
 
@@ -117,9 +113,7 @@ def _check_access(
 
 
 def _send_success_message(
-    request: "HttpRequest",
-    source: object,
-    cleaned_data: dict[str, Any],
+    request: "HttpRequest", source: object, cleaned_data: dict[str, Any]
 ) -> None:
     """Flash the declared success message through django.contrib.messages."""
     if not hasattr(source, "get_success_message"):
@@ -208,11 +202,7 @@ def _resolve_and_call(
     """Resolve a hook's dependencies and call it, feeding url_kwargs to kwargs."""
     cache, stack = deps
     resolved = resolver.resolve_dependencies(
-        hook,
-        request=request,
-        _cache=cache,
-        _stack=stack,
-        **url_kwargs,
+        hook, request=request, _cache=cache, _stack=stack, **url_kwargs
     )
     if _accepts_var_keyword(hook):
         for key, value in url_kwargs.items():
@@ -292,10 +282,7 @@ def _enforce_permission_hook(
         return None
     try:
         raw = _resolve_and_call(
-            hook,
-            request,
-            state.url_kwargs,
-            deps=(state.dep_cache, state.dep_stack),
+            hook, request, state.url_kwargs, deps=(state.dep_cache, state.dep_stack)
         )
     except PermissionDenied:
         _emit_form_access_denied(
@@ -308,10 +295,7 @@ def _enforce_permission_hook(
 
 
 def _enforce_view_permissions(
-    form_class: type,
-    request: "HttpRequest",
-    action_name: str,
-    state: "_DispatchState",
+    form_class: type, request: "HttpRequest", action_name: str, state: "_DispatchState"
 ) -> "HttpResponse | None":
     """Run the view-level check_permissions hook, emitting on a denial."""
     present = getattr(form_class, "_has_check_permissions", False)
@@ -321,11 +305,7 @@ def _enforce_view_permissions(
         else None
     )
     return _enforce_permission_hook(
-        request,
-        action_name,
-        state,
-        hook=hook,
-        layer="view",
+        request, action_name, state, hook=hook, layer="view"
     )
 
 
@@ -364,11 +344,7 @@ def _enforce_object_permissions(
         cast("_ObjectPermissionHook", form).has_object_permission if present else None
     )
     return _enforce_permission_hook(
-        request,
-        action_name,
-        state,
-        hook=hook,
-        layer="object",
+        request, action_name, state, hook=hook, layer="object"
     )
 
 
@@ -382,10 +358,7 @@ def _form_action_context_callable(
         dep_cache: dict[str, Any] = {}
         dep_stack: list[str] = []
         resolved_form_class, init_kwargs = _resolve_form_class(
-            form_class,
-            request,
-            url_kwargs,
-            (dep_cache, dep_stack),
+            form_class, request, url_kwargs, (dep_cache, dep_stack)
         )
         if init_kwargs:
             form_instance = _form_from_initial_data(
@@ -439,11 +412,7 @@ def _resolve_form_class(
         raise TypeError(msg)
     cache, stack = deps if deps is not None else ({}, [])
     resolved = resolver.resolve_dependencies(
-        form_class,
-        request=request,
-        _cache=cache,
-        _stack=stack,
-        **url_kwargs,
+        form_class, request=request, _cache=cache, _stack=stack, **url_kwargs
     )
     produced = form_class(**resolved)
     if isinstance(produced, tuple) and len(produced) == _FACTORY_TUPLE_LEN:
@@ -561,10 +530,7 @@ class _DispatchState:
             )
 
     def emit_form_validation_failed(
-        self,
-        request: "HttpRequest",
-        action_name: str,
-        form: "django_forms.Form",
+        self, request: "HttpRequest", action_name: str, form: "django_forms.Form"
     ) -> None:
         """Send `form_validation_failed` when any receiver is connected."""
         if form_validation_failed.receivers:
@@ -604,10 +570,7 @@ class _DispatchState:
         """Send `wizard_completed` when any receiver is connected."""
         if wizard_completed.receivers:
             wizard_completed.send(
-                sender=wizard_class,
-                cleaned_data=merged,
-                uid=self.uid,
-                request=request,
+                sender=wizard_class, cleaned_data=merged, uid=self.uid, request=request
             )
 
 
@@ -689,11 +652,7 @@ class FormActionDispatch:
 
         if form_class is None and handler is not None:
             return FormActionDispatch._dispatch_handler_only(
-                backend,
-                handler,
-                request,
-                action_name,
-                state,
+                backend, handler, request, action_name, state
             )
 
         if form_class is not None:
@@ -980,9 +939,7 @@ class FormActionDispatch:
 
     @staticmethod
     def shape_response(
-        backend: "FormActionBackend",
-        request: "HttpRequest",
-        outcome: ActionOutcome,
+        backend: "FormActionBackend", request: "HttpRequest", outcome: ActionOutcome
     ) -> HttpResponse:
         """Build the default envelope for one pipeline outcome.
 
@@ -1017,9 +974,7 @@ class FormActionDispatch:
 
     @staticmethod
     def _origin_rerender_response(
-        backend: "FormActionBackend",
-        request: "HttpRequest",
-        action_name: str,
+        backend: "FormActionBackend", request: "HttpRequest", action_name: str
     ) -> HttpResponse:
         """Re-render the origin page after a valid submission's handler returned None.
 

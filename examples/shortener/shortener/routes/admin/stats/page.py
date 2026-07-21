@@ -9,8 +9,7 @@ from next.pages import context
 @context("totals")
 def totals() -> dict[str, int]:
     aggregate = Link.objects.aggregate(
-        link_count=Count("id"),
-        total_clicks=Sum("clicks"),
+        link_count=Count("id"), total_clicks=Sum("clicks")
     )
     return {
         "links": aggregate["link_count"],

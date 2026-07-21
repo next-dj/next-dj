@@ -98,8 +98,7 @@ class TestBenchWizardDispatch:
         meta = backend.get_meta("bench_dispatch_wizard")
         assert meta is not None
         request = RequestFactory().post(
-            "/form/action/",
-            {"_next_form_origin": "/request/one/", "name": "Ada"},
+            "/form/action/", {"_next_form_origin": "/request/one/", "name": "Ada"}
         )
         request.session = SessionStore()
 

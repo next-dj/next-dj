@@ -35,9 +35,7 @@ def populated_form_backend() -> RegistryFormActionBackend:
 
 
 @pytest.fixture()
-def populated_component_registry(
-    tmp_path: Path,
-) -> tuple[ComponentRegistry, Path]:
+def populated_component_registry(tmp_path: Path) -> tuple[ComponentRegistry, Path]:
     """``ComponentRegistry`` with 500 components rooted at ``tmp_path``."""
     registry = ComponentRegistry()
     registry.mark_as_root(tmp_path)

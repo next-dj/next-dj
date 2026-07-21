@@ -22,9 +22,7 @@ def resolve_action_url(action_name: str) -> str:
 
 
 def build_form_for(
-    action_name: str,
-    data: dict[str, Any] | None = None,
-    **form_kwargs: object,
+    action_name: str, data: dict[str, Any] | None = None, **form_kwargs
 ) -> django_forms.Form:
     """Instantiate the form class registered for `action_name`.
 
@@ -43,8 +41,7 @@ def build_form_for(
             f"({action_name!r}) with the test client instead."
         )
         raise LookupError(msg)
-    kwargs = cast("dict[str, Any]", form_kwargs)
-    return cast("django_forms.Form", form_class(data=data, **kwargs))
+    return cast("django_forms.Form", form_class(data=data, **form_kwargs))
 
 
 __all__ = ["build_form_for", "resolve_action_url"]

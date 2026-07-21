@@ -194,10 +194,7 @@ class TestCheckUrlPatterns:
         router = _TreeRouter(root_trees=[tmp_path])
 
         with patch_checks_router_manager_with_routers(routers=[router]):
-            messages = [
-                *check_url_patterns(None),
-                *check_reverse_name_collisions(None),
-            ]
+            messages = [*check_url_patterns(None), *check_reverse_name_collisions(None)]
 
         assert [m.id for m in messages] == ["next.E028"]
 
@@ -213,8 +210,7 @@ class TestCheckUrlPatterns:
             assert any(m.id == "next.E015" for m in check_url_patterns(None))
 
         skipped = _TreeRouter(
-            root_trees=[tree_a, tree_b],
-            skip_dir_names=frozenset({"_components"}),
+            root_trees=[tree_a, tree_b], skip_dir_names=frozenset({"_components"})
         )
         with patch_checks_router_manager_with_routers(routers=[skipped]):
             assert check_url_patterns(None) == []
@@ -283,8 +279,7 @@ class TestCheckReverseNameCollisions:
         init_error = Error("router manager unavailable", id="next.E007")
 
         with patch(
-            "next.urls.checks.get_router_manager",
-            return_value=(None, [init_error]),
+            "next.urls.checks.get_router_manager", return_value=(None, [init_error])
         ):
             messages = check_reverse_name_collisions(None)
 

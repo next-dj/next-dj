@@ -93,24 +93,17 @@ class StaticManager:
         """Return the shared asset discovery instance."""
         if self._discovery is None:
             self._discovery = AssetDiscovery(
-                self,
-                resolver=PathResolver(self.page_roots),
+                self, resolver=PathResolver(self.page_roots)
             )
         return self._discovery
 
-    def discover_page_assets(
-        self,
-        file_path: Path,
-        collector: StaticCollector,
-    ) -> None:
+    def discover_page_assets(self, file_path: Path, collector: StaticCollector) -> None:
         """Forward page asset discovery to the shared discovery instance."""
         self._ensure_backends()
         self.discovery.discover_page_assets(file_path, collector)
 
     def discover_component_assets(
-        self,
-        info: ComponentInfo,
-        collector: StaticCollector,
+        self, info: ComponentInfo, collector: StaticCollector
     ) -> None:
         """Forward component asset discovery to the shared discovery instance."""
         self._ensure_backends()
@@ -192,11 +185,7 @@ class StaticManager:
         return user_tags
 
     def _wrap_with_runtime(
-        self,
-        user_tags: str,
-        collector: StaticCollector,
-        *,
-        request: HttpRequest | None,
+        self, user_tags: str, collector: StaticCollector, *, request: HttpRequest | None
     ) -> str:
         builder = self._next_script_builder()
         if builder.policy is ScriptInjectionPolicy.AUTO:
@@ -231,10 +220,7 @@ class StaticManager:
         return "\n".join(self._render_one(asset, backend, request) for asset in assets)
 
     def _render_one(
-        self,
-        asset: StaticAsset,
-        backend: StaticBackend,
-        request: HttpRequest | None,
+        self, asset: StaticAsset, backend: StaticBackend, request: HttpRequest | None
     ) -> str:
         if asset.inline is not None:
             tag = default_kinds.inline_tag(asset.kind)
@@ -331,8 +317,7 @@ default_manager: DefaultStaticManager = DefaultStaticManager()
 
 
 def collect_component_assets(
-    info: ComponentInfo,
-    collector: StaticCollector | None,
+    info: ComponentInfo, collector: StaticCollector | None
 ) -> None:
     """Discover a composite component's co-located assets into the collector.
 
@@ -355,7 +340,7 @@ def reset_default_manager() -> None:
     default_manager._wrapped = empty  # type: ignore[assignment]
 
 
-def _on_settings_reloaded(**_kwargs: object) -> None:
+def _on_settings_reloaded(**kwargs) -> None:
     """Reset the default static manager when framework settings reload."""
     reset_default_manager()
 

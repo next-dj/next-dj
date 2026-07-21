@@ -16,9 +16,7 @@ from django.apps import apps as django_apps
 from django.test import RequestFactory
 
 
-_SEED_MIGRATION = importlib.import_module(
-    "catalog.migrations.0002_seed_catalog",
-)
+_SEED_MIGRATION = importlib.import_module("catalog.migrations.0002_seed_catalog")
 
 
 @pytest.fixture()
@@ -58,11 +56,7 @@ class TestModelStr:
         """Return the product name and brand from `__str__`."""
         cat = Category.objects.create(slug="x", name="Things")
         product = Product.objects.create(
-            category=cat,
-            slug="p",
-            name="Widget",
-            brand="Acme",
-            price=Decimal("1.00"),
+            category=cat, slug="p", name="Widget", brand="Acme", price=Decimal("1.00")
         )
         assert str(product) == "Widget (Acme)"
 

@@ -59,8 +59,7 @@ def _render_template_string(template_str: str, context_dict: dict[str, Any]) -> 
 
 
 def _merge_csrf_context(
-    context_dict: dict[str, Any],
-    request: HttpRequest | None,
+    context_dict: dict[str, Any], request: HttpRequest | None
 ) -> None:
     """Add a lazy `csrf_token` matching the request context processor."""
     if request is None or "csrf_token" in context_dict:
@@ -70,9 +69,7 @@ def _merge_csrf_context(
 
 
 def _inject_component_context(
-    info: ComponentInfo,
-    context_data: dict[str, Any],
-    request: HttpRequest | None,
+    info: ComponentInfo, context_data: dict[str, Any], request: HttpRequest | None
 ) -> None:
     if info.module_path is None:
         return
@@ -161,9 +158,7 @@ class CompositeComponentRenderer:
     """Uses `render()` in `component.py` when present, otherwise the template."""
 
     def __init__(
-        self,
-        module_loader: ModuleLoader,
-        template_loader: ComponentTemplateLoader,
+        self, module_loader: ModuleLoader, template_loader: ComponentTemplateLoader
     ) -> None:
         """Bind the renderer to shared module and template loaders."""
         self._module_loader = module_loader
@@ -236,9 +231,7 @@ class CompositeComponentRenderer:
         return _render_template_string(template_str, context_dict)
 
     def _fallback_to_template(
-        self,
-        info: ComponentInfo,
-        context_data: Mapping[str, Any],
+        self, info: ComponentInfo, context_data: Mapping[str, Any]
     ) -> str:
         template_str = self._template_loader.load(info)
         if template_str is None:

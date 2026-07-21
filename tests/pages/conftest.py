@@ -87,7 +87,7 @@ def capture_template_loaded() -> Generator[list[dict[str, Any]], None, None]:
     """Capture ``template_loaded`` signal events."""
     events: list[dict[str, Any]] = []
 
-    def _listener(sender: object, **kwargs: object) -> None:
+    def _listener(sender: object, **kwargs) -> None:
         events.append({"sender": sender, **kwargs})
 
     template_loaded.connect(_listener)
@@ -102,7 +102,7 @@ def capture_context_registered() -> Generator[list[dict[str, Any]], None, None]:
     """Capture ``context_registered`` signal events."""
     events: list[dict[str, Any]] = []
 
-    def _listener(sender: object, **kwargs: object) -> None:
+    def _listener(sender: object, **kwargs) -> None:
         events.append({"sender": sender, **kwargs})
 
     context_registered.connect(_listener)
@@ -117,7 +117,7 @@ def capture_page_rendered() -> Generator[list[dict[str, Any]], None, None]:
     """Capture ``page_rendered`` signal events."""
     events: list[dict[str, Any]] = []
 
-    def _listener(sender: object, **kwargs: object) -> None:
+    def _listener(sender: object, **kwargs) -> None:
         events.append({"sender": sender, **kwargs})
 
     page_rendered.connect(_listener)

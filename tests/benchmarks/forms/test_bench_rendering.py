@@ -73,9 +73,7 @@ class TestBenchRenderInvalidPage:
 
     @pytest.mark.benchmark(group="forms.rendering")
     def test_render_invalid_page_with_errors(
-        self,
-        error_render_setup: tuple[RegistryFormActionBackend, Path],
-        benchmark,
+        self, error_render_setup: tuple[RegistryFormActionBackend, Path], benchmark
     ) -> None:
         backend, page_file = error_render_setup
         request = build_mock_http_request(method="GET")
@@ -84,10 +82,7 @@ class TestBenchRenderInvalidPage:
 
         def run() -> str:
             return backend.render_invalid_page(
-                request,
-                _INVALID_PAGE_ACTION,
-                form,
-                page_file_path=page_file,
+                request, _INVALID_PAGE_ACTION, form, page_file_path=page_file
             )
 
         benchmark(run)
@@ -101,8 +96,7 @@ class TestBenchErrorRerenderWithLayouts:
         self, tmp_path: Path
     ) -> tuple[RegistryFormActionBackend, Path]:
         page_file = _build_layered_page(
-            tmp_path,
-            "<main>{{ form.title }}{{ form.body }}{{ form.errors }}</main>",
+            tmp_path, "<main>{{ form.title }}{{ form.body }}{{ form.errors }}</main>"
         )
         backend = RegistryFormActionBackend()
         backend.register_action(
@@ -117,9 +111,7 @@ class TestBenchErrorRerenderWithLayouts:
 
     @pytest.mark.benchmark(group="forms.rendering.page")
     def test_error_rerender_with_layouts(
-        self,
-        layered_error_setup: tuple[RegistryFormActionBackend, Path],
-        benchmark,
+        self, layered_error_setup: tuple[RegistryFormActionBackend, Path], benchmark
     ) -> None:
         backend, page_file = layered_error_setup
         request = build_mock_http_request(method="GET")
@@ -128,10 +120,7 @@ class TestBenchErrorRerenderWithLayouts:
 
         def run() -> str:
             return backend.render_invalid_page(
-                request,
-                _LAYERED_ACTION,
-                form,
-                page_file_path=page_file,
+                request, _LAYERED_ACTION, form, page_file_path=page_file
             )
 
         benchmark(run)
@@ -198,12 +187,7 @@ class TestBenchFormTag:
 
         def run() -> str:
             return template.render(
-                Context(
-                    {
-                        "request": csrf_request,
-                        "current_page_module_path": __file__,
-                    }
-                )
+                Context({"request": csrf_request, "current_page_module_path": __file__})
             )
 
         benchmark(run)

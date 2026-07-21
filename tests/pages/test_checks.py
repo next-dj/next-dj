@@ -10,6 +10,8 @@ from next.checks import (
     check_context_functions,
     check_layout_templates,
     check_page_functions,
+    check_page_module_imports,
+    check_single_keyless_context,
     reset_check_caches,
 )
 from next.conf import next_framework_settings as s
@@ -74,12 +76,7 @@ def render(request, **kwargs):
         ],
     )
     def test_has_template_or_djx(
-        self,
-        tmp_path,
-        page_content,
-        create_djx,
-        djx_content,
-        expected_result,
+        self, tmp_path, page_content, create_djx, djx_content, expected_result
     ) -> None:
         """Test _has_template_or_djx with different scenarios."""
         page_file = tmp_path / "page.py"
@@ -99,11 +96,7 @@ class TestLayoutChecks:
     @pytest.mark.parametrize(
         ("layout_body", "expected_warnings", "msg_substring"),
         [
-            (
-                "<html>{% block template %}{% endblock template %}</html>",
-                0,
-                None,
-            ),
+            ("<html>{% block template %}{% endblock template %}</html>", 0, None),
             (
                 "<html><body>No template block</body></html>",
                 1,
@@ -113,11 +106,7 @@ class TestLayoutChecks:
         ids=["with_block", "without_block"],
     )
     def test_check_layout_templates_scenarios(
-        self,
-        tmp_path,
-        layout_body,
-        expected_warnings,
-        msg_substring,
+        self, tmp_path, layout_body, expected_warnings, msg_substring
     ) -> None:
         """Layout.djx with or without required ``{% block template %}``."""
         (tmp_path / "layout.djx").write_text(layout_body)
@@ -125,8 +114,7 @@ class TestLayoutChecks:
         page_file.write_text("")
 
         with patch_checks_router_manager(
-            pages_directory=tmp_path,
-            scan_routes=[("test", page_file)],
+            pages_directory=tmp_path, scan_routes=[("test", page_file)]
         ):
             warnings = check_layout_templates(None)
         assert len(warnings) == expected_warnings
@@ -169,16 +157,7 @@ class TestMissingPageContentChecks:
                 0,
                 0,
             ),
-            (
-                "with_template_djx",
-                "",
-                True,
-                "<h1>Hello World</h1>",
-                False,
-                None,
-                0,
-                0,
-            ),
+            ("with_template_djx", "", True, "<h1>Hello World</h1>", False, None, 0, 0),
             (
                 "with_layout_djx",
                 "",
@@ -189,16 +168,7 @@ class TestMissingPageContentChecks:
                 0,
                 0,
             ),
-            (
-                "no_content",
-                "",
-                False,
-                None,
-                False,
-                None,
-                1,
-                0,
-            ),
+            ("no_content", "", False, None, False, None, 1, 0),
         ],
         ids=[
             "with_template",
@@ -260,7 +230,7 @@ class TestMemoAndBrokenPages:
         loaders_module._MODULE_MEMO.pop(page_file, None)
 
         with patch_checks_router_manager_with_routers(
-            routers=[_AppRouter(tmp_path, page_file)],
+            routers=[_AppRouter(tmp_path, page_file)]
         ):
             messages = check_page_functions(None)
         e012 = [m for m in messages if m.id == "next.E012"]
@@ -273,7 +243,7 @@ class TestMemoAndBrokenPages:
         loaders_module._MODULE_MEMO.pop(page_file, None)
 
         with patch_checks_router_manager_with_routers(
-            routers=[_AppRouter(tmp_path, page_file)],
+            routers=[_AppRouter(tmp_path, page_file)]
         ):
             messages = check_page_functions(None)
         e012 = [m for m in messages if m.id == "next.E012"]
@@ -286,7 +256,7 @@ class TestMemoAndBrokenPages:
         loaders_module._MODULE_MEMO.pop(page_file, None)
 
         with patch_checks_router_manager_with_routers(
-            routers=[_AppRouter(tmp_path, page_file)],
+            routers=[_AppRouter(tmp_path, page_file)]
         ):
             messages = check_page_functions(None)
         e012 = [m for m in messages if m.id == "next.E012"]
@@ -331,9 +301,7 @@ class TestCheckTemplateLoaders:
         loaders_module._REGISTERED_LOADERS_CACHE["value"] = None
 
     @override_settings(
-        NEXT_FRAMEWORK={
-            "TEMPLATE_LOADERS": ["next.pages.loaders.DjxTemplateLoader"],
-        }
+        NEXT_FRAMEWORK={"TEMPLATE_LOADERS": ["next.pages.loaders.DjxTemplateLoader"]}
     )
     def test_valid_default_is_clean(self) -> None:
 
@@ -427,22 +395,8 @@ class TestBodySourceConflicts:
                 None,
                 None,
             ),
-            (
-                "only_template_attr",
-                'template = "x"',
-                False,
-                0,
-                None,
-                None,
-            ),
-            (
-                "only_template_djx",
-                "",
-                True,
-                0,
-                None,
-                None,
-            ),
+            ("only_template_attr", 'template = "x"', False, 0, None, None),
+            ("only_template_djx", "", True, 0, None, None),
         ],
         ids=[
             "render_and_template_djx",
@@ -505,12 +459,11 @@ def get_context_data():
         """)
 
         with patch_checks_router_manager(
-            pages_directory=tmp_path,
-            scan_routes=[("test", page_file)],
+            pages_directory=tmp_path, scan_routes=[("test", page_file)]
         ) as (_mock_mgr, mock_router, _):
             mock_context_manager = MagicMock()
             mock_context_manager._context_registry = {
-                page_file: {None: (lambda: {"key": "value"}, False)},
+                page_file: {None: (lambda: {"key": "value"}, False)}
             }
             mock_router._context_manager = mock_context_manager
 
@@ -529,8 +482,7 @@ def get_context_data() -> str:
         """)
 
         with patch_checks_router_manager(
-            pages_directory=tmp_path,
-            scan_routes=[("test", page_file)],
+            pages_directory=tmp_path, scan_routes=[("test", page_file)]
         ):
             errors = check_context_functions(None)
             assert len(errors) == 1
@@ -549,8 +501,7 @@ def get_context_data():
         """)
 
         with patch_checks_router_manager(
-            pages_directory=tmp_path,
-            scan_routes=[("test", page_file)],
+            pages_directory=tmp_path, scan_routes=[("test", page_file)]
         ):
             errors = check_context_functions(None)
             assert errors == []
@@ -568,8 +519,7 @@ def get_context_data() -> str:
         loaders_module._MODULE_MEMO.pop(page_file, None)
 
         with patch_checks_router_manager(
-            pages_directory=tmp_path,
-            scan_routes=[("test", page_file)],
+            pages_directory=tmp_path, scan_routes=[("test", page_file)]
         ):
             errors = check_context_functions(None)
         assert len(errors) == 1
@@ -588,8 +538,7 @@ async def get_context_data() -> str:
         loaders_module._MODULE_MEMO.pop(page_file, None)
 
         with patch_checks_router_manager(
-            pages_directory=tmp_path,
-            scan_routes=[("test", page_file)],
+            pages_directory=tmp_path, scan_routes=[("test", page_file)]
         ):
             errors = check_context_functions(None)
         assert len(errors) == 1
@@ -608,8 +557,7 @@ def get_context_data() -> str:
         loaders_module._MODULE_MEMO.pop(page_file, None)
 
         with patch_checks_router_manager(
-            pages_directory=tmp_path,
-            scan_routes=[("test", page_file)],
+            pages_directory=tmp_path, scan_routes=[("test", page_file)]
         ):
             errors = check_context_functions(None)
         assert len(errors) == 1
@@ -628,8 +576,7 @@ def get_context_data() -> str:
         loaders_module._MODULE_MEMO.pop(page_file, None)
 
         with patch_checks_router_manager(
-            pages_directory=tmp_path,
-            scan_routes=[("test", page_file)],
+            pages_directory=tmp_path, scan_routes=[("test", page_file)]
         ):
             first = check_context_functions(None)
             assert [error.id for error in first] == ["next.E029"]
@@ -654,12 +601,11 @@ def get_context_data():
         """)
 
         with patch_checks_router_manager(
-            pages_directory=tmp_path,
-            scan_routes=[("test", page_file)],
+            pages_directory=tmp_path, scan_routes=[("test", page_file)]
         ) as (_mock_mgr, mock_router, _):
             mock_context_manager = MagicMock()
             mock_context_manager._context_registry = {
-                page_file: {"my_key": (lambda: "not a dict but with key", False)},
+                page_file: {"my_key": (lambda: "not a dict but with key", False)}
             }
             mock_router._context_manager = mock_context_manager
 
@@ -692,11 +638,11 @@ class TestContextProcessorSignature:
                     "PAGES_DIR": "pages",
                     "OPTIONS": {
                         "context_processors": [
-                            "tests.pages.test_checks._processor_with_request",
-                        ],
+                            "tests.pages.test_checks._processor_with_request"
+                        ]
                     },
-                },
-            ],
+                }
+            ]
         }
     )
     def test_processor_with_request_is_accepted(self) -> None:
@@ -713,11 +659,11 @@ class TestContextProcessorSignature:
                     "PAGES_DIR": "pages",
                     "OPTIONS": {
                         "context_processors": [
-                            "tests.pages.test_checks._processor_without_request",
-                        ],
+                            "tests.pages.test_checks._processor_without_request"
+                        ]
                     },
-                },
-            ],
+                }
+            ]
         }
     )
     def test_processor_without_request_triggers_error(self) -> None:
@@ -736,11 +682,11 @@ class TestContextProcessorSignature:
                     "PAGES_DIR": "pages",
                     "OPTIONS": {
                         "context_processors": [
-                            "tests.pages.nonexistent.missing_processor",
-                        ],
+                            "tests.pages.nonexistent.missing_processor"
+                        ]
                     },
-                },
-            ],
+                }
+            ]
         }
     )
     def test_unresolvable_processor_is_silently_skipped(self) -> None:
@@ -757,11 +703,11 @@ class TestContextProcessorSignature:
                     "PAGES_DIR": "pages",
                     "OPTIONS": {
                         "context_processors": [
-                            123,  # non-string entry
-                        ],
+                            123  # non-string entry
+                        ]
                     },
-                },
-            ],
+                }
+            ]
         }
     )
     def test_non_string_processor_entries_are_skipped(self) -> None:
@@ -784,9 +730,130 @@ class TestContextProcessorSignature:
                     "PAGES_DIR": "pages",
                     "OPTIONS": {},
                 },
-            ],
+            ]
         }
     )
     def test_non_dict_backend_entries_are_skipped(self) -> None:
         errors = check_context_processor_signature()
         assert errors == []
+
+
+class _RootPageRouter:
+    app_dirs = False
+    pages_dir = "pages"
+
+    def __init__(self, pages_path: Path, page_file: Path) -> None:
+        self._pages_path = pages_path
+        self._page_file = page_file
+
+    def _get_root_pages_paths(self) -> list[Path]:
+        return [self._pages_path]
+
+    def _scan_pages_directory(self, _pages_dir: object) -> list[tuple[str, Path]]:
+        return [("test", self._page_file)]
+
+
+class TestPageModuleImports:
+    """next.E017 flags a page.py that raises while importing."""
+
+    def test_broken_page_reports_e017(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("def render( invalid syntax {\n")
+        with patch_checks_router_manager(
+            pages_directory=tmp_path, scan_routes=[("test", page_file)]
+        ):
+            messages = check_page_module_imports(None)
+        assert [m.id for m in messages] == ["next.E017"]
+
+    def test_valid_page_reports_no_e017(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text('template = "ok"\n')
+        with patch_checks_router_manager(
+            pages_directory=tmp_path, scan_routes=[("test", page_file)]
+        ):
+            messages = check_page_module_imports(None)
+        assert messages == []
+
+    def test_virtual_page_without_file_is_skipped(self, tmp_path) -> None:
+        missing = tmp_path / "virtual" / "page.py"
+        with patch_checks_router_manager(
+            pages_directory=tmp_path, scan_routes=[("virtual", missing)]
+        ):
+            messages = check_page_module_imports(None)
+        assert messages == []
+
+    def test_broken_page_beside_template_djx_is_caught_by_e017_not_e012(
+        self, tmp_path
+    ) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("def render( invalid syntax {\n")
+        (tmp_path / "template.djx").write_text("<p>ok</p>\n")
+
+        with patch_checks_router_manager_with_routers(
+            routers=[_AppRouter(tmp_path, page_file)]
+        ):
+            body = check_page_functions(None)
+        assert [m for m in body if m.id == "next.E012"] == []
+
+        with patch_checks_router_manager(
+            pages_directory=tmp_path, scan_routes=[("test", page_file)]
+        ):
+            imports = check_page_module_imports(None)
+        assert [m.id for m in imports] == ["next.E017"]
+
+
+class TestSingleKeylessContext:
+    """next.E018 flags a page.py with more than one keyless @context."""
+
+    def test_two_keyless_contexts_report_e018(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text(
+            "from next.pages import page\n\n"
+            "@page.context\n"
+            "def first() -> dict:\n"
+            "    return {}\n\n"
+            "@page.context\n"
+            "def second() -> dict:\n"
+            "    return {}\n"
+        )
+        with patch_checks_router_manager(
+            pages_directory=tmp_path, scan_routes=[("test", page_file)]
+        ):
+            messages = check_single_keyless_context(None)
+        assert [m.id for m in messages] == ["next.E018"]
+        assert "first" in messages[0].msg
+        assert "second" in messages[0].msg
+
+    def test_single_keyless_context_reports_nothing(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text(
+            "from next.pages import page\n\n"
+            "@page.context\n"
+            "def only() -> dict:\n"
+            "    return {}\n"
+        )
+        with patch_checks_router_manager(
+            pages_directory=tmp_path, scan_routes=[("test", page_file)]
+        ):
+            messages = check_single_keyless_context(None)
+        assert messages == []
+
+
+class TestContextChecksDeduplicate:
+    """Checks report a page surfaced by several routers once, not per router."""
+
+    def test_e029_reported_once_across_routers(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text(
+            "from next.pages import page\n\n"
+            "@page.context\n"
+            "def bad() -> str:\n"
+            "    return {}\n"
+        )
+        routers = [
+            _RootPageRouter(tmp_path, page_file),
+            _RootPageRouter(tmp_path, page_file),
+        ]
+        with patch_checks_router_manager_with_routers(routers=routers):
+            messages = check_context_functions(None)
+        assert [m.id for m in messages] == ["next.E029"]

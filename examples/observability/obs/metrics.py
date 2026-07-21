@@ -76,9 +76,7 @@ def incr(kind: str, key: str, by: int = 1) -> int:
     """
     cumulative = _atomic_bump(_full_key(kind, key), by)
     _atomic_bump(
-        _bucket_key(kind, key, _floor_minute(_now())),
-        by,
-        ttl=BUCKET_TTL_SECONDS,
+        _bucket_key(kind, key, _floor_minute(_now())), by, ttl=BUCKET_TTL_SECONDS
     )
     return cumulative
 

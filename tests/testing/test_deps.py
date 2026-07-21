@@ -20,9 +20,7 @@ class TestMakeResolutionContext:
 
     def test_forwards_fields(self) -> None:
         ctx = make_resolution_context(
-            form="f",
-            url_kwargs={"slug": "abc"},
-            context_data={"title": "T"},
+            form="f", url_kwargs={"slug": "abc"}, context_data={"title": "T"}
         )
         assert ctx.form == "f"
         assert ctx.url_kwargs == {"slug": "abc"}

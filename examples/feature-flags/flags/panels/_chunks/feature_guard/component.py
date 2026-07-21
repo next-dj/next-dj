@@ -12,7 +12,7 @@ _BANNER = Template(
     ' font-medium text-emerald-900">live</span>'
     "</div>"
     '<p class="mt-1 text-sm text-emerald-800">{{ description }}</p>'
-    "</article>",
+    "</article>"
 )
 
 
@@ -26,6 +26,6 @@ def render(flag: DFlag[Flag]) -> str:
                 "flag": flag,
                 "label": flag.label or flag.name,
                 "description": flag.description or "No description provided.",
-            },
-        ),
+            }
+        )
     )

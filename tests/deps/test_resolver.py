@@ -13,11 +13,7 @@ from next.deps import (
 )
 from next.deps.cache import _IN_PROGRESS, DependencyCache
 from next.urls import HttpRequestProvider, UrlKwargsProvider
-from tests.support import (
-    _ctx,
-    _minimal_resolver,
-    _resolver_with_form,
-)
+from tests.support import _ctx, _minimal_resolver, _resolver_with_form
 
 
 _IN_PROGRESS_SENTINEL = _IN_PROGRESS
@@ -99,9 +95,7 @@ class TestDependencyResolver:
         assert "cls" not in result
         assert result == {"request": request, "obj_id": 1}
 
-    def test_resolve_dependencies_unknown_param_without_default_gets_none(
-        self,
-    ) -> None:
+    def test_resolve_dependencies_unknown_param_without_default_gets_none(self) -> None:
         """Params with no provider and no context value get None."""
 
         def fn(unknown: str) -> None:
@@ -112,12 +106,11 @@ class TestDependencyResolver:
         assert result == {"unknown": None}
 
     def test_resolve_dependencies_skips_var_positional_and_var_keyword(
-        self,
-        mock_http_request,
+        self, mock_http_request
     ) -> None:
         """*args and **kwargs are not included in resolved dict."""
 
-        def fn(request: HttpRequest, *args: object, **kwargs: object) -> None:
+        def fn(request: HttpRequest, *args, **kwargs) -> None:
             pass
 
         r = _minimal_resolver()
@@ -326,11 +319,7 @@ class TestResolveWithTemplateContext:
 
         r = DependencyResolver()
         result = r.resolve_with_template_context(
-            fn,
-            request=None,
-            template_context={"form": form},
-            _cache={},
-            _stack=[],
+            fn, request=None, template_context={"form": form}, _cache={}, _stack=[]
         )
         assert result["form"] is form
 

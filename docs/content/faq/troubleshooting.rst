@@ -46,6 +46,20 @@ The choices are a ``render`` function, a ``template`` module attribute, or a sib
 Other values raise ``TypeError`` naming the ``page.py`` path.
 See :doc:`/content/topics/pages`.
 
+next.E017 on a page.py That Fails to Import
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A ``page.py`` raised while importing, so the framework loads it as nothing.
+Its ``render``, ``template``, and ``@context`` declarations never take effect, and a sibling ``template.djx`` can otherwise hide the failure.
+Fix the syntax or import error named in the report so the module loads.
+
+next.E018 on Multiple Keyless Context Functions
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A ``page.py`` registers more than one keyless ``@context`` callable.
+Keyless callables share one slot, so only the last one runs and the earlier ones are ignored.
+Give each callable a key such as ``@context("name")``, or merge them into a single callable.
+
 next.E029 on a Keyless Context Function
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

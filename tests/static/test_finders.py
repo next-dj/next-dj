@@ -10,10 +10,7 @@ from django.core.management import call_command
 from django.test import override_settings
 
 from next.static import NextStaticFilesFinder
-from next.static.finders import (
-    _MappedSourceStorage,
-    discover_colocated_static_assets,
-)
+from next.static.finders import _MappedSourceStorage, discover_colocated_static_assets
 
 
 if TYPE_CHECKING:
@@ -50,8 +47,7 @@ class TestDiscoverColocatedAssets:
                 return_value={pages_tree / "layout.djx"},
             ),
             mock.patch(
-                "next.static.finders.get_component_paths_for_watch",
-                return_value=set(),
+                "next.static.finders.get_component_paths_for_watch", return_value=set()
             ),
         ):
             mapping = discover_colocated_static_assets()
@@ -71,8 +67,7 @@ class TestDiscoverColocatedAssets:
         (unrelated / "template.css").write_text("")
         with (
             mock.patch(
-                "next.static.finders.get_pages_directories_for_watch",
-                return_value=[],
+                "next.static.finders.get_pages_directories_for_watch", return_value=[]
             ),
             mock.patch(
                 "next.static.finders.get_template_djx_paths_for_watch",
@@ -82,8 +77,7 @@ class TestDiscoverColocatedAssets:
                 "next.static.finders.get_layout_djx_paths_for_watch", return_value=set()
             ),
             mock.patch(
-                "next.static.finders.get_component_paths_for_watch",
-                return_value=set(),
+                "next.static.finders.get_component_paths_for_watch", return_value=set()
             ),
         ):
             mapping = discover_colocated_static_assets()
@@ -106,8 +100,7 @@ class TestNextStaticFilesFinderFind:
                 "next.static.finders.get_layout_djx_paths_for_watch", return_value=set()
             ),
             mock.patch(
-                "next.static.finders.get_component_paths_for_watch",
-                return_value=set(),
+                "next.static.finders.get_component_paths_for_watch", return_value=set()
             ),
         ):
             result = finder.find("next/about.css")
@@ -129,8 +122,7 @@ class TestNextStaticFilesFinderFind:
                 "next.static.finders.get_layout_djx_paths_for_watch", return_value=set()
             ),
             mock.patch(
-                "next.static.finders.get_component_paths_for_watch",
-                return_value=set(),
+                "next.static.finders.get_component_paths_for_watch", return_value=set()
             ),
         ):
             assert finder.find("next/missing.css") is None
@@ -150,8 +142,7 @@ class TestNextStaticFilesFinderFind:
                 "next.static.finders.get_layout_djx_paths_for_watch", return_value=set()
             ),
             mock.patch(
-                "next.static.finders.get_component_paths_for_watch",
-                return_value=set(),
+                "next.static.finders.get_component_paths_for_watch", return_value=set()
             ),
         ):
             found = finder.find("next/about.css", find_all=True)
@@ -173,8 +164,7 @@ class TestNextStaticFilesFinderFind:
                 "next.static.finders.get_layout_djx_paths_for_watch", return_value=set()
             ),
             mock.patch(
-                "next.static.finders.get_component_paths_for_watch",
-                return_value=set(),
+                "next.static.finders.get_component_paths_for_watch", return_value=set()
             ),
         ):
             found = finder.find("next/about.css", all=True)
@@ -199,8 +189,7 @@ class TestNextStaticFilesFinderList:
                 return_value={pages_tree / "layout.djx"},
             ),
             mock.patch(
-                "next.static.finders.get_component_paths_for_watch",
-                return_value=set(),
+                "next.static.finders.get_component_paths_for_watch", return_value=set()
             ),
         ):
             items = list(finder.list(ignore_patterns=None))
@@ -223,8 +212,7 @@ class TestNextStaticFilesFinderList:
                 "next.static.finders.get_layout_djx_paths_for_watch", return_value=set()
             ),
             mock.patch(
-                "next.static.finders.get_component_paths_for_watch",
-                return_value=set(),
+                "next.static.finders.get_component_paths_for_watch", return_value=set()
             ),
         ):
             items = list(finder.list(ignore_patterns=["*.js"]))
@@ -285,17 +273,12 @@ class TestCollectstaticIntegration:
                 return_value={pages_tree / "layout.djx"},
             ),
             mock.patch(
-                "next.static.finders.get_component_paths_for_watch",
-                return_value=set(),
+                "next.static.finders.get_component_paths_for_watch", return_value=set()
             ),
         ):
             out = StringIO()
             call_command(
-                "collectstatic",
-                "--noinput",
-                "--dry-run",
-                "--ignore=*.py",
-                stdout=out,
+                "collectstatic", "--noinput", "--dry-run", "--ignore=*.py", stdout=out
             )
         # Dry-run completes without ImproperlyConfigured. The finder wires
         # up the staticfiles command path — full asset enumeration is tested

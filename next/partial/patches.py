@@ -342,12 +342,7 @@ class Patches:
     paths that already hold the version and render their own HTML.
     """
 
-    def __init__(
-        self,
-        request: HttpRequest,
-        *,
-        echo_of: str | None = None,
-    ) -> None:
+    def __init__(self, request: HttpRequest, *, echo_of: str | None = None) -> None:
         """Start an empty builder bound to the request.
 
         Pass `echo_of` with the originating mutation's request id so the
@@ -371,10 +366,7 @@ class Patches:
         return builder
 
     def _init_state(
-        self,
-        request: HttpRequest | None,
-        version: str,
-        echo_of: str | None,
+        self, request: HttpRequest | None, version: str, echo_of: str | None
     ) -> None:
         """Set the builder state shared by both construction forms."""
         self._request = request
@@ -399,7 +391,7 @@ class Patches:
         html: str | None = None,
         *,
         extract: bool = False,
-        **select: object,
+        **select,
     ) -> "Patches":
         """Morph a target into HTML, the default verb.
 
@@ -413,9 +405,7 @@ class Patches:
         return self._dispatch_morph(html, select)
 
     def _dispatch_morph(
-        self,
-        html: str | None,
-        select: "Mapping[str, object]",
+        self, html: str | None, select: "Mapping[str, object]"
     ) -> "Patches":
         """Route a keyword-selected morph to its typed per-verb method."""
         zone = select.get("zone")
@@ -432,9 +422,7 @@ class Patches:
         raise TypeError(msg)
 
     def _dispatch_zone_morph(
-        self,
-        zone: str,
-        select: "Mapping[str, object]",
+        self, zone: str, select: "Mapping[str, object]"
     ) -> "Patches":
         """Route a zone-selected morph to its local or foreign per-verb method.
 
@@ -455,8 +443,7 @@ class Patches:
 
     @staticmethod
     def _reject_extra_morph_keys(
-        select: "Mapping[str, object]",
-        allowed: frozenset[str],
+        select: "Mapping[str, object]", allowed: frozenset[str]
     ) -> None:
         """Raise when the selector mapping carries keys the route does not own."""
         extra = sorted(select.keys() - allowed)
@@ -468,11 +455,7 @@ class Patches:
             raise TypeError(msg)
 
     def _append_morph(
-        self,
-        target: "Mapping[str, Any]",
-        html: str,
-        *,
-        extract: bool,
+        self, target: "Mapping[str, Any]", html: str, *, extract: bool
     ) -> "Patches":
         """Record one morph op with an optional extract flag."""
         extras = {"extract": True} if extract else {}
@@ -482,10 +465,7 @@ class Patches:
         return self
 
     def morph_zone(
-        self,
-        zone: str,
-        *,
-        overrides: "Mapping[str, Any] | None" = None,
+        self, zone: str, *, overrides: "Mapping[str, Any] | None" = None
     ) -> "Patches":
         """Render the named zone of the origin page and morph it in place."""
         result = self._render_zone(zone, overrides)
@@ -538,10 +518,7 @@ class Patches:
         return resolve_url_to_page(url, self._require_request())
 
     def _foreign_authorization(
-        self,
-        foreign_path: "Path",
-        request: HttpRequest,
-        url_kwargs: dict[str, Any],
+        self, foreign_path: "Path", request: HttpRequest, url_kwargs: dict[str, Any]
     ) -> "tuple[HttpResponseBase | None, bool]":
         """Re-run the foreign page's body resolution once for guard and kind.
 
@@ -575,42 +552,25 @@ class Patches:
         return self
 
     def append(
-        self,
-        target: "Mapping[str, Any]",
-        html: str,
-        *,
-        dedupe: DedupeMode = "key",
+        self, target: "Mapping[str, Any]", html: str, *, dedupe: DedupeMode = "key"
     ) -> "Patches":
         """Append children to the target, deduplicating by key or id."""
         return self._merge("append", target, html, dedupe)
 
     def prepend(
-        self,
-        target: "Mapping[str, Any]",
-        html: str,
-        *,
-        dedupe: DedupeMode = "key",
+        self, target: "Mapping[str, Any]", html: str, *, dedupe: DedupeMode = "key"
     ) -> "Patches":
         """Prepend children to the target, deduplicating by key or id."""
         return self._merge("prepend", target, html, dedupe)
 
     def _merge(
-        self,
-        op: str,
-        target: "Mapping[str, Any]",
-        html: str,
-        dedupe: DedupeMode,
+        self, op: str, target: "Mapping[str, Any]", html: str, dedupe: DedupeMode
     ) -> "Patches":
         """Record a merge op appending or prepending deduplicated children."""
         if dedupe not in _DEDUPE_MODES:
             raise UnknownDedupeError(dedupe)
         self._ops.append(
-            Patch(
-                op=op,
-                target=dict(target),
-                html=html,
-                extras={"dedupe": dedupe},
-            )
+            Patch(op=op, target=dict(target), html=html, extras={"dedupe": dedupe})
         )
         return self
 
@@ -624,7 +584,7 @@ class Patches:
         self._ops.append(Patch(op="refresh", extras={keys.ZONE: zone}))
         return self
 
-    def context(self, **names: object) -> "Patches":
+    def context(self, **names) -> "Patches":
         """Merge named serialize provider values into the client context.
 
         Only the names of registered `serialize=True` providers on the
@@ -651,10 +611,7 @@ class Patches:
         return self
 
     def layer_open(
-        self,
-        *,
-        zone: str | None = None,
-        href: str | None = None,
+        self, *, zone: str | None = None, href: str | None = None
     ) -> "Patches":
         """Open a server-initiated layer, optionally seeding a zone or href.
 
@@ -673,10 +630,7 @@ class Patches:
         return self
 
     def layer_close(
-        self,
-        *,
-        result: object = None,
-        dismiss: str | None = None,
+        self, *, result: object = None, dismiss: str | None = None
     ) -> "Patches":
         """Close the top layer with an accept result or a dismissal.
 
@@ -745,7 +699,7 @@ class Patches:
             )
         return self
 
-    def op(self, name: str, **payload: object) -> "Patches":
+    def op(self, name: str, **payload) -> "Patches":
         """Emit a custom verb registered through `register_patch_op`.
 
         A built-in verb is refused so it travels only through its typed
@@ -868,9 +822,7 @@ class Patches:
         return dict(self._render_context)
 
     def _render_zone(
-        self,
-        zone: str,
-        overrides: "Mapping[str, Any] | None",
+        self, zone: str, overrides: "Mapping[str, Any] | None"
     ) -> "ZoneRenderResult":
         """Render the named zone of the origin page with optional overrides."""
         return render_zone(

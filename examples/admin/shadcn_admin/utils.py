@@ -16,8 +16,7 @@ LOGOUT_URL = "/admin/logout/"
 
 
 def resolve_model_admin(
-    app_label: str,
-    model_name: str,
+    app_label: str, model_name: str
 ) -> tuple[type[Model], ModelAdmin]:
     """Return `(model, ModelAdmin)` from `admin.site._registry`, or 404."""
     try:
@@ -35,10 +34,7 @@ def resolve_model_admin(
 
 
 def resolve_object_or_404(
-    request: HttpRequest,
-    app_label: str,
-    model_name: str,
-    pk: int,
+    request: HttpRequest, app_label: str, model_name: str, pk: int
 ) -> tuple[type[Model], ModelAdmin, Model]:
     """Like `resolve_model_admin` but also fetches the object — 404 if missing."""
     model, model_admin = resolve_model_admin(app_label, model_name)
@@ -67,9 +63,7 @@ def logout_url() -> str:
 def changelist_url(app_label: str, model_name: str) -> str:
     """URL of the changelist page for one model."""
     return page_reverse(
-        "[str:app_label]/[str:model_name]",
-        app_label=app_label,
-        model_name=model_name,
+        "[str:app_label]/[str:model_name]", app_label=app_label, model_name=model_name
     )
 
 

@@ -46,7 +46,7 @@ class TestRegisterPatchOp:
     def test_register_emits_signal(self) -> None:
         seen: list[dict[str, object]] = []
 
-        def receiver(sender: object, **kwargs: object) -> None:
+        def receiver(sender: object, **kwargs) -> None:
             seen.append({"sender": sender, **kwargs})
 
         patch_op_registered.connect(receiver)
@@ -147,7 +147,7 @@ class TestZoneRegisteredSignal:
     def test_fires_once_per_object(self) -> None:
         seen: list[dict[str, object]] = []
 
-        def receiver(sender: object, **kwargs: object) -> None:
+        def receiver(sender: object, **kwargs) -> None:
             seen.append({"sender": sender, **kwargs})
 
         zone_registered.connect(receiver)
@@ -164,7 +164,7 @@ class TestZoneRegisteredSignal:
     def test_sends_lazy_and_poll_kwargs(self) -> None:
         seen: list[dict[str, object]] = []
 
-        def receiver(sender: object, **kwargs: object) -> None:
+        def receiver(sender: object, **kwargs) -> None:
             seen.append({"sender": sender, **kwargs})
 
         zone_registered.connect(receiver)
@@ -187,9 +187,7 @@ class TestZoneRequested:
 
     def test_named_zone_is_requested(self) -> None:
         request = RequestFactory().get(
-            "/",
-            HTTP_X_NEXT_REQUEST="1",
-            HTTP_X_NEXT_ZONE="first, second",
+            "/", HTTP_X_NEXT_REQUEST="1", HTTP_X_NEXT_ZONE="first, second"
         )
         assert zone_requested(request, "first") is True
         assert zone_requested(request, "missing") is False

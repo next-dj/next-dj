@@ -90,9 +90,7 @@ class ComponentsManager:
                 )
                 continue
             component_backend_loaded.send(
-                sender=ComponentsManager,
-                backend=backend,
-                config=config,
+                sender=ComponentsManager, backend=backend, config=config
             )
             self._backends.append(backend)
 
@@ -112,11 +110,7 @@ class ComponentsManager:
         self._walk_registered_folders.add(key)
         return True
 
-    def get_component(
-        self,
-        name: str,
-        template_path: Path,
-    ) -> ComponentInfo | None:
+    def get_component(self, name: str, template_path: Path) -> ComponentInfo | None:
         """Return the first non-`None` match from configured backends."""
         self._ensure_backends()
         for backend in self._backends:
@@ -141,7 +135,7 @@ class ComponentsManager:
 components_manager = ComponentsManager()
 
 
-def _on_settings_reloaded(**_kwargs: object) -> None:
+def _on_settings_reloaded(**kwargs) -> None:
     """Rebuild component backends when framework settings reload."""
     components_manager._reload_config()
 

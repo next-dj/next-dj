@@ -13,11 +13,7 @@ from next.forms.signals import (
     action_registered,
     form_validation_failed,
 )
-from next.pages.signals import (
-    context_registered,
-    page_rendered,
-    template_loaded,
-)
+from next.pages.signals import context_registered, page_rendered, template_loaded
 from next.server.signals import watch_specs_ready
 from next.static.signals import (
     asset_registered,
@@ -56,9 +52,7 @@ def on_context_registered(file_path: object = None, **_kwargs: object) -> None:
 
 @receiver(page_rendered)
 def on_page_rendered(
-    file_path: object = None,
-    duration_ms: float | None = None,
-    **_kwargs: object,
+    file_path: object = None, duration_ms: float | None = None, **_kwargs: object
 ) -> None:
     """Pages group: count renders and accumulate render-time milliseconds."""
     incr("pages.rendered", str(file_path))

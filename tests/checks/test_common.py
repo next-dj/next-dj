@@ -18,10 +18,7 @@ from next.checks.common import (
 )
 from next.conf.signals import settings_reloaded
 from next.urls import checks as urls_checks
-from next.urls.checks import (
-    check_reverse_name_collisions,
-    check_url_patterns,
-)
+from next.urls.checks import check_reverse_name_collisions, check_url_patterns
 from next.urls.dispatcher import scan_pages_tree
 from tests.support import patch_checks_router_manager_with_routers
 
@@ -224,8 +221,7 @@ class TestCollectAllPatternsDedup:
     """The two URL checks share one collection walk within a run."""
 
     def test_two_url_checks_collect_once_with_stable_messages(
-        self,
-        tmp_path: Path,
+        self, tmp_path: Path
     ) -> None:
         tree_a = tmp_path / "a"
         tree_b = tmp_path / "b"

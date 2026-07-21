@@ -9,10 +9,7 @@ from next.checks import (
     check_duplicate_component_names,
     reset_check_caches,
 )
-from next.components import (
-    ComponentInfo,
-    FileComponentsBackend,
-)
+from next.components import ComponentInfo, FileComponentsBackend
 from tests.support import (
     next_framework_settings_for_checks_backends_value as _next_framework_settings_for_checks_backends_value,
     patch_checks_components_manager,
@@ -126,14 +123,7 @@ class TestChecks:
         fake_backend = FileComponentsBackend(dict(min_component_config))
 
         fake_backend._registry.register(
-            ComponentInfo(
-                "bad",
-                tmp_path,
-                "",
-                None,
-                tmp_path / "component.py",
-                False,
-            )
+            ComponentInfo("bad", tmp_path, "", None, tmp_path / "component.py", False)
         )
         fake_backend._loaded = True
 

@@ -55,10 +55,7 @@ class TestFormActionCollisions:
         backend = RegistryFormActionBackend()
         backend.register_action(
             ActionRegistration(
-                name="solo",
-                file_path=_FAKE_FILE,
-                scope="shared",
-                handler=lambda: None,
+                name="solo", file_path=_FAKE_FILE, scope="shared", handler=lambda: None
             )
         )
         assert check_form_action_collisions() == []
@@ -92,18 +89,12 @@ class TestFormActionCollisions:
         same = _distinct_handler("stable")
         backend.register_action(
             ActionRegistration(
-                name="reload_me",
-                file_path=_FAKE_FILE,
-                scope="shared",
-                handler=same,
+                name="reload_me", file_path=_FAKE_FILE, scope="shared", handler=same
             )
         )
         backend.register_action(
             ActionRegistration(
-                name="reload_me",
-                file_path=_FAKE_FILE,
-                scope="shared",
-                handler=same,
+                name="reload_me", file_path=_FAKE_FILE, scope="shared", handler=same
             )
         )
         assert check_form_action_collisions() == []
@@ -152,10 +143,7 @@ class TestSharedActionNameCollisions:
     ) -> None:
         backend.register_action(
             ActionRegistration(
-                name=name,
-                file_path=file_path,
-                scope=scope,
-                handler=lambda: None,
+                name=name, file_path=file_path, scope=scope, handler=lambda: None
             )
         )
 
@@ -251,7 +239,7 @@ class TestFormActionBackendsConfigurationCheck:
     def test_unimportable_backend_is_e044(self, settings) -> None:
         """A path that fails to import surfaces the original error."""
         settings.NEXT_FRAMEWORK = {
-            "FORM_ACTION_BACKENDS": [{"BACKEND": "no.such.Module"}],
+            "FORM_ACTION_BACKENDS": [{"BACKEND": "no.such.Module"}]
         }
         errors = check_form_action_backends_configuration()
         assert any(
@@ -261,7 +249,7 @@ class TestFormActionBackendsConfigurationCheck:
     def test_wrong_type_backend_is_e045(self, settings) -> None:
         """A class that is not a `FormActionBackend` subclass triggers E045."""
         settings.NEXT_FRAMEWORK = {
-            "FORM_ACTION_BACKENDS": [{"BACKEND": "django.http.HttpResponse"}],
+            "FORM_ACTION_BACKENDS": [{"BACKEND": "django.http.HttpResponse"}]
         }
         errors = check_form_action_backends_configuration()
         assert any(e.id == "next.E045" for e in errors)
@@ -270,8 +258,8 @@ class TestFormActionBackendsConfigurationCheck:
         """Default backend path passes the check without errors."""
         settings.NEXT_FRAMEWORK = {
             "FORM_ACTION_BACKENDS": [
-                {"BACKEND": "next.forms.RegistryFormActionBackend"},
-            ],
+                {"BACKEND": "next.forms.RegistryFormActionBackend"}
+            ]
         }
         assert check_form_action_backends_configuration() == []
 
@@ -692,10 +680,7 @@ def _isolated_backend_with(
 
 def _wizard_registration(name: str, wizard_class: type) -> ActionRegistration:
     return ActionRegistration(
-        name=name,
-        file_path=_FAKE_FILE,
-        scope="shared",
-        wizard_class=wizard_class,
+        name=name, file_path=_FAKE_FILE, scope="shared", wizard_class=wizard_class
     )
 
 
@@ -843,10 +828,7 @@ def _page_wizard_registration(
     name: str, wizard_class: type, file_path: str
 ) -> ActionRegistration:
     return ActionRegistration(
-        name=name,
-        file_path=file_path,
-        scope="page",
-        wizard_class=wizard_class,
+        name=name, file_path=file_path, scope="page", wizard_class=wizard_class
     )
 
 

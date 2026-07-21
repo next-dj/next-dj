@@ -21,9 +21,9 @@ CONFIG_HASH_DEEP = {
                     "DEDUP_STRATEGY": "next.static.collector.HashContentDedup",
                     "JS_CONTEXT_POLICY": "next.static.collector.DeepMergePolicy",
                 },
-            },
-        ],
-    },
+            }
+        ]
+    }
 }
 
 CONFIG_LAST_WINS_ONLY = {
@@ -32,11 +32,11 @@ CONFIG_LAST_WINS_ONLY = {
             {
                 "BACKEND": "next.static.StaticFilesBackend",
                 "OPTIONS": {
-                    "JS_CONTEXT_POLICY": "next.static.collector.LastWinsPolicy",
+                    "JS_CONTEXT_POLICY": "next.static.collector.LastWinsPolicy"
                 },
-            },
-        ],
-    },
+            }
+        ]
+    }
 }
 
 

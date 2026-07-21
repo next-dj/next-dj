@@ -1,8 +1,6 @@
 import json
 
-from next.static import (
-    PydanticJsContextSerializer as _FrameworkPydantic,
-)
+from next.static import PydanticJsContextSerializer as _FrameworkPydantic
 
 
 ENVELOPE_VERSION = 1

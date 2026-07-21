@@ -32,7 +32,7 @@ class Filters:
             or self.price_min is not None
             or self.price_max is not None
             or self.in_stock
-            or self.sort != "newest",
+            or self.sort != "newest"
         )
 
 
@@ -82,21 +82,13 @@ def parse_filters(request: HttpRequest) -> Filters:
 class FiltersProvider(RegisteredParameterProvider):
     """Resolve `DFilters`-annotated parameters into a `Filters` snapshot."""
 
-    def can_handle(
-        self,
-        param: inspect.Parameter,
-        context: ResolutionContext,
-    ) -> bool:
+    def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:
         """Match the bare `DFilters` annotation when a request is attached."""
         if param.annotation is not DFilters:
             return False
         return getattr(context, "request", None) is not None
 
-    def resolve(
-        self,
-        _param: inspect.Parameter,
-        context: ResolutionContext,
-    ) -> Filters:
+    def resolve(self, _param: inspect.Parameter, context: ResolutionContext) -> Filters:
         """Return a `Filters` snapshot derived from the current request."""
         return parse_filters(context.request)
 
@@ -104,20 +96,14 @@ class FiltersProvider(RegisteredParameterProvider):
 class PageProvider(RegisteredParameterProvider):
     """Resolve `DPage[T]`-annotated parameters into a `PageRequest`."""
 
-    def can_handle(
-        self,
-        param: inspect.Parameter,
-        context: ResolutionContext,
-    ) -> bool:
+    def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:
         """Match `DPage` annotations when a request is attached."""
         if param.annotation is not DPage:
             return False
         return getattr(context, "request", None) is not None
 
     def resolve(
-        self,
-        _param: inspect.Parameter,
-        context: ResolutionContext,
+        self, _param: inspect.Parameter, context: ResolutionContext
     ) -> PageRequest:
         """Return a clamped `PageRequest` derived from `?page` and `?per_page`."""
         g = context.request.GET
@@ -129,7 +115,4 @@ class PageProvider(RegisteredParameterProvider):
             per_page = int(g.get("per_page") or DEFAULT_PER_PAGE)
         except ValueError:
             per_page = DEFAULT_PER_PAGE
-        return PageRequest(
-            number=number,
-            per_page=min(MAX_PER_PAGE, max(1, per_page)),
-        )
+        return PageRequest(number=number, per_page=min(MAX_PER_PAGE, max(1, per_page)))

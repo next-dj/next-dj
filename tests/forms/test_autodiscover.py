@@ -93,7 +93,7 @@ def test_second_call_does_not_reregister(settings, tmp_path, monkeypatch) -> Non
 
     events: list[object] = []
 
-    def _listener(sender: object, **kwargs: object) -> None:
+    def _listener(sender: object, **kwargs) -> None:
         events.append(kwargs.get("action_name"))
 
     action_registered.connect(_listener)
@@ -117,7 +117,7 @@ def test_disabled_setting_skips_import(tmp_path, monkeypatch) -> None:
 
 
 def test_disabled_setting_skips_discovery_entirely(monkeypatch) -> None:
-    def _boom(*_args: str) -> None:
+    def _boom(*args: str) -> None:
         pytest.fail("discovery attempted while disabled")
 
     monkeypatch.setattr(autodiscover, "autodiscover_modules", _boom)

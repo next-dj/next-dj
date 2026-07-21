@@ -5,10 +5,7 @@ from django.http import HttpRequest, QueryDict
 
 from next.deps import DependencyResolver
 from next.urls import DQuery, QueryParamProvider, get_multi_values
-from tests.support import (
-    _ctx,
-    inspect_parameter,
-)
+from tests.support import _ctx, inspect_parameter
 
 
 @pytest.fixture()
@@ -55,12 +52,7 @@ class TestQueryParamProviderCanHandle:
         ],
     )
     def test_can_handle_matrix(
-        self,
-        provider,
-        make_request,
-        annotation,
-        request_present,
-        expected,
+        self, provider, make_request, annotation, request_present, expected
     ) -> None:
         """Match `DQuery[...]` annotations only when a request is attached."""
         request = make_request() if request_present else None
@@ -88,12 +80,7 @@ class TestQueryParamProviderResolveScalar:
         ],
     )
     def test_scalar_value(
-        self,
-        provider,
-        request_ctx,
-        query,
-        annotation,
-        expected,
+        self, provider, request_ctx, query, annotation, expected
     ) -> None:
         """Return a coerced value when the key is present in the query string."""
         ctx = request_ctx(query)
@@ -126,20 +113,14 @@ class TestQueryParamProviderResolveScalar:
         assert provider.resolve(param, ctx) is None
 
     def test_unparametrised_dquery_falls_back_to_string(
-        self,
-        provider,
-        request_ctx,
+        self, provider, request_ctx
     ) -> None:
         """Treat a bare `DQuery` annotation as `DQuery[str]`."""
         ctx = request_ctx("q=hello")
         param = inspect_parameter("q", DQuery)
         assert provider.resolve(param, ctx) == "hello"
 
-    def test_non_type_inner_hint_treated_as_string(
-        self,
-        provider,
-        request_ctx,
-    ) -> None:
+    def test_non_type_inner_hint_treated_as_string(self, provider, request_ctx) -> None:
         """Coerce as `str` when the inner hint is a string literal rather than a type."""
         ctx = request_ctx("q=hello")
         param = inspect_parameter("q", DQuery["ignored"])
@@ -163,32 +144,21 @@ class TestQueryParamProviderResolveMultiValue:
         ],
     )
     def test_multi_value(
-        self,
-        provider,
-        request_ctx,
-        query,
-        annotation,
-        expected,
+        self, provider, request_ctx, query, annotation, expected
     ) -> None:
         """Collect repeated keys from plain, bracket, and comma-delimited forms."""
         ctx = request_ctx(query)
         param = inspect_parameter(query.split("=", 1)[0].rstrip("[]"), annotation)
         assert provider.resolve(param, ctx) == expected
 
-    def test_repeated_plain_form_skips_comma_split(
-        self,
-        provider,
-        request_ctx,
-    ) -> None:
+    def test_repeated_plain_form_skips_comma_split(self, provider, request_ctx) -> None:
         """Treat each repeated value as atomic when the plain form has multiple entries."""
         ctx = request_ctx("brand=Acme,Inc&brand=Globex")
         param = inspect_parameter("brand", DQuery[list[str]])
         assert provider.resolve(param, ctx) == ["Acme,Inc", "Globex"]
 
     def test_plain_single_value_with_bracket_present(
-        self,
-        provider,
-        request_ctx,
+        self, provider, request_ctx
     ) -> None:
         """Keep the bracket form when the plain form has a single entry that is empty."""
         ctx = request_ctx("brand=&brand[]=Acme&brand[]=Globex")
@@ -196,43 +166,27 @@ class TestQueryParamProviderResolveMultiValue:
         assert provider.resolve(param, ctx) == ["Acme", "Globex"]
 
     def test_comma_split_only_when_single_plain_value(
-        self,
-        provider,
-        request_ctx,
+        self, provider, request_ctx
     ) -> None:
         """Split on commas only when exactly one plain value is present."""
         ctx = request_ctx("brand=Acme,Globex")
         param = inspect_parameter("brand", DQuery[list[str]])
         assert provider.resolve(param, ctx) == ["Acme", "Globex"]
 
-    def test_empty_list_when_key_absent_no_default(
-        self,
-        provider,
-        request_ctx,
-    ) -> None:
+    def test_empty_list_when_key_absent_no_default(self, provider, request_ctx) -> None:
         """Return an empty list when neither plain nor bracket key is present."""
         ctx = request_ctx()
         param = inspect_parameter("brand", DQuery[list[str]])
         assert provider.resolve(param, ctx) == []
 
-    def test_empty_returns_default_when_provided(
-        self,
-        provider,
-        request_ctx,
-    ) -> None:
+    def test_empty_returns_default_when_provided(self, provider, request_ctx) -> None:
         """Return the declared default when the multi-value key is absent."""
         ctx = request_ctx()
-        param = inspect_parameter(
-            "brand",
-            DQuery[list[str]],
-            default=("fallback",),
-        )
+        param = inspect_parameter("brand", DQuery[list[str]], default=("fallback",))
         assert provider.resolve(param, ctx) == ("fallback",)
 
     def test_nested_list_hint_falls_back_to_string_coercion(
-        self,
-        provider,
-        request_ctx,
+        self, provider, request_ctx
     ) -> None:
         """Coerce list elements as strings when the inner hint is a generic alias."""
         ctx = request_ctx("brand=Acme&brand=Globex")
@@ -249,9 +203,7 @@ class TestQueryParamProviderEndToEnd:
         request = make_request("q=hello&page=2&brand=Acme&brand=Globex")
 
         def view(
-            q: DQuery[str] = "",
-            page: DQuery[int] = 1,
-            brand: DQuery[list[str]] = (),
+            q: DQuery[str] = "", page: DQuery[int] = 1, brand: DQuery[list[str]] = ()
         ) -> tuple[str, int, list[str]]:
             return q, page, list(brand)
 

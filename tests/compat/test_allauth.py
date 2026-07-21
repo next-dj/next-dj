@@ -35,7 +35,7 @@ def django_db_setup(django_db_setup, django_db_blocker):
             MIDDLEWARE=[
                 *settings.MIDDLEWARE,
                 "allauth.account.middleware.AccountMiddleware",
-            ],
+            ]
         ),
         override_settings(INSTALLED_APPS=[*settings.INSTALLED_APPS, *_ALLAUTH_APPS]),
     ):
@@ -69,9 +69,7 @@ def factory_actions(allauth_env):
     account_utils = pytest.importorskip("allauth.account.utils")
     account_settings = pytest.importorskip("allauth.account.app_settings")
 
-    def login_form_factory(
-        request: HttpRequest,
-    ) -> tuple[type, dict[str, HttpRequest]]:
+    def login_form_factory(request: HttpRequest) -> tuple[type, dict[str, HttpRequest]]:
         return account_forms.LoginForm, {"request": request}
 
     @action("compat_allauth_login", form_class=login_form_factory)
@@ -103,12 +101,7 @@ def subclass_action(allauth_env):
     class CompatAllauthLoginSub(Form, account_forms.LoginForm):
         """Login subclass that recovers the request from the allauth context."""
 
-        def __init__(
-            self,
-            *args: object,
-            request: HttpRequest | None = None,
-            **kwargs: object,
-        ) -> None:
+        def __init__(self, *args, request: HttpRequest | None = None, **kwargs) -> None:
             if request is None:
                 request = allauth_core_context.request
             super().__init__(*args, request=request, **kwargs)

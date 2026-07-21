@@ -74,7 +74,7 @@ class TestEagerLoadPages:
     def test_import_spec_failure_raises(self, tmp_path: Path, monkeypatch) -> None:
         _write_page(tmp_path / "page.py", "VALUE = 6\n")
 
-        def fake_spec(*_args: object, **_kwargs: object) -> None:
+        def fake_spec(*args, **kwargs) -> None:
             return None
 
         monkeypatch.setattr(
@@ -116,7 +116,7 @@ class TestEagerLoadComponents:
                 NEXT_FRAMEWORK={
                     "COMPONENT_BACKENDS": [config],
                     "LAZY_COMPONENT_MODULES": True,
-                },
+                }
             ):
                 components_manager._reload_config()
                 assert not marker.exists()

@@ -11,7 +11,7 @@ from next.deps.signals import provider_registered
 def capture_provider_registered() -> Generator[list[dict[str, Any]], None, None]:
     events: list[dict[str, Any]] = []
 
-    def _listener(sender: object, **kwargs: object) -> None:
+    def _listener(sender: object, **kwargs) -> None:
         events.append({"sender": sender, **kwargs})
 
     provider_registered.connect(_listener)

@@ -58,10 +58,7 @@ def inject_vite_dev_client(sender: StaticCollector, **_kwargs: object) -> None:
     if not _has_module_assets(sender):
         return
     origin = settings.VITE_DEV_ORIGIN
-    sender.add(
-        StaticAsset(url=f"{origin}/@vite/client", kind="module"),
-        prepend=True,
-    )
+    sender.add(StaticAsset(url=f"{origin}/@vite/client", kind="module"), prepend=True)
 
 
 # Wire the dev-client injector only when the developer opted into the

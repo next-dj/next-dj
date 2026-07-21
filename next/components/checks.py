@@ -21,27 +21,16 @@ if TYPE_CHECKING:
 
 _COMPONENT_BACKEND_SETTINGS_KEY = "COMPONENT_BACKENDS"
 
-_FILE_COMPONENT_BACKEND_CONFIG_KEYS = frozenset(
-    {
-        "BACKEND",
-        "COMPONENTS_DIR",
-        "DIRS",
-    },
-)
+_FILE_COMPONENT_BACKEND_CONFIG_KEYS = frozenset({"BACKEND", "COMPONENTS_DIR", "DIRS"})
 
 
 def _validate_single_component_backend(
-    config: dict[str, object],
-    index: int,
+    config: dict[str, object], index: int
 ) -> list[CheckMessage]:
     """Validate required keys and types for one merged component backend dict."""
     prefix = f"NEXT_FRAMEWORK['{_COMPONENT_BACKEND_SETTINGS_KEY}'][{index}]"
     errors: list[CheckMessage] = [
-        Error(
-            f"{prefix} must specify {key}.",
-            obj=settings,
-            id="next.E031",
-        )
+        Error(f"{prefix} must specify {key}.", obj=settings, id="next.E031")
         for key in ("BACKEND", "DIRS", "COMPONENTS_DIR")
         if key not in config
     ]
@@ -49,19 +38,11 @@ def _validate_single_component_backend(
         return errors
     if not isinstance(config["BACKEND"], str):
         errors.append(
-            Error(
-                f"{prefix}.BACKEND must be a string.",
-                obj=settings,
-                id="next.E032",
-            ),
+            Error(f"{prefix}.BACKEND must be a string.", obj=settings, id="next.E032")
         )
     if not isinstance(config["DIRS"], list):
         errors.append(
-            Error(
-                f"{prefix}.DIRS must be a list.",
-                obj=settings,
-                id="next.E032",
-            ),
+            Error(f"{prefix}.DIRS must be a list.", obj=settings, id="next.E032")
         )
     if not isinstance(config["COMPONENTS_DIR"], str):
         errors.append(
@@ -69,23 +50,18 @@ def _validate_single_component_backend(
                 f"{prefix}.COMPONENTS_DIR must be a string.",
                 obj=settings,
                 id="next.E027",
-            ),
+            )
         )
     errors.extend(
         errors_for_unknown_keys(
-            config,
-            allowed=_FILE_COMPONENT_BACKEND_CONFIG_KEYS,
-            prefix=prefix,
-        ),
+            config, allowed=_FILE_COMPONENT_BACKEND_CONFIG_KEYS, prefix=prefix
+        )
     )
     return errors
 
 
 @register(NEXT)
-def check_next_components_configuration(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+def check_next_components_configuration(*args, **kwargs) -> list[CheckMessage]:
     """Validate `COMPONENT_BACKENDS` shape in merged `NEXT_FRAMEWORK`."""
     raw = getattr(settings, "NEXT_FRAMEWORK", None)
     if raw is not None and not isinstance(raw, dict):
@@ -99,7 +75,7 @@ def check_next_components_configuration(
                 "backend configuration dictionaries.",
                 obj=settings,
                 id="next.E023",
-            ),
+            )
         ]
 
     if len(backends) == 0:
@@ -109,7 +85,7 @@ def check_next_components_configuration(
                 "one component backend entry.",
                 obj=settings,
                 id="next.E033",
-            ),
+            )
         ]
 
     errors: list[CheckMessage] = []
@@ -121,7 +97,7 @@ def check_next_components_configuration(
                     "must be a dictionary.",
                     obj=settings,
                     id="next.E002",
-                ),
+                )
             )
             continue
         errors.extend(_validate_single_component_backend(config, i))
@@ -130,10 +106,7 @@ def check_next_components_configuration(
 
 
 @register(NEXT)
-def check_duplicate_component_names(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+def check_duplicate_component_names(*args, **kwargs) -> list[CheckMessage]:
     """Check that no two components share the same name within the same scope."""
     errors: list[CheckMessage] = []
     configs = next_framework_settings.COMPONENT_BACKENDS
@@ -162,16 +135,13 @@ def check_duplicate_component_names(
                         f"within the same scope: {paths_str}",
                         obj=settings,
                         id="next.E020",
-                    ),
+                    )
                 )
     return errors
 
 
 @register(NEXT)
-def check_cross_root_component_name_conflicts(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+def check_cross_root_component_name_conflicts(*args, **kwargs) -> list[CheckMessage]:
     """Reject one component name in the root route scope on more than one page tree."""
     errors: list[CheckMessage] = []
     configs = next_framework_settings.COMPONENT_BACKENDS
@@ -196,8 +166,7 @@ def check_cross_root_component_name_conflicts(
             details = ". ".join(
                 f"{root}: {path_str or '?'}"
                 for root, path_str in sorted(
-                    roots_map.items(),
-                    key=lambda item: str(item[0]),
+                    roots_map.items(), key=lambda item: str(item[0])
                 )
             )
             errors.append(
@@ -208,7 +177,7 @@ def check_cross_root_component_name_conflicts(
                     f"names at the root route scope. Locations: {details}.",
                     obj=settings,
                     id="next.E034",
-                ),
+                )
             )
     return errors
 
@@ -242,10 +211,7 @@ def _component_py_uses_pages_context(file_path: Path) -> bool:
 
 
 @register(NEXT)
-def check_component_py_no_pages_context(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+def check_component_py_no_pages_context(*args, **kwargs) -> list[CheckMessage]:
     """Check that `component.py` files do not use `context` from `next.pages`."""
     errors: list[CheckMessage] = []
     configs = next_framework_settings.COMPONENT_BACKENDS
@@ -269,7 +235,7 @@ def check_component_py_no_pages_context(
                         "Use component context from next.components instead.",
                         obj=str(info.module_path),
                         id="next.E021",
-                    ),
+                    )
                 )
     return errors
 

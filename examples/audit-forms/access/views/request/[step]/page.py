@@ -68,9 +68,7 @@ class AccessRequestWizard(FormWizard):
         return request.POST.get("policy_acknowledged") == "on"
 
     def done(
-        self,
-        request: HttpRequest,
-        cleaned_data: dict[str, Any],
+        self, request: HttpRequest, cleaned_data: dict[str, Any]
     ) -> PatchResponse | HttpResponse:
         """Create the request, close the wizard layer, and link the next dispatch.
 

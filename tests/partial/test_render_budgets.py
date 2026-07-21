@@ -14,10 +14,7 @@ class TestOneZoneRenderPerInvalidPost:
     def test_zone_body_renders_once(self, next_client: NextClient) -> None:
         original = patches_module.Patches._render_zone
         with patch.object(
-            patches_module.Patches,
-            "_render_zone",
-            autospec=True,
-            side_effect=original,
+            patches_module.Patches, "_render_zone", autospec=True, side_effect=original
         ) as spy:
             response = next_client.post_action(
                 "zoned_rename_form",

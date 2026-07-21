@@ -19,10 +19,7 @@ def read_post_body(post_path: Path) -> str:
 def post_metadata(post_path: Path) -> dict[str, str]:
     """Return slug, URL name, and title extracted from the first `# …` line."""
     body = read_post_body(post_path)
-    heading = next(
-        (line for line in body.splitlines() if line.startswith("# ")),
-        "",
-    )
+    heading = next((line for line in body.splitlines() if line.startswith("# ")), "")
     slug = post_path.parent.name
     title = heading.removeprefix("# ").strip() or slug.replace("-", " ").title()
     return {

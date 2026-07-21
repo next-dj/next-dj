@@ -20,10 +20,7 @@ class TestNextClient:
 
     def test_post_action_dispatches_form(self) -> None:
         client = NextClient(enforce_csrf_checks=False)
-        response = client.post_action(
-            "simple_form_redirect",
-            {"name": "Carol"},
-        )
+        response = client.post_action("simple_form_redirect", {"name": "Carol"})
         assert response.status_code in (200, 302)
 
     @pytest.mark.django_db()

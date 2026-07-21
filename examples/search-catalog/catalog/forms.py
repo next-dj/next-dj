@@ -28,8 +28,7 @@ class PresetFilterForm(Form):
     """
 
     preset = django_forms.ChoiceField(
-        choices=[(name, name) for name in PRESETS],
-        widget=django_forms.HiddenInput,
+        choices=[(name, name) for name in PRESETS], widget=django_forms.HiddenInput
     )
 
     def _target(self) -> str:

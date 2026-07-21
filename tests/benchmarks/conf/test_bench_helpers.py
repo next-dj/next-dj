@@ -8,11 +8,7 @@ from next.conf.helpers import extend_default_backend
 class TestBenchExtendDefaultBackend:
     @pytest.mark.benchmark(group="conf.helpers")
     def test_extend_single_override(self, benchmark) -> None:
-        benchmark(
-            extend_default_backend,
-            "PAGE_BACKENDS",
-            PAGES_DIR="routes",
-        )
+        benchmark(extend_default_backend, "PAGE_BACKENDS", PAGES_DIR="routes")
 
     @pytest.mark.benchmark(group="conf.helpers")
     def test_extend_nested_options_merge(self, benchmark) -> None:

@@ -12,8 +12,7 @@ from next.pages import context
 
 class BulkToggleForm(Form):
     enabled_names = forms.MultipleChoiceField(
-        required=False,
-        widget=forms.CheckboxSelectMultiple(attrs={"class": "hidden"}),
+        required=False, widget=forms.CheckboxSelectMultiple(attrs={"class": "hidden"})
     )
 
     class Meta:

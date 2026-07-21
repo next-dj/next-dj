@@ -55,7 +55,7 @@ class TestComponentTag:
         t = Template('{% load components %}{% component "nonexistent" %}')
         with patch("next.templatetags.components.get_component", return_value=None):
             result = t.render(
-                Context({"current_template_path": "/app/pages/home/template.djx"}),
+                Context({"current_template_path": "/app/pages/home/template.djx"})
             )
         assert result == ""
 
@@ -76,7 +76,7 @@ class TestComponentTag:
         ):
             t = Template('{% load components %}{% component "card" title="Hello" %}')
             result = t.render(
-                Context({"current_template_path": str(tmp_path / "template.djx")}),
+                Context({"current_template_path": str(tmp_path / "template.djx")})
             )
         assert 'class="card"' in result
         assert "Hello" in result
@@ -106,8 +106,8 @@ class TestComponentTag:
                     {
                         "current_template_path": str(tmp_path / "template.djx"),
                         "page_var": "from_parent_page",
-                    },
-                ),
+                    }
+                )
             )
         assert "from_parent_page" in result
 
@@ -136,19 +136,15 @@ class TestComponentTag:
                     {
                         "current_template_path": str(tmp_path / "t.djx"),
                         "title": "from_parent",
-                    },
-                ),
+                    }
+                )
             )
         assert "from_prop" in result
         assert "from_parent" not in result
 
     def test_component_tag_accepts_path_object_in_context(self, tmp_path: Path) -> None:
         """current_template_path in context can be a Path object."""
-        with patch.object(
-            components_manager,
-            "get_component",
-            return_value=None,
-        ):
+        with patch.object(components_manager, "get_component", return_value=None):
             t = Template('{% load components %}{% component "c" %}')
             t.render(Context({"current_template_path": tmp_path / "t.djx"}))
 
@@ -178,8 +174,8 @@ class TestComponentTag:
                     {
                         "current_template_path": str(tmp_path / "template.djx"),
                         "_static_collector": collector,
-                    },
-                ),
+                    }
+                )
             )
         spy.assert_called_once()
         (called_info, called_collector) = spy.call_args.args
@@ -227,7 +223,7 @@ class TestComponentTag:
         (tmp_path / "card.djx").write_text(
             "<article>"
             '{% #set_slot "description" %}<i>fallback</i>{% /set_slot %}'
-            "</article>",
+            "</article>"
         )
         info = ComponentInfo(
             name="card",
@@ -240,7 +236,7 @@ class TestComponentTag:
         with patch.object(components_manager, "get_component", return_value=info):
             t = Template("{% load components %}" + call_site)
             result = t.render(
-                Context({"current_template_path": str(tmp_path / "page.djx")}),
+                Context({"current_template_path": str(tmp_path / "page.djx")})
             )
         assert expected_substring in result
         for forbidden in forbidden_substrings:
@@ -322,7 +318,7 @@ class TestComponentTag:
     ) -> None:
         """When #component body has #slot, content is passed to component."""
         (tmp_path / "box.djx").write_text(
-            '<div class="box">{{ slot_image }} {{ children }}</div>',
+            '<div class="box">{{ slot_image }} {{ children }}</div>'
         )
         with patch.object(
             components_manager,
@@ -344,7 +340,7 @@ class TestComponentTag:
                 "{% /component %}"
             )
             result = t.render(
-                Context({"current_template_path": str(tmp_path / "template.djx")}),
+                Context({"current_template_path": str(tmp_path / "template.djx")})
             )
         assert "slot_image" in result or "<img" in result
         assert "kids" in result
@@ -366,7 +362,7 @@ class TestComponentTag:
         ):
             t = Template('{% load components %}{% component "card" title="My Title" %}')
             result = t.render(
-                Context({"current_template_path": str(tmp_path / "t.djx")}),
+                Context({"current_template_path": str(tmp_path / "t.djx")})
             )
         assert "My Title" in result
 
@@ -389,7 +385,7 @@ class TestComponentTag:
                 '{% load components %}{% component "card" orphan title="Kept" %}'
             )
             result = t.render(
-                Context({"current_template_path": str(tmp_path / "t.djx")}),
+                Context({"current_template_path": str(tmp_path / "t.djx")})
             )
         assert "Kept" in result
 
@@ -414,7 +410,7 @@ class TestComponentTag:
                         "current_template_path": str(tmp_path / "t.djx"),
                         "page_title": "From Context",
                     }
-                ),
+                )
             )
         assert "From Context" in result
         assert "page_title" not in result
@@ -440,7 +436,7 @@ class TestComponentTag:
                         "current_template_path": str(tmp_path / "t.djx"),
                         "user": {"name": "Ada"},
                     }
-                ),
+                )
             )
         assert "Ada" in result
 
@@ -458,7 +454,7 @@ class TestComponentTag:
         with patch.object(components_manager, "get_component", return_value=info):
             t = Template('{% load components %}{% component "card" count=42 %}')
             result = t.render(
-                Context({"current_template_path": str(tmp_path / "t.djx")}),
+                Context({"current_template_path": str(tmp_path / "t.djx")})
             )
         assert "42" in result
 
@@ -482,7 +478,7 @@ class TestComponentTag:
                         "current_template_path": str(tmp_path / "t.djx"),
                         "payload": marker,
                     }
-                ),
+                )
             )
         assert "YES" in result
 
@@ -501,23 +497,16 @@ class TestComponentTag:
             t = Template('{% load components %}{% component "card" title=name|upper %}')
             result = t.render(
                 Context(
-                    {
-                        "current_template_path": str(tmp_path / "t.djx"),
-                        "name": "ada",
-                    }
-                ),
+                    {"current_template_path": str(tmp_path / "t.djx"), "name": "ada"}
+                )
             )
         assert "ADA" in result
 
     def test_nested_components_three_levels(self, tmp_path: Path) -> None:
         """{% #component %} inside component.djx resolves nested names."""
         (tmp_path / "inner.djx").write_text("<i>inner</i>")
-        (tmp_path / "mid.djx").write_text(
-            '{% #component "inner" %}{% /component %}',
-        )
-        (tmp_path / "outer.djx").write_text(
-            '{% #component "mid" %}{% /component %}',
-        )
+        (tmp_path / "mid.djx").write_text('{% #component "inner" %}{% /component %}')
+        (tmp_path / "outer.djx").write_text('{% #component "mid" %}{% /component %}')
 
         def fake_get(name: str, _: Path) -> ComponentInfo | None:
             mapping = {
@@ -539,10 +528,10 @@ class TestComponentTag:
 
         with patch.object(components_manager, "get_component", side_effect=fake_get):
             t = Template(
-                "{% load components %}{% #component 'outer' %}{% /component %}",
+                "{% load components %}{% #component 'outer' %}{% /component %}"
             )
             result = t.render(
-                Context({"current_template_path": str(tmp_path / "page.djx")}),
+                Context({"current_template_path": str(tmp_path / "page.djx")})
             )
         assert "<i>inner</i>" in result
 
@@ -660,9 +649,7 @@ class TestSetSlotTag:
     def test_short_set_slot_requires_exactly_one_name(self) -> None:
         """{% set_slot %} short form with two names raises."""
         with pytest.raises(TemplateSyntaxError, match="exactly one"):
-            Template(
-                '{% load components %}{% set_slot "a" "b" %}',
-            )
+            Template('{% load components %}{% set_slot "a" "b" %}')
 
     def test_short_set_slot_empty_name_raises(self) -> None:
         """{% set_slot "" %} raises."""
@@ -676,11 +663,7 @@ class TestSetSlotTag:
             # must not shadow the default body. Earlier versions fell back
             # to the unprefixed ``<name>`` key, which leaked props into
             # the slot lookup.
-            (
-                {"description": "prop value"},
-                "<span>default</span>",
-                ("prop value",),
-            ),
+            ({"description": "prop value"}, "<span>default</span>", ("prop value",)),
             # Both slot_<name> and a same-named prop are present: the
             # caller-injected slot wins over both the prop and the
             # default fallback body.
@@ -701,7 +684,7 @@ class TestSetSlotTag:
         """Slot lookup honours ``slot_<name>`` only and never falls back to props."""
         t = Template(
             "{% load components %}"
-            '{% #set_slot "description" %}<span>default</span>{% /set_slot %}',
+            '{% #set_slot "description" %}<span>default</span>{% /set_slot %}'
         )
         result = t.render(Context(context_data))
         assert expected_substring in result
@@ -716,7 +699,7 @@ class TestSetSlotTag:
         that case — the caller asked for the slot to render empty.
         """
         t = Template(
-            '{% load components %}{% #set_slot "label" %}fallback{% /set_slot %}',
+            '{% load components %}{% #set_slot "label" %}fallback{% /set_slot %}'
         )
         result = t.render(Context({"slot_label": ""}))
         assert result == ""

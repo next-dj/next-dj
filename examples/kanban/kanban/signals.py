@@ -41,12 +41,10 @@ def inject_vite_dev_assets(sender: object, **_kwargs: object) -> None:
     # slot, so the resulting bucket order is preamble, then @vite/client,
     # then the regular module scripts.
     sender.add(  # type: ignore[attr-defined]
-        StaticAsset(url=preamble_url, kind="module"),
-        prepend=True,
+        StaticAsset(url=preamble_url, kind="module"), prepend=True
     )
     sender.add(  # type: ignore[attr-defined]
-        StaticAsset(url=f"{origin}/@vite/client", kind="module"),
-        prepend=True,
+        StaticAsset(url=f"{origin}/@vite/client", kind="module"), prepend=True
     )
 
 

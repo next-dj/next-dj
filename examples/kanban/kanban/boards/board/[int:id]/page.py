@@ -45,8 +45,7 @@ def moved_card(request: HttpRequest) -> Card | None:
 
 @context("board", inherit_context=True, serialize=True)
 def board_payload(
-    active_board: DBoard[Board],
-    request: HttpRequest,
+    active_board: DBoard[Board], request: HttpRequest
 ) -> dict[str, object]:
     """Expose the full board tree under the merged board JS context key.
 

@@ -41,18 +41,15 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
-            ],
+            ]
         },
-    },
+    }
 ]
 
 WSGI_APPLICATION = "config.wsgi.application"
 
 DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
-    },
+    "default": {"ENGINE": "django.db.backends.sqlite3", "NAME": BASE_DIR / "db.sqlite3"}
 }
 
 CACHES = {
@@ -90,21 +87,17 @@ NEXT_FRAMEWORK = {
             # surface in this access-request workflow.
             "DIRS": [str(BASE_DIR / "portal")],
             "PAGES_DIR": "views",
-            "OPTIONS": {
-                "context_processors": [],
-            },
-        },
+            "OPTIONS": {"context_processors": []},
+        }
     ],
     "COMPONENT_BACKENDS": [
         {
             "BACKEND": "next.components.FileComponentsBackend",
             "DIRS": [str(SHARED_DIR / "_components")],
             "COMPONENTS_DIR": "_blocks",
-        },
+        }
     ],
-    "FORM_ACTION_BACKENDS": [
-        {"BACKEND": "access.backends.AuditedFormActionBackend"},
-    ],
+    "FORM_ACTION_BACKENDS": [{"BACKEND": "access.backends.AuditedFormActionBackend"}],
     # Wizard step drafts live in the dedicated `wizards` cache alias rather
     # than the session, with a short lifetime that fits a PII-carrying flow.
     "FORM_WIZARD_BACKEND": {

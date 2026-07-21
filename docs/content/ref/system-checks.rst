@@ -158,6 +158,12 @@ Errors
    * - ``next.E016``
      - An error was raised while collecting patterns from a router.
      - ``next.urls.checks``
+   * - ``next.E017``
+     - A ``page.py`` raises while importing, so the framework skips the module silently.
+     - ``next.pages.checks``
+   * - ``next.E018``
+     - A ``page.py`` registers more than one keyless ``@context`` callable, and only the last one runs.
+     - ``next.pages.checks``
    * - ``next.E019``
      - ``request`` is missing from the template context (required for ``{% form %}`` and CSRF).
      - ``next.pages.checks``

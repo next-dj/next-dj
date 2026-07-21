@@ -79,10 +79,7 @@ class TestRenderInvalidPage:
         request = mock_http_request(method="GET")
         form = SimpleForm(initial={"name": "test"})
         html = form_action_manager.default_backend.render_invalid_page(
-            request,
-            "simple_form",
-            form,
-            page_file_path=PAGE_MODULE_FOR_FORM_TESTS,
+            request, "simple_form", form, page_file_path=PAGE_MODULE_FOR_FORM_TESTS
         )
         assert "test" in html or "name" in html
 
@@ -91,10 +88,7 @@ class TestRenderInvalidPage:
         request = mock_http_request(method="GET")
         form = SimpleForm(initial={"name": "x"})
         html = form_action_manager.default_backend.render_invalid_page(
-            request,
-            "simple_form",
-            form,
-            page_file_path=PAGE_MODULE_FOR_FORM_TESTS,
+            request, "simple_form", form, page_file_path=PAGE_MODULE_FOR_FORM_TESTS
         )
         assert isinstance(html, str)
         assert html.strip() != ""
@@ -103,10 +97,7 @@ class TestRenderInvalidPage:
         """Form None still returns a string when a page template exists."""
         request = mock_http_request(method="GET")
         html = form_action_manager.default_backend.render_invalid_page(
-            request,
-            "simple_form",
-            form=None,
-            page_file_path=PAGE_MODULE_FOR_FORM_TESTS,
+            request, "simple_form", form=None, page_file_path=PAGE_MODULE_FOR_FORM_TESTS
         )
         assert isinstance(html, str)
 
@@ -147,28 +138,18 @@ class TestRenderInvalidPage:
         form = RenderWizardStep(data={"name": ""})
         assert not form.is_valid()
         html = form_action_manager.default_backend.render_invalid_page(
-            request,
-            "render_wizard",
-            form,
-            page_file_path=PAGE_MODULE_FOR_FORM_TESTS,
+            request, "render_wizard", form, page_file_path=PAGE_MODULE_FOR_FORM_TESTS
         )
         assert isinstance(html, str)
         assert html.strip() != ""
 
     @pytest.mark.parametrize(
         ("template_body", "output_mode"),
-        [
-            ("{{ form.name }}", "form_fields"),
-            ("{{ current_template_path }}", "path"),
-        ],
+        [("{{ form.name }}", "form_fields"), ("{{ current_template_path }}", "path")],
         ids=("form_fields", "current_template_path"),
     )
     def test_renders_from_template_djx(
-        self,
-        mock_http_request,
-        tmp_path,
-        template_body: str,
-        output_mode: str,
+        self, mock_http_request, tmp_path, template_body: str, output_mode: str
     ) -> None:
         """Render the page reading the sibling template.djx of ``page_file_path``."""
         request = mock_http_request(method="GET")
@@ -182,10 +163,7 @@ class TestRenderInvalidPage:
         template_djx.write_text(template_body)
 
         html = backend.render_invalid_page(
-            request,
-            "simple_form",
-            form,
-            page_file_path=page_file,
+            request, "simple_form", form, page_file_path=page_file
         )
         if output_mode == "path":
             assert str(template_djx) in html
@@ -243,8 +221,7 @@ class TestFormTagSyntax:
             form_engine.from_string('{% form "foo" "bar" %}x{% endform %}')
 
     @pytest.mark.parametrize(
-        "attr",
-        ["action", "method", "data-next-action", "data-next-target"],
+        "attr", ["action", "method", "data-next-action", "data-next-target"]
     )
     def test_reserved_attribute_raises(self, form_engine, attr: str) -> None:
         """{% form %} rejects exact reserved names and the data-next- prefix."""
@@ -608,7 +585,7 @@ class TestFormTagFormsetRender:
                 name="bulk_rows",
                 file_path=str(PAGE_MODULE_FOR_FORM_TESTS),
                 scope="page",
-                handler=lambda **_kwargs: None,
+                handler=lambda **kwargs: None,
                 form_class=build_bulk_rows,
             )
         )
@@ -674,10 +651,7 @@ class TestActionUrlTag:
     def _register_page_action(name: str, page_path: str) -> None:
         form_action_manager.default_backend.register_action(
             ActionRegistration(
-                name=name,
-                file_path=page_path,
-                scope="page",
-                handler=lambda: None,
+                name=name, file_path=page_path, scope="page", handler=lambda: None
             )
         )
 
@@ -780,10 +754,10 @@ class TestFormTagMarkupIdentity:
         """A backend exposing no meta renders the tag without the marker."""
 
         class NoMetaBackend(FormActionBackend):
-            def register_action(self, *args: object, **kwargs: object) -> None:
+            def register_action(self, *args, **kwargs) -> None:
                 pass
 
-            def get_action_url(self, action_name: str, **kwargs: object) -> str:
+            def get_action_url(self, action_name: str, **kwargs) -> str:
                 return "/custom/submit/"
 
             def generate_urls(self) -> list:
@@ -802,9 +776,7 @@ class TestFormTagMarkupIdentity:
     def test_auto_enctype_for_multipart_form(self, form_engine, csrf_request) -> None:
         """A multipart form gains enctype="multipart/form-data" automatically."""
         html = self._render(
-            form_engine,
-            csrf_request,
-            '{% form "upload_enctype_form" %}x{% endform %}',
+            form_engine, csrf_request, '{% form "upload_enctype_form" %}x{% endform %}'
         )
         assert 'enctype="multipart/form-data">' in html
 

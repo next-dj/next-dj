@@ -15,20 +15,14 @@ def _handler_simple(request: object, name: str = "default") -> str:
 
 
 def _handler_five(
-    request: object,
-    a: int = 1,
-    b: int = 2,
-    c: int = 3,
-    d: int = 4,
+    request: object, a: int = 1, b: int = 2, c: int = 3, d: int = 4
 ) -> int:
     del request
     return a + b + c + d
 
 
 def _handler_mixed(
-    request: object,
-    cached: str = Depends("theme"),
-    value: int = Context("page_value"),
+    request: object, cached: str = Depends("theme"), value: int = Context("page_value")
 ) -> str:
     del request
     return f"{cached}:{value}"
@@ -40,22 +34,14 @@ class TestBenchDependencyResolver:
         """Signature walk with one positional-only ``request`` + default kwarg."""
         resolver = DependencyResolver()
         request = MagicMock()
-        benchmark(
-            resolver.resolve_dependencies,
-            _handler_simple,
-            request=request,
-        )
+        benchmark(resolver.resolve_dependencies, _handler_simple, request=request)
 
     @pytest.mark.benchmark(group="deps.resolver")
     def test_resolve_five_params(self, benchmark) -> None:
         """Five-parameter function — measures per-arg overhead."""
         resolver = DependencyResolver()
         request = MagicMock()
-        benchmark(
-            resolver.resolve_dependencies,
-            _handler_five,
-            request=request,
-        )
+        benchmark(resolver.resolve_dependencies, _handler_five, request=request)
 
     @pytest.mark.benchmark(group="deps.resolver")
     def test_resolve_mixed_markers(self, benchmark) -> None:

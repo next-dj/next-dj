@@ -24,8 +24,7 @@ def resolve_base_dir() -> Path | None:
 
 
 def _classify_one_dir_entry(
-    item: Path,
-    base_dir: Path | None,
+    item: Path, base_dir: Path | None
 ) -> tuple[str, Path | str | None]:
     if item.is_absolute():
         if item.exists() and item.is_dir():
@@ -49,8 +48,7 @@ def _classify_one_dir_entry(
 
 
 def classify_dirs_entries(
-    entries: list[Any] | tuple[Any, ...] | None,
-    base_dir: Path | None,
+    entries: list[Any] | tuple[Any, ...] | None, base_dir: Path | None
 ) -> tuple[list[Path], frozenset[str]]:
     """Split ``DIRS`` into directory roots and URL segment names (file router)."""
     path_roots: list[Path] = []
@@ -123,9 +121,7 @@ def _walk_back(frame: FrameType | None, back_count: int) -> FrameType | None:
 
 
 def _scan_by_suffix(
-    frame: FrameType | None,
-    suffixes: tuple[str, ...],
-    max_walk: int,
+    frame: FrameType | None, suffixes: tuple[str, ...], max_walk: int
 ) -> Path:
     """Return the first caller frame whose ``__file__`` is not a framework suffix."""
     for _ in range(max_walk):
@@ -142,9 +138,7 @@ def _scan_by_suffix(
 
 
 def _scan_framework_file(
-    frame: FrameType | None,
-    skip_framework_file: tuple[str, str],
-    max_walk: int,
+    frame: FrameType | None, skip_framework_file: tuple[str, str], max_walk: int
 ) -> Path:
     """Return the first caller frame outside the named framework module file."""
     base, parent = skip_framework_file

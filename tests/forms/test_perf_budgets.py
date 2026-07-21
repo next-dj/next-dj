@@ -6,11 +6,7 @@ from django import forms as django_forms
 from django.http import HttpRequest, HttpResponseRedirect
 
 from next.deps import resolver
-from next.forms import (
-    ActionRegistration,
-    Form,
-    RegistryFormActionBackend,
-)
+from next.forms import ActionRegistration, Form, RegistryFormActionBackend
 from next.forms.dispatch import FormActionDispatch
 from next.forms.manager import form_action_manager
 from next.forms.wizard import (
@@ -46,10 +42,7 @@ class BudgetWizard(FormWizard):
     class Meta:
         """Two ordered steps with the default URL parameter."""
 
-        steps: ClassVar = [
-            ("identity", BudgetIdentityStep),
-            ("scope", BudgetScopeStep),
-        ]
+        steps: ClassVar = [("identity", BudgetIdentityStep), ("scope", BudgetScopeStep)]
 
     def done(self, request: HttpRequest, cleaned_data: dict) -> HttpResponseRedirect:
         """Redirect once the last step validates."""
@@ -62,10 +55,7 @@ class ConditionalBudgetWizard(FormWizard):
     class Meta:
         """Two declared steps that get_steps can expand."""
 
-        steps: ClassVar = [
-            ("identity", BudgetIdentityStep),
-            ("scope", BudgetScopeStep),
-        ]
+        steps: ClassVar = [("identity", BudgetIdentityStep), ("scope", BudgetScopeStep)]
 
     def get_steps(self) -> list:
         """Append an extra step when the first answer asks for it."""
@@ -141,10 +131,7 @@ class TestWizardStorageRoundTripBudgets:
     ) -> None:
         """A get_steps override that reads storage still pays a single load."""
         resp = _post_step(
-            client_no_csrf,
-            "conditional_budget_wizard",
-            "identity",
-            {"name": "expand"},
+            client_no_csrf, "conditional_budget_wizard", "identity", {"name": "expand"}
         )
         assert resp.status_code == 302
         assert resp.url == "/request/scope/"
@@ -185,7 +172,7 @@ class TestErrorRerenderFileReadBudget:
         reads = {"count": 0}
         original_read_text = Path.read_text
 
-        def counting_read_text(self, *args: object, **kwargs: object) -> str:
+        def counting_read_text(self, *args, **kwargs) -> str:
             reads["count"] += 1
             return original_read_text(self, *args, **kwargs)
 
@@ -230,7 +217,7 @@ class TestPermissionHookResolveBudgets:
         calls = {"n": 0}
         original = resolver.resolve_dependencies
 
-        def counting(*args: object, **kwargs: object) -> object:
+        def counting(*args, **kwargs) -> object:
             calls["n"] += 1
             return original(*args, **kwargs)
 

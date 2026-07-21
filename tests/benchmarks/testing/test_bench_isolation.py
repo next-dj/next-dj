@@ -30,9 +30,4 @@ class TestBenchResetFormActions:
                 )
             return (), {}
 
-        benchmark.pedantic(
-            reset_form_actions,
-            setup=setup,
-            rounds=200,
-            iterations=1,
-        )
+        benchmark.pedantic(reset_form_actions, setup=setup, rounds=200, iterations=1)

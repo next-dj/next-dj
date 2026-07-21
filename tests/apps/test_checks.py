@@ -42,10 +42,7 @@ class TestDjangoTemplatesBackendCheck:
 
     def test_mixed_engines_with_django_backend_pass(self) -> None:
         with override_settings(
-            TEMPLATES=[
-                {"BACKEND": _JINJA_BACKEND},
-                {"BACKEND": _DJANGO_BACKEND},
-            ],
+            TEMPLATES=[{"BACKEND": _JINJA_BACKEND}, {"BACKEND": _DJANGO_BACKEND}]
         ):
             messages = check_django_templates_backend_present(app_configs=None)
         assert messages == []

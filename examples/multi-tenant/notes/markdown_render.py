@@ -7,8 +7,7 @@ from django.utils.safestring import SafeString
 
 EMPTY_PREVIEW = "<p class='text-slate-400 italic'>Nothing to preview yet.</p>"
 UNSAFE_HREF = re.compile(
-    r'href="\s*(?:javascript|data|vbscript):[^"]*"',
-    flags=re.IGNORECASE,
+    r'href="\s*(?:javascript|data|vbscript):[^"]*"', flags=re.IGNORECASE
 )
 
 

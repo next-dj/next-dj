@@ -8,12 +8,7 @@ from django.core.cache import cache
 from django.http import Http404
 from polls import broker as broker_module
 from polls.backends import ViteManifestBackend
-from polls.broker import (
-    SNAPSHOT_KEY,
-    PollBroker,
-    build_snapshot,
-    store_snapshot,
-)
+from polls.broker import SNAPSHOT_KEY, PollBroker, build_snapshot, store_snapshot
 from polls.forms import VoteForm
 from polls.models import Choice, Poll
 from polls.providers import DPoll
@@ -140,10 +135,7 @@ class TestManifestRouting:
         manifest_path = tmp_path / "manifest.json"
         manifest_path.write_text(json.dumps({manifest_key: {"file": built_file}}))
         backend = _backend(
-            {
-                "VITE_ROOT": str(configured_root),
-                "MANIFEST_PATH": str(manifest_path),
-            }
+            {"VITE_ROOT": str(configured_root), "MANIFEST_PATH": str(manifest_path)}
         )
         url = backend.register_file(asset_path, "component", "vue")
         assert f"polls/dist/{built_file}" in url

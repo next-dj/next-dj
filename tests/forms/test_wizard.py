@@ -351,18 +351,14 @@ class TestWizardGoto:
     def test_goto_swaps_current_segment(self) -> None:
         """`goto` rewrites the current-step segment to the target step."""
         wizard = DemoWizard(
-            _request(),
-            url_kwargs={"step": "identity"},
-            base_path="/request/identity/",
+            _request(), url_kwargs={"step": "identity"}, base_path="/request/identity/"
         )
         assert wizard.goto("scope") == "/request/scope/"
 
     def test_goto_falls_back_when_current_absent_from_path(self) -> None:
         """`goto` rewrites the last segment when the current step is absent."""
         wizard = DemoWizard(
-            _request(),
-            url_kwargs={"step": "identity"},
-            base_path="/request/landing/",
+            _request(), url_kwargs={"step": "identity"}, base_path="/request/landing/"
         )
         assert wizard.goto("scope") == "/request/scope/"
 

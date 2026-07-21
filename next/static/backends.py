@@ -65,12 +65,7 @@ class StaticBackend(ABC):
         return self._config
 
     @abstractmethod
-    def register_file(
-        self,
-        source_path: Path,
-        logical_name: str,
-        kind: str,
-    ) -> str:
+    def register_file(self, source_path: Path, logical_name: str, kind: str) -> str:
         """Register a co-located asset file and return its public URL.
 
         The `source_path` argument is the absolute path to the source
@@ -114,12 +109,7 @@ class StaticFilesBackend(StaticBackend):
         return f"{StaticNamespace.NEXT}/{logical_name}{suffix}"
 
     @override
-    def register_file(
-        self,
-        source_path: Path,
-        logical_name: str,
-        kind: str,
-    ) -> str:
+    def register_file(self, source_path: Path, logical_name: str, kind: str) -> str:
         """Return the staticfiles URL for `next/<logical_name><suffix>`.
 
         The suffix is taken from `source_path.suffix`, so a single kind
@@ -149,12 +139,7 @@ class StaticFilesBackend(StaticBackend):
         self._url_cache[cache_key] = url
         return url
 
-    def render_link_tag(
-        self,
-        url: str,
-        *,
-        request: HttpRequest | None = None,
-    ) -> str:
+    def render_link_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
         """Return a link tag built from the configured css_tag template.
 
         The `request` argument is accepted for contract compatibility
@@ -163,12 +148,7 @@ class StaticFilesBackend(StaticBackend):
         del request
         return self._css_tag.format(url=url)
 
-    def render_script_tag(
-        self,
-        url: str,
-        *,
-        request: HttpRequest | None = None,
-    ) -> str:
+    def render_script_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
         """Return a script tag built from the configured js_tag template.
 
         The `request` argument is accepted for contract compatibility
@@ -177,12 +157,7 @@ class StaticFilesBackend(StaticBackend):
         del request
         return self._js_tag.format(url=url)
 
-    def render_module_tag(
-        self,
-        url: str,
-        *,
-        request: HttpRequest | None = None,
-    ) -> str:
+    def render_module_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
         """Return a module script tag built from the configured module_tag template.
 
         The `request` argument is accepted for contract compatibility

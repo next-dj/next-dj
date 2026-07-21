@@ -51,9 +51,7 @@ class TestComponentsManager:
     def test_reload_config_swallows_backend_creation_error(self) -> None:
         """When create_backend raises, _reload_config logs and continues."""
         mock_ns = _next_framework_settings_component_backends_list(
-            [
-                {"BACKEND": "next.components.NonexistentBackend", "OPTIONS": {}},
-            ],
+            [{"BACKEND": "next.components.NonexistentBackend", "OPTIONS": {}}]
         )
         with patch("next.components.manager.next_framework_settings", mock_ns):
             manager = ComponentsManager()
@@ -116,9 +114,7 @@ class TestRegisterComponentsFolderFromRouterWalk:
         (comp_dir / "component.djx").write_text("<span>news</span>")
         (comp_dir / "component.py").write_text("# module for news\n")
         register_components_folder_from_router_walk(
-            tmp_path / "_components",
-            tmp_path,
-            "",
+            tmp_path / "_components", tmp_path, ""
         )
         infos = [i for i in backend._registry.get_all() if i.name == "news"]
         assert len(infos) == 1
@@ -161,7 +157,7 @@ class TestRegisterComponentsFolderFromRouterWalk:
             NEXT_FRAMEWORK={
                 "COMPONENT_BACKENDS": [config],
                 "LAZY_COMPONENT_MODULES": True,
-            },
+            }
         ):
             backend = FileComponentsBackend(config)
             with patch.object(
@@ -240,12 +236,8 @@ class TestRenderComponent:
     ) -> None:
         """Composite with component.djx and component.py without render uses template."""
         (tmp_path / "profile").mkdir()
-        (tmp_path / "profile" / "component.djx").write_text(
-            "<div>{{ username }}</div>",
-        )
-        (tmp_path / "profile" / "component.py").write_text(
-            "other = 1\n",
-        )
+        (tmp_path / "profile" / "component.djx").write_text("<div>{{ username }}</div>")
+        (tmp_path / "profile" / "component.py").write_text("other = 1\n")
         info = ComponentInfo(
             name="profile",
             scope_root=tmp_path,
@@ -261,7 +253,7 @@ class TestRenderComponent:
         """load_component_template returns module.component when no .djx."""
         (tmp_path / "mod").mkdir()
         (tmp_path / "mod" / "component.py").write_text(
-            'component = "<div>{{ x }}</div>"\n',
+            'component = "<div>{{ x }}</div>"\n'
         )
         info = ComponentInfo(
             name="mod",
@@ -294,7 +286,7 @@ class TestRenderComponent:
         """Composite with render() in component.py uses it and returns string."""
         (tmp_path / "custom").mkdir()
         (tmp_path / "custom" / "component.py").write_text(
-            "def render(x=''):\n    return f'<div>{x}</div>'\n",
+            "def render(x=''):\n    return f'<div>{x}</div>'\n"
         )
         info = ComponentInfo(
             name="custom",
@@ -333,14 +325,7 @@ class TestComponentRenderers:
         loader = ModuleLoader()
         tl = ComponentTemplateLoader(loader)
         r = CompositeComponentRenderer(loader, tl)
-        info = ComponentInfo(
-            "x",
-            Path("/"),
-            "",
-            Path("/t.djx"),
-            None,
-            False,
-        )
+        info = ComponentInfo("x", Path("/"), "", Path("/t.djx"), None, False)
         assert r.render(info, {}, None) == ""
 
     def test_composite_render_returns_httpresponse_content(
@@ -352,16 +337,9 @@ class TestComponentRenderers:
         (d / "component.py").write_text(
             "from django.http import HttpResponse\n"
             "def render():\n"
-            "    return HttpResponse(b'<em>ok</em>')\n",
+            "    return HttpResponse(b'<em>ok</em>')\n"
         )
-        info = ComponentInfo(
-            "hr",
-            tmp_path,
-            "",
-            None,
-            d / "component.py",
-            False,
-        )
+        info = ComponentInfo("hr", tmp_path, "", None, d / "component.py", False)
         out = render_component(info, {})
         assert "ok" in out
 
@@ -372,12 +350,7 @@ class TestComponentRenderers:
         (d / "component.djx").write_text("<i>{{ request.path }}</i>")
         (d / "component.py").write_text("# no render\n")
         info = ComponentInfo(
-            "rq",
-            tmp_path,
-            "",
-            d / "component.djx",
-            d / "component.py",
-            False,
+            "rq", tmp_path, "", d / "component.djx", d / "component.py", False
         )
         req = RequestFactory().get("/hello")
         html = render_component(info, {}, request=req)
@@ -392,12 +365,7 @@ class TestComponentRenderers:
         (d / "component.djx").write_text("{% csrf_token %}")
         (d / "component.py").write_text("# no render\n")
         info = ComponentInfo(
-            "csrf",
-            tmp_path,
-            "",
-            d / "component.djx",
-            d / "component.py",
-            False,
+            "csrf", tmp_path, "", d / "component.djx", d / "component.py", False
         )
         req = RequestFactory().get("/")
         html = render_component(info, {}, request=req)
@@ -426,12 +394,7 @@ class TestComponentRenderers:
         (d / "component.djx").write_text("<p>x</p>")
         (d / "component.py").write_text("# template path via djx. no render()\n")
         info = ComponentInfo(
-            "nt",
-            tmp_path,
-            "",
-            d / "component.djx",
-            d / "component.py",
-            False,
+            "nt", tmp_path, "", d / "component.djx", d / "component.py", False
         )
         loader = ModuleLoader()
         tl = ComponentTemplateLoader(loader)
@@ -444,14 +407,7 @@ class TestComponentRenderers:
         d = tmp_path / "nf"
         d.mkdir()
         (d / "component.py").write_text("syntax error (\n")
-        info = ComponentInfo(
-            "nf",
-            tmp_path,
-            "",
-            None,
-            d / "component.py",
-            False,
-        )
+        info = ComponentInfo("nf", tmp_path, "", None, d / "component.py", False)
         r = CompositeComponentRenderer(
             ModuleLoader(), ComponentTemplateLoader(ModuleLoader())
         )
@@ -488,8 +444,7 @@ class TestGetComponentPathsForWatch:
     def test_empty_when_backend_settings_not_lists(self) -> None:
         """Return empty sets when ``*_BACKENDS`` settings are not lists."""
         mock_nf = SimpleNamespace(
-            PAGE_BACKENDS="not-a-list",
-            COMPONENT_BACKENDS="not-a-list",
+            PAGE_BACKENDS="not-a-list", COMPONENT_BACKENDS="not-a-list"
         )
         with patch("next.components.watch.next_framework_settings", mock_nf):
             assert get_component_paths_for_watch() == set()
@@ -509,16 +464,16 @@ class TestGetComponentPathsForWatch:
                         "APP_DIRS": False,
                         "DIRS": [str(pages_root)],
                         "OPTIONS": {},
-                    },
+                    }
                 ],
                 "COMPONENT_BACKENDS": [
                     {
                         "BACKEND": "next.components.FileComponentsBackend",
                         "DIRS": [],
                         "COMPONENTS_DIR": "_components",
-                    },
+                    }
                 ],
-            },
+            }
         ):
             next_framework_settings.reload()
             paths = get_component_paths_for_watch()
@@ -540,16 +495,16 @@ class TestGetComponentPathsForWatch:
                         "APP_DIRS": False,
                         "DIRS": [str(pages_root)],
                         "OPTIONS": {},
-                    },
+                    }
                 ],
                 "COMPONENT_BACKENDS": [
                     {
                         "BACKEND": "next.components.FileComponentsBackend",
                         "DIRS": [],
                         "COMPONENTS_DIR": "_components",
-                    },
+                    }
                 ],
-            },
+            }
         ):
             next_framework_settings.reload()
             paths = get_component_paths_for_watch()
@@ -559,10 +514,7 @@ class TestGetComponentPathsForWatch:
     def test_skips_non_dict_page_config(self) -> None:
         """Non-dict ``PAGE_BACKENDS`` entries are ignored."""
         with override_settings(
-            NEXT_FRAMEWORK={
-                "PAGE_BACKENDS": ["not-dict"],
-                "COMPONENT_BACKENDS": [],
-            },
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": ["not-dict"], "COMPONENT_BACKENDS": []}
         ):
             next_framework_settings.reload()
             assert get_component_paths_for_watch() == set()
@@ -571,10 +523,7 @@ class TestGetComponentPathsForWatch:
     def test_skips_non_dict_component_config(self) -> None:
         """Non-dict ``COMPONENT_BACKENDS`` entries are ignored."""
         with override_settings(
-            NEXT_FRAMEWORK={
-                "PAGE_BACKENDS": [],
-                "COMPONENT_BACKENDS": ["bad"],
-            },
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": [], "COMPONENT_BACKENDS": ["bad"]}
         ):
             next_framework_settings.reload()
             assert get_component_paths_for_watch() == set()
@@ -593,9 +542,9 @@ class TestGetComponentPathsForWatch:
                         "BACKEND": "next.components.FileComponentsBackend",
                         "DIRS": [str(root)],
                         "COMPONENTS_DIR": "_components",
-                    },
+                    }
                 ],
-            },
+            }
         ):
             next_framework_settings.reload()
             paths = get_component_paths_for_watch()
@@ -615,10 +564,10 @@ class TestGetComponentPathsForWatch:
                         "APP_DIRS": False,
                         "DIRS": [str(pages_root)],
                         "OPTIONS": {},
-                    },
+                    }
                 ],
                 "COMPONENT_BACKENDS": [],
-            },
+            }
         ):
             next_framework_settings.reload()
             with patch(
@@ -641,16 +590,16 @@ class TestGetComponentPathsForWatch:
                         "APP_DIRS": False,
                         "DIRS": [str(pages_root)],
                         "OPTIONS": {},
-                    },
+                    }
                 ],
                 "COMPONENT_BACKENDS": [
                     {
                         "BACKEND": "next.components.FileComponentsBackend",
                         "DIRS": [],
                         "COMPONENTS_DIR": "_components",
-                    },
+                    }
                 ],
-            },
+            }
         ):
             next_framework_settings.reload()
             with patch.object(Path, "glob", side_effect=OSError("glob fail")):
@@ -672,16 +621,16 @@ class TestGetComponentPathsForWatch:
                         "APP_DIRS": False,
                         "DIRS": [str(pages_root)],
                         "OPTIONS": {},
-                    },
+                    }
                 ],
                 "COMPONENT_BACKENDS": [
                     {
                         "BACKEND": "next.components.FileComponentsBackend",
                         "DIRS": [],
                         "COMPONENTS_DIR": "_components",
-                    },
+                    }
                 ],
-            },
+            }
         ):
             next_framework_settings.reload()
             with patch.object(Path, "relative_to", side_effect=ValueError("outside")):
@@ -698,9 +647,9 @@ class TestGetComponentPathsForWatch:
                         "BACKEND": "next.components.FileComponentsBackend",
                         "DIRS": [],
                         "COMPONENTS_DIR": "_components",
-                    },
+                    }
                 ],
-            },
+            }
         ):
             next_framework_settings.reload()
             with patch(
@@ -720,9 +669,9 @@ class TestGetComponentPathsForWatch:
                         "BACKEND": "next.components.DummyBackend",
                         "DIRS": [],
                         "COMPONENTS_DIR": "_components",
-                    },
+                    }
                 ],
-            },
+            }
         ):
             next_framework_settings.reload()
             assert get_component_paths_for_watch() == set()
@@ -740,9 +689,9 @@ class TestGetComponentPathsForWatch:
                         "BACKEND": "next.components.FileComponentsBackend",
                         "DIRS": [str(root)],
                         "COMPONENTS_DIR": "_components",
-                    },
+                    }
                 ],
-            },
+            }
         ):
             next_framework_settings.reload()
             with patch.object(Path, "iterdir", side_effect=OSError("read")):
@@ -762,16 +711,16 @@ class TestGetComponentPathsForWatch:
                         "APP_DIRS": False,
                         "DIRS": [str(pages_root)],
                         "OPTIONS": {},
-                    },
+                    }
                 ],
                 "COMPONENT_BACKENDS": [
                     {
                         "BACKEND": "next.components.FileComponentsBackend",
                         "DIRS": [],
                         "COMPONENTS_DIR": "_components",
-                    },
+                    }
                 ],
-            },
+            }
         ):
             next_framework_settings.reload()
             with patch(
@@ -796,16 +745,16 @@ class TestGetComponentPathsForWatch:
                         "APP_DIRS": False,
                         "DIRS": [str(pages_root)],
                         "OPTIONS": {},
-                    },
+                    }
                 ],
                 "COMPONENT_BACKENDS": [
                     {
                         "BACKEND": "next.components.FileComponentsBackend",
                         "DIRS": [],
                         "COMPONENTS_DIR": "_components",
-                    },
+                    }
                 ],
-            },
+            }
         ):
             next_framework_settings.reload()
             assert get_component_paths_for_watch() == set()
@@ -823,15 +772,13 @@ class TestGetComponentPathsForWatch:
                         "BACKEND": "next.components.FileComponentsBackend",
                         "DIRS": [str(root)],
                         "COMPONENTS_DIR": "_components",
-                    },
+                    }
                 ],
-            },
+            }
         ):
             next_framework_settings.reload()
             with patch.object(
-                ComponentScanner,
-                "scan_directory",
-                side_effect=OSError("scan"),
+                ComponentScanner, "scan_directory", side_effect=OSError("scan")
             ):
                 assert get_component_paths_for_watch() == set()
         next_framework_settings.reload()

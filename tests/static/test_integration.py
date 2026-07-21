@@ -7,11 +7,7 @@ import pytest
 from django.contrib.staticfiles.storage import staticfiles_storage
 from django.template import Context, Template
 
-from next.static import (
-    StaticCollector,
-    StaticFilesBackend,
-    StaticManager,
-)
+from next.static import StaticCollector, StaticFilesBackend, StaticManager
 from next.static.collector import HEAD_CLOSE
 
 
@@ -161,8 +157,7 @@ class TestEmptyCollectorIntegration:
         static_url_mock: None,
     ) -> None:
         out = wired_manager.inject(
-            f"<head>{HEAD_CLOSE}<body>{SCRIPTS_PLACEHOLDER}</body>",
-            collector,
+            f"<head>{HEAD_CLOSE}<body>{SCRIPTS_PLACEHOLDER}</body>", collector
         )
         assert "next/next.min.js" in out
         assert STYLES_PLACEHOLDER not in out

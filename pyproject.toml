@@ -200,6 +200,8 @@ select = ["ALL"]
 ignore = [
     # Framework-specific ignores
     "SLF001", # private member access (framework code needs this)
+    "ANN002", # missing type annotation for *args
+    "ANN003", # missing type annotation for **kwargs
 
     # Docstring rule conflicts - choose one of each conflicting pair
     "D203",   # incorrect-blank-line-before-class (conflicts with D211)
@@ -237,7 +239,7 @@ known-first-party = ["next"]
 force-single-line = false
 lines-after-imports = 2
 combine-as-imports = true
-split-on-trailing-comma = true
+split-on-trailing-comma = false
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
@@ -257,6 +259,11 @@ multiline-quotes = "double"
 allow-star-arg-any = false
 ignore-fully-untyped = false
 
+[tool.ruff.lint.flake8-unused-arguments]
+# *args/**kwargs a callback must accept but never reads are not dead code, so
+# they need no `_` prefix to mark them unused.
+ignore-variadic-names = true
+
 [tool.ruff.lint.flake8-pytest-style]
 mark-parentheses = true
 fixture-parentheses = true
@@ -267,7 +274,7 @@ extend-immutable-calls = ["next.deps.Depends"]
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
-skip-magic-trailing-comma = false
+skip-magic-trailing-comma = true
 docstring-code-format = true
 docstring-code-line-length = "dynamic"
 

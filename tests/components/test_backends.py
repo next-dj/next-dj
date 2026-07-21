@@ -106,7 +106,7 @@ class TestFileComponentsBackend:
         """Root component dir: .djx files are discovered as simple components."""
         (tmp_path / "header.djx").write_text("<header>Hi</header>")
         backend = FileComponentsBackend(
-            {**min_component_config, "DIRS": [str(tmp_path)]},
+            {**min_component_config, "DIRS": [str(tmp_path)]}
         )
         backend._ensure_loaded()
         assert len(backend._registry) == 1
@@ -125,7 +125,7 @@ class TestFileComponentsBackend:
         (tmp_path / "profile").mkdir()
         (tmp_path / "profile" / "component.djx").write_text("<div>profile</div>")
         backend = FileComponentsBackend(
-            {**min_component_config, "DIRS": [str(tmp_path)]},
+            {**min_component_config, "DIRS": [str(tmp_path)]}
         )
         backend._ensure_loaded()
         assert len(backend._registry) == 1
@@ -226,7 +226,7 @@ class TestFileComponentsBackend:
 
         with patch.object(ModuleLoader, "_load_from_disk", tracking_load_from_disk):
             backend = FileComponentsBackend(
-                {**min_component_config, "DIRS": [str(tmp_path)]},
+                {**min_component_config, "DIRS": [str(tmp_path)]}
             )
             backend._ensure_loaded()
             backend.import_all_component_modules()
@@ -275,10 +275,7 @@ class TestComponentsFactoryManager:
     def test_create_backend_imports_class_and_passes_config(self) -> None:
         """Backend is loaded by dotted path and receives the full config dict."""
         b = ComponentsFactory.create_backend(
-            {
-                "BACKEND": "next.components.DummyBackend",
-                "OPTIONS": {"marker": 7},
-            },
+            {"BACKEND": "next.components.DummyBackend", "OPTIONS": {"marker": 7}}
         )
         assert isinstance(b, DummyBackend)
         assert b.config["OPTIONS"]["marker"] == 7
@@ -306,7 +303,7 @@ class TestComponentsFactoryManager:
                     "DIRS": [],
                     "COMPONENTS_DIR": "_components",
                 },
-            ],
+            ]
         )
         with patch("next.components.manager.next_framework_settings", mock_ns2):
             mgr2._reload_config()
@@ -321,8 +318,8 @@ class TestComponentsFactoryManager:
                     "BACKEND": "next.components.BoomBackend",
                     "DIRS": [],
                     "COMPONENTS_DIR": "_components",
-                },
-            ],
+                }
+            ]
         )
         with patch("next.components.manager.next_framework_settings", mock_ns):
             mgr._reload_config()

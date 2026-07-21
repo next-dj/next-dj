@@ -55,12 +55,7 @@ class FormActionNotFoundError(LookupError):
         # failure.
         self._context: tuple[
             str, str | None, Callable[[], Iterable[str]] | Iterable[str], bool
-        ] = (
-            name,
-            page_path,
-            candidates,
-            registry_empty,
-        )
+        ] = (name, page_path, candidates, registry_empty)
         if message is None:
             super().__init__()
         else:
@@ -280,9 +275,7 @@ class FormActionBackend(ABC):
         """Run the handler for `uid`."""
 
     def get_meta(
-        self,
-        action_name: str,
-        page_path: str | None = None,
+        self, action_name: str, page_path: str | None = None
     ) -> "ActionMeta | None":
         """Return optional per-action metadata for subclasses."""
         del action_name, page_path
@@ -306,9 +299,7 @@ class FormActionBackend(ABC):
         return ""
 
     def shape_response(
-        self,
-        request: "HttpRequest",
-        outcome: ActionOutcome,
+        self, request: "HttpRequest", outcome: ActionOutcome
     ) -> "HttpResponse":
         """Turn one pipeline outcome into the HTTP response.
 
@@ -318,10 +309,7 @@ class FormActionBackend(ABC):
         """
         # Deferred to break the next.forms <-> next.partial import cycle:
         # partial shaping imports the form dispatch and origin helpers.
-        from next.partial import (  # noqa: PLC0415
-            is_partial_request,
-            shape_partial,
-        )
+        from next.partial import is_partial_request, shape_partial  # noqa: PLC0415
 
         if is_partial_request(request):
             return shape_partial(self, request, outcome)
@@ -338,7 +326,7 @@ def _make_uid_for_action(scope_key: str, name: str) -> str:
 _url_caching_backends: "WeakSet[RegistryFormActionBackend]" = WeakSet()
 
 
-def _on_setting_changed(*, setting: str, **_kwargs: object) -> None:
+def _on_setting_changed(*, setting: str, **kwargs) -> None:
     """Drop cached action URLs when the URLconf is swapped under override_settings."""
     if setting == "ROOT_URLCONF":
         for backend in _url_caching_backends:
@@ -528,9 +516,7 @@ class RegistryFormActionBackend(FormActionBackend):
 
     @override
     def get_meta(
-        self,
-        action_name: str,
-        page_path: str | None = None,
+        self, action_name: str, page_path: str | None = None
     ) -> "ActionMeta | None":
         """Return stored `ActionMeta` for the name, if any."""
         if page_path is not None:

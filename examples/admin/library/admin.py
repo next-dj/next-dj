@@ -42,17 +42,10 @@ class BookAdmin(admin.ModelAdmin):
         description="Mark selected %(verbose_name_plural)s as published",
         permissions=["change"],
     )
-    def mark_as_published(
-        self,
-        request: HttpRequest,
-        queryset: QuerySet[Book],
-    ) -> None:
+    def mark_as_published(self, request: HttpRequest, queryset: QuerySet[Book]) -> None:
         """Flip the selected books to `published` status in a single UPDATE."""
         updated = queryset.update(status=Book.PUBLISHED)
-        self.message_user(
-            request,
-            f"{updated} book(s) marked as published.",
-        )
+        self.message_user(request, f"{updated} book(s) marked as published.")
 
 
 @admin.register(Chapter)

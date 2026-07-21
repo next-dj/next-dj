@@ -39,32 +39,17 @@ class TestRouting:
         assert "Featured" in body
 
     @pytest.mark.parametrize(
-        ("show", "expected_count"),
-        [
-            (None, 3),
-            (1, 1),
-            (6, 6),
-            (999, 12),
-            (0, 1),
-        ],
+        ("show", "expected_count"), [(None, 3), (1, 1), (6, 6), (999, 12), (0, 1)]
     )
     def test_landing_show_query_param(
-        self,
-        client,
-        catalog_db,
-        show,
-        expected_count,
+        self, client, catalog_db, show, expected_count
     ) -> None:
         """Honour `?show=N` on the landing through `DQuery[int]`."""
         url = "/" if show is None else f"/?show={show}"
         body = client.get(url).content.decode()
         assert body.count("data-product-card") == expected_count
 
-    def test_landing_reuses_product_card_css(
-        self,
-        client,
-        catalog_db,
-    ) -> None:
+    def test_landing_reuses_product_card_css(self, client, catalog_db) -> None:
         """Render the shared `product_card.css` once on the landing too."""
         body = client.get("/").content.decode()
         assert body.count("data-product-card") == 3
@@ -135,16 +120,10 @@ class TestFilters:
         ],
     )
     def test_filter_by_brand_keeps_only_listed_brands(
-        self,
-        client,
-        catalog_db,
-        query,
-        expected_brands,
+        self, client, catalog_db, query, expected_brands
     ) -> None:
         """Restrict the listing to the requested brands across every wire format."""
-        cards = _product_card_section(
-            client.get(f"/catalog/{query}").content.decode(),
-        )
+        cards = _product_card_section(client.get(f"/catalog/{query}").content.decode())
         excluded = {"Acme", "Globex", "Initech", "Hooli"} - expected_brands
         for brand in excluded:
             assert brand not in cards
@@ -162,21 +141,13 @@ class TestFilters:
         assert r.status_code == 200
         assert "out of stock" not in _product_card_section(r.content.decode()).lower()
 
-    def test_search_query_matches_product_name(
-        self,
-        client,
-        catalog_db,
-    ) -> None:
+    def test_search_query_matches_product_name(self, client, catalog_db) -> None:
         """Match products whose name contains the search term."""
         r = client.get("/catalog/?q=iPhone")
         assert r.status_code == 200
         assert "iPhone 15" in r.content.decode()
 
-    def test_pagination_returns_distinct_pages(
-        self,
-        client,
-        catalog_db,
-    ) -> None:
+    def test_pagination_returns_distinct_pages(self, client, catalog_db) -> None:
         """Return non-overlapping product slugs for different page numbers."""
         slugs_page1 = _slug_set(client.get("/catalog/?page=1").content.decode())
         slugs_page2 = _slug_set(client.get("/catalog/?page=2").content.decode())
@@ -189,9 +160,7 @@ class TestActiveFilterChip:
     """Cover the active-filter chip rendered by the context processor."""
 
     def test_chip_renders_with_class_and_data_attribute(
-        self,
-        client,
-        catalog_db,
+        self, client, catalog_db
     ) -> None:
         """Render a chip with the active-filter class and a data attribute."""
         body = client.get("/catalog/?brand=Acme").content.decode()
@@ -199,11 +168,7 @@ class TestActiveFilterChip:
         assert 'data-active-filter="brand"' in body
         assert "Brand Acme" in body
 
-    def test_no_chip_on_default_sort(
-        self,
-        client,
-        catalog_db,
-    ) -> None:
+    def test_no_chip_on_default_sort(self, client, catalog_db) -> None:
         """Skip chip rendering when only the default sort key is present."""
         body = client.get("/catalog/?sort=newest").content.decode()
         assert "data-active-filter" not in body
@@ -212,11 +177,7 @@ class TestActiveFilterChip:
 class TestInheritContext:
     """Cover the `inherit_context=True` pathway."""
 
-    def test_product_detail_uses_inherited_category(
-        self,
-        client,
-        catalog_db,
-    ) -> None:
+    def test_product_detail_uses_inherited_category(self, client, catalog_db) -> None:
         """Surface the inherited Category instance on the product detail page."""
         body = client.get("/catalog/electronics/iphone-15/").content.decode()
         assert "Electronics" in body
@@ -227,20 +188,14 @@ class TestCacheHit:
     """Cover the LocMem cache hit path of `cached_search`."""
 
     def test_two_identical_requests_share_one_cache_key(
-        self,
-        client,
-        catalog_db,
+        self, client, catalog_db
     ) -> None:
         """Store one cache entry when the same filters arrive twice in a row."""
         client.get("/catalog/?brand=Acme")
         client.get("/catalog/?brand=Acme")
         assert len(_cache_keys()) == 1
 
-    def test_distinct_filters_produce_distinct_keys(
-        self,
-        client,
-        catalog_db,
-    ) -> None:
+    def test_distinct_filters_produce_distinct_keys(self, client, catalog_db) -> None:
         """Store one cache entry per distinct filter set."""
         client.get("/catalog/?brand=Acme")
         client.get("/catalog/?brand=Globex")
@@ -343,9 +298,7 @@ class TestInfiniteScrollAppend:
     ) -> None:
         first = client.get_zones("/catalog/", "catalog-results")
         second = client.get_zones(
-            "/catalog/?page=2",
-            "catalog-results",
-            HTTP_X_NEXT_MERGE="append",
+            "/catalog/?page=2", "catalog-results", HTTP_X_NEXT_MERGE="append"
         )
         keys_one = set(
             KEY_PATTERN.findall(envelope_of(first).html_for_zone("catalog-results"))

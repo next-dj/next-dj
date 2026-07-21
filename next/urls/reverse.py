@@ -14,10 +14,7 @@ from .parser import default_url_parser
 
 
 def page_reverse(
-    path_template: str = "",
-    *,
-    namespace: str = app_name,
-    **kwargs: object,
+    path_template: str = "", *, namespace: str = app_name, **kwargs
 ) -> str:
     """Reverse a file-router page URL from its directory-tree template."""
     clean_name = default_url_parser.prepare_url_name(path_template)
@@ -30,7 +27,7 @@ def page_reverse(
 page_reverse_lazy = lazy(page_reverse, str)
 
 
-def with_query(base: str, **overrides: object) -> str:
+def with_query(base: str, **overrides) -> str:
     """Return `base` with its query string updated by `overrides`.
 
     `None` values drop their key from the result. Multi-valued keys can be
@@ -50,7 +47,7 @@ def with_query(base: str, **overrides: object) -> str:
             pairs.append((key, str(value)))
     new_query = urlencode(pairs, doseq=False)
     return urlunsplit(
-        (parts.scheme, parts.netloc, parts.path, new_query, parts.fragment),
+        (parts.scheme, parts.netloc, parts.path, new_query, parts.fragment)
     )
 
 

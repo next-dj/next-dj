@@ -30,10 +30,7 @@ class TestBoundFormOverride:
         form = EditorForm(data={"name": "Ada"})
         assert form.is_valid()
         result = render_zone(
-            FORMZONE_PAGE,
-            ("editor",),
-            _request(),
-            overrides={"form": form},
+            FORMZONE_PAGE, ("editor",), _request(), overrides={"form": form}
         )
         assert 'value="Ada"' in result.html["editor"]
 
@@ -41,10 +38,7 @@ class TestBoundFormOverride:
         form = EditorForm(data={"name": ""})
         assert not form.is_valid()
         result = render_zone(
-            FORMZONE_PAGE,
-            ("editor",),
-            _request(),
-            overrides={"form": form},
+            FORMZONE_PAGE, ("editor",), _request(), overrides={"form": form}
         )
         assert 'data-next-zone="editor"' in result.html["editor"]
         assert "required" in result.html["editor"].lower()

@@ -12,8 +12,7 @@ from next.pages import context
 
 class NoteCreateForm(Form):
     title = django_forms.CharField(
-        max_length=160,
-        widget=ComponentWidget("input", placeholder="Note title"),
+        max_length=160, widget=ComponentWidget("input", placeholder="Note title")
     )
     body = django_forms.CharField(
         required=False,
@@ -30,10 +29,7 @@ class NoteCreateForm(Form):
             body=self.cleaned_data.get("body", ""),
         )
         return HttpResponseRedirect(
-            reverse(
-                "next:page_notes_int_note_id_edit",
-                kwargs={"note_id": note_obj.pk},
-            ),
+            reverse("next:page_notes_int_note_id_edit", kwargs={"note_id": note_obj.pk})
         )
 
 

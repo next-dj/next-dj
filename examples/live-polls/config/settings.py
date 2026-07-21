@@ -59,25 +59,22 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
-            ],
+            ]
         },
-    },
+    }
 ]
 
 WSGI_APPLICATION = "config.wsgi.application"
 
 DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
-    },
+    "default": {"ENGINE": "django.db.backends.sqlite3", "NAME": BASE_DIR / "db.sqlite3"}
 }
 
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
         "LOCATION": "live-polls",
-    },
+    }
 }
 
 LANGUAGE_CODE = "en-us"
@@ -102,17 +99,15 @@ NEXT_FRAMEWORK = {
             # around every poll list, detail, and stream surface.
             "DIRS": [str(BASE_DIR / "studio")],
             "PAGES_DIR": "screens",
-            "OPTIONS": {
-                "context_processors": [],
-            },
-        },
+            "OPTIONS": {"context_processors": []},
+        }
     ],
     "COMPONENT_BACKENDS": [
         {
             "BACKEND": "next.components.FileComponentsBackend",
             "DIRS": [str(SHARED_DIR / "_components")],
             "COMPONENTS_DIR": "_widgets",
-        },
+        }
     ],
     "STATIC_BACKENDS": [
         {
@@ -126,6 +121,6 @@ NEXT_FRAMEWORK = {
                     BASE_DIR / "polls/static/polls/dist/.vite/manifest.json"
                 ),
             },
-        },
+        }
     ],
 }

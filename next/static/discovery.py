@@ -159,10 +159,7 @@ class PathResolver:
     provider callable returns already resolved absolute page roots.
     """
 
-    def __init__(
-        self,
-        page_roots_provider: Callable[[], tuple[Path, ...]],
-    ) -> None:
+    def __init__(self, page_roots_provider: Callable[[], tuple[Path, ...]]) -> None:
         """Store the page-roots provider callable consulted on every lookup."""
         self._provider = page_roots_provider
         self._find_page_root_cache: dict[Path, Path | None] = {}
@@ -185,9 +182,7 @@ class PathResolver:
         return None
 
     def logical_name_for_template(
-        self,
-        template_dir: Path,
-        page_root: Path | None,
+        self, template_dir: Path, page_root: Path | None
     ) -> str:
         """Return the logical URL name for a page template directory.
 
@@ -201,11 +196,7 @@ class PathResolver:
             return self._fallback(template_dir)
         return rel or "index"
 
-    def logical_name_for_layout(
-        self,
-        layout_dir: Path,
-        page_root: Path | None,
-    ) -> str:
+    def logical_name_for_layout(self, layout_dir: Path, page_root: Path | None) -> str:
         """Return the logical URL name for a layout directory.
 
         The caller is expected to pass a resolved `layout_dir` and a
@@ -247,11 +238,7 @@ class AssetDiscovery:
         self._module_list_cache: OrderedDict[Path, dict[str, list[str]]] = OrderedDict()
         self._layout_dir_cache: OrderedDict[Path, list[Path]] = OrderedDict()
 
-    def discover_page_assets(
-        self,
-        file_path: Path,
-        collector: StaticCollector,
-    ) -> None:
+    def discover_page_assets(self, file_path: Path, collector: StaticCollector) -> None:
         """Collect layout, template, and module-level assets for a page file.
 
         Assets are added from the outermost layout inward, then from
@@ -283,9 +270,7 @@ class AssetDiscovery:
             self._collect_module_lists(resolved, collector)
 
     def discover_component_assets(
-        self,
-        info: ComponentInfo,
-        collector: StaticCollector,
+        self, info: ComponentInfo, collector: StaticCollector
     ) -> None:
         """Collect co-located CSS, JS, and module asset lists for a component."""
         component_dir = self._component_directory(info)
@@ -324,9 +309,7 @@ class AssetDiscovery:
                     self._register_file(candidate, logical_name, kind, collector)
 
     def _collect_module_lists(
-        self,
-        module_path: Path,
-        collector: StaticCollector,
+        self, module_path: Path, collector: StaticCollector
     ) -> None:
         """Read URL list variables matching every registered placeholder slot.
 
@@ -363,10 +346,7 @@ class AssetDiscovery:
                 self._register_module_url(url, slot_name, collector)
 
     def _register_module_url(
-        self,
-        url: str,
-        slot_name: str,
-        collector: StaticCollector,
+        self, url: str, slot_name: str, collector: StaticCollector
     ) -> None:
         """Resolve a module-level URL to a kind and add it to the collector.
 
@@ -421,11 +401,7 @@ class AssetDiscovery:
             return
         asset = StaticAsset(url=url, kind=kind, source_path=source_path.resolve())
         collector.add(asset)
-        asset_registered.send(
-            sender=asset,
-            collector=collector,
-            backend=backend,
-        )
+        asset_registered.send(sender=asset, collector=collector, backend=backend)
 
     def _component_directory(self, info: ComponentInfo) -> Path | None:
         """Return the directory that holds a composite component, or None."""
@@ -438,9 +414,7 @@ class AssetDiscovery:
         return None  # pragma: no cover
 
     def _find_layout_directories(
-        self,
-        file_path: Path,
-        page_root: Path | None,
+        self, file_path: Path, page_root: Path | None
     ) -> list[Path]:
         """Walk up from the page directory and return layout dirs outermost first.
 

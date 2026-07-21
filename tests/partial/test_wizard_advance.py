@@ -9,7 +9,7 @@ from next.testing import NextClient, envelope_of
 from tests.support import CountingWizardBackend
 
 
-def _advance_identity(next_client: NextClient, **kwargs: object) -> HttpResponse:
+def _advance_identity(next_client: NextClient, **kwargs) -> HttpResponse:
     return next_client.post_action(
         "step_wizard",
         {"name": "Ada"},
@@ -104,7 +104,7 @@ class TestWizardAdvanceRendersZoneNotPageView:
         calls: list[tuple] = []
         original = shaping_module.render_zone
 
-        def _spy(page_path, zones, request, **kwargs: object):
+        def _spy(page_path, zones, request, **kwargs):
             calls.append((page_path, zones))
             return original(page_path, zones, request, **kwargs)
 
@@ -189,7 +189,7 @@ class TestWizardAdvanceShipsZoneAssetsAndContext:
             collector=collector,
         )
         monkeypatch.setattr(
-            shaping_module, "render_zone", lambda *_args, **_kwargs: crafted
+            shaping_module, "render_zone", lambda *args, **kwargs: crafted
         )
         response = _advance_identity(next_client, zones="wizard-zone")
         envelope = envelope_of(response)

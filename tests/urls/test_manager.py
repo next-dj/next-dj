@@ -59,12 +59,7 @@ class TestRouterManager:
         assert repr(manager) == "<RouterManager backends=0>"
 
     @pytest.mark.parametrize(
-        ("router_count", "expected_len"),
-        [
-            (0, 0),
-            (1, 1),
-        ],
-        ids=["empty", "one_router"],
+        ("router_count", "expected_len"), [(0, 0), (1, 1)], ids=["empty", "one_router"]
     )
     def test_len_variations(self, manager, router_count, expected_len) -> None:
         """``len`` matches number of registered routers."""
@@ -104,7 +99,7 @@ class TestRouterManager:
                     "PAGES_DIR": "pages",
                     "APP_DIRS": True,
                     "OPTIONS": {},
-                },
+                }
             ]
             mock_router = Mock()
             mock_router.generate_urls.return_value = ["url1"]
@@ -157,8 +152,7 @@ class TestRouterManager:
         """Each config-error type from backend creation is logged and swallowed."""
         with (
             patch(
-                "next.urls.RouterFactory.create_backend",
-                side_effect=exc_type("boom"),
+                "next.urls.RouterFactory.create_backend", side_effect=exc_type("boom")
             ),
             caplog.at_level(logging.ERROR, logger="next.urls.manager"),
         ):
@@ -277,9 +271,7 @@ class TestGlobalInstances:
         render_module_path.write_text(file_content)
 
         pattern = page.create_url_pattern(
-            "test/[[args]]",
-            render_module_path,
-            router._url_parser,
+            "test/[[args]]", render_module_path, router._url_parser
         )
         assert pattern is not None
 
@@ -297,9 +289,7 @@ class TestGlobalInstances:
         )
 
         pattern = page.create_url_pattern(
-            "test/[[args]]",
-            render_module_path,
-            router._url_parser,
+            "test/[[args]]", render_module_path, router._url_parser
         )
         assert pattern is not None
 
@@ -314,10 +304,7 @@ class TestGlobalInstances:
         mock_s.BASE_DIR = None
         with (
             patch("next.urls.backends.settings", mock_s),
-            patch(
-                "next.utils.settings",
-                mock_s,
-            ),
+            patch("next.utils.settings", mock_s),
         ):
             urls = router._generate_root_urls()
             assert urls == []
@@ -343,17 +330,13 @@ class TestGlobalInstances:
         mock_s.INSTALLED_APPS = ["testapp1", "testapp2"]
         with (
             patch("next.urls.backends.settings", mock_s),
-            patch(
-                "next.utils.settings",
-                mock_s,
-            ),
+            patch("next.utils.settings", mock_s),
             patch.object(router, "_get_app_pages_path") as mock_get_path,
         ):
             mock_get_path.side_effect = [None, Path("/tmp/pages")]
 
             with patch.object(
-                router,
-                "_generate_patterns_from_directory",
+                router, "_generate_patterns_from_directory"
             ) as mock_gen_patterns:
                 mock_gen_patterns.return_value = ["pattern1", "pattern2"]
 
@@ -370,9 +353,7 @@ class TestGlobalInstances:
 
         with (
             patch.object(
-                router,
-                "_get_root_pages_paths",
-                return_value=[Path("/tmp/pages")],
+                router, "_get_root_pages_paths", return_value=[Path("/tmp/pages")]
             ),
             patch.object(
                 router,
@@ -392,17 +373,17 @@ class TestGlobalInstances:
 
         (pages_dir / "home").mkdir(parents=True, exist_ok=True)
         (pages_dir / "home" / "page.py").write_text(
-            "def render(request):\n    return 'home'\n",
+            "def render(request):\n    return 'home'\n"
         )
 
         (pages_dir / "items" / "[int:id]").mkdir(parents=True, exist_ok=True)
         (pages_dir / "items" / "[int:id]" / "page.py").write_text(
-            "def render(request, id):\n    return id\n",
+            "def render(request, id):\n    return id\n"
         )
 
         (pages_dir / "blog" / "post").mkdir(parents=True, exist_ok=True)
         (pages_dir / "blog" / "post" / "page.py").write_text(
-            "def render(request):\n    return 'post'\n",
+            "def render(request):\n    return 'post'\n"
         )
 
         results = list(router._scan_pages_directory(pages_dir))
@@ -417,11 +398,7 @@ class TestGlobalInstances:
         router = FileRouterBackend()
 
         with named_temp_py('template = "Hello {{ name }}!"') as temp_file:
-            pattern = page.create_url_pattern(
-                "test",
-                temp_file,
-                router._url_parser,
-            )
+            pattern = page.create_url_pattern("test", temp_file, router._url_parser)
             assert pattern is not None
             assert hasattr(pattern, "callback")
             assert hasattr(pattern, "name")
@@ -432,11 +409,7 @@ class TestGlobalInstances:
         router = FileRouterBackend()
 
         with named_temp_py('template = "Hello {{ name }}!"') as temp_file:
-            pattern = page.create_url_pattern(
-                "test",
-                temp_file,
-                router._url_parser,
-            )
+            pattern = page.create_url_pattern("test", temp_file, router._url_parser)
 
             view_func = pattern.callback
             response = view_func(RequestFactory().get("/"), name="John")
@@ -451,11 +424,7 @@ class TestGlobalInstances:
         router = FileRouterBackend()
 
         with named_temp_py('template = "Hello {{ name }}!"') as temp_file:
-            pattern = page.create_url_pattern(
-                "test",
-                temp_file,
-                router._url_parser,
-            )
+            pattern = page.create_url_pattern("test", temp_file, router._url_parser)
 
             view_func = pattern.callback
             response = view_func(
@@ -471,9 +440,7 @@ class TestGlobalInstances:
 
         with named_temp_py('template = "Hello {{ name }}!"') as temp_file:
             pattern = page.create_url_pattern(
-                "test/[[args]]",
-                temp_file,
-                router._url_parser,
+                "test/[[args]]", temp_file, router._url_parser
             )
 
             view_func = pattern.callback
@@ -496,9 +463,7 @@ class TestGlobalInstances:
 
         with patch("importlib.util.spec_from_file_location", return_value=None):
             pattern = page.create_url_pattern(
-                "test",
-                Path("/nonexistent/file.py"),
-                router._url_parser,
+                "test", Path("/nonexistent/file.py"), router._url_parser
             )
             assert pattern is None
 
@@ -511,9 +476,7 @@ class TestGlobalInstances:
 
         with patch("importlib.util.spec_from_file_location", return_value=mock_spec):
             pattern = page.create_url_pattern(
-                "test",
-                Path("/some/file.py"),
-                router._url_parser,
+                "test", Path("/some/file.py"), router._url_parser
             )
             assert pattern is None
 
@@ -549,9 +512,7 @@ class TestLazyUrlPatterns:
         """Explicit ``__reversed__`` walks one ``_patterns()`` build, not one per index."""
         assert "__reversed__" in type(lazy_urlpatterns).__dict__
         with patch.object(
-            type(lazy_urlpatterns),
-            "_patterns",
-            return_value=["r1", "r2", "f1"],
+            type(lazy_urlpatterns), "_patterns", return_value=["r1", "r2", "f1"]
         ) as mock_patterns:
             assert list(reversed(lazy_urlpatterns)) == ["f1", "r2", "r1"]
         assert mock_patterns.call_count == 1
@@ -559,9 +520,7 @@ class TestLazyUrlPatterns:
     def test_cache_hit_builds_once(self) -> None:
         """Two accesses with stable versions expand the routers once."""
         with patch.object(
-            RouterManager,
-            "__iter__",
-            side_effect=lambda *_args: iter([]),
+            RouterManager, "__iter__", side_effect=lambda *args: iter([])
         ) as mock_iter:
             first = list(lazy_urlpatterns)
             second = list(lazy_urlpatterns)
@@ -571,9 +530,7 @@ class TestLazyUrlPatterns:
     def test_invalidated_by_router_reload(self) -> None:
         """`router_manager.reload()` bumps the version and forces a rebuild."""
         with patch.object(
-            RouterManager,
-            "__iter__",
-            side_effect=lambda *_args: iter([]),
+            RouterManager, "__iter__", side_effect=lambda *args: iter([])
         ) as mock_iter:
             list(lazy_urlpatterns)
             router_manager.reload()
@@ -674,9 +631,7 @@ class TestLazyUrlPatterns:
     def test_include_defers_materialisation_until_first_resolve(self) -> None:
         """``include()`` does not iterate patterns, the first resolve does."""
         with patch.object(
-            RouterManager,
-            "__iter__",
-            side_effect=lambda *_args: iter([]),
+            RouterManager, "__iter__", side_effect=lambda *args: iter([])
         ) as mock_iter:
             included = include("next.urls")
             mock_iter.assert_not_called()

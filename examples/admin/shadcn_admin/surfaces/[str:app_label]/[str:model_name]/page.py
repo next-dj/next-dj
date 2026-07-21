@@ -29,10 +29,7 @@ def _visible_columns(cl: ChangeList) -> list[str]:
 
 
 def _columns(
-    cl: ChangeList,
-    visible: list[str],
-    model: type[Model],
-    model_admin: ModelAdmin,
+    cl: ChangeList, visible: list[str], model: type[Model], model_admin: ModelAdmin
 ) -> list[dict[str, Any]]:
     ordering_columns = cl.get_ordering_field_columns()
     sortable_by = cl.sortable_by
@@ -57,11 +54,7 @@ def _columns(
     return [entry(i, name) for i, name in enumerate(visible)]
 
 
-def _row_cell(
-    name: str,
-    obj: Model,
-    model_admin: ModelAdmin,
-) -> str | SafeString:
+def _row_cell(name: str, obj: Model, model_admin: ModelAdmin) -> str | SafeString:
     try:
         field, _attr, value = lookup_field(name, obj, model_admin)
     except (AttributeError, ValueError):  # pragma: no cover
@@ -127,9 +120,7 @@ def _filters(cl: ChangeList) -> list[dict[str, Any]]:
 
 
 def _actions(
-    model_admin: ModelAdmin,
-    model: type[Model],
-    request: HttpRequest,
+    model_admin: ModelAdmin, model: type[Model], request: HttpRequest
 ) -> list[dict[str, Any]]:
     placeholders = {
         "verbose_name": str(model._meta.verbose_name),
@@ -145,9 +136,7 @@ def _actions(
 
 @context("changelist_state")
 def changelist_state(
-    request: HttpRequest,
-    app_label: str,
-    model_name: str,
+    request: HttpRequest, app_label: str, model_name: str
 ) -> dict[str, Any]:
     """Render changelist data from `ModelAdmin.get_changelist_instance(request)`."""
     model, model_admin = utils.resolve_model_admin(app_label, model_name)
@@ -173,22 +162,16 @@ def changelist_state(
 
 
 @action("admin:bulk_action", login_required=True)
-def bulk_action(
-    request: HttpRequest,
-    app_label: str,
-    model_name: str,
-) -> HttpResponse:
+def bulk_action(request: HttpRequest, app_label: str, model_name: str) -> HttpResponse:
     """Run a Django admin bulk action and redirect to the origin changelist."""
     _, model_admin = utils.resolve_model_admin(app_label, model_name)
     if not model_admin.has_view_or_change_permission(request):
         raise PermissionDenied
     response = model_admin.response_action(
-        request,
-        queryset=model_admin.get_queryset(request),
+        request, queryset=model_admin.get_queryset(request)
     )
     if response is None or isinstance(response, HttpResponseRedirect):
         return redirect_to_origin(
-            request,
-            fallback=utils.changelist_url(app_label, model_name),
+            request, fallback=utils.changelist_url(app_label, model_name)
         )
     return response  # pragma: no cover

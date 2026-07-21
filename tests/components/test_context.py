@@ -49,9 +49,7 @@ class TestComponentContextManager:
         (tmp_path / "k" / "component.djx").write_text("<span>{{ count }}</span>")
         (tmp_path / "k" / "component.py").write_text("# empty\n")
         component._registry.register(
-            tmp_path / "k" / "component.py",
-            "count",
-            lambda: 42,
+            tmp_path / "k" / "component.py", "count", lambda: 42
         )
         info = ComponentInfo(
             name="k",
@@ -244,10 +242,7 @@ class TestComponentContextManagerFrames:
     def test_get_caller_path_raises_when_no_python_file_in_chain(self) -> None:
         """Walk stops if no frame exposes a ``.py`` __file__."""
         inner = types.SimpleNamespace(f_back=None, f_globals={"__file__": "/x.txt"})
-        start = types.SimpleNamespace(
-            f_back=inner,
-            f_globals={"__file__": "/y.txt"},
-        )
+        start = types.SimpleNamespace(f_back=inner, f_globals={"__file__": "/y.txt"})
         mgr = ComponentContextManager()
         with (
             patch("next.utils.inspect.currentframe", return_value=start),
@@ -480,11 +475,7 @@ class TestComponentContextSerializerOverride:
         mgr, info, module_path = self._setup(tmp_path)
         marker = self._MarkerSerializer()
         mgr._registry.register(
-            module_path,
-            "feed",
-            lambda: "payload",
-            serialize=True,
-            serializer=marker,
+            module_path, "feed", lambda: "payload", serialize=True, serializer=marker
         )
 
         collector = StaticCollector()

@@ -30,8 +30,7 @@ def _load(path: Path, name: str) -> ModuleType:
 
 
 _note_card = _load(
-    PAGES_ROOT / "notes" / "_blocks" / "note_card" / "component.py",
-    "mt_note_card",
+    PAGES_ROOT / "notes" / "_blocks" / "note_card" / "component.py", "mt_note_card"
 )
 
 
@@ -73,9 +72,7 @@ class TestTenantMiddleware:
     @override_settings(DEBUG=False)
     def test_unknown_tenant_returns_404(self) -> None:
         middleware = TenantMiddleware(Mock())
-        response = middleware(
-            self._request(meta={"HTTP_X_TENANT": "nope"}),
-        )
+        response = middleware(self._request(meta={"HTTP_X_TENANT": "nope"}))
         assert response.status_code == 404
 
     @pytest.mark.django_db()
@@ -189,9 +186,7 @@ class TestTenantTheme:
     def test_returns_css_variables_for_known_tenant(self) -> None:
         request = HttpRequest()
         request.tenant = Tenant(  # type: ignore[attr-defined]
-            slug="acme",
-            name="Acme",
-            primary_color="#2563eb",
+            slug="acme", name="Acme", primary_color="#2563eb"
         )
         result = tenant_theme(request)
         assert result["tenant_theme"] == {"--tenant-accent": "#2563eb"}
@@ -211,10 +206,7 @@ class TestTenantPrefixStaticBackend:
         backend = TenantPrefixStaticBackend()
         request = HttpRequest()
         request.tenant = Tenant(slug="acme", name="Acme")  # type: ignore[attr-defined]
-        rendered = backend.render_script_tag(
-            "/static/next/a.js",
-            request=request,
-        )
+        rendered = backend.render_script_tag("/static/next/a.js", request=request)
         assert 'src="/_t/acme/static/next/a.js"' in rendered
 
     def test_module_tag_prepends_prefix(self) -> None:
@@ -222,8 +214,7 @@ class TestTenantPrefixStaticBackend:
         request = HttpRequest()
         request.tenant = Tenant(slug="acme", name="Acme")  # type: ignore[attr-defined]
         rendered = backend.render_module_tag(
-            "/static/next/components/markdown_preview.mjs",
-            request=request,
+            "/static/next/components/markdown_preview.mjs", request=request
         )
         assert 'type="module"' in rendered
         assert 'src="/_t/acme/static/next/components/markdown_preview.mjs"' in rendered
@@ -233,8 +224,7 @@ class TestTenantPrefixStaticBackend:
         request = HttpRequest()
         request.tenant = Tenant(slug="acme", name="Acme")  # type: ignore[attr-defined]
         rendered = backend.render_link_tag(
-            "https://cdn.example.com/x.css",
-            request=request,
+            "https://cdn.example.com/x.css", request=request
         )
         assert "https://cdn.example.com/x.css" in rendered
         assert "/_t/" not in rendered
@@ -316,7 +306,7 @@ class TestMarkdownRender:
         rendered = str(
             render_markdown(
                 "# Heading\n\n```py\nprint(1)\n```\n\n[ok](https://example.com)"
-            ),
+            )
         )
         assert "<h1>Heading</h1>" in rendered
         assert "<pre>" in rendered

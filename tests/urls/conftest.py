@@ -16,10 +16,7 @@ def router():
 def mock_settings():
     """Patch ``settings`` in both ``urls`` and ``filesystem`` (``resolve_base_dir``)."""
     mock = Mock()
-    with (
-        patch("next.urls.backends.settings", mock),
-        patch("next.utils.settings", mock),
-    ):
+    with patch("next.urls.backends.settings", mock), patch("next.utils.settings", mock):
         yield mock
 
 

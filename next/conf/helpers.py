@@ -22,10 +22,7 @@ _BACKEND_LIST_KEYS = frozenset(
 
 
 def extend_default_backend(
-    key: str,
-    *,
-    index: int = 0,
-    **overrides: object,
+    key: str, *, index: int = 0, **overrides
 ) -> list[dict[str, Any]]:
     """Return a `NEXT_FRAMEWORK[key]` list with one backend entry patched.
 
