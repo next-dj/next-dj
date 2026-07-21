@@ -194,9 +194,9 @@ have denied.
 ``LayerHrefWithoutZoneError`` is raised when a layer seeds an ``href`` but names no
 ``zone=`` to load it into, so the builder refuses the layer instead of opening an empty
 one on the client.
-The remaining eight are rarely caught and stay out of the curated surface.
-They guard the custom-verb contract, the event-name and dedupe vocabularies, and the
-foreign-page and href rules, and live in ``next.partial.patches``.
+The remaining nine are rarely caught and stay out of the curated surface.
+They guard the custom-verb contract, the event-name, context-key, and dedupe vocabularies,
+and the foreign-page and href rules, and live in ``next.partial.patches``.
 
 .. autoexception:: next.partial.UnknownZoneError
    :members:
@@ -217,6 +217,9 @@ foreign-page and href rules, and live in ``next.partial.patches``.
    :members:
 
 .. autoexception:: next.partial.patches.UnknownContextNameError
+   :members:
+
+.. autoexception:: next.partial.patches.ReservedContextKeyError
    :members:
 
 .. autoexception:: next.partial.patches.ReservedEventNameError

@@ -23,6 +23,21 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+# The client insertion verb each built-in renderer stands for. The registry owns
+# the table because it is the only place that knows which renderer a kind uses.
+_RENDERER_LOADS: Final[dict[str, str]] = {
+    "render_link_tag": "link",
+    "render_script_tag": "script",
+    "render_module_tag": "module",
+}
+
+# The element the runtime builds around an inline body for each verb. A kind whose
+# own `inline_tag` differs would render that body into another element on a full
+# page render, so the verb is withheld instead of letting the two renders disagree.
+# The `module` verb builds a typed script no `inline_tag` can name, hence its absence.
+_LOAD_INLINE_TAGS: Final[dict[str, str]] = {"link": "style", "script": "script"}
+
+
 class StaticNamespace:
     """Namespace constants used when building staticfiles URL paths.
 
@@ -170,6 +185,27 @@ class KindRegistry:
             msg = f"Unsupported asset kind: {kind!r}"
             raise KeyError(msg)
         return self._renderers[kind]
+
+    def load(self, kind: str, *, inline: bool = False) -> str | None:
+        """Return the client insertion verb for the kind, or None when it has none.
+
+        A kind that is not registered, or one whose renderer is a custom
+        backend method, has no verb the runtime can act on, so the wire
+        omits the field rather than guessing. With `inline` the verb also
+        requires the kind's `inline_tag` to be the element the runtime
+        builds, so a body rendered verbatim on a full page render is never
+        wrapped and executed by a patch instead.
+        """
+        renderer = self._renderers.get(kind)
+        if renderer is None:
+            return None
+        load = _RENDERER_LOADS.get(renderer)
+        if load is None or not inline:
+            return load
+        expected = _LOAD_INLINE_TAGS.get(load)
+        if expected is None or expected != self._inline_tags.get(kind):
+            return None
+        return load
 
     def inline_tag(self, kind: str) -> str | None:
         """Return the inline wrapper element for the kind or None.

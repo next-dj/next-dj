@@ -23,6 +23,21 @@ function envelope(ops: unknown[], extra: Record<string, unknown> = {}): unknown 
   return { version: "v1", ops, assets: [], form: null, ...extra };
 }
 
+// Both boundary channels at once, so a case asserting one of them also asserts
+// the silence of the other.
+function spyConsole() {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+  return {
+    warn,
+    debug,
+    restore: () => {
+      warn.mockRestore();
+      debug.mockRestore();
+    },
+  };
+}
+
 describe("parseEnvelope", () => {
   it("collapses absent meta to empty values", () => {
     const parsed = parseEnvelope({ version: "v1" });
@@ -62,6 +77,23 @@ describe("parseEnvelope", () => {
       ops: [null, { op: "inner" }, "nope", 7],
     });
     expect(parsed.ops).toEqual([{ op: "inner" }]);
+  });
+
+  it("drops a record that names no verb and one whose verb is not a string", () => {
+    const parsed = parseEnvelope({
+      version: "v1",
+      ops: [{}, { op: 7 }, { op: "inner" }, { target: { zone: "z" }, html: "hi" }],
+    });
+    expect(parsed.ops).toEqual([{ op: "inner" }]);
+  });
+
+  it("counts an op-less record among the malformed ops in dev", () => {
+    const logs = spyConsole();
+    parseEnvelope({ version: "v1", ops: [{}, { op: 7 }, { op: "inner" }] }, true);
+    expect(logs.warn).toHaveBeenCalledExactlyOnceWith(
+      "[next] dropped malformed ops: 2",
+    );
+    logs.restore();
   });
 
   it("collapses a non-record form-errors value to an empty map", () => {
@@ -120,6 +152,299 @@ describe("parseEnvelope", () => {
       { kind: "css", url: "", inline: ".z{color:red}" },
       { kind: "js", inline: "console.log(1)" },
     ]);
+  });
+
+  it("keeps a custom kind that carries a server insertion verb", () => {
+    const parsed = parseEnvelope({
+      version: "v1",
+      assets: [
+        { kind: "styles", url: "/theme.css", load: "link" },
+        { kind: "island", url: "/island.mjs", load: "module" },
+        { kind: "legacy", inline: "boot()", load: "script" },
+      ],
+    });
+    expect(parsed.assets).toEqual([
+      { kind: "styles", url: "/theme.css", load: "link" },
+      { kind: "island", url: "/island.mjs", load: "module" },
+      { kind: "legacy", inline: "boot()", load: "script" },
+    ]);
+  });
+
+  it("keeps the built-in kinds when the server sends no verb", () => {
+    const parsed = parseEnvelope({
+      version: "v1",
+      assets: [
+        { kind: "css", url: "/a.css" },
+        { kind: "js", url: "/a.js" },
+        { kind: "module", url: "/a.mjs" },
+      ],
+    });
+    expect(parsed.assets.map((asset) => asset.kind)).toEqual(["css", "js", "module"]);
+  });
+
+  it("drops an entry whose load is not one of the insertion verbs", () => {
+    const parsed = parseEnvelope({
+      version: "v1",
+      assets: [
+        { kind: "js", url: "/a.js", load: "worklet" },
+        { kind: "css", url: "/b.css", load: 7 },
+        { kind: "css", url: "/c.css" },
+      ],
+    });
+    // A load the client cannot act on is a broken entry, not a css asset that
+    // happens to carry one. An entry spelling no load keeps its kind's meaning.
+    expect(parsed.assets).toEqual([{ kind: "css", url: "/c.css" }]);
+  });
+
+  it("counts an entry with an unknown load among the malformed ones", () => {
+    const logs = spyConsole();
+    parseEnvelope(
+      { version: "v1", assets: [{ kind: "css", url: "/b.css", load: 7 }] },
+      true,
+    );
+    expect(logs.warn).toHaveBeenCalledExactlyOnceWith(
+      "[next] dropped malformed assets: 1",
+    );
+    expect(logs.debug).not.toHaveBeenCalled();
+    logs.restore();
+  });
+
+  it("keeps the server verb over the legacy meaning of the kind", () => {
+    const parsed = parseEnvelope({
+      version: "v1",
+      assets: [{ kind: "css", url: "/island.mjs", load: "module" }],
+    });
+    expect(parsed.assets).toEqual([
+      { kind: "css", url: "/island.mjs", load: "module" },
+    ]);
+  });
+
+  it("names a kind whose verb the client cannot resolve in the skip line", () => {
+    const logs = spyConsole();
+    const parsed = parseEnvelope(
+      {
+        version: "v1",
+        assets: [
+          { kind: "island", url: "/island.mjs", load: "module" },
+          { kind: "wasm", url: "/lib.wasm" },
+        ],
+      },
+      true,
+    );
+    expect(logs.warn).not.toHaveBeenCalled();
+    expect(logs.debug).toHaveBeenCalledExactlyOnceWith(
+      "[next] skipped assets of unsupported kind (1): wasm",
+    );
+    expect(parsed.assets).toHaveLength(1);
+    logs.restore();
+  });
+
+  it("counts the malformed ops in dev and says nothing about the assets", () => {
+    const logs = spyConsole();
+    const parsed = parseEnvelope({ version: "v1", ops: [null, { op: "inner" }] }, true);
+    expect(logs.warn).toHaveBeenCalledExactlyOnceWith(
+      "[next] dropped malformed ops: 1",
+    );
+    expect(logs.debug).not.toHaveBeenCalled();
+    expect(parsed.ops).toEqual([{ op: "inner" }]);
+    logs.restore();
+  });
+
+  it("counts the malformed assets in dev and says nothing about the ops", () => {
+    const logs = spyConsole();
+    const parsed = parseEnvelope(
+      {
+        version: "v1",
+        ops: [{ op: "inner" }],
+        assets: [
+          { kind: "css", url: "/ok.css" },
+          "nope",
+          { url: "/no-kind.js" },
+          { kind: "js" },
+        ],
+      },
+      true,
+    );
+    expect(logs.warn).toHaveBeenCalledExactlyOnceWith(
+      "[next] dropped malformed assets: 3",
+    );
+    expect(logs.debug).not.toHaveBeenCalled();
+    expect(parsed.assets).toEqual([{ kind: "css", url: "/ok.css" }]);
+    logs.restore();
+  });
+
+  it("reports a custom asset kind as a skip rather than as damage", () => {
+    const logs = spyConsole();
+    const parsed = parseEnvelope(
+      {
+        version: "v1",
+        assets: [
+          { kind: "css", url: "/components/poll_chart.css" },
+          { kind: "vue", url: "/dist/page-CBz.js" },
+          { kind: "vue", url: "/dist/component-Dlb.js" },
+        ],
+      },
+      true,
+    );
+    expect(logs.warn).not.toHaveBeenCalled();
+    expect(logs.debug).toHaveBeenCalledExactlyOnceWith(
+      "[next] skipped assets of unsupported kind (2): vue",
+    );
+    expect(parsed.assets).toEqual([{ kind: "css", url: "/components/poll_chart.css" }]);
+    logs.restore();
+  });
+
+  it("names each unsupported kind once in the skip line", () => {
+    const logs = spyConsole();
+    parseEnvelope(
+      {
+        version: "v1",
+        assets: [
+          { kind: "vue", url: "/a.js" },
+          { kind: "wasm", inline: "AGFzbQ==" },
+          { kind: "vue", url: "/b.js" },
+          { kind: "js", url: "/c.js" },
+        ],
+      },
+      true,
+    );
+    expect(logs.warn).not.toHaveBeenCalled();
+    expect(logs.debug).toHaveBeenCalledExactlyOnceWith(
+      "[next] skipped assets of unsupported kind (3): vue, wasm",
+    );
+    logs.restore();
+  });
+
+  it("reports all three categories of a mixed envelope in dev", () => {
+    const logs = spyConsole();
+    const parsed = parseEnvelope(
+      {
+        version: "v1",
+        ops: [null, "nope", { op: "inner" }],
+        assets: [
+          { kind: "css", url: "/ok.css" },
+          { url: "/no-kind.js" },
+          { kind: "vue", url: "/page.js" },
+        ],
+      },
+      true,
+    );
+    expect(logs.warn.mock.calls).toEqual([
+      ["[next] dropped malformed ops: 2"],
+      ["[next] dropped malformed assets: 1"],
+    ]);
+    expect(logs.debug).toHaveBeenCalledExactlyOnceWith(
+      "[next] skipped assets of unsupported kind (1): vue",
+    );
+    expect(parsed.ops).toEqual([{ op: "inner" }]);
+    expect(parsed.assets).toEqual([{ kind: "css", url: "/ok.css" }]);
+    logs.restore();
+  });
+
+  it("stays silent on the same malformed envelope without dev", () => {
+    const logs = spyConsole();
+    const wire = {
+      version: "v1",
+      ops: [null, { op: "inner" }],
+      assets: [
+        { kind: "css", url: "/ok.css" },
+        { url: "/no-kind.js" },
+        "nope",
+        { kind: "vue", url: "/page.js" },
+      ],
+    };
+    const implicit = parseEnvelope(wire);
+    const explicit = parseEnvelope(wire, false);
+    expect(logs.warn).not.toHaveBeenCalled();
+    expect(logs.debug).not.toHaveBeenCalled();
+    expect(implicit).toEqual(explicit);
+    expect(explicit.ops).toEqual([{ op: "inner" }]);
+    expect(explicit.assets).toEqual([{ kind: "css", url: "/ok.css" }]);
+    logs.restore();
+  });
+
+  it("keeps quiet in dev when nothing is dropped", () => {
+    const logs = spyConsole();
+    const parsed = parseEnvelope(
+      {
+        version: "v1",
+        ops: [{ op: "inner" }],
+        assets: [
+          { kind: "css", url: "/ok.css" },
+          { kind: "js", inline: "console.log(1)" },
+        ],
+      },
+      true,
+    );
+    expect(logs.warn).not.toHaveBeenCalled();
+    expect(logs.debug).not.toHaveBeenCalled();
+    expect(parsed.ops).toHaveLength(1);
+    logs.restore();
+  });
+
+  it("keeps quiet in dev on an envelope carrying no ops and no assets", () => {
+    const logs = spyConsole();
+    const parsed = parseEnvelope({ version: "v1" }, true);
+    expect(logs.warn).not.toHaveBeenCalled();
+    expect(logs.debug).not.toHaveBeenCalled();
+    expect(parsed.ops).toEqual([]);
+    expect(parsed.assets).toEqual([]);
+    logs.restore();
+  });
+
+  it("counts no drop in dev when ops and assets are absent", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const parsed = parseEnvelope({ version: "v1" }, true);
+    expect(warn).not.toHaveBeenCalled();
+    expect(parsed.ops).toEqual([]);
+    expect(parsed.assets).toEqual([]);
+    warn.mockRestore();
+  });
+
+  it("names an ops field that is present but not a list", () => {
+    const logs = spyConsole();
+    // A backend serialising one op as an object instead of a list drops the
+    // whole envelope's ops, the most common serialisation slip there is.
+    const parsed = parseEnvelope(
+      { version: "v1", ops: { op: "morph", html: "<p>x</p>" } },
+      true,
+    );
+    expect(logs.warn).toHaveBeenCalledExactlyOnceWith(
+      "[next] envelope ops is not an array, all ops dropped",
+    );
+    expect(parsed.ops).toEqual([]);
+    logs.restore();
+  });
+
+  it("names an assets field that is present but not a list", () => {
+    const logs = spyConsole();
+    const parsed = parseEnvelope(
+      { version: "v1", ops: [{ op: "inner" }], assets: { kind: "css", url: "/a.css" } },
+      true,
+    );
+    expect(logs.warn).toHaveBeenCalledExactlyOnceWith(
+      "[next] envelope assets is not an array, all assets dropped",
+    );
+    expect(parsed.assets).toEqual([]);
+    logs.restore();
+  });
+
+  it("names a null ops field, a field the server did spell", () => {
+    const logs = spyConsole();
+    parseEnvelope({ version: "v1", ops: null, assets: null }, true);
+    expect(logs.warn.mock.calls).toEqual([
+      ["[next] envelope ops is not an array, all ops dropped"],
+      ["[next] envelope assets is not an array, all assets dropped"],
+    ]);
+    logs.restore();
+  });
+
+  it("stays silent on a non-list ops field without dev", () => {
+    const logs = spyConsole();
+    const parsed = parseEnvelope({ version: "v1", ops: { op: "morph" } });
+    expect(logs.warn).not.toHaveBeenCalled();
+    expect(parsed.ops).toEqual([]);
+    logs.restore();
   });
 });
 
@@ -387,6 +712,430 @@ describe("Applier script neutralisation", () => {
     );
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
+  });
+
+  it("names an address that refuses to serialise as no target", () => {
+    document.body.innerHTML = '<form data-next-action="u1"><input name="email"></form>';
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { applier } = makeApplier(true);
+    // The uid and the name still resolve the field, only the description of the
+    // address is impossible, and a warn is not worth an exception.
+    const field: unknown[] = ["u1", "email"];
+    field.push(field);
+    applier.apply(
+      envelope([{ op: "inner", target: { field }, html: "<script>1</script>" }]),
+    );
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("targeting no target"));
+    warn.mockRestore();
+  });
+
+  it("carries dev into the morph engine so markup slips are diagnosed", () => {
+    document.body.innerHTML =
+      '<ul data-next-zone="z"><li id="x" data-next-key="x">old</li></ul>';
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { applier } = makeApplier(true);
+    applier.apply(
+      envelope([
+        {
+          op: "morph",
+          target: { zone: "z" },
+          html: '<ul data-next-zone="z"><li id="x" data-next-key="x">new</li></ul>',
+        },
+      ]),
+    );
+    expect(warn).toHaveBeenCalled();
+    expect(document.querySelector("#x")!.textContent).toBe("new");
+    warn.mockRestore();
+  });
+
+  it("stays silent on the same markup slip in non-dev builds", () => {
+    document.body.innerHTML =
+      '<ul data-next-zone="z"><li id="x" data-next-key="x">old</li></ul>';
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { applier } = makeApplier(false);
+    applier.apply(
+      envelope([
+        {
+          op: "morph",
+          target: { zone: "z" },
+          html: '<ul data-next-zone="z"><li id="x" data-next-key="x">new</li></ul>',
+        },
+      ]),
+    );
+    expect(warn).not.toHaveBeenCalled();
+    expect(document.querySelector("#x")!.textContent).toBe("new");
+    warn.mockRestore();
+  });
+
+  it("counts dropped ops through apply in dev builds", () => {
+    document.body.innerHTML = '<div data-next-zone="z"></div>';
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { applier } = makeApplier(true);
+    applier.apply(envelope([null, { op: "inner", target: { zone: "z" }, html: "hi" }]));
+    expect(warn).toHaveBeenCalledWith("[next] dropped malformed ops: 1");
+    expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("hi");
+    warn.mockRestore();
+  });
+});
+
+describe("Applier dev timing", () => {
+  // The user timing runs for real, the spies only record the names the runtime
+  // writes: the assertions are about those names, not about the entry-buffer
+  // semantics of a browser. Only console.debug is silenced.
+  function spyTiming() {
+    return {
+      mark: vi.spyOn(performance, "mark"),
+      measure: vi.spyOn(performance, "measure"),
+      clear: vi.spyOn(performance, "clearMarks"),
+      debug: vi.spyOn(console, "debug").mockImplementation(() => undefined),
+    };
+  }
+
+  beforeEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("measures a zone patch under its zone name", () => {
+    document.body.innerHTML = '<div data-next-zone="cart">old</div>';
+    const timing = spyTiming();
+    const { applier } = makeApplier(true);
+    applier.apply(
+      envelope([
+        {
+          op: "morph",
+          target: { zone: "cart" },
+          html: '<div data-next-zone="cart">new</div>',
+        },
+      ]),
+    );
+    expect(timing.mark).toHaveBeenCalledWith("next:apply:cart:start:1");
+    expect(timing.measure).toHaveBeenCalledWith(
+      "next:apply:cart",
+      "next:apply:cart:start:1",
+    );
+    expect(timing.clear).toHaveBeenCalledWith("next:apply:cart:start:1");
+    expect(timing.debug).toHaveBeenCalledWith(
+      expect.stringMatching(/^\[next] zone "cart" morph in \d+\.\d ms$/),
+    );
+  });
+
+  it("falls back to the verb when the op names no zone", () => {
+    const timing = spyTiming();
+    const { applier } = makeApplier(true);
+    applier.apply(envelope([{ op: "toast", text: "saved" }]));
+    expect(timing.mark).toHaveBeenCalledWith("next:apply:toast:start:1");
+    expect(timing.measure).toHaveBeenCalledWith(
+      "next:apply:toast",
+      "next:apply:toast:start:1",
+    );
+    expect(timing.debug).toHaveBeenCalledWith(
+      expect.stringMatching(/^\[next] op "toast" in \d+\.\d ms$/),
+    );
+  });
+
+  it("falls back to the verb when the target names something other than a zone", () => {
+    document.body.innerHTML = '<div id="slot">old</div>';
+    const timing = spyTiming();
+    const { applier } = makeApplier(true);
+    applier.apply(envelope([{ op: "inner", target: { css: "#slot" }, html: "new" }]));
+    expect(timing.mark).toHaveBeenCalledWith("next:apply:inner:start:1");
+    expect(timing.debug).toHaveBeenCalledWith(
+      expect.stringMatching(/^\[next] op "inner" in \d+\.\d ms$/),
+    );
+  });
+
+  it("closes the measure of a throwing op and still reports the failure", () => {
+    const timing = spyTiming();
+    const { applier, dispatched } = makeApplier(true);
+    applier.defineOp("boom", () => {
+      throw new Error("op blew up");
+    });
+    applier.apply(envelope([{ op: "boom" }]));
+    expect(timing.measure).toHaveBeenCalledWith(
+      "next:apply:boom",
+      "next:apply:boom:start:1",
+    );
+    expect(timing.clear).toHaveBeenCalledWith("next:apply:boom:start:1");
+    const err = dispatched.find((d) => d.event === "partial:error");
+    expect(err!.detail.op).toBe("boom");
+  });
+
+  it("stays silent outside dev builds", () => {
+    document.body.innerHTML = '<div data-next-zone="cart">old</div>';
+    const timing = spyTiming();
+    const { applier } = makeApplier(false);
+    applier.apply(envelope([{ op: "inner", target: { zone: "cart" }, html: "new" }]));
+    expect(timing.mark).not.toHaveBeenCalled();
+    expect(timing.measure).not.toHaveBeenCalled();
+    expect(timing.debug).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-next-zone="cart"]')!.textContent).toBe("new");
+  });
+
+  it("gives each op its own start mark so a nested apply cannot clear it", () => {
+    document.body.innerHTML = '<div data-next-zone="cart">old</div>';
+    const timing = spyTiming();
+    const { applier, dispatched } = makeApplier(true);
+    // A custom op re-entering the applier under the same label is the shape of
+    // a next:morph-element listener applying its own patch.
+    applier.defineOp("nested", () => {
+      applier.apply(envelope([{ op: "inner", target: { zone: "cart" }, html: "new" }]));
+    });
+    applier.apply(envelope([{ op: "nested", target: { zone: "cart" } }]));
+    const marks = timing.mark.mock.calls.map((call) => call[0]);
+    expect(marks).toHaveLength(2);
+    expect(new Set(marks).size).toBe(2);
+    expect(timing.measure.mock.calls.map((call) => call[0])).toEqual([
+      "next:apply:cart",
+      "next:apply:cart",
+    ]);
+    expect(dispatched.some((d) => d.event === "partial:error")).toBe(false);
+    expect(
+      dispatched
+        .filter((d) => d.event === "partial:applied")
+        .every((d) => d.detail.ok === true),
+    ).toBe(true);
+    expect(document.querySelector('[data-next-zone="cart"]')!.textContent).toBe("new");
+  });
+
+  it("keeps a cleared entry buffer from failing the op it was timing", () => {
+    const timing = spyTiming();
+    const { applier, dispatched } = makeApplier(true);
+    applier.defineOp("clears", () => {
+      performance.clearMarks();
+    });
+    applier.apply(envelope([{ op: "clears" }]));
+    expect(dispatched.some((d) => d.event === "partial:error")).toBe(false);
+    const applied = dispatched.find((d) => d.event === "partial:applied");
+    expect(applied!.detail.ok).toBe(true);
+    expect(timing.debug).toHaveBeenCalledWith(
+      expect.stringMatching(/^\[next] op "clears" in \d+\.\d ms$/),
+    );
+  });
+
+  it("keeps the real error of a throwing op whose mark was cleared", () => {
+    const timing = spyTiming();
+    const { applier, dispatched } = makeApplier(true);
+    applier.defineOp("clears", () => {
+      performance.clearMarks();
+      throw new Error("op blew up");
+    });
+    applier.apply(envelope([{ op: "clears" }]));
+    const err = dispatched.find((d) => d.event === "partial:error");
+    expect((err!.detail.error as Error).message).toBe("op blew up");
+    expect(timing.debug).toHaveBeenCalled();
+  });
+
+  it("measures a refresh under the zone it re-GETs", () => {
+    const timing = spyTiming();
+    const { applier } = makeApplier(true);
+    applier.apply(envelope([{ op: "refresh", zone: "feed" }]));
+    expect(timing.measure).toHaveBeenCalledWith("next:apply:feed", expect.any(String));
+    expect(timing.debug).toHaveBeenCalledWith(
+      expect.stringMatching(/^\[next] zone "feed" refresh in \d+\.\d ms$/),
+    );
+  });
+
+  it("measures a refresh carrying its zone in the target under that zone", () => {
+    const timing = spyTiming();
+    const { applier } = makeApplier(true);
+    applier.apply(envelope([{ op: "refresh", target: { zone: "feed" } }]));
+    expect(timing.measure).toHaveBeenCalledWith("next:apply:feed", expect.any(String));
+  });
+
+  it("measures a layer.open under the zone it seeds", () => {
+    const timing = spyTiming();
+    const { applier } = makeApplier(true);
+    applier.apply(envelope([{ op: "layer.open", zone: "cart", href: "/cart/" }]));
+    expect(timing.measure).toHaveBeenCalledWith("next:apply:cart", expect.any(String));
+  });
+
+  it("falls back to the verb for a layer.open naming no zone", () => {
+    const timing = spyTiming();
+    const { applier } = makeApplier(true);
+    applier.apply(envelope([{ op: "layer.open" }]));
+    expect(timing.measure).toHaveBeenCalledWith(
+      "next:apply:layer.open",
+      expect.any(String),
+    );
+  });
+
+  it("ignores a top-level zone on a verb that does not address one", () => {
+    document.body.innerHTML = '<div data-next-zone="cart">old</div>';
+    const timing = spyTiming();
+    const { applier } = makeApplier(true);
+    // inner reads its address from target only, so a stray top-level zone must
+    // not name the measurement after a zone the op never touched.
+    applier.apply(
+      envelope([{ op: "inner", target: { css: "[data-next-zone]" }, zone: "cart" }]),
+    );
+    expect(timing.measure).toHaveBeenCalledWith("next:apply:inner", expect.any(String));
+  });
+
+  it("degrades the applied signal for an unknown verb while timing it", () => {
+    const timing = spyTiming();
+    const { applier, dispatched } = makeApplier(true);
+    applier.apply(envelope([{ op: "frobnicate" }]));
+    const applied = dispatched.find((d) => d.event === "partial:applied");
+    expect(applied!.detail.ok).toBe(false);
+    expect(timing.debug).toHaveBeenCalledWith(
+      expect.stringMatching(/^\[next] op "frobnicate" in \d+\.\d ms$/),
+    );
+  });
+
+  it("reports the span the op took, not the clock reading it started at", () => {
+    const timing = spyTiming();
+    // The op moves the mocked clock itself, so the reported number can only come
+    // from the difference between the two readings.
+    let clock = 100;
+    vi.spyOn(performance, "now").mockImplementation(() => clock);
+    const { applier } = makeApplier(true);
+    applier.defineOp("slow", () => {
+      clock = 103.2;
+    });
+    applier.apply(envelope([{ op: "slow" }]));
+    expect(timing.debug).toHaveBeenCalledWith('[next] op "slow" in 3.2 ms');
+  });
+
+  it("stays silent when dev is left at its default", () => {
+    const timing = spyTiming();
+    const applier = new Applier({
+      dispatch: () => undefined,
+      mergeContext: () => undefined,
+      document,
+    });
+    applier.apply(envelope([{ op: "toast", text: "saved" }]));
+    expect(timing.mark).not.toHaveBeenCalled();
+    expect(timing.debug).not.toHaveBeenCalled();
+  });
+});
+
+describe("Applier op errors name their target", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("a throwing op carries the human-readable address it aimed at", () => {
+    const { applier, dispatched } = makeApplier();
+    applier.defineOp("boom", () => {
+      throw new Error("op blew up");
+    });
+    applier.apply(envelope([{ op: "boom", target: { zone: "cart" } }]));
+    const err = dispatched.find((d) => d.event === "partial:error");
+    expect(err!.detail.target).toBe('zone "cart"');
+  });
+
+  it("an unknown verb carries its address too", () => {
+    const { applier, dispatched } = makeApplier();
+    applier.apply(envelope([{ op: "frobnicate", target: { form: "a1b2" } }]));
+    const err = dispatched.find((d) => d.event === "partial:error");
+    expect(err!.detail.target).toBe('form "a1b2"');
+  });
+
+  it("omits the key when the op names no target", () => {
+    const { applier, dispatched } = makeApplier();
+    applier.apply(envelope([{ op: "frobnicate" }]));
+    const err = dispatched.find((d) => d.event === "partial:error");
+    expect(err!.detail).not.toHaveProperty("target");
+  });
+
+  it("omits the key for a target object with no recognised address", () => {
+    const { applier, dispatched } = makeApplier();
+    applier.apply(envelope([{ op: "frobnicate", target: {} }]));
+    const bare = dispatched.find((d) => d.event === "partial:error");
+    expect(bare!.detail).not.toHaveProperty("target");
+    const foreign = makeApplier();
+    foreign.applier.apply(envelope([{ op: "frobnicate", target: { region: "cart" } }]));
+    const err = foreign.dispatched.find((d) => d.event === "partial:error");
+    expect(err!.detail).not.toHaveProperty("target");
+  });
+
+  it("omits the key when the target is not an object", () => {
+    const { applier, dispatched } = makeApplier();
+    applier.apply(envelope([{ op: "frobnicate", target: "cart" }]));
+    const err = dispatched.find((d) => d.event === "partial:error");
+    expect(err!.detail).not.toHaveProperty("target");
+  });
+
+  it("names the address the resolver reads, not the first key serialised", () => {
+    const { applier, dispatched } = makeApplier();
+    applier.apply(
+      envelope([{ op: "frobnicate", target: { css: "#slot", zone: "cart" } }]),
+    );
+    const err = dispatched.find((d) => d.event === "partial:error");
+    expect(err!.detail.target).toBe('zone "cart"');
+  });
+
+  it("prefers form over the field and css addresses under it", () => {
+    const { applier, dispatched } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "frobnicate",
+          target: { css: "#slot", field: ["u1", "email"], form: "a1b2" },
+        },
+      ]),
+    );
+    const err = dispatched.find((d) => d.event === "partial:error");
+    expect(err!.detail.target).toBe('form "a1b2"');
+  });
+
+  it("prefers field over the css address under it", () => {
+    const { applier, dispatched } = makeApplier();
+    applier.apply(
+      envelope([
+        { op: "frobnicate", target: { css: "#slot", field: ["u1", "email"] } },
+      ]),
+    );
+    const err = dispatched.find((d) => d.event === "partial:error");
+    expect(err!.detail.target).toBe('field ["u1","email"]');
+  });
+
+  it("omits the key when the recognised address carries no value", () => {
+    const { applier, dispatched } = makeApplier();
+    applier.apply(envelope([{ op: "frobnicate", target: { zone: undefined } }]));
+    const err = dispatched.find((d) => d.event === "partial:error");
+    expect(err!.detail).not.toHaveProperty("target");
+  });
+
+  it("contains a throwing op whose target refuses to serialise", () => {
+    document.body.innerHTML = '<div data-next-zone="z">old</div>';
+    const { applier, dispatched } = makeApplier();
+    applier.defineOp("boom", () => {
+      throw new Error("op blew up");
+    });
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    applier.apply(
+      envelope([
+        { op: "boom", target: { zone: cyclic } },
+        { op: "inner", target: { zone: "z" }, html: "new" },
+      ]),
+    );
+    const err = dispatched.find((d) => d.event === "partial:error");
+    expect((err!.detail.error as Error).message).toBe("op blew up");
+    expect(err!.detail).not.toHaveProperty("target");
+    // The description of a target never decides whether the rest of the
+    // envelope applies.
+    expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("new");
+    const applied = dispatched.find((d) => d.event === "partial:applied");
+    expect(applied!.detail.ok).toBe(false);
+  });
+
+  it("skips an unknown verb whose target refuses to serialise", () => {
+    document.body.innerHTML = '<div data-next-zone="z">old</div>';
+    const { applier, dispatched } = makeApplier();
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    applier.apply(
+      envelope([
+        { op: "frobnicate", target: { zone: cyclic } },
+        { op: "inner", target: { zone: "z" }, html: "new" },
+      ]),
+    );
+    const err = dispatched.find((d) => d.event === "partial:error");
+    expect((err!.detail.error as Error).message).toBe("unknown op frobnicate");
+    expect(err!.detail).not.toHaveProperty("target");
+    expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("new");
   });
 });
 

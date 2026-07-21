@@ -41,7 +41,11 @@ if TYPE_CHECKING:
         check_template_loaders,
     )
     from next.pages.loaders import _load_python_module
-    from next.static.checks import check_js_context_serializer
+    from next.static.checks import (
+        check_asset_kinds_are_loadable,
+        check_js_context_serializer,
+        check_reserved_js_context_keys,
+    )
     from next.urls.checks import (
         check_next_pages_configuration,
         check_reverse_name_collisions,
@@ -71,7 +75,11 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_template_loaders",
     ),
     "next.pages.loaders": ("_load_python_module",),
-    "next.static.checks": ("check_js_context_serializer",),
+    "next.static.checks": (
+        "check_asset_kinds_are_loadable",
+        "check_js_context_serializer",
+        "check_reserved_js_context_keys",
+    ),
     "next.urls.checks": (
         "check_next_pages_configuration",
         "check_reverse_name_collisions",

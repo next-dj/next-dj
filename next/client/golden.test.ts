@@ -230,7 +230,9 @@ describe("golden fixtures apply to the DOM", () => {
     expect(document.querySelector('[data-next-zone="beta"]')!.textContent).toBe(
       "beta hi",
     );
-    expect(envelope.assets).toEqual([{ kind: "css", url: "/static/next/zoned.css" }]);
+    expect(envelope.assets).toEqual([
+      { kind: "css", url: "/static/next/zoned.css", load: "link" },
+    ]);
     expect(dispatched.some((d) => d.event === "partial:error")).toBe(false);
   });
 

@@ -34,6 +34,8 @@ class TestWireKeyConstants:
     def test_asset_key_values(self) -> None:
         assert keys.KIND == "kind"
         assert keys.URL == "url"
+        assert keys.INLINE == "inline"
+        assert keys.LOAD == "load"
 
     def test_form_meta_key_values(self) -> None:
         assert keys.UID == "uid"

@@ -379,6 +379,15 @@ Warnings
    * - ``next.W071``
      - ``PARTIAL_BACKENDS`` has more than one entry. Partial rendering uses a single protocol backend, so only the first entry runs and the rest are ignored.
      - ``next.partial.checks``
+   * - ``next.W074``
+     - A registered asset kind names a renderer outside ``render_link_tag``, ``render_script_tag``, and ``render_module_tag``, so it carries no client insertion verb.
+       Assets of that kind reach the browser only on a full page render, never through a patch envelope.
+     - ``next.static.checks``
+   * - ``next.W075``
+     - A page or a component registers a ``serialize=True`` context key that the ``next.min.js`` init payload reserves, ``$csrf`` or ``$dev``.
+       The message names the condition under which the framework writes the key, ``$csrf`` on an automatically injected payload whose request can mint a CSRF token and ``$dev`` on one built while ``DEBUG`` is on.
+       The framework value wins there, while a render that leaves the key out keeps the registered value, so ``window.Next.context`` differs between environments.
+     - ``next.static.checks``
 
 .. note::
 

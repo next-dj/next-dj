@@ -90,13 +90,18 @@ A repeated ``register`` call with the same parameters is idempotent, but registe
        ]
    }
 
+A custom renderer costs the kind its client insertion verb, so its assets render on a full page render and are skipped on a partial render.
+The ``next.W074`` check reports the kind for that reason.
+Keep ``render_module_tag`` from the walkthrough when the assets must also arrive through a patch envelope.
+
 Verification
 ------------
 
 Reload the page and inspect the HTML source.
 A script tag points at the JSX file.
 
-Run ``uv run python manage.py check`` and confirm no warnings.
+Run ``uv run python manage.py check``.
+The walkthrough registration reports no warnings, and the custom-renderer variant reports ``next.W074`` for the ``jsx`` kind.
 
 See Also
 --------

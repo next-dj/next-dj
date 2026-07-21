@@ -216,7 +216,7 @@ Inline Script in a Patch Does Not Run
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The applier strips every ``<script>`` element from patch HTML before the markup reaches the document.
-A development build prints a ``console.warn`` for each neutralised script, so the removal is visible rather than silent.
+With the runtime's dev mode on, that is with Django ``DEBUG``, the runtime prints a ``console.warn`` for each neutralised script, so the removal is visible rather than silent.
 Move the behaviour into a co-located module, see :doc:`/content/topics/partial-rendering/co-located-js`.
 
 next.W071 Extra PARTIAL_BACKENDS Entries

@@ -20,6 +20,7 @@ from django.http.response import HttpResponseBase
 from django.template import Context as DjangoTemplateContext, Origin, Template
 from django.urls import URLPattern, path
 
+from next.checks.common import get_router_manager, iter_scanned_page_pairs
 from next.conf import next_framework_settings
 from next.deps import DependencyResolver, resolver
 from next.utils import caller_source_path
@@ -32,7 +33,7 @@ from .signals import page_rendered, template_loaded
 
 if TYPE_CHECKING:
     import types
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
     from pathlib import Path
 
     from next.static import StaticCollector
@@ -605,3 +606,27 @@ def reset_context_registry() -> None:
     `page.py` repopulates the registry from its current source.
     """
     page._context_manager.reset()
+
+
+def iter_serialized_page_context_keys() -> Iterator[tuple[Path, str]]:
+    """Yield the `page.py` path and key of every keyed `serialize=True` context.
+
+    A keyless `serialize=True` callable spreads the keys of the dict it
+    returns at render time, so those keys exist only at runtime and never
+    travel through here.
+    """
+    router_manager, _errors = get_router_manager()
+    if router_manager is None:
+        return
+    registry = page._context_manager._context_registry
+    seen: set[Path] = set()
+    for router in router_manager._backends:
+        for _url_path, page_path in iter_scanned_page_pairs(router):
+            if page_path in seen:
+                continue
+            seen.add(page_path)
+            if not page_path.exists() or _load_python_module_memo(page_path) is None:
+                continue
+            for key, entry in registry.get(page_path, {}).items():
+                if entry.serialize and key is not None:
+                    yield page_path, key

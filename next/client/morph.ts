@@ -30,6 +30,9 @@ export interface MorphOptions {
   afterNode?: (oldNode: Node, newNode: Node) => void;
   // An old node found no pair and is about to be discarded. false keeps it.
   onDiscard?: (node: Node) => boolean | void;
+  // Emit markup diagnostics to the console. Default false, so a production page
+  // stays silent on a server-authored markup slip.
+  dev?: boolean;
 }
 
 interface Ctx {
@@ -43,11 +46,10 @@ interface Ctx {
 
 // Read an id strictly through getAttribute: the `id` property is subject to DOM
 // clobbering, an `<input name="id">` inside a form shadows form.id.
-function readId(el: Element): string | null {
+function readId(el: Element, dev: boolean): string | null {
   const key = el.getAttribute("data-next-key");
   if (key !== null) {
-    if (el.getAttribute("id") !== null) {
-      // dev warn: a node carries either a key or an id, not both.
+    if (dev && el.getAttribute("id") !== null) {
       console.warn("[next.morph] data-next-key and id on one node", el);
     }
     return key;
@@ -63,11 +65,12 @@ function collectIds(
   root: Element,
   into: Map<Element, Set<string>>,
   universe: Set<string>,
+  dev: boolean,
 ): void {
-  consume(root, root, into, universe);
+  consume(root, root, into, universe, dev);
   const tagged = root.querySelectorAll("[id],[data-next-key]");
   for (const el of Array.from(tagged)) {
-    consume(el, root, into, universe);
+    consume(el, root, into, universe, dev);
   }
 }
 
@@ -76,8 +79,9 @@ function consume(
   root: Element,
   into: Map<Element, Set<string>>,
   universe: Set<string>,
+  dev: boolean,
 ): void {
-  const id = readId(el);
+  const id = readId(el, dev);
   if (id === null) return;
   universe.add(id);
   let node: Element | null = el;
@@ -463,6 +467,7 @@ export function morph(
 ): Element {
   const content = parseContent(target, html);
   const mode = options.mode ?? "node";
+  const dev = options.dev ?? false;
   const doc = target.ownerDocument;
 
   const newRoot =
@@ -478,12 +483,12 @@ export function morph(
   const ids = new Map<Element, Set<string>>();
   const oldUniverse = new Set<string>();
   const newUniverse = new Set<string>();
-  collectIds(target, ids, oldUniverse);
+  collectIds(target, ids, oldUniverse, dev);
   if (newRoot instanceof Element) {
-    collectIds(newRoot, ids, newUniverse);
+    collectIds(newRoot, ids, newUniverse, dev);
   } else {
     for (const child of Array.from(newRoot.childNodes)) {
-      if (isElement(child)) collectIds(child, ids, newUniverse);
+      if (isElement(child)) collectIds(child, ids, newUniverse, dev);
     }
   }
   const persistent = new Set<string>();

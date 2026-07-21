@@ -321,6 +321,32 @@ describe("createPartial surface", () => {
     expect(calls).toHaveLength(1);
   });
 
+  it("_configure drops the asset watch the previous configuration armed", () => {
+    Object.defineProperty(document, "readyState", {
+      value: "loading",
+      configurable: true,
+    });
+    const forget = vi.spyOn(document, "removeEventListener");
+    partial._configure({ document });
+    partial.ready();
+    partial._configure({ document });
+    Reflect.deleteProperty(document, "readyState");
+    expect(forget.mock.calls.some(([type]) => type === "DOMContentLoaded")).toBe(true);
+  });
+
+  it("_reset drops the asset watch on the current document", () => {
+    Object.defineProperty(document, "readyState", {
+      value: "loading",
+      configurable: true,
+    });
+    partial._configure({ document });
+    partial.ready();
+    const forget = vi.spyOn(document, "removeEventListener");
+    partial._reset();
+    Reflect.deleteProperty(document, "readyState");
+    expect(forget.mock.calls.some(([type]) => type === "DOMContentLoaded")).toBe(true);
+  });
+
   it("a poll tick GETs the host page while a layer holds the address bar", async () => {
     window.history.replaceState(null, "", "/host/");
     document.body.innerHTML = '<div data-next-zone="t" data-next-poll="5000"></div>';
@@ -500,6 +526,40 @@ describe("createPartial surface", () => {
         (c) => (c.init.headers as Record<string, string>)["X-Next-Zone"] === "poll",
       ),
     ).toBe(true);
+  });
+
+  it("the dev flag reaches the applier's boundary diagnostics", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "debug").mockImplementation(() => {});
+    document.body.innerHTML = '<div data-next-zone="z">old</div>';
+    const wire = {
+      version: "v1",
+      ops: [null, { op: "inner", target: { zone: "z" }, html: "new" }],
+      assets: [],
+      form: null,
+    };
+    partial._configure({ document, dev: true });
+    partial.apply(wire);
+    expect(warn).toHaveBeenCalledWith("[next] dropped malformed ops: 1");
+    warn.mockClear();
+    partial._configure({ document });
+    partial.apply(wire);
+    expect(warn).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("new");
+  });
+
+  it("the dev flag reaches the trigger attribute diagnostics", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    document.body.innerHTML = '<div data-next-zone="t" data-next-poll="soon"></div>';
+    partial._configure({ document, dev: true });
+    partial.ready();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('data-next-poll="soon" is not a whole number'),
+    );
+    warn.mockClear();
+    partial._configure({ document });
+    partial.ready();
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it("onMount returns a teardown that unregisters the callback", () => {

@@ -180,6 +180,414 @@ describe("append and prepend dedup", () => {
       ),
     ).not.toThrow();
   });
+
+  it("replaces the first child holding the key when the container repeats it", () => {
+    document.body.innerHTML =
+      '<ul data-next-zone="rows">' +
+      '<li data-next-key="1">first</li>' +
+      '<li data-next-key="1">second</li>' +
+      "</ul>";
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "append",
+          target: { zone: "rows" },
+          html: '<li data-next-key="1">new</li>',
+        },
+      ]),
+    );
+    const texts = Array.from(document.querySelectorAll("li")).map(
+      (li) => li.textContent,
+    );
+    expect(texts).toEqual(["new", "second"]);
+  });
+
+  it("inserts both rows when one batch repeats a key absent from the container", () => {
+    document.body.innerHTML = '<ul data-next-zone="rows"><li>keep</li></ul>';
+    const { applier } = makeApplier();
+    // The fresh rows sit in the fragment, invisible to the container index, so
+    // neither matches the other and both land.
+    applier.apply(
+      envelope([
+        {
+          op: "append",
+          target: { zone: "rows" },
+          html: '<li data-next-key="9">a</li><li data-next-key="9">b</li>',
+        },
+      ]),
+    );
+    const texts = Array.from(document.querySelectorAll("li")).map(
+      (li) => li.textContent,
+    );
+    expect(texts).toEqual(["keep", "a", "b"]);
+  });
+
+  it("a later row with a replaced key replaces the row that just landed", () => {
+    document.body.innerHTML =
+      '<ul data-next-zone="rows"><li data-next-key="1">old</li></ul>';
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "append",
+          target: { zone: "rows" },
+          html: '<li data-next-key="1">second</li><li data-next-key="1">third</li>',
+        },
+      ]),
+    );
+    const rows = document.querySelectorAll("li");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.textContent).toBe("third");
+  });
+
+  it("prefers data-next-key over the id fallback", () => {
+    document.body.innerHTML =
+      '<ul data-next-zone="rows"><li id="k" data-next-key="1">old</li></ul>';
+    const { applier } = makeApplier();
+    // The container row is indexed under its data-next-key, so an incoming row
+    // whose id repeats that element's id is a fresh row, not a match.
+    applier.apply(
+      envelope([
+        { op: "append", target: { zone: "rows" }, html: '<li id="k">by id</li>' },
+      ]),
+    );
+    const texts = Array.from(document.querySelectorAll("li")).map(
+      (li) => li.textContent,
+    );
+    expect(texts).toEqual(["old", "by id"]);
+  });
+
+  it("leaves keyless and foreign nodes of the container untouched", () => {
+    document.body.innerHTML =
+      '<ul data-next-zone="rows">' +
+      "<li>keyless</li>" +
+      '<li class="foreign">third-party</li>' +
+      '<li data-next-key="1">old</li>' +
+      "</ul>";
+    const foreign = document.querySelector(".foreign")!;
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "append",
+          target: { zone: "rows" },
+          html: '<li data-next-key="1">new</li><li>fresh keyless</li>',
+        },
+      ]),
+    );
+    const texts = Array.from(document.querySelectorAll("li")).map(
+      (li) => li.textContent,
+    );
+    expect(texts).toEqual(["keyless", "third-party", "new", "fresh keyless"]);
+    expect(document.querySelector(".foreign")).toBe(foreign);
+  });
+
+  it("keeps focus and typed input in a row the merge does not touch", () => {
+    document.body.innerHTML =
+      '<ul data-next-zone="rows">' +
+      '<li data-next-key="1"><input id="kept" /></li>' +
+      '<li data-next-key="2"><input id="swapped" /></li>' +
+      "</ul>";
+    const kept = document.querySelector<HTMLInputElement>("#kept")!;
+    const swapped = document.querySelector<HTMLInputElement>("#swapped")!;
+    kept.value = "typed";
+    swapped.value = "lost";
+    kept.focus();
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "append",
+          target: { zone: "rows" },
+          html: '<li data-next-key="2"><input id="swapped" /></li>',
+        },
+      ]),
+    );
+    expect(document.querySelector<HTMLInputElement>("#kept")!.value).toBe("typed");
+    expect(document.activeElement).toBe(kept);
+    // A keyed match is a replace, not a morph, so the swapped row loses its
+    // value exactly as it did before the index.
+    expect(document.querySelector<HTMLInputElement>("#swapped")!.value).toBe("");
+  });
+
+  it("still lands a row whose match a next:removed listener detached", () => {
+    document.body.innerHTML =
+      '<ul data-next-zone="rows">' +
+      '<li data-next-key="1">one</li>' +
+      '<li data-next-key="2">two</li>' +
+      "</ul>";
+    const list = document.querySelector("ul")!;
+    // next:removed is the documented island unmount hook, so a listener may
+    // detach a sibling row while the merge is running.
+    list.addEventListener("next:removed", () => {
+      document.querySelector('[data-next-key="2"]')?.remove();
+    });
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "append",
+          target: { zone: "rows" },
+          html: '<li data-next-key="1">A</li><li data-next-key="2">B</li>',
+        },
+      ]),
+    );
+    const texts = Array.from(document.querySelectorAll("li")).map(
+      (li) => li.textContent,
+    );
+    expect(texts).toEqual(["A", "B"]);
+  });
+
+  it("replaces a keyed row a next:removed listener added, not duplicating it", () => {
+    document.body.innerHTML =
+      '<ul data-next-zone="rows"><li data-next-key="1">one</li></ul>';
+    const list = document.querySelector("ul")!;
+    let added = false;
+    // An island unmount hook that renders a placeholder row lands a key the
+    // index snapshot cannot know about.
+    list.addEventListener("next:removed", () => {
+      if (added) return;
+      added = true;
+      const ghost = document.createElement("li");
+      ghost.setAttribute("data-next-key", "2");
+      ghost.textContent = "ghost";
+      list.append(ghost);
+    });
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "append",
+          target: { zone: "rows" },
+          html: '<li data-next-key="1">A</li><li data-next-key="2">B</li>',
+        },
+      ]),
+    );
+    const texts = Array.from(document.querySelectorAll("li")).map(
+      (li) => li.textContent,
+    );
+    expect(texts).toEqual(["A", "B"]);
+    expect(document.querySelectorAll('[data-next-key="2"]')).toHaveLength(1);
+  });
+
+  it("lands a row whose match the listener removed on its own next:removed", () => {
+    document.body.innerHTML =
+      '<ul data-next-zone="rows">' +
+      '<li data-next-key="1">one</li>' +
+      '<li data-next-key="2">two</li>' +
+      "</ul>";
+    const list = document.querySelector("ul")!;
+    list.addEventListener("next:removed", (event) => {
+      (event.target as Element).remove();
+    });
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "append",
+          target: { zone: "rows" },
+          html: '<li data-next-key="1">A</li>',
+        },
+      ]),
+    );
+    // The match left the container before the replace, so the row lands at the
+    // edge rather than disappearing into a no-op replaceWith.
+    const texts = Array.from(document.querySelectorAll("li")).map(
+      (li) => li.textContent,
+    );
+    expect(texts).toEqual(["two", "A"]);
+  });
+
+  it("treats a stale hit as a miss when a listener swaps a row one for one", () => {
+    document.body.innerHTML =
+      '<ul data-next-zone="rows">' +
+      '<li data-next-key="1">one</li>' +
+      '<li data-next-key="2">two</li>' +
+      "</ul>";
+    const list = document.querySelector("ul")!;
+    let swapped = false;
+    // A listener that drops one row and adds another leaves the child count
+    // untouched, so only the detachment check catches the stale index entry.
+    list.addEventListener("next:removed", () => {
+      if (swapped) return;
+      swapped = true;
+      document.querySelector('[data-next-key="2"]')!.remove();
+      const filler = document.createElement("li");
+      filler.textContent = "filler";
+      list.append(filler);
+    });
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "append",
+          target: { zone: "rows" },
+          html: '<li data-next-key="1">A</li><li data-next-key="2">B</li>',
+        },
+      ]),
+    );
+    const texts = Array.from(document.querySelectorAll("li")).map(
+      (li) => li.textContent,
+    );
+    expect(texts).toEqual(["A", "filler", "B"]);
+  });
+
+  it("does not duplicate a key the listener added while swapping a row one for one", () => {
+    document.body.innerHTML =
+      '<ul data-next-zone="rows"><li id="a">a</li><li id="b">b</li></ul>';
+    const list = document.querySelector("ul")!;
+    let swapped = false;
+    // Dropping one row and adding another leaves the child count untouched, so
+    // the key the listener introduced is invisible to every count-based check.
+    list.addEventListener("next:removed", () => {
+      if (swapped) return;
+      swapped = true;
+      document.querySelector("#b")!.remove();
+      const late = document.createElement("li");
+      late.id = "c";
+      late.textContent = "listener c";
+      list.append(late);
+    });
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "append",
+          target: { zone: "rows" },
+          html: '<li id="a">A</li><li id="c">C</li>',
+        },
+      ]),
+    );
+    const ids = Array.from(document.querySelectorAll("li")).map((li) => li.id);
+    expect(ids).toEqual(["a", "c"]);
+    expect(document.querySelector("#c")!.textContent).toBe("C");
+  });
+
+  it("replaces a key a listener added before the row that carries it was read", () => {
+    document.body.innerHTML =
+      '<ul data-next-zone="rows"><li data-next-key="1">one</li></ul>';
+    const list = document.querySelector("ul")!;
+    let added = false;
+    list.addEventListener("next:removed", () => {
+      if (added) return;
+      added = true;
+      const ghost = document.createElement("li");
+      ghost.setAttribute("data-next-key", "2");
+      ghost.textContent = "ghost";
+      list.append(ghost);
+    });
+    const { applier } = makeApplier();
+    // The row carrying key 2 is read before any listener has run, so nothing
+    // inside the loop can see the key the first fireRemoved is about to add.
+    applier.apply(
+      envelope([
+        {
+          op: "append",
+          target: { zone: "rows" },
+          html: '<li data-next-key="2">B</li><li data-next-key="1">A</li>',
+        },
+      ]),
+    );
+    const texts = Array.from(document.querySelectorAll("li")).map(
+      (li) => li.textContent,
+    );
+    expect(texts).toEqual(["A", "B"]);
+    expect(document.querySelectorAll('[data-next-key="2"]')).toHaveLength(1);
+  });
+
+  it("lands both repeated rows when the listener removes the late match", () => {
+    document.body.innerHTML =
+      '<ul data-next-zone="rows"><li data-next-key="1">one</li></ul>';
+    const list = document.querySelector("ul")!;
+    let ghost: Element | undefined;
+    // The first unmount hook adds a keyed row, the next one takes that row back
+    // out, so the deferred rows find a match that is gone by the time it is
+    // replaced and have to stay whole.
+    list.addEventListener("next:removed", (event) => {
+      if (ghost === undefined) {
+        ghost = document.createElement("li");
+        ghost.setAttribute("data-next-key", "2");
+        ghost.textContent = "ghost";
+        list.append(ghost);
+        return;
+      }
+      (event.target as Element).remove();
+    });
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "append",
+          target: { zone: "rows" },
+          html:
+            '<li data-next-key="1">A</li>' +
+            '<li data-next-key="2">B</li>' +
+            '<li data-next-key="2">B2</li>',
+        },
+      ]),
+    );
+    const texts = Array.from(document.querySelectorAll("li")).map(
+      (li) => li.textContent,
+    );
+    expect(texts).toEqual(["A", "B", "B2"]);
+  });
+
+  it("skips the container index for a batch that carries no keys", () => {
+    const rows = Array.from(
+      { length: 500 },
+      (_, i) => `<li data-next-key="r${i}">row ${i}</li>`,
+    ).join("");
+    document.body.innerHTML = `<ul data-next-zone="rows">${rows}</ul>`;
+    const { applier } = makeApplier();
+    const spy = vi.spyOn(Element.prototype, "getAttribute");
+    try {
+      applier.apply(
+        envelope([{ op: "append", target: { zone: "rows" }, html: "<li>fresh</li>" }]),
+      );
+      // A keyless row matches nothing, so the merge reads the key of the one
+      // incoming row and never walks the 500 live children. Only the key reads
+      // are counted: the zone selector itself walks the document in jsdom.
+      const keyReads = spy.mock.calls.filter((call) => call[0] === "data-next-key");
+      expect(keyReads).toHaveLength(1);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(document.querySelectorAll("li")).toHaveLength(501);
+  });
+
+  it("reads each row's key a bounded number of times, not once per child", () => {
+    const rows = Array.from(
+      { length: 500 },
+      (_, i) => `<li data-next-key="r${i}">row ${i}</li>`,
+    ).join("");
+    document.body.innerHTML = `<ul data-next-zone="rows">${rows}</ul>`;
+    // The batch matches the tail of the list, the worst case for a scan that
+    // walks the children from the front for every incoming row.
+    const html = Array.from(
+      { length: 100 },
+      (_, i) => `<li data-next-key="r${400 + i}">fresh ${i}</li>`,
+    ).join("");
+    const { applier } = makeApplier();
+    const spy = vi.spyOn(Element.prototype, "getAttribute");
+    // A spy left on the prototype would poison every later test, so it comes off
+    // even if the apply throws.
+    try {
+      applier.apply(envelope([{ op: "append", target: { zone: "rows" }, html }]));
+      // A scan per incoming row would cost 500 * 100 reads. The constant is
+      // loose on purpose: the assertion is linearity, not a jsdom call count,
+      // and the fragment parse and the removal sweep read attributes too.
+      expect(spy.mock.calls.length).toBeLessThan(10 * (500 + 100));
+    } finally {
+      spy.mockRestore();
+    }
+    // A merge that never ran would also read nothing, so the count alone proves
+    // no work: the batch has to have landed on the keyed rows it addressed.
+    const rowEls = document.querySelectorAll("li");
+    expect(rowEls).toHaveLength(500);
+    expect(rowEls[400]!.textContent).toBe("fresh 0");
+    expect(rowEls[499]!.textContent).toBe("fresh 99");
+  });
 });
 
 describe("refresh verb", () => {

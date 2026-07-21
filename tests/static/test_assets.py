@@ -207,6 +207,86 @@ class TestDefaultKinds:
         assert default_kinds.inline_tag("js") == "script"
 
 
+class TestKindRegistryLoad:
+    """load maps a kind to the client insertion verb of its renderer."""
+
+    @pytest.mark.parametrize(
+        ("renderer", "expected"),
+        [
+            ("render_link_tag", "link"),
+            ("render_script_tag", "script"),
+            ("render_module_tag", "module"),
+        ],
+    )
+    def test_builtin_renderers_resolve_to_a_verb(
+        self, renderer: str, expected: str
+    ) -> None:
+        reg = KindRegistry()
+        reg.register("thing", extension=".thing", slot="scripts", renderer=renderer)
+        assert reg.load("thing") == expected
+
+    def test_custom_renderer_has_no_verb(self) -> None:
+        reg = KindRegistry()
+        reg.register("jsx", extension=".jsx", slot="scripts", renderer="render_babel")
+        assert reg.load("jsx") is None
+
+    def test_unregistered_kind_has_no_verb(self) -> None:
+        assert KindRegistry().load("whatever") is None
+
+    def test_default_kinds_cover_every_builtin(self) -> None:
+        assert default_kinds.load("css") == "link"
+        assert default_kinds.load("js") == "script"
+        assert default_kinds.load("module") == "module"
+
+
+class TestKindRegistryInlineLoad:
+    """The inline form only carries a verb the full render agrees with."""
+
+    def test_builtin_inline_pairs_keep_their_verb(self) -> None:
+        assert default_kinds.load("css", inline=True) == "link"
+        assert default_kinds.load("js", inline=True) == "script"
+
+    def test_module_inline_body_has_no_verb(self) -> None:
+        assert default_kinds.load("module", inline=True) is None
+
+    def test_kind_without_inline_tag_has_no_inline_verb(self) -> None:
+        reg = KindRegistry()
+        reg.register(
+            "snippet",
+            extension=".snippet",
+            slot="scripts",
+            renderer="render_script_tag",
+        )
+        assert reg.load("snippet") == "script"
+        assert reg.load("snippet", inline=True) is None
+
+    def test_mismatched_inline_tag_has_no_inline_verb(self) -> None:
+        reg = KindRegistry()
+        reg.register(
+            "banner",
+            extension=".banner",
+            slot="styles",
+            renderer="render_link_tag",
+            inline_tag="template",
+        )
+        assert reg.load("banner") == "link"
+        assert reg.load("banner", inline=True) is None
+
+    def test_custom_renderer_has_no_inline_verb(self) -> None:
+        reg = KindRegistry()
+        reg.register(
+            "jsx",
+            extension=".jsx",
+            slot="scripts",
+            renderer="render_babel",
+            inline_tag="script",
+        )
+        assert reg.load("jsx", inline=True) is None
+
+    def test_unregistered_kind_has_no_inline_verb(self) -> None:
+        assert KindRegistry().load("whatever", inline=True) is None
+
+
 class TestStaticNamespace:
     """StaticNamespace exposes string constants for URL construction."""
 

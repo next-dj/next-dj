@@ -43,18 +43,13 @@ export const ATTR_KEY = "data-next-key";
 // shared constants until the 0.9 sync step.
 
 // A partial:error as a discriminated union on kind, so a listener branches on
-// the cause and reads only the fields that cause carries. network is a fetch
-// reject or a dropped SSE connection, with no status or body to report. http is
-// a 5xx or a mutating reply that is not an envelope, carrying the status and
-// body. parse is a malformed JSON body. op is a thrown or unknown verb mid-apply,
-// naming the verb. asset is a stylesheet that failed to load or a version
-// mismatch surviving a reload, optionally naming the url. It lives with the wire
+// the cause and reads only the fields that cause carries. It lives with the wire
 // vocabulary so every emitting module stamps its payload against one shape.
 export type PartialError =
   | { kind: "network"; error: unknown }
   | { kind: "http"; status: number; body: string }
   | { kind: "parse"; body: string; error: unknown }
-  | { kind: "op"; op: string; error: unknown }
+  | { kind: "op"; op: string; target?: string; error: unknown }
   | { kind: "asset"; url?: string; error: unknown };
 
 // The discriminant of PartialError, kept as a named alias for listeners that

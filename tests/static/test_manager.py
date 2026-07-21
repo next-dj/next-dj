@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 from unittest import mock
 
@@ -17,7 +18,7 @@ from next.static import (
 )
 from next.static.collector import HEAD_CLOSE
 from next.static.manager import DefaultStaticManager
-from next.static.scripts import NextScriptBuilder
+from next.static.scripts import CSRF_PAYLOAD_KEY, DEV_PAYLOAD_KEY, NextScriptBuilder
 
 
 STYLES_PLACEHOLDER = "<!-- next:styles -->"
@@ -195,6 +196,184 @@ class TestInjectScriptsAuto:
             out = fresh_manager.inject(html, collector)
         assert "$csrf" not in out
         assert "Next._init({})" in out
+
+
+class TestInjectDevPayload:
+    """The `$dev` init key follows Django `DEBUG` and is absent otherwise."""
+
+    def inject(
+        self, manager: StaticManager, collector: StaticCollector, *, debug: bool
+    ) -> str:
+        html = f"<body>{SCRIPTS_PLACEHOLDER}</body>"
+        with (
+            override_settings(DEBUG=debug),
+            mock.patch(
+                "next.static.manager.staticfiles_storage.url",
+                return_value="/static/next/next.min.js",
+            ),
+        ):
+            return manager.inject(html, collector)
+
+    def inject_with_request(
+        self, manager: StaticManager, collector: StaticCollector, *, debug: bool
+    ) -> str:
+        html = f"<body>{SCRIPTS_PLACEHOLDER}</body>"
+        request = RequestFactory().get("/")
+        with (
+            override_settings(DEBUG=debug),
+            mock.patch(
+                "next.static.manager.staticfiles_storage.url",
+                return_value="/static/next/next.min.js",
+            ),
+        ):
+            return manager.inject(html, collector, request=request)
+
+    def test_debug_adds_dev_key(self, fresh_manager: StaticManager) -> None:
+        out = self.inject(fresh_manager, StaticCollector(), debug=True)
+        assert 'Next._init({"$dev":true})' in out
+
+    def test_debug_appends_dev_key_after_user_context(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        collector = StaticCollector()
+        collector.add_js_context("user", "alice")
+        out = self.inject(fresh_manager, collector, debug=True)
+        assert 'Next._init({"user":"alice","$dev":true})' in out
+
+    def test_debug_adds_dev_key_next_to_csrf_payload(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        out = self.inject_with_request(fresh_manager, StaticCollector(), debug=True)
+        assert '"$csrf"' in out
+        assert '"$dev":true' in out
+
+    def test_debug_leaves_collector_context_unmutated(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        collector = StaticCollector()
+        collector.add_js_context("user", "alice")
+        out = self.inject(fresh_manager, collector, debug=True)
+        assert f'"{DEV_PAYLOAD_KEY}":true' in out
+        assert DEV_PAYLOAD_KEY not in collector.js_context()
+        assert DEV_PAYLOAD_KEY not in collector.js_context_wire()
+
+    def test_no_debug_omits_dev_key(self, fresh_manager: StaticManager) -> None:
+        out = self.inject(fresh_manager, StaticCollector(), debug=False)
+        assert "$dev" not in out
+        assert "Next._init({})" in out
+
+    def test_no_debug_omits_dev_key_with_csrf_payload(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        out = self.inject_with_request(fresh_manager, StaticCollector(), debug=False)
+        assert "$dev" not in out
+        assert '"$csrf"' in out
+
+    def test_disabled_policy_omits_dev_key(self, fresh_manager: StaticManager) -> None:
+        fresh_manager._ensure_backends()
+        fresh_manager._script_builder = NextScriptBuilder(
+            "/static/next/next.min.js", policy=ScriptInjectionPolicy.DISABLED
+        )
+        out = self.inject(fresh_manager, StaticCollector(), debug=True)
+        assert "$dev" not in out
+        assert "Next._init" not in out
+
+    def test_manual_policy_omits_dev_key(self, fresh_manager: StaticManager) -> None:
+        fresh_manager._ensure_backends()
+        fresh_manager._script_builder = NextScriptBuilder(
+            "/static/next/next.min.js", policy=ScriptInjectionPolicy.MANUAL
+        )
+        out = self.inject(fresh_manager, StaticCollector(), debug=True)
+        assert "$dev" not in out
+        assert "Next._init" not in out
+
+
+class _MarkSerializer:
+    """Per-key serializer that wraps a value under a marker."""
+
+    def dumps(self, value: object) -> str:
+        """Return the value wrapped in a marker object as compact JSON."""
+        return json.dumps({"mark": value}, separators=(",", ":"))
+
+
+class TestReservedInitPayloadKeys:
+    """A js-context key colliding with a reserved key loses to the framework."""
+
+    def inject(
+        self,
+        manager: StaticManager,
+        collector: StaticCollector,
+        *,
+        debug: bool,
+        with_request: bool = False,
+    ) -> str:
+        html = f"<body>{SCRIPTS_PLACEHOLDER}</body>"
+        request = RequestFactory().get("/") if with_request else None
+        with (
+            override_settings(DEBUG=debug),
+            mock.patch(
+                "next.static.manager.staticfiles_storage.url",
+                return_value="/static/next/next.min.js",
+            ),
+        ):
+            return manager.inject(html, collector, request=request)
+
+    def test_framework_csrf_payload_beats_a_user_fragment(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        collector = StaticCollector()
+        collector.add_js_context(CSRF_PAYLOAD_KEY, {"header": "X-App", "token": "app"})
+        out = self.inject(fresh_manager, collector, debug=False, with_request=True)
+        assert '"header":"X-Csrftoken"' in out
+        assert "X-App" not in out
+        assert out.count(f'"{CSRF_PAYLOAD_KEY}"') == 1
+
+    def test_framework_dev_flag_beats_a_user_fragment(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        collector = StaticCollector()
+        collector.add_js_context(DEV_PAYLOAD_KEY, False)
+        out = self.inject(fresh_manager, collector, debug=True)
+        assert f'"{DEV_PAYLOAD_KEY}":true' in out
+        assert f'"{DEV_PAYLOAD_KEY}":false' not in out
+
+    def test_user_dev_key_survives_without_debug(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        """Without DEBUG the framework injects nothing, so `next.W075` is the guard."""
+        collector = StaticCollector()
+        collector.add_js_context(DEV_PAYLOAD_KEY, False)
+        out = self.inject(fresh_manager, collector, debug=False)
+        assert f'"{DEV_PAYLOAD_KEY}":false' in out
+
+    def test_key_serializer_override_does_not_encode_the_framework_value(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        collector = StaticCollector()
+        collector.add_js_context(DEV_PAYLOAD_KEY, False, serializer=_MarkSerializer())
+        out = self.inject(fresh_manager, collector, debug=True)
+        assert f'"{DEV_PAYLOAD_KEY}":true' in out
+        assert "mark" not in out
+
+    def test_collision_leaves_the_collector_untouched(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        collector = StaticCollector()
+        collector.add_js_context(CSRF_PAYLOAD_KEY, {"header": "X-App", "token": "app"})
+        self.inject(fresh_manager, collector, debug=True, with_request=True)
+        assert collector.js_context()[CSRF_PAYLOAD_KEY] == {
+            "header": "X-App",
+            "token": "app",
+        }
+        assert "X-App" in collector.js_context_encoded()[CSRF_PAYLOAD_KEY]
+
+    def test_other_keys_keep_their_cached_fragments(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        collector = StaticCollector()
+        collector.add_js_context("user", "alice", serializer=_MarkSerializer())
+        out = self.inject(fresh_manager, collector, debug=True)
+        assert '"user":{"mark":"alice"}' in out
 
 
 class TestInjectScriptsDisabled:

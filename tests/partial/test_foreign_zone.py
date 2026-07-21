@@ -30,7 +30,7 @@ class TestForeignZoneByPath:
         envelope = (
             Patches(partial_request()).morph(zone="alpha", page=_ZONED_PAGE).envelope()
         )
-        assert {"kind": "css", "url": "/static/next/zoned.css"} in [
+        assert {"kind": "css", "url": "/static/next/zoned.css", "load": "link"} in [
             asset.as_dict() for asset in envelope.assets
         ]
 

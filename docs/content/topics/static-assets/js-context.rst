@@ -172,6 +172,14 @@ Configure the policy through the first static backend ``OPTIONS``.
 The configured policy fires anywhere the same key reaches the collector twice, including page-to-component, component-to-component, page-to-layout, and any contributor that calls ``StaticCollector.add_js_context`` directly.
 Two ``@context`` decorators on the same page that register the same key always resolve first-wins, regardless of ``JS_CONTEXT_POLICY``.
 Pick distinct keys when both registrations live in the same module.
+The framework owns the ``$``-prefixed keys of the init payload, ``$csrf`` and ``$dev``, and layers them over the collected context once the policy has already run.
+A project key of either name loses on a render that writes the framework value, whichever way the project registered the key, because the layering discards the pre-encoded fragment and the per-key serializer the key recorded.
+Each key travels under its own condition, ``$csrf`` on an automatically injected payload whose request can mint a CSRF token and ``$dev`` on an automatically injected payload only while ``DEBUG`` is on.
+A render that does not meet the condition keeps the registered value instead, so ``window.Next.context`` disagrees between environments.
+The ``next.W075`` system check reports such a key at ``manage.py check`` and names the ``page.py`` or ``component.py`` that declares it, so the declaring module keeps its value by renaming the key.
+
+A partial render honours the same ownership.
+``Patches.context()`` refuses ``$csrf`` and ``$dev`` with ``ReservedContextKeyError``, and the js-context delta of a zone render drops them before it becomes a ``context`` patch.
 
 Writing a Policy
 ----------------
@@ -301,6 +309,7 @@ An absent or empty ``NEXT_JS_OPTIONS`` uses the ``AUTO`` policy and the default 
    Under ``MANUAL`` the static manager skips both the preload hint and the ``Next._init`` wrap, exactly like ``DISABLED``.
    To inject ``window.Next`` yourself, resolve the runtime URL with ``staticfiles_storage.url(NEXT_JS_STATIC_PATH)`` from ``next.static.scripts``, then bind one ``builder = NextScriptBuilder.from_options(url, NEXT_JS_OPTIONS)``.
    Emit ``builder.preload_link()``, ``builder.script_tag()``, and ``builder.init_script(js_context)`` from a custom template tag or middleware.
+   A payload built this way carries neither ``$csrf`` nor ``$dev``, because the static manager adds both only under ``AUTO``.
 
 Set the policy through the ``NEXT_JS_OPTIONS`` dict.
 

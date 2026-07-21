@@ -417,7 +417,7 @@ On click the runtime opens a native ``<dialog>``, builds the ``access-wizard`` z
        {"op": "morph", "target": {"zone": "access-wizard"},
         "html": "<div data-next-zone=\"access-wizard\">…identity step…</div>"}
      ],
-     "assets": [{"kind": "css", "url": "/static/access/progress_bar.css"}]
+     "assets": [{"kind": "css", "url": "/static/access/progress_bar.css", "load": "link"}]
    }
 
 A step submitted with an error answers 200 with a morph of the wizard zone and the form meta.
@@ -536,7 +536,7 @@ CSS loads before the morph, JS after, so the table cannot arrive without behavio
        {"op": "morph", "target": {"zone": "audit-table"},
         "html": "<div data-next-zone=\"audit-table\">…the table…</div>"}
      ],
-     "assets": [{"kind": "css", "url": "/static/access/audit_row.css"}]
+     "assets": [{"kind": "css", "url": "/static/access/audit_row.css", "load": "link"}]
    }
 
 Critical content must not be marked lazy, because the placeholder is all a no-JavaScript client ever sees.

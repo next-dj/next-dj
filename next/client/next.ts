@@ -63,6 +63,10 @@ class Next {
   // server-seeded context. It is the runtime's true bootstrap, ahead of any
   // co-located script, so it seeds context and mounts before ready listeners run.
   static _init(context: Record<string, unknown>): void {
+    // Only the literal true opens the dev channel, so a stray "true" string
+    // leaves production quiet. It runs before ready() because _configure
+    // rebuilds the applier and the initial scan must walk the new instances.
+    if (context.$dev === true) Next.partial._configure({ dev: true });
     Next.#context = context;
     Next.#ready = true;
     // The initial seed is one big delta, so every seeded key is changed.

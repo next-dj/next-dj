@@ -116,8 +116,10 @@ export function createSse(deps: SseDeps): Sse {
   // The connections keyed by url so a re-scan of a re-inserted container does
   // not open a second stream to the same endpoint.
   const connections = new Map<string, Connection>();
-  // The own request ids, a ring of the last ECHO_LIMIT values.
-  const echo: string[] = [];
+  // The own request ids, a ring of the last ECHO_LIMIT values. A Map answers
+  // membership in constant time and keeps insertion order, so its first key is
+  // the oldest id and eviction needs no second structure.
+  const echo = new Map<string, true>();
   let paused = false;
   // The clock reading at the last pause, so resume measures the hidden span and
   // skips revalidation for a flicker.
@@ -125,12 +127,19 @@ export function createSse(deps: SseDeps): Sse {
   let detachVisibility: (() => void) | null = null;
 
   function remember(id: string): void {
-    echo.push(id);
-    if (echo.length > ECHO_LIMIT) echo.shift();
+    echo.set(id, true);
+    // The ring runs one entry over the limit at most, so the first key is the
+    // only id to drop.
+    if (echo.size > ECHO_LIMIT) {
+      for (const oldest of echo.keys()) {
+        echo.delete(oldest);
+        break;
+      }
+    }
   }
 
   function isEcho(id: string | undefined): boolean {
-    return id !== undefined && echo.includes(id);
+    return id !== undefined && echo.has(id);
   }
 
   // Parse one event body and apply it, unless it is the client's own echo. A
@@ -257,7 +266,7 @@ export function createSse(deps: SseDeps): Sse {
     _reset() {
       for (const connection of connections.values()) connection.control.close();
       connections.clear();
-      echo.length = 0;
+      echo.clear();
       paused = false;
       pausedAt = 0;
       if (detachVisibility !== null) detachVisibility();

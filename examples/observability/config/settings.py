@@ -71,6 +71,12 @@ STATICFILES_DIRS = [BASE_DIR / "static", SHARED_DIR / "static"]
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# `obs/apps.py` registers the `jsx` kind with a custom Babel renderer, so the
+# client has no insertion verb for it and next.W074 fires. Browser-side Babel is
+# a full-page technique and the sparkline sits outside every zone, so no patch
+# envelope ever has to load its `component.jsx`.
+SILENCED_SYSTEM_CHECKS = ["next.W074"]
+
 # Naming, custom backend, dedup policy, and JS-context serializer wiring
 # all live under one settings dict. The custom components backend counts
 # every name resolution. The dedup policy counts every asset filtered as

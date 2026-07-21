@@ -10,6 +10,8 @@ interface NextStatic {
       name: string,
       handler: (patch: Record<string, unknown>, ctx: unknown) => void,
     ): void;
+    ready(): void;
+    _configure(adapters: { dev?: boolean }): void;
     _reset(): void;
   };
   _init(context: Record<string, unknown>): void;
@@ -60,6 +62,53 @@ describe("Next._init", () => {
     expect(win.Next.context.flag).toBe(true);
     expect(win.Next.context.arr).toEqual([1, 2]);
     expect(win.Next.context.nil).toBeNull();
+  });
+});
+
+describe("Next._init dev channel", () => {
+  // _configure is stubbed, not called through: a real rebuild would leave the
+  // shared runtime of this file wired for dev.
+  function spyConfigure() {
+    return vi.spyOn(win.Next.partial, "_configure").mockImplementation(() => undefined);
+  }
+
+  beforeEach(() => {
+    win.Next._init({});
+  });
+
+  it("opens the dev channel from a literal true and before the initial scan", () => {
+    const configure = spyConfigure();
+    const ready = vi.spyOn(win.Next.partial, "ready");
+    win.Next._init({ $dev: true });
+    expect(configure).toHaveBeenCalledWith({ dev: true });
+    expect(configure.mock.invocationCallOrder[0]!).toBeLessThan(
+      ready.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("leaves the channel shut when the payload carries no key", () => {
+    const configure = spyConfigure();
+    win.Next._init({});
+    expect(configure).not.toHaveBeenCalled();
+  });
+
+  it("leaves the channel shut for a truthy value that is not the boolean", () => {
+    const configure = spyConfigure();
+    win.Next._init({ $dev: "true" });
+    expect(configure).not.toHaveBeenCalled();
+  });
+
+  it("keeps $dev in the context store and in the changed keys", () => {
+    const configure = spyConfigure();
+    const received: Record<string, unknown>[] = [];
+    const off = win.Next.on("context-updated", (payload) => {
+      received.push(payload);
+    });
+    win.Next._init({ $dev: true, page: "home" });
+    expect(win.Next.context.$dev).toBe(true);
+    expect(received[0]!.changed).toEqual(["$dev", "page"]);
+    off();
+    expect(configure).toHaveBeenCalledTimes(1);
   });
 });
 

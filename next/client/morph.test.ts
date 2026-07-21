@@ -391,11 +391,33 @@ describe("morph hooks and events", () => {
     expect(keep.hasAttribute("class")).toBe(false);
   });
 
-  it("warns on a node carrying both data-next-key and id", () => {
+  it("warns in dev on a node carrying both data-next-key and id", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const target = mount('<ul id="l"><li id="x" data-next-key="x">x</li></ul>');
+    morph(target, '<ul id="l"><li id="x" data-next-key="x">y</li></ul>', {
+      dev: true,
+    });
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("stays silent in dev on a keyed node carrying no id", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const target = mount('<ul id="l"><li data-next-key="x">x</li></ul>');
+    morph(target, '<ul id="l"><li data-next-key="x">y</li></ul>', { dev: true });
+    expect(warn).not.toHaveBeenCalled();
+    expect(target.textContent).toBe("y");
+  });
+
+  it("stays silent on key and id together without dev", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const target = mount('<ul id="l"><li id="x" data-next-key="x">x</li></ul>');
     morph(target, '<ul id="l"><li id="x" data-next-key="x">y</li></ul>');
-    expect(warn).toHaveBeenCalled();
+    morph(target, '<ul id="l"><li id="x" data-next-key="x">z</li></ul>', {
+      dev: false,
+    });
+    expect(warn).not.toHaveBeenCalled();
+    expect(target.textContent).toBe("z");
     warn.mockRestore();
   });
 

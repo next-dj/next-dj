@@ -26,6 +26,7 @@ def patch_checks_router_manager(
     mock_router._scan_pages_directory.return_value = routes
     with (
         patch("next.pages.checks.get_router_manager", return_value=(mock_mgr, [])),
+        patch("next.pages.manager.get_router_manager", return_value=(mock_mgr, [])),
         patch("next.urls.checks.get_router_manager", return_value=(mock_mgr, [])),
         patch(
             "next.checks.common.get_pages_directory", return_value=pages_directory

@@ -7,6 +7,7 @@ from next.partial.patches import (
     BuiltinPatchOpError,
     CrossSiteHrefError,
     LayerHrefWithoutZoneError,
+    ReservedContextKeyError,
     ReservedEventNameError,
     ReservedPatchKeyError,
     UnknownContextNameError,
@@ -14,6 +15,7 @@ from next.partial.patches import (
     UnknownPatchOpError,
 )
 from next.partial.registry import patch_op_registry
+from next.static.scripts import CSRF_PAYLOAD_KEY, DEV_PAYLOAD_KEY
 from tests.support import partial_request, plain_request
 
 
@@ -38,7 +40,7 @@ class TestMorphZone:
 
     def test_zone_asset_manifest_travels_in_the_envelope(self) -> None:
         envelope = Patches(partial_request()).morph(zone="alpha").envelope()
-        assert {"kind": "css", "url": "/static/next/zoned.css"} in [
+        assert {"kind": "css", "url": "/static/next/zoned.css", "load": "link"} in [
             asset.as_dict() for asset in envelope.assets
         ]
 
@@ -318,6 +320,36 @@ class TestContextPatch:
             Patches(partial_request()).context(secret="leak")
         assert "flag" in exc.value.available
         assert "flag" in str(exc.value)
+
+
+class TestReservedContextKeys:
+    """`context()` refuses the init-payload keys the framework owns."""
+
+    @pytest.mark.parametrize("name", ["$csrf", "$dev"])
+    def test_reserved_key_raises(self, name: str) -> None:
+        with pytest.raises(ReservedContextKeyError, match="reserved") as exc:
+            Patches(partial_request()).context(**{name: "forged"})
+        assert exc.value.keys == frozenset({name})
+
+    def test_reserved_key_refused_without_a_request(self) -> None:
+        with pytest.raises(ReservedContextKeyError):
+            Patches.versioned("v1").context(**{CSRF_PAYLOAD_KEY: "forged"})
+
+    def test_message_sorts_several_reserved_keys(self) -> None:
+        with pytest.raises(ReservedContextKeyError) as exc:
+            Patches(partial_request()).context(**{DEV_PAYLOAD_KEY: 1, "$csrf": 2})
+        assert exc.value.keys == frozenset({"$csrf", "$dev"})
+        assert "$csrf, $dev" in str(exc.value)
+
+    def test_reserved_key_wins_over_the_unknown_name_error(self) -> None:
+        with pytest.raises(ReservedContextKeyError):
+            Patches(partial_request()).context(**{"$csrf": 1, "secret": 2})
+
+    def test_no_op_is_recorded_when_the_call_is_refused(self) -> None:
+        patches = Patches(partial_request())
+        with pytest.raises(ReservedContextKeyError):
+            patches.context(**{CSRF_PAYLOAD_KEY: "forged"})
+        assert patches.envelope().ops == ()
 
 
 class TestResponse:

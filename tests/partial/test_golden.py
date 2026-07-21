@@ -405,7 +405,9 @@ class TestGoldenFixtureShape:
 
     def test_zone_get_envelope_carries_asset_manifest(self) -> None:
         data = _envelope_data(_zone_get())
-        assert data["assets"] == [{"kind": "css", "url": "/static/next/zoned.css"}]
+        assert data["assets"] == [
+            {"kind": "css", "url": "/static/next/zoned.css", "load": "link"}
+        ]
 
     def test_invalid_extract_envelope_marks_extract_on_the_form_target(self) -> None:
         data = _envelope_data(_invalid_form_extract())

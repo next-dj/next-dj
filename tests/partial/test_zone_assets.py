@@ -7,18 +7,18 @@ class TestZoneGetInlineAssets:
     """A zone GET ships the inline assets its body collected."""
 
     @pytest.mark.parametrize(
-        ("zone", "kind", "body"),
+        ("zone", "kind", "body", "load"),
         [
-            ("styled", "css", ".zone-styled { color: crimson; }"),
-            ("scripted", "js", 'console.log("zone scripted");'),
+            ("styled", "css", ".zone-styled { color: crimson; }", "link"),
+            ("scripted", "js", 'console.log("zone scripted");', "script"),
         ],
     )
     def test_inline_asset_travels_with_its_body(
-        self, zone: str, kind: str, body: str
+        self, zone: str, kind: str, body: str, load: str
     ) -> None:
         response = NextClient().get_zones("/zoned_inline/", zone)
         inline = [a for a in envelope_of(response).assets if a["url"] == ""]
-        assert inline == [{"kind": kind, "url": "", "inline": body}]
+        assert inline == [{"kind": kind, "url": "", "inline": body, "load": load}]
 
     def test_inline_asset_manifest_is_not_empty(self) -> None:
         response = NextClient().get_zones("/zoned_inline/", "styled")
@@ -31,7 +31,7 @@ class TestZoneGetUrlAssets:
     def test_url_form_asset_travels(self) -> None:
         response = NextClient().get_zones("/zoned/", "alpha")
         assert envelope_of(response).assets == [
-            {"kind": "css", "url": "/static/next/zoned.css"}
+            {"kind": "css", "url": "/static/next/zoned.css", "load": "link"}
         ]
 
     def test_url_form_asset_carries_no_inline_key(self) -> None:
@@ -82,10 +82,12 @@ class TestZoneGetMixedManifest:
             "kind": "css",
             "url": "",
             "inline": ".zone-mixed { color: navy; }",
+            "load": "link",
         } in envelope.assets
         assert {
             "kind": "css",
             "url": "/static/next/zoned_inline.css",
+            "load": "link",
         } in envelope.assets
         context_ops = [op for op in envelope.ops if op["op"] == "context"]
         assert context_ops == [{"op": "context", "data": {"seen": 7}}]

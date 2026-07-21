@@ -122,6 +122,46 @@ describe("createSse", () => {
     expect(applied).toHaveLength(1);
   });
 
+  it("still suppresses the oldest id while the ring sits exactly at the limit", () => {
+    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    const { adapter, opened } = mockSource();
+    const sse = makeSse(adapter, manualVisibility());
+    sse.scan(document);
+    for (let i = 0; i < 25; i += 1) sse.remember(`r${i}`);
+    for (let i = 0; i < 25; i += 1) opened[0]!.message(envelope([], `r${i}`));
+    expect(applied).toHaveLength(0);
+  });
+
+  it("evicts only the oldest id when one more overflows the ring", () => {
+    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    const { adapter, opened } = mockSource();
+    const sse = makeSse(adapter, manualVisibility());
+    sse.scan(document);
+    for (let i = 0; i < 25; i += 1) sse.remember(`r${i}`);
+    sse.remember("r25");
+    opened[0]!.message(envelope([], "r0"));
+    expect(applied).toHaveLength(1);
+    // The 25 ids that survived the eviction, the newest included, stay silent.
+    for (let i = 1; i < 26; i += 1) opened[0]!.message(envelope([], `r${i}`));
+    expect(applied).toHaveLength(1);
+  });
+
+  it("a repeated id keeps its first place in the ring rather than moving to the end", () => {
+    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    const { adapter, opened } = mockSource();
+    const sse = makeSse(adapter, manualVisibility());
+    sse.scan(document);
+    for (let i = 0; i < 25; i += 1) sse.remember(`r${i}`);
+    // Re-feeding the oldest id must not promote it: the next overflow still
+    // evicts r0, not r1.
+    sse.remember("r0");
+    sse.remember("r25");
+    opened[0]!.message(envelope([], "r0"));
+    expect(applied).toHaveLength(1);
+    opened[0]!.message(envelope([], "r1"));
+    expect(applied).toHaveLength(1);
+  });
+
   it("drops the echo of a mutation whose id the wire fed into the ring", async () => {
     document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
     const { adapter, opened } = mockSource();
@@ -446,5 +486,19 @@ describe("createSse", () => {
     expect(opened[0]!.closed).toBe(true);
     expect(sse.size()).toBe(0);
     expect(detach).toHaveBeenCalledOnce();
+  });
+
+  it("_reset empties the echo ring so a remembered id no longer suppresses", () => {
+    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    const { adapter, opened } = mockSource();
+    const sse = makeSse(adapter, manualVisibility());
+    sse.scan(document);
+    sse.remember("r1");
+    opened[0]!.message(envelope([], "r1"));
+    expect(applied).toHaveLength(0);
+    sse._reset();
+    sse.scan(document);
+    opened[1]!.message(envelope([], "r1"));
+    expect(applied).toHaveLength(1);
   });
 });

@@ -132,7 +132,11 @@ class TestEnvelopeHelpers:
 
     def test_assets_manifest_lists_co_located_css(self) -> None:
         envelope = envelope_of(NextClient().get_zones("/zoned/", "alpha"))
-        assert {"kind": "css", "url": "/static/next/zoned.css"} in envelope.assets
+        assert {
+            "kind": "css",
+            "url": "/static/next/zoned.css",
+            "load": "link",
+        } in envelope.assets
 
     def test_html_for_zone_returns_payload(self) -> None:
         envelope = envelope_of(NextClient().get_zones("/zoned/", "alpha"))
