@@ -24,11 +24,7 @@ class Board(models.Model):
 class Column(models.Model):
     """A vertical lane on a board where cards are stacked in display order."""
 
-    board = models.ForeignKey(
-        Board,
-        on_delete=models.CASCADE,
-        related_name="columns",
-    )
+    board = models.ForeignKey(Board, on_delete=models.CASCADE, related_name="columns")
     title = models.CharField(max_length=120)
     position = models.PositiveIntegerField(default=0)
     wip_limit = models.PositiveIntegerField(null=True, blank=True)
@@ -48,11 +44,7 @@ _EXCERPT_LIMIT = 100
 class Card(models.Model):
     """An individual task card that lives inside one column."""
 
-    column = models.ForeignKey(
-        Column,
-        on_delete=models.CASCADE,
-        related_name="cards",
-    )
+    column = models.ForeignKey(Column, on_delete=models.CASCADE, related_name="cards")
     title = models.CharField(max_length=200)
     body = models.TextField(blank=True)
     position = models.PositiveIntegerField(default=0)

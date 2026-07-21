@@ -11,8 +11,7 @@ EMPTY_PREVIEW = format_html(
     "<p class='text-slate-400 italic'>{}</p>", "Nothing to preview yet."
 )
 UNSAFE_HREF = re.compile(
-    r'href="\s*(?:javascript|data|vbscript):[^"]*"',
-    flags=re.IGNORECASE,
+    r'href="\s*(?:javascript|data|vbscript):[^"]*"', flags=re.IGNORECASE
 )
 
 

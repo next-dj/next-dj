@@ -29,32 +29,17 @@ def active_filters(request: HttpRequest) -> dict[str, Any]:
         chips.append(_chip(items, f"Search {f.q}", "q", f.q))
     chips.extend(_chip(items, f"Brand {brand}", "brand", brand) for brand in f.brands)
     if f.price_min is not None:
-        chips.append(
-            _chip(items, f"From {f.price_min}", "price_min", str(f.price_min)),
-        )
+        chips.append(_chip(items, f"From {f.price_min}", "price_min", str(f.price_min)))
     if f.price_max is not None:
-        chips.append(
-            _chip(items, f"To {f.price_max}", "price_max", str(f.price_max)),
-        )
+        chips.append(_chip(items, f"To {f.price_max}", "price_max", str(f.price_max)))
     if f.in_stock:
         chips.append(_chip(items, "In stock", "in_stock", "1"))
-    return {
-        "active_filters": chips,
-        "active_filters_count": len(chips),
-    }
+    return {"active_filters": chips, "active_filters_count": len(chips)}
 
 
 def _chip(
-    items: list[tuple[str, str]],
-    label: str,
-    key: str,
-    value: str,
+    items: list[tuple[str, str]], label: str, key: str, value: str
 ) -> dict[str, str]:
     """Return a single chip descriptor including the precomputed drop URL."""
     kept = [(k, v) for k, v in items if (k, v) != (key, value)]
-    return {
-        "label": label,
-        "key": key,
-        "value": value,
-        "drop_url": urlencode(kept),
-    }
+    return {"label": label, "key": key, "value": value, "drop_url": urlencode(kept)}

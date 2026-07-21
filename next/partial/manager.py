@@ -4,10 +4,7 @@ import hashlib
 import json
 from typing import TYPE_CHECKING, Any, cast
 
-from django.contrib.staticfiles.storage import (
-    ManifestFilesMixin,
-    staticfiles_storage,
-)
+from django.contrib.staticfiles.storage import ManifestFilesMixin, staticfiles_storage
 from django.core.exceptions import ImproperlyConfigured
 
 from next.conf import import_class_cached, next_framework_settings
@@ -126,7 +123,7 @@ def _hash_mapping(hashed_files: "Mapping[str, str]") -> str:
     return digest[:_HASH_WIDTH]
 
 
-def _on_settings_reloaded(**_kwargs: object) -> None:
+def _on_settings_reloaded(**kwargs) -> None:
     """Drop the cached backend so a reloaded config takes effect."""
     partial_backend_manager.reset()
 
@@ -134,8 +131,4 @@ def _on_settings_reloaded(**_kwargs: object) -> None:
 settings_reloaded.connect(_on_settings_reloaded)
 
 
-__all__ = [
-    "PartialBackendManager",
-    "PartialProtocolFactory",
-    "partial_backend_manager",
-]
+__all__ = ["PartialBackendManager", "PartialProtocolFactory", "partial_backend_manager"]

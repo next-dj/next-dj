@@ -64,11 +64,7 @@ def href(
 
 
 @component.context("is_active")
-def is_active(
-    request: HttpRequest,
-    url_name: str = "",
-    active_when: str = "",
-) -> bool:
+def is_active(request: HttpRequest, url_name: str = "", active_when: str = "") -> bool:
     match = getattr(request, "resolver_match", None)
     if match is None:
         return False
@@ -79,12 +75,7 @@ def is_active(
 
 
 @component.context("classes")
-def classes(
-    *,
-    is_active: bool,
-    variant: str = "tabs",
-    extra: str = "",
-) -> str:
+def classes(*, is_active: bool, variant: str = "tabs", extra: str = "") -> str:
     style = VARIANTS.get(variant, VARIANTS["tabs"])
     state = style["active"] if is_active else style["inactive"]
     parts = [style["base"], state]

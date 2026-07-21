@@ -157,8 +157,7 @@ class TestZoneResponseVary:
     """A zone GET response stamps the protective partial Vary header."""
 
     @pytest.mark.parametrize(
-        "header",
-        ["X-Next-Request", "X-Next-Zone", "X-Next-Merge", "X-Next-Version"],
+        "header", ["X-Next-Request", "X-Next-Zone", "X-Next-Merge", "X-Next-Version"]
     )
     def test_zone_response_varies_on_partial_header(self, header: str) -> None:
         response = NextClient().get_zones("/zoned/", "alpha")

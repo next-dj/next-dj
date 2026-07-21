@@ -60,10 +60,7 @@ class TestNextStatReloader:
         indirect=["reloader_tick_scenario"],
     )
     def test_tick_scenario_notify_behavior(
-        self,
-        reloader_tick_scenario,
-        num_ticks: int,
-        expect: str,
+        self, reloader_tick_scenario, num_ticks: int, expect: str
     ) -> None:
         """tick() under each patched scenario matches expected notify behavior."""
         reloader, payload = reloader_tick_scenario
@@ -106,7 +103,7 @@ class TestTreeDirSignature:
                     entry.is_dir.side_effect = OSError
                     return iter([entry])
 
-                def __exit__(self, *_: object) -> bool:
+                def __exit__(self, *args) -> bool:
                     return False
 
             return _CM()

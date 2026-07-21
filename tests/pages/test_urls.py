@@ -38,11 +38,7 @@ class TestURLPatternParser:
         ],
     )
     def test_parse_url_pattern_variations(
-        self,
-        url_parser,
-        url_pattern,
-        expected_pattern,
-        expected_params,
+        self, url_parser, url_pattern, expected_pattern, expected_params
     ) -> None:
         """Test parsing URL patterns with different variations."""
         pattern, params = url_parser.parse_url_pattern(url_pattern)
@@ -62,15 +58,12 @@ class TestURLPatternParser:
                     "post_slug",
                     "args",
                 ],
-            ),
+            )
         ],
         ids=["complex_pattern"],
     )
     def test_parse_url_pattern_complex(
-        self,
-        url_parser,
-        url_pattern,
-        expected_contains,
+        self, url_parser, url_pattern, expected_contains
     ) -> None:
         """Test parsing complex URL pattern."""
         pattern, params = url_parser.parse_url_pattern(url_pattern)
@@ -92,11 +85,7 @@ class TestURLPatternParser:
         ids=["empty_bracket", "empty_double_bracket"],
     )
     def test_parse_url_pattern_edge_cases(
-        self,
-        url_parser,
-        url_pattern,
-        pattern_contains,
-        params_condition,
+        self, url_parser, url_pattern, pattern_contains, params_condition
     ) -> None:
         """Test parsing URL pattern edge cases."""
         pattern, params = url_parser.parse_url_pattern(url_pattern)
@@ -115,11 +104,7 @@ class TestURLPatternParser:
         ids=["simple_param", "typed_param", "empty", "whitespace", "colon_prefix"],
     )
     def test_parse_param_name_and_type_variations(
-        self,
-        url_parser,
-        param_string,
-        expected_name,
-        expected_type,
+        self, url_parser, param_string, expected_name, expected_type
     ) -> None:
         """Test parsing parameter name and type with different variations."""
         name, type_name = url_parser._parse_param_name_and_type(param_string)
@@ -133,16 +118,12 @@ class TestURLPatternParser:
                 "user/[[profile]]/[int:user-id]/posts",
                 ["profile", "user_id"],
                 "user/<path:profile>/<int:user_id>/posts/",
-            ),
+            )
         ],
         ids=["args_and_params"],
     )
     def test_parse_url_pattern_with_args_and_params(
-        self,
-        url_parser,
-        url_path,
-        expected_params,
-        expected_pattern,
+        self, url_parser, url_path, expected_params, expected_pattern
     ) -> None:
         """Test parsing URL pattern with both args and regular parameters."""
         django_pattern, parameters = url_parser.parse_url_pattern(url_path)
@@ -234,15 +215,7 @@ def render(request, **kwargs):
                 "page_test",
                 "<h1>Virtual view: {{ title }}</h1><p>{{ content }}</p>",
             ),
-            (
-                "virtual_view_no_djx",
-                None,
-                False,
-                None,
-                "test",
-                None,
-                None,
-            ),
+            ("virtual_view_no_djx", None, False, None, "test", None, None),
             (
                 "virtual_view_with_params",
                 None,
@@ -297,10 +270,7 @@ def render(request, **kwargs):
             assert pattern is None
 
     def test_create_url_pattern_render_function_fallback(
-        self,
-        page_instance,
-        tmp_path,
-        url_parser,
+        self, page_instance, tmp_path, url_parser
     ) -> None:
         """Test that render function is used as fallback when no template is found."""
         page_file = tmp_path / "page.py"
@@ -317,10 +287,7 @@ def render(request, **kwargs):
         assert pattern.name == "page_test"
 
     def test_create_url_pattern_virtual_view_rendering(
-        self,
-        page_instance,
-        tmp_path,
-        url_parser,
+        self, page_instance, tmp_path, url_parser
     ) -> None:
         """Test that virtual view can be rendered with context."""
         page_file = tmp_path / "page.py"
@@ -336,10 +303,7 @@ def render(request, **kwargs):
         assert result == "<h1>Welcome</h1><p>Hello World!</p>"
 
     def test_create_url_pattern_with_context_functions(
-        self,
-        page_instance,
-        tmp_path,
-        url_parser,
+        self, page_instance, tmp_path, url_parser
     ) -> None:
         """Test create_url_pattern with context functions for virtual view."""
         page_file = tmp_path / "page.py"
@@ -348,14 +312,10 @@ def render(request, **kwargs):
         djx_file.write_text(djx_content)
 
         page_instance._context_manager.register_context(
-            page_file,
-            "title",
-            lambda: "Context Title",
+            page_file, "title", lambda: "Context Title"
         )
         page_instance._context_manager.register_context(
-            page_file,
-            "description",
-            lambda: "Context Description",
+            page_file, "description", lambda: "Context Description"
         )
 
         pattern = page_instance.create_url_pattern("test", page_file, url_parser)
@@ -381,17 +341,12 @@ class TestPageCreateUrlPattern:
         clean_name = url_parser.prepare_url_name("test")
 
         result = page_instance._create_regular_page_pattern(
-            page_file,
-            django_pattern,
-            parameters,
-            clean_name,
+            page_file, django_pattern, parameters, clean_name
         )
         assert result is None
 
     def test_create_regular_page_pattern_no_template_no_render(
-        self,
-        page_instance,
-        tmp_path,
+        self, page_instance, tmp_path
     ) -> None:
         """Test _create_regular_page_pattern when no template and no render function."""
         page_file = tmp_path / "page.py"
@@ -402,9 +357,6 @@ class TestPageCreateUrlPattern:
         clean_name = url_parser.prepare_url_name("test")
 
         result = page_instance._create_regular_page_pattern(
-            page_file,
-            django_pattern,
-            parameters,
-            clean_name,
+            page_file, django_pattern, parameters, clean_name
         )
         assert result is None

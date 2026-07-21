@@ -163,9 +163,9 @@ Both metaclasses are ``DeclarativeFieldsMetaclass``, so the bases compose.
    class LoginAction(Form, LoginForm):
        def __init__(
            self,
-           *args: object,
+           *args,
            request: HttpRequest | None = None,
-           **kwargs: object,
+           **kwargs,
        ) -> None:
            if request is None:
                request = allauth_context.request

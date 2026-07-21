@@ -114,10 +114,7 @@ def build_inline_formsets(spec: AdminFormSpec) -> list[BaseInlineFormSet]:
             if f"{prefix}-TOTAL_FORMS" not in spec.request.POST:
                 continue
             fs = formset_cls(
-                spec.request.POST,
-                spec.request.FILES,
-                instance=parent,
-                prefix=prefix,
+                spec.request.POST, spec.request.FILES, instance=parent, prefix=prefix
             )
         else:
             fs = formset_cls(instance=parent, prefix=prefix)
@@ -256,9 +253,7 @@ class AdminInlineSpec:
     def _row(self, obj: Model, post: QueryDict | None) -> RelatedRow:
         spec = form_spec(self._bind(obj, post))
         return RelatedRow(
-            pk=obj.pk,
-            fields=spec.sections[0].fields,
-            errors=spec.non_field_errors,
+            pk=obj.pk, fields=spec.sections[0].fields, errors=spec.non_field_errors
         )
 
     def _section(self, token: str, target_pk: str) -> RelatedSection:
@@ -320,10 +315,7 @@ def _build_form_class(spec: AdminFormSpec) -> type[django_forms.Form]:
 
 @resolver.dependency("admin_spec")
 def admin_spec(
-    request: HttpRequest,
-    app_label: str,
-    model_name: str,
-    pk: int | None = None,
+    request: HttpRequest, app_label: str, model_name: str, pk: int | None = None
 ) -> AdminFormSpec:
     """Resolve `(model, ModelAdmin, instance)` once per dispatch.
 
@@ -349,10 +341,7 @@ def admin_change_form_factory(
 
 
 def _persist(
-    form: django_forms.ModelForm,
-    spec: AdminFormSpec,
-    *,
-    change: bool,
+    form: django_forms.ModelForm, spec: AdminFormSpec, *, change: bool
 ) -> HttpResponse:
     obj = form.save(commit=False)
     formsets = build_inline_formsets(spec)
@@ -386,8 +375,7 @@ def _redirect_after_save(spec: AdminFormSpec, obj: Model) -> HttpResponseRedirec
 
 @action("admin:add", form_class=admin_add_form_factory, login_required=True)
 def handle_add(
-    form: django_forms.ModelForm,
-    spec: AdminFormSpec = Depends("admin_spec"),
+    form: django_forms.ModelForm, spec: AdminFormSpec = Depends("admin_spec")
 ) -> HttpResponse:
     """Save a new object and its inline formsets, then redirect."""
     if not spec.model_admin.has_add_permission(spec.request):
@@ -397,8 +385,7 @@ def handle_add(
 
 @action("admin:change", form_class=admin_change_form_factory, login_required=True)
 def handle_change(
-    form: django_forms.ModelForm,
-    spec: AdminFormSpec = Depends("admin_spec"),
+    form: django_forms.ModelForm, spec: AdminFormSpec = Depends("admin_spec")
 ) -> HttpResponse:
     """Persist main form and inline formsets via `ModelAdmin.save_model`."""
     if not spec.model_admin.has_change_permission(spec.request, spec.instance):
@@ -450,8 +437,7 @@ def _count_badge(inline: AdminInlineSpec) -> str:
 
 def _flash_save(spec: AdminFormSpec, obj: Model, *, verb: str) -> None:
     messages.success(
-        spec.request,
-        f"The {obj._meta.verbose_name} was {verb} successfully.",
+        spec.request, f"The {obj._meta.verbose_name} was {verb} successfully."
     )
 
 
@@ -481,21 +467,15 @@ def handle_inline_change(
     return (
         Patches(request)
         .replace(
-            {"css": f'form[data-next-key="{obj.pk}"]'},
-            _render_inline_row(inline, obj),
+            {"css": f'form[data-next-key="{obj.pk}"]'}, _render_inline_row(inline, obj)
         )
-        .inner(
-            {"css": f'[data-inline-count="{inline.token}"]'},
-            _count_badge(inline),
-        )
+        .inner({"css": f'[data-inline-count="{inline.token}"]'}, _count_badge(inline))
         .response()
     )
 
 
 @action(
-    "admin:inline_add",
-    form_class=admin_inline_add_form_factory,
-    login_required=True,
+    "admin:inline_add", form_class=admin_inline_add_form_factory, login_required=True
 )
 def handle_inline_add(
     request: HttpRequest,
@@ -524,10 +504,7 @@ def handle_inline_add(
     return (
         Patches(request)
         .layer_open(href=child_change_url, zone="record")
-        .inner(
-            {"css": f'[data-inline-count="{inline.token}"]'},
-            _count_badge(inline),
-        )
+        .inner({"css": f'[data-inline-count="{inline.token}"]'}, _count_badge(inline))
         .response()
     )
 

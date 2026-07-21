@@ -20,10 +20,7 @@ def _build_test_settings() -> dict[str, object]:
     return {
         "DEBUG": True,
         "DATABASES": {
-            "default": {
-                "ENGINE": "django.db.backends.sqlite3",
-                "NAME": ":memory:",
-            },
+            "default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}
         },
         "TEMPLATES": [
             {
@@ -31,11 +28,9 @@ def _build_test_settings() -> dict[str, object]:
                 "DIRS": [],
                 "APP_DIRS": True,
                 "OPTIONS": {
-                    "context_processors": [
-                        "django.template.context_processors.request",
-                    ],
+                    "context_processors": ["django.template.context_processors.request"]
                 },
-            },
+            }
         ],
         "INSTALLED_APPS": [
             "django.contrib.auth",
@@ -61,7 +56,7 @@ def _build_test_settings() -> dict[str, object]:
         "STORAGES": {
             "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
             "staticfiles": {
-                "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+                "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
             },
         },
         "USE_TZ": True,
@@ -74,8 +69,8 @@ def _build_test_settings() -> dict[str, object]:
                     "APP_DIRS": False,
                     "DIRS": [str(PROJECT_ROOT / "tests" / "site_pages")],
                     "OPTIONS": {},
-                },
-            ],
+                }
+            ]
         },
     }
 

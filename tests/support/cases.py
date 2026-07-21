@@ -70,11 +70,7 @@ URL_KWARGS_RESOLVE_CASES: tuple[UrlKwargsResolveCase, ...] = (
     UrlKwargsResolveCase("int_match", "id", int, {"id": 42}, 42),
     UrlKwargsResolveCase("str_to_int", "id", int, {"id": "99"}, 99),
     UrlKwargsResolveCase(
-        "no_annotation",
-        "slug",
-        inspect.Parameter.empty,
-        {"slug": "hello"},
-        "hello",
+        "no_annotation", "slug", inspect.Parameter.empty, {"slug": "hello"}, "hello"
     ),
     UrlKwargsResolveCase(
         "int_conv_fail", "id", int, {"id": "not-a-number"}, "not-a-number"
@@ -117,18 +113,10 @@ URL_BY_ANNOTATION_RESOLVE_CASES: tuple[UrlByAnnotationResolveCase, ...] = (
         "two_arg_reads_named_key", "note_id", DUrl["id", int], {"note_id": "9"}, None
     ),
     UrlByAnnotationResolveCase(
-        "coerce_uuid_preserved",
-        "pk",
-        DUrl[UUID],
-        {"pk": _UUID_VALUE},
-        _UUID_VALUE,
+        "coerce_uuid_preserved", "pk", DUrl[UUID], {"pk": _UUID_VALUE}, _UUID_VALUE
     ),
     UrlByAnnotationResolveCase(
-        "coerce_uuid_from_text",
-        "pk",
-        DUrl[UUID],
-        {"pk": _UUID_TEXT},
-        _UUID_VALUE,
+        "coerce_uuid_from_text", "pk", DUrl[UUID], {"pk": _UUID_TEXT}, _UUID_VALUE
     ),
 )
 
@@ -162,24 +150,13 @@ class PermissionHookCase:
 PERMISSION_OUTCOME_CASES: tuple[PermissionHookCase, ...] = (
     PermissionHookCase("none_allows", None, 302, expected_redirect="/"),
     PermissionHookCase("true_allows", True, 302, expected_redirect="/"),
+    PermissionHookCase("false_denies", False, None, raises_permission_denied=True),
     PermissionHookCase(
-        "false_denies",
-        False,
-        None,
-        raises_permission_denied=True,
-    ),
-    PermissionHookCase(
-        "redirect_short_circuits",
-        "redirect",
-        302,
-        expected_redirect="/paywall/",
+        "redirect_short_circuits", "redirect", 302, expected_redirect="/paywall/"
     ),
     PermissionHookCase("response_403_verbatim", "response_403", 403),
     PermissionHookCase(
-        "raised_propagates",
-        PERMISSION_HOOK_RAISE,
-        None,
-        raises_permission_denied=True,
+        "raised_propagates", PERMISSION_HOOK_RAISE, None, raises_permission_denied=True
     ),
     PermissionHookCase(
         "bad_type_raises_type_error",

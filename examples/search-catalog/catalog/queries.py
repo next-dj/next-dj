@@ -22,10 +22,7 @@ CACHE_TTL = 60
 
 
 def _cache_key(
-    filters: Filters,
-    page: int,
-    per_page: int,
-    category_pk: int | None,
+    filters: Filters, page: int, per_page: int, category_pk: int | None
 ) -> str:
     """Build a stable hash-based cache key for the given filter set."""
     payload: dict[str, Any] = {
@@ -44,11 +41,7 @@ def _cache_key(
 
 
 def cached_search(
-    filters: Filters,
-    page: int,
-    per_page: int,
-    *,
-    category: Category | None = None,
+    filters: Filters, page: int, per_page: int, *, category: Category | None = None
 ) -> dict[str, Any]:
     """Return a paginated search payload, reading from the cache when possible.
 

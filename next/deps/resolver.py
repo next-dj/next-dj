@@ -167,8 +167,7 @@ class DependencyResolver:
         self._providers.append(provider)
 
     def register(
-        self,
-        provider: ParameterProvider | type[ParameterProvider],
+        self, provider: ParameterProvider | type[ParameterProvider]
     ) -> ParameterProvider | type[ParameterProvider]:
         """Register a provider, accepting either a class or an instance."""
         if isinstance(provider, type):
@@ -204,7 +203,7 @@ class DependencyResolver:
             self._resolve_call_stack.pop()
 
     def resolve_dependencies(
-        self, func: Callable[..., Any], **context: object
+        self, func: Callable[..., Any], **context
     ) -> dict[str, Any]:
         """Resolve `func` from a loose kwargs mapping and build a context object."""
         self._ensure_providers()

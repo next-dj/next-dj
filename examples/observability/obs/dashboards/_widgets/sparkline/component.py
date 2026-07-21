@@ -13,9 +13,7 @@ from next.components import component
 
 
 @component.context(
-    "totals_chart",
-    serialize=True,
-    serializer=WrappedJsContextSerializer(),
+    "totals_chart", serialize=True, serializer=WrappedJsContextSerializer()
 )
 def totals_chart(totals: dict[str, int]) -> dict[str, Any]:
     """Expose chart-ready data under `window.Next.context.totals_chart`.
@@ -26,5 +24,5 @@ def totals_chart(totals: dict[str, int]) -> dict[str, Any]:
     because the envelope is `{"v": 1, "data": ...}`.
     """
     return {
-        "bars": [{"name": name, "value": int(value)} for name, value in totals.items()],
+        "bars": [{"name": name, "value": int(value)} for name, value in totals.items()]
     }

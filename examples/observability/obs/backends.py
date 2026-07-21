@@ -18,11 +18,7 @@ if TYPE_CHECKING:
 class CountingComponentsBackend(FileComponentsBackend):
     """`FileComponentsBackend` that counts component resolutions."""
 
-    def get_component(
-        self,
-        name: str,
-        template_path: Path,
-    ) -> "ComponentInfo | None":
+    def get_component(self, name: str, template_path: Path) -> "ComponentInfo | None":
         """Return the component info and record one lookup event."""
         info = super().get_component(name, template_path)
         if info is not None:
@@ -50,10 +46,7 @@ class BabelJsxBackend(StaticFilesBackend):
         self._babel_tag = str(opts.get("babel_tag") or self._DEFAULT_BABEL_TAG)
 
     def render_babel_script_tag(
-        self,
-        url: str,
-        *,
-        request: HttpRequest | None = None,
+        self, url: str, *, request: HttpRequest | None = None
     ) -> str:
         """Return a `<script type="text/babel">` tag pointing at `url`."""
         return self._babel_tag.format(url=url)

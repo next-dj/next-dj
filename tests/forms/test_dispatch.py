@@ -70,10 +70,7 @@ class DispatchWizard(FormWizard):
     class Meta:
         """Two ordered steps routed through the wizard backend."""
 
-        steps: ClassVar = [
-            ("identity", WizardIdentityStep),
-            ("scope", WizardScopeStep),
-        ]
+        steps: ClassVar = [("identity", WizardIdentityStep), ("scope", WizardScopeStep)]
 
     done_payloads: ClassVar[list] = []
 
@@ -89,10 +86,7 @@ class ConditionalDispatchWizard(FormWizard):
     class Meta:
         """Two declared steps that a get_steps override can expand."""
 
-        steps: ClassVar = [
-            ("identity", WizardIdentityStep),
-            ("scope", WizardScopeStep),
-        ]
+        steps: ClassVar = [("identity", WizardIdentityStep), ("scope", WizardScopeStep)]
 
     done_payloads: ClassVar[list] = []
 
@@ -228,12 +222,7 @@ class TestDispatchViaClient:
         """Invalid POST returns 200 with validation errors when the origin resolves."""
         url = form_action_manager.get_action_url("simple_form")
         resp = client_no_csrf.post(
-            url,
-            data={
-                "name": "",
-                "_next_form_origin": "/",
-            },
-            follow=False,
+            url, data={"name": "", "_next_form_origin": "/"}, follow=False
         )
         assert resp.status_code == 200
         c = resp.content
@@ -254,9 +243,7 @@ class TestDispatchViaClient:
         """Invalid POST whose origin matches no route returns 400."""
         url = form_action_manager.get_action_url("simple_form")
         resp = client_no_csrf.post(
-            url,
-            data={"name": "", "_next_form_origin": "/no/such/route/"},
-            follow=False,
+            url, data={"name": "", "_next_form_origin": "/no/such/route/"}, follow=False
         )
         assert resp.status_code == 400
 
@@ -265,11 +252,7 @@ class TestDispatchViaClient:
         url = form_action_manager.get_action_url("simple_form")
         resp = client_no_csrf.post(
             url,
-            data={
-                "name": "Alice",
-                "email": "",
-                "_next_form_origin": "/",
-            },
+            data={"name": "Alice", "email": "", "_next_form_origin": "/"},
             follow=False,
         )
         # SimpleForm.on_valid returns None, so the dispatcher re-renders the
@@ -282,11 +265,7 @@ class TestDispatchViaClient:
     def test_redirect_action_returns_redirect(self, client_no_csrf) -> None:
         """Redirect action returns 302 redirect."""
         url = form_action_manager.get_action_url("simple_form_redirect")
-        resp = client_no_csrf.post(
-            url,
-            data={"name": "Bob"},
-            follow=False,
-        )
+        resp = client_no_csrf.post(url, data={"name": "Bob"}, follow=False)
         assert resp.status_code == 302
         assert resp.url == "/done/"
 
@@ -313,19 +292,13 @@ class TestFormDispatchRenderInvalidPageBranches:
 
         backend.register_action(
             ActionRegistration(
-                name="only",
-                file_path=_FAKE_FILE,
-                scope="shared",
-                handler=h,
+                name="only", file_path=_FAKE_FILE, scope="shared", handler=h
             )
         )
         req = mock_http_request(method="GET")
         form = F()
         html = backend.render_invalid_page(
-            req,
-            "missing_action",
-            form,
-            PAGE_MODULE_FOR_FORM_TESTS,
+            req, "missing_action", form, PAGE_MODULE_FOR_FORM_TESTS
         )
         assert html == form.render(form.template_name_p)
 
@@ -343,10 +316,7 @@ class TestFormDispatchRenderInvalidPageBranches:
 
         backend.register_action(
             ActionRegistration(
-                name="frag",
-                file_path=_FAKE_FILE,
-                scope="shared",
-                handler=h,
+                name="frag", file_path=_FAKE_FILE, scope="shared", handler=h
             )
         )
         req = mock_http_request(method="GET")
@@ -354,12 +324,7 @@ class TestFormDispatchRenderInvalidPageBranches:
         blank_page = tmp_path / "page.py"
         blank_page.write_text("")
 
-        html = backend.render_invalid_page(
-            req,
-            "frag",
-            form,
-            blank_page,
-        )
+        html = backend.render_invalid_page(req, "frag", form, blank_page)
         assert html == form.render(form.template_name_p)
 
     def test_dispatch_with_modelform_returning_instance(
@@ -387,7 +352,7 @@ class TestFormDispatchRenderInvalidPageBranches:
                 return mock_instance
 
         def handler(
-            request: HttpRequest, form: TestModelForm, **_kwargs: object
+            request: HttpRequest, form: TestModelForm, **kwargs
         ) -> HttpResponseRedirect:
             return HttpResponseRedirect("/")
 
@@ -441,10 +406,7 @@ class TestFormDispatchRenderInvalidPageBranches:
         try:
             form = TestForm(initial={"name": "test"})
             html = backend.render_invalid_page(
-                request,
-                "test_action",
-                form,
-                page_file_path=file_path,
+                request, "test_action", form, page_file_path=file_path
             )
             assert isinstance(html, str)
         finally:
@@ -761,11 +723,7 @@ class TestResolveFormClass:
             return F
 
         request = mock_http_request(method="POST")
-        cls, init_kwargs = _resolve_form_class(
-            factory,
-            request,
-            {"model_name": "tag"},
-        )
+        cls, init_kwargs = _resolve_form_class(factory, request, {"model_name": "tag"})
         assert cls is F
         assert init_kwargs == {}
         assert seen["model_name"] == "tag"
@@ -827,12 +785,7 @@ class _CustomInitForm(django_forms.Form):
 
     name = django_forms.CharField(max_length=10, required=False)
 
-    def __init__(
-        self,
-        *args: object,
-        label_suffix: str = "",
-        **kwargs: object,
-    ) -> None:
+    def __init__(self, *args, label_suffix: str = "", **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.label_suffix = label_suffix
 
@@ -841,9 +794,7 @@ class TestFormClassInitKwargs:
     """Factory returning `(cls, init_kwargs)` bypasses get_initial."""
 
     @pytest.mark.parametrize(
-        ("bound", "suffix"),
-        [(False, "?"), (True, "!")],
-        ids=("unbound", "bound"),
+        ("bound", "suffix"), [(False, "?"), (True, "!")], ids=("unbound", "bound")
     )
     def test_form_built_with_init_kwargs(
         self, mock_http_request, bound, suffix
@@ -875,9 +826,7 @@ class TestFormClassInitKwargs:
     def test_dispatch_uses_init_kwargs_and_skips_get_initial(
         self, mock_http_request
     ) -> None:
-        def factory(
-            request: HttpRequest,
-        ) -> tuple[type[django_forms.Form], dict]:
+        def factory(request: HttpRequest) -> tuple[type[django_forms.Form], dict]:
             return _CustomInitForm, {"label_suffix": "$"}
 
         captured: dict[str, object] = {}
@@ -899,11 +848,7 @@ class TestFormClassInitKwargs:
 
         post = QueryDict(mutable=True)
         post["name"] = "x"
-        request = mock_http_request(
-            method="POST",
-            POST=post,
-            FILES=QueryDict(),
-        )
+        request = mock_http_request(method="POST", POST=post, FILES=QueryDict())
         meta = backend.get_meta("init_kwargs_action")
         assert meta is not None
         response = FormActionDispatch.dispatch(
@@ -968,7 +913,7 @@ class TestDispatchSharedDepCache:
 
         seen: dict[str, object] = {}
 
-        def receiver(**kwargs: object) -> None:
+        def receiver(**kwargs) -> None:
             seen.update(kwargs)
 
         action_dispatched.connect(receiver)
@@ -1021,10 +966,7 @@ class TestDispatchSharedDepCache:
             cls, _ = _resolve_form_class(factory, request, {}, (dep_cache, dep_stack))
             assert cls is WForm
             resolved = resolver.resolve_dependencies(
-                handler_like,
-                request=request,
-                _cache=dep_cache,
-                _stack=dep_stack,
+                handler_like, request=request, _cache=dep_cache, _stack=dep_stack
             )
         finally:
             resolver._dependency_callables.pop("widget", None)
@@ -1172,20 +1114,14 @@ class TestWizardDispatchViaClient:
 
         url = form_action_manager.get_action_url("empty_dispatch_wizard")
         resp = client_no_csrf.post(
-            url,
-            data={"_next_form_origin": "/request/ghost/"},
-            follow=False,
+            url, data={"_next_form_origin": "/request/ghost/"}, follow=False
         )
         assert resp.status_code == 400
 
     def test_missing_origin_returns_bad_request(self, client_no_csrf) -> None:
         """A wizard POST without a valid _next_form_origin returns 400."""
         url = form_action_manager.get_action_url("dispatch_wizard")
-        resp = client_no_csrf.post(
-            url,
-            data={"name": "Ada"},
-            follow=False,
-        )
+        resp = client_no_csrf.post(url, data={"name": "Ada"}, follow=False)
         assert resp.status_code == 400
 
     def test_done_error_response_preserves_draft(
@@ -1233,7 +1169,7 @@ class TestWizardDispatchViaClient:
 
         completed: list[dict] = []
 
-        def on_completed(sender, **kwargs: object) -> None:
+        def on_completed(sender, **kwargs) -> None:
             completed.append(kwargs)
 
         wizard_completed.connect(on_completed)
@@ -1309,10 +1245,7 @@ class PlainStepsWizard(FormWizard):
     class Meta:
         """Two bare Django form steps."""
 
-        steps: ClassVar = [
-            ("identity", PlainIdentityStep),
-            ("scope", PlainScopeStep),
-        ]
+        steps: ClassVar = [("identity", PlainIdentityStep), ("scope", PlainScopeStep)]
 
     done_payloads: ClassVar[list] = []
 
@@ -1374,18 +1307,12 @@ class InjectedDoneWizard(FormWizard):
     class Meta:
         """Two ordered steps routed through the wizard backend."""
 
-        steps: ClassVar = [
-            ("identity", WizardIdentityStep),
-            ("scope", WizardScopeStep),
-        ]
+        steps: ClassVar = [("identity", WizardIdentityStep), ("scope", WizardScopeStep)]
 
     seen: ClassVar[list] = []
 
     def done(
-        self,
-        request: HttpRequest,
-        cleaned_data: dict,
-        token: str = Depends("token"),
+        self, request: HttpRequest, cleaned_data: dict, token: str = Depends("token")
     ) -> HttpResponseRedirect:
         """Record the resolved arguments and redirect."""
         type(self).seen.append((request is not None, dict(cleaned_data), token))
@@ -1465,10 +1392,7 @@ class TestWizardDoneInjection:
             del cleaned_data, slug
 
         resolved = resolver.resolve_dependencies(
-            func,
-            request=None,
-            cleaned_data={"a": 1},
-            slug="x",
+            func, request=None, cleaned_data={"a": 1}, slug="x"
         )
         assert resolved == {"cleaned_data": {"a": 1}, "slug": "x"}
 

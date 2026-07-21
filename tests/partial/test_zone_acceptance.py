@@ -73,9 +73,7 @@ class TestZoneBatchOneContextCollection:
     def test_context_built_once_for_a_two_zone_batch(self) -> None:
         original = render_module.page.build_render_context
         with patch.object(
-            render_module.page,
-            "build_render_context",
-            side_effect=original,
+            render_module.page, "build_render_context", side_effect=original
         ) as spy:
             response = NextClient().get_zones("/counted/", ("alpha", "beta"))
         assert envelope_of(response).zone_targets() == ["alpha", "beta"]
@@ -84,9 +82,7 @@ class TestZoneBatchOneContextCollection:
     def test_context_built_once_for_a_three_zone_batch(self) -> None:
         original = render_module.page.build_render_context
         with patch.object(
-            render_module.page,
-            "build_render_context",
-            side_effect=original,
+            render_module.page, "build_render_context", side_effect=original
         ) as spy:
             NextClient().get_zones("/counted/", ("alpha", "beta", "gamma"))
         assert spy.call_count == 1

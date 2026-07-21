@@ -15,7 +15,7 @@ from next.urls.signals import route_registered, router_reloaded
 def capture_route_registered() -> Generator[list[dict[str, Any]], None, None]:
     events: list[dict[str, Any]] = []
 
-    def _listener(sender: object, **kwargs: object) -> None:
+    def _listener(sender: object, **kwargs) -> None:
         events.append({"sender": sender, **kwargs})
 
     route_registered.connect(_listener)
@@ -29,7 +29,7 @@ def capture_route_registered() -> Generator[list[dict[str, Any]], None, None]:
 def capture_router_reloaded() -> Generator[list[dict[str, Any]], None, None]:
     events: list[dict[str, Any]] = []
 
-    def _listener(sender: object, **kwargs: object) -> None:
+    def _listener(sender: object, **kwargs) -> None:
         events.append({"sender": sender, **kwargs})
 
     router_reloaded.connect(_listener)
@@ -81,7 +81,7 @@ class TestRouteRegisteredSignal:
         """After the fixture tears down, the listener is no longer connected."""
         events: list[dict[str, Any]] = []
 
-        def _listener(sender: object, **kwargs: object) -> None:
+        def _listener(sender: object, **kwargs) -> None:
             events.append({"sender": sender})
 
         route_registered.connect(_listener)
@@ -174,7 +174,7 @@ class TestRouterReloadedSignal:
         """After the fixture tears down, the listener is no longer connected."""
         events: list[dict[str, Any]] = []
 
-        def _listener(sender: object, **kwargs: object) -> None:
+        def _listener(sender: object, **kwargs) -> None:
             events.append({"sender": sender})
 
         router_reloaded.connect(_listener)

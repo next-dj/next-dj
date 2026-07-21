@@ -27,19 +27,11 @@ class BoardProvider(RegisteredParameterProvider):
     without re-fetching it inside the handler.
     """
 
-    def can_handle(
-        self,
-        param: inspect.Parameter,
-        _context: ResolutionContext,
-    ) -> bool:
+    def can_handle(self, param: inspect.Parameter, _context: ResolutionContext) -> bool:
         """Match parameters annotated as a ``DBoard[...]`` subscript."""
         return get_origin(param.annotation) is DBoard
 
-    def resolve(
-        self,
-        param: inspect.Parameter,
-        context: ResolutionContext,
-    ) -> object:
+    def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:
         """Fetch the board matching the URL ``id`` or POST ``board_id``."""
         (model_cls,) = get_args(param.annotation)
         pk = context.url_kwargs.get("id")
@@ -58,11 +50,7 @@ class BoardProvider(RegisteredParameterProvider):
 class CardProvider(RegisteredParameterProvider):
     """Resolve ``DCard[Model]`` parameters from a POST ``card_id`` field."""
 
-    def can_handle(
-        self,
-        param: inspect.Parameter,
-        context: ResolutionContext,
-    ) -> bool:
+    def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:
         """Match ``DCard[...]`` annotations when the request carries ``card_id``."""
         if get_origin(param.annotation) is not DCard:
             return False
@@ -71,11 +59,7 @@ class CardProvider(RegisteredParameterProvider):
             return False
         return bool(request.POST.get("card_id"))
 
-    def resolve(
-        self,
-        param: inspect.Parameter,
-        context: ResolutionContext,
-    ) -> object:
+    def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:
         """Fetch the card matching POST ``card_id``, or raise ``Http404``."""
         (model_cls,) = get_args(param.annotation)
         pk = context.request.POST.get("card_id")

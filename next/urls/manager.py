@@ -104,7 +104,7 @@ class RouterManager:
 router_manager = RouterManager()
 
 
-def _on_settings_reloaded(**_kwargs: object) -> None:
+def _on_settings_reloaded(**kwargs) -> None:
     """Rebuild router backends and the URL resolver on settings reload.
 
     The resolver is swapped in place so `urlpatterns` keeps its identity
@@ -148,11 +148,7 @@ class _LazyUrlPatterns(Sequence["URLPattern | URLResolver"]):
         ]
         # Versions are read after the build because expanding pages can
         # register form actions and bump the forms version mid-build.
-        self._cache = (
-            router_manager._version,
-            form_action_manager._version,
-            patterns,
-        )
+        self._cache = (router_manager._version, form_action_manager._version, patterns)
         return patterns
 
     @override
@@ -214,9 +210,4 @@ app_name = "next"
 urlpatterns = [_build_url_resolver()]
 
 
-__all__ = [
-    "RouterManager",
-    "app_name",
-    "router_manager",
-    "urlpatterns",
-]
+__all__ = ["RouterManager", "app_name", "router_manager", "urlpatterns"]

@@ -60,9 +60,7 @@ def _strip_quotes(raw: str) -> str:
 
 
 def _parse_props(
-    parser: Parser,
-    bits: list[str],
-    start: int,
+    parser: Parser, bits: list[str], start: int
 ) -> dict[str, FilterExpression]:
     """Parse ``key=expr`` pairs from tag bits starting at *start*.
 
@@ -92,9 +90,7 @@ class _NamedBlockSpec:
 
 
 def _parse_one_named_block(
-    parser: Parser,
-    token: Token,
-    spec: _NamedBlockSpec,
+    parser: Parser, token: Token, spec: _NamedBlockSpec
 ) -> tuple[str, NodeList]:
     """Parse ``tag "name"`` … ``/end`` into a name and inner node list."""
     bits = token.split_contents()
@@ -130,10 +126,7 @@ class ComponentNode(Node):
     """Looks up the component, gathers slots and free children, then renders HTML."""
 
     def __init__(
-        self,
-        name: str,
-        props: dict[str, FilterExpression],
-        nodelist: NodeList,
+        self, name: str, props: dict[str, FilterExpression], nodelist: NodeList
     ) -> None:
         """Store component name, prop expressions, and nested nodes."""
         self.name = name
@@ -199,10 +192,7 @@ class ComponentNode(Node):
         parent_flat = dict(cast("dict[str, Any]", context.flatten()))
         for key in _INTERNAL_CONTEXT_KEYS:
             parent_flat.pop(key, None)
-        render_ctx: dict[str, Any] = {
-            **parent_flat,
-            **self._resolved_props(context),
-        }
+        render_ctx: dict[str, Any] = {**parent_flat, **self._resolved_props(context)}
         render_ctx["current_template_path"] = path
         render_ctx["children"] = "".join(child_chunks)
 

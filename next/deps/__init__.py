@@ -9,12 +9,8 @@ and the `RESERVED_KEYS` set. Deeper helpers live under
 
 from __future__ import annotations
 
-from . import checks, signals
-from .cache import (
-    REQUEST_DEP_CACHE_ATTR,
-    DependencyCycleError,
-    get_request_dep_cache,
-)
+from . import signals
+from .cache import REQUEST_DEP_CACHE_ATTR, DependencyCycleError, get_request_dep_cache
 from .context import RESERVED_KEYS, ResolutionContext
 from .markers import DDependencyBase, Depends
 from .providers import ParameterProvider, RegisteredParameterProvider
@@ -31,7 +27,6 @@ __all__ = [
     "ParameterProvider",
     "RegisteredParameterProvider",
     "ResolutionContext",
-    "checks",
     "get_request_dep_cache",
     "resolver",
     "signals",

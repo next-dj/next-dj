@@ -163,7 +163,7 @@ from .access import get_active_tenant
 
 
 @receiver(form_access_denied)
-def _on_form_access_denied(action_name, layer, reason, request, **_):
+def _on_form_access_denied(action_name, layer, reason, request, **kwargs):
     tenant = get_active_tenant(request)
     tenant_slug = getattr(tenant, "slug", "unknown")
     logger.warning(

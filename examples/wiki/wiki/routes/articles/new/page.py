@@ -10,20 +10,15 @@ from next.pages import context
 
 class ArticleCreateForm(Form):
     slug = django_forms.SlugField(
-        max_length=80,
-        widget=ComponentWidget("input", placeholder="wiki-slug"),
+        max_length=80, widget=ComponentWidget("input", placeholder="wiki-slug")
     )
     title = django_forms.CharField(
-        max_length=200,
-        widget=ComponentWidget("input", placeholder="Article title"),
+        max_length=200, widget=ComponentWidget("input", placeholder="Article title")
     )
     body_md = django_forms.CharField(
         required=False,
         widget=ComponentWidget(
-            "textarea",
-            placeholder="# Markdown body",
-            rows=12,
-            markdown_source=True,
+            "textarea", placeholder="# Markdown body", rows=12, markdown_source=True
         ),
     )
 

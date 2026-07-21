@@ -1,12 +1,7 @@
 import pytest
 from django.test import RequestFactory
 
-from next.partial import (
-    Patches,
-    PatchResponse,
-    UnknownZoneError,
-    register_patch_op,
-)
+from next.partial import Patches, PatchResponse, UnknownZoneError, register_patch_op
 from next.partial.headers import CONTENT_TYPE
 from next.partial.patches import (
     BuiltinPatchOpError,
@@ -170,10 +165,7 @@ class TestStandaloneVerbs:
 
     def test_layer_close_with_result(self) -> None:
         envelope = Patches.versioned("v1").layer_close(result={"id": 7}).envelope()
-        assert envelope.ops[0].as_dict() == {
-            "op": "layer.close",
-            "result": {"id": 7},
-        }
+        assert envelope.ops[0].as_dict() == {"op": "layer.close", "result": {"id": 7}}
 
     def test_layer_close_with_dismiss(self) -> None:
         envelope = Patches.versioned("v1").layer_close(dismiss="cancel").envelope()
@@ -291,10 +283,7 @@ class TestCustomOp:
 
     def test_registered_verb_emits_a_patch(self, custom_op: str) -> None:
         envelope = Patches.versioned("v1").op(custom_op, origin="button").envelope()
-        assert envelope.ops[0].as_dict() == {
-            "op": "confetti",
-            "origin": "button",
-        }
+        assert envelope.ops[0].as_dict() == {"op": "confetti", "origin": "button"}
 
     def test_unregistered_verb_raises_unknown_op(self) -> None:
         with pytest.raises(UnknownPatchOpError) as exc:
@@ -317,10 +306,7 @@ class TestContextPatch:
 
     def test_registered_serialize_name_serialises(self) -> None:
         envelope = Patches(partial_request()).context(flag=True).envelope()
-        assert envelope.ops[0].as_dict() == {
-            "op": "context",
-            "data": {"flag": True},
-        }
+        assert envelope.ops[0].as_dict() == {"op": "context", "data": {"flag": True}}
 
     def test_unregistered_name_raises_unknown_context(self) -> None:
         with pytest.raises(UnknownContextNameError) as exc:

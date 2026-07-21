@@ -3,11 +3,7 @@ from django.http import HttpRequest, HttpResponse
 from django.urls import include, path, re_path
 
 
-def serve_tenant_static(
-    request: HttpRequest,
-    slug: str,
-    path: str,
-) -> HttpResponse:
+def serve_tenant_static(request: HttpRequest, slug: str, path: str) -> HttpResponse:
     """Serve a co-located static asset under the per-tenant URL prefix.
 
     The custom `TenantPrefixStaticBackend` rewrites every asset URL to

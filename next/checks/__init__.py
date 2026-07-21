@@ -13,6 +13,12 @@ import importlib
 from typing import TYPE_CHECKING
 
 
+__all__ = ["NEXT", "register_all", "reset_check_caches"]
+
+NEXT: str = "next"
+"""Shared system-check tag that selects every `next-dj` check."""
+
+
 if TYPE_CHECKING:
     from next.components.checks import (
         check_component_py_no_pages_context,
@@ -28,8 +34,10 @@ if TYPE_CHECKING:
         check_context_processor_signature,
         check_layout_templates,
         check_page_functions,
+        check_page_module_imports,
         check_pages_structure,
         check_request_in_context,
+        check_single_keyless_context,
         check_template_loaders,
     )
     from next.pages.loaders import _load_python_module
@@ -56,8 +64,10 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_context_processor_signature",
         "check_layout_templates",
         "check_page_functions",
+        "check_page_module_imports",
         "check_pages_structure",
         "check_request_in_context",
+        "check_single_keyless_context",
         "check_template_loaders",
     ),
     "next.pages.loaders": ("_load_python_module",),
@@ -83,12 +93,29 @@ def register_all() -> None:
         "next.urls.checks",
         "next.components.checks",
         "next.forms.checks",
-        "next.server.checks",
         "next.static.checks",
         "next.partial.checks",
         "next.apps.checks",
     ):
         importlib.import_module(module_name)
+
+
+def reset_check_caches() -> None:
+    """Drop every per-run check cache so the next run rebuilds from disk.
+
+    Tests and scripts that invoke checks directly and mutate the page or
+    component tree in place need this, since the caches otherwise freeze the
+    scanned state for the lifetime of the process. The module memo and context
+    registry are cleared together so a re-executed `page.py` repopulates the
+    registry from its current source instead of keeping a stale `@context`.
+    """
+    common = importlib.import_module("next.checks.common")
+    common.reset_router_manager_cache()
+    common.reset_components_manager_cache()
+    importlib.import_module("next.partial.checks").reset_composed_pages_memo()
+    importlib.import_module("next.urls.checks").reset_collected_patterns_cache()
+    importlib.import_module("next.pages.loaders").reset_module_memo()
+    importlib.import_module("next.pages.manager").reset_context_registry()
 
 
 def __getattr__(name: str) -> object:
@@ -102,4 +129,4 @@ def __getattr__(name: str) -> object:
 
 def __dir__() -> list[str]:
     """List the eager `register_all` plus every lazily resolved re-export."""
-    return ["register_all", *sorted(_LAZY_ATTRIBUTES)]
+    return ["NEXT", "register_all", "reset_check_caches", *sorted(_LAZY_ATTRIBUTES)]

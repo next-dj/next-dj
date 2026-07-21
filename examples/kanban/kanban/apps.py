@@ -11,10 +11,7 @@ class KanbanConfig(AppConfig):
     def ready(self) -> None:
         """Register JSX kind, page stem, and connect signal handlers."""
         default_kinds.register(
-            "jsx",
-            extension=".jsx",
-            slot="scripts",
-            renderer="render_module_tag",
+            "jsx", extension=".jsx", slot="scripts", renderer="render_module_tag"
         )
         default_stems.register("template", "page")
 

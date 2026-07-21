@@ -40,20 +40,15 @@ class TestComponentRegisteredSignal:
     """``component_registered`` wiring."""
 
     def test_listener_receives_manual_send(
-        self,
-        capture_component_registered: list[dict[str, Any]],
+        self, capture_component_registered: list[dict[str, Any]]
     ) -> None:
         """A connected listener receives kwargs from ``.send``."""
-        component_registered.send(
-            sender=object,
-            name="card",
-        )
+        component_registered.send(sender=object, name="card")
         assert len(capture_component_registered) == 1
         assert capture_component_registered[0]["name"] == "card"
 
     def test_sender_is_preserved(
-        self,
-        capture_component_registered: list[dict[str, Any]],
+        self, capture_component_registered: list[dict[str, Any]]
     ) -> None:
         """``sender`` passed to ``.send`` is captured in the event dict."""
 
@@ -64,8 +59,7 @@ class TestComponentRegisteredSignal:
         assert capture_component_registered[0]["sender"] is _Fake
 
     def test_disconnect_stops_receiving(
-        self,
-        capture_component_registered: list[dict[str, Any]],
+        self, capture_component_registered: list[dict[str, Any]]
     ) -> None:
         """After fixture teardown the listener is removed (no cross-test bleed)."""
         component_registered.send(sender=object, name="x")
@@ -116,8 +110,7 @@ class TestComponentsRegisteredSignal:
         ]
 
     def test_listener_receives_manual_send(
-        self,
-        capture_components_registered: list[dict[str, Any]],
+        self, capture_components_registered: list[dict[str, Any]]
     ) -> None:
         """A connected listener receives `infos` from `.send`."""
         components_registered.send(sender=object, infos=())
@@ -137,8 +130,7 @@ class TestComponentsRegisteredSignal:
         assert event["infos"] == tuple(items)
 
     def test_registry_register_many_empty_does_not_fire(
-        self,
-        capture_components_registered: list[dict[str, Any]],
+        self, capture_components_registered: list[dict[str, Any]]
     ) -> None:
         """An empty bulk call stays silent."""
         ComponentRegistry().register_many([])
@@ -160,20 +152,17 @@ class TestComponentBackendLoadedSignal:
     """``component_backend_loaded`` wiring."""
 
     def test_listener_receives_manual_send(
-        self,
-        capture_component_backend_loaded: list[dict[str, Any]],
+        self, capture_component_backend_loaded: list[dict[str, Any]]
     ) -> None:
         """A connected listener receives kwargs from ``.send``."""
         component_backend_loaded.send(
-            sender=object,
-            config={"BACKEND": "next.components.FileComponentsBackend"},
+            sender=object, config={"BACKEND": "next.components.FileComponentsBackend"}
         )
         assert len(capture_component_backend_loaded) == 1
         assert "config" in capture_component_backend_loaded[0]
 
     def test_sender_is_preserved(
-        self,
-        capture_component_backend_loaded: list[dict[str, Any]],
+        self, capture_component_backend_loaded: list[dict[str, Any]]
     ) -> None:
         """``sender`` is echoed back from the event."""
 
@@ -184,15 +173,11 @@ class TestComponentBackendLoadedSignal:
         assert capture_component_backend_loaded[0]["sender"] is _Backend
 
     def test_manager_reload_config_emits_per_backend(
-        self,
-        capture_component_backend_loaded: list[dict[str, Any]],
+        self, capture_component_backend_loaded: list[dict[str, Any]]
     ) -> None:
         """`ComponentsManager._reload_config` fires once per built backend."""
         sentinel: ComponentsBackend = ComponentsFactory.create_backend(
-            {
-                "BACKEND": "next.components.DummyBackend",
-                "COMPONENTS_DIR": "_widgets",
-            }
+            {"BACKEND": "next.components.DummyBackend", "COMPONENTS_DIR": "_widgets"}
         )
 
         class _StubFactory:
@@ -210,9 +195,7 @@ class TestComponentBackendLoadedSignal:
         ]
 
         with (
-            patch(
-                "next.components.manager.next_framework_settings",
-            ) as fake_settings,
+            patch("next.components.manager.next_framework_settings") as fake_settings,
             patch.object(
                 ComponentsFactory, "create_backend", _StubFactory.create_backend
             ),
@@ -232,21 +215,15 @@ class TestComponentRenderedSignal:
     """``component_rendered`` wiring."""
 
     def test_listener_receives_manual_send(
-        self,
-        capture_component_rendered: list[dict[str, Any]],
+        self, capture_component_rendered: list[dict[str, Any]]
     ) -> None:
         """A connected listener receives kwargs from ``.send``."""
-        component_rendered.send(
-            sender=object,
-            name="card",
-            html="<div>card</div>",
-        )
+        component_rendered.send(sender=object, name="card", html="<div>card</div>")
         assert len(capture_component_rendered) == 1
         assert capture_component_rendered[0]["html"] == "<div>card</div>"
 
     def test_sender_is_preserved(
-        self,
-        capture_component_rendered: list[dict[str, Any]],
+        self, capture_component_rendered: list[dict[str, Any]]
     ) -> None:
         """``sender`` is echoed back from the event."""
 
@@ -257,8 +234,7 @@ class TestComponentRenderedSignal:
         assert capture_component_rendered[0]["sender"] is _Renderer
 
     def test_multiple_listeners_all_notified(
-        self,
-        capture_component_rendered: list[dict[str, Any]],
+        self, capture_component_rendered: list[dict[str, Any]]
     ) -> None:
         """Two calls produce two events."""
         component_rendered.send(sender=object, html="<a/>")
@@ -266,9 +242,7 @@ class TestComponentRenderedSignal:
         assert len(capture_component_rendered) == 2
 
     def test_render_component_emits_when_listener_connected(
-        self,
-        tmp_path: Path,
-        capture_component_rendered: list[dict[str, Any]],
+        self, tmp_path: Path, capture_component_rendered: list[dict[str, Any]]
     ) -> None:
         """``render_component`` fires ``component_rendered`` when a listener exists."""
         template_path = tmp_path / "card.djx"
@@ -288,8 +262,7 @@ class TestComponentRenderedSignal:
         assert event["template_path"] == template_path
 
     def test_render_component_skips_send_without_listeners(
-        self,
-        tmp_path: Path,
+        self, tmp_path: Path
     ) -> None:
         """``render_component`` does not dispatch when no listener is connected."""
         template_path = tmp_path / "card.djx"

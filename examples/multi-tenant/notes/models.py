@@ -17,11 +17,7 @@ class Tenant(models.Model):
 
 
 class Note(models.Model):
-    tenant = models.ForeignKey(
-        Tenant,
-        on_delete=models.CASCADE,
-        related_name="notes",
-    )
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="notes")
     title = models.CharField(max_length=160)
     body = models.TextField(blank=True, default="")
     locked = models.BooleanField(default=False)

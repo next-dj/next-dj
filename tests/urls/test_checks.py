@@ -1,8 +1,10 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from django.core.checks import Error
 
+from next.checks import reset_check_caches
 from next.testing import override_next_settings
 from next.urls.checks import (
     _collect_url_patterns,
@@ -10,6 +12,13 @@ from next.urls.checks import (
     check_url_patterns,
 )
 from tests.support import patch_checks_router_manager_with_routers
+
+
+@pytest.fixture(autouse=True)
+def _reset_check_caches():
+    reset_check_caches()
+    yield
+    reset_check_caches()
 
 
 def _write_page(tree: Path, route: str) -> Path:
@@ -185,10 +194,7 @@ class TestCheckUrlPatterns:
         router = _TreeRouter(root_trees=[tmp_path])
 
         with patch_checks_router_manager_with_routers(routers=[router]):
-            messages = [
-                *check_url_patterns(None),
-                *check_reverse_name_collisions(None),
-            ]
+            messages = [*check_url_patterns(None), *check_reverse_name_collisions(None)]
 
         assert [m.id for m in messages] == ["next.E028"]
 
@@ -204,8 +210,7 @@ class TestCheckUrlPatterns:
             assert any(m.id == "next.E015" for m in check_url_patterns(None))
 
         skipped = _TreeRouter(
-            root_trees=[tree_a, tree_b],
-            skip_dir_names=frozenset({"_components"}),
+            root_trees=[tree_a, tree_b], skip_dir_names=frozenset({"_components"})
         )
         with patch_checks_router_manager_with_routers(routers=[skipped]):
             assert check_url_patterns(None) == []
@@ -274,8 +279,7 @@ class TestCheckReverseNameCollisions:
         init_error = Error("router manager unavailable", id="next.E007")
 
         with patch(
-            "next.urls.checks.get_router_manager",
-            return_value=(None, [init_error]),
+            "next.urls.checks.get_router_manager", return_value=(None, [init_error])
         ):
             messages = check_reverse_name_collisions(None)
 

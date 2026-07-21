@@ -44,10 +44,7 @@ def _page_path_from_view(view: object) -> "Path | None":
 
 
 def resolve_url_to_match(
-    url: str,
-    request: "HttpRequest",
-    *,
-    filter_reserved: bool = True,
+    url: str, request: "HttpRequest", *, filter_reserved: bool = True
 ) -> "OriginMatch | None":
     """Resolve a same-site URL against the URLconf to a page identity.
 

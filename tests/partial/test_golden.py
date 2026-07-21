@@ -100,9 +100,7 @@ def _invalid_form() -> GoldenCase:
         '<input name="name" value="" aria-invalid="true"></form>'
     )
     form = FormMeta(
-        uid="ab12cd34",
-        valid=False,
-        errors={"name": ["This field is required."]},
+        uid="ab12cd34", valid=False, errors={"name": ["This field is required."]}
     )
     envelope = (
         Patches.versioned("9f3c2e1b")
@@ -147,10 +145,7 @@ def _invalid_form_extract() -> GoldenCase:
             "the failed form by uid, the document trimmed to it by the client."
         ),
         version="9f3c2e1b",
-        extra_headers={
-            "X-Next-Form": "invalid",
-            "X-Next-Action": "3f9ac21d75e04b88",
-        },
+        extra_headers={"X-Next-Form": "invalid", "X-Next-Action": "3f9ac21d75e04b88"},
     )
 
 
@@ -161,9 +156,7 @@ def _validate_form() -> GoldenCase:
         '<input name="email" value="bad" aria-invalid="true"></form>'
     )
     form = FormMeta(
-        uid="ab12cd34",
-        valid=False,
-        errors={"email": ["Enter a valid email address."]},
+        uid="ab12cd34", valid=False, errors={"email": ["Enter a valid email address."]}
     )
     envelope = (
         Patches.versioned("9f3c2e1b")

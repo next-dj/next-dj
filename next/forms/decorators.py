@@ -39,9 +39,7 @@ class _HandlerSpec:
 
 
 def _register_handler(
-    func: Callable[..., Any],
-    file_path: str,
-    spec: _HandlerSpec,
+    func: Callable[..., Any], file_path: str, spec: _HandlerSpec
 ) -> None:
     """Validate the scope override and forward one registration to the manager."""
     if spec.scope is not None and spec.scope not in _VALID_SCOPES:
@@ -108,8 +106,7 @@ def action(
         raise TypeError(msg)
     action_name = name if isinstance(name, str) else None
     guard = build_action_guard(
-        login_required=login_required,
-        permission_required=permission_required,
+        login_required=login_required, permission_required=permission_required
     )
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:

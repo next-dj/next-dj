@@ -5,6 +5,8 @@ Troubleshooting
 
 This page lists the most common errors and warnings plus the actions that resolve them.
 
+Run ``uv run python manage.py check --tag next`` to filter out the built-in Django and third-party checks and see only the next.dj diagnostics while investigating.
+
 .. contents::
    :local:
    :depth: 2
@@ -43,6 +45,31 @@ The choices are a ``render`` function, a ``template`` module attribute, or a sib
 ``render`` must return ``str`` or a Django :class:`~django.http.HttpResponseBase` subclass.
 Other values raise ``TypeError`` naming the ``page.py`` path.
 See :doc:`/content/topics/pages`.
+
+next.E017 on a page.py That Fails to Import
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A ``page.py`` raised while importing, so the framework loads it as nothing.
+Its ``render``, ``template``, and ``@context`` declarations never take effect, and a sibling ``template.djx`` can otherwise hide the failure.
+Fix the syntax or import error named in the report so the module loads.
+
+next.E018 on Multiple Keyless Context Functions
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A ``page.py`` registers more than one keyless ``@context`` callable.
+Keyless callables share one slot, so only the last one runs and the earlier ones are ignored.
+Give each callable a key such as ``@context("name")``, or merge them into a single callable.
+
+next.E029 on a Keyless Context Function
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A keyless context callable must be annotated as returning a dict.
+Keyless means the decorator carries no key, whether written as ``@context``, ``@page.context``, an aliased import, or an ``async def`` context function.
+The check inspects every keyless form.
+
+Two fixes clear the report.
+Annotate the callable with a dict return type, either ``-> dict`` or a :class:`~typing.TypedDict`.
+Alternatively give the decorator a key, for example ``@context("name")``, which makes the context keyed and exempt from the check.
 
 Forms
 -----

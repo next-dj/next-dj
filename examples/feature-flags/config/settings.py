@@ -41,25 +41,22 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
-            ],
+            ]
         },
-    },
+    }
 ]
 
 WSGI_APPLICATION = "config.wsgi.application"
 
 DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
-    },
+    "default": {"ENGINE": "django.db.backends.sqlite3", "NAME": BASE_DIR / "db.sqlite3"}
 }
 
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
         "LOCATION": "feature-flags",
-    },
+    }
 }
 
 LANGUAGE_CODE = "en-us"
@@ -84,16 +81,14 @@ NEXT_FRAMEWORK = {
             # `flags/panels/` tree.
             "DIRS": [str(BASE_DIR / "frame")],
             "PAGES_DIR": "panels",
-            "OPTIONS": {
-                "context_processors": [],
-            },
-        },
+            "OPTIONS": {"context_processors": []},
+        }
     ],
     "COMPONENT_BACKENDS": [
         {
             "BACKEND": "next.components.FileComponentsBackend",
             "DIRS": [str(SHARED_DIR / "_components")],
             "COMPONENTS_DIR": "_chunks",
-        },
+        }
     ],
 }

@@ -81,10 +81,7 @@ def render_form_page_with_errors(
     context_data.update(overrides)
 
     rendered, _collector = page.render_with_static_assets(
-        file_path,
-        template,
-        context_data,
-        request=request,
+        file_path, template, context_data, request=request
     )
     return rendered
 

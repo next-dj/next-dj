@@ -6,11 +6,7 @@ from unittest import mock
 import pytest
 from django.test import override_settings
 
-from next.static import (
-    StaticBackend,
-    StaticFilesBackend,
-    StaticsFactory,
-)
+from next.static import StaticBackend, StaticFilesBackend, StaticsFactory
 from next.static.backends import StaticBackend as _StaticBackendDirect
 from next.static.signals import backend_loaded
 
@@ -30,29 +26,14 @@ MJS_URL = "https://cdn.example.com/site.mjs"
 class _CollectingBackend(StaticBackend):
     """Minimal concrete backend for ABC compliance + config probing."""
 
-    def register_file(
-        self,
-        source_path: Path,
-        logical_name: str,
-        kind: str,
-    ) -> str:
+    def register_file(self, source_path: Path, logical_name: str, kind: str) -> str:
         return f"/{logical_name}.{kind}"
 
-    def render_link_tag(
-        self,
-        url: str,
-        *,
-        request: HttpRequest | None = None,
-    ) -> str:
+    def render_link_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
         del request
         return f"<link {url}>"
 
-    def render_script_tag(
-        self,
-        url: str,
-        *,
-        request: HttpRequest | None = None,
-    ) -> str:
+    def render_script_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
         del request
         return f"<script {url}>"
 
@@ -95,11 +76,7 @@ class TestStaticFilesBackendOptions:
 
     def test_custom_css_tag_with_crossorigin(self) -> None:
         backend = StaticFilesBackend(
-            {
-                "OPTIONS": {
-                    "css_tag": '<link rel="stylesheet" crossorigin href="{url}">',
-                },
-            }
+            {"OPTIONS": {"css_tag": '<link rel="stylesheet" crossorigin href="{url}">'}}
         )
         assert backend.render_link_tag(CSS_URL) == (
             f'<link rel="stylesheet" crossorigin href="{CSS_URL}">'
@@ -107,11 +84,7 @@ class TestStaticFilesBackendOptions:
 
     def test_custom_js_tag_with_defer(self) -> None:
         backend = StaticFilesBackend(
-            {
-                "OPTIONS": {
-                    "js_tag": '<script defer src="{url}"></script>',
-                },
-            }
+            {"OPTIONS": {"js_tag": '<script defer src="{url}"></script>'}}
         )
         assert backend.render_script_tag(JS_URL) == (
             f'<script defer src="{JS_URL}"></script>'
@@ -240,7 +213,7 @@ class TestStaticsFactoryCreateBackend:
     def test_fires_backend_loaded_signal(self) -> None:
         received: list[dict[str, Any]] = []
 
-        def _listener(sender: object, **kwargs: object) -> None:
+        def _listener(sender: object, **kwargs) -> None:
             received.append({"sender": sender, **kwargs})
 
         backend_loaded.connect(_listener)

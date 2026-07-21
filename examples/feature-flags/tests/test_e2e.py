@@ -219,8 +219,7 @@ class TestActiveNav:
     def test_admin_link_not_active_on_home(self, client) -> None:
         body = client.get("/").content.decode()
         assert_missing_class(
-            find_anchor(body, href="/admin/", text="Admin"),
-            "font-semibold",
+            find_anchor(body, href="/admin/", text="Admin"), "font-semibold"
         )
 
     def test_admin_subnav_metrics_active_only_on_metrics(self, client) -> None:
@@ -230,8 +229,7 @@ class TestActiveNav:
             "font-semibold",
         )
         assert_missing_class(
-            find_anchor(body, href="/admin/", text="Flags"),
-            "font-semibold",
+            find_anchor(body, href="/admin/", text="Flags"), "font-semibold"
         )
 
 

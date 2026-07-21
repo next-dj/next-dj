@@ -16,12 +16,7 @@ from .signals import sse_stream_closed, sse_stream_opened
 
 
 if TYPE_CHECKING:
-    from collections.abc import (
-        AsyncIterator,
-        Callable,
-        Iterable,
-        Iterator,
-    )
+    from collections.abc import AsyncIterator, Callable, Iterable, Iterator
 
     from django.http import HttpRequest
 
@@ -90,8 +85,7 @@ class PatchEventStream(StreamingHttpResponse):
             sse_stream_opened.send(sender=type(self), request=request)
 
     def _guard_source_kind(
-        self,
-        source: "Iterable[Patches] | AsyncIterable[Patches]",
+        self, source: "Iterable[Patches] | AsyncIterable[Patches]"
     ) -> None:
         """Refuse a source kind the request's server kind would buffer.
 
@@ -119,8 +113,7 @@ class PatchEventStream(StreamingHttpResponse):
             raise ImproperlyConfigured(msg)
 
     def _build_content(
-        self,
-        source: "Iterable[Patches] | AsyncIterable[Patches]",
+        self, source: "Iterable[Patches] | AsyncIterable[Patches]"
     ) -> "Iterator[bytes] | AsyncIterator[bytes]":
         """Return a sync or async byte stream matching the source kind."""
         if isinstance(source, AsyncIterable):
@@ -160,8 +153,7 @@ class PatchEventStream(StreamingHttpResponse):
             close()
 
     async def _async_stream(
-        self,
-        source: "AsyncIterable[Patches]",
+        self, source: "AsyncIterable[Patches]"
     ) -> "AsyncIterator[bytes]":
         """Yield SSE bytes for an async source, interleaving heartbeats.
 
@@ -200,9 +192,7 @@ class PatchEventStream(StreamingHttpResponse):
             self._announce_closed(sent)
 
     async def _cleanup_async(
-        self,
-        task: "asyncio.Future[Patches] | None",
-        iterator: "AsyncIterator[Patches]",
+        self, task: "asyncio.Future[Patches] | None", iterator: "AsyncIterator[Patches]"
     ) -> None:
         """Cancel an in-flight pull and close the source generator.
 

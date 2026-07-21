@@ -260,11 +260,7 @@ class TestSpecsAreFrozen:
 
     def test_formset_row_spec_frozen(self) -> None:
         row = FormsetRowSpec(
-            fields=(),
-            hidden_html="",
-            delete_field=None,
-            errors={},
-            is_extra=False,
+            fields=(), hidden_html="", delete_field=None, errors={}, is_extra=False
         )
         with pytest.raises((AttributeError, TypeError)):
             row.is_extra = True  # type: ignore[misc]

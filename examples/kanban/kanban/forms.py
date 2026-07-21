@@ -20,8 +20,7 @@ class MoveCardForm(Form):
     card_id = django_forms.IntegerField(widget=django_forms.HiddenInput)
     target_column_id = django_forms.IntegerField(widget=django_forms.HiddenInput)
     target_position = django_forms.IntegerField(
-        min_value=0,
-        widget=django_forms.HiddenInput,
+        min_value=0, widget=django_forms.HiddenInput
     )
 
     def clean(self) -> dict[str, object]:
@@ -78,13 +77,9 @@ class CreateCardForm(Form):
     """Create a card at the tail of a column subject to its WIP limit."""
 
     column_id = django_forms.IntegerField(widget=django_forms.HiddenInput)
-    title = django_forms.CharField(
-        max_length=200,
-        widget=ComponentWidget("input"),
-    )
+    title = django_forms.CharField(max_length=200, widget=ComponentWidget("input"))
     body = django_forms.CharField(
-        required=False,
-        widget=ComponentWidget("textarea", rows=4),
+        required=False, widget=ComponentWidget("textarea", rows=4)
     )
 
     def clean(self) -> dict[str, object]:
@@ -132,14 +127,9 @@ class CreateColumnForm(Form):
     # existing instance, so it carries the parent board_id as a hidden field
     # instead of resolving one row through instance_from_url.
     board_id = django_forms.IntegerField(widget=django_forms.HiddenInput)
-    title = django_forms.CharField(
-        max_length=120,
-        widget=ComponentWidget("input"),
-    )
+    title = django_forms.CharField(max_length=120, widget=ComponentWidget("input"))
     wip_limit = django_forms.IntegerField(
-        required=False,
-        min_value=1,
-        widget=ComponentWidget("input", type="number"),
+        required=False, min_value=1, widget=ComponentWidget("input", type="number")
     )
 
     def on_valid(

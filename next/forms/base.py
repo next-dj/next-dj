@@ -270,7 +270,7 @@ class _PermissionHooks:
     _has_object_permission: bool = False
 
     @override
-    def __init_subclass__(cls, **kwargs: object) -> None:
+    def __init_subclass__(cls, **kwargs) -> None:
         """Stamp the per-subclass hook-presence flags via __func__ identity."""
         super().__init_subclass__(**kwargs)
         cls._has_check_permissions = _stamp_hook_flag(
@@ -296,7 +296,7 @@ class BaseForm(_PermissionHooks, DjangoBaseForm):
     default_renderer = _div_form_renderer
 
     @override
-    def __init_subclass__(cls, **kwargs: object) -> None:
+    def __init_subclass__(cls, **kwargs) -> None:
         """Register subclass in form_action_manager automatically."""
         super().__init_subclass__(**kwargs)
         _auto_register_form_class(cls)
@@ -325,14 +325,14 @@ class BaseModelForm(_PermissionHooks, DjangoBaseModelForm):
     default_renderer = _div_form_renderer
 
     @override
-    def __init_subclass__(cls, **kwargs: object) -> None:
+    def __init_subclass__(cls, **kwargs) -> None:
         """Register subclass in form_action_manager automatically."""
         super().__init_subclass__(**kwargs)
         _auto_register_form_class(cls)
         _validate_instance_from_url(cls, is_model_form=True)
 
     @classmethod
-    def get_initial(cls, **url_kwargs: object) -> dict[str, Any] | Model:
+    def get_initial(cls, **url_kwargs) -> dict[str, Any] | Model:
         """Return a model instance loaded from the URL, or an empty dict."""
         spec = getattr(getattr(cls, "Meta", None), "instance_from_url", None)
         if not spec:

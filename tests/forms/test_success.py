@@ -341,7 +341,7 @@ class TestSuccessMessageViaClient:
     def test_message_precedes_action_dispatched(self, client_no_csrf) -> None:
         seen: list[list[str] | None] = []
 
-        def receiver(sender, request, **kwargs: object) -> None:
+        def receiver(sender, request, **kwargs) -> None:
             storage = getattr(request, "_messages", None)
             seen.append(
                 [m.message for m in storage._queued_messages]

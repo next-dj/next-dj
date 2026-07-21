@@ -63,9 +63,7 @@ class ActionRef:
 
 
 def shape_partial(
-    backend: "FormActionBackend",
-    request: "HttpRequest",
-    outcome: ActionOutcome,
+    backend: "FormActionBackend", request: "HttpRequest", outcome: ActionOutcome
 ) -> HttpResponse:
     """Shape one action outcome as a patch envelope for a partial request.
 
@@ -115,11 +113,7 @@ def shape_validate(
         patches.morph(zone=zone, overrides=overrides)
     else:
         html = backend.render_invalid_page(
-            request,
-            action.action_name,
-            form,
-            page_path,
-            url_kwargs,
+            request, action.action_name, form, page_path, url_kwargs
         )
         patches.morph({keys.FORM_SELECTOR: uid}, html, extract=True)
     patches.set_form(_form_meta(uid, form))
@@ -165,11 +159,7 @@ def _shape_invalid(
         patches.morph(zone=zone, overrides=_form_overrides(outcome))
     else:
         html = backend.render_invalid_page(
-            request,
-            outcome.action_name,
-            form,
-            outcome.page_path,
-            outcome.url_kwargs,
+            request, outcome.action_name, form, outcome.page_path, outcome.url_kwargs
         )
         patches.morph({keys.FORM_SELECTOR: uid}, html, extract=True)
     if form is not None:
@@ -217,9 +207,7 @@ def _shape_advance(
         return response
     page_path, url_kwargs = target
     next_wizard = type(wizard)(
-        request=request,
-        url_kwargs=url_kwargs,
-        base_path=redirect_to,
+        request=request, url_kwargs=url_kwargs, base_path=redirect_to
     )
     form = next_wizard.current_form()
     patches = Patches(request)
@@ -296,10 +284,7 @@ def _shape_result(
 
 
 def _redirect_as_visit(
-    request: "HttpRequest",
-    redirect: HttpResponseRedirect,
-    *,
-    rotated: bool,
+    request: "HttpRequest", redirect: HttpResponseRedirect, *, rotated: bool
 ) -> HttpResponse:
     """Pack a handler redirect into a `visit`, full-navigating external hosts.
 
@@ -312,9 +297,7 @@ def _redirect_as_visit(
     """
     href = redirect["Location"]
     internal = url_has_allowed_host_and_scheme(
-        href,
-        allowed_hosts={request.get_host()},
-        require_https=request.is_secure(),
+        href, allowed_hosts={request.get_host()}, require_https=request.is_secure()
     )
     patches = Patches(request)
     patches.redirect(href, external=not internal)
@@ -337,20 +320,14 @@ def _success_funnel(
         patches.morph(zone=zone)
     else:
         html = backend.render_invalid_page(
-            request,
-            outcome.action_name,
-            None,
-            page_path,
-            url_kwargs,
+            request, outcome.action_name, None, page_path, url_kwargs
         )
         patches.morph({keys.FORM_SELECTOR: uid}, html, extract=True)
     drain_messages(request, patches)
     return _envelope_response(patches, request=request, rotated=rotated)
 
 
-def _origin_target(
-    request: "HttpRequest",
-) -> "tuple[Path | None, dict[str, object]]":
+def _origin_target(request: "HttpRequest") -> "tuple[Path | None, dict[str, object]]":
     """Resolve the request origin to its page path and URL kwargs.
 
     Both the validate pass and the success funnel re-render the origin
@@ -399,17 +376,14 @@ def _form_overrides(outcome: ActionOutcome) -> dict[str, object]:
 
 
 def _bound_form_overrides(
-    form: "BaseForm | BaseFormSet",
-    action_name: str,
+    form: "BaseForm | BaseFormSet", action_name: str
 ) -> dict[str, object]:
     """Return the overrides binding an already-bound form into the zone."""
     return {"form": form, action_name: form}
 
 
 def _wizard_overrides(
-    form: object,
-    wizard: "FormWizard",
-    action_name: str,
+    form: object, wizard: "FormWizard", action_name: str
 ) -> dict[str, object]:
     """Return the overrides binding the next step's unbound form into the zone."""
     namespace = types.SimpleNamespace(form=form, wizard=wizard)
@@ -417,8 +391,7 @@ def _wizard_overrides(
 
 
 def _resolve_step_target(
-    request: "HttpRequest",
-    href: str,
+    request: "HttpRequest", href: str
 ) -> "tuple[Path, dict[str, object]] | None":
     """Resolve the next step URL to its page identity and URL kwargs.
 
@@ -442,8 +415,7 @@ def _should_push_steps(wizard: "FormWizard") -> bool:
 
 
 def _validate_targets(
-    form: "BaseForm | BaseFormSet",
-    validate_fields: tuple[str, ...],
+    form: "BaseForm | BaseFormSet", validate_fields: tuple[str, ...]
 ) -> frozenset[str]:
     """Return the requested field names with file fields removed.
 
@@ -473,10 +445,7 @@ def _form_file_fields(form: "BaseForm") -> frozenset[str]:
     )
 
 
-def _scrub_errors(
-    form: "BaseForm | BaseFormSet",
-    requested: frozenset[str],
-) -> None:
+def _scrub_errors(form: "BaseForm | BaseFormSet", requested: frozenset[str]) -> None:
     """Drop every error the validate request did not ask to surface.
 
     Only errors of the requested fields survive. The cross-field non-field
@@ -533,12 +502,7 @@ def _csrf_rotated(request: "HttpRequest") -> bool:
     return bool(meta.get(_CSRF_ROTATED_FLAG))
 
 
-def _stamp_csrf(
-    request: "HttpRequest",
-    patches: Patches,
-    *,
-    rotated: bool,
-) -> None:
+def _stamp_csrf(request: "HttpRequest", patches: Patches, *, rotated: bool) -> None:
     """Attach the rotated CSRF payload when the request rotated its token."""
     if rotated:
         patches.set_csrf(csrf_payload(request))
@@ -571,10 +535,7 @@ def _error_count(form: "BaseForm | BaseFormSet") -> int:
 
 
 def _envelope_response(
-    patches: Patches,
-    *,
-    request: "HttpRequest | None" = None,
-    rotated: bool = False,
+    patches: Patches, *, request: "HttpRequest | None" = None, rotated: bool = False
 ) -> PatchResponse:
     """Serialise the builder's envelope into a partial response.
 

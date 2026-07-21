@@ -32,8 +32,7 @@ _PIECES = (
 
 def _load(relative: str):
     spec = importlib.util.spec_from_file_location(
-        f"_test_{relative.replace('/', '_').replace('.py', '')}",
-        _PIECES / relative,
+        f"_test_{relative.replace('/', '_').replace('.py', '')}", _PIECES / relative
     )
     mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
     spec.loader.exec_module(mod)  # type: ignore[union-attr]
@@ -208,8 +207,7 @@ class TestCardProvider:
         assert not provider.can_handle(param, ctx)
 
     def test_resolve_returns_card_for_post_id(
-        self,
-        two_columns: tuple[Column, Column],
+        self, two_columns: tuple[Column, Column]
     ) -> None:
         col_a, _ = two_columns
         card = Card.objects.create(column=col_a, title="Move me", position=0)
@@ -253,8 +251,7 @@ class TestCardProvider:
 
 class TestMoveCardFormClean:
     def test_cross_board_move_rejected(
-        self,
-        two_columns: tuple[Column, Column],
+        self, two_columns: tuple[Column, Column]
     ) -> None:
         col_a, _ = two_columns
         other_board = Board.objects.create(title="Other", slug="other")
@@ -266,7 +263,7 @@ class TestMoveCardFormClean:
                 "card_id": str(card.pk),
                 "target_column_id": str(other_col.pk),
                 "target_position": "0",
-            },
+            }
         )
         assert not form.is_valid()
         assert "across boards" in str(form.errors)
@@ -277,7 +274,7 @@ class TestMoveCardFormClean:
                 "card_id": "99999",
                 "target_column_id": "99999",
                 "target_position": "0",
-            },
+            }
         )
         assert not form.is_valid()
         assert "Unknown card" in str(form.errors)
@@ -290,24 +287,19 @@ class TestMoveCardFormClean:
 
 class TestCreateCardFormClean:
     def test_wip_limit_blocks_creation(
-        self,
-        two_columns: tuple[Column, Column],
+        self, two_columns: tuple[Column, Column]
     ) -> None:
         col_a, _ = two_columns
         col_a.wip_limit = 1
         col_a.save()
         Card.objects.create(column=col_a, title="One", position=0)
 
-        form = CreateCardForm(
-            data={"column_id": str(col_a.pk), "title": "Two"},
-        )
+        form = CreateCardForm(data={"column_id": str(col_a.pk), "title": "Two"})
         assert not form.is_valid()
         assert "WIP limit" in str(form.errors)
 
     def test_unknown_column_rejected(self) -> None:
-        form = CreateCardForm(
-            data={"column_id": "99999", "title": "Lost"},
-        )
+        form = CreateCardForm(data={"column_id": "99999", "title": "Lost"})
         assert not form.is_valid()
         assert "Unknown column" in str(form.errors)
 
@@ -358,9 +350,7 @@ class TestViteManifestBackendRegisterFile:
         assert out == "http://localhost:5173/page.jsx"
 
     def test_jsx_with_missing_manifest_file_falls_back(
-        self,
-        tmp_path: Path,
-        caplog: pytest.LogCaptureFixture,
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         manifest = tmp_path / "missing.json"  # never created
         backend = ViteManifestBackend(
@@ -485,8 +475,7 @@ class TestCreateCardHandlerRace:
     """Authoritative WIP check inside the handler rejects a racing post."""
 
     def test_handler_returns_400_when_limit_filled_after_clean(
-        self,
-        two_columns: tuple[Column, Column],
+        self, two_columns: tuple[Column, Column]
     ) -> None:
         col_a, _ = two_columns
         col_a.wip_limit = 2

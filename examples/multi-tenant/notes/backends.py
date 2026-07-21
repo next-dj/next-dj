@@ -22,30 +22,15 @@ class TenantPrefixStaticBackend(StaticFilesBackend):
     commands behaving the same way as the default backend.
     """
 
-    def render_link_tag(
-        self,
-        url: str,
-        *,
-        request: HttpRequest | None = None,
-    ) -> str:
+    def render_link_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
         """Return a CSS link tag with the per-tenant prefix injected."""
         return super().render_link_tag(_prefixed(url, request))
 
-    def render_script_tag(
-        self,
-        url: str,
-        *,
-        request: HttpRequest | None = None,
-    ) -> str:
+    def render_script_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
         """Return a JS script tag with the per-tenant prefix injected."""
         return super().render_script_tag(_prefixed(url, request))
 
-    def render_module_tag(
-        self,
-        url: str,
-        *,
-        request: HttpRequest | None = None,
-    ) -> str:
+    def render_module_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
         """Return a module script tag with the per-tenant prefix injected."""
         return super().render_module_tag(_prefixed(url, request))
 

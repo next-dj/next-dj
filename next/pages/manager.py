@@ -24,11 +24,7 @@ from next.conf import next_framework_settings
 from next.deps import DependencyResolver, resolver
 from next.utils import caller_source_path
 
-from .loaders import (
-    LayoutManager,
-    _load_python_module_memo,
-    build_registered_loaders,
-)
+from .loaders import LayoutManager, _load_python_module_memo, build_registered_loaders
 from .processors import _get_context_processors
 from .registry import PageContextRegistry
 from .signals import page_rendered, template_loaded
@@ -52,7 +48,7 @@ class _RoutedPageView(Protocol):
 
     next_page_path: Path
 
-    def __call__(self, request: HttpRequest, **kwargs: object) -> HttpResponseBase: ...
+    def __call__(self, request: HttpRequest, **kwargs) -> HttpResponseBase: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,10 +165,7 @@ class Page:
         return decorator(func_or_key) if callable(func_or_key) else decorator
 
     def build_render_context(
-        self,
-        file_path: Path,
-        request: HttpRequest | None = None,
-        **kwargs: object,
+        self, file_path: Path, request: HttpRequest | None = None, **kwargs
     ) -> dict[str, object]:
         """Build the full render context dict used by `render`.
 
@@ -213,17 +206,13 @@ class Page:
                     if strict:
                         raise
                     logger.warning(
-                        "Error in context processor %s: %s",
-                        processor.__name__,
-                        e,
+                        "Error in context processor %s: %s", processor.__name__, e
                     )
 
         return context_data
 
     def _load_static_body(
-        self,
-        file_path: Path,
-        module: types.ModuleType | None,
+        self, file_path: Path, module: types.ModuleType | None
     ) -> str:
         """Return the static body for `file_path` without invoking `render()`.
 
@@ -249,7 +238,7 @@ class Page:
         file_path: Path,
         module: types.ModuleType | None,
         request: HttpRequest | None = None,
-        **kwargs: object,
+        **kwargs,
     ) -> _BodyResolution:
         """Resolve the page body per-request.
 
@@ -273,17 +262,13 @@ class Page:
         render_func: Callable[..., object],
         file_path: Path,
         request: HttpRequest | None = None,
-        **kwargs: object,
+        **kwargs,
     ) -> _BodyResolution:
         """Invoke `render_func` with DI-resolved arguments and classify the result."""
         dep_cache: dict[str, Any] = {}
         dep_stack: list[str] = []
         resolved = self._get_resolver().resolve_dependencies(
-            render_func,
-            request=request,
-            _cache=dep_cache,
-            _stack=dep_stack,
-            **kwargs,
+            render_func, request=request, _cache=dep_cache, _stack=dep_stack, **kwargs
         )
         result = render_func(**resolved)
         if isinstance(result, HttpResponseBase):
@@ -352,15 +337,12 @@ class Page:
         template: Template | str,
         start: float,
         request: HttpRequest | None = None,
-        **kwargs: object,
+        **kwargs,
     ) -> str:
         """Build context, render `template`, inject static assets, emit signal."""
         context_data = self.build_render_context(file_path, request, **kwargs)
         result, collector = self.render_with_static_assets(
-            file_path,
-            template,
-            context_data,
-            request=request,
+            file_path, template, context_data, request=request
         )
         if page_rendered.receivers:
             duration_ms = (time.perf_counter() - start) * 1000
@@ -375,11 +357,7 @@ class Page:
         return result
 
     def _render_composed(
-        self,
-        file_path: Path,
-        body: str,
-        request: HttpRequest | None = None,
-        **kwargs: object,
+        self, file_path: Path, body: str, request: HttpRequest | None = None, **kwargs
     ) -> str:
         """Compose `body` through layouts and render.
 
@@ -420,10 +398,7 @@ class Page:
         return compiled
 
     def render(
-        self,
-        file_path: Path,
-        request: HttpRequest | None = None,
-        **kwargs: object,
+        self, file_path: Path, request: HttpRequest | None = None, **kwargs
     ) -> str:
         """Render the page with Django `Template` and the static collector.
 
@@ -439,10 +414,7 @@ class Page:
         return self._render_template_str(file_path, template, start, request, **kwargs)
 
     def authorization_outcome(
-        self,
-        file_path: Path,
-        request: HttpRequest,
-        **kwargs: object,
+        self, file_path: Path, request: HttpRequest, **kwargs
     ) -> tuple[HttpResponseBase | None, bool]:
         """Re-run a page's body resolution once, reporting short-circuit and kind.
 
@@ -473,7 +445,7 @@ class Page:
         synthesised `page.py` location of virtual `template.djx` pages.
         """
 
-        def view(request: HttpRequest, **kwargs: object) -> HttpResponseBase:
+        def view(request: HttpRequest, **kwargs) -> HttpResponseBase:
             resolution = self._resolve_page_body(file_path, module, request, **kwargs)
             if resolution.http_response is not None:
                 return resolution.http_response
@@ -583,9 +555,7 @@ class Page:
         )
 
     def _page_has_body_source(
-        self,
-        file_path: Path,
-        module: types.ModuleType | None,
+        self, file_path: Path, module: types.ModuleType | None
     ) -> bool:
         """Return True when `file_path` can produce a body or layout body."""
         if module is not None:
@@ -598,10 +568,7 @@ class Page:
         return self._layout_manager._layout_loader.can_load(file_path)
 
     def create_url_pattern(
-        self,
-        url_path: str,
-        file_path: Path,
-        url_parser: URLPatternParser,
+        self, url_path: str, file_path: Path, url_parser: URLPatternParser
     ) -> URLPattern | None:
         """Return a `path()` pattern for a page, template, or virtual entry."""
         # The error class is reached through the parser because a top-level
@@ -611,24 +578,16 @@ class Page:
             django_pattern, parameters = url_parser.parse_url_pattern(url_path)
         except url_parser.duplicate_parameter_error as exc:
             raise url_parser.duplicate_parameter_error(
-                exc.param_name,
-                exc.url_path,
-                file_path=file_path,
+                exc.param_name, exc.url_path, file_path=file_path
             ) from exc
         clean_name = url_parser.prepare_url_name(url_path)
 
         if file_path.exists():
             return self._create_regular_page_pattern(
-                file_path,
-                django_pattern,
-                parameters,
-                clean_name,
+                file_path, django_pattern, parameters, clean_name
             )
         return self._create_virtual_page_pattern(
-            file_path,
-            django_pattern,
-            parameters,
-            clean_name,
+            file_path, django_pattern, parameters, clean_name
         )
 
 
@@ -637,3 +596,12 @@ _ = inspect  # keep `inspect` import reachable for test-time patching
 
 page: Page = Page()
 context = page.context
+
+
+def reset_context_registry() -> None:
+    """Clear the shared page-context registry for a from-disk rebuild.
+
+    The check-cache reset pairs this with the module memo so a re-executed
+    `page.py` repopulates the registry from its current source.
+    """
+    page._context_manager.reset()

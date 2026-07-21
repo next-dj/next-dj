@@ -123,10 +123,7 @@ class TestKindRegistryRegister:
         reg.register("css", extension=".css", slot="styles", renderer="render_link_tag")
         with pytest.raises(ValueError, match="already registered"):
             reg.register(
-                "css",
-                extension=".sass",
-                slot="styles",
-                renderer="render_link_tag",
+                "css", extension=".sass", slot="styles", renderer="render_link_tag"
             )
 
     def test_register_rejects_empty_kind(self) -> None:

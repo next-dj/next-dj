@@ -16,24 +16,17 @@ import pkgutil
 from importlib import import_module
 
 from django.conf import settings
-from django.core.checks import (
-    CheckMessage,
-    Tags,
-    Warning as DjangoWarning,
-    register,
-)
+from django.core.checks import CheckMessage, Tags, Warning as DjangoWarning, register
 from django.template import Library
 
 import next.templatetags
+from next.checks import NEXT
 
 from .templates import _BUILTIN_MODULES, _DJANGO_BACKEND
 
 
-@register(Tags.templates)
-def check_django_templates_backend_present(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+@register(Tags.templates, NEXT)
+def check_django_templates_backend_present(*args, **kwargs) -> list[CheckMessage]:
     """Warn when no DjangoTemplates engine carries the next-dj tags."""
     engines = getattr(settings, "TEMPLATES", [])
     if any(engine.get("BACKEND") == _DJANGO_BACKEND for engine in engines):
@@ -44,7 +37,7 @@ def check_django_templates_backend_present(
             "None is configured, so the {% %} tags will be unavailable.",
             obj=settings,
             id="next.W062",
-        ),
+        )
     ]
 
 
@@ -70,11 +63,8 @@ def _iter_tag_library_modules() -> list[str]:
     return found
 
 
-@register(Tags.templates)
-def check_builtin_tag_libraries_complete(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+@register(Tags.templates, NEXT)
+def check_builtin_tag_libraries_complete(*args, **kwargs) -> list[CheckMessage]:
     """Warn when a tag library is not registered as a builtin (`next.W063`).
 
     The builtin registration list is the explicit `_BUILTIN_MODULES` tuple.

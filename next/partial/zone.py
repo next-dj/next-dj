@@ -82,10 +82,7 @@ class ZoneOptions:
 
 
 def render_zone_body(
-    partial: "ZonePartial",
-    name: str,
-    options: ZoneOptions,
-    context: "Context",
+    partial: "ZonePartial", name: str, options: ZoneOptions, context: "Context"
 ) -> tuple[SafeString, SafeString]:
     """Render one zone body and its addressable wrapper element.
 
@@ -100,10 +97,7 @@ def render_zone_body(
 
 
 def render_zone_standalone(
-    partial: "ZonePartial",
-    name: str,
-    options: ZoneOptions,
-    context: "Context",
+    partial: "ZonePartial", name: str, options: ZoneOptions, context: "Context"
 ) -> SafeString:
     """Render one zone body wrapped in its addressable element.
 
@@ -125,11 +119,7 @@ class ZonePartial:
     """
 
     def __init__(
-        self,
-        nodelist: NodeList,
-        name: str,
-        origin: "Origin | None",
-        engine: Engine,
+        self, nodelist: NodeList, name: str, origin: "Origin | None", engine: Engine
     ) -> None:
         """Store the body node list and the template identity it stands for."""
         self.nodelist = nodelist
@@ -300,16 +290,10 @@ def do_zone(parser: "Parser", token: "Token") -> ZoneNode:
         )
         raise TemplateSyntaxError(msg)
     partial = ZonePartial(
-        nodelist=body,
-        name=name,
-        origin=parser.origin,
-        engine=Engine.get_default(),
+        nodelist=body, name=name, origin=parser.origin, engine=Engine.get_default()
     )
     return ZoneNode(
-        name=name,
-        partial=partial,
-        options=options,
-        placeholder=placeholder,
+        name=name, partial=partial, options=options, placeholder=placeholder
     )
 
 

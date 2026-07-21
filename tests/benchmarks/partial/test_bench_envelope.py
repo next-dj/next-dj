@@ -84,9 +84,7 @@ class TestBenchShapeInvalid:
 
     @pytest.mark.benchmark(group="partial.shaping")
     def test_shape_invalid_outcome(
-        self,
-        invalid_setup: tuple[RegistryFormActionBackend, ActionOutcome],
-        benchmark,
+        self, invalid_setup: tuple[RegistryFormActionBackend, ActionOutcome], benchmark
     ) -> None:
         backend, outcome = invalid_setup
         request = RequestFactory().post(

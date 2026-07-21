@@ -34,10 +34,7 @@ class AuditEntry(models.Model):
 
     SOURCE_BACKEND = "backend"
     SOURCE_SIGNAL = "signal"
-    SOURCE_CHOICES: ClassVar = [
-        (SOURCE_BACKEND, "backend"),
-        (SOURCE_SIGNAL, "signal"),
-    ]
+    SOURCE_CHOICES: ClassVar = [(SOURCE_BACKEND, "backend"), (SOURCE_SIGNAL, "signal")]
 
     action_name = models.CharField(max_length=120)
     kind = models.CharField(max_length=20, choices=KIND_CHOICES)

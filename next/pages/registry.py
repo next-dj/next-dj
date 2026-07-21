@@ -77,15 +77,12 @@ def get_template_djx_paths_for_watch() -> set[Path]:
 class PageContextRegistry:
     """Register per-`page.py` context callables and merge their output."""
 
-    def __init__(
-        self,
-        resolver: DependencyResolver | None = None,
-    ) -> None:
+    def __init__(self, resolver: DependencyResolver | None = None) -> None:
         """Initialise with an optional resolver and an empty registry."""
-        self._context_registry: dict[
-            Path,
-            dict[str | None, PageContextEntry],
-        ] = {}
+        self._context_registry: dict[Path, dict[str | None, PageContextEntry]] = {}
+        # Keyless callables share the `None` slot, so the registry keeps only
+        # the last. Retain the overwritten names for the `next.E018` diagnostic.
+        self._keyless_conflicts: dict[Path, list[str]] = {}
         self._resolver = resolver
 
     def _get_resolver(self) -> DependencyResolver:
@@ -93,6 +90,15 @@ class PageContextRegistry:
         if self._resolver is not None:
             return self._resolver
         return resolver
+
+    def reset(self) -> None:
+        """Drop every registered context so the next import repopulates it.
+
+        Re-executing a `page.py` only overwrites the keys it still declares, so
+        a removed `@context` would otherwise leave a stale entry behind.
+        """
+        self._context_registry.clear()
+        self._keyless_conflicts.clear()
 
     def register_context(
         self,
@@ -105,7 +111,18 @@ class PageContextRegistry:
         serializer: JsContextSerializer | None = None,
     ) -> None:
         """Bind `func` to `file_path` with keyed or dict-merge semantics."""
-        self._context_registry.setdefault(file_path, {})[key] = PageContextEntry(
+        bucket = self._context_registry.setdefault(file_path, {})
+        existing = bucket.get(None)
+        # Compare by name so a re-executed module (same name) is not a conflict.
+        if (
+            key is None
+            and existing is not None
+            and existing.func.__name__ != func.__name__
+        ):
+            self._keyless_conflicts.setdefault(
+                file_path, [existing.func.__name__]
+            ).append(func.__name__)
+        bucket[key] = PageContextEntry(
             func=func,
             inherit_context=inherit_context,
             serialize=serialize,
@@ -116,10 +133,7 @@ class PageContextRegistry:
         )
 
     def collect_context(
-        self,
-        file_path: Path,
-        request: HttpRequest | None = None,
-        **kwargs: object,
+        self, file_path: Path, request: HttpRequest | None = None, **kwargs
     ) -> ContextResult:
         """Merge inherited ancestor page.py context with this file's context callables.
 
@@ -148,8 +162,7 @@ class PageContextRegistry:
 
         registry = self._context_registry.get(file_path, {})
         ordered = sorted(
-            registry.items(),
-            key=lambda item: (item[0] is not None, str(item[0] or "")),
+            registry.items(), key=lambda item: (item[0] is not None, str(item[0] or ""))
         )
         for key, entry in ordered:
             resolved = self._get_resolver().resolve_dependencies(
@@ -209,10 +222,7 @@ class PageContextRegistry:
             page_file = current_dir / "page.py"
 
             if page_file.exists():
-                for key, entry in self._context_registry.get(
-                    page_file,
-                    {},
-                ).items():
+                for key, entry in self._context_registry.get(page_file, {}).items():
                     if entry.inherit_context:
                         resolved = self._get_resolver().resolve_dependencies(
                             entry.func,

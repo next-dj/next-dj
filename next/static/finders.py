@@ -172,10 +172,7 @@ class NextStaticFilesFinder(BaseFinder):
 
     @override
     def find(
-        self,
-        path: str,
-        find_all: bool = False,
-        **kwargs: bool,
+        self, path: str, find_all: bool = False, **kwargs: bool
     ) -> str | list[str] | None:
         """Resolve the logical path to an absolute filesystem path or list."""
         # Django's BaseFinder.find dictates a positional bool and a deprecated
@@ -190,8 +187,7 @@ class NextStaticFilesFinder(BaseFinder):
 
     @override
     def list(
-        self,
-        ignore_patterns: Iterable[str] | None,
+        self, ignore_patterns: Iterable[str] | None
     ) -> Iterator[tuple[str, Storage]]:
         """Yield logical-path and storage pairs for `collectstatic`."""
         patterns = list(ignore_patterns) if ignore_patterns is not None else []

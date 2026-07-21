@@ -12,19 +12,14 @@ from next.pages import context
 
 @context("delete_state")
 def delete_state(
-    request: HttpRequest,
-    app_label: str,
-    model_name: str,
-    pk: int,
+    request: HttpRequest, app_label: str, model_name: str, pk: int
 ) -> dict[str, Any]:
     """Build confirmation context: object, deps, protected refs, permissions."""
     model, model_admin, obj = utils.resolve_object_or_404(
         request, app_label, model_name, pk
     )
     _to_delete, model_count, perms_needed, protected = get_deleted_objects(
-        [obj],
-        request,
-        model_admin.admin_site,
+        [obj], request, model_admin.admin_site
     )
     return {
         "app_label": app_label,
@@ -48,10 +43,7 @@ def delete_state(
 
 @action("admin:delete", login_required=True)
 def delete(
-    request: HttpRequest,
-    app_label: str,
-    model_name: str,
-    pk: int,
+    request: HttpRequest, app_label: str, model_name: str, pk: int
 ) -> HttpResponse:
     """Delete the object via `ModelAdmin.delete_model` and redirect."""
     model, model_admin, obj = utils.resolve_object_or_404(
@@ -63,7 +55,6 @@ def delete(
     model_admin.log_deletions(request, [obj])
     model_admin.delete_model(request, obj)
     messages.success(
-        request,
-        f"The {model._meta.verbose_name} {obj_repr} was deleted successfully.",
+        request, f"The {model._meta.verbose_name} {obj_repr} was deleted successfully."
     )
     return HttpResponseRedirect(utils.changelist_url(app_label, model_name))

@@ -94,9 +94,7 @@ class TestFormActionNotFoundError:
     def test_reduce_round_trip_keeps_message(self) -> None:
         """Pickle and deepcopy carry the rendered message and drop the source."""
         exc = FormActionNotFoundError(
-            name="vote",
-            page_path="/app/page.py",
-            candidates=lambda: ["votes"],
+            name="vote", page_path="/app/page.py", candidates=lambda: ["votes"]
         )
         revived = copy.deepcopy(exc)
         assert isinstance(revived, FormActionNotFoundError)
@@ -190,10 +188,10 @@ class TestFormActionManager:
         """Skip backends whose get_meta yields None and ask the next one."""
 
         class NoMetaBackend(FormActionBackend):
-            def register_action(self, *args: object, **kwargs: object) -> None:
+            def register_action(self, *args, **kwargs) -> None:
                 pass
 
-            def get_action_url(self, action_name: str, **kwargs: object) -> str:
+            def get_action_url(self, action_name: str, **kwargs) -> str:
                 return ""
 
             def generate_urls(self) -> list:
@@ -358,10 +356,7 @@ class TestRegistryFormActionBackend:
 
         backend.register_action(
             ActionRegistration(
-                name="page_action",
-                file_path=page_file,
-                scope="page",
-                handler=handler,
+                name="page_action", file_path=page_file, scope="page", handler=handler
             )
         )
         meta = backend.get_meta("page_action", page_file)
@@ -373,18 +368,12 @@ class TestRegistryFormActionBackend:
         backend = RegistryFormActionBackend()
         backend.register_action(
             ActionRegistration(
-                name="alpha",
-                file_path=_FAKE_FILE,
-                scope="shared",
-                handler=lambda: None,
+                name="alpha", file_path=_FAKE_FILE, scope="shared", handler=lambda: None
             )
         )
         first_uid = next(iter(backend._uid_to_name))
         with (
-            patch(
-                "next.forms.backends._make_uid_for_action",
-                return_value=first_uid,
-            ),
+            patch("next.forms.backends._make_uid_for_action", return_value=first_uid),
             pytest.raises(ImproperlyConfigured, match="UID collision"),
         ):
             backend.register_action(
@@ -401,18 +390,12 @@ class TestRegistryFormActionBackend:
         backend = RegistryFormActionBackend()
         backend.register_action(
             ActionRegistration(
-                name="alpha",
-                file_path=_FAKE_FILE,
-                scope="shared",
-                handler=lambda: None,
+                name="alpha", file_path=_FAKE_FILE, scope="shared", handler=lambda: None
             )
         )
         backend.register_action(
             ActionRegistration(
-                name="alpha",
-                file_path=_FAKE_FILE,
-                scope="shared",
-                handler=lambda: None,
+                name="alpha", file_path=_FAKE_FILE, scope="shared", handler=lambda: None
             )
         )
         assert backend.get_meta("alpha") is not None
@@ -426,10 +409,7 @@ class TestRegistryFormActionBackend:
 
         backend.register_action(
             ActionRegistration(
-                name="tuple_test",
-                file_path=_FAKE_FILE,
-                scope="shared",
-                handler=h,
+                name="tuple_test", file_path=_FAKE_FILE, scope="shared", handler=h
             )
         )
         keys = list(backend._registry.keys())
@@ -444,10 +424,7 @@ class TestRegistryFormActionBackend:
 
         backend.register_action(
             ActionRegistration(
-                name="uid_tuple_test",
-                file_path=_FAKE_FILE,
-                scope="shared",
-                handler=h,
+                name="uid_tuple_test", file_path=_FAKE_FILE, scope="shared", handler=h
             )
         )
         values = list(backend._uid_to_name.values())
@@ -463,10 +440,7 @@ class TestRegistryFormActionBackend:
 
         backend.register_action(
             ActionRegistration(
-                name="page_meta_test",
-                file_path=page_path,
-                scope="page",
-                handler=h,
+                name="page_meta_test", file_path=page_path, scope="page", handler=h
             )
         )
         meta = backend.get_meta("page_meta_test", page_path)
@@ -482,10 +456,7 @@ class TestRegistryFormActionBackend:
 
         backend.register_action(
             ActionRegistration(
-                name="any_scope_test",
-                file_path=_FAKE_FILE,
-                scope="shared",
-                handler=h,
+                name="any_scope_test", file_path=_FAKE_FILE, scope="shared", handler=h
             )
         )
         meta = backend.get_meta("any_scope_test")
@@ -538,10 +509,7 @@ class TestNameIndexScopeFilter:
     ) -> None:
         backend.register_action(
             ActionRegistration(
-                name=name,
-                file_path=file_path,
-                scope=scope,
-                handler=lambda: None,
+                name=name, file_path=file_path, scope=scope, handler=lambda: None
             )
         )
 
@@ -599,10 +567,7 @@ class TestUnknownActionSuggestions:
     def _register(backend: RegistryFormActionBackend, name: str) -> None:
         backend.register_action(
             ActionRegistration(
-                name=name,
-                file_path=_FAKE_FILE,
-                scope="shared",
-                handler=lambda: None,
+                name=name, file_path=_FAKE_FILE, scope="shared", handler=lambda: None
             )
         )
 
@@ -624,10 +589,7 @@ class TestUnknownActionSuggestions:
         ],
     )
     def test_backend_suggestions(
-        self,
-        lookup_name: str,
-        expected_suggestions: tuple[str, ...],
-        message_tail: str,
+        self, lookup_name: str, expected_suggestions: tuple[str, ...], message_tail: str
     ) -> None:
         """The lookup error carries close matches and renders them last."""
         backend = RegistryFormActionBackend()
@@ -658,10 +620,7 @@ class TestEmptyRegistryDiagnosis:
     def _register(backend: RegistryFormActionBackend, name: str) -> None:
         backend.register_action(
             ActionRegistration(
-                name=name,
-                file_path=_FAKE_FILE,
-                scope="shared",
-                handler=lambda: None,
+                name=name, file_path=_FAKE_FILE, scope="shared", handler=lambda: None
             )
         )
 
@@ -710,10 +669,10 @@ class TestFormActionBackendAbstract:
         """Abstract backend get_meta returns None."""
 
         class StubBackend(FormActionBackend):
-            def register_action(self, *args: object, **kwargs: object) -> None:
+            def register_action(self, *args, **kwargs) -> None:
                 pass
 
-            def get_action_url(self, action_name: str, **kwargs: object) -> str:
+            def get_action_url(self, action_name: str, **kwargs) -> str:
                 return ""
 
             def generate_urls(self) -> list:
@@ -729,10 +688,10 @@ class TestFormActionBackendAbstract:
         """Abstract backend render_invalid_page returns empty string."""
 
         class StubBackend(FormActionBackend):
-            def register_action(self, *args: object, **kwargs: object) -> None:
+            def register_action(self, *args, **kwargs) -> None:
                 pass
 
-            def get_action_url(self, action_name: str, **kwargs: object) -> str:
+            def get_action_url(self, action_name: str, **kwargs) -> str:
                 return ""
 
             def generate_urls(self) -> list:
@@ -749,10 +708,10 @@ class TestFormActionBackendAbstract:
         """The base hooks keep the plain parameter names subclasses override."""
 
         class StubBackend(FormActionBackend):
-            def register_action(self, *args: object, **kwargs: object) -> None:
+            def register_action(self, *args, **kwargs) -> None:
                 pass
 
-            def get_action_url(self, action_name: str, **kwargs: object) -> str:
+            def get_action_url(self, action_name: str, **kwargs) -> str:
                 return ""
 
             def generate_urls(self) -> list:
@@ -777,10 +736,10 @@ class TestFormActionBackendAbstract:
         """Abstract backend shape_response delegates to the default envelope."""
 
         class StubBackend(FormActionBackend):
-            def register_action(self, *args: object, **kwargs: object) -> None:
+            def register_action(self, *args, **kwargs) -> None:
                 pass
 
-            def get_action_url(self, action_name: str, **kwargs: object) -> str:
+            def get_action_url(self, action_name: str, **kwargs) -> str:
                 return ""
 
             def generate_urls(self) -> list:
@@ -835,10 +794,7 @@ class TestIterActions:
                 )
             )
         metas = list(backend.iter_actions())
-        assert [meta.get("name") for meta in metas] == [
-            "first_action",
-            "second_action",
-        ]
+        assert [meta.get("name") for meta in metas] == ["first_action", "second_action"]
         assert all(meta.get("uid") for meta in metas)
 
     def test_empty_registry_backend_yields_nothing(self) -> None:
@@ -860,8 +816,8 @@ class TestManagerBackendsAccessor:
         """An unprimed manager builds its backends from settings."""
         settings.NEXT_FRAMEWORK = {
             "FORM_ACTION_BACKENDS": [
-                {"BACKEND": "next.forms.RegistryFormActionBackend"},
-            ],
+                {"BACKEND": "next.forms.RegistryFormActionBackend"}
+            ]
         }
         manager = FormActionManager()
         backends = manager.backends
@@ -884,7 +840,7 @@ class TestFormActionManagerReloadConfig:
             "FORM_ACTION_BACKENDS": [
                 "not-a-dict",
                 {"BACKEND": "next.forms.RegistryFormActionBackend"},
-            ],
+            ]
         }
         manager = FormActionManager()
         manager._reload_config()
@@ -895,8 +851,8 @@ class TestFormActionManagerReloadConfig:
         """If a backend constructor raises ImproperlyConfigured, the entry is skipped and logged."""
         settings.NEXT_FRAMEWORK = {
             "FORM_ACTION_BACKENDS": [
-                {"BACKEND": "next.forms.RegistryFormActionBackend"},
-            ],
+                {"BACKEND": "next.forms.RegistryFormActionBackend"}
+            ]
         }
 
         def boom(_config: dict) -> None:
@@ -919,7 +875,7 @@ class TestFormActionFactory:
     def test_explicit_backend_path(self) -> None:
         """Explicit `BACKEND` path is honoured."""
         backend = FormActionFactory.create_backend(
-            {"BACKEND": "next.forms.RegistryFormActionBackend"},
+            {"BACKEND": "next.forms.RegistryFormActionBackend"}
         )
         assert isinstance(backend, RegistryFormActionBackend)
 
@@ -942,16 +898,13 @@ class TestGetActionUrlNoReverseMatchFallback:
 
         backend.register_action(
             ActionRegistration(
-                name="fallback_action",
-                file_path=page_path,
-                scope="page",
-                handler=h,
+                name="fallback_action", file_path=page_path, scope="page", handler=h
             )
         )
 
         original_reverse = __import__("django.urls", fromlist=["reverse"]).reverse
 
-        def mock_reverse(name: str, **kwargs: object) -> str:
+        def mock_reverse(name: str, **kwargs) -> str:
             if name == "next:form_action":
                 msg = "no such url"
                 raise NoReverseMatch(msg)
@@ -1072,8 +1025,8 @@ class TestFormActionManagerVersion:
         """_reload_config increments the version alongside the backend rebuild."""
         settings.NEXT_FRAMEWORK = {
             "FORM_ACTION_BACKENDS": [
-                {"BACKEND": "next.forms.RegistryFormActionBackend"},
-            ],
+                {"BACKEND": "next.forms.RegistryFormActionBackend"}
+            ]
         }
         manager = FormActionManager()
         before = manager._version
@@ -1165,10 +1118,7 @@ def _register(backend: RegistryFormActionBackend, name: str) -> None:
 
     backend.register_action(
         ActionRegistration(
-            name=name,
-            file_path=_FAKE_FILE,
-            scope="shared",
-            handler=handler,
+            name=name, file_path=_FAKE_FILE, scope="shared", handler=handler
         )
     )
 

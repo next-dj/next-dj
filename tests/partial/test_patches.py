@@ -35,11 +35,7 @@ class TestPatchAsDict:
 
     def test_event_carries_extras(self) -> None:
         patch = Patch(op="event", extras={"name": "ping", "detail": {"x": 1}})
-        assert patch.as_dict() == {
-            "op": "event",
-            "name": "ping",
-            "detail": {"x": 1},
-        }
+        assert patch.as_dict() == {"op": "event", "name": "ping", "detail": {"x": 1}}
 
 
 class TestAssetAsDict:
@@ -212,10 +208,7 @@ class TestPatchesBuilder:
 
     def test_add_context_records_a_context_op(self) -> None:
         envelope = Patches.versioned("v1")._add_context({"unread": 3}).envelope()
-        assert envelope.ops[0].as_dict() == {
-            "op": "context",
-            "data": {"unread": 3},
-        }
+        assert envelope.ops[0].as_dict() == {"op": "context", "data": {"unread": 3}}
 
     def test_version_carried(self) -> None:
         assert Patches.versioned("9f3c").envelope().version == "9f3c"
@@ -366,7 +359,7 @@ class TestOriginRenderContextMemoised:
         calls = 0
         original = next.pages.page.build_render_context
 
-        def _counting(*args: object, **kwargs: object) -> object:
+        def _counting(*args, **kwargs) -> object:
             nonlocal calls
             calls += 1
             return original(*args, **kwargs)
@@ -381,7 +374,7 @@ class TestOriginRenderContextMemoised:
         calls = 0
         original = next.pages.page.build_render_context
 
-        def _counting(*args: object, **kwargs: object) -> object:
+        def _counting(*args, **kwargs) -> object:
             nonlocal calls
             calls += 1
             return original(*args, **kwargs)

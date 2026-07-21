@@ -34,9 +34,7 @@ TWEAKS_SOURCE = (
 @pytest.fixture()
 def tweaks_env():
     """Enable the widget_tweaks template library for one test."""
-    with override_settings(
-        INSTALLED_APPS=[*settings.INSTALLED_APPS, "widget_tweaks"],
-    ):
+    with override_settings(INSTALLED_APPS=[*settings.INSTALLED_APPS, "widget_tweaks"]):
         yield
 
 

@@ -14,9 +14,7 @@ if TYPE_CHECKING:
 
 @contextmanager
 def route_watch_layer_patches(
-    *,
-    get_pages_directories_for_watch,
-    scan_pages_tree,
+    *, get_pages_directories_for_watch, scan_pages_tree
 ) -> Generator[None, None, None]:
     """Apply the usual ``next.server`` patches around route discovery for ``tick()`` tests."""
     with (
@@ -118,8 +116,7 @@ def tick_scenario_mtime_change(reloader: NextStatReloader):
 
     with (
         route_watch_layer_patches(
-            get_pages_directories_for_watch=list,
-            scan_pages_tree=lambda _p: iter([]),
+            get_pages_directories_for_watch=list, scan_pages_tree=lambda _p: iter([])
         ),
         patch.object(reloader, "snapshot_files", side_effect=snapshot_side_effect),
         patch.object(reloader, "notify_file_changed") as mock_notify,

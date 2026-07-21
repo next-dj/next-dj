@@ -56,7 +56,7 @@ class ComponentWidget(django_forms.Widget):
         component_name: str,
         *,
         attrs: dict[str, Any] | None = None,
-        **component_kwargs: object,
+        **component_kwargs,
     ) -> None:
         """Store the target component name and its extra render kwargs."""
         self.component_name = component_name

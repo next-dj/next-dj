@@ -87,10 +87,7 @@ def _register_form(
     """Register a page-scoped form action through the default backend."""
     form_action_manager.default_backend.register_action(
         ActionRegistration(
-            name=name,
-            file_path=file_path,
-            scope="page",
-            form_class=form_class,
+            name=name, file_path=file_path, scope="page", form_class=form_class
         )
     )
 
@@ -310,10 +307,7 @@ class TestComponentWidgetAssetCollection:
     """`render` discovers co-located component assets when a collector is bound."""
 
     def _render_with_collector(
-        self,
-        component_name: str,
-        anchor: Path,
-        collector: StaticCollector | None,
+        self, component_name: str, anchor: Path, collector: StaticCollector | None
     ) -> None:
         widget = ComponentWidget(component_name)
         widget._template_path = anchor
@@ -408,10 +402,7 @@ class TestBindComponentWidgets:
         request = object()
         collector = StaticCollector()
         bind_component_widgets(
-            formset,
-            template_path=echo_component,
-            request=request,
-            collector=collector,
+            formset, template_path=echo_component, request=request, collector=collector
         )
         assert len(formset.forms) == 2
         for member in formset.forms:
@@ -480,7 +471,7 @@ class TestCheckComponentWidgetComponents:
                 name="formless",
                 file_path="/fake/page.py",
                 scope="page",
-                handler=lambda *_: None,
+                handler=lambda *args: None,
             )
         )
         assert check_component_widget_components() == []
@@ -489,10 +480,10 @@ class TestCheckComponentWidgetComponents:
         # A from-scratch backend keeping the iter_actions default must not
         # raise: the check sees an empty iterator and reports nothing.
         class _BareBackend(FormActionBackend):
-            def register_action(self, *args: object, **kwargs: object) -> None:
+            def register_action(self, *args, **kwargs) -> None:
                 pass
 
-            def get_action_url(self, action_name: str, **kwargs: object) -> str:
+            def get_action_url(self, action_name: str, **kwargs) -> str:
                 return ""
 
             def generate_urls(self) -> list:
@@ -564,7 +555,7 @@ class TestCheckComponentWidgetFieldTypes:
                 name="formless_types",
                 file_path="/fake/page.py",
                 scope="page",
-                handler=lambda *_: None,
+                handler=lambda *args: None,
             )
         )
         assert check_component_widget_field_types() == []

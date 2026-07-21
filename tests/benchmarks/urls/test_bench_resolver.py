@@ -19,7 +19,7 @@ _SECTIONS = 10
 _PAGES = 12
 
 
-def _bench_view(_request, **_kwargs: object) -> HttpResponse:
+def _bench_view(_request, **kwargs) -> HttpResponse:
     return HttpResponse(b"bench")
 
 

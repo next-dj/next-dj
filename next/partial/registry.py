@@ -113,9 +113,7 @@ def _zones_from_template(template: "Template") -> dict[str, ZoneInfo]:
     nodes = cast("list[ZoneNode]", template.nodelist.get_nodes_by_type(ZoneNode))
     for node in nodes:
         zones[node.name] = ZoneInfo(
-            name=node.name,
-            partial=node.partial,
-            options=node.options,
+            name=node.name, partial=node.partial, options=node.options
         )
     return zones
 

@@ -113,11 +113,11 @@ The next ``get_cached_flag`` call refetches from the database.
    from .cache import invalidate_flag
    from .models import Flag
 
-   def _invalidate_on_save(instance: Flag, **_: object) -> None:
+   def _invalidate_on_save(instance: Flag, **kwargs) -> None:
        """Drop the cached entry so the next read reflects the updated row."""
        invalidate_flag(instance.name)
 
-   def _invalidate_on_delete(instance: Flag, **_: object) -> None:
+   def _invalidate_on_delete(instance: Flag, **kwargs) -> None:
        """Drop the cached entry when the flag is removed from the database."""
        invalidate_flag(instance.name)
 

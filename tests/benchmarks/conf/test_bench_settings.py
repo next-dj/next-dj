@@ -48,7 +48,7 @@ class TestBenchSettingsMerge:
             "FORM_ACTION_BACKENDS": [
                 {"BACKEND": "myapp.backends.AuditedBackend", "OPTIONS": {}},
                 {"BACKEND": "myapp.backends.MetricsBackend", "OPTIONS": {}},
-            ],
+            ]
         }
         settings = NextFrameworkSettings()
         benchmark(settings._build_flat_merged, user_dict)

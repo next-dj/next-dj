@@ -20,9 +20,7 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
 
-def build_mock_http_request(
-    *, path: str | None = "/test/", **attrs: object
-) -> MagicMock:
+def build_mock_http_request(*, path: str | None = "/test/", **attrs) -> MagicMock:
     """Return ``MagicMock(spec=HttpRequest)`` with optional ``path`` and attributes."""
     m = MagicMock(spec=HttpRequest)
     if path is not None:
@@ -51,9 +49,7 @@ def next_framework_settings_for_checks(*, backends: list) -> object:
     """Stand-in for ``next_framework_settings`` in checks tests."""
     return SimpleNamespace(
         COMPONENT_BACKENDS=backends,
-        PAGE_BACKENDS=list(
-            NextFrameworkSettings.DEFAULTS["PAGE_BACKENDS"],
-        ),
+        PAGE_BACKENDS=list(NextFrameworkSettings.DEFAULTS["PAGE_BACKENDS"]),
         URL_NAME_TEMPLATE=NextFrameworkSettings.DEFAULTS["URL_NAME_TEMPLATE"],
     )
 
@@ -82,7 +78,7 @@ def _ctx(
     stack=None,
     resolver_inst=None,
     _context_data=None,
-    **kwargs: object,
+    **kwargs,
 ) -> SimpleNamespace:
     """Build dynamic context (SimpleNamespace) for provider tests."""
     if url_kwargs is None:
@@ -115,9 +111,7 @@ def _minimal_resolver() -> DependencyResolver:
 def _resolver_with_form() -> DependencyResolver:
     """Return a resolver with request, URL and form providers."""
     return DependencyResolver(
-        HttpRequestProvider(),
-        UrlKwargsProvider(),
-        FormProvider(),
+        HttpRequestProvider(), UrlKwargsProvider(), FormProvider()
     )
 
 
@@ -168,11 +162,7 @@ def file_router_backend_from_params(params: object) -> object:
     """Build FileRouterBackend from tuple params or return params unchanged."""
     if isinstance(params, tuple):
         if len(params) == 3:
-            return FileRouterBackend(
-                params[0],
-                app_dirs=params[1],
-                options=params[2],
-            )
+            return FileRouterBackend(params[0], app_dirs=params[1], options=params[2])
         if len(params) == 2:
             return FileRouterBackend(params[0], app_dirs=params[1])
         if len(params) == 1:

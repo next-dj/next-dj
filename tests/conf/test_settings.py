@@ -27,17 +27,9 @@ class TestLazyFixtureWiring:
 class TestNextFrameworkSettingsDjangoIntegration:
     """Global next_framework_settings with override_settings(NEXT_FRAMEWORK=...)."""
 
-    @pytest.mark.parametrize(
-        "next_framework",
-        [
-            {},
-            42,
-        ],
-        ids=["empty_dict", "non_dict"],
-    )
+    @pytest.mark.parametrize("next_framework", [{}, 42], ids=["empty_dict", "non_dict"])
     def test_falls_back_to_default_page_router_backend(
-        self,
-        next_framework: object,
+        self, next_framework: object
     ) -> None:
         """Empty or invalid NEXT_FRAMEWORK keeps the default file router backend."""
         with override_settings(NEXT_FRAMEWORK=next_framework):  # type: ignore[arg-type]
@@ -55,7 +47,7 @@ class TestNextFrameworkSettingsDjangoIntegration:
                 "APP_DIRS": False,
                 "DIRS": [],
                 "OPTIONS": {},
-            },
+            }
         ]
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": custom}):
             next_framework_settings.reload()
@@ -73,15 +65,13 @@ class TestNextFrameworkSettingsDjangoIntegration:
                         "BACKEND": "next.components.FileComponentsBackend",
                         "DIRS": ["/tmp/x"],
                         "COMPONENTS_DIR": "_components",
-                    },
-                ],
-            },
+                    }
+                ]
+            }
         ):
             next_framework_settings.reload()
             assert next_framework_settings.PAGE_BACKENDS[0]["PAGES_DIR"] == "pages"
-            assert next_framework_settings.COMPONENT_BACKENDS[0]["DIRS"] == [
-                "/tmp/x",
-            ]
+            assert next_framework_settings.COMPONENT_BACKENDS[0]["DIRS"] == ["/tmp/x"]
 
     @pytest.mark.parametrize(
         "bad_attr",
@@ -95,9 +85,7 @@ class TestNextFrameworkSettingsDjangoIntegration:
 
     def test_only_url_name_template_overridden(self) -> None:
         """Setting only URL_NAME_TEMPLATE keeps default page backends."""
-        with override_settings(
-            NEXT_FRAMEWORK={"URL_NAME_TEMPLATE": "view_{name}"},
-        ):
+        with override_settings(NEXT_FRAMEWORK={"URL_NAME_TEMPLATE": "view_{name}"}):
             next_framework_settings.reload()
             assert next_framework_settings.URL_NAME_TEMPLATE == "view_{name}"
             assert (
@@ -114,9 +102,7 @@ class TestNextFrameworkSettingsDjangoIntegration:
         ids=["invalid_routers_type", "invalid_url_name_template"],
     )
     def test_invalid_setting_type_keeps_default(
-        self,
-        next_framework: dict[str, Any],
-        setting_name: str,
+        self, next_framework: dict[str, Any], setting_name: str
     ) -> None:
         """Wrong type for a key is ignored and the default value is kept."""
         with override_settings(NEXT_FRAMEWORK=next_framework):  # type: ignore[arg-type, dict-item]
@@ -131,11 +117,7 @@ class TestNextFrameworkSettingsFlatMerge:
 
     @pytest.mark.parametrize(
         ("user", "expected_routers_len"),
-        [
-            (None, 1),
-            ({}, 1),
-            ({"PAGE_BACKENDS": []}, 0),
-        ],
+        [(None, 1), ({}, 1), ({"PAGE_BACKENDS": []}, 0)],
         ids=["none_user", "empty_user_dict", "explicit_empty_routers"],
     )
     def test_build_flat_merged_routers_length(
@@ -149,8 +131,7 @@ class TestNextFrameworkSettingsFlatMerge:
         assert len(merged["PAGE_BACKENDS"]) == expected_routers_len
 
     def test_build_flat_merge_empty_component_backends(
-        self,
-        fresh_next_framework_settings: NextFrameworkSettings,
+        self, fresh_next_framework_settings: NextFrameworkSettings
     ) -> None:
         """Explicit empty COMPONENT_BACKENDS is preserved."""
         user = {"COMPONENT_BACKENDS": []}
@@ -199,7 +180,7 @@ class TestUrlResolverSetting:
     def test_string_override_reaches_merged_settings(self) -> None:
         """A dotted-path string lands in next_framework_settings unchanged."""
         with override_settings(
-            NEXT_FRAMEWORK={"URL_RESOLVER": "django.urls.resolvers.URLResolver"},
+            NEXT_FRAMEWORK={"URL_RESOLVER": "django.urls.resolvers.URLResolver"}
         ):
             next_framework_settings.reload()
             assert (
@@ -208,9 +189,7 @@ class TestUrlResolverSetting:
             )
 
     @pytest.mark.parametrize(
-        "raw",
-        [123, None, ["next.urls.TrieURLResolver"]],
-        ids=["int", "none", "list"],
+        "raw", [123, None, ["next.urls.TrieURLResolver"]], ids=["int", "none", "list"]
     )
     def test_non_string_override_keeps_default(self, raw: object) -> None:
         """A non-string value is ignored by the merge and the default stays."""
@@ -221,7 +200,7 @@ class TestUrlResolverSetting:
     def test_key_passes_unknown_key_check(self) -> None:
         """System checks accept URL_RESOLVER as a known top-level key."""
         with override_settings(
-            NEXT_FRAMEWORK={"URL_RESOLVER": "next.urls.TrieURLResolver"},
+            NEXT_FRAMEWORK={"URL_RESOLVER": "next.urls.TrieURLResolver"}
         ):
             next_framework_settings.reload()
             errors = check_next_framework_unknown_top_level_keys()
@@ -242,10 +221,10 @@ class TestNextFrameworkChecksUnknownKeys:
                         "APP_DIRS": True,
                         "DIRS": [],
                         "OPTIONS": {},
-                    },
+                    }
                 ],
                 "NOT_A_FRAMEWORK_KEY": True,
-            },
+            }
         ):
             next_framework_settings.reload()
             errors = check_next_framework_unknown_top_level_keys()
@@ -262,8 +241,7 @@ class TestNextFrameworkChecksUnknownKeys:
         ],
     )
     def test_next_framework_rejects_legacy_prefixed_keys(
-        self,
-        renamed_key: str,
+        self, renamed_key: str
     ) -> None:
         """Pre-rename keys with the dropped prefix are reported as unknown."""
         with override_settings(NEXT_FRAMEWORK={f"DEFAULT_{renamed_key}": []}):
@@ -283,9 +261,9 @@ class TestNextFrameworkChecksUnknownKeys:
                         "DIRS": [],
                         "OPTIONS": {},
                         "made_up_option": True,
-                    },
-                ],
-            },
+                    }
+                ]
+            }
         ):
             next_framework_settings.reload()
             errors = check_next_pages_configuration()
@@ -303,9 +281,9 @@ class TestNextFrameworkChecksUnknownKeys:
                         "DIRS": [],
                         "OPTIONS": {},
                         "COMPONENTS_DIR": "_components",
-                    },
-                ],
-            },
+                    }
+                ]
+            }
         ):
             next_framework_settings.reload()
             errors = check_next_pages_configuration()
@@ -321,9 +299,9 @@ class TestNextFrameworkChecksUnknownKeys:
                         "DIRS": [],
                         "COMPONENTS_DIR": "_components",
                         "extra_key": 1,
-                    },
-                ],
-            },
+                    }
+                ]
+            }
         ):
             next_framework_settings.reload()
             errors = check_next_components_configuration()
@@ -341,13 +319,8 @@ class TestNextFrameworkChecksUnknownKeys:
         try:
             with override_settings(
                 NEXT_FRAMEWORK={
-                    "PAGE_BACKENDS": [
-                        {
-                            "BACKEND": backend_path,
-                            "PAGES_DIR": "pages",
-                        },
-                    ],
-                },
+                    "PAGE_BACKENDS": [{"BACKEND": backend_path, "PAGES_DIR": "pages"}]
+                }
             ):
                 next_framework_settings.reload()
                 errors = check_next_pages_configuration()

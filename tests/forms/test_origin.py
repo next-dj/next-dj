@@ -248,7 +248,7 @@ class TestSiblingFormReRenderKwargs:
             seen: ClassVar[list] = []
 
             @classmethod
-            def get_initial(cls, request: HttpRequest, **kwargs: object) -> dict:
+            def get_initial(cls, request: HttpRequest, **kwargs) -> dict:
                 cls.seen.append(dict(kwargs))
                 return {}
 

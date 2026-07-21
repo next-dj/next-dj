@@ -296,14 +296,10 @@ class TestInjectForwardsRequest:
         collector.add(StaticAsset(url=CSS_URL, kind="css"))
         sentinel = RequestFactory().get("/")
         with mock.patch.object(
-            fresh_manager.default_backend,
-            "render_link_tag",
-            return_value="<link/>",
+            fresh_manager.default_backend, "render_link_tag", return_value="<link/>"
         ) as render:
             fresh_manager.inject(
-                f"<head>{STYLES_PLACEHOLDER}</head>",
-                collector,
-                request=sentinel,
+                f"<head>{STYLES_PLACEHOLDER}</head>", collector, request=sentinel
             )
         render.assert_called_once_with(CSS_URL, request=sentinel)
 
@@ -318,8 +314,7 @@ class TestInjectForwardsRequest:
                 fresh_manager,
                 "_next_script_builder",
                 return_value=NextScriptBuilder(
-                    "/static/next/next.min.js",
-                    policy=ScriptInjectionPolicy.DISABLED,
+                    "/static/next/next.min.js", policy=ScriptInjectionPolicy.DISABLED
                 ),
             ),
             mock.patch.object(
@@ -339,9 +334,7 @@ class TestInjectForwardsRequest:
         collector = StaticCollector()
         collector.add(StaticAsset(url=CSS_URL, kind="css"))
         with mock.patch.object(
-            fresh_manager.default_backend,
-            "render_link_tag",
-            return_value="<link/>",
+            fresh_manager.default_backend, "render_link_tag", return_value="<link/>"
         ) as render:
             fresh_manager.inject(f"<head>{STYLES_PLACEHOLDER}</head>", collector)
         render.assert_called_once_with(CSS_URL, request=None)
@@ -349,9 +342,7 @@ class TestInjectForwardsRequest:
 
 class TestDiscoveryForwarding:
     def test_discover_page_assets_delegates(
-        self,
-        tmp_path: Path,
-        fresh_manager: StaticManager,
+        self, tmp_path: Path, fresh_manager: StaticManager
     ) -> None:
         (tmp_path / "template.css").write_text("")
         page_path = tmp_path / "page.djx"
@@ -369,9 +360,7 @@ class TestDiscoveryForwarding:
         ]
 
     def test_discover_component_assets_delegates(
-        self,
-        composite_component: ComponentInfo,
-        fresh_manager: StaticManager,
+        self, composite_component: ComponentInfo, fresh_manager: StaticManager
     ) -> None:
         collector = StaticCollector()
         with mock.patch(

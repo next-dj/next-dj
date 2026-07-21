@@ -155,9 +155,7 @@ class TestComponentsInstall:
         marker = tmp_path / "imported.txt"
         config = _component_backend_config(tmp_path, "widget", marker)
         try:
-            with override_settings(
-                NEXT_FRAMEWORK={"COMPONENT_BACKENDS": [config]},
-            ):
+            with override_settings(NEXT_FRAMEWORK={"COMPONENT_BACKENDS": [config]}):
                 next_components.install()
                 backend = components_manager._backends[0]
                 assert isinstance(backend, FileComponentsBackend)
@@ -175,7 +173,7 @@ class TestComponentsInstall:
                 NEXT_FRAMEWORK={
                     "COMPONENT_BACKENDS": [config],
                     "LAZY_COMPONENT_MODULES": True,
-                },
+                }
             ):
                 next_components.install()
                 backend = components_manager._backends[0]

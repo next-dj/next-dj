@@ -28,7 +28,7 @@ def _remember(action_name: str) -> None:
 
 
 @receiver(action_dispatched)
-def _on_action_dispatched(action_name: str, **_kwargs: object) -> None:
+def _on_action_dispatched(action_name: str, **kwargs) -> None:
     """Bump the counter for `action_name` and track the name for readout."""
     key = _key(action_name)
     cache.add(key, 0)

@@ -6,11 +6,7 @@ import pytest
 from django import forms, forms as django_forms
 from django.http import HttpRequest, HttpResponseRedirect
 
-from next.forms import (
-    BaseModelForm,
-    Form,
-    ModelForm,
-)
+from next.forms import BaseModelForm, Form, ModelForm
 from next.forms.base import _is_self_registered
 from next.forms.decorators import action as action_decorator
 from next.forms.diagnostics import registration_diagnostics
@@ -343,7 +339,7 @@ class TestBaseFormGetInitial:
             name = forms.CharField(max_length=100)
 
             @classmethod
-            def get_initial(cls, request: HttpRequest, **kwargs: object) -> dict:
+            def get_initial(cls, request: HttpRequest, **kwargs) -> dict:
                 return {"name": f"from-{kwargs['id']}"}
 
         request = HttpRequest()

@@ -15,10 +15,7 @@ def submit_url(category: object = None) -> str:
     either a slug string or a resolved `Category` instance.
     """
     if isinstance(category, Category):
-        return reverse(
-            "next:page_catalog_category",
-            kwargs={"category": category.slug},
-        )
+        return reverse("next:page_catalog_category", kwargs={"category": category.slug})
     return reverse("next:page_catalog")
 
 

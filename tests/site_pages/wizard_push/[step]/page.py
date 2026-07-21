@@ -24,10 +24,7 @@ class PushStepWizard(FormWizard):
     class Meta:
         """Two ordered steps with step history pushing enabled."""
 
-        steps: ClassVar = [
-            ("identity", PushIdentityStep),
-            ("scope", PushScopeStep),
-        ]
+        steps: ClassVar = [("identity", PushIdentityStep), ("scope", PushScopeStep)]
         url_param = "step"
         push_steps = True
 

@@ -203,7 +203,7 @@ so the envelope carries the re-aggregated zone beside the custom verb with a pay
 ### 8. The flush command
 
 ```python
-def handle(self, *_args, **_options):
+def handle(self, *args, **options):
     rows = flush()
     if not rows:
         self.stdout.write("nothing to flush")

@@ -49,25 +49,22 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
-            ],
+            ]
         },
-    },
+    }
 ]
 
 WSGI_APPLICATION = "config.wsgi.application"
 
 DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
-    },
+    "default": {"ENGINE": "django.db.backends.sqlite3", "NAME": BASE_DIR / "db.sqlite3"}
 }
 
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
         "LOCATION": "admin-example",
-    },
+    }
 }
 
 LANGUAGE_CODE = "en-us"
@@ -99,9 +96,9 @@ NEXT_FRAMEWORK = {
             "OPTIONS": {
                 # The hand-crafted logout form in `layout.djx` writes a bare
                 # `{% csrf_token %}`, which reads the token this processor seeds.
-                "context_processors": ["django.template.context_processors.csrf"],
+                "context_processors": ["django.template.context_processors.csrf"]
             },
-        },
+        }
     ],
     "COMPONENT_BACKENDS": [
         {
@@ -111,6 +108,6 @@ NEXT_FRAMEWORK = {
                 str(SHARED_DIR / "_components"),
             ],
             "COMPONENTS_DIR": "_panels",
-        },
+        }
     ],
 }

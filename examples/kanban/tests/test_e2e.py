@@ -74,10 +74,7 @@ class TestBoardList:
     """The index page lists active boards and hides archived ones."""
 
     def test_renders_active_boards(
-        self,
-        client: NextClient,
-        board: Board,
-        archived_board: Board,
+        self, client: NextClient, board: Board, archived_board: Board
     ) -> None:
         del archived_board
         response = client.get("/")
@@ -85,11 +82,7 @@ class TestBoardList:
         assert response.status_code == 200
         assert board.title in body
 
-    def test_archived_hidden(
-        self,
-        client: NextClient,
-        archived_board: Board,
-    ) -> None:
+    def test_archived_hidden(self, client: NextClient, archived_board: Board) -> None:
         response = client.get("/")
         body = response.content.decode()
         assert response.status_code == 200
@@ -106,11 +99,7 @@ class TestBoardList:
 class TestBoardView:
     """The board detail page renders columns and the React mount point."""
 
-    def test_columns_and_cards_render(
-        self,
-        client: NextClient,
-        board: Board,
-    ) -> None:
+    def test_columns_and_cards_render(self, client: NextClient, board: Board) -> None:
         body = _board_html(client, board)
         assert "Backlog" in body
         assert "In Progress" in body
@@ -131,9 +120,7 @@ class TestBoardView:
         assert re.search(r'<script type="module"', body)
 
     def test_inherit_context_visible_in_settings(
-        self,
-        client: NextClient,
-        board: Board,
+        self, client: NextClient, board: Board
     ) -> None:
         body = _settings_html(client, board)
         assert board.title in body
@@ -148,11 +135,7 @@ class TestSettings:
         assert "Add column" in body
         assert "Archive" in body
 
-    def test_rename_form_post_redirects(
-        self,
-        client: NextClient,
-        board: Board,
-    ) -> None:
+    def test_rename_form_post_redirects(self, client: NextClient, board: Board) -> None:
         response = client.post_action(
             "rename_board_form",
             {"title": "New title"},
@@ -162,11 +145,7 @@ class TestSettings:
         board.refresh_from_db()
         assert board.title == "New title"
 
-    def test_archive_form_toggles(
-        self,
-        client: NextClient,
-        board: Board,
-    ) -> None:
+    def test_archive_form_toggles(self, client: NextClient, board: Board) -> None:
         response = client.post_action(
             "archive_board_form",
             {"archived": "1"},
@@ -177,15 +156,12 @@ class TestSettings:
         assert board.archived is True
 
     def test_archive_unset_redirects_back_to_settings(
-        self,
-        client: NextClient,
-        board: Board,
+        self, client: NextClient, board: Board
     ) -> None:
         board.archived = True
         board.save(update_fields=["archived"])
         response = client.post_action(
-            "archive_board_form",
-            origin=f"/board/{board.pk}/settings/",
+            "archive_board_form", origin=f"/board/{board.pk}/settings/"
         )
         assert response.status_code == 302
         assert response["Location"] == f"/board/{board.pk}/settings/"
@@ -193,14 +169,11 @@ class TestSettings:
         assert board.archived is False
 
     def test_invalid_then_fixed_resubmit_renames_in_place(
-        self,
-        client: NextClient,
-        board: Board,
+        self, client: NextClient, board: Board
     ) -> None:
         rename = _rename_form_block(_settings_html(client, board))
         invalid = client.post(
-            _form_action_url(rename),
-            {**_hidden_fields(rename), "title": ""},
+            _form_action_url(rename), {**_hidden_fields(rename), "title": ""}
         )
         assert invalid.status_code == 200
         rerendered = _rename_form_block(invalid.content.decode())
@@ -208,8 +181,7 @@ class TestSettings:
         assert refields["_next_form_origin"] == f"/board/{board.pk}/settings/"
         before = Board.objects.count()
         fixed = client.post(
-            _form_action_url(rerendered),
-            {**refields, "title": "Fixed title"},
+            _form_action_url(rerendered), {**refields, "title": "Fixed title"}
         )
         assert fixed.status_code == 302
         assert fixed["Location"] == f"/board/{board.pk}/settings/"
@@ -217,11 +189,7 @@ class TestSettings:
         board.refresh_from_db()
         assert board.title == "Fixed title"
 
-    def test_add_column_form_post(
-        self,
-        client: NextClient,
-        board: Board,
-    ) -> None:
+    def test_add_column_form_post(self, client: NextClient, board: Board) -> None:
         before = board.columns.count()
         response = client.post_action(
             "create_column_form",
@@ -239,40 +207,26 @@ class TestMoveCard:
     """The move_card form action moves cards between columns."""
 
     def test_post_moves_card_between_columns(
-        self,
-        client: NextClient,
-        board: Board,
+        self, client: NextClient, board: Board
     ) -> None:
         backlog = board.columns.get(title="Backlog")
         done = board.columns.get(title="Done")
         card = backlog.cards.first()
         response = client.post_action(
             "move_card_form",
-            {
-                "card_id": card.pk,
-                "target_column_id": done.pk,
-                "target_position": "0",
-            },
+            {"card_id": card.pk, "target_column_id": done.pk, "target_position": "0"},
         )
         assert response.status_code == 302
         card.refresh_from_db()
         assert card.column_id == done.pk
 
-    def test_post_normalises_positions(
-        self,
-        client: NextClient,
-        board: Board,
-    ) -> None:
+    def test_post_normalises_positions(self, client: NextClient, board: Board) -> None:
         backlog = board.columns.get(title="Backlog")
         done = board.columns.get(title="Done")
         card = backlog.cards.first()
         client.post_action(
             "move_card_form",
-            {
-                "card_id": card.pk,
-                "target_column_id": done.pk,
-                "target_position": "0",
-            },
+            {"card_id": card.pk, "target_column_id": done.pk, "target_position": "0"},
         )
         positions = list(
             done.cards.order_by("position").values_list("position", flat=True)
@@ -280,9 +234,7 @@ class TestMoveCard:
         assert positions == list(range(len(positions)))
 
     def test_cross_board_target_rejected(
-        self,
-        client: NextClient,
-        board: Board,
+        self, client: NextClient, board: Board
     ) -> None:
         other_board = Board.objects.create(title="Other", slug="other")
         other_col = Column.objects.create(board=other_board, title="X", position=0)
@@ -299,21 +251,13 @@ class TestMoveCard:
         card.refresh_from_db()
         assert card.column.board_id == board.pk
 
-    def test_negative_position_rejected(
-        self,
-        client: NextClient,
-        board: Board,
-    ) -> None:
+    def test_negative_position_rejected(self, client: NextClient, board: Board) -> None:
         backlog = board.columns.get(title="Backlog")
         done = board.columns.get(title="Done")
         card = backlog.cards.first()
         response = client.post_action(
             "move_card_form",
-            {
-                "card_id": card.pk,
-                "target_column_id": done.pk,
-                "target_position": "-1",
-            },
+            {"card_id": card.pk, "target_column_id": done.pk, "target_position": "-1"},
         )
         assert response.status_code == 400
 
@@ -322,20 +266,14 @@ class TestPreviewComponent:
     """The preview composite renders after a successful move."""
 
     def test_preview_appears_with_moved_query(
-        self,
-        client: NextClient,
-        board: Board,
+        self, client: NextClient, board: Board
     ) -> None:
         backlog = board.columns.get(title="Backlog")
         done = board.columns.get(title="Done")
         card = backlog.cards.first()
         client.post_action(
             "move_card_form",
-            {
-                "card_id": card.pk,
-                "target_column_id": done.pk,
-                "target_position": "0",
-            },
+            {"card_id": card.pk, "target_column_id": done.pk, "target_position": "0"},
         )
         response = client.get(f"/board/{board.pk}/?moved={card.pk}")
         body = response.content.decode()
@@ -343,17 +281,13 @@ class TestPreviewComponent:
         assert f'data-kanban-preview="{card.pk}"' in body
 
     def test_preview_hidden_without_moved_query(
-        self,
-        client: NextClient,
-        board: Board,
+        self, client: NextClient, board: Board
     ) -> None:
         body = _board_html(client, board)
         assert "Move complete" not in body
 
     def test_preview_skips_unknown_card_id(
-        self,
-        client: NextClient,
-        board: Board,
+        self, client: NextClient, board: Board
     ) -> None:
         response = client.get(f"/board/{board.pk}/?moved=99999")
         body = response.content.decode()
@@ -363,16 +297,11 @@ class TestPreviewComponent:
 class TestCreateCard:
     """The create_card form action appends cards and respects WIP limits."""
 
-    def test_post_appends_card_at_tail(
-        self,
-        client: NextClient,
-        board: Board,
-    ) -> None:
+    def test_post_appends_card_at_tail(self, client: NextClient, board: Board) -> None:
         backlog = board.columns.get(title="Backlog")
         before = backlog.cards.count()
         response = client.post_action(
-            "create_card_form",
-            {"column_id": backlog.pk, "title": "Extra"},
+            "create_card_form", {"column_id": backlog.pk, "title": "Extra"}
         )
         assert response.status_code == 302
         backlog.refresh_from_db()
@@ -381,30 +310,22 @@ class TestCreateCard:
         assert new.title == "Extra"
         assert new.position == before
 
-    def test_wip_limit_blocks_creation(
-        self,
-        client: NextClient,
-        board: Board,
-    ) -> None:
+    def test_wip_limit_blocks_creation(self, client: NextClient, board: Board) -> None:
         progress = board.columns.get(title="In Progress")
         Card.objects.create(column=progress, title="Second", position=1)
         response = client.post_action(
-            "create_card_form",
-            {"column_id": progress.pk, "title": "Over the limit"},
+            "create_card_form", {"column_id": progress.pk, "title": "Over the limit"}
         )
         assert response.status_code == 400
         assert progress.cards.filter(title="Over the limit").count() == 0
 
     def test_wip_limit_none_allows_unlimited(
-        self,
-        client: NextClient,
-        board: Board,
+        self, client: NextClient, board: Board
     ) -> None:
         backlog = board.columns.get(title="Backlog")
         for index in range(5):
             response = client.post_action(
-                "create_card_form",
-                {"column_id": backlog.pk, "title": f"Card {index}"},
+                "create_card_form", {"column_id": backlog.pk, "title": f"Card {index}"}
             )
             assert response.status_code == 302
         assert backlog.cards.count() >= 5
@@ -414,20 +335,13 @@ class TestJsxBackend:
     """JSX files discovered alongside templates are injected as ES module scripts."""
 
     def test_page_jsx_rendered_as_module(
-        self,
-        client: NextClient,
-        board: Board,
+        self, client: NextClient, board: Board
     ) -> None:
         body = _board_html(client, board)
-        assert re.search(
-            r'<script type="module" src="[^"]*page\.jsx">',
-            body,
-        )
+        assert re.search(r'<script type="module" src="[^"]*page\.jsx">', body)
 
     def test_no_text_babel_scripts_present(
-        self,
-        client: NextClient,
-        board: Board,
+        self, client: NextClient, board: Board
     ) -> None:
         body = _board_html(client, board)
         assert 'type="text/babel"' not in body
@@ -437,9 +351,7 @@ class TestJsContext:
     """`Next._init({...})` carries deep-merged board state."""
 
     def test_next_init_call_contains_board(
-        self,
-        client: NextClient,
-        board: Board,
+        self, client: NextClient, board: Board
     ) -> None:
         body = _board_html(client, board)
         payload = _next_init_payload(body)
@@ -447,11 +359,7 @@ class TestJsContext:
         assert payload["board"]["title"] == board.title
         assert "csrf" in payload["board"]
 
-    def test_deep_merge_columns_present(
-        self,
-        client: NextClient,
-        board: Board,
-    ) -> None:
+    def test_deep_merge_columns_present(self, client: NextClient, board: Board) -> None:
         body = _board_html(client, board)
         payload = _next_init_payload(body)
         cols = payload["board"]["columns"]
@@ -472,18 +380,12 @@ class TestInheritedHeaderCount:
         assert int(match.group(1)) >= 1
 
     def test_board_detail_inherits_count(
-        self,
-        client: NextClient,
-        board: Board,
+        self, client: NextClient, board: Board
     ) -> None:
         body = _board_html(client, board)
         assert "active boards" in body
 
-    def test_settings_inherits_count(
-        self,
-        client: NextClient,
-        board: Board,
-    ) -> None:
+    def test_settings_inherits_count(self, client: NextClient, board: Board) -> None:
         body = _settings_html(client, board)
         assert "active boards" in body
 
@@ -492,9 +394,7 @@ class TestCdnCachePolicy:
     """Local script tags do not carry CDN cache-control attributes."""
 
     def test_local_script_has_no_cache_attrs(
-        self,
-        client: NextClient,
-        board: Board,
+        self, client: NextClient, board: Board
     ) -> None:
         del board
         response = client.get("/")
@@ -510,9 +410,7 @@ class TestViteDevAssetsGuard:
     """`@vite/client` is injected only on pages that ship jsx scripts."""
 
     def test_index_page_skips_vite_client(
-        self,
-        client: NextClient,
-        board: Board,
+        self, client: NextClient, board: Board
     ) -> None:
         del board
         response = client.get("/")
@@ -521,14 +419,11 @@ class TestViteDevAssetsGuard:
         assert 'src="data:text/javascript' not in body
 
     def test_board_page_includes_vite_client_and_preamble(
-        self,
-        client: NextClient,
-        board: Board,
+        self, client: NextClient, board: Board
     ) -> None:
         body = _board_html(client, board)
         preamble_match = re.search(
-            r'<script type="module" src="data:text/javascript;base64,([^"]+)"',
-            body,
+            r'<script type="module" src="data:text/javascript;base64,([^"]+)"', body
         )
         assert preamble_match is not None, "React Refresh preamble not injected"
         decoded = base64.b64decode(preamble_match.group(1)).decode()
@@ -544,11 +439,7 @@ class TestViteDevAssetsGuard:
 class TestPayloadEnrichment:
     """Board JS payload carries excerpt and wip_limit for the React layer."""
 
-    def test_payload_includes_wip_limit(
-        self,
-        client: NextClient,
-        board: Board,
-    ) -> None:
+    def test_payload_includes_wip_limit(self, client: NextClient, board: Board) -> None:
         body = _board_html(client, board)
         payload = _next_init_payload(body)
         in_progress = next(
@@ -557,9 +448,7 @@ class TestPayloadEnrichment:
         assert in_progress["wip_limit"] == 2
 
     def test_payload_includes_card_excerpt(
-        self,
-        client: NextClient,
-        board: Board,
+        self, client: NextClient, board: Board
     ) -> None:
         backlog = board.columns.get(title="Backlog")
         long_card = backlog.cards.first()

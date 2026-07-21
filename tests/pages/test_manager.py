@@ -91,10 +91,7 @@ class TestPage:
         assert entry.serialize is False
 
     def test_context_decorator_with_inherit_context(
-        self,
-        page_instance,
-        context_temp_file,
-        mock_frame,
+        self, page_instance, context_temp_file, mock_frame
     ) -> None:
         """Test context decorator with inherit_context=True."""
         mock_frame.return_value.f_back.f_globals = {"__file__": str(context_temp_file)}
@@ -117,14 +114,11 @@ class TestPage:
         assert entry.serialize is False
 
     def test_context_decorator_without_key_inherit_context(
-        self,
-        page_instance,
-        context_temp_file,
-        mock_frame,
+        self, page_instance, context_temp_file, mock_frame
     ) -> None:
         """Test context decorator without key but with inherit_context=True."""
         mock_frame.return_value.f_back.f_back.f_globals = {
-            "__file__": str(context_temp_file),
+            "__file__": str(context_temp_file)
         }
 
         @page_instance.context(inherit_context=True)
@@ -180,7 +174,7 @@ class TestPage:
             (
                 "template_override",
                 "Hello {{ name }}! Count: {{ count }}",
-                {None: lambda *_args, **_kwargs: {"name": "ContextName", "count": 5}},
+                {None: lambda *args, **kwargs: {"name": "ContextName", "count": 5}},
                 {"name": "OverrideName", "count": 20},
                 "Hello ContextName! Count: 5",
             ),
@@ -215,9 +209,7 @@ class TestPage:
         if context_setup:
             for key, func in context_setup.items():
                 page_instance._context_manager.register_context(
-                    test_file_path,
-                    key,
-                    func,
+                    test_file_path, key, func
                 )
 
         # render
@@ -232,9 +224,7 @@ class TestPage:
         template1 = "Page 1: {{ title }}"
         page_instance.register_template(file1, template1)
         page_instance._context_manager.register_context(
-            file1,
-            "title",
-            lambda: "First Page",
+            file1, "title", lambda: "First Page"
         )
 
         # second file
@@ -242,9 +232,7 @@ class TestPage:
         template2 = "Page 2: {{ title }}"
         page_instance.register_template(file2, template2)
         page_instance._context_manager.register_context(
-            file2,
-            "title",
-            lambda: "Second Page",
+            file2, "title", lambda: "Second Page"
         )
 
         # render both
@@ -261,7 +249,7 @@ class TestPage:
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
         layout_file.write_text(
-            "<html>{% block template %}{% endblock template %}</html>",
+            "<html>{% block template %}{% endblock template %}</html>"
         )
 
         page_file = layout_dir / "page.py"
@@ -281,10 +269,7 @@ class TestPage:
             return "inherited_value"
 
         page_instance._context_manager.register_context(
-            page_file,
-            "inherited_var",
-            layout_func,
-            inherit_context=True,
+            page_file, "inherited_var", layout_func, inherit_context=True
         )
 
         # render child page
@@ -301,7 +286,7 @@ class TestPage:
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
         layout_file.write_text(
-            "<html>{% block template %}{% endblock template %}</html>",
+            "<html>{% block template %}{% endblock template %}</html>"
         )
 
         page_file = layout_dir / "page.py"
@@ -321,10 +306,7 @@ class TestPage:
             return "layout_value"
 
         page_instance._context_manager.register_context(
-            page_file,
-            "var",
-            layout_func,
-            inherit_context=True,
+            page_file, "var", layout_func, inherit_context=True
         )
 
         # register context in child page.py (should override inherited)
@@ -332,10 +314,7 @@ class TestPage:
             return "child_value"
 
         page_instance._context_manager.register_context(
-            child_page_file,
-            "var",
-            child_func,
-            inherit_context=False,
+            child_page_file, "var", child_func, inherit_context=False
         )
 
         # render child page
@@ -350,9 +329,7 @@ class TestPage:
         """Test that context registry uses defaultdict-like behavior."""
         # register context function - should create the file entry
         page_instance._context_manager.register_context(
-            test_file_path,
-            "test_key",
-            lambda: "test_value",
+            test_file_path, "test_key", lambda: "test_value"
         )
 
         assert test_file_path in page_instance._context_manager._context_registry
@@ -671,17 +648,13 @@ class TestGlobalPageInstance:
             (
                 "no_file",
                 lambda mock_frame: setattr(
-                    mock_frame.return_value.f_back,
-                    "f_globals",
-                    {"__file__": None},
+                    mock_frame.return_value.f_back, "f_globals", {"__file__": None}
                 ),
             ),
             (
                 "exhausted_frames",
                 lambda mock_frame: setattr(
-                    mock_frame.return_value.f_back,
-                    "f_back",
-                    None,
+                    mock_frame.return_value.f_back, "f_back", None
                 ),
             ),
         ],
@@ -695,8 +668,7 @@ class TestGlobalPageInstance:
             frame_setup(mock_frame)
 
             with pytest.raises(
-                RuntimeError,
-                match="Could not determine caller file path",
+                RuntimeError, match="Could not determine caller file path"
             ):
                 page_instance._get_caller_path(1)
 
@@ -717,7 +689,7 @@ class TestLayoutManager:
         # create layout structure
         layout_file = tmp_path / "layout.djx"
         layout_file.write_text(
-            "<html><body>{% block template %}{% endblock template %}</body></html>",
+            "<html><body>{% block template %}{% endblock template %}</body></html>"
         )
 
         sub_dir = tmp_path / "sub"
@@ -751,7 +723,7 @@ class TestLayoutManager:
         # create layout structure
         layout_file = tmp_path / "layout.djx"
         layout_file.write_text(
-            "<html><body>{% block template %}{% endblock template %}</body></html>",
+            "<html><body>{% block template %}{% endblock template %}</body></html>"
         )
 
         sub_dir = tmp_path / "sub"
@@ -855,7 +827,7 @@ class TestLayoutIntegration:
         """Page.render wraps the sibling template.djx body through ancestor layouts."""
         layout_file = tmp_path / "layout.djx"
         layout_file.write_text(
-            "<html><body>{% block template %}{% endblock template %}</body></html>",
+            "<html><body>{% block template %}{% endblock template %}</body></html>"
         )
 
         sub_dir = tmp_path / "sub"
@@ -952,7 +924,7 @@ class TestUnifiedViewBodyResolution:
     ) -> None:
         """`template = "..."` flows through an ancestor `layout.djx`."""
         (tmp_path / "layout.djx").write_text(
-            "<html><body>{% block template %}{% endblock template %}</body></html>",
+            "<html><body>{% block template %}{% endblock template %}</body></html>"
         )
         page_dir = tmp_path / "sub"
         page_dir.mkdir()
@@ -972,7 +944,7 @@ class TestUnifiedViewBodyResolution:
     ) -> None:
         """`render()` returning a string flows through the ancestor layout."""
         (tmp_path / "layout.djx").write_text(
-            "<html><body>{% block template %}{% endblock template %}</body></html>",
+            "<html><body>{% block template %}{% endblock template %}</body></html>"
         )
         page_dir = tmp_path / "sub"
         page_dir.mkdir()
@@ -993,7 +965,7 @@ class TestUnifiedViewBodyResolution:
     ) -> None:
         """`render()` returning HttpResponse is returned verbatim, no layout."""
         (tmp_path / "layout.djx").write_text(
-            "<html><body>{% block template %}{% endblock template %}</body></html>",
+            "<html><body>{% block template %}{% endblock template %}</body></html>"
         )
         page_dir = tmp_path / "sub"
         page_dir.mkdir()
@@ -1016,7 +988,7 @@ class TestUnifiedViewBodyResolution:
     ) -> None:
         """`HttpResponseRedirect` (an HttpResponse subclass) is returned verbatim."""
         (tmp_path / "layout.djx").write_text(
-            "<html>{% block template %}{% endblock template %}</html>",
+            "<html>{% block template %}{% endblock template %}</html>"
         )
         page_dir = tmp_path / "sub"
         page_dir.mkdir()
@@ -1038,7 +1010,7 @@ class TestUnifiedViewBodyResolution:
     ) -> None:
         """`JsonResponse` (an HttpResponse subclass) is returned verbatim."""
         (tmp_path / "layout.djx").write_text(
-            "<html>{% block template %}{% endblock template %}</html>",
+            "<html>{% block template %}{% endblock template %}</html>"
         )
         page_dir = tmp_path / "sub"
         page_dir.mkdir()
@@ -1057,12 +1029,7 @@ class TestUnifiedViewBodyResolution:
 
     @pytest.mark.parametrize(
         "return_value",
-        [
-            "None",
-            "{'x': 1}",
-            "[1, 2]",
-            "42",
-        ],
+        ["None", "{'x': 1}", "[1, 2]", "42"],
         ids=["None", "dict", "list", "int"],
     )
     def test_render_returning_non_str_non_response_raises(
@@ -1127,7 +1094,7 @@ class TestUnifiedViewBodyResolution:
     ) -> None:
         """A page with no body source still renders the ancestor layout's shell."""
         (tmp_path / "layout.djx").write_text(
-            "<html><body>{% block template %}{% endblock template %}</body></html>",
+            "<html><body>{% block template %}{% endblock template %}</body></html>"
         )
         page_dir = tmp_path / "sub"
         page_dir.mkdir()
@@ -1160,7 +1127,7 @@ class TestLoadStaticBodyEdgeCases:
     ) -> None:
         """`has_template` short-circuits to True when an ancestor layout applies."""
         (tmp_path / "layout.djx").write_text(
-            "<main>{% block template %}{% endblock template %}</main>",
+            "<main>{% block template %}{% endblock template %}</main>"
         )
         sub = tmp_path / "sub"
         sub.mkdir()
@@ -1182,7 +1149,7 @@ class TestLayoutComposeBody:
     def test_ancestor_layout_wraps_body_in_block(self, tmp_path) -> None:
         """Without a sibling layout the body is wrapped in a `{% block template %}`."""
         (tmp_path / "layout.djx").write_text(
-            "<main>{% block template %}{% endblock template %}</main>",
+            "<main>{% block template %}{% endblock template %}</main>"
         )
         sub = tmp_path / "sub"
         sub.mkdir()
@@ -1197,7 +1164,7 @@ class TestLayoutComposeBody:
     def test_sibling_layout_substitutes_body_directly(self, tmp_path) -> None:
         """With a sibling layout the body replaces the placeholder verbatim."""
         (tmp_path / "layout.djx").write_text(
-            "<section>{% block template %}{% endblock template %}</section>",
+            "<section>{% block template %}{% endblock template %}</section>"
         )
         page_file = tmp_path / "page.py"
         loader = LayoutTemplateLoader()
@@ -1242,7 +1209,7 @@ class TestCustomTemplateLoaderIntegration:
     ) -> None:
         """A custom loader for `template.md` feeds `_load_static_body`."""
         (tmp_path / "layout.djx").write_text(
-            "<html>{% block template %}{% endblock template %}</html>",
+            "<html>{% block template %}{% endblock template %}</html>"
         )
         page_dir = tmp_path / "post"
         page_dir.mkdir()

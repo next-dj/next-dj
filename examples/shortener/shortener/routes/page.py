@@ -28,9 +28,7 @@ class CreateLinkForm(Form):
         max_length=2000,
         assume_scheme="https",
         widget=ComponentWidget(
-            "input",
-            type="url",
-            placeholder="https://example.com/very/long/path",
+            "input", type="url", placeholder="https://example.com/very/long/path"
         ),
     )
 
@@ -85,11 +83,7 @@ def _render_row(link: Link, request: HttpRequest) -> str:
     """
     return _ROW_TEMPLATE.render(
         Context(
-            {
-                "link": link,
-                "request": request,
-                "current_template_path": _TEMPLATE_PATH,
-            }
+            {"link": link, "request": request, "current_template_path": _TEMPLATE_PATH}
         )
     )
 

@@ -203,10 +203,7 @@ class TestSerializerOverride:
         encoded = WrappedJsContextSerializer().dumps(
             _PydanticPayload(name="y", count=7)
         )
-        assert json.loads(encoded) == {
-            "v": 1,
-            "data": {"name": "y", "count": 7},
-        }
+        assert json.loads(encoded) == {"v": 1, "data": {"name": "y", "count": 7}}
 
 
 class TestInstrumentedDedup:
@@ -278,13 +275,7 @@ class TestReceiverDirectInvocation:
                 "/tmp/page.py",
                 1,
             ),
-            (
-                on_route_registered,
-                {"url_path": "/stats/"},
-                "urls.route",
-                "/stats/",
-                1,
-            ),
+            (on_route_registered, {"url_path": "/stats/"}, "urls.route", "/stats/", 1),
             (on_router_reloaded, {}, "urls", "router_reloaded", 1),
             (on_component_backend_loaded, {}, "components", "backend_loaded", 1),
             (
@@ -315,12 +306,7 @@ class TestReceiverDirectInvocation:
         ],
     )
     def test_receiver_increments_expected_counter(
-        self,
-        receiver,
-        kwargs,
-        expected_kind,
-        expected_key,
-        expected_value,
+        self, receiver, kwargs, expected_kind, expected_key, expected_value
     ) -> None:
         receiver(**kwargs)
         assert metrics.read_kind(expected_kind).get(expected_key) == expected_value

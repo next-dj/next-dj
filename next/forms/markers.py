@@ -3,11 +3,7 @@
 import inspect
 from typing import get_args, get_origin, override
 
-from next.deps import (
-    DDependencyBase,
-    RegisteredParameterProvider,
-    ResolutionContext,
-)
+from next.deps import DDependencyBase, RegisteredParameterProvider, ResolutionContext
 
 
 class DForm[FormT](DDependencyBase[FormT]):

@@ -52,9 +52,7 @@ class TestRenderComponentByName:
         components_manager._backends.append(backend)
         try:
             html = render_component_by_name(
-                "greeter",
-                at=tmp_path / "page.djx",
-                context={"name": "World"},
+                "greeter", at=tmp_path / "page.djx", context={"name": "World"}
             )
         finally:
             components_manager._backends.clear()

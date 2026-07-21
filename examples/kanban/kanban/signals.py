@@ -12,7 +12,7 @@ def _has_module_assets(collector: object) -> bool:
     return any(asset.kind == "jsx" for asset in scripts)
 
 
-def inject_vite_dev_assets(sender: object, **_kwargs: object) -> None:
+def inject_vite_dev_assets(sender: object, **kwargs) -> None:
     """Prepend the React Refresh preamble and the Vite HMR client.
 
     Both assets are added as URL-form module scripts because the
@@ -41,12 +41,10 @@ def inject_vite_dev_assets(sender: object, **_kwargs: object) -> None:
     # slot, so the resulting bucket order is preamble, then @vite/client,
     # then the regular module scripts.
     sender.add(  # type: ignore[attr-defined]
-        StaticAsset(url=preamble_url, kind="module"),
-        prepend=True,
+        StaticAsset(url=preamble_url, kind="module"), prepend=True
     )
     sender.add(  # type: ignore[attr-defined]
-        StaticAsset(url=f"{origin}/@vite/client", kind="module"),
-        prepend=True,
+        StaticAsset(url=f"{origin}/@vite/client", kind="module"), prepend=True
     )
 
 

@@ -15,11 +15,7 @@ class DTenant(DDependencyBase["Tenant"]):
 class TenantProvider(RegisteredParameterProvider):
     """Resolve `DTenant` parameters from `request.tenant`."""
 
-    def can_handle(
-        self,
-        param: inspect.Parameter,
-        context: ResolutionContext,
-    ) -> bool:
+    def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:
         """Match the bare `DTenant` annotation when a request is attached."""
         if param.annotation is not DTenant:
             return False
@@ -28,10 +24,6 @@ class TenantProvider(RegisteredParameterProvider):
             return False
         return get_active_tenant(request) is not None
 
-    def resolve(
-        self,
-        _param: inspect.Parameter,
-        context: ResolutionContext,
-    ) -> Tenant:
+    def resolve(self, _param: inspect.Parameter, context: ResolutionContext) -> Tenant:
         """Return the `Tenant` previously stashed by `TenantMiddleware`."""
         return get_active_tenant(context.request)

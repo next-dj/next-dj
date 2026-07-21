@@ -13,11 +13,7 @@ if TYPE_CHECKING:
 
 
 _RESERVED_FORM_KEYS = frozenset(
-    {
-        "csrfmiddlewaretoken",
-        "_next_form_origin",
-        "policy_acknowledged",
-    },
+    {"csrfmiddlewaretoken", "_next_form_origin", "policy_acknowledged"}
 )
 
 

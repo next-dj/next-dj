@@ -37,12 +37,7 @@ class TestPageContextRegistry:
         ids=["keyed", "dict_merge"],
     )
     def test_register_and_collect_context(
-        self,
-        context_manager,
-        test_file_path,
-        key,
-        func_return,
-        expected_result,
+        self, context_manager, test_file_path, key, func_return, expected_result
     ) -> None:
         """Test registering and collecting context with different key types."""
         context_manager.register_context(test_file_path, key, func_return)
@@ -50,11 +45,7 @@ class TestPageContextRegistry:
         assert test_file_path in context_manager._context_registry
         assert key in context_manager._context_registry[test_file_path]
         assert context_manager._context_registry[test_file_path][key] == (
-            PageContextEntry(
-                func=func_return,
-                inherit_context=False,
-                serialize=False,
-            )
+            PageContextEntry(func=func_return, inherit_context=False, serialize=False)
         )
 
         result = context_manager.collect_context(test_file_path)
@@ -91,9 +82,7 @@ class TestPageContextRegistry:
             test_file_path, "custom_context_var", lambda: "12345"
         )
 
-        def landing(
-            custom_context_var: str = Context(),
-        ) -> dict[str, str]:
+        def landing(custom_context_var: str = Context()) -> dict[str, str]:
             return {"title": "Landing", "custom_context_var": custom_context_var}
 
         context_manager.register_context(test_file_path, "landing", landing)
@@ -134,9 +123,7 @@ class TestPageContextRegistry:
         assert result.js_context == {}
 
     def test_register_context_with_inherit_context(
-        self,
-        context_manager,
-        test_file_path,
+        self, context_manager, test_file_path
     ) -> None:
         """Test registering context with inherit_context=True."""
 
@@ -144,10 +131,7 @@ class TestPageContextRegistry:
             return "inherited_value"
 
         context_manager.register_context(
-            test_file_path,
-            "inherited_key",
-            test_func,
-            inherit_context=True,
+            test_file_path, "inherited_key", test_func, inherit_context=True
         )
 
         assert test_file_path in context_manager._context_registry
@@ -163,7 +147,7 @@ class TestPageContextRegistry:
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
         layout_file.write_text(
-            "<html>{% block template %}{% endblock template %}</html>",
+            "<html>{% block template %}{% endblock template %}</html>"
         )
 
         page_file = layout_dir / "page.py"
@@ -177,10 +161,7 @@ class TestPageContextRegistry:
             return "layout_value"
 
         context_manager.register_context(
-            page_file,
-            "layout_var",
-            layout_func,
-            inherit_context=True,
+            page_file, "layout_var", layout_func, inherit_context=True
         )
 
         result = context_manager.collect_context(child_page_file)
@@ -214,7 +195,7 @@ class TestPageContextRegistry:
         root_dir.mkdir()
         root_layout = root_dir / "layout.djx"
         root_layout.write_text(
-            "<html>{% block template %}{% endblock template %}</html>",
+            "<html>{% block template %}{% endblock template %}</html>"
         )
         root_page = root_dir / "page.py"
         root_page.write_text("")
@@ -237,16 +218,10 @@ class TestPageContextRegistry:
             return "sub_value"
 
         context_manager.register_context(
-            root_page,
-            "root_var",
-            root_func,
-            inherit_context=True,
+            root_page, "root_var", root_func, inherit_context=True
         )
         context_manager.register_context(
-            sub_page,
-            "sub_var",
-            sub_func,
-            inherit_context=True,
+            sub_page, "sub_var", sub_func, inherit_context=True
         )
 
         result = context_manager.collect_context(child_page)
@@ -272,7 +247,7 @@ class TestPageContextRegistry:
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
         layout_file.write_text(
-            "<html>{% block template %}{% endblock template %}</html>",
+            "<html>{% block template %}{% endblock template %}</html>"
         )
 
         child_dir = layout_dir / "child"
@@ -305,10 +280,7 @@ class TestPageContextRegistry:
             return "section_value"
 
         context_manager.register_context(
-            section_page,
-            "section_var",
-            inheritable,
-            inherit_context=True,
+            section_page, "section_var", inheritable, inherit_context=True
         )
 
         result = context_manager.collect_context(child_page_file)
@@ -324,7 +296,7 @@ class TestPageContextRegistry:
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
         layout_file.write_text(
-            "<html>{% block template %}{% endblock template %}</html>",
+            "<html>{% block template %}{% endblock template %}</html>"
         )
 
         page_file = layout_dir / "page.py"
@@ -338,10 +310,7 @@ class TestPageContextRegistry:
             return "layout_value"
 
         context_manager.register_context(
-            page_file,
-            "layout_var",
-            layout_func,
-            inherit_context=False,
+            page_file, "layout_var", layout_func, inherit_context=False
         )
 
         result = context_manager.collect_context(child_page_file)
@@ -356,7 +325,7 @@ class TestPageContextRegistry:
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
         layout_file.write_text(
-            "<html>{% block template %}{% endblock template %}</html>",
+            "<html>{% block template %}{% endblock template %}</html>"
         )
 
         page_file = layout_dir / "page.py"
@@ -370,10 +339,7 @@ class TestPageContextRegistry:
             return {"inherited_key1": "value1", "inherited_key2": "value2"}
 
         context_manager.register_context(
-            page_file,
-            None,
-            layout_dict_func,
-            inherit_context=True,
+            page_file, None, layout_dict_func, inherit_context=True
         )
 
         result = context_manager.collect_context(child_page_file)
@@ -382,6 +348,81 @@ class TestPageContextRegistry:
         assert "inherited_key2" in result.context_data
         assert result.context_data["inherited_key1"] == "value1"
         assert result.context_data["inherited_key2"] == "value2"
+
+
+class TestKeylessConflicts:
+    """`_keyless_conflicts` records overwritten keyless callables for next.E018."""
+
+    def test_single_keyless_records_no_conflict(
+        self, context_manager, test_file_path
+    ) -> None:
+        def only() -> dict:
+            return {}
+
+        context_manager.register_context(test_file_path, None, only)
+        assert context_manager._keyless_conflicts == {}
+
+    def test_keyed_alongside_keyless_records_no_conflict(
+        self, context_manager, test_file_path
+    ) -> None:
+        def keyed() -> str:
+            return "x"
+
+        def keyless() -> dict:
+            return {}
+
+        context_manager.register_context(test_file_path, "k", keyed)
+        context_manager.register_context(test_file_path, None, keyless)
+        assert context_manager._keyless_conflicts == {}
+
+    def test_multiple_keyless_records_every_name_in_order(
+        self, context_manager, test_file_path
+    ) -> None:
+        def first() -> dict:
+            return {}
+
+        def second() -> dict:
+            return {}
+
+        def third() -> dict:
+            return {}
+
+        for func in (first, second, third):
+            context_manager.register_context(test_file_path, None, func)
+
+        assert context_manager._keyless_conflicts[test_file_path] == [
+            "first",
+            "second",
+            "third",
+        ]
+
+    def test_reregistering_same_keyless_name_is_no_conflict(
+        self, context_manager, test_file_path
+    ) -> None:
+        def get_context_data() -> dict:
+            return {}
+
+        context_manager.register_context(test_file_path, None, get_context_data)
+        context_manager.register_context(test_file_path, None, get_context_data)
+
+        assert context_manager._keyless_conflicts == {}
+
+    def test_reset_clears_keyless_conflicts(
+        self, context_manager, test_file_path
+    ) -> None:
+        def first() -> dict:
+            return {}
+
+        def second() -> dict:
+            return {}
+
+        context_manager.register_context(test_file_path, None, first)
+        context_manager.register_context(test_file_path, None, second)
+        assert context_manager._keyless_conflicts
+
+        context_manager.reset()
+        assert context_manager._keyless_conflicts == {}
+        assert context_manager._context_registry == {}
 
 
 class TestContextMarker:
@@ -461,10 +502,7 @@ class TestPageContextRegistrySerialize:
 
     @pytest.mark.parametrize("serialize", [True, False], ids=["serialized", "plain"])
     def test_keyed_serialize_flag_controls_js_context(
-        self,
-        registry,
-        tmp_path,
-        serialize,
+        self, registry, tmp_path, serialize
     ) -> None:
         """A keyed context function with serialize controls js_context inclusion."""
         path = tmp_path / "page.py"
@@ -474,10 +512,7 @@ class TestPageContextRegistrySerialize:
 
     @pytest.mark.parametrize("serialize", [True, False], ids=["serialized", "plain"])
     def test_dict_merge_serialize_flag_controls_js_context(
-        self,
-        registry,
-        tmp_path,
-        serialize,
+        self, registry, tmp_path, serialize
     ) -> None:
         """An unkeyed context function with serialize controls js_context inclusion."""
         path = tmp_path / "page.py"
@@ -585,11 +620,7 @@ class TestPageContextRegistrySerializerOverride:
         path = tmp_path / "page.py"
         marker = self._MarkerSerializer()
         registry.register_context(
-            path,
-            None,
-            lambda: {"a": 1, "b": 2},
-            serialize=True,
-            serializer=marker,
+            path, None, lambda: {"a": 1, "b": 2}, serialize=True, serializer=marker
         )
         result = registry.collect_context(path)
         assert result.js_context_serializers == {"a": marker, "b": marker}

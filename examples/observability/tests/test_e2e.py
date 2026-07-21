@@ -43,12 +43,7 @@ GROUP_SAMPLES: dict[str, list] = {
         component_rendered,
     ],
     "forms": [action_registered, action_dispatched, form_validation_failed],
-    "static": [
-        asset_registered,
-        backend_loaded,
-        collector_finalized,
-        html_injected,
-    ],
+    "static": [asset_registered, backend_loaded, collector_finalized, html_injected],
     "server": [watch_specs_ready],
 }
 

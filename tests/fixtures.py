@@ -160,7 +160,6 @@ def checks_router_patch(request, tmp_path):
     """Indirect: ``request.param`` is ``list[tuple[str, Path]]`` routes for page checks mocks."""
     routes = request.param
     with patch_checks_router_manager(
-        pages_directory=tmp_path,
-        scan_routes=routes,
+        pages_directory=tmp_path, scan_routes=routes
     ) as ctx:
         yield ctx

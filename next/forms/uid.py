@@ -42,8 +42,7 @@ def validated_origin_path(raw: object) -> str | None:
 
 
 def redirect_to_origin(
-    request: HttpRequest,
-    fallback: str = "/",
+    request: HttpRequest, fallback: str = "/"
 ) -> HttpResponseRedirect:
     """Redirect back to the page that rendered the form."""
     origin: str | None = None

@@ -6,10 +6,18 @@ from unittest.mock import MagicMock, patch
 import pytest
 from django.test import override_settings
 
+from next.checks import reset_check_caches
 from next.components import ComponentInfo, FileComponentsBackend
 from next.forms.backends import FormActionBackend, RegistryFormActionBackend
 from next.partial import checks
 from next.partial.registry import patch_op_registry, register_patch_op
+
+
+@pytest.fixture(autouse=True)
+def _reset_check_caches():
+    reset_check_caches()
+    yield
+    reset_check_caches()
 
 
 @contextmanager
@@ -264,7 +272,6 @@ def _component(template_path: Path | None) -> Generator[None, None, None]:
         )
     backend._loaded = True
     manager = MagicMock()
-    manager._reload_config = lambda: None
     manager._backends = [backend]
 
     settings_ns = MagicMock()
@@ -273,7 +280,7 @@ def _component(template_path: Path | None) -> Generator[None, None, None]:
     ]
     with (
         patch("next.partial.checks.next_framework_settings", settings_ns),
-        patch("next.partial.checks.ComponentsManager", return_value=manager),
+        patch("next.partial.checks.get_components_manager", return_value=manager),
     ):
         yield
 
@@ -344,7 +351,7 @@ class _PartialUnawareBackend(RegistryFormActionBackend):
 
 
 @contextmanager
-def _form_backends(*backends: object, partial_active: bool) -> Iterator[None]:
+def _form_backends(*backends, partial_active: bool) -> Iterator[None]:
     """Point the W068 check at given form backends and partial-config state."""
     manager = MagicMock()
     manager.backends = tuple(backends)
@@ -509,9 +516,7 @@ class TestBackendNamesPathCheck:
         assert ids == [checks.E_BACKEND_WITHOUT_PATH]
 
     @pytest.mark.parametrize(
-        "config",
-        [[_BACKEND_DICT], "not-a-list"],
-        ids=["valid_entry", "non_sequence"],
+        "config", [[_BACKEND_DICT], "not-a-list"], ids=["valid_entry", "non_sequence"]
     )
     def test_valid_or_non_sequence_config_is_silent(self, config: object) -> None:
         with _partial_backends(config):
@@ -535,3 +540,71 @@ class TestChecksSilentOnValidComposite:
             assert checks.check_zone_not_in_if() == []
             assert checks.check_lazy_zone_has_placeholder() == []
             assert checks.check_with_directly_over_zone() == []
+
+
+_ZONE_CHECKS = (
+    checks.check_duplicate_zone_names,
+    checks.check_zone_name_is_slug,
+    checks.check_zone_not_in_loop,
+    checks.check_zone_not_in_if,
+    checks.check_repeated_form_has_key,
+    checks.check_lazy_zone_has_placeholder,
+    checks.check_with_directly_over_zone,
+)
+
+
+@contextmanager
+def _counting_collect() -> Iterator[list[int]]:
+    """Count calls to the composed-page collector, delegating to the real one."""
+    real = checks._collect_composed_pages
+    calls = [0]
+
+    def counting(manager: object) -> Iterator[tuple[Path, object]]:
+        calls[0] += 1
+        return real(manager)
+
+    with patch.object(checks, "_collect_composed_pages", side_effect=counting):
+        yield calls
+
+
+class TestComposedPagesMemo:
+    """The seven zone checks share one walk of the composed-page tree."""
+
+    def test_seven_checks_collect_pages_once(self, tmp_path: Path) -> None:
+        page_file = _page_dir(tmp_path, "shared")
+        body = '{% zone "z" %}<p>{{ a }}</p>{% endzone %}'
+        with _composed_pages((page_file, body)), _counting_collect() as calls:
+            for check in _ZONE_CHECKS:
+                check()
+        assert calls[0] == 1
+
+    def test_new_manager_invalidates_memo(self, tmp_path: Path) -> None:
+        first_page = _page_dir(tmp_path, "one")
+        with _composed_pages(
+            (first_page, '{% zone "solo" %}<p>{{ a }}</p>{% endzone %}')
+        ):
+            assert checks.check_duplicate_zone_names() == []
+        second_page = _page_dir(tmp_path, "two")
+        dup = '{% zone "x" %}a{% endzone %}{% zone "x" %}b{% endzone %}'
+        with _composed_pages((second_page, dup)):
+            ids = [m.id for m in checks.check_duplicate_zone_names()]
+        assert ids == [checks.E_DUPLICATE_ZONE]
+
+    def test_reset_hook_recollects_on_live_manager(self, tmp_path: Path) -> None:
+        page_file = _page_dir(tmp_path, "live")
+        body = '{% zone "z" %}<p>{{ a }}</p>{% endzone %}'
+        with _composed_pages((page_file, body)), _counting_collect() as calls:
+            checks.check_duplicate_zone_names()
+            checks.check_zone_name_is_slug()
+            assert calls[0] == 1
+            checks.reset_composed_pages_memo()
+            checks.check_zone_not_in_loop()
+            assert calls[0] == 2
+
+    def test_memo_does_not_hide_e072(self, tmp_path: Path) -> None:
+        broken = _page_dir(tmp_path, "torn")
+        body = '{% zone "z" %}b{% placeholder %}p{% endzone %}'
+        with _composed_pages((broken, body)):
+            checks.check_duplicate_zone_names()
+            messages = checks.check_composed_templates_compile()
+        assert [m.id for m in messages] == [checks.E_COMPOSED_TEMPLATE_SYNTAX]

@@ -42,9 +42,7 @@ class TestFlushClicksDecrMissing:
         Link.objects.create(slug="gone", url="https://example.com/g")
         increment_clicks("gone")
         with mock.patch.object(
-            cache_module.cache,
-            "decr",
-            side_effect=ValueError("missing"),
+            cache_module.cache, "decr", side_effect=ValueError("missing")
         ):
             assert flush_clicks() == 1
         assert Link.objects.get(slug="gone").clicks == 1
@@ -69,14 +67,9 @@ class TestGenerateSlugIntegrityRetry:
         Link.objects.create(slug="fixed", url="https://example.com/s")
         total = SLUG_ATTEMPTS_PER_LENGTH * (SLUG_MAX_LENGTH - 6 + 1)
         with (
-            mock.patch(
-                "shortener.routes.page._random_slug",
-                return_value="fixed",
-            ),
+            mock.patch("shortener.routes.page._random_slug", return_value="fixed"),
             mock.patch.object(
-                Link.objects,
-                "create",
-                side_effect=IntegrityError("dup"),
+                Link.objects, "create", side_effect=IntegrityError("dup")
             ),
             pytest.raises(RuntimeError, match="Could not allocate"),
         ):

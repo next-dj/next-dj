@@ -10,10 +10,7 @@ from next.pages.watch import (
     iter_pages_roots_with_components_folder_names,
 )
 from next.urls import FileRouterBackend, RouterBackend
-from next.urls.dispatcher import (
-    _scan_pages_directory,
-    scan_pages_tree,
-)
+from next.urls.dispatcher import _scan_pages_directory, scan_pages_tree
 from next.utils import classify_dirs_entries
 
 
@@ -28,9 +25,7 @@ class TestGetPagesDirectoriesForWatch:
 
     def test_skips_non_dict_config(self) -> None:
         """List entries that are not dicts are skipped."""
-        with override_settings(
-            NEXT_FRAMEWORK={"PAGE_BACKENDS": ["not a dict", None]},
-        ):
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": ["not a dict", None]}):
             next_framework_settings.reload()
             assert get_pages_directories_for_watch() == []
 
@@ -46,12 +41,12 @@ class TestGetPagesDirectoriesForWatch:
                         "APP_DIRS": False,
                         "OPTIONS": {
                             "BASE_DIR": str(
-                                Path(__file__).parent.parent.parent / "tests" / "pages",
-                            ),
+                                Path(__file__).parent.parent.parent / "tests" / "pages"
+                            )
                         },
                     },
-                ],
-            },
+                ]
+            }
         ):
             next_framework_settings.reload()
             result = get_pages_directories_for_watch()
@@ -65,7 +60,7 @@ class TestGetPagesDirectoriesForWatch:
             mock_backend._get_installed_apps = Mock(return_value=[])
             mock_create.return_value = mock_backend
             with override_settings(
-                NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "other.Backend"}]},
+                NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "other.Backend"}]}
             ):
                 next_framework_settings.reload()
                 assert get_pages_directories_for_watch() == []
@@ -81,7 +76,7 @@ class TestGetPagesDirectoriesForWatch:
             mock_backend.options = {}
             mock_backend.generate_urls = Mock(return_value=[])
             mock_backend._get_root_pages_paths = Mock(
-                return_value=[tmp_path / "root_pages"],
+                return_value=[tmp_path / "root_pages"]
             )
             mock_backend._get_installed_apps = Mock(return_value=["myapp"])
             mock_backend._get_app_pages_path = Mock(return_value=app_pages)
@@ -96,9 +91,9 @@ class TestGetPagesDirectoriesForWatch:
                             "APP_DIRS": True,
                             "DIRS": [],
                             "OPTIONS": {},
-                        },
-                    ],
-                },
+                        }
+                    ]
+                }
             ):
                 next_framework_settings.reload()
                 result = get_pages_directories_for_watch()
@@ -117,9 +112,7 @@ class TestIterPagesRootsWithComponentsFolderNames:
 
     def test_skips_non_dict_config(self) -> None:
         """Non-dict entries are skipped."""
-        with override_settings(
-            NEXT_FRAMEWORK={"PAGE_BACKENDS": ["not a dict"]},
-        ):
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": ["not a dict"]}):
             next_framework_settings.reload()
             assert iter_pages_roots_with_components_folder_names() == []
 
@@ -131,7 +124,7 @@ class TestIterPagesRootsWithComponentsFolderNames:
             mock_backend._get_installed_apps = Mock(return_value=[])
             mock_create.return_value = mock_backend
             with override_settings(
-                NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "other.Backend"}]},
+                NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "other.Backend"}]}
             ):
                 next_framework_settings.reload()
                 assert iter_pages_roots_with_components_folder_names() == []
@@ -147,14 +140,12 @@ class TestIterPagesRootsWithComponentsFolderNames:
                         "PAGES_DIR": "pages",
                         "APP_DIRS": False,
                         "DIRS": [
-                            str(
-                                Path(__file__).parent.parent.parent / "tests" / "pages"
-                            ),
+                            str(Path(__file__).parent.parent.parent / "tests" / "pages")
                         ],
                         "OPTIONS": {},
                     },
-                ],
-            },
+                ]
+            }
         ):
             next_framework_settings.reload()
             result = iter_pages_roots_with_components_folder_names()
@@ -200,9 +191,7 @@ class TestScanPagesDirectory:
         (tmp_path / "_components" / "card.djx").write_text("<div>card</div>")
         (tmp_path / "_components" / "nested").mkdir()
         (tmp_path / "_components" / "nested" / "page.py").write_text("z = 3")
-        result = list(
-            scan_pages_tree(tmp_path, skip_dir_names=("_components",)),
-        )
+        result = list(scan_pages_tree(tmp_path, skip_dir_names=("_components",)))
         url_paths = {r[0] for r in result}
         assert "" in url_paths
         assert "home" in url_paths
@@ -219,8 +208,7 @@ class TestScanPagesDirectory:
             calls.append((folder, root, scope))
 
         with patch(
-            "next.urls.dispatcher.register_components_folder_from_router_walk",
-            capture,
+            "next.urls.dispatcher.register_components_folder_from_router_walk", capture
         ):
             list(
                 scan_pages_tree(
@@ -228,7 +216,7 @@ class TestScanPagesDirectory:
                     skip_dir_names=("_components",),
                     register_components=True,
                     components_folder_name="_components",
-                ),
+                )
             )
         assert len(calls) == 1
         assert calls[0][0].name == "_components"

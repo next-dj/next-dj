@@ -12,7 +12,7 @@ from next.conf.signals import settings_reloaded
 def capture_settings_reloaded() -> Generator[list[dict[str, Any]], None, None]:
     events: list[dict[str, Any]] = []
 
-    def _listener(sender, **kwargs: object) -> None:
+    def _listener(sender, **kwargs) -> None:
         events.append({"sender": sender, **kwargs})
 
     settings_reloaded.connect(_listener)

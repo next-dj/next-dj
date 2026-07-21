@@ -1,16 +1,8 @@
 from django.http import HttpRequest
 
-from next.deps import (
-    DependencyResolver,
-    Depends,
-    resolver,
-)
+from next.deps import DependencyResolver, Depends, resolver
 from next.deps.markers import DependsProvider
-from tests.support import (
-    _ctx,
-    _minimal_resolver,
-    inspect_parameter,
-)
+from tests.support import _ctx, _minimal_resolver, inspect_parameter
 
 
 class TestRegisterDependency:

@@ -3,10 +3,7 @@ from pathlib import Path
 from django.template import Template
 
 from next.components.manager import components_manager
-from next.forms import (
-    ActionRegistration,
-    RegistryFormActionBackend,
-)
+from next.forms import ActionRegistration, RegistryFormActionBackend
 from next.forms.diagnostics import registration_diagnostics
 from next.forms.manager import form_action_manager
 from next.pages.manager import page

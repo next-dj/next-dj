@@ -5,11 +5,7 @@ from next.forms import Form
 from next.partial import Patches, is_partial_request
 
 
-WINDOW_CHOICES = (
-    ("1m", "Last minute"),
-    ("5m", "Last 5 minutes"),
-    ("1h", "Last hour"),
-)
+WINDOW_CHOICES = (("1m", "Last minute"), ("5m", "Last 5 minutes"), ("1h", "Last hour"))
 DEFAULT_WINDOW = "5m"
 LIVE_TOTALS_ZONE = "live-totals"
 METRIC_PULSE_OP = "metric-pulse"
@@ -25,8 +21,8 @@ class WindowFilterForm(Form):
                 "class": (
                     "rounded-md border border-slate-300 bg-white px-3 py-2 "
                     "text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
-                ),
-            },
+                )
+            }
         ),
     )
 

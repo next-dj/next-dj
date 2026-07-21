@@ -27,13 +27,7 @@ def build_pages_tree(
     for i in range(fanout):
         child = root / f"n_{i}"
         child.mkdir()
-        build_pages_tree(
-            child,
-            depth - 1,
-            fanout,
-            leaf=leaf,
-            leaf_body=leaf_body,
-        )
+        build_pages_tree(child, depth - 1, fanout, leaf=leaf, leaf_body=leaf_body)
 
 
 def build_component_djx_dir(root: Path, count: int) -> None:
@@ -42,11 +36,11 @@ def build_component_djx_dir(root: Path, count: int) -> None:
         (root / f"comp_{i}.djx").write_text(f"<div>c{i}</div>")
 
 
-def noop_form_handler(**_: object) -> None:  # pragma: no cover - bench stub
+def noop_form_handler(**kwargs) -> None:  # pragma: no cover - bench stub
     """Stub action handler for form-action benchmarks."""
 
 
-def noop_signal_receiver(sender: object, **_: object) -> None:  # pragma: no cover
+def noop_signal_receiver(sender: object, **kwargs) -> None:  # pragma: no cover
     """No-op Django signal receiver for signal-overhead benchmarks."""
     del sender
 

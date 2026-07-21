@@ -191,22 +191,14 @@ class QueryParamProvider(RegisteredParameterProvider):
     priority = 80
 
     @override
-    def can_handle(
-        self,
-        param: inspect.Parameter,
-        context: ResolutionContext,
-    ) -> bool:
+    def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:
         """Return True for `DQuery[...]` annotations when a request is present."""
         if get_origin(param.annotation) is not DQuery:
             return False
         return getattr(context, "request", None) is not None
 
     @override
-    def resolve(
-        self,
-        param: inspect.Parameter,
-        context: ResolutionContext,
-    ) -> object:
+    def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:
         """Pull the value from `request.GET` and coerce it to the annotated type."""
         request = context.request
         if request is None:
@@ -227,9 +219,7 @@ def _missing(param: inspect.Parameter) -> object:
 
 
 def _resolve_multi(
-    request: HttpRequest,
-    param: inspect.Parameter,
-    hint: object,
+    request: HttpRequest, param: inspect.Parameter, hint: object
 ) -> object:
     """Resolve a `DQuery[list[T]]` parameter from repeated query-string keys.
 
@@ -250,11 +240,7 @@ def _resolve_multi(
     return [_coerce_url_value(v, inner_type) for v in raw_list]
 
 
-def _expand_multi_value(
-    request: HttpRequest,
-    name: str,
-    plain: list[str],
-) -> list[str]:
+def _expand_multi_value(request: HttpRequest, name: str, plain: list[str]) -> list[str]:
     """Return values for `name` after considering bracket and comma forms.
 
     `plain` holds whatever `request.GET.getlist(name)` returned and is

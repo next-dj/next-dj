@@ -20,10 +20,8 @@ DEFAULTS: dict[str, Any] = {
             "DIRS": [],
             "APP_DIRS": True,
             "PAGES_DIR": "pages",
-            "OPTIONS": {
-                "context_processors": [],
-            },
-        },
+            "OPTIONS": {"context_processors": []},
+        }
     ],
     "URL_NAME_TEMPLATE": "page_{name}",
     "URL_RESOLVER": "next.urls.TrieURLResolver",
@@ -32,19 +30,11 @@ DEFAULTS: dict[str, Any] = {
             "BACKEND": "next.components.FileComponentsBackend",
             "DIRS": [],
             "COMPONENTS_DIR": "_components",
-        },
+        }
     ],
-    "STATIC_BACKENDS": [
-        {
-            "BACKEND": "next.static.StaticFilesBackend",
-            "OPTIONS": {},
-        },
-    ],
+    "STATIC_BACKENDS": [{"BACKEND": "next.static.StaticFilesBackend", "OPTIONS": {}}],
     "FORM_ACTION_BACKENDS": [
-        {
-            "BACKEND": "next.forms.RegistryFormActionBackend",
-            "OPTIONS": {},
-        },
+        {"BACKEND": "next.forms.RegistryFormActionBackend", "OPTIONS": {}}
     ],
     "PARTIAL_BACKENDS": [
         {
@@ -52,16 +42,11 @@ DEFAULTS: dict[str, Any] = {
             "OPTIONS": {
                 "VERSION": "manifest",
                 "PUSH_WIZARD_STEPS": False,
-                "SSE": {
-                    "HEARTBEAT_SECONDS": 25,
-                    "RETRY_MS": 3000,
-                },
+                "SSE": {"HEARTBEAT_SECONDS": 25, "RETRY_MS": 3000},
             },
-        },
+        }
     ],
-    "TEMPLATE_LOADERS": [
-        "next.pages.loaders.DjxTemplateLoader",
-    ],
+    "TEMPLATE_LOADERS": ["next.pages.loaders.DjxTemplateLoader"],
     "NEXT_JS_OPTIONS": {},
     "STRICT_CONTEXT": False,
     "LAZY_COMPONENT_MODULES": False,

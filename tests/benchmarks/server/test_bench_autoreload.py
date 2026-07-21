@@ -14,9 +14,7 @@ if TYPE_CHECKING:
 
 class TestBenchTreeSignature:
     @pytest.mark.parametrize(
-        ("depth", "fanout"),
-        [(3, 3), (4, 5)],
-        ids=["small", "large"],
+        ("depth", "fanout"), [(3, 3), (4, 5)], ids=["small", "large"]
     )
     @pytest.mark.benchmark(group="server.autoreload")
     def test_signature(
@@ -33,8 +31,7 @@ class TestBenchCollectRoutes:
     ) -> None:
         build_pages_tree(tmp_path, depth=3, fanout=4, leaf="page.py")
         monkeypatch.setattr(
-            "next.server.autoreload.get_pages_directories_for_watch",
-            lambda: [tmp_path],
+            "next.server.autoreload.get_pages_directories_for_watch", lambda: [tmp_path]
         )
         reloader = NextStatReloader()
         reloader._collect_routes()  # warm
@@ -44,8 +41,7 @@ class TestBenchCollectRoutes:
     def test_collect_routes_fresh(self, tmp_path: Path, monkeypatch, benchmark) -> None:
         build_pages_tree(tmp_path, depth=3, fanout=4, leaf="page.py")
         monkeypatch.setattr(
-            "next.server.autoreload.get_pages_directories_for_watch",
-            lambda: [tmp_path],
+            "next.server.autoreload.get_pages_directories_for_watch", lambda: [tmp_path]
         )
 
         def run() -> None:

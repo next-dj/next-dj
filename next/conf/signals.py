@@ -20,7 +20,7 @@ settings_reloaded: Signal = Signal()
 """Emitted when `NextFrameworkSettings` caches have been dropped."""
 
 
-def _on_setting_changed(*, setting: str, **_kwargs: object) -> None:
+def _on_setting_changed(*, setting: str, **kwargs) -> None:
     """Reload framework settings when Django reports a matching change."""
     if setting == USER_SETTING:
         next_framework_settings.reload()

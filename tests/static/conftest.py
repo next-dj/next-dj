@@ -28,12 +28,7 @@ JS_URL = "https://example.com/a.js"
 class DeterministicBackend(StaticFilesBackend):
     """Backend with stable deterministic URLs for discovery-order tests."""
 
-    def register_file(
-        self,
-        _source_path: Path,
-        logical_name: str,
-        kind: str,
-    ) -> str:
+    def register_file(self, _source_path: Path, logical_name: str, kind: str) -> str:
         return f"/static/next/{logical_name}{default_kinds.extension(kind)}"
 
 
@@ -100,8 +95,7 @@ def make_discovery() -> Callable[..., tuple[AssetDiscovery, StaticManager]]:
     """Build an ``AssetDiscovery`` wired to a given backend and page roots."""
 
     def _factory(
-        backend: StaticBackend,
-        page_roots: tuple[Path, ...] = (),
+        backend: StaticBackend, page_roots: tuple[Path, ...] = ()
     ) -> tuple[AssetDiscovery, StaticManager]:
         manager = StaticManager()
         manager._backends = [backend]

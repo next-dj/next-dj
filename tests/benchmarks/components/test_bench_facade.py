@@ -17,9 +17,7 @@ if TYPE_CHECKING:
 
 
 def _send_component_rendered(
-    signal: Signal,
-    sender: object,
-    info: ComponentInfo,
+    signal: Signal, sender: object, info: ComponentInfo
 ) -> None:
     signal.send(sender=sender, info=info, template_path=info.template_path)
 
@@ -37,11 +35,6 @@ class TestBenchComponentRenderedSignal:
         info = build_component_info(tmp_path)
         component_rendered.connect(noop_signal_receiver)
         try:
-            benchmark(
-                _send_component_rendered,
-                component_rendered,
-                object(),
-                info,
-            )
+            benchmark(_send_component_rendered, component_rendered, object(), info)
         finally:
             component_rendered.disconnect(noop_signal_receiver)

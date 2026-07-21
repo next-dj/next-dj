@@ -37,10 +37,7 @@ class TestPageReverse:
 
     def test_unknown_template_propagates_no_reverse_match(self) -> None:
         with (
-            patch(
-                "next.urls.reverse.reverse",
-                side_effect=NoReverseMatch("nope"),
-            ),
+            patch("next.urls.reverse.reverse", side_effect=NoReverseMatch("nope")),
             pytest.raises(NoReverseMatch),
         ):
             page_reverse("[str:missing]", missing="x")

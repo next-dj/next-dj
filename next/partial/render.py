@@ -132,8 +132,7 @@ def render_zone(
 
 
 def _renderable_zone_names(
-    zone_names: tuple[str, ...],
-    zones: "Mapping[str, ZoneInfo]",
+    zone_names: tuple[str, ...], zones: "Mapping[str, ZoneInfo]"
 ) -> tuple[str, ...]:
     """Return the declared names of a batch, deduplicated in request order.
 
@@ -149,8 +148,7 @@ def _renderable_zone_names(
 
 
 def _seed_collector(
-    page_path: "Path",
-    context_data: dict[str, object],
+    page_path: "Path", context_data: dict[str, object]
 ) -> "StaticCollector":
     """Seed a fresh collector and bind it to the context like the page path.
 
@@ -174,10 +172,7 @@ def _seed_collector(
 
 
 def _emit_rendered(
-    page_path: "Path",
-    zone_names: tuple[str, ...],
-    request: "HttpRequest",
-    start: float,
+    page_path: "Path", zone_names: tuple[str, ...], request: "HttpRequest", start: float
 ) -> None:
     """Announce each rendered zone when the signal has receivers."""
     if not zone_rendered.receivers:

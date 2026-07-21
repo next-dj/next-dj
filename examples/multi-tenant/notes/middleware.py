@@ -48,7 +48,7 @@ class TenantMiddleware:
             return HttpResponseBadRequest(
                 "Missing X-Tenant header.\n"
                 "Send a request with X-Tenant: <slug>. In DEBUG you may also "
-                "pass ?tenant=<slug> for a browser demo.",
+                "pass ?tenant=<slug> for a browser demo."
             )
 
         try:
@@ -61,21 +61,14 @@ class TenantMiddleware:
 
         if debug_query:
             response = HttpResponseRedirect(_strip_tenant_query(request))
-            response.set_cookie(
-                COOKIE_NAME,
-                slug,
-                httponly=True,
-                samesite="Lax",
-            )
+            response.set_cookie(COOKIE_NAME, slug, httponly=True, samesite="Lax")
             return response
 
         request.tenant = tenant  # type: ignore[attr-defined]
         return self._get_response(request)
 
 
-def _resolve_tenant_slug(
-    request: HttpRequest,
-) -> tuple[str | None, bool, bool]:
+def _resolve_tenant_slug(request: HttpRequest) -> tuple[str | None, bool, bool]:
     """Return (slug, came_from_query, came_from_cookie) for the request."""
     header_value = request.META.get(HEADER_NAME, "").strip()
     if header_value:

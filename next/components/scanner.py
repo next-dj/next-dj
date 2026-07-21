@@ -44,10 +44,7 @@ class ComponentScanner:
         self._module_loader = module_loader or ModuleLoader()
 
     def scan_directory(
-        self,
-        directory: Path,
-        scope_root: Path,
-        scope_relative: str,
+        self, directory: Path, scope_root: Path, scope_relative: str
     ) -> Sequence[ComponentInfo]:
         """Return a list of `ComponentInfo` found immediately inside `directory`."""
         components: list[ComponentInfo] = []
@@ -69,10 +66,7 @@ class ComponentScanner:
         return components
 
     def _create_simple_component(
-        self,
-        djx_file: Path,
-        scope_root: Path,
-        scope_relative: str,
+        self, djx_file: Path, scope_root: Path, scope_relative: str
     ) -> ComponentInfo:
         return ComponentInfo(
             name=djx_file.stem,
@@ -84,10 +78,7 @@ class ComponentScanner:
         )
 
     def _try_create_composite_component(
-        self,
-        directory: Path,
-        scope_root: Path,
-        scope_relative: str,
+        self, directory: Path, scope_root: Path, scope_relative: str
     ) -> ComponentInfo | None:
         comp_djx = directory / "component.djx"
         comp_py = directory / "component.py"

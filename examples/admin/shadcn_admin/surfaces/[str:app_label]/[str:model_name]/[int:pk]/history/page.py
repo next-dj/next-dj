@@ -13,10 +13,7 @@ _ACTION_LABELS = {1: "Added", 2: "Changed", 3: "Deleted"}
 
 @context("history_state")
 def history_state(
-    request: HttpRequest,
-    app_label: str,
-    model_name: str,
-    pk: int,
+    request: HttpRequest, app_label: str, model_name: str, pk: int
 ) -> dict[str, Any]:
     """Build the history context from `LogEntry` rows for the target object."""
     model, _model_admin, obj = utils.resolve_object_or_404(

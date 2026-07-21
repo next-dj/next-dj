@@ -50,9 +50,7 @@ def register_autoreload_watch_spec(path: Path, glob: str) -> None:
     _registered_extra_watch_specs.append((path, glob))
 
 
-def _dedupe_watch_specs(
-    specs: Iterable[tuple[Path, str]],
-) -> list[tuple[Path, str]]:
+def _dedupe_watch_specs(specs: Iterable[tuple[Path, str]]) -> list[tuple[Path, str]]:
     """Drop duplicate `(path, glob)` pairs keyed on resolved path."""
     seen: set[tuple[Path, str]] = set()
     out: list[tuple[Path, str]] = []

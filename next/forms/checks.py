@@ -4,15 +4,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from django.conf import settings
-from django.core.checks import (
-    CheckMessage,
-    Error,
-    Tags,
-    Warning as DjangoWarning,
-    register,
-)
+from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register
 from django.forms import FileField, MultiValueField
 
+from next.checks import NEXT
 from next.components.facade import get_component
 from next.conf import import_class_cached, next_framework_settings
 
@@ -20,11 +15,7 @@ from .backends import FormActionBackend
 from .diagnostics import registration_diagnostics
 from .manager import form_action_manager
 from .widgets import ComponentWidget
-from .wizard import (
-    CacheFormWizardBackend,
-    FormWizardBackend,
-    SessionFormWizardBackend,
-)
+from .wizard import CacheFormWizardBackend, FormWizardBackend, SessionFormWizardBackend
 
 
 if TYPE_CHECKING:
@@ -44,11 +35,8 @@ def _iter_registered_actions() -> "Iterator[ActionMeta]":
         yield from backend.iter_actions()
 
 
-@register(Tags.compatibility)
-def check_form_action_collisions(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+@register(NEXT)
+def check_form_action_collisions(*args, **kwargs) -> list[CheckMessage]:
     """Flag two `@action` calls that share a name but come from different handlers."""
     return [
         Error(
@@ -62,11 +50,8 @@ def check_form_action_collisions(
     ]
 
 
-@register(Tags.compatibility)
-def check_shared_action_name_collisions(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+@register(NEXT)
+def check_shared_action_name_collisions(*args, **kwargs) -> list[CheckMessage]:
     """Error when one shared action name is declared by two different modules."""
     return [
         Error(
@@ -83,11 +68,8 @@ def check_shared_action_name_collisions(
     ]
 
 
-@register(Tags.compatibility)
-def check_form_action_backends_configuration(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+@register(NEXT)
+def check_form_action_backends_configuration(*args, **kwargs) -> list[CheckMessage]:
     """Validate `FORM_ACTION_BACKENDS` shape and import paths."""
     raw = getattr(settings, "NEXT_FRAMEWORK", None)
     if not isinstance(raw, dict):
@@ -99,10 +81,8 @@ def check_form_action_backends_configuration(
         key = _FORM_ACTION_BACKEND_SETTINGS_KEY
         return [
             Error(
-                f"NEXT_FRAMEWORK[{key!r}] must be a list.",
-                obj=settings,
-                id="next.E044",
-            ),
+                f"NEXT_FRAMEWORK[{key!r}] must be a list.", obj=settings, id="next.E044"
+            )
         ]
     errors: list[CheckMessage] = []
     for index, config in enumerate(configs):
@@ -112,19 +92,14 @@ def check_form_action_backends_configuration(
 
 
 def _validate_single_form_action_backend(
-    config: object,
-    prefix: str,
+    config: object, prefix: str
 ) -> list[CheckMessage]:
     if not isinstance(config, dict):
         return [Error(f"{prefix} must be a dict.", obj=settings, id="next.E044")]
     backend_path = config.get("BACKEND")
     if not isinstance(backend_path, str):
         return [
-            Error(
-                f"{prefix}.BACKEND must be a string.",
-                obj=settings,
-                id="next.E044",
-            ),
+            Error(f"{prefix}.BACKEND must be a string.", obj=settings, id="next.E044")
         ]
     try:
         cls = import_class_cached(backend_path)
@@ -134,7 +109,7 @@ def _validate_single_form_action_backend(
                 f"{prefix}.BACKEND {backend_path!r} cannot be imported: {exc}.",
                 obj=settings,
                 id="next.E044",
-            ),
+            )
         ]
     if not isinstance(cls, type) or not issubclass(cls, FormActionBackend):
         return [
@@ -142,16 +117,13 @@ def _validate_single_form_action_backend(
                 f"{prefix}.BACKEND {backend_path!r} must subclass FormActionBackend.",
                 obj=settings,
                 id="next.E045",
-            ),
+            )
         ]
     return []
 
 
-@register(Tags.compatibility)
-def check_forms_outside_base_dir(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+@register(NEXT)
+def check_forms_outside_base_dir(*args, **kwargs) -> list[CheckMessage]:
     """Warn when form classes are declared outside BASE_DIR."""
     return [
         DjangoWarning(
@@ -163,11 +135,8 @@ def check_forms_outside_base_dir(
     ]
 
 
-@register(Tags.compatibility)
-def check_invalid_form_meta_scope(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+@register(NEXT)
+def check_invalid_form_meta_scope(*args, **kwargs) -> list[CheckMessage]:
     """Error when a form class Meta.scope or an @action scope is invalid."""
     class_errors: list[CheckMessage] = [
         Error(
@@ -188,11 +157,8 @@ def check_invalid_form_meta_scope(
     return class_errors + action_errors
 
 
-@register(Tags.compatibility)
-def check_action_applied_to_class(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+@register(NEXT)
+def check_action_applied_to_class(*args, **kwargs) -> list[CheckMessage]:
     """Error when @action decorator was applied to a class."""
     return [
         Error(
@@ -204,11 +170,8 @@ def check_action_applied_to_class(
     ]
 
 
-@register(Tags.compatibility)
-def check_instance_from_url_unknown_field(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+@register(NEXT)
+def check_instance_from_url_unknown_field(*args, **kwargs) -> list[CheckMessage]:
     """Error when Meta.instance_from_url references a field absent on the model."""
     return [
         Error(
@@ -224,11 +187,8 @@ def check_instance_from_url_unknown_field(
     ]
 
 
-@register(Tags.compatibility)
-def check_instance_from_url_on_non_model_form(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+@register(NEXT)
+def check_instance_from_url_on_non_model_form(*args, **kwargs) -> list[CheckMessage]:
     """Error when Meta.instance_from_url is set on a class that is not a ModelForm."""
     return [
         Error(
@@ -240,11 +200,8 @@ def check_instance_from_url_on_non_model_form(
     ]
 
 
-@register(Tags.compatibility)
-def check_form_wizard_steps(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+@register(NEXT)
+def check_form_wizard_steps(*args, **kwargs) -> list[CheckMessage]:
     """Error when a FormWizard declares no steps."""
     return [
         Error(
@@ -256,11 +213,8 @@ def check_form_wizard_steps(
     ]
 
 
-@register(Tags.compatibility)
-def check_form_wizard_backend(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+@register(NEXT)
+def check_form_wizard_backend(*args, **kwargs) -> list[CheckMessage]:
     """Validate `FORM_WIZARD_BACKEND` shape and import path."""
     raw = getattr(settings, "NEXT_FRAMEWORK", None)
     if not isinstance(raw, dict):
@@ -279,7 +233,7 @@ def _validate_form_wizard_backend(config: object) -> list[CheckMessage]:
                 f"NEXT_FRAMEWORK[{key!r}] must be a dict with a BACKEND key.",
                 obj=settings,
                 id="next.E051",
-            ),
+            )
         ]
     backend_path = config.get("BACKEND")
     if not isinstance(backend_path, str):
@@ -288,7 +242,7 @@ def _validate_form_wizard_backend(config: object) -> list[CheckMessage]:
                 f"NEXT_FRAMEWORK[{key!r}].BACKEND must be a string.",
                 obj=settings,
                 id="next.E051",
-            ),
+            )
         ]
     try:
         cls = import_class_cached(backend_path)
@@ -299,7 +253,7 @@ def _validate_form_wizard_backend(config: object) -> list[CheckMessage]:
                 f"imported: {exc}.",
                 obj=settings,
                 id="next.E051",
-            ),
+            )
         ]
     if not (isinstance(cls, type) and issubclass(cls, FormWizardBackend)):
         return [
@@ -308,16 +262,13 @@ def _validate_form_wizard_backend(config: object) -> list[CheckMessage]:
                 "FormWizardBackend.",
                 obj=settings,
                 id="next.E051",
-            ),
+            )
         ]
     return []
 
 
-@register(Tags.compatibility)
-def check_form_wizard_sessions(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+@register(NEXT)
+def check_form_wizard_sessions(*args, **kwargs) -> list[CheckMessage]:
     """Warn when wizard storage needs sessions without django.contrib.sessions."""
     if "django.contrib.sessions" in settings.INSTALLED_APPS:
         return []
@@ -344,15 +295,12 @@ def check_form_wizard_sessions(
             "will raise ImproperlyConfigured at request time.",
             obj=settings,
             id="next.W056",
-        ),
+        )
     ]
 
 
-@register(Tags.compatibility)
-def check_wizard_step_actions(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+@register(NEXT)
+def check_wizard_step_actions(*args, **kwargs) -> list[CheckMessage]:
     """Warn when a wizard step class is also a registered standalone action.
 
     Only static Meta.steps are inspected, `get_steps` dynamics are not visible.
@@ -391,11 +339,8 @@ def check_wizard_step_actions(
 _PAGE_MODULE_NAME = "page.py"
 
 
-@register(Tags.compatibility)
-def check_wizard_url_param_route(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+@register(NEXT)
+def check_wizard_url_param_route(*args, **kwargs) -> list[CheckMessage]:
     """Error when a page-scoped wizard's page path lacks the url_param segment.
 
     Only wizards declared in a page module are inspected. The page file
@@ -430,11 +375,8 @@ def check_wizard_url_param_route(
     return messages
 
 
-@register(Tags.compatibility)
-def check_wizard_step_file_fields(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+@register(NEXT)
+def check_wizard_step_file_fields(*args, **kwargs) -> list[CheckMessage]:
     """Warn when a static wizard step declares a FileField or ImageField.
 
     Only static Meta.steps are inspected, `get_steps` dynamics are not visible.
@@ -464,11 +406,8 @@ def check_wizard_step_file_fields(
     return messages
 
 
-@register(Tags.compatibility)
-def check_wizard_step_field_collisions(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+@register(NEXT)
+def check_wizard_step_field_collisions(*args, **kwargs) -> list[CheckMessage]:
     """Warn when two static wizard steps declare the same field name.
 
     Only static Meta.steps are inspected, `get_steps` dynamics are not visible.
@@ -501,11 +440,8 @@ def check_wizard_step_field_collisions(
     return messages
 
 
-@register(Tags.compatibility)
-def check_form_anchor_files(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+@register(NEXT)
+def check_form_anchor_files(*args, **kwargs) -> list[CheckMessage]:
     """Validate that FORM_ANCHOR_FILES is None or a collection of strings."""
     raw = getattr(settings, "NEXT_FRAMEWORK", None)
     if not isinstance(raw, dict):
@@ -522,7 +458,7 @@ def check_form_anchor_files(
                 f"NEXT_FRAMEWORK[{key!r}] must be None or a list of strings.",
                 obj=settings,
                 id="next.E052",
-            ),
+            )
         ]
     if not all(isinstance(item, str) for item in value):
         return [
@@ -530,16 +466,13 @@ def check_form_anchor_files(
                 f"NEXT_FRAMEWORK[{key!r}] must contain only strings.",
                 obj=settings,
                 id="next.E052",
-            ),
+            )
         ]
     return []
 
 
-@register(Tags.compatibility)
-def check_action_guard_permissions(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+@register(NEXT)
+def check_action_guard_permissions(*args, **kwargs) -> list[CheckMessage]:
     """Warn when permission_required is declared without django.contrib.auth.
 
     This inspects the static `ActionGuard` only. The dynamic `check_permissions`
@@ -569,11 +502,8 @@ def _declares_success_message(target: object) -> bool:
     return bool(getattr(getattr(target, "Meta", None), "success_message", ""))
 
 
-@register(Tags.compatibility)
-def check_success_message_framework(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+@register(NEXT)
+def check_success_message_framework(*args, **kwargs) -> list[CheckMessage]:
     """Warn when Meta.success_message is declared without the messages framework."""
     has_app = "django.contrib.messages" in settings.INSTALLED_APPS
     has_middleware = _MESSAGE_MIDDLEWARE in tuple(settings.MIDDLEWARE or ())
@@ -594,11 +524,8 @@ def check_success_message_framework(
     ]
 
 
-@register(Tags.compatibility)
-def check_component_widget_components(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+@register(NEXT)
+def check_component_widget_components(*args, **kwargs) -> list[CheckMessage]:
     """Warn when a ComponentWidget names a component that does not resolve."""
     base = getattr(settings, "BASE_DIR", None)
     seen: set[str] = set()
@@ -630,11 +557,8 @@ def check_component_widget_components(
     return messages
 
 
-@register(Tags.compatibility)
-def check_component_widget_field_types(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
+@register(NEXT)
+def check_component_widget_field_types(*args, **kwargs) -> list[CheckMessage]:
     """Warn when a ComponentWidget is attached to an unsupported field type."""
     messages: list[CheckMessage] = []
     for meta in _iter_registered_actions():

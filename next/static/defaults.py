@@ -40,10 +40,7 @@ def register_defaults() -> None:
         inline_tag="script",
     )
     default_kinds.register(
-        "module",
-        extension=".mjs",
-        slot="scripts",
-        renderer="render_module_tag",
+        "module", extension=".mjs", slot="scripts", renderer="render_module_tag"
     )
 
 

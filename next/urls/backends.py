@@ -145,7 +145,7 @@ class FileRouterBackend(RouterBackend):
                 tuple(sorted(self._skip_dir_names)),
                 self._components_folder_name,
                 cp_t,
-            ),
+            )
         )
 
     @override
@@ -225,35 +225,27 @@ class FileRouterBackend(RouterBackend):
             return self._patterns_cache[app_name]
         if pages_path := self._get_app_pages_path(app_name):
             patterns: list[URLPattern | URLResolver] = list(
-                self._generate_patterns_from_directory(pages_path),
+                self._generate_patterns_from_directory(pages_path)
             )
             self._patterns_cache[app_name] = patterns
             return patterns
         return []
 
     def _generate_patterns_from_directory(
-        self,
-        pages_path: Path,
+        self, pages_path: Path
     ) -> Generator[URLPattern, None, None]:
         """Yield one `URLPattern` per discovered page under `pages_path`."""
         for url_path, file_path in self._scan_pages_directory(pages_path):
             if pattern := page.create_url_pattern(
-                url_path,
-                file_path,
-                self._url_parser,
+                url_path, file_path, self._url_parser
             ):
                 route_registered.send(
-                    sender=FileRouterBackend,
-                    url_path=url_path,
-                    file_path=file_path,
+                    sender=FileRouterBackend, url_path=url_path, file_path=file_path
                 )
                 yield pattern
 
     def _scan_pages_directory(
-        self,
-        pages_path: Path,
-        *,
-        register_components: bool = True,
+        self, pages_path: Path, *, register_components: bool = True
     ) -> Generator[tuple[str, Path], None, None]:
         """Yield `(url_path, page_file)` pairs discovered under `pages_path`."""
         dispatcher = FilesystemTreeDispatcher(
@@ -268,7 +260,7 @@ class RouterFactory:
     """Build `RouterBackend` instances from `PAGE_BACKENDS`-style dicts."""
 
     _backends: ClassVar[dict[str, type[RouterBackend]]] = {
-        "next.urls.FileRouterBackend": FileRouterBackend,
+        "next.urls.FileRouterBackend": FileRouterBackend
     }
 
     @classmethod
@@ -329,8 +321,7 @@ class RouterFactory:
                 raise ValueError(msg) from e
 
         if not isinstance(backend_class, type) or not issubclass(
-            backend_class,
-            RouterBackend,
+            backend_class, RouterBackend
         ):
             msg = f"Backend {backend_name!r} is not a RouterBackend subclass"
             raise TypeError(msg)
@@ -359,8 +350,4 @@ class RouterFactory:
         return backend_class()
 
 
-__all__ = [
-    "FileRouterBackend",
-    "RouterBackend",
-    "RouterFactory",
-]
+__all__ = ["FileRouterBackend", "RouterBackend", "RouterFactory"]

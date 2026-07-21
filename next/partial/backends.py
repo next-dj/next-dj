@@ -41,11 +41,7 @@ class PartialProtocolBackend:
 
     def _dumps(self, envelope: "Envelope") -> str:
         """Serialise an envelope to a compact JSON string."""
-        return json.dumps(
-            envelope.as_dict(),
-            separators=(",", ":"),
-            ensure_ascii=False,
-        )
+        return json.dumps(envelope.as_dict(), separators=(",", ":"), ensure_ascii=False)
 
     def serialize_envelope(self, envelope: "Envelope") -> bytes:
         """Serialize one envelope for an HTTP response body."""

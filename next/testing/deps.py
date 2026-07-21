@@ -55,10 +55,7 @@ def resolve_call(
     loose keyword arguments as `make_resolution_context`.
     """
     context = make_resolution_context(
-        request=request,
-        form=form,
-        url_kwargs=url_kwargs,
-        context_data=context_data,
+        request=request, form=form, url_kwargs=url_kwargs, context_data=context_data
     )
     return resolver.resolve(func, context)
 

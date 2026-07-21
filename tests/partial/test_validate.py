@@ -102,7 +102,7 @@ class TestValidateBehindGuard:
     ) -> None:
         received: list[dict] = []
 
-        def _record(**kwargs: object) -> None:
+        def _record(**kwargs) -> None:
             received.append(kwargs)
 
         field_validated.connect(_record)
@@ -151,7 +151,7 @@ class TestValidateBehindViewPermissions:
     ) -> None:
         received: list[dict] = []
 
-        def _record(**kwargs: object) -> None:
+        def _record(**kwargs) -> None:
             received.append(kwargs)
 
         field_validated.connect(_record)
@@ -289,7 +289,7 @@ class TestValidateSignalAndFieldNames:
     ) -> None:
         received: list[dict] = []
 
-        def _record(**kwargs: object) -> None:
+        def _record(**kwargs) -> None:
             received.append(kwargs)
 
         field_validated.connect(_record)

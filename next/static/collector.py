@@ -123,10 +123,7 @@ class JsContextPolicy(Protocol):
     """Merge strategy for the collector JS context."""
 
     def merge(
-        self,
-        existing: dict[str, Any],
-        key: str,
-        value: object,
+        self, existing: dict[str, Any], key: str, value: object
     ) -> dict[str, Any]:
         """Merge a new entry into the existing mapping and return it."""
         raise NotImplementedError
@@ -140,10 +137,7 @@ class FirstWinsPolicy:
     """
 
     def merge(
-        self,
-        existing: dict[str, Any],
-        key: str,
-        value: object,
+        self, existing: dict[str, Any], key: str, value: object
     ) -> dict[str, Any]:
         """Write the value only when the key is absent from existing."""
         if key not in existing:
@@ -155,10 +149,7 @@ class LastWinsPolicy:
     """Overwrite the previous value with the latest registration."""
 
     def merge(
-        self,
-        existing: dict[str, Any],
-        key: str,
-        value: object,
+        self, existing: dict[str, Any], key: str, value: object
     ) -> dict[str, Any]:
         """Assign the value under the key, overwriting any existing entry."""
         existing[key] = value
@@ -169,10 +160,7 @@ class RaiseOnConflictPolicy:
     """Raise `KeyError` when the same key is registered twice."""
 
     def merge(
-        self,
-        existing: dict[str, Any],
-        key: str,
-        value: object,
+        self, existing: dict[str, Any], key: str, value: object
     ) -> dict[str, Any]:
         """Assign the value or raise when the key already exists."""
         if key in existing:
@@ -186,10 +174,7 @@ class DeepMergePolicy:
     """Recursively merge dict values and override scalars with the latest value."""
 
     def merge(
-        self,
-        existing: dict[str, Any],
-        key: str,
-        value: object,
+        self, existing: dict[str, Any], key: str, value: object
     ) -> dict[str, Any]:
         """Recursively merge dict values or assign the new one otherwise."""
         current = existing.get(key)
@@ -200,11 +185,7 @@ class DeepMergePolicy:
         return existing
 
     @classmethod
-    def _deep_merge(
-        cls,
-        a: dict[str, Any],
-        b: dict[str, Any],
-    ) -> dict[str, Any]:
+    def _deep_merge(cls, a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
         out = dict(a)
         for k, v in b.items():
             cur = out.get(k)
@@ -363,11 +344,7 @@ class StaticCollector:
         return self._js_serializer
 
     def add_js_context(
-        self,
-        key: str,
-        value: object,
-        *,
-        serializer: JsContextSerializer | None = None,
+        self, key: str, value: object, *, serializer: JsContextSerializer | None = None
     ) -> None:
         """Merge the value under the key through the JS-context policy.
 
@@ -409,10 +386,7 @@ class StaticCollector:
         return self._js_context_serializers
 
     def _encoded_fragment(
-        self,
-        key: str,
-        value: object,
-        default: JsContextSerializer,
+        self, key: str, value: object, default: JsContextSerializer
     ) -> str:
         """Return the cached JSON fragment for a key or re-encode on miss.
 

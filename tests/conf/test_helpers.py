@@ -9,8 +9,7 @@ class TestExtendDefaultBackend:
 
     def test_replaces_single_top_level_key(self) -> None:
         patched = extend_default_backend(
-            "COMPONENT_BACKENDS",
-            COMPONENTS_DIR="_widgets",
+            "COMPONENT_BACKENDS", COMPONENTS_DIR="_widgets"
         )
         assert patched[0]["COMPONENTS_DIR"] == "_widgets"
         assert patched[0]["BACKEND"] == "next.components.FileComponentsBackend"
@@ -21,14 +20,11 @@ class TestExtendDefaultBackend:
             OPTIONS={"DEDUP_STRATEGY": "next.static.collector.HashContentDedup"},
         )
         assert patched[0]["OPTIONS"] == {
-            "DEDUP_STRATEGY": "next.static.collector.HashContentDedup",
+            "DEDUP_STRATEGY": "next.static.collector.HashContentDedup"
         }
 
     def test_preserves_unrelated_entries(self) -> None:
-        patched = extend_default_backend(
-            "PAGE_BACKENDS",
-            PAGES_DIR="routes",
-        )
+        patched = extend_default_backend("PAGE_BACKENDS", PAGES_DIR="routes")
         assert patched[0]["APP_DIRS"] is True
         assert patched[0]["DIRS"] == []
         assert patched[0]["PAGES_DIR"] == "routes"
@@ -42,8 +38,7 @@ class TestExtendDefaultBackend:
 
     def test_patches_form_action_backends(self) -> None:
         patched = extend_default_backend(
-            "FORM_ACTION_BACKENDS",
-            OPTIONS={"strict": True},
+            "FORM_ACTION_BACKENDS", OPTIONS={"strict": True}
         )
         assert patched[0]["BACKEND"] == "next.forms.RegistryFormActionBackend"
         assert patched[0]["OPTIONS"] == {"strict": True}

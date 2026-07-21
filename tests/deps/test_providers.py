@@ -174,10 +174,7 @@ class TestUrlKwargsProvider:
 
     @pytest.mark.parametrize(
         ("url_kwargs", "expected"),
-        [
-            ({"id": 42}, True),
-            ({}, False),
-        ],
+        [({"id": 42}, True), ({}, False)],
         ids=["name_in_kwargs", "name_missing"],
     )
     def test_can_handle(self, url_kwargs, expected) -> None:
@@ -214,10 +211,7 @@ class TestUrlByAnnotationProvider:
 
     @pytest.mark.parametrize(
         ("annotation", "expected"),
-        [
-            (DUrl[int], True),
-            (int, False),
-        ],
+        [(DUrl[int], True), (int, False)],
         ids=["durl", "plain_int"],
     )
     def test_can_handle(self, annotation, expected) -> None:
@@ -245,11 +239,7 @@ class TestFormProvider:
 
     @pytest.mark.parametrize(
         ("param_name", "form_kind", "expected"),
-        [
-            ("form", "mock", True),
-            ("form", "none", False),
-            ("other", "mock", False),
-        ],
+        [("form", "mock", True), ("form", "none", False), ("other", "mock", False)],
         ids=["name_form_with_instance", "form_none", "wrong_name"],
     )
     def test_can_handle_basic(self, param_name, form_kind, expected) -> None:

@@ -18,7 +18,7 @@ _FIELDS_TEMPLATE = Template(
         {% endif %}
       </label>
     {% endfor %}
-    """,
+    """
 )
 
 _REVIEW_TEMPLATE = Template(
@@ -35,7 +35,7 @@ _REVIEW_TEMPLATE = Template(
         <dd class="whitespace-pre-line">{{ draft.reason }}</dd>
       </dl>
     </div>
-    """,
+    """
 )
 
 _SAVED_SUMMARY_TEMPLATE = Template(
@@ -46,7 +46,7 @@ _SAVED_SUMMARY_TEMPLATE = Template(
         <dd class="col-span-2 truncate">{{ entry.value }}</dd>
       {% endfor %}
     </dl>
-    """,
+    """
 )
 
 _FIELD_LABELS = {
@@ -58,11 +58,7 @@ _FIELD_LABELS = {
     "expires_in_days": "Expires in days",
 }
 
-_STEP_LABELS = {
-    "identity": "Identity",
-    "scope": "Scope",
-    "approval": "Approval",
-}
+_STEP_LABELS = {"identity": "Identity", "scope": "Scope", "approval": "Approval"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,10 +72,7 @@ class _Section:
     saved: bool
 
 
-def render(
-    form: django_forms.Form,
-    wizard: FormWizard,
-) -> str:
+def render(form: django_forms.Form, wizard: FormWizard) -> str:
     """Render every wizard step as a section gated on its stored state.
 
     The active step shows its bound fields (or the review summary on the

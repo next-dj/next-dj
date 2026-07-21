@@ -124,10 +124,7 @@ class PollBroker:
             yield Change(snapshot=payload, request_id=self._request_ids.get(poll_id))
 
     def _wait_for_new_revision(
-        self,
-        poll_id: int,
-        condition: threading.Condition,
-        baseline: int,
+        self, poll_id: int, condition: threading.Condition, baseline: int
     ) -> int:
         """Block until the revision differs from `baseline` or the wake fires.
 

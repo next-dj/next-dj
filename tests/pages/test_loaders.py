@@ -17,10 +17,7 @@ from next.pages.loaders import (
     build_registered_loaders,
 )
 from next.pages.processors import _get_context_processors, _import_context_processor
-from tests.support import (
-    default_page_router_config,
-    file_router_config_entry,
-)
+from tests.support import default_page_router_config, file_router_config_entry
 
 
 class TestPythonTemplateLoader:
@@ -186,9 +183,7 @@ class TestDjxTemplateLoader:
                 page_instance.register_template(page_file, template_content)
 
         result = page_instance.render(
-            page_file,
-            title="Items",
-            items=["Apple", "Banana"],
+            page_file, title="Items", items=["Apple", "Banana"]
         )
 
         assert "Items" in result
@@ -223,7 +218,7 @@ def get_landing_data(*args, **kwargs):
         page_instance._context_manager.register_context(
             page_file,
             "landing",
-            lambda *_args, **_kwargs: {
+            lambda *args, **kwargs: {
                 "title": "Test Title",
                 "description": "Test Description",
             },
@@ -249,11 +244,7 @@ class TestLayoutTemplateLoader:
         ids=["layout_and_template", "template_only", "layout_only", "neither"],
     )
     def test_can_load_with_layout_files(
-        self,
-        tmp_path,
-        create_layout,
-        create_template,
-        expected_can_load,
+        self, tmp_path, create_layout, create_template, expected_can_load
     ) -> None:
         """Test can_load with different layout and template combinations."""
         loader = LayoutTemplateLoader()
@@ -264,7 +255,7 @@ class TestLayoutTemplateLoader:
         if create_layout:
             layout_file = tmp_path / "layout.djx"
             layout_file.write_text(
-                "<html><body>{% block template %}{% endblock template %}</body></html>",
+                "<html><body>{% block template %}{% endblock template %}</body></html>"
             )
 
         if create_template:
@@ -284,7 +275,7 @@ class TestLayoutTemplateLoader:
         layout_file.write_text("layout content")
 
         with override_settings(
-            NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(tmp_path)},
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(tmp_path)}
         ):
             next_framework_settings.reload()
             result = loader._get_additional_layout_files()
@@ -297,8 +288,7 @@ class TestLayoutTemplateLoader:
         loader = LayoutTemplateLoader()
 
         mock_nf = SimpleNamespace(
-            PAGE_BACKENDS="not-a-list",
-            URL_NAME_TEMPLATE="page_{name}",
+            PAGE_BACKENDS="not-a-list", URL_NAME_TEMPLATE="page_{name}"
         )
         with patch("next.pages.loaders.next_framework_settings", mock_nf):
             assert loader._get_additional_layout_files() == []
@@ -314,20 +304,12 @@ class TestLayoutTemplateLoader:
                 ],
                 [],
             ),
-            (
-                "app_dirs_true",
-                [file_router_config_entry(app_dirs=True)],
-                [],
-            ),
+            ("app_dirs_true", [file_router_config_entry(app_dirs=True)], []),
         ],
         ids=["invalid_config", "app_dirs_true"],
     )
     def test_get_additional_layout_files_scenarios(
-        self,
-        tmp_path,
-        test_case,
-        config,
-        expected_result,
+        self, tmp_path, test_case, config, expected_result
     ) -> None:
         """Test _get_additional_layout_files with different configuration scenarios."""
         loader = LayoutTemplateLoader()
@@ -346,25 +328,13 @@ class TestLayoutTemplateLoader:
                 file_router_config_entry(pages_dir="test_dir"),
                 ["test_dir"],
             ),
-            (
-                "with_app_dirs",
-                file_router_config_entry(app_dirs=True),
-                [],
-            ),
-            (
-                "no_options",
-                file_router_config_entry(),
-                [],
-            ),
+            ("with_app_dirs", file_router_config_entry(app_dirs=True), []),
+            ("no_options", file_router_config_entry(), []),
         ],
         ids=["with_pages_dir", "with_app_dirs", "no_options"],
     )
     def test_get_pages_dirs_for_config_scenarios(
-        self,
-        tmp_path,
-        test_case,
-        config,
-        expected_list,
+        self, tmp_path, test_case, config, expected_list
     ) -> None:
         """Test _get_pages_dirs_for_config with different configuration scenarios."""
         loader = LayoutTemplateLoader()
@@ -471,7 +441,7 @@ class TestLayoutTemplateLoader:
         page_file = tmp_path / "page.py"
 
         with override_settings(
-            NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(tmp_path)},
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(tmp_path)}
         ):
             next_framework_settings.reload()
             result = loader._find_layout_files(page_file)
@@ -517,7 +487,7 @@ class TestLayoutTemplateLoader:
         page_file = child_dir / "page.py"
 
         with override_settings(
-            NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(parent_dir)},
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(parent_dir)}
         ):
             next_framework_settings.reload()
             result = loader._find_layout_files(page_file)
@@ -546,9 +516,7 @@ class TestLayoutTemplateLoader:
         additional_layout.write_text("additional layout")
 
         with override_settings(
-            NEXT_FRAMEWORK={
-                "PAGE_BACKENDS": default_page_router_config(additional_dir),
-            },
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(additional_dir)}
         ):
             next_framework_settings.reload()
             result = loader._find_layout_files(page_file)
@@ -589,14 +557,14 @@ class TestLayoutTemplateLoader:
 
         root_layout = tmp_path / "layout.djx"
         root_layout.write_text(
-            "<html><head><title>Root</title></head><body>{% block template %}{% endblock template %}</body></html>",
+            "<html><head><title>Root</title></head><body>{% block template %}{% endblock template %}</body></html>"
         )
 
         sub_dir = tmp_path / "sub"
         sub_dir.mkdir()
         sub_layout = sub_dir / "layout.djx"
         sub_layout.write_text(
-            "<div class='sub-layout'>{% block template %}{% endblock template %}</div>",
+            "<div class='sub-layout'>{% block template %}{% endblock template %}</div>"
         )
 
         nested_dir = sub_dir / "nested"
@@ -620,7 +588,7 @@ class TestLayoutTemplateLoader:
 
         layout_file = tmp_path / "layout.djx"
         layout_file.write_text(
-            "<html><body>{% block template %}{% endblock template %}</body></html>",
+            "<html><body>{% block template %}{% endblock template %}</body></html>"
         )
 
         page_file = tmp_path / "page.py"
@@ -637,7 +605,7 @@ class TestLayoutTemplateLoader:
         loader = LayoutTemplateLoader()
         layout_file = tmp_path / "layout.djx"
         layout_file.write_text(
-            "<html><body>{% block template %}{% endblock %}</body></html>",
+            "<html><body>{% block template %}{% endblock %}</body></html>"
         )
         page_file = tmp_path / "page.py"
         result = loader.load_template(page_file)
@@ -698,10 +666,7 @@ class TestContextProcessors:
 
     def test_get_context_processors_empty_config(self, page_instance) -> None:
         """Test _get_context_processors with empty ``ROUTERS`` list."""
-        with override_settings(
-            NEXT_FRAMEWORK={"PAGE_BACKENDS": []},
-            TEMPLATES=[],
-        ):
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": []}, TEMPLATES=[]):
             next_framework_settings.reload()
             processors = _get_context_processors()
             assert processors == []
@@ -719,10 +684,7 @@ class TestContextProcessors:
     def test_get_context_processors_no_context_processors(self, page_instance) -> None:
         """Test _get_context_processors with routers but no context_processors."""
         config = [file_router_config_entry(app_dirs=True)]
-        with override_settings(
-            NEXT_FRAMEWORK={"PAGE_BACKENDS": config},
-            TEMPLATES=[],
-        ):
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": config}, TEMPLATES=[]):
             next_framework_settings.reload()
             processors = _get_context_processors()
             assert processors == []
@@ -745,9 +707,9 @@ class TestContextProcessors:
                     "context_processors": [
                         "test_app.context_processors.test_processor",
                         "test_app.context_processors.auth_processor",
-                    ],
+                    ]
                 },
-            },
+            }
         ]
 
         next_pages_config = [file_router_config_entry(app_dirs=True)]
@@ -781,20 +743,20 @@ class TestContextProcessors:
                 "BACKEND": "django.template.backends.django.DjangoTemplates",
                 "OPTIONS": {
                     "context_processors": [
-                        "test_app.context_processors.template_processor",
-                    ],
+                        "test_app.context_processors.template_processor"
+                    ]
                 },
-            },
+            }
         ]
         next_pages_config = [
             file_router_config_entry(
                 app_dirs=True,
                 options={
                     "context_processors": [
-                        "test_app.context_processors.next_pages_processor",
-                    ],
+                        "test_app.context_processors.next_pages_processor"
+                    ]
                 },
-            ),
+            )
         ]
 
         with patch("next.pages.processors.import_string") as mock_import:
@@ -820,13 +782,12 @@ class TestContextProcessors:
             {
                 "BACKEND": "django.template.backends.django.DjangoTemplates",
                 "OPTIONS": {"context_processors": [shared_path]},
-            },
+            }
         ]
         next_pages_config = [
             file_router_config_entry(
-                app_dirs=True,
-                options={"context_processors": [shared_path]},
-            ),
+                app_dirs=True, options={"context_processors": [shared_path]}
+            )
         ]
         with (
             patch("next.pages.processors.import_string", return_value=shared_processor),
@@ -844,10 +805,7 @@ class TestContextProcessors:
         self, page_instance
     ) -> None:
         """With empty TEMPLATES and no router processors, result is empty."""
-        with override_settings(
-            TEMPLATES=[],
-            NEXT_FRAMEWORK={"PAGE_BACKENDS": []},
-        ):
+        with override_settings(TEMPLATES=[], NEXT_FRAMEWORK={"PAGE_BACKENDS": []}):
             next_framework_settings.reload()
             result = _get_context_processors()
             assert result == []
@@ -861,8 +819,7 @@ class TestContextProcessors:
             }
         ]
         with override_settings(
-            TEMPLATES=templates_config,
-            NEXT_FRAMEWORK={"PAGE_BACKENDS": []},
+            TEMPLATES=templates_config, NEXT_FRAMEWORK={"PAGE_BACKENDS": []}
         ):
             next_framework_settings.reload()
             result = _get_context_processors()
@@ -887,14 +844,13 @@ class TestContextProcessors:
                         "context_processors": [
                             "test_app.context_processors.test_processor",
                             "test_app.context_processors.another_processor",
-                        ],
+                        ]
                     },
-                ),
+                )
             ]
 
             with override_settings(
-                NEXT_FRAMEWORK={"PAGE_BACKENDS": config},
-                TEMPLATES=[],
+                NEXT_FRAMEWORK={"PAGE_BACKENDS": config}, TEMPLATES=[]
             ):
                 next_framework_settings.reload()
                 processors = _get_context_processors()
@@ -911,9 +867,9 @@ class TestContextProcessors:
                     "context_processors": [
                         "invalid.module.path",
                         "django.template.context_processors.request",
-                    ],
+                    ]
                 },
-            ),
+            )
         ]
 
         with (
@@ -1015,11 +971,7 @@ class TestContextProcessors:
             ),
             patch("next.pages.manager.logger") as mock_logger,
         ):
-            result = page_instance.render(
-                page_file,
-                mock_request,
-                title="Test Title",
-            )
+            result = page_instance.render(page_file, mock_request, title="Test Title")
 
             assert "Test Title" in result
             assert "good_value" in result
@@ -1050,9 +1002,7 @@ class TestContextProcessors:
             page_instance.render(page_file, mock_request, title="Test Title")
 
     def test_render_with_context_processor_non_dict_return(
-        self,
-        page_instance,
-        tmp_path,
+        self, page_instance, tmp_path
     ) -> None:
         """Test render method with context processor that returns non-dict."""
         page_file = tmp_path / "page.py"
@@ -1133,7 +1083,7 @@ class TestBuildRegisteredLoaders:
             "TEMPLATE_LOADERS": [
                 "next.pages.loaders.DjxTemplateLoader",
                 "next.pages.loaders.PythonTemplateLoader",
-            ],
+            ]
         }
     )
     def test_user_list_replaces_default(self) -> None:
@@ -1152,7 +1102,7 @@ class TestBuildRegisteredLoaders:
                 "does.not.exist.Loader",
                 "next.pages.loaders.LayoutManager",
                 "next.pages.loaders.DjxTemplateLoader",
-            ],
+            ]
         }
     )
     def test_invalid_entries_are_skipped(self) -> None:
@@ -1173,7 +1123,7 @@ class TestBuildRegisteredLoaders:
             "TEMPLATE_LOADERS": [
                 "next.pages.loaders.DjxTemplateLoader",
                 "next.pages.loaders.DjxTemplateLoader",
-            ],
+            ]
         }
     )
     def test_duplicate_entries_registered_once(self) -> None:

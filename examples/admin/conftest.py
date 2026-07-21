@@ -46,9 +46,7 @@ def client() -> NextClient:
 @pytest.fixture()
 def admin_user(db):
     return get_user_model().objects.create_superuser(
-        "admin",
-        "admin@example.com",
-        "admin-pass",
+        "admin", "admin@example.com", "admin-pass"
     )
 
 

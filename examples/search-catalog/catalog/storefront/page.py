@@ -20,7 +20,7 @@ def featured(show: DQuery[int] = DEFAULT_FEATURED) -> list[Product]:
     return list(
         Product.objects.filter(in_stock=True)
         .select_related("category")
-        .order_by("-created_at")[:count],
+        .order_by("-created_at")[:count]
     )
 
 

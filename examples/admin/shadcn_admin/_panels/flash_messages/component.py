@@ -19,9 +19,6 @@ _LEVEL_TO_VARIANT = {
 def flashes(request: HttpRequest) -> list[dict[str, Any]]:
     """Drain `messages` for this request and return alert-ready dicts."""
     return [
-        {
-            "text": str(m),
-            "variant": _LEVEL_TO_VARIANT.get(m.level_tag, "info"),
-        }
+        {"text": str(m), "variant": _LEVEL_TO_VARIANT.get(m.level_tag, "info")}
         for m in get_messages(request)
     ]

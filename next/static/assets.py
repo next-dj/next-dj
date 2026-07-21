@@ -78,10 +78,7 @@ class KindRegistry:
     Example::
 
         default_kinds.register(
-            "css",
-            extension=".css",
-            slot="styles",
-            renderer="render_link_tag",
+            "css", extension=".css", slot="styles", renderer="render_link_tag"
         )
     """
 

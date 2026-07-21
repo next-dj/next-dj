@@ -127,17 +127,10 @@ class TestStaticCollectorInline:
 
     @pytest.mark.parametrize(
         ("kind", "body", "slot"),
-        [
-            ("js", "console.log(1)", "scripts"),
-            ("css", "body{color:red}", "styles"),
-        ],
+        [("js", "console.log(1)", "scripts"), ("css", "body{color:red}", "styles")],
     )
     def test_inline_asset_lands_in_bucket(
-        self,
-        collector: StaticCollector,
-        kind: str,
-        body: str,
-        slot: str,
+        self, collector: StaticCollector, kind: str, body: str, slot: str
     ) -> None:
         collector.add(StaticAsset(url="", kind=kind, inline=body))
         items = collector.assets_in_slot(slot)

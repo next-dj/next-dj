@@ -21,10 +21,7 @@ def partial_meta(host: str | None = None) -> dict[str, str]:
     return meta
 
 
-def partial_request(
-    origin: str | None = "/zoned/",
-    host: str | None = None,
-):
+def partial_request(origin: str | None = "/zoned/", host: str | None = None):
     """Return a partial POST whose form origin resolves to a real page.
 
     Pass `origin=None` to post a partial that names no resolvable origin

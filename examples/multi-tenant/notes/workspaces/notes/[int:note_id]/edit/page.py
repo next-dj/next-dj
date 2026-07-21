@@ -46,9 +46,8 @@ class NoteEditForm(ModelForm):
         self.save()
         return HttpResponseRedirect(
             reverse(
-                "next:page_notes_int_note_id_edit",
-                kwargs={"note_id": self.instance.pk},
-            ),
+                "next:page_notes_int_note_id_edit", kwargs={"note_id": self.instance.pk}
+            )
         )
 
 

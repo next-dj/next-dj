@@ -33,10 +33,7 @@ class FormActionManager:
     bypass the manager and hit a backend directly are not tracked, as
     they were never supported."""
 
-    def __init__(
-        self,
-        backends: "list[FormActionBackend] | None" = None,
-    ) -> None:
+    def __init__(self, backends: "list[FormActionBackend] | None" = None) -> None:
         """Initialise with explicit backends or defer loading to settings."""
         self._backends: list[FormActionBackend] = list(backends) if backends else []
 
@@ -55,8 +52,7 @@ class FormActionManager:
         self._version += 1
         self._backends = []
         configs = cast(
-            "list[Any]",
-            getattr(next_framework_settings, "FORM_ACTION_BACKENDS", []),
+            "list[Any]", getattr(next_framework_settings, "FORM_ACTION_BACKENDS", [])
         )
         for config in configs:
             if not isinstance(config, dict):
@@ -65,8 +61,7 @@ class FormActionManager:
                 self._backends.append(FormActionFactory.create_backend(config))
             except ImproperlyConfigured:
                 logger.exception(
-                    "Error creating form-action backend from config %s",
-                    config,
+                    "Error creating form-action backend from config %s", config
                 )
 
     def _ensure_backends(self) -> None:
@@ -116,10 +111,7 @@ class FormActionManager:
         )
 
     def get_action_meta(
-        self,
-        action_name: str,
-        *,
-        page_path: str | None = None,
+        self, action_name: str, *, page_path: str | None = None
     ) -> "ActionMeta | None":
         """Return the action meta from the first backend that knows the name."""
         self._ensure_backends()
@@ -130,10 +122,7 @@ class FormActionManager:
         return None
 
     def require_action_meta(
-        self,
-        action_name: str,
-        *,
-        page_path: str | None = None,
+        self, action_name: str, *, page_path: str | None = None
     ) -> "ActionMeta":
         """Return the action meta or raise with close matches when none exists."""
         meta = self.get_action_meta(action_name, page_path=page_path)
@@ -168,9 +157,7 @@ form_action_manager = FormActionManager()
 
 
 def build_form_namespace_for_action(
-    action_name: str,
-    request: "HttpRequest",
-    page_path: str | None = None,
+    action_name: str, request: "HttpRequest", page_path: str | None = None
 ) -> types.SimpleNamespace | None:
     """Build the form namespace used by the form template tag."""
     meta = form_action_manager.get_action_meta(action_name, page_path=page_path)
@@ -180,8 +167,7 @@ def build_form_namespace_for_action(
 
 
 def _build_form_namespace_from_meta(
-    meta: "ActionMeta",
-    request: "HttpRequest",
+    meta: "ActionMeta", request: "HttpRequest"
 ) -> types.SimpleNamespace | None:
     """Build the form namespace for already-resolved action meta."""
     wizard_class = meta.get("wizard_class")
