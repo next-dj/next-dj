@@ -1,11 +1,3 @@
-"""Signal receivers that record which template loader wins per page.
-
-Hooked on `template_loaded` so the admin or debug tooling can see whether a
-page was rendered from a `.djx` file or from a custom loader such as
-`MarkdownTemplateLoader`. The info is stored in a module-level dict keyed
-by file path.
-"""
-
 from __future__ import annotations
 
 import threading

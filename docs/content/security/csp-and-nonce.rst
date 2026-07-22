@@ -20,6 +20,9 @@ A dynamically inserted element carries the page nonce, so a policy that allows n
 The bootstrap script tag already carries the nonce your CSP middleware stamps on it, so there is nothing extra to configure on the runtime side.
 The asset elements inherit it.
 
+The nonce is the only attribute the runtime carries over from the page.
+An element it builds for a patch-inserted asset takes a fixed attribute set, so an ``integrity`` or ``crossorigin`` attribute a backend writes into its tag templates reaches the browser on a full render alone, see :doc:`/content/topics/partial-rendering/limitations`.
+
 Scripts in Patches Never Run
 ----------------------------
 

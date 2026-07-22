@@ -186,10 +186,10 @@ class UnknownContextNameError(LookupError):
 class ReservedContextKeyError(ValueError):
     """Raised when `context()` names a key the init payload owns.
 
-    A full render lets the framework value of a reserved key win, so a
-    context patch that names one would leave the client store disagreeing
-    with the page it patches. The explicit naming is a caller bug refused
-    at the builder rather than merged on the client.
+    A full render keeps a reserved key for the framework, so a context
+    patch that names one would leave the client store disagreeing with the
+    page it patches. The explicit naming is a caller bug refused at the
+    builder rather than merged on the client.
     """
 
     def __init__(self, reserved: frozenset[str]) -> None:
@@ -198,7 +198,7 @@ class ReservedContextKeyError(ValueError):
         names = ", ".join(sorted(reserved))
         super().__init__(
             f"Context patch names the reserved init-payload key(s) {names}. "
-            "The framework writes those keys on a full render, rename the "
+            "The framework owns those keys on every render, rename the "
             "serialize provider instead."
         )
 

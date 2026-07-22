@@ -58,7 +58,7 @@ Supply the handler on the client through a co-located asset.
 The handler receives the patch and an apply context.
 The patch carries the payload fields the server authored, here ``patch.count``.
 The context exposes ``dispatch`` for an event on the ``Next.on`` bus, ``mergeContext`` for a context merge, and ``root`` for the document.
-It also exposes ``dev`` for the runtime's dev mode, described in the Client Runtime section of :doc:`reference`.
+It also exposes ``dev`` for the runtime's dev mode, which follows Django ``DEBUG`` and is described in the Client Runtime section of :doc:`reference`.
 Registering the handler at load time is safe, because ``defineOp`` records a handler rather than scanning the DOM.
 
 The envelope carries the custom verb beside the built-ins.
@@ -107,6 +107,7 @@ A value is pushed by the name of a registered ``serialize=True`` provider on the
 
 A name that is not a ``serialize=True`` provider of the origin page raises ``UnknownContextNameError``, so the verb cannot smuggle an arbitrary value past the provider contract.
 The ``$csrf`` and ``$dev`` keys of the init payload raise ``ReservedContextKeyError`` whether or not the origin page registered them, symmetric to ``event()`` refusing a framework-owned event name, so the ``$`` namespace stays the framework's on a patch as it is on a full render.
+A page that registers either name loses that value on the full render too, so no patch has anything to update, see :doc:`/content/topics/static-assets/js-context`.
 
 Read the merged value on the client through ``Next.context`` and react to the merge through ``context-updated``.
 The event payload carries the whole merged store in ``context`` and the keys of the delta in ``changed``, so a listener filters on ``changed`` instead of re-reading every value.

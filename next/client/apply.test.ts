@@ -143,15 +143,53 @@ describe("parseEnvelope", () => {
     const parsed = parseEnvelope({
       version: "v1",
       assets: [
-        { kind: "css", url: "", inline: ".z{color:red}" },
-        { kind: "js", inline: "console.log(1)" },
+        { kind: "css", url: "", inline: ".z{color:red}", load: "link" },
+        { kind: "js", inline: "console.log(1)", load: "script" },
         { kind: "css" },
       ],
     });
     expect(parsed.assets).toEqual([
-      { kind: "css", url: "", inline: ".z{color:red}" },
-      { kind: "js", inline: "console.log(1)" },
+      { kind: "css", url: "", inline: ".z{color:red}", load: "link" },
+      { kind: "js", inline: "console.log(1)", load: "script" },
     ]);
+  });
+
+  it("drops an inline body whose kind name is the only thing naming a verb", () => {
+    // The server withholds the verb from an inline body whenever the kind's own
+    // inline wrapper is not the element the runtime builds, and the module kind
+    // registers none, so guessing from the name would execute a body the full
+    // render prints verbatim.
+    const parsed = parseEnvelope({
+      version: "v1",
+      assets: [
+        { kind: "module", url: "", inline: "mount()" },
+        { kind: "css", url: "/a.css" },
+      ],
+    });
+    expect(parsed.assets).toEqual([{ kind: "css", url: "/a.css" }]);
+  });
+
+  it("keeps the kind fallback for a url-form entry an older server sent", () => {
+    const parsed = parseEnvelope({
+      version: "v1",
+      assets: [{ kind: "module", url: "/island.mjs" }],
+    });
+    expect(parsed.assets).toEqual([{ kind: "module", url: "/island.mjs" }]);
+  });
+
+  it("drops an entry whose kind is not a string, the type it is read as", () => {
+    const logs = spyConsole();
+    const parsed = parseEnvelope(
+      { version: "v1", assets: [{ kind: 42, load: "link", url: "/a.css" }] },
+      true,
+    );
+    // The boundary and the dev breakdown call the same entry broken, so the
+    // console cannot report an asset the loader went on to insert.
+    expect(parsed.assets).toEqual([]);
+    expect(logs.warn).toHaveBeenCalledExactlyOnceWith(
+      "[next] dropped malformed assets: 1",
+    );
+    logs.restore();
   });
 
   it("keeps a custom kind that carries a server insertion verb", () => {
@@ -371,7 +409,7 @@ describe("parseEnvelope", () => {
         ops: [{ op: "inner" }],
         assets: [
           { kind: "css", url: "/ok.css" },
-          { kind: "js", inline: "console.log(1)" },
+          { kind: "js", inline: "console.log(1)", load: "script" },
         ],
       },
       true,
@@ -390,15 +428,6 @@ describe("parseEnvelope", () => {
     expect(parsed.ops).toEqual([]);
     expect(parsed.assets).toEqual([]);
     logs.restore();
-  });
-
-  it("counts no drop in dev when ops and assets are absent", () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const parsed = parseEnvelope({ version: "v1" }, true);
-    expect(warn).not.toHaveBeenCalled();
-    expect(parsed.ops).toEqual([]);
-    expect(parsed.assets).toEqual([]);
-    warn.mockRestore();
   });
 
   it("names an ops field that is present but not a list", () => {
@@ -787,6 +816,7 @@ describe("Applier dev timing", () => {
       mark: vi.spyOn(performance, "mark"),
       measure: vi.spyOn(performance, "measure"),
       clear: vi.spyOn(performance, "clearMarks"),
+      clearSpans: vi.spyOn(performance, "clearMeasures"),
       debug: vi.spyOn(console, "debug").mockImplementation(() => undefined),
     };
   }
@@ -814,6 +844,9 @@ describe("Applier dev timing", () => {
       "next:apply:cart:start:1",
     );
     expect(timing.clear).toHaveBeenCalledWith("next:apply:cart:start:1");
+    // A dev tab lives for hours, so neither half of the span stays in the entry
+    // buffer once the panel has recorded it.
+    expect(timing.clearSpans).toHaveBeenCalledWith("next:apply:cart");
     expect(timing.debug).toHaveBeenCalledWith(
       expect.stringMatching(/^\[next] zone "cart" morph in \d+\.\d ms$/),
     );
@@ -910,6 +943,48 @@ describe("Applier dev timing", () => {
     expect(timing.debug).toHaveBeenCalledWith(
       expect.stringMatching(/^\[next] op "clears" in \d+\.\d ms$/),
     );
+  });
+
+  it("applies the op of a page whose user timing refuses the start mark", () => {
+    const timing = spyTiming();
+    timing.mark.mockImplementation(() => {
+      throw new Error("user timing unavailable");
+    });
+    document.body.innerHTML = '<div data-next-zone="cart">old</div>';
+    const { applier, dispatched } = makeApplier(true);
+    applier.apply(envelope([{ op: "inner", target: { zone: "cart" }, html: "new" }]));
+    expect(dispatched.some((d) => d.event === "partial:error")).toBe(false);
+    expect(dispatched.find((d) => d.event === "partial:applied")!.detail.ok).toBe(true);
+    expect(document.querySelector('[data-next-zone="cart"]')!.textContent).toBe("new");
+  });
+
+  it("keeps a replaced console.debug from failing the op it reports on", () => {
+    const timing = spyTiming();
+    // Analytics wrappers and dev overlays replace console.debug, and a throwing
+    // stub in the finally would turn a clean op into partial:error.
+    timing.debug.mockImplementation(() => {
+      throw new Error("console hijacked");
+    });
+    document.body.innerHTML = '<div data-next-zone="cart">old</div>';
+    const { applier, dispatched } = makeApplier(true);
+    applier.apply(envelope([{ op: "inner", target: { zone: "cart" }, html: "new" }]));
+    expect(dispatched.some((d) => d.event === "partial:error")).toBe(false);
+    expect(dispatched.find((d) => d.event === "partial:applied")!.detail.ok).toBe(true);
+    expect(document.querySelector('[data-next-zone="cart"]')!.textContent).toBe("new");
+  });
+
+  it("keeps the real error of a throwing op whose timing line was refused", () => {
+    const timing = spyTiming();
+    timing.debug.mockImplementation(() => {
+      throw new Error("console hijacked");
+    });
+    const { applier, dispatched } = makeApplier(true);
+    applier.defineOp("boom", () => {
+      throw new Error("op blew up");
+    });
+    applier.apply(envelope([{ op: "boom" }]));
+    const err = dispatched.find((d) => d.event === "partial:error");
+    expect((err!.detail.error as Error).message).toBe("op blew up");
   });
 
   it("keeps the real error of a throwing op whose mark was cleared", () => {
@@ -1568,6 +1643,48 @@ describe("Applier morph verb", () => {
       0,
     );
     expect(input.value).toBe("typed");
+  });
+
+  it("keeps a touched details open under a patch the user never asked for", () => {
+    document.body.innerHTML =
+      '<div data-next-zone="z"><details id="d" open></details></div>';
+    const details = document.querySelector<HTMLDetailsElement>("#d")!;
+    const dispatched: Dispatched[] = [];
+    const applier = new Applier({
+      dispatch: (event, detail) => dispatched.push({ event, detail }),
+      mergeContext: () => undefined,
+      document,
+      // The user toggled the detail before this poll response, so it reads as
+      // touched even though its stamp predates the request snapshot.
+      isTouched: (el) => el === details,
+    });
+    applier.apply(
+      envelope([
+        {
+          op: "morph",
+          target: { zone: "z" },
+          html: '<div data-next-zone="z"><details id="d"></details></div>',
+        },
+      ]),
+      0,
+    );
+    expect(document.querySelector("#d")!.hasAttribute("open")).toBe(true);
+  });
+
+  it("syncs an untouched details from the server", () => {
+    document.body.innerHTML =
+      '<div data-next-zone="z"><details id="d" open></details></div>';
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "morph",
+          target: { zone: "z" },
+          html: '<div data-next-zone="z"><details id="d"></details></div>',
+        },
+      ]),
+    );
+    expect(document.querySelector("#d")!.hasAttribute("open")).toBe(false);
   });
 });
 

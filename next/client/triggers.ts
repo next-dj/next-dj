@@ -26,8 +26,10 @@ import {
   MAX_POLL_MS,
   MIN_POLL_MS,
   currentUrl,
+  devReader,
   matching,
 } from "./protocol";
+import type { DevFlag } from "./protocol";
 import type { VisibilityAdapter } from "./sse";
 import type { Clock } from "./wire";
 
@@ -100,8 +102,9 @@ export interface TriggerDeps {
   confirm?: ConfirmAdapter;
   // Dev builds warn on a hand-written data-next-* value outside its closed set,
   // which the runtime would otherwise drop in silence. Injectable so tests
-  // assert both the warn-on and the silent-off behaviour.
-  dev?: boolean;
+  // assert both the warn-on and the silent-off behaviour, and a getter form lets
+  // the owner flip it without rebuilding the delegated listeners and the timers.
+  dev?: DevFlag;
 }
 
 export interface Triggers {
@@ -115,13 +118,21 @@ export interface Triggers {
   _reset(): void;
 }
 
+// Add a zone to the per-page batch, one comma-joined GET per owning page. The
+// load scan and the poll tick both group zones by their layer-resolved page.
+function addZone(batches: Map<string, string[]>, url: string, zone: string): void {
+  const zones = batches.get(url);
+  if (zones === undefined) batches.set(url, [zone]);
+  else zones.push(zone);
+}
+
 export function createTriggers(deps: TriggerDeps): Triggers {
   const doc = deps.document ?? document;
   const clock = deps.clock ?? defaultClock();
   const observer = deps.observer ?? defaultObserver();
   const confirm = deps.confirm ?? defaultConfirm();
   const visibility = deps.visibility ?? defaultVisibility();
-  const dev = deps.dev ?? false;
+  const dev = devReader(deps.dev);
   // Per-element debounce handles, keyed by the element itself.
   const timers = new WeakMap<Element, number>();
   // Lazy zones already activated, so a parent morph that re-inserts the same
@@ -194,6 +205,12 @@ export function createTriggers(deps: TriggerDeps): Triggers {
   // intent, never headers.
   function zoneGet(url: string, zone: string): void {
     deps.fetch({ url, zone });
+  }
+
+  // Fire one comma-joined zone GET per owning page, the batch the load scan and
+  // the poll tick both build.
+  function flushBatches(batches: Map<string, string[]>): void {
+    for (const [url, zones] of batches) zoneGet(url, zones.join(","));
   }
 
   // A pagination link or sentinel GETs the next page with a merge intent, the
@@ -401,17 +418,14 @@ export function createTriggers(deps: TriggerDeps): Triggers {
         membership.delete(el);
         continue;
       }
-      const url = pageUrl(el);
-      const zones = batches.get(url);
-      if (zones === undefined) batches.set(url, [zone]);
-      else zones.push(zone);
+      addZone(batches, pageUrl(el), zone);
       if (ms !== interval) {
         group.elements.delete(el);
         membership.delete(el);
         joinPoll(el, ms);
       }
     }
-    for (const [url, zones] of batches) zoneGet(url, zones.join(","));
+    flushBatches(batches);
     group.lastFire = clock.now();
     if (group.elements.size === 0) {
       groups.delete(interval);
@@ -458,14 +472,11 @@ export function createTriggers(deps: TriggerDeps): Triggers {
       const zone = el.getAttribute(ATTR_ZONE);
       if (zone === null) continue;
       activated.add(el);
-      const url = pageUrl(el);
-      const zones = batches.get(url);
-      if (zones === undefined) batches.set(url, [zone]);
-      else zones.push(zone);
+      addZone(batches, pageUrl(el), zone);
     }
     // The wire queues per path and zone batch, so a re-fired batch supersedes
     // its own page's predecessor and never another page's.
-    for (const [url, zones] of batches) zoneGet(url, zones.join(","));
+    flushBatches(batches);
   }
 
   // The attribute of an element matched by an attribute selector, so the null
@@ -479,7 +490,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
   // outside its closed set, a poll interval failing the grammar or bounds, a
   // poll element naming no zone. Dev-only.
   function validateAttrs(root: ParentNode): void {
-    if (!dev) return;
+    if (!dev()) return;
     for (const el of matching(root, `[${LAZY_ATTR}]`)) {
       const value = attrOf(el, LAZY_ATTR);
       if (!LAZY_VALUES.has(value)) warnAttr(LAZY_ATTR, value, LAZY_VALUES);

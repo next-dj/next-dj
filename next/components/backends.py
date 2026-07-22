@@ -91,7 +91,9 @@ class FileComponentsBackend(ComponentsBackend):
 
         Under `LAZY_COMPONENT_MODULES` nothing imports a `component.py` before
         a render needs it, so a caller reading decorator state asks for the
-        import here instead of finding a half-populated registry.
+        import here instead of finding a half-populated registry. The import is
+        deliberately unconditional, which is why a system check that walks
+        decorator state pays the eager import that the lazy mode avoids.
         """
         self._ensure_loaded()
         self.import_all_component_modules()

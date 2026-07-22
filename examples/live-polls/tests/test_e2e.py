@@ -19,6 +19,7 @@ from next.forms.signals import action_dispatched, form_validation_failed
 from next.partial.headers import REQUEST_ID
 from next.testing import (
     NextClient,
+    PartialEnvelope,
     SignalRecorder,
     build_form_for,
     envelope_of,
@@ -368,6 +369,49 @@ class TestPartialVote:
         assert 'data-poll-chart-data data-total-votes="4"' in html
         assert f'data-choice-id="{tabs.pk}"' in html
         assert 'data-choice-votes="4"' in html
+
+
+class TestZoneAssetsCarryInsertionVerbs:
+    """The asset manifest of a zone morph names how the client inserts each file.
+
+    `PollsConfig.ready` registers the `vue` kind with `render_module_tag`,
+    so the co-located `component.vue` files travel with `load: "module"`
+    and the shared stylesheet with `load: "link"`.
+    """
+
+    def _vote_envelope(self, client: NextClient, poll: Poll) -> PartialEnvelope:
+        choice = poll.choices.get(text="Tabs")
+        return envelope_of(
+            client.post_action(
+                "vote_form",
+                {"poll": poll.pk, "choice": choice.pk},
+                origin=f"/polls/{poll.pk}/",
+                partial=True,
+                zones="poll-results",
+            )
+        )
+
+    def test_every_asset_declares_a_load_verb(
+        self, client: NextClient, poll: Poll
+    ) -> None:
+        assets = self._vote_envelope(client, poll).assets
+        assert assets
+        assert all("load" in asset for asset in assets)
+
+    def test_vue_assets_load_as_modules(self, client: NextClient, poll: Poll) -> None:
+        assets = self._vote_envelope(client, poll).assets
+        vue = [asset for asset in assets if asset["kind"] == "vue"]
+        assert vue
+        assert {asset["load"] for asset in vue} == {"module"}
+        assert any("poll_chart/component.vue" in asset["url"] for asset in vue)
+
+    def test_stylesheet_asset_loads_as_a_link(
+        self, client: NextClient, poll: Poll
+    ) -> None:
+        assets = self._vote_envelope(client, poll).assets
+        css = [asset for asset in assets if asset["kind"] == "css"]
+        assert [asset["load"] for asset in css] == ["link"]
+        assert css[0]["url"].endswith("poll_chart.css")
 
 
 class TestBroadcastReceiver:

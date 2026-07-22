@@ -4,8 +4,10 @@
 // id-sets (a wrapper without an id still matches through the ids of its
 // children), then a left-to-right child walk reuses, moves, creates, or discards
 // nodes. Live properties (value/checked/selected/open) split from their
-// attribute twins and honour an injected dirty predicate. The server authors the
-// target, so the engine never reaches outside it.
+// attribute twins and honour an injected dirty predicate, and a <details> open
+// state honours a touched predicate so a user-opened detail survives a patch it
+// never asked for. The server authors the target, so the engine never reaches
+// outside it.
 
 import { defaultMove } from "./adapters";
 
@@ -21,6 +23,11 @@ export interface MorphOptions {
   // A field carrying local input made after the request snapshot. Default
   // () => false. A dirty field keeps its live value untouched.
   isDirty?: (field: Element) => boolean;
+  // Whether an element was ever touched, blind to the snapshot. Default
+  // () => false. A <details> the user has opened keeps its open state against a
+  // patch it never asked for, since the toggle has no live focus signal a field
+  // relies on.
+  isTouched?: (el: Element) => boolean;
   // The move adapter. Default moveBefore with an insertBefore fallback. It is a
   // DI-seam so the native branch is exercised through a mock in jsdom.
   move?: Move;
@@ -38,6 +45,7 @@ export interface MorphOptions {
 interface Ctx {
   ids: Map<Element, Set<string>>;
   isDirty: (field: Element) => boolean;
+  isTouched: (el: Element) => boolean;
   move: Move;
   beforeNode: (oldNode: Node | null, newNode: Node) => boolean | void;
   afterNode: (oldNode: Node, newNode: Node) => void;
@@ -255,16 +263,20 @@ function syncLive(ctx: Ctx, oldEl: Element, newEl: Element): void {
 }
 
 // Some attributes are owned by syncLive, not the generic pass: the value, checked
-// and selected twins are set there with their dirty rule, a toggled <details> is
-// dirty and keeps its open state, and a <dialog>'s open belongs to the layer
-// surface, the morph boundary.
+// and selected twins are set there with their dirty rule, a <details> the user
+// has ever toggled keeps its open state, and a <dialog>'s open belongs to the
+// layer surface, the morph boundary.
 function skipAttribute(ctx: Ctx, el: Element, name: string): boolean {
   const tag = el.tagName;
   if (name === "value" || name === "checked") return tag === "INPUT";
   if (name === "selected") return tag === "OPTION";
   if (name === "open") {
     if (tag === "DIALOG") return true;
-    return tag === "DETAILS" && ctx.isDirty(el);
+    // A <details> is server-owned until the user first toggles it, then it is
+    // the user's for the life of the page: the snapshot rule would resync it
+    // shut under a poll or SSE patch the user never asked for, since a toggle
+    // predating the request snapshot reads as clean.
+    return tag === "DETAILS" && ctx.isTouched(el);
   }
   return false;
 }
@@ -499,6 +511,7 @@ export function morph(
   const ctx: Ctx = {
     ids,
     isDirty: options.isDirty ?? (() => false),
+    isTouched: options.isTouched ?? (() => false),
     move: options.move ?? defaultMove,
     beforeNode: options.beforeNode ?? (() => undefined),
     afterNode: options.afterNode ?? (() => undefined),

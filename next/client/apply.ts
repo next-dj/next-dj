@@ -11,9 +11,10 @@ import {
   asString,
   cssEscape,
   currentUrl,
+  devReader,
   isRecord,
 } from "./protocol";
-import type { PartialError } from "./protocol";
+import type { DevFlag, PartialError } from "./protocol";
 import type { Navigate } from "./wire";
 
 export interface Target {
@@ -185,11 +186,20 @@ function isAssetLoad(value: unknown): value is AssetLoad {
   return value === "link" || value === "script" || value === "module";
 }
 
-// The insertion verb of a wire asset. A verb the server spelled out wins, and
-// the three built-in kinds keep their implied verb so an envelope from a server
-// that predates the field still loads.
-export function assetLoad(kind: unknown, load: unknown): AssetLoad | undefined {
+// The insertion verb of a wire asset. A verb the server spelled out wins, and a
+// url-form entry of a built-in kind keeps its implied verb so an envelope from a
+// server that predates the field still loads. An inline body takes no such
+// fallback: the server only spells the verb when the kind's inline wrapper is the
+// element this runtime would build, and the module kind has no such wrapper, so
+// guessing from the name would execute a body a full page render prints
+// verbatim.
+export function assetLoad(
+  kind: unknown,
+  load: unknown,
+  inline: unknown,
+): AssetLoad | undefined {
   if (isAssetLoad(load)) return load;
+  if (typeof inline === "string") return undefined;
   if (kind === "css") return "link";
   if (kind === "js") return "script";
   if (kind === "module") return "module";
@@ -198,15 +208,15 @@ export function assetLoad(kind: unknown, load: unknown): AssetLoad | undefined {
 
 // Narrow an unknown wire entry to an Asset. The manifest crosses the wire
 // boundary like the ops do, so a malformed entry is dropped here rather than
-// cast blind into envelope.assets and the event details. An entry whose
-// insertion verb does not resolve is dropped too, since a partial:applied
-// listener would otherwise read a load the type promises is a verb.
+// cast blind into envelope.assets and the event details. The kind is checked
+// against the type it is declared as, so this boundary and the dev breakdown
+// call the same entries broken. An entry whose insertion verb does not resolve
+// is dropped too, since a partial:applied listener would otherwise read a load
+// the type promises is a verb.
 export function isAsset(value: unknown): value is Asset {
   return (
-    isRecord(value) &&
-    (value.load === undefined || isAssetLoad(value.load)) &&
-    assetLoad(value.kind, value.load) !== undefined &&
-    (typeof value.url === "string" || typeof value.inline === "string")
+    isWellFormedAsset(value) &&
+    assetLoad(value.kind, value.load, value.inline) !== undefined
   );
 }
 
@@ -315,11 +325,17 @@ export interface ApplyDeps {
   mergeContext: (data: Record<string, unknown>) => void;
   document?: Document;
   // Dev builds warn on each neutralised script. The flag is injectable so
-  // tests assert both the warn-on and the silent-off behaviour.
-  dev?: boolean;
+  // tests assert both the warn-on and the silent-off behaviour, and a getter
+  // form lets the owner flip it without rebuilding the applier and losing the
+  // custom ops registered against it.
+  dev?: DevFlag;
   // Build the morph dirty predicate from the request snapshot wire.ts threads
   // in. Absent, no field is treated as dirty and the server value always wins.
   dirtySince?: (snapshot: number) => (field: Element) => boolean;
+  // Whether an element was ever touched, blind to any snapshot. It carries the
+  // <details> open state past a patch the user never asked for. Absent, no
+  // element reads as touched and the server open state wins.
+  isTouched?: (el: Element) => boolean;
   // The layer stack, consulted for zone targets (top layer down) and the home
   // of layer.close and toast. Absent, zone resolve falls back to the document.
   layers?: LayerBridge;
@@ -377,7 +393,7 @@ function parseFormMeta(value: unknown): FormMeta | null {
 // measure of "broken" at this boundary.
 function isWellFormedAsset(
   value: unknown,
-): value is { kind: string; load: AssetLoad | undefined } {
+): value is { kind: string; load: AssetLoad | undefined; inline?: unknown } {
   return (
     isRecord(value) &&
     typeof value.kind === "string" &&
@@ -412,7 +428,7 @@ function reportDropped(wire: RawEnvelope): void {
   for (const entry of rawAssets) {
     if (!isWellFormedAsset(entry)) {
       malformedAssets += 1;
-    } else if (assetLoad(entry.kind, entry.load) === undefined) {
+    } else if (assetLoad(entry.kind, entry.load, entry.inline) === undefined) {
       skipped += 1;
       kinds.add(entry.kind);
     }
@@ -468,6 +484,7 @@ export class Applier {
   readonly #mergeContext: (data: Record<string, unknown>) => void;
   readonly #document: Document;
   readonly #dirtySince: (snapshot: number) => (field: Element) => boolean;
+  readonly #isTouched: (el: Element) => boolean;
   readonly #layers: LayerBridge | undefined;
   readonly #history: HistoryAdapter | undefined;
   readonly #navigate: Navigate | undefined;
@@ -475,7 +492,7 @@ export class Applier {
   readonly #mount: MountRegistry | undefined;
   readonly #refresh: ZoneFetch | undefined;
   readonly #here: () => string;
-  readonly #dev: boolean;
+  readonly #dev: () => boolean;
   // Monotonic apply counter per zone. The lazy-zone triggers read it so a zone
   // whose ancestor was re-created mid-flight does not enqueue a stale second GET.
   readonly #applied = new Map<string, number>();
@@ -486,8 +503,9 @@ export class Applier {
     this.#dispatch = deps.dispatch;
     this.#mergeContext = deps.mergeContext;
     this.#document = deps.document ?? document;
-    this.#dev = deps.dev ?? false;
+    this.#dev = devReader(deps.dev);
     this.#dirtySince = deps.dirtySince ?? (() => () => false);
+    this.#isTouched = deps.isTouched ?? (() => false);
     this.#layers = deps.layers;
     this.#history = deps.history;
     this.#navigate = deps.navigate;
@@ -523,7 +541,7 @@ export class Applier {
   // a continuation. With no asset bridge the gate is a straight-through call
   // and the whole apply stays synchronous.
   apply(raw: unknown, snapshot?: number, key?: string, page?: string): Envelope {
-    const envelope = parseEnvelope(raw, this.#dev);
+    const envelope = parseEnvelope(raw, this.#dev());
     // A version mismatch is a full visit instead of an apply, guarded against a
     // reload loop inside the bridge. true means the bridge took over.
     if (this.#assets?.versionMismatch(envelope.version, this.#here())) {
@@ -562,17 +580,7 @@ export class Applier {
         if (!this.#timedOp(op, state)) ok = false;
       } catch (error) {
         ok = false;
-        const target = describeOpTarget(op);
-        this.#emit(
-          "partial:error",
-          {
-            kind: "op",
-            op: op.op,
-            ...(target !== undefined ? { target } : {}),
-            error,
-          } satisfies PartialError,
-          false,
-        );
+        this.#opError(op, error);
       }
     }
     if (envelope.csrf) this.#rotateCsrf(envelope.csrf);
@@ -597,7 +605,7 @@ export class Applier {
   // rest of the page timeline. Production stops at the first line, one branch on
   // the hot path.
   #timedOp(patch: Patch, state: ApplyState): boolean {
-    if (!this.#dev) return this.#applyOp(patch, state);
+    if (!this.#dev()) return this.#applyOp(patch, state);
     const zone = zoneOf(patch);
     const label = zone ?? patch.op;
     // The serial keeps this mark distinct from the mark of a nested apply under
@@ -605,14 +613,14 @@ export class Applier {
     // the plain name a reader looks for in the panel.
     this.#timings += 1;
     const startMark = `next:apply:${label}:start:${this.#timings}`;
-    performance.mark(startMark);
+    openMeasure(startMark);
     const started = performance.now();
     try {
       return this.#applyOp(patch, state);
     } finally {
       const ms = (performance.now() - started).toFixed(1);
       closeMeasure(`next:apply:${label}`, startMark);
-      console.debug(
+      reportTiming(
         zone === undefined
           ? `[next] op "${patch.op}" in ${ms} ms`
           : `[next] zone "${zone}" ${patch.op} in ${ms} ms`,
@@ -641,6 +649,14 @@ export class Applier {
       return true;
     }
     // An unknown verb is a single skipped op, never a poisoned envelope.
+    this.#opError(patch, new Error(`unknown op ${patch.op}`));
+    return false;
+  }
+
+  // The partial:error of one failed op, its target named when the patch carried
+  // a recognised address. Shared by the contained-throw path and the unknown
+  // verb so both report the failure the same way.
+  #opError(patch: Patch, error: unknown): void {
     const target = describeOpTarget(patch);
     this.#emit(
       "partial:error",
@@ -648,11 +664,10 @@ export class Applier {
         kind: "op",
         op: patch.op,
         ...(target !== undefined ? { target } : {}),
-        error: new Error(`unknown op ${patch.op}`),
+        error,
       } satisfies PartialError,
       false,
     );
-    return false;
   }
 
   // The built-in verbs ride the same apply path and ApplyContext as the custom
@@ -670,10 +685,8 @@ export class Applier {
         this.#inner(patch, state);
         return;
       case "append":
-        this.#merge(patch, "append", state);
-        return;
       case "prepend":
-        this.#merge(patch, "prepend", state);
+        this.#merge(patch, state);
         return;
       case "remove":
         this.#remove(patch, state);
@@ -710,7 +723,7 @@ export class Applier {
       dispatch: this.#dispatch,
       mergeContext: this.#mergeContext,
       root: this.#document,
-      dev: this.#dev,
+      dev: this.#dev(),
     };
   }
 
@@ -775,7 +788,8 @@ export class Applier {
     // mark, not the detached original the mount pass would skip.
     const result = morph(node, content, {
       isDirty: state.isDirty,
-      dev: this.#dev,
+      isTouched: this.#isTouched,
+      dev: this.#dev(),
     });
     this.#mark(result, patch.target, state);
   }
@@ -825,7 +839,7 @@ export class Applier {
   // append and prepend dedupe by data-next-key, falling back to id: an existing
   // node with the same key is replaced in place, not duplicated, so a re-fetched
   // page of a paginated list cannot double its rows.
-  #merge(patch: MergePatch, side: "append" | "prepend", state: ApplyState): void {
+  #merge(patch: MergePatch, state: ApplyState): void {
     const node = this.#resolve(patch.target, state);
     if (node === null) return;
     const fragment = this.#fragment(patch.html ?? "", patch.target);
@@ -876,7 +890,7 @@ export class Applier {
       index.set(key, child);
     }
     if (fired && missed.length > 0) this.#reconcile(node, missed);
-    if (side === "append") node.append(fresh);
+    if (patch.op === "append") node.append(fresh);
     else node.prepend(fresh);
     this.#mark(node, patch.target, state);
     for (const child of incoming) state.touched.push(child);
@@ -947,7 +961,7 @@ export class Applier {
     const scripts = root.querySelectorAll("script");
     for (const script of Array.from(scripts)) {
       script.remove();
-      if (this.#dev) {
+      if (this.#dev()) {
         console.warn(
           `[next.partial] removed a <script> from a patch targeting ${
             describeTarget(target) ?? "no target"
@@ -1073,15 +1087,38 @@ function keyIndex(container: Element): Map<string, Element> {
   return index;
 }
 
+// Open the diagnostic span of one op. Same containment as closeMeasure: the mark
+// runs before the try block that guards the op, so a page whose user timing is
+// stubbed or exhausted would otherwise fail the op it was about to measure.
+function openMeasure(startMark: string): void {
+  try {
+    performance.mark(startMark);
+  } catch {
+    // A measurement never decides the fate of what it measures.
+  }
+}
+
 // Close the diagnostic span of one op. A user-timing failure stays inside here,
 // since thrown from the finally of #timedOp it would displace the outcome of the
 // op and the real error of an op that threw.
 function closeMeasure(name: string, startMark: string): void {
   try {
     performance.measure(name, startMark);
-    // The measure holds the span from here on, and a dev tab lives for hours,
-    // so the start mark does not stay in the entry buffer.
+    // A dev tab lives for hours and the panel already recorded the span as it
+    // was created, so neither the mark nor the measure stays in the buffer.
     performance.clearMarks(startMark);
+    performance.clearMeasures(name);
+  } catch {
+    // A measurement never decides the fate of what it measured.
+  }
+}
+
+// The timing line of one op. A page can replace console.debug with a throwing
+// stub (analytics wrappers, dev overlays do), and thrown from the finally of
+// #timedOp it would displace the outcome of the op it reports on.
+function reportTiming(message: string): void {
+  try {
+    console.debug(message);
   } catch {
     // A measurement never decides the fate of what it measured.
   }
@@ -1104,20 +1141,12 @@ function zoneOf(patch: {
   return inTarget;
 }
 
-// A wire target is recognised only when it carries one of the addresses the
-// resolver reads, so a foreign or empty object describes nothing. Narrowing here
-// keeps the totality guards inside describeTarget unreachable.
-function isTarget(value: unknown): value is Target {
-  return (
-    isRecord(value) &&
-    ("zone" in value || "form" in value || "field" in value || "css" in value)
-  );
-}
-
-// The human-readable address an op aimed at, for the error detail. Absent when
-// the patch carried no recognised target, so the key stays off the payload.
+// The human-readable address an op aimed at, for the error detail. A foreign or
+// empty record carries none of the addresses describeTarget reads and so
+// describes nothing, the same as an absent target, and the key stays off the
+// payload.
 function describeOpTarget(patch: { op: string; target?: unknown }): string | undefined {
-  return isTarget(patch.target) ? describeTarget(patch.target) : undefined;
+  return isRecord(patch.target) ? describeTarget(patch.target as Target) : undefined;
 }
 
 // The addresses a target may carry, in the order #resolveIn reads them, so a
@@ -1130,19 +1159,11 @@ const TARGET_KEYS = [
   "css",
 ] as const satisfies (keyof Target)[];
 
+// The human-readable address a target spells. Absent when it carries none of the
+// addresses the resolver reads, or when that address refuses to serialise:
 // JSON.stringify throws on a circular value, so a description that cannot be
 // produced reads as no description rather than deciding the fate of the op it
 // describes from inside the very catch that contains that op.
-function showValue(value: unknown): string | undefined {
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return undefined;
-  }
-}
-
-// The human-readable address a target spells. Absent when it carries none of the
-// addresses the resolver reads, or when that address refuses to serialise.
 function describeTarget(target: Target | undefined): string | undefined {
   // Script neutralisation only runs on a resolved node, which requires a target
   // carrying a recognised address, so the no-target guard is unreachable from
@@ -1153,8 +1174,11 @@ function describeTarget(target: Target | undefined): string | undefined {
   for (const key of TARGET_KEYS) {
     const value = target[key];
     if (value === undefined) continue;
-    const shown = showValue(value);
-    return shown === undefined ? undefined : `${key} ${shown}`;
+    try {
+      return `${key} ${JSON.stringify(value)}`;
+    } catch {
+      return undefined;
+    }
   }
   return undefined;
 }

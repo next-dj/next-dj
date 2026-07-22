@@ -14,6 +14,11 @@ export interface DirtyTracker {
   // A predicate over the response snapshot: an element is dirty when its stamp
   // is later than the snapshot of the request that produced the response.
   isDirtySince(snapshot: number): (el: Element) => boolean;
+  // Whether the element was ever touched, blind to any snapshot. A <details>
+  // open state has no second "user is here" signal the way a field has focus,
+  // so once the user has toggled it, its openness belongs to the user for the
+  // life of the page rather than being resynced from a later server response.
+  isTouched(el: Element): boolean;
   install(doc: Document): void;
   _reset(): void;
 }
@@ -72,6 +77,7 @@ export function createDirtyTracker(deps: DirtyDeps = {}): DirtyTracker {
         return at !== undefined && at > snapshot;
       };
     },
+    isTouched: (el) => stamps.has(el),
     install,
     _reset() {
       // A clean slate also drops the capture-phase input/change/toggle

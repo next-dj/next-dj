@@ -1,4 +1,4 @@
-"""Pages subsystem: templates, context, layouts, rendering, URL patterns.
+"""The pages subsystem covering templates, context, layouts, rendering, and URLs.
 
 This package exposes a narrow public surface. Internal helpers are
 available through deep imports from the submodules (`context`,

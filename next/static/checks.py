@@ -18,7 +18,7 @@ from next.pages.manager import iter_serialized_page_context_keys
 
 from .assets import default_kinds
 from .backends import StaticBackend
-from .scripts import RESERVED_PAYLOAD_CONDITIONS, RESERVED_PAYLOAD_KEYS
+from .scripts import RESERVED_PAYLOAD_KEYS
 from .serializers import JsContextSerializer
 
 
@@ -159,14 +159,47 @@ def check_asset_kinds_are_loadable(*args, **kwargs) -> list[CheckMessage]:
     ]
 
 
+def _loses_inline_bodies(kind: str) -> bool:
+    """Return True when a kind's URL form has an insertion verb but its bodies do not.
+
+    A kind without an `inline_tag` is left to `next.W074`, since its inline
+    bodies render verbatim and name no element either render can build.
+    """
+    if default_kinds.inline_tag(kind) is None:
+        return False
+    return (
+        default_kinds.load(kind) is not None
+        and default_kinds.load(kind, inline=True) is None
+    )
+
+
+@register(NEXT)
+def check_inline_asset_bodies_are_loadable(*args, **kwargs) -> list[CheckMessage]:
+    """Warn about a kind whose inline bodies the partial runtime cannot insert."""
+    return [
+        DjangoWarning(
+            f"Asset kind {kind!r} is registered with renderer "
+            f"{default_kinds.renderer(kind)!r} and inline_tag "
+            f"{default_kinds.inline_tag(kind)!r}, which name different elements. "
+            "URL-form assets of this kind travel in a patch envelope, but their "
+            "inline bodies carry no client insertion verb and reach the browser "
+            "only on a full page render. Pair render_link_tag with "
+            "inline_tag='style' or render_script_tag with inline_tag='script'.",
+            obj=settings,
+            id="next.W076",
+        )
+        for kind in default_kinds.kinds()
+        if _loses_inline_bodies(kind)
+    ]
+
+
 def _reserved_key_warning(origin: str, source_path: Path, key: str) -> CheckMessage:
     """Return the `next.W075` warning for one reserved-key collision."""
     return DjangoWarning(
         f"{origin} context key {key!r} in {source_path} is reserved for the "
-        f"next.min.js init payload. The framework writes {key} "
-        f"{RESERVED_PAYLOAD_CONDITIONS[key]} and its value wins there. A render "
-        "that leaves the key out keeps the registered value instead, so "
-        "window.Next.context differs between environments. Rename the key.",
+        f"next.min.js init payload. The framework owns {key} on every render, "
+        "so the registered value never reaches window.Next.context and no "
+        "context patch can update it. Rename the key.",
         obj=str(source_path),
         id="next.W075",
     )

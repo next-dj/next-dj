@@ -63,6 +63,10 @@ A custom backend overrides the renderer methods to add the ``integrity`` and ``c
 
 Apply the same pattern to ``render_script_tag`` and ``render_module_tag``.
 
+The integrity attribute belongs to the server-rendered tag, so it covers a full page render.
+An asset a patch envelope brings for the first time is built by the client runtime from a fixed attribute set that carries no ``integrity`` and no ``crossorigin``, see :doc:`/content/topics/partial-rendering/limitations`.
+A deployment that must verify every byte through SRI serves the assets of a partial-rendered page on the full render, for example by declaring them on the layout rather than co-locating them with a zone.
+
 Content Security Policy
 -----------------------
 

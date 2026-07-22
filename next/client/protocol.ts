@@ -56,6 +56,19 @@ export type PartialError =
 // switch on the kind before reading the cause-specific fields.
 export type PartialErrorKind = PartialError["kind"];
 
+// The dev-diagnostics flag as the runtime takes it: a fixed value, or a read of
+// state that flips after construction. The inline bootstrap opens the channel
+// after the runtime is already built, and rebuilding the applier and the
+// triggers there would drop their registries and re-read the CSP nonce off the
+// wrong script, so both read the flag through a call instead of capturing it.
+export type DevFlag = boolean | (() => boolean);
+
+export function devReader(flag: DevFlag | undefined): () => boolean {
+  if (typeof flag === "function") return flag;
+  const fixed = flag ?? false;
+  return () => fixed;
+}
+
 // The boundary predicates the wire parsers share. Several modules narrow an
 // unknown JSON value the same way, so the checks live here next to the wire
 // vocabulary rather than being copied per module.

@@ -39,7 +39,7 @@ Drains both the cumulative and the bucketed counters into the `obs.MetricSnapsho
 
 Tailwind loads from a CDN in the shared `page_head` component pulled into `instrument/layout.djx`. Chart.js arrives through the framework static collector — the URL is declared in the page-level `scripts` list of `obs/dashboards/stats/page.py` and reaches the page via `{% collect_scripts %}`. Page-level scripts land in the injection order before every widget's co-located file, so the chart widget's `component.js` always finds `window.Chart` defined. React, ReactDOM, and Babel-standalone follow the same path from the `scripts` list in `obs/dashboards/page.py`, which keeps them ahead of the sparkline's own `component.jsx`. There is no build step.
 
-Browser-side Babel is a full-page technique, so the sparkline is the one widget that renders only on a full page load — it sits outside every zone and its `component.jsx` never rides a patch envelope. The framework says as much through `next.W074`, which `config/settings.py` silences on purpose with a comment.
+Browser-side Babel is a full-page technique, so the sparkline is the one widget that renders only on a full page load — it sits outside every zone and its `component.jsx` never rides a patch envelope. The framework says as much through `next.W074`, which `config/settings.py` silences on purpose with a comment. The silencing is honest only while that invariant holds, so `TestSparklineStaysOutsideEveryZone` in the e2e suite re-GETs every zone the dashboard declares and fails if the sparkline mount ever shows up in a zone body.
 
 Both chart widgets mount through `Next.partial.onMount` with a WeakMap keyed by the host element, so a partial morph that reconciles the host in place never creates a second Chart.js instance or React root. A delegated `next:removed` listener walks the detached subtree and destroys the chart or unmounts the root when the host actually leaves the document.
 
@@ -165,6 +165,8 @@ def totals_chart(totals: dict[str, int]) -> dict[str, Any]:
 ```
 
 The framework records each override at the static collector level. At inject time the rendered HTML carries `"live_stats":{"v":1,"data":{...}}` and `"totals_chart":{"v":1,"data":{...}}`, while the sibling `render_rates` key from `_widgets/render_chart/component.py` stays flat through the global default. Three demonstrations, one HTML response, no per-key code branching.
+
+The same `Next._init(...)` payload carries the keys the framework owns outright. `$csrf` travels on every render, `$dev` only while `DEBUG` is on, and both are off limits to your own `@context` keys — a collision is reported as `next.W075` and the registered value never reaches `window.Next.context`. `TestDevFlagChannel` in the e2e suite pins both halves of the `$dev` contract.
 
 ### 5. The eight receiver blocks
 

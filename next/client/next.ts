@@ -64,8 +64,8 @@ class Next {
   // co-located script, so it seeds context and mounts before ready listeners run.
   static _init(context: Record<string, unknown>): void {
     // Only the literal true opens the dev channel, so a stray "true" string
-    // leaves production quiet. It runs before ready() because _configure
-    // rebuilds the applier and the initial scan must walk the new instances.
+    // leaves production quiet. It runs before ready() so the initial trigger
+    // scan already validates the hand-written attributes it walks.
     if (context.$dev === true) Next.partial._configure({ dev: true });
     Next.#context = context;
     Next.#ready = true;

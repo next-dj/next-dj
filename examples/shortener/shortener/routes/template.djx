@@ -29,17 +29,15 @@
 
   {% #component "section" title="Latest shortened links" %}
     {% #slot "content" %}
-      {% if recent_links %}
-        {% zone "latest-links" tag="ul" %}
+      {% zone "latest-links" tag="ul" %}
+        {% if recent_links %}
           {% for link in recent_links %}
             {% component "link_row" link=link %}
           {% endfor %}
-        {% endzone %}
-      {% else %}
-        {% zone "latest-links" tag="ul" %}
+        {% else %}
           {% component "empty_state" title="No links yet" description="Create one above to see it here." icon="🪄" %}
-        {% endzone %}
-      {% endif %}
+        {% endif %}
+      {% endzone %}
     {% /slot %}
   {% /component %}
 </div>

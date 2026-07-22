@@ -146,18 +146,18 @@ describe("createSse", () => {
     expect(applied).toHaveLength(1);
   });
 
-  it("a repeated id keeps its first place in the ring rather than moving to the end", () => {
+  it("a repeated id moves to the young end of the ring", () => {
     document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
     for (let i = 0; i < 25; i += 1) sse.remember(`r${i}`);
-    // Re-feeding the oldest id must not promote it: the next overflow still
-    // evicts r0, not r1.
+    // Re-feeding the oldest id renews it, so the next overflow evicts r1 and r0
+    // still suppresses its echo.
     sse.remember("r0");
     sse.remember("r25");
     opened[0]!.message(envelope([], "r0"));
-    expect(applied).toHaveLength(1);
+    expect(applied).toHaveLength(0);
     opened[0]!.message(envelope([], "r1"));
     expect(applied).toHaveLength(1);
   });

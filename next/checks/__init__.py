@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     from next.pages.loaders import _load_python_module
     from next.static.checks import (
         check_asset_kinds_are_loadable,
+        check_inline_asset_bodies_are_loadable,
         check_js_context_serializer,
         check_reserved_js_context_keys,
     )
@@ -77,6 +78,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
     "next.pages.loaders": ("_load_python_module",),
     "next.static.checks": (
         "check_asset_kinds_are_loadable",
+        "check_inline_asset_bodies_are_loadable",
         "check_js_context_serializer",
         "check_reserved_js_context_keys",
     ),

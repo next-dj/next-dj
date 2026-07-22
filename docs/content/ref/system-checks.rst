@@ -27,7 +27,8 @@ Checks that also concern templates or URL patterns keep their :doc:`Django tags 
 Shared Helpers
 ~~~~~~~~~~~~~~
 
-``next.checks.common`` holds helpers reused across subsystem check modules. It is imported indirectly by those modules rather than by ``register_all``.
+``next.checks.common`` holds helpers reused across subsystem check modules.
+It is imported indirectly by those modules rather than by ``register_all``.
 
 .. automodule:: next.checks.common
    :members:
@@ -384,9 +385,15 @@ Warnings
        Assets of that kind reach the browser only on a full page render, never through a patch envelope.
      - ``next.static.checks``
    * - ``next.W075``
-     - A page or a component registers a ``serialize=True`` context key that the ``next.min.js`` init payload reserves, ``$csrf`` or ``$dev``.
-       The message names the condition under which the framework writes the key, ``$csrf`` on an automatically injected payload whose request can mint a CSRF token and ``$dev`` on one built while ``DEBUG`` is on.
-       The framework value wins there, while a render that leaves the key out keeps the registered value, so ``window.Next.context`` differs between environments.
+     - A page or a component registers a keyed ``serialize=True`` context under a name the ``next.min.js`` init payload reserves, ``$csrf`` or ``$dev``.
+       The framework owns those names on every render, so the registered value never reaches ``window.Next.context`` and no ``context`` patch updates it.
+       The message names the declaring ``page.py`` or ``component.py`` and asks for a rename.
+       A keyless ``serialize=True`` provider spreads the keys of the dict it returns at render time, so the check never sees them.
+     - ``next.static.checks``
+   * - ``next.W076``
+     - A registered asset kind names one of the three bundled renderers together with an ``inline_tag`` that is not the element that renderer's verb builds.
+       The URL form of such a kind travels in a patch envelope while its inline bodies carry no insertion verb and reach the browser only on a full page render.
+       Pair ``render_link_tag`` with ``inline_tag="style"`` or ``render_script_tag`` with ``inline_tag="script"``.
      - ``next.static.checks``
 
 .. note::

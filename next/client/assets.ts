@@ -10,9 +10,13 @@
 //
 // Two views, two rules: the link verb is inserted and awaited (bounded) before
 // the ops run so there is no FOUC, the script verbs run after the ops so the
-// target DOM is already in place. Each URL executes once per page life. A version
-// mismatch triggers a single full visit under a reload-once flag so a stale CDN
-// cannot loop the page. The link loader, the navigation, and the session store
+// target DOM is already in place. Each URL executes once per page life. A delta
+// taken while the parser is still mid-document would read its unparsed tail as
+// missing, so an envelope landing in that window waits for the end of the parse
+// before its assets and its ops go in.
+//
+// A version mismatch triggers a single full visit under a reload-once flag so a
+// stale CDN cannot loop the page. The link loader, the navigation, and the store
 // are injectable seams: jsdom loads no resources, fires no link.onload, and does
 // not implement location.assign.
 
@@ -72,10 +76,12 @@ export interface Assets {
   seed(): void;
   // Insert the missing link-verb assets of a manifest and call done once every
   // new sheet has loaded, errored, or timed out. With none missing the callback
-  // runs synchronously so the ops apply in the same tick.
+  // runs synchronously so the ops apply in the same tick, unless the document is
+  // still parsing, where the whole phase waits for the end of the parse.
   loadCss(manifest: readonly Asset[], done: () => void): void;
   // Run the missing script and module verbs of a manifest after the ops, each
-  // URL and each inline body once per page.
+  // URL and each inline body once per page. Deferred past the parse window like
+  // loadCss, since the delta is only honest against a complete document.
   loadJs(manifest: readonly Asset[]): void;
   // The current asset version known to the client, sent on every request.
   version(): string;
@@ -126,6 +132,9 @@ export function createAssets(deps: AssetsDeps): Assets {
   // Detach the pending catch-up scan, undefined once the registry is complete.
   // Doubles as the "still watching the parse window" flag.
   let unwatch: (() => void) | undefined;
+  // The asset phases waiting for the end of the parse, held so a discarded
+  // instance can drop them instead of firing into a document it no longer seeds.
+  const deferred = new Set<() => void>();
   // Whether this instance has taken its one baseline scan. _configure builds a
   // registry it never seeds, so a delta can arrive first and an unseeded
   // registry would read as an empty page and re-insert the whole manifest.
@@ -145,9 +154,9 @@ export function createAssets(deps: AssetsDeps): Assets {
     };
   }
 
-  // Re-seed in front of a delta taken while the document is still arriving. The
-  // gate is the pending watch rather than the readyState, since a deferred
-  // script runs after the flip to "interactive" but before the event.
+  // Re-seed in front of a delta whose loader has cleared the parse window. Every
+  // caller runs it through whenParsed, so the document is no longer "loading"
+  // and the seed prefix can be completed with a full scan, then the watch drops.
   function catchUp(): void {
     // An unseeded registry takes its one baseline scan here, and seed() decides
     // from there whether the parse window is open at all.
@@ -158,7 +167,24 @@ export function createAssets(deps: AssetsDeps): Assets {
     const settled = unwatch;
     if (settled === undefined) return;
     scan();
-    if (doc.readyState !== "loading") settled();
+    settled();
+  }
+
+  // Hold an asset phase back until the document is fully parsed. While the
+  // parser is mid-document the registry is incomplete by construction, so a
+  // delta taken there counts a tag not yet reached as missing and inserts a
+  // second copy of it. A `lazy="load"` zone GET fires exactly in that window.
+  function whenParsed(run: () => void): void {
+    if (doc.readyState !== "loading") {
+      run();
+      return;
+    }
+    const onParsed = (): void => {
+      deferred.delete(onParsed);
+      run();
+    };
+    deferred.add(onParsed);
+    doc.addEventListener("DOMContentLoaded", onParsed, { once: true });
   }
 
   function scan(): void {
@@ -199,11 +225,12 @@ export function createAssets(deps: AssetsDeps): Assets {
     return true;
   }
 
-  // The verb a manifest entry asks for, or undefined when the entry is malformed
-  // or names a kind whose server renderer implies no client verb.
+  // The verb a manifest entry asks for, or undefined when the entry is malformed,
+  // names a kind whose server renderer implies no client verb, or carries an
+  // inline body the server sent no verb for.
   function verbOf(asset: Asset): AssetLoad | undefined {
     if (!isAsset(asset)) return undefined;
-    return assetLoad(asset.kind, asset.load);
+    return assetLoad(asset.kind, asset.load, asset.inline);
   }
 
   // Insert an inline style with the page nonce so CSP still allows it.
@@ -226,67 +253,75 @@ export function createAssets(deps: AssetsDeps): Assets {
     return el;
   }
 
+  // done rides inside the parse gate with the delta, so an envelope that lands
+  // mid-parse applies its ops once the document is whole. That is the right
+  // order anyway: such a patch would otherwise morph a zone the parser has not
+  // reached yet.
   function loadCss(manifest: readonly Asset[], done: () => void): void {
-    catchUp();
-    // Inline styles insert synchronously and need no load gate, so they go in
-    // during this pass and never join the url delta done waits on.
-    const urls: string[] = [];
-    for (const asset of manifest) {
-      if (verbOf(asset) !== "link") continue;
-      if (asset.inline !== undefined) {
-        if (claim(inlineKey("link", asset.inline))) insertStyle(asset.inline);
-        continue;
+    whenParsed(() => {
+      catchUp();
+      // Inline styles insert synchronously and need no load gate, so they go in
+      // during this pass and never join the url delta done waits on.
+      const urls: string[] = [];
+      for (const asset of manifest) {
+        if (verbOf(asset) !== "link") continue;
+        if (asset.inline !== undefined) {
+          if (claim(inlineKey("link", asset.inline))) insertStyle(asset.inline);
+          continue;
+        }
+        if (isEmptyUrl(asset)) continue;
+        if (claim(urlKey(asset.url))) urls.push(asset.url);
       }
-      if (isEmptyUrl(asset)) continue;
-      if (claim(urlKey(asset.url))) urls.push(asset.url);
-    }
-    if (urls.length === 0) {
-      done();
-      return;
-    }
-    // A 404 or a timeout on one sheet must not strand the whole envelope, so
-    // each settles on its own and the ops run once the last one resolves.
-    let pending = urls.length;
-    let errored = false;
-    const settle = (ok: boolean): void => {
-      if (!ok) errored = true;
-      pending -= 1;
-      if (pending > 0) return;
-      // The ops still run, so one 404 after a deploy cannot leave a form
-      // response unapplied. partial:error reports the styling gap.
-      if (errored) {
-        deps.dispatch("partial:error", {
-          kind: "asset",
-          error: new Error("a stylesheet failed to load"),
-        } satisfies PartialError);
+      if (urls.length === 0) {
+        done();
+        return;
       }
-      done();
-    };
-    for (const url of urls) {
-      loadLink(url, nonce, settle, clock, cssTimeout);
-    }
+      // A 404 or a timeout on one sheet must not strand the whole envelope, so
+      // each settles on its own and the ops run once the last one resolves.
+      let pending = urls.length;
+      let errored = false;
+      const settle = (ok: boolean): void => {
+        if (!ok) errored = true;
+        pending -= 1;
+        if (pending > 0) return;
+        // The ops still run, so one 404 after a deploy cannot leave a form
+        // response unapplied. partial:error reports the styling gap.
+        if (errored) {
+          deps.dispatch("partial:error", {
+            kind: "asset",
+            error: new Error("a stylesheet failed to load"),
+          } satisfies PartialError);
+        }
+        done();
+      };
+      for (const url of urls) {
+        loadLink(url, nonce, settle, clock, cssTimeout);
+      }
+    });
   }
 
   // One pass in manifest order rather than a pass per verb, so a module and a
   // classic script insert in the order the server listed them.
   function loadJs(manifest: readonly Asset[]): void {
-    catchUp();
-    for (const asset of manifest) {
-      const load = verbOf(asset);
-      if (load !== "script" && load !== "module") continue;
-      if (asset.inline !== undefined) {
-        if (!claim(inlineKey(load, asset.inline))) continue;
+    whenParsed(() => {
+      catchUp();
+      for (const asset of manifest) {
+        const load = verbOf(asset);
+        if (load !== "script" && load !== "module") continue;
+        if (asset.inline !== undefined) {
+          if (!claim(inlineKey(load, asset.inline))) continue;
+          const el = makeScript(load);
+          el.textContent = asset.inline;
+          doc.head.append(el);
+          continue;
+        }
+        if (isEmptyUrl(asset)) continue;
+        if (!claim(urlKey(asset.url))) continue;
         const el = makeScript(load);
-        el.textContent = asset.inline;
+        el.src = asset.url;
         doc.head.append(el);
-        continue;
       }
-      if (isEmptyUrl(asset)) continue;
-      if (!claim(urlKey(asset.url))) continue;
-      const el = makeScript(load);
-      el.src = asset.url;
-      doc.head.append(el);
-    }
+    });
   }
 
   function versionMismatch(envelopeVersion: string, url: string): boolean {
@@ -343,6 +378,10 @@ export function createAssets(deps: AssetsDeps): Assets {
       // seeds, or its scan would fire into a page the live registry owns. The
       // seeded flag stays set, since a rescan here would read that same document.
       unwatch?.();
+      for (const onParsed of deferred) {
+        doc.removeEventListener("DOMContentLoaded", onParsed);
+      }
+      deferred.clear();
       loaded.clear();
       knownVersion = "";
     },

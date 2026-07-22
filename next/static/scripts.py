@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import enum
 import json
-from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, ClassVar, Final
 
 from django.conf import settings
@@ -42,22 +41,12 @@ CSRF_PAYLOAD_KEY: Final = "$csrf"
 # production render carries no dev-only bytes.
 DEV_PAYLOAD_KEY: Final = "$dev"
 
-# The init-payload keys the framework owns, each with the condition under which it
-# writes the key. A colliding js-context key loses only on renders that meet the
-# condition, so the check can name it instead of promising a loss that never happens.
-RESERVED_PAYLOAD_CONDITIONS: Final[Mapping[str, str]] = MappingProxyType(
-    {
-        CSRF_PAYLOAD_KEY: (
-            "into every automatically injected payload whose request can mint a "
-            "CSRF token"
-        ),
-        DEV_PAYLOAD_KEY: (
-            "into an automatically injected payload only while DEBUG is True"
-        ),
-    }
+# The init-payload keys the framework owns. A colliding js-context key never reaches
+# the payload, whether or not this render has a framework value to write under it, so
+# the client store carries one meaning for the key in every environment.
+RESERVED_PAYLOAD_KEYS: Final[frozenset[str]] = frozenset(
+    {CSRF_PAYLOAD_KEY, DEV_PAYLOAD_KEY}
 )
-
-RESERVED_PAYLOAD_KEYS: Final[frozenset[str]] = frozenset(RESERVED_PAYLOAD_CONDITIONS)
 
 # Escape the inline-init payload for the HTML `<script>` context, mirroring
 # Django's `json_script`. These code points only ever appear inside JSON string

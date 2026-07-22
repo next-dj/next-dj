@@ -164,16 +164,27 @@ describe("checked and selected sync together on inactive controls", () => {
   });
 });
 
-describe("details open obeys the dirty rule", () => {
+describe("details open obeys the touched rule", () => {
   it("server markup wins when the user has not toggled", () => {
     const target = mount('<details id="d"></details>');
     morph(target, '<details id="d" open></details>');
     expect(target.hasAttribute("open")).toBe(true);
   });
 
-  it("a toggled details keeps the user state", () => {
+  it("an untouched details syncs shut from the server too", () => {
+    // The open state is server-owned until the user touches it, so the server
+    // may both open and close it.
     const target = mount('<details id="d" open></details>');
-    morph(target, '<details id="d"></details>', { isDirty: () => true });
+    morph(target, '<details id="d"></details>');
+    expect(target.hasAttribute("open")).toBe(false);
+  });
+
+  it("a touched details keeps the user open state against an unrequested patch", () => {
+    // The touch predates the request snapshot, so a poll or SSE patch the user
+    // never asked for must not resync it shut: touched, not dirty-since, is the
+    // signal, since a details toggle has no live focus a field relies on.
+    const target = mount('<details id="d" open></details>');
+    morph(target, '<details id="d"></details>', { isTouched: () => true });
     expect(target.hasAttribute("open")).toBe(true);
   });
 

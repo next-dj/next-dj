@@ -127,6 +127,10 @@ export function createSse(deps: SseDeps): Sse {
   let detachVisibility: (() => void) | null = null;
 
   function remember(id: string): void {
+    // A Map keeps the position of a key it already holds, so an id remembered
+    // again is re-inserted: the newest use of an id decides its age, not the
+    // first one, and a request repeating its id is not evicted early.
+    echo.delete(id);
     echo.set(id, true);
     // The ring runs one entry over the limit at most, so the first key is the
     // only id to drop.

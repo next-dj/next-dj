@@ -191,7 +191,9 @@ def iter_serialized_component_context_keys() -> Iterator[tuple[Path, str]]:
 
     A keyless `serialize=True` callable spreads the keys of the dict it
     returns at render time, so those keys exist only at runtime and never
-    travel through here.
+    travel through here. Reading the keys imports every `component.py`, since
+    the decorator state is the truth, so a check calling this pays that import
+    even under `LAZY_COMPONENT_MODULES`.
     """
     manager = get_components_manager()
     for backend in manager._backends:

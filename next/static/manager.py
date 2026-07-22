@@ -35,6 +35,7 @@ from .scripts import (
     CSRF_PAYLOAD_KEY,
     DEV_PAYLOAD_KEY,
     NEXT_JS_STATIC_PATH,
+    RESERVED_PAYLOAD_KEYS,
     NextScriptBuilder,
     ScriptInjectionPolicy,
     csrf_payload_for,
@@ -204,16 +205,19 @@ class StaticManager:
             js_context: dict[str, Any] = collector.js_context()
             encoded = collector.js_context_encoded()
             serializers = collector.js_context_serializers()
+            collided = RESERVED_PAYLOAD_KEYS.intersection(js_context)
+            if collided:
+                # Fresh mappings leave the collector untouched. A reserved key
+                # belongs to the framework on every render, so the fragment and
+                # the serializer a colliding key recorded go out with the value.
+                js_context = {k: v for k, v in js_context.items() if k not in collided}
+                encoded = {k: v for k, v in encoded.items() if k not in collided}
+                serializers = {
+                    k: v for k, v in serializers.items() if k not in collided
+                }
             reserved = self._reserved_payload(request)
             if reserved:
-                # Fresh mappings leave the collector untouched. Dropping the
-                # fragment and serializer a colliding key recorded is what lets
-                # the framework value reach the payload.
                 js_context = {**js_context, **reserved}
-                encoded = {k: v for k, v in encoded.items() if k not in reserved}
-                serializers = {
-                    k: v for k, v in serializers.items() if k not in reserved
-                }
             init_payload = builder.init_script(
                 js_context, key_serializers=serializers, encoded=encoded
             )

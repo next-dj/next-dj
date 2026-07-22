@@ -98,6 +98,7 @@ An event name that starts with ``partial:`` or ``next:``, or equals ``ready`` or
 
 The ``$csrf`` and ``$dev`` keys of the init payload are reserved the same way.
 ``Patches.context()`` rejects either name with ``ReservedContextKeyError``, and the js-context delta of a zone render drops them before it becomes a ``context`` op, so the ``$`` namespace belongs to the framework on a patch exactly as it does on a full render.
+A full render drops a page or component key of either name from the payload whether or not it has a framework value to write there, so no patch has a registered value to update.
 
 Asset Manifest
 --------------
@@ -126,7 +127,14 @@ Each entry carries ``kind`` and ``url`` always, plus ``inline`` and ``load`` whe
      - The insertion verb, derived from the renderer registered for the kind. Absent when that renderer is a custom backend method, and absent on an inline body whose kind does not wrap it in the element the verb builds.
 
 The runtime inserts an asset by its verb rather than by its kind, so a custom kind registered with one of the three built-in renderers loads like the built-in kind that shares it.
-An entry whose kind resolves to no verb is skipped, and the ``next.W074`` check reports the kind at ``manage.py check``.
+The verb of an entry resolves in three steps.
+A ``load`` field the server wrote wins.
+A URL-form entry without that field falls back to the verb the name of a built-in kind implies, ``link`` for ``css``, ``script`` for ``js``, and ``module`` for ``module``, so an envelope authored before the field existed still loads.
+An entry carrying an inline body takes no such fallback, because the server spells the verb only when the kind wraps the body in the element the runtime builds, so a body with no explicit ``load`` is dropped at the boundary rather than executed in an element a full page render prints verbatim.
+
+An entry that resolves to no verb is skipped.
+The ``next.W074`` check reports a registered kind whose renderer implies no verb, and ``next.W076`` a registered kind whose inline bodies lose the verb its URL form keeps.
+Both checks walk the kinds registered in the running process, so an entry naming a kind no registration backs is skipped with no check to announce it.
 See :doc:`/content/topics/static-assets/asset-kinds` for the renderer-to-verb mapping.
 
 Request Headers
@@ -230,6 +238,10 @@ Status Codes
    * - 5xx
      - No envelope. The runtime swaps nothing and fires ``partial:error``.
 
+A safe-method zone GET that answers with a non-envelope navigates once under a navigate-once flag, the same shape the version-mismatch reload uses.
+A ``lazy="load"`` zone re-asks on the freshly loaded page, so an expired session, a WAF stub, or a maintenance page that keeps answering non-envelope would otherwise loop the navigation.
+The second non-envelope while the flag stands degrades to a ``partial:error`` of kind ``network`` and leaves the page in place, and the flag clears the moment a correct envelope classifies.
+
 Attributes
 ----------
 
@@ -250,7 +262,8 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from its par
      - Lazy zone wrapper, infinite-scroll sentinel
      - ``load`` or ``revealed``, the materialisation trigger. ``load`` fetches on
        ``ready``, ``revealed`` waits for the viewport. On a pagination sentinel
-       ``revealed`` arms the observer that fires the merge GET.
+       ``revealed`` arms the observer that fires the merge GET. Any other value is
+       ignored, with a console warning in dev.
    * - ``data-next-poll``
      - Zone wrapper
      - The poll interval in milliseconds, from the ``poll=`` literal, written on the
@@ -278,7 +291,8 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from its par
      - Debounce in milliseconds.
    * - ``data-next-merge``
      - Pagination link
-     - ``append`` or ``prepend``, travels as ``X-Next-Merge``.
+     - ``append`` or ``prepend``, travels as ``X-Next-Merge``. Any other value is
+       ignored, with a console warning in dev.
    * - ``data-next-layer``
      - ``<a>``
      - Open the href in a layer, the zone container is created before the request.
@@ -335,7 +349,7 @@ The ``next:mounted``, ``next:removed``, and ``next:morph-*`` node events live on
    * - ``context-updated``
      - No
      - ``{context, changed}``, where ``context`` is the whole merged store and
-       ``changed`` lists only the keys of the delta that just arrived. The
+       ``changed`` lists only the keys of the delta that arrived. The
        initial seed lists every seeded key in ``changed``.
    * - ``partial:before-request``
      - No
@@ -352,8 +366,9 @@ The ``next:mounted``, ``next:removed``, and ``next:morph-*`` node events live on
      - No
      - A discriminated union on ``kind``, where each cause carries only its own
        fields.
-       ``{kind: "network", error}`` is a fetch reject or a dropped stream
-       connection, with no status or body to report.
+       ``{kind: "network", error}`` is a fetch reject, a dropped stream
+       connection, or a zone that still answers a non-envelope after the
+       navigate-once fallback already navigated, with no status or body to report.
        ``{kind: "http", status, body}`` is a 5xx or a mutating reply that is not
        an envelope.
        ``{kind: "parse", body, error}`` is a malformed JSON body.
@@ -430,8 +445,11 @@ The runtime's dev mode follows Django ``DEBUG``.
 Under the default ``auto`` script injection policy a full render seeds the ``$dev`` key of the init payload while ``DEBUG`` is on.
 The runtime reads that key once at bootstrap, and every diagnostic this reference calls dev-only rides it.
 In dev each applied patch shows up in the browser Performance panel as a ``next:apply:<label>`` measurement and prints the same span as a ``console.debug`` line.
-The label is the zone the op addresses, whether the patch spells it in the ``target`` or at the top level, and the verb itself when the op names no zone.
+The label is the zone the op addresses, read the way the verb itself reads it.
+``refresh`` prefers its top-level ``zone`` and falls back to the one in ``target``, ``layer.open`` reads only its top-level ``zone``, and every other verb reads ``target.zone``.
+An op that names no zone that way is labelled by its verb.
 Dev also counts what the envelope boundary dropped, so a malformed op and a malformed asset each earn a console warning with the number dropped instead of vanishing.
+An ``ops`` or ``assets`` value that is not an array is dropped whole and earns its own console warning naming the field, since the per-entry counts would otherwise report nothing wrong.
 An asset whose insertion verb the envelope boundary cannot resolve is a ``console.debug`` skip naming its kind, because a kind with a custom renderer is a normal configuration rather than damage.
 A production page carries no ``$dev`` key, so it carries neither the measurements nor any of the console lines.
 
@@ -554,7 +572,8 @@ Styling Layers and Toasts
 -------------------------
 
 The runtime creates a bare ``<dialog data-next-dialog>`` for every layer and a ``<div data-next-toasts>`` container for toasts.
-No framework CSS is applied. The selectors are the hook.
+No framework CSS is applied.
+The selectors are the hook.
 
 .. code-block:: css
    :caption: plain CSS

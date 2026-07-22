@@ -1,6 +1,18 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { Wire } from "./wire";
+import type { SessionStore } from "./assets";
 import { ACCEPT, CONTENT_TYPE, HEADER_REQUEST_ID, REQUEST_FLAG } from "./protocol";
+
+// An in-memory reload-once store, so the navigate-once flag stays isolated per
+// harness rather than leaking through the shared jsdom sessionStorage.
+function memorySession(): SessionStore {
+  const store = new Map<string, string>();
+  return {
+    get: (key) => store.get(key) ?? null,
+    set: (key, value) => void store.set(key, value),
+    remove: (key) => void store.delete(key),
+  };
+}
 
 function envelopeResponse(
   body: string,
@@ -21,19 +33,25 @@ type Harness = ReturnType<typeof makeWire>;
 
 function makeWire(
   responder: (url: string, init: RequestInit) => Promise<Response>,
-  opts: { version?: string; csrf?: { header: string; token: string } } = {},
+  opts: {
+    version?: string;
+    csrf?: { header: string; token: string };
+    session?: SessionStore;
+  } = {},
 ) {
   const dispatched: { event: string; detail: Record<string, unknown> }[] = [];
   const navigated: string[] = [];
   const envelopes: unknown[] = [];
   const pages: (string | undefined)[] = [];
   const calls: { url: string; init: RequestInit }[] = [];
+  const session = opts.session ?? memorySession();
   const wire = new Wire({
     fetch: (url, init) => {
       calls.push({ url, init });
       return responder(url, init);
     },
     navigate: (url) => navigated.push(url),
+    session,
     dispatch: (event, detail) => dispatched.push({ event, detail }),
     onEnvelope: (raw, _response, _snapshot, _key, page) => {
       envelopes.push(raw);
@@ -42,7 +60,7 @@ function makeWire(
     version: () => opts.version ?? "v1",
     csrf: () => opts.csrf,
   });
-  return { wire, dispatched, navigated, envelopes, pages, calls };
+  return { wire, dispatched, navigated, envelopes, pages, calls, session };
 }
 
 const ENVELOPE = '{"version":"v1","ops":[],"assets":[],"form":null}';
@@ -219,6 +237,87 @@ describe("Wire classification", () => {
     await h.wire.fetch({ url: "/list/", zone: "z" });
     expect(h.envelopes).toHaveLength(1);
     expect((h.envelopes[0] as { body: string }).body).toBe("raw-body");
+  });
+});
+
+describe("Wire non-envelope navigate-once", () => {
+  const NAVIGATED = "next:partial:navigated";
+
+  function html(url: string): Response {
+    return envelopeResponse("<html>login</html>", { type: "text/html", url });
+  }
+
+  it("navigates and sets the flag on the first non-envelope", async () => {
+    const session = memorySession();
+    const h = makeWire(async () => html("/login/"), { session });
+    await h.wire.fetch({ url: "/list/", zone: "z" });
+    expect(h.navigated).toEqual(["/login/"]);
+    expect(session.get(NAVIGATED)).toBe("1");
+  });
+
+  it("degrades to partial:error without navigating when the flag stands", async () => {
+    const session = memorySession();
+    session.set(NAVIGATED, "1");
+    const h = makeWire(async () => html("/login/"), { session });
+    await h.wire.fetch({ url: "/list/", zone: "z" });
+    expect(h.navigated).toEqual([]);
+    const err = h.dispatched.find((d) => d.event === "partial:error");
+    expect(err!.detail.kind).toBe("network");
+    expect(err!.detail.error).toBeInstanceOf(Error);
+    expect(session.get(NAVIGATED)).toBeNull();
+  });
+
+  it("clears the flag once a correct envelope classifies", async () => {
+    const session = memorySession();
+    session.set(NAVIGATED, "1");
+    const h = makeWire(async () => envelopeResponse(ENVELOPE), { session });
+    await h.wire.fetch({ url: "/list/", zone: "z" });
+    expect(h.envelopes).toHaveLength(1);
+    expect(session.get(NAVIGATED)).toBeNull();
+  });
+
+  it("clears the flag on a parse-hook envelope too", async () => {
+    const session = memorySession();
+    session.set(NAVIGATED, "1");
+    const h = makeWire(
+      async () => envelopeResponse("raw", { type: "text/vnd.next.stream+html" }),
+      { session },
+    );
+    h.wire.parseHook("text/vnd.next.stream+html", () => ({ version: "v1", ops: [] }));
+    await h.wire.fetch({ url: "/list/", zone: "z" });
+    expect(h.envelopes).toHaveLength(1);
+    expect(session.get(NAVIGATED)).toBeNull();
+  });
+
+  it("guards the redirect branch the same way", async () => {
+    const session = memorySession();
+    session.set(NAVIGATED, "1");
+    const h = makeWire(
+      async () => envelopeResponse(ENVELOPE, { url: "/final/", redirected: true }),
+      { session },
+    );
+    await h.wire.fetch({ url: "/list/", zone: "z" });
+    expect(h.navigated).toEqual([]);
+    const err = h.dispatched.find((d) => d.event === "partial:error");
+    expect(err!.detail.kind).toBe("network");
+  });
+
+  it("still errors on a mutating non-envelope with no redirect, flag untouched", async () => {
+    const session = memorySession();
+    const h = makeWire(
+      async () =>
+        envelopeResponse("<html>denied</html>", {
+          status: 403,
+          type: "text/html",
+          url: "/_next/form/u1/",
+        }),
+      { session },
+    );
+    await h.wire.fetch({ url: "/_next/form/u1/", method: "POST", uid: "u1" });
+    expect(h.navigated).toEqual([]);
+    const err = h.dispatched.find((d) => d.event === "partial:error");
+    expect(err!.detail.kind).toBe("http");
+    expect(session.get(NAVIGATED)).toBeNull();
   });
 });
 

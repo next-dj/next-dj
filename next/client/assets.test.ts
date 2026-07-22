@@ -26,6 +26,24 @@ function css(url: string): Asset {
   return { kind: "css", url };
 }
 
+// The inline forms a modern server sends. It spells the verb out only when the
+// kind's inline wrapper is the element the runtime builds, so an inline body
+// without a load carries no verb at all and the loader has nothing to insert.
+function inlineCss(body: string): Asset {
+  return { kind: "css", url: "", inline: body, load: "link" };
+}
+
+function inlineJs(body: string): Asset {
+  return { kind: "js", url: "", inline: body, load: "script" };
+}
+
+// An inline body carrying the module verb. No built-in kind produces this pair,
+// since the module verb builds a typed script no inline wrapper can name, so it
+// only ever reaches the loader from a source that spells the verb out.
+function inlineModule(body: string): Asset {
+  return { kind: "module", url: "", inline: body, load: "module" };
+}
+
 function makeAssets(over: Partial<Parameters<typeof createAssets>[0]> = {}) {
   const dispatched: Dispatched[] = [];
   const loaded: string[] = [];
@@ -126,7 +144,7 @@ describe("assets registry and delta", () => {
     document.head.innerHTML = "<style>.z{}</style>";
     const { assets } = makeAssets();
     assets.seed();
-    assets.loadCss([{ kind: "css", url: "", inline: ".z{}" }], () => undefined);
+    assets.loadCss([inlineCss(".z{}")], () => undefined);
     expect(document.head.querySelectorAll("style")).toHaveLength(1);
   });
 
@@ -134,7 +152,7 @@ describe("assets registry and delta", () => {
     document.head.innerHTML = "<script>void 0</script>";
     const { assets } = makeAssets();
     assets.seed();
-    assets.loadJs([{ kind: "js", url: "", inline: "void 0" }]);
+    assets.loadJs([inlineJs("void 0")]);
     expect(document.head.querySelectorAll("script:not([src])")).toHaveLength(1);
   });
 
@@ -142,8 +160,8 @@ describe("assets registry and delta", () => {
     document.body.innerHTML = "<style>.b{}</style><script>void 1</script>";
     const { assets } = makeAssets();
     assets.seed();
-    assets.loadCss([{ kind: "css", url: "", inline: ".b{}" }], () => undefined);
-    assets.loadJs([{ kind: "js", url: "", inline: "void 1" }]);
+    assets.loadCss([inlineCss(".b{}")], () => undefined);
+    assets.loadJs([inlineJs("void 1")]);
     expect(document.head.querySelectorAll("style")).toHaveLength(0);
     expect(document.head.querySelectorAll("script:not([src])")).toHaveLength(0);
   });
@@ -151,8 +169,8 @@ describe("assets registry and delta", () => {
   it("inserts an inline asset that omits url entirely", () => {
     const { assets, loaded } = makeAssets();
     const done = vi.fn();
-    assets.loadCss([{ kind: "css", inline: ".n{}" } as Asset], done);
-    assets.loadJs([{ kind: "js", inline: "void 2" } as Asset]);
+    assets.loadCss([{ kind: "css", inline: ".n{}", load: "link" } as Asset], done);
+    assets.loadJs([{ kind: "js", inline: "void 2", load: "script" } as Asset]);
     expect(document.head.querySelector("style")!.textContent).toBe(".n{}");
     expect(document.head.querySelector("script:not([src])")!.textContent).toBe(
       "void 2",
@@ -165,7 +183,7 @@ describe("assets registry and delta", () => {
     document.head.innerHTML = "<style>.z{}</style>";
     const { assets } = makeAssets();
     assets.seed();
-    assets.loadCss([{ kind: "css", url: "", inline: ".y{}" }], () => undefined);
+    assets.loadCss([inlineCss(".y{}")], () => undefined);
     expect(document.head.querySelectorAll("style")).toHaveLength(2);
   });
 
@@ -238,7 +256,7 @@ describe("assets registry and delta", () => {
   it("injects an inline style with the body and skips the link loader", () => {
     const { assets, loaded } = makeAssets();
     const done = vi.fn();
-    assets.loadCss([{ kind: "css", url: "", inline: ".z{color:red}" }], done);
+    assets.loadCss([inlineCss(".z{color:red}")], done);
     const style = document.head.querySelector("style")!;
     expect(style.textContent).toBe(".z{color:red}");
     expect(loaded).toEqual([]);
@@ -247,7 +265,7 @@ describe("assets registry and delta", () => {
 
   it("dedupes an inline style by body across applies", () => {
     const { assets } = makeAssets();
-    const inline = { kind: "css", url: "", inline: ".z{color:red}" };
+    const inline = inlineCss(".z{color:red}");
     assets.loadCss([inline], () => undefined);
     assets.loadCss([inline], () => undefined);
     expect(document.head.querySelectorAll("style")).toHaveLength(1);
@@ -255,14 +273,14 @@ describe("assets registry and delta", () => {
 
   it("injects an inline script with its body as textContent", () => {
     const { assets } = makeAssets();
-    assets.loadJs([{ kind: "js", url: "", inline: "globalThis.__x = 1" }]);
+    assets.loadJs([inlineJs("globalThis.__x = 1")]);
     const script = document.head.querySelector("script:not([src])")!;
     expect(script.textContent).toBe("globalThis.__x = 1");
   });
 
   it("dedupes an inline script by body across applies", () => {
     const { assets } = makeAssets();
-    const inline = { kind: "js", url: "", inline: "globalThis.__x = 1" };
+    const inline = inlineJs("globalThis.__x = 1");
     assets.loadJs([inline]);
     assets.loadJs([inline]);
     expect(document.head.querySelectorAll("script:not([src])")).toHaveLength(1);
@@ -271,7 +289,7 @@ describe("assets registry and delta", () => {
   it("keeps inline and url assets of the same kind apart", () => {
     const { assets, loaded } = makeAssets();
     assets.loadCss(
-      [{ kind: "css", url: "", inline: ".z{color:red}" }, css("http://x/u.css")],
+      [inlineCss(".z{color:red}"), css("http://x/u.css")],
       () => undefined,
     );
     expect(document.head.querySelector("style")!.textContent).toBe(".z{color:red}");
@@ -365,17 +383,26 @@ describe("assets registry and delta", () => {
 
   it("injects an inline module as a type=module script", () => {
     const { assets } = makeAssets();
-    assets.loadJs([{ kind: "module", url: "", inline: "mount()" }]);
+    assets.loadJs([inlineModule("mount()")]);
     const script = document.head.querySelector<HTMLScriptElement>("script:not([src])")!;
     expect(script.type).toBe("module");
     expect(script.textContent).toBe("mount()");
+  });
+
+  it("leaves an inline body of the module kind alone when no verb spells it out", () => {
+    // The module kind registers no inline wrapper, so the server withholds the
+    // verb and a full page render prints the body verbatim. Building a
+    // type=module script here would execute what the other render only shows.
+    const { assets } = makeAssets();
+    assets.loadJs([{ kind: "module", url: "", inline: "mount()" }]);
+    expect(document.head.querySelectorAll("script")).toHaveLength(0);
   });
 
   it("seeds an inline module so the inline module delta does not re-run it", () => {
     document.head.innerHTML = '<script type="module">mount()</script>';
     const { assets } = makeAssets();
     assets.seed();
-    assets.loadJs([{ kind: "module", url: "", inline: "mount()" }]);
+    assets.loadJs([inlineModule("mount()")]);
     expect(document.head.querySelectorAll("script:not([src])")).toHaveLength(1);
   });
 
@@ -385,7 +412,7 @@ describe("assets registry and delta", () => {
     assets.seed();
     // The seeded body ran as a classic script, so the module form of the same
     // source has not run yet and still has to be inserted.
-    assets.loadJs([{ kind: "module", url: "", inline: "mount()" }]);
+    assets.loadJs([inlineModule("mount()")]);
     const scripts =
       document.head.querySelectorAll<HTMLScriptElement>("script:not([src])");
     expect(scripts).toHaveLength(2);
@@ -394,7 +421,7 @@ describe("assets registry and delta", () => {
 
   it("dedupes an inline module by body across applies", () => {
     const { assets } = makeAssets();
-    const inline: Asset = { kind: "module", url: "", inline: "mount()" };
+    const inline = inlineModule("mount()");
     assets.loadJs([inline]);
     assets.loadJs([inline]);
     expect(document.head.querySelectorAll("script:not([src])")).toHaveLength(1);
@@ -431,8 +458,8 @@ describe("assets registry and delta", () => {
       value: null,
       configurable: true,
     });
-    assets.loadCss([{ kind: "css", url: "", inline: ".z{}" }], () => undefined);
-    assets.loadJs([{ kind: "js", url: "", inline: "void 0" }]);
+    assets.loadCss([inlineCss(".z{}")], () => undefined);
+    assets.loadJs([inlineJs("void 0")]);
     expect(document.head.querySelector<HTMLStyleElement>("style")!.nonce).toBe(
       "nonce-7a3f",
     );
@@ -632,21 +659,25 @@ describe("seeding across the parse window", () => {
     expect(loaded).toEqual([]);
   });
 
-  it("re-seeds inside the window, before DOMContentLoaded fires", () => {
+  it("defers a js delta taken inside the window to the end of the parse", () => {
     const { assets } = makeAssets();
     assets.seed();
     parseTag('<script type="module" src="/static/w.js"></script>');
     assets.loadJs([{ kind: "module", url: "/static/w.js", load: "module" }]);
+    // The delta waits, so the module is not evaluated a second time here.
+    expect(document.querySelectorAll('script[src="/static/w.js"]')).toHaveLength(1);
+    finishParsing();
     expect(document.querySelectorAll('script[src="/static/w.js"]')).toHaveLength(1);
   });
 
-  it("re-seeds a stylesheet inside the window, before DOMContentLoaded fires", () => {
+  it("defers a stylesheet delta taken inside the window to the end of the parse", () => {
     const { assets, loaded } = makeAssets();
-    // Seeded up front, so the rescan can only come from loadCss itself: a load
-    // zone fires mid-parse and its response lands before the parser is done.
+    // Seeded up front, so a load zone firing mid-parse holds its delta until the
+    // whole document has arrived rather than reading the unparsed tail as missing.
     assets.seed();
     parseTag('<link rel="stylesheet" href="/static/mid.css">');
     assets.loadCss([css("/static/mid.css")], () => undefined);
+    finishParsing();
     expect(loaded).toEqual([]);
   });
 
@@ -659,6 +690,45 @@ describe("seeding across the parse window", () => {
     readyState("interactive");
     assets.loadJs([{ kind: "js", url: "/static/d.js" }]);
     expect(document.querySelectorAll('script[src="/static/d.js"]')).toHaveLength(1);
+  });
+
+  it("holds the js delta until parsing ends, seeing a tag parsed after seed", () => {
+    // The bug: a lazy load zone GETs mid-parse, so the manifest names a script
+    // the parser has not reached yet. A delta taken here counts it missing and
+    // inserts a second copy. Deferred to DOMContentLoaded, the scan sees the tag.
+    const { assets } = makeAssets();
+    assets.seed();
+    assets.loadJs([{ kind: "js", url: "/static/react-dom.js" }]);
+    parseTag('<script src="/static/react-dom.js"></script>');
+    finishParsing();
+    expect(
+      document.querySelectorAll('script[src="/static/react-dom.js"]'),
+    ).toHaveLength(1);
+  });
+
+  it("holds the css delta and its done until parsing ends", () => {
+    const { assets, loaded } = makeAssets();
+    const done = vi.fn();
+    assets.seed();
+    assets.loadCss([css("/static/mid.css")], done);
+    // The sheet is still being parsed when the load zone answers, so the delta
+    // and the done that runs the ops both wait for the whole document.
+    expect(done).not.toHaveBeenCalled();
+    parseTag('<link rel="stylesheet" href="/static/mid.css">');
+    finishParsing();
+    expect(loaded).toEqual([]);
+    expect(done).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops a deferred asset phase on reset so it never fires after parsing", () => {
+    const { assets } = makeAssets();
+    assets.seed();
+    assets.loadJs([{ kind: "js", url: "/static/orphan.js" }]);
+    assets._reset();
+    finishParsing();
+    expect(document.querySelectorAll('script[src="/static/orphan.js"]')).toHaveLength(
+      0,
+    );
   });
 
   it("stops rescanning once the document has finished parsing", () => {

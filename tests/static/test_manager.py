@@ -337,14 +337,32 @@ class TestReservedInitPayloadKeys:
         assert f'"{DEV_PAYLOAD_KEY}":true' in out
         assert f'"{DEV_PAYLOAD_KEY}":false' not in out
 
-    def test_user_dev_key_survives_without_debug(
+    def test_user_dev_key_is_dropped_without_debug(
         self, fresh_manager: StaticManager
     ) -> None:
-        """Without DEBUG the framework injects nothing, so `next.W075` is the guard."""
+        """A reserved key belongs to the framework even when it writes nothing."""
         collector = StaticCollector()
         collector.add_js_context(DEV_PAYLOAD_KEY, False)
         out = self.inject(fresh_manager, collector, debug=False)
-        assert f'"{DEV_PAYLOAD_KEY}":false' in out
+        assert DEV_PAYLOAD_KEY not in out
+        assert "Next._init({})" in out
+
+    def test_user_csrf_key_is_dropped_without_a_token_minting_request(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        collector = StaticCollector()
+        collector.add_js_context(CSRF_PAYLOAD_KEY, {"header": "X-App", "token": "app"})
+        out = self.inject(fresh_manager, collector, debug=False)
+        assert CSRF_PAYLOAD_KEY not in out
+        assert "X-App" not in out
+
+    def test_a_context_without_reserved_keys_is_untouched(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        collector = StaticCollector()
+        collector.add_js_context("user", "alice")
+        out = self.inject(fresh_manager, collector, debug=False)
+        assert 'Next._init({"user":"alice"})' in out
 
     def test_key_serializer_override_does_not_encode_the_framework_value(
         self, fresh_manager: StaticManager

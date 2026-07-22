@@ -13,7 +13,6 @@ from next.static.scripts import (
     CSRF_PAYLOAD_KEY,
     DEV_PAYLOAD_KEY,
     NEXT_JS_STATIC_PATH,
-    RESERVED_PAYLOAD_CONDITIONS,
     RESERVED_PAYLOAD_KEYS,
     csrf_header_name,
     csrf_payload,
@@ -315,23 +314,11 @@ class TestNextJsStaticPath:
 class TestReservedPayloadKeys:
     """The reserved set is the single source of truth for framework-owned keys."""
 
-    def test_holds_every_framework_key(self) -> None:
-        assert frozenset({CSRF_PAYLOAD_KEY, DEV_PAYLOAD_KEY}) == RESERVED_PAYLOAD_KEYS
+    def test_holds_every_framework_wire_name(self) -> None:
+        assert frozenset({"$csrf", "$dev"}) == RESERVED_PAYLOAD_KEYS
 
-    def test_every_reserved_key_is_dollar_prefixed(self) -> None:
-        assert all(key.startswith("$") for key in RESERVED_PAYLOAD_KEYS)
-
-    def test_every_reserved_key_carries_its_condition(self) -> None:
-        assert set(RESERVED_PAYLOAD_CONDITIONS) == set(RESERVED_PAYLOAD_KEYS)
-
-    def test_dev_condition_is_debug_only(self) -> None:
-        assert (
-            "only while DEBUG is True" in RESERVED_PAYLOAD_CONDITIONS[DEV_PAYLOAD_KEY]
-        )
-
-    def test_conditions_are_read_only(self) -> None:
-        with pytest.raises(TypeError):
-            RESERVED_PAYLOAD_CONDITIONS[DEV_PAYLOAD_KEY] = "always"  # type: ignore[index]
+    def test_key_constants_carry_the_wire_names(self) -> None:
+        assert (CSRF_PAYLOAD_KEY, DEV_PAYLOAD_KEY) == ("$csrf", "$dev")
 
 
 class TestCsrfPayload:

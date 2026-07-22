@@ -69,32 +69,10 @@ class StaticAsset:
 class KindRegistry:
     """Mutable registry mapping asset kinds to extension, slot, and renderer.
 
-    The registry ships empty. Bootstrap code registers built-in kinds
-    such as `css` and `js` through `register`, and user code registers
-    additional kinds the same way during `AppConfig.ready`.
-
-    Each registration carries three pieces of information.
-
-    The `extension` field is the file suffix associated with the kind.
-    Discovery walks every registered kind and looks for files matching
-    `{stem}{extension}` next to each template, layout, or component.
-
-    The `slot` field is the name of the placeholder slot that buckets
-    this asset at render time. Slots are owned by a sibling
-    `PlaceholderRegistry` and identify where the rendered tags land in
-    the final HTML.
-
-    The `renderer` field is the method name that the configured static
-    backend exposes for rendering asset URLs of this kind. The manager
-    looks the method up on the active backend with `getattr` per asset.
-
-    Example usage during framework bootstrap.
-
-    Example::
-
-        default_kinds.register(
-            "css", extension=".css", slot="styles", renderer="render_link_tag"
-        )
+    A registration binds the file suffix discovery looks for, the
+    placeholder slot the rendered tags land in, and the backend method
+    that renders a URL of the kind. The registry ships empty so built-in
+    kinds go through the same public `register` call user code uses.
     """
 
     def __init__(self) -> None:

@@ -67,6 +67,28 @@ describe("createPartial surface", () => {
     expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("new");
   });
 
+  it("a user-toggled details survives an unrequested morph patch", () => {
+    document.body.innerHTML =
+      '<div data-next-zone="z"><details id="d" open></details></div>';
+    const details = document.querySelector<HTMLDetailsElement>("#d")!;
+    // The delegated toggle listener the dirty tracker installs stamps the
+    // element, so the morph reads it as user-owned and keeps its open state.
+    details.dispatchEvent(new Event("toggle"));
+    partial.apply({
+      version: "v1",
+      ops: [
+        {
+          op: "morph",
+          target: { zone: "z" },
+          html: '<div data-next-zone="z"><details id="d"></details></div>',
+        },
+      ],
+      assets: [],
+      form: null,
+    });
+    expect(document.querySelector("#d")!.hasAttribute("open")).toBe(true);
+  });
+
   it("defineOp registers a custom verb reachable from apply", () => {
     const seen: unknown[] = [];
     partial.defineOp("confetti", (patch) => seen.push(patch.origin));
@@ -548,6 +570,77 @@ describe("createPartial surface", () => {
     expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("new");
   });
 
+  it("opening the dev channel keeps the ops registered before it", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const seen: unknown[] = [];
+    // A MANUAL-injection page runs its own script ahead of the bootstrap, so a
+    // custom verb can be registered before the dev channel opens.
+    partial.defineOp("confetti", (patch) => seen.push(patch.origin));
+    partial._configure({ dev: true });
+    partial.apply({
+      version: "v1",
+      ops: [null, { op: "confetti", origin: "btn" }],
+      assets: [],
+      form: null,
+    });
+    expect(seen).toEqual(["btn"]);
+    // The same apply proves the channel really opened, so the surviving verb is
+    // not the silence of a flag that never flipped.
+    expect(warn).toHaveBeenCalledWith("[next] dropped malformed ops: 1");
+  });
+
+  it("opening the dev channel keeps the parse hooks registered before it", async () => {
+    document.body.innerHTML = '<div data-next-zone="z">old</div>';
+    partial._configure({
+      document,
+      fetch: async () =>
+        new Response("stream-body", {
+          status: 200,
+          headers: { "content-type": "text/vnd.next.stream+html" },
+        }),
+      navigate: () => {},
+    });
+    partial.parseHook("text/vnd.next.stream+html", () => ({
+      version: "v1",
+      ops: [{ op: "inner", target: { zone: "z" }, html: "hooked" }],
+      assets: [],
+      form: null,
+    }));
+    partial._configure({ dev: true });
+    await partial.fetch({ url: "/list/", zone: "z" });
+    expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("hooked");
+  });
+
+  it("opening the dev channel keeps the nonce taken at the bootstrap", () => {
+    document.head.innerHTML = "";
+    const boot = document.createElement("script");
+    boot.nonce = "nonce-7a3f";
+    Object.defineProperty(document, "currentScript", {
+      value: boot,
+      configurable: true,
+    });
+    const made = makeSurface();
+    // The inline `_init` is what opens the channel, and it carries no nonce of
+    // its own under a CSP that allows it by hash.
+    Object.defineProperty(document, "currentScript", {
+      value: document.createElement("script"),
+      configurable: true,
+    });
+    made.partial._configure({ dev: true });
+    made.partial.apply({
+      version: "v1",
+      ops: [],
+      assets: [{ kind: "css", url: "", inline: ".z{}", load: "link" }],
+      form: null,
+    });
+    Object.defineProperty(document, "currentScript", {
+      value: null,
+      configurable: true,
+    });
+    expect(document.head.querySelector("style")!.nonce).toBe("nonce-7a3f");
+    made.partial._reset();
+  });
+
   it("the dev flag reaches the trigger attribute diagnostics", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     document.body.innerHTML = '<div data-next-zone="t" data-next-poll="soon"></div>';
@@ -591,9 +684,18 @@ describe("createPartial surface", () => {
     expect(() => partial._configure({ document, history })).not.toThrow();
   });
 
-  it("_configure without a document installs over the global document", () => {
+  it("_configure naming no seam at all rebuilds nothing", () => {
     const made = makeSurface();
-    expect(() => made.partial._configure({})).not.toThrow();
+    const seen: unknown[] = [];
+    made.partial.defineOp("confetti", (patch) => seen.push(patch.origin));
+    made.partial._configure({});
+    made.partial.apply({
+      version: "v1",
+      ops: [{ op: "confetti", origin: "btn" }],
+      assets: [],
+      form: null,
+    });
+    expect(seen).toEqual(["btn"]);
     made.partial._reset();
   });
 

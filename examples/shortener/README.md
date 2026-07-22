@@ -23,7 +23,7 @@ uv run python manage.py runserver     # http://127.0.0.1:8000/
 uv run pytest
 ```
 
-Tailwind loads via the Play CDN in [`routes/layout.djx`](shortener/routes/layout.djx). No Node, no build step.
+Tailwind loads via the Play CDN in [`host/layout.djx`](host/layout.djx). No Node, no build step.
 
 ## Walking the code
 
@@ -55,7 +55,7 @@ A directory under `routes/` with a `page.py` becomes a URL. The framework compos
 - **`template.djx`** (sibling of `page.py`) — the page body. Just HTML. No `{% block template %}` wrapping needed because the framework handles substitution.
 - **`page.py`** — Python side: context functions (`@context`), optional self-registering form classes (`next.forms.Form`/`ModelForm`), optional `template = "..."` module attribute, optional `render(request, ...) -> HttpResponse`.
 
-Ancestor layouts cascade: `routes/admin/stats/` inherits `routes/admin/layout.djx`, which itself is wrapped by `routes/layout.djx`. Look at the nested toolbar in [`admin/layout.djx`](shortener/routes/admin/layout.djx):
+Ancestor layouts cascade: `routes/admin/stats/` inherits `routes/admin/layout.djx`, which itself is wrapped by the project-level [`host/layout.djx`](host/layout.djx). Look at the nested toolbar in [`admin/layout.djx`](shortener/routes/admin/layout.djx):
 
 ```djx
 <section class="space-y-4">
@@ -169,7 +169,7 @@ The admin list edits each link inline. The same form renders once per row, so ea
 
 Three actions author their own patch envelopes through `Patches(request)` and fall back to a redirect when no runtime is present, so each works the same with or without JS.
 
-- **`prepend` with dedupe.** The home create form wraps its latest-links list in a `{% zone "latest-links" tag="ul" %}`. On a partial submit [`CreateLinkForm.on_valid`](shortener/routes/page.py) renders one keyed `link_row` and prepends it: `Patches(request).prepend({"zone": "latest-links"}, row, dedupe="key").response()`. Dedupe by `data-next-key` (the slug) means a resubmission replaces its row instead of doubling it. Without the runtime the form keeps its declared `Meta.success_url` redirect.
+- **`prepend` with dedupe.** The home create form wraps its latest-links list in a `{% zone "latest-links" tag="ul" %}`. On a partial submit [`CreateLinkForm.on_valid`](shortener/routes/page.py) renders one keyed `link_row` and prepends it: `Patches(request).prepend({"zone": "latest-links"}, row, dedupe="key").response()`. Dedupe by `data-next-key` (the slug) means a resubmission replaces its row instead of doubling it. Without the runtime the form keeps its declared `Meta.success_url` redirect. The empty-state branch lives _inside_ the zone body rather than around the tag, because a standalone zone render never evaluates an enclosing `{% if %}` — the framework rejects the other arrangement with `next.E063`.
 - **`remove`.** Each admin row is a `<li data-next-key="{{ link.slug }}">`. The [`delete_link`](shortener/routes/admin/page.py) action drops the row in place: `Patches(request).remove({"css": 'li[data-next-key="..."]'}).response(fallback="/admin/")`.
 - **`morph_foreign_zone` (out of band).** The home page owns a `{% zone "links-badge" %}` that totals unflushed clicks. The [`reset_clicks`](shortener/routes/admin/links/[slug]/page.py) action on the detail page re-renders that zone of the _foreign_ home page out of band: `Patches(request).morph_foreign_zone("links-badge", "/")`. The home page's body resolution re-runs first, so the zone travels only when that page would have served the request.
 

@@ -160,6 +160,12 @@ A URL-form asset takes the verb of its renderer.
 An inline body keeps that verb only when the kind wraps it in the element the runtime builds, ``style`` for the ``link`` verb and ``script`` for the ``script`` verb.
 The ``module`` verb builds a typed ``<script type="module">`` that no ``inline_tag`` names, so an inline body under ``render_module_tag`` carries no verb, and neither does the inline body of a kind registered without an ``inline_tag``.
 Such a body reaches the browser on a full page render, which emits it verbatim, and is skipped on a partial render, so the two renders agree on the element that holds it.
+A kind whose ``inline_tag`` names a different element than its renderer's verb builds keeps its URL form on a patch and leaves its inline bodies to the full render, which the ``next.W076`` check reports.
+
+The rule the two sides follow reads in three parts.
+The server derives the verb from the renderer registered for the kind and writes it into the entry.
+A URL-form entry that reaches the client with no ``load`` field falls back to the verb implied by the name of a built-in kind, ``link`` for ``css``, ``script`` for ``js``, and ``module`` for ``module``, so an envelope authored before the field existed still loads.
+An entry carrying an inline body takes no such fallback, and without an explicit ``load`` field it is dropped rather than wrapped in an element the full render would not build.
 
 A kind registered with a custom renderer, such as the ``render_babel_tag`` example, carries no verb.
 Its assets render on a full page render and are skipped on a partial render, because the runtime has no element to build for them.
@@ -210,6 +216,7 @@ Customise the rendered output through the ``module_tag`` key in the backend ``OP
 
 The ``module`` kind carries no ``inline_tag``, so it renders an inline body verbatim, as do custom kinds registered without an ``inline_tag``.
 An inline body of such a kind carries no insertion verb, so it arrives on a full page render only, while the URL form of the same kind still loads through a patch envelope.
+The two renders agree on that split, because the client drops an inline entry that carries no verb instead of guessing one from the kind name.
 
 System Checks
 -------------
@@ -217,6 +224,9 @@ System Checks
 The static system checks ``next.W030``, ``next.W031``, and ``next.E036`` through ``next.E038`` validate the backend configuration.
 The ``next.W042`` check validates the ``JS_CONTEXT_SERIALIZER`` setting.
 The ``next.W074`` check walks the registered kinds and warns about each one whose renderer carries no client insertion verb.
+The ``next.W076`` check walks the same kinds and warns about each one whose ``inline_tag`` is not the element its renderer's verb builds, so its URL form travels in a patch envelope while its inline bodies do not.
+Both checks read the registry of the running process, so a kind no registration backs is outside their reach.
+The ``next.W075`` check covers the init-payload keys the framework reserves rather than the kinds, see :doc:`js-context`.
 No check validates the shape of a registration, because a bad call to ``default_kinds.register`` raises ``ValueError`` during ``AppConfig.ready``.
 Because Django runs ``ready`` for every management command and during ASGI or WSGI worker boot, the exception aborts whatever process is starting up, not only ``manage.py check``.
 

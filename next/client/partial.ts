@@ -92,6 +92,7 @@ export interface PartialSurface {
   ready(): void;
   // Configure the injectable adapters and rebuild the wire and applier. Tests
   // call this in beforeEach, production wires the real platform globals once.
+  // An adapter object carrying nothing but the dev flag only flips the flag.
   _configure(adapters: PartialAdapters): void;
   _reset(): void;
 }
@@ -104,8 +105,22 @@ function opt<K extends string, V>(key: K, value: V | undefined): Partial<Record<
   return value === undefined ? {} : ({ [key]: value } as Record<K, V>);
 }
 
+// Whether an adapter object names no seam at all, the shape the inline bootstrap
+// passes to open the dev channel. Such a call swaps nothing in, so it must not
+// cost a rebuild.
+function onlyDev(adapters: PartialAdapters): boolean {
+  return Object.keys(adapters).every((key) => key === "dev");
+}
+
 export function createPartial(deps: PartialDeps): PartialSurface {
   let csrf: CsrfPayload | undefined;
+
+  // The dev channel is closure state the applier and the triggers read live. It
+  // opens from inside the inline `_init`, where a rebuild would take the CSP
+  // nonce off that inline script instead of off the bundle tag and would drop
+  // the ops and parse hooks a page registered before the bootstrap.
+  let dev = false;
+  const readDev = (): boolean => dev;
 
   // The dirty registry: delegated listeners stamp touched fields, wire.ts
   // snapshots the counter at fetch time, the applier consults the predicate.
@@ -154,8 +169,11 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       dispatch: deps.dispatch,
       mergeContext: deps.mergeContext,
       ...opt("document", adapters?.document),
-      ...opt("dev", adapters?.dev),
+      dev: readDev,
       dirtySince: (snapshot) => dirty.isDirtySince(snapshot),
+      // A user-toggled <details> keeps its open state past a patch it never
+      // asked for, off the same registry the dirty predicate reads.
+      isTouched: (el) => dirty.isTouched(el),
       // The stack satisfies the bridge: the applier resolves zone targets top
       // layer down and routes the layer and toast verbs into it. _configure
       // rebuilds the stack before the applier, so this binding stays live.
@@ -200,7 +218,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       ...opt("observer", adapters?.observer),
       ...opt("visibility", adapters?.visibility),
       ...opt("confirm", adapters?.confirm),
-      ...opt("dev", adapters?.dev),
+      dev: readDev,
     };
   }
 
@@ -225,6 +243,9 @@ export function createPartial(deps: PartialDeps): PartialSurface {
     return {
       ...opt("fetch", adapters?.fetch),
       ...opt("navigate", adapters?.navigate),
+      // The same reload-once store the asset guard uses, so the non-envelope
+      // navigate-once flag rides the one session seam the harness overrides.
+      ...opt("session", adapters?.session),
       dispatch: deps.dispatch,
       onEnvelope: (
         raw: unknown,
@@ -293,6 +314,10 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       triggers.ready();
     },
     _configure(adapters) {
+      // An absent flag reads as production, the same default every other absent
+      // adapter falls back to.
+      dev = adapters.dev ?? false;
+      if (onlyDev(adapters)) return;
       if (adapters.document !== undefined) dirty.install(adapters.document);
       if (adapters.history !== undefined) history = adapters.history;
       if (adapters.navigate !== undefined) navigate = adapters.navigate;

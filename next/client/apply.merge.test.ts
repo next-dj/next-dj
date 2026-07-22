@@ -533,6 +533,74 @@ describe("append and prepend dedup", () => {
     expect(texts).toEqual(["A", "B", "B2"]);
   });
 
+  it("aims the second row of a repeated key at the replacement, not the ghost", () => {
+    document.body.innerHTML =
+      '<ul data-next-zone="rows"><li data-next-key="1">one</li></ul>';
+    const list = document.querySelector("ul")!;
+    let added = false;
+    // The hook puts its keyed row ahead of the replacement, so a rebuilt index
+    // would resolve key 1 to the ghost while the live index still points at the
+    // row the merge just landed.
+    list.addEventListener("next:removed", () => {
+      if (added) return;
+      added = true;
+      const ghost = document.createElement("li");
+      ghost.setAttribute("data-next-key", "1");
+      ghost.textContent = "ghost";
+      list.prepend(ghost);
+    });
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "append",
+          target: { zone: "rows" },
+          html: '<li data-next-key="1">A</li><li data-next-key="1">B</li>',
+        },
+      ]),
+    );
+    const texts = Array.from(document.querySelectorAll("li")).map(
+      (li) => li.textContent,
+    );
+    // B replaces A, the row of its own batch, and the hook's row is left where
+    // the hook put it.
+    expect(texts).toEqual(["ghost", "B"]);
+  });
+
+  it("cascades the deferred rows of one key through the reconcile pass", () => {
+    document.body.innerHTML =
+      '<ul data-next-zone="rows"><li data-next-key="a">one</li></ul>';
+    const list = document.querySelector("ul")!;
+    let added = false;
+    list.addEventListener("next:removed", () => {
+      if (added) return;
+      added = true;
+      const ghost = document.createElement("li");
+      ghost.setAttribute("data-next-key", "b");
+      ghost.textContent = "ghost";
+      list.append(ghost);
+    });
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "append",
+          target: { zone: "rows" },
+          html:
+            '<li data-next-key="a">A</li>' +
+            '<li data-next-key="b">first b</li>' +
+            '<li data-next-key="b">second b</li>',
+        },
+      ]),
+    );
+    const texts = Array.from(document.querySelectorAll("li")).map(
+      (li) => li.textContent,
+    );
+    // Both deferred rows carry key b: the first takes the hook's row, the second
+    // takes the first, the same cascade the pass inside the loop performs.
+    expect(texts).toEqual(["A", "second b"]);
+  });
+
   it("skips the container index for a batch that carries no keys", () => {
     const rows = Array.from(
       { length: 500 },

@@ -12,9 +12,15 @@ import {
   REQUEST_FLAG,
 } from "./protocol";
 import type { PartialError } from "./protocol";
-import { defaultFetch, defaultNavigate } from "./adapters";
+import { defaultFetch, defaultNavigate, defaultSession } from "./adapters";
+import type { SessionStore } from "./assets";
 
 const SAFE_METHODS = new Set(["GET", "HEAD"]);
+
+// The navigate-once flag of the non-envelope fallback, kept apart from the
+// version guard's own flag in assets.ts: the two loops have different causes and
+// one must not clear the other.
+const NAVIGATED_FLAG = "next:partial:navigated";
 
 // Stand-ins for the platform globals so vitest drives fetch and the clock
 // deterministically and jsdom's missing navigation hook is mockable.
@@ -69,6 +75,9 @@ export type ParseHook = (response: Response, body: string) => unknown;
 export interface WireDeps {
   fetch?: FetchAdapter;
   navigate?: Navigate;
+  // The navigate-once store of the non-envelope fallback. Absent, the default
+  // wraps sessionStorage, the same store the version guard writes to.
+  session?: SessionStore;
   dispatch: (event: string, detail: Record<string, unknown>) => void;
   onEnvelope: EnvelopeHandler;
   version?: () => string;
@@ -104,6 +113,7 @@ function newRequestId(): string {
 export class Wire {
   readonly #fetch: FetchAdapter;
   readonly #navigate: Navigate;
+  readonly #session: SessionStore;
   readonly #dispatch: (event: string, detail: Record<string, unknown>) => void;
   readonly #onEnvelope: EnvelopeHandler;
   readonly #version: () => string;
@@ -120,6 +130,7 @@ export class Wire {
   constructor(deps: WireDeps) {
     this.#fetch = deps.fetch ?? defaultFetch();
     this.#navigate = deps.navigate ?? defaultNavigate();
+    this.#session = deps.session ?? defaultSession();
     this.#dispatch = deps.dispatch;
     this.#onEnvelope = deps.onEnvelope;
     this.#version = deps.version ?? (() => "");
@@ -278,7 +289,7 @@ export class Wire {
     const hook = this.#parseHooks.get(baseType);
     if (hook !== undefined) {
       const body = await this.#text(response);
-      this.#onEnvelope(hook(response, body), response, snapshot, request.key, page);
+      this.#deliver(hook(response, body), response, snapshot, request.key, page);
       return;
     }
     // Any non-envelope content-type, or a redirected response, is a full
@@ -289,7 +300,7 @@ export class Wire {
     // 405: it surfaces as an error and leaves the page in place.
     if (baseType !== CONTENT_TYPE || response.redirected) {
       if (response.redirected || SAFE_METHODS.has(method)) {
-        this.#navigate(response.url || request.url);
+        this.#fallbackNavigate(response.url || request.url);
         return;
       }
       const body = await this.#text(response);
@@ -312,7 +323,41 @@ export class Wire {
       } satisfies PartialError);
       return;
     }
-    this.#onEnvelope(raw, response, snapshot, request.key, page);
+    this.#deliver(raw, response, snapshot, request.key, page);
+  }
+
+  // Hand a recognised envelope to the applier and clear the navigate-once flag:
+  // a correct classify means the state settled, so the next non-envelope on the
+  // same page is a fresh cause that earns its own single navigation. Mirrors
+  // acceptVersion clearing the version guard's flag.
+  #deliver(
+    raw: unknown,
+    response: Response,
+    snapshot: number,
+    key: string | undefined,
+    page: string | undefined,
+  ): void {
+    this.#session.remove(NAVIGATED_FLAG);
+    this.#onEnvelope(raw, response, snapshot, key, page);
+  }
+
+  // The full-visit fallback for a non-envelope zone GET, guarded so a page that
+  // keeps answering non-envelope (an expired session redirecting to login, a
+  // WAF stub, a maintenance page) cannot loop navigation. A `lazy="load"` zone
+  // re-asks on every fresh page, so without the flag the same answer navigates
+  // forever. The first non-envelope navigates under the flag, a second while
+  // the flag stands degrades to a partial:error and leaves the page in place.
+  #fallbackNavigate(url: string): void {
+    if (this.#session.get(NAVIGATED_FLAG) === "1") {
+      this.#session.remove(NAVIGATED_FLAG);
+      this.#dispatch("partial:error", {
+        kind: "network",
+        error: new Error("zone answered non-envelope after a navigation"),
+      } satisfies PartialError);
+      return;
+    }
+    this.#session.set(NAVIGATED_FLAG, "1");
+    this.#navigate(url);
   }
 
   #text(response: Response): Promise<string> {
