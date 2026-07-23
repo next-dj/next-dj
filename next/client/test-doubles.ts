@@ -5,8 +5,7 @@ import type { VisibilityAdapter } from "./sse";
 import type { Clock } from "./wire";
 
 // Holds every pending timer with a working clearTimeout, so a duplicate chain
-// shows up as pending() above one. tick() drains the due set first, so a
-// re-arm from inside a handler lands in the next cycle.
+// shows up as pending() above one. tick() drains the due set before re-arms.
 export function manualPollClock(): Clock & {
   tick(): void;
   pending(): number;

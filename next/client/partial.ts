@@ -1,7 +1,4 @@
-// Assembly of the `Next.partial` surface from the wire and apply modules. The
-// core wires its dispatch and context-merge into the applier and the fetch
-// layer, and exposes the public surface. Further verbs register behind the same
-// surface through its extension points.
+// Assembly of the `Next.partial` surface from the wire and apply modules.
 
 import { Applier } from "./apply";
 import type {
@@ -32,105 +29,75 @@ import type { EventSourceAdapter, Sse, VisibilityAdapter } from "./sse";
 import { defaultHistory, defaultNavigate } from "./adapters";
 import { currentUrl, matching } from "./protocol";
 
+/** The core seams the applier and the fetch layer read from. */
 export interface PartialDeps {
   dispatch: (event: string, detail: Record<string, unknown>) => void;
   mergeContext: (data: Record<string, unknown>) => void;
 }
 
-// The injectable seams the test harness overrides: the fetch adapter, the
-// navigation hook jsdom does not implement, the clock for the timer-bound
-// behaviour (CSS-wait timeout, debounce), the CSS loader, the intersection
-// geometry, the reload-once session store, and the confirm gate.
+/** The injectable platform seams, each overridable by the test harness. */
 export interface PartialAdapters {
   fetch?: FetchAdapter;
   clock?: Clock;
   navigate?: Navigate;
   document?: Document;
   dev?: boolean;
-  // The native <dialog> modality, mocked in tests so the layer stack runs
-  // without jsdom's missing showModal and focus trap.
   dialog?: DialogAdapter;
   history?: HistoryAdapter;
-  // The Back-gesture seam of the intercepting modal lifecycle, mocked in tests
-  // so the popstate handler runs without jsdom driving real history.
   popstate?: PopStateAdapter;
-  // The CSS loader, the intersection geometry, the reload-once store, and the
-  // confirm gate, each absent in jsdom.
   loadLink?: LinkLoader;
   observer?: IntersectionAdapter;
   session?: SessionStore;
   confirm?: ConfirmAdapter;
   cssTimeoutMs?: number;
-  // The EventSource seam of the SSE bridge and the visibility seam the bridge
-  // shares with the poll triggers, both absent in jsdom: tests drive message,
-  // error, and the visibility flip through mocks.
   source?: EventSourceAdapter;
   visibility?: VisibilityAdapter;
 }
 
+/** The public `Next.partial` surface plus its underscore-prefixed test seams. */
 export interface PartialSurface {
   apply(raw: unknown): Envelope;
   fetch(request: WireRequest): Promise<void>;
   defineOp(name: string, handler: OpHandler): void;
   parseHook(contentType: string, hook: ParseHook): void;
   setCsrf(csrf: CsrfPayload | undefined): void;
-  // The re-executable mount registry: the callback runs over the document on
-  // `ready`, over every inserted subtree after each apply, and immediately over
-  // the current document when registered after `ready`, the replacement for
-  // DOMContentLoaded for co-located JS that loads after the inline `_init`.
-  // Returns a teardown that unregisters the callback, symmetric with the other
-  // install seams, so a plugin can remove its own mount hook.
+  /** Register a mount callback, returning a teardown that unregisters it. */
   onMount(selector: string, callback: (el: Element) => void): () => void;
-  // The modal layer stack, exposed so the harness drives open/close/resolve
-  // without synthesising a click.
   layers: LayerStack;
-  // The SSE bridge, exposed so the harness drives the echo ring, the scan, and
-  // the resync without a real EventSource.
   sse: Sse;
-  // Run the on-`ready` work: seed the asset registry, mount the initial DOM,
-  // fire the batched load zones. The core calls this from `_init`.
+  /** Run the on-`ready` work, called by the core from the inline `_init`. */
   ready(): void;
-  // Configure the injectable adapters and rebuild the wire and applier. Tests
-  // call this in beforeEach, production wires the real platform globals once.
-  // An adapter object carrying nothing but the dev flag only flips the flag.
+  /** Configure the adapters and rebuild the wire and applier. */
   _configure(adapters: PartialAdapters): void;
   _reset(): void;
 }
 
-// An optional dep entry: an absent adapter contributes no key at all, so the
-// built deps object never carries an explicit undefined. This honours
-// exactOptionalPropertyTypes, where an optional `key?: T` field rejects an
-// assigned undefined.
+// An absent adapter contributes no key, so the deps object never carries an
+// explicit undefined that exactOptionalPropertyTypes would reject.
 function opt<K extends string, V>(key: K, value: V | undefined): Partial<Record<K, V>> {
   return value === undefined ? {} : ({ [key]: value } as Record<K, V>);
 }
 
-// Whether an adapter object names no seam at all, the shape the inline bootstrap
-// passes to open the dev channel. Such a call swaps nothing in, so it must not
-// cost a rebuild.
+// A dev-only adapter object swaps nothing in, so it must not cost a rebuild.
 function onlyDev(adapters: PartialAdapters): boolean {
   return Object.keys(adapters).every((key) => key === "dev");
 }
 
+/** Build the partial surface, wiring the sub-modules onto the shared deps. */
 export function createPartial(deps: PartialDeps): PartialSurface {
   let csrf: CsrfPayload | undefined;
 
-  // The dev channel is closure state the applier and the triggers read live. It
+  // Live closure state the applier and triggers read through a call. The channel
   // opens from inside the inline `_init`, where a rebuild would take the CSP
-  // nonce off that inline script instead of off the bundle tag and would drop
-  // the ops and parse hooks a page registered before the bootstrap.
+  // nonce off that script and drop ops and parse hooks registered before boot.
   let dev = false;
   const readDev = (): boolean => dev;
 
-  // The dirty registry: delegated listeners stamp touched fields, wire.ts
-  // snapshots the counter at fetch time, the applier consults the predicate.
   const dirty = createDirtyTracker();
   dirty.install(document);
 
-  // The mount registry, shared by onMount and triggers: every inserted subtree
-  // runs the registered selector callbacks and the trigger activation. The
-  // `mounted` flag records whether the initial `ready` pass has run, so a
-  // late-registered callback catches up over the present document.
+  // Shared by onMount and triggers. The `mounted` flag records whether the
+  // initial `ready` pass has run, so a late callback catches up over the DOM.
   const mounts: { selector: string; callback: (el: Element) => void }[] = [];
   let mounted = false;
   const runMount: MountCallback = (root) => {
@@ -171,17 +138,12 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       ...opt("document", adapters?.document),
       dev: readDev,
       dirtySince: (snapshot) => dirty.isDirtySince(snapshot),
-      // A user-toggled <details> keeps its open state past a patch it never
-      // asked for, off the same registry the dirty predicate reads.
       isTouched: (el) => dirty.isTouched(el),
-      // The stack satisfies the bridge: the applier resolves zone targets top
-      // layer down and routes the layer and toast verbs into it. _configure
-      // rebuilds the stack before the applier, so this binding stays live.
+      // _configure rebuilds the stack before the applier, so this stays live.
       layers,
       history,
-      // The visit verb rides the navigation seam, a hard navigation that takes
-      // any origin, where the url verb rides history. Defaults to the real
-      // location.assign and _configure swaps in the mock, the same as history.
+      // The visit verb rides this hard-navigation seam, the url verb rides
+      // history. _configure swaps in the mock, the same as history.
       navigate,
       assets,
       mount: { run: runMount },
@@ -195,8 +157,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       dispatch: deps.dispatch,
       ...opt("document", adapters?.document),
       ...opt("dialog", adapters?.dialog),
-      // The layer stack shares the applier's history seam so a modal pushes its
-      // honest URL and a close replaces it back through the same channel.
+      // Shares the applier's history seam so a modal pushes its honest URL.
       history,
       ...opt("popstate", adapters?.popstate),
       fetch: (request: { url: string; zone: string }) => wire.fetch(request),
@@ -207,11 +168,8 @@ export function createPartial(deps: PartialDeps): PartialSurface {
     return {
       fetch: (request: WireRequest) => void wire.fetch(request),
       abort: (zone: string) => wire.abort(zone),
-      // A poll tick or lazy activation asks the layer stack for the page that
-      // owns its element, so a base-page zone keeps GETting the host URL while
-      // a modal layer holds the address bar. The arrow reads the `layers`
-      // variable, and _configure rebuilds the stack before the triggers, so
-      // the binding stays live the same way applyDeps holds it.
+      // The owning page of an element, so a base-page zone keeps GETting the
+      // host URL while a modal layer holds the address bar.
       pageUrl: (el: Element) => layers.urlFor(el),
       ...opt("document", adapters?.document),
       ...opt("clock", adapters?.clock),
@@ -224,14 +182,10 @@ export function createPartial(deps: PartialDeps): PartialSurface {
 
   function sseDeps(adapters?: PartialAdapters) {
     return {
-      // A stream event carries no per-target dirty snapshot, so it applies with
-      // the server value winning, the same as a direct apply.
+      // A stream event carries no dirty snapshot, so the server value wins.
       apply: (raw: unknown) => void applier.apply(raw),
       fetch: (request: WireRequest) => void wire.fetch(request),
       dispatch: deps.dispatch,
-      // A stream subscription captures the page that owns its container from
-      // the layer stack, the same live binding as triggerDeps: _configure
-      // rebuilds the stack before the bridge, so the arrow stays current.
       pageUrl: (el: Element) => layers.urlFor(el),
       ...opt("document", adapters?.document),
       ...opt("source", adapters?.source),
@@ -243,8 +197,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
     return {
       ...opt("fetch", adapters?.fetch),
       ...opt("navigate", adapters?.navigate),
-      // The same reload-once store the asset guard uses, so the non-envelope
-      // navigate-once flag rides the one session seam the harness overrides.
+      // The same reload-once store the asset guard uses.
       ...opt("session", adapters?.session),
       dispatch: deps.dispatch,
       onEnvelope: (
@@ -255,15 +208,14 @@ export function createPartial(deps: PartialDeps): PartialSurface {
         page: string | undefined,
       ) => {
         const envelope = applier.apply(raw, snapshot, key, page);
-        // The csrf meta rotates the payload token too, so the next mutation
-        // submits the fresh token, not just the forms already in the document.
+        // A csrf meta rotates the token so the next mutation submits the fresh
+        // one, not just the forms already in the document.
         if (envelope.csrf) csrf = envelope.csrf;
       },
       version: () => assets.version(),
       csrf: () => csrf,
       dirtySnapshot: () => dirty.snapshot(),
-      // Every mutating request feeds its ring id to the SSE bridge so the
-      // matching stream event is dropped as the client's own echo.
+      // Feeds the ring id to the SSE bridge so the echo stream event drops.
       rememberRequestId: (id: string) => sse.remember(id),
     };
   }
@@ -287,10 +239,8 @@ export function createPartial(deps: PartialDeps): PartialSurface {
     onMount(selector, callback) {
       const entry = { selector, callback };
       mounts.push(entry);
-      // A co-located script can register after the initial `ready` pass, since
-      // it loads after the inline `_init` runs. Catch the callback up over the
-      // document already present, mirroring `Next.on("ready")` for late
-      // subscribers. It was absent from the `ready` pass, so this runs once.
+      // A callback registered after `ready` catches up over the present DOM,
+      // mirroring `Next.on("ready")` for late subscribers.
       if (mounted) {
         for (const el of Array.from(document.querySelectorAll(selector))) {
           callback(el);
@@ -314,22 +264,18 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       triggers.ready();
     },
     _configure(adapters) {
-      // An absent flag reads as production, the same default every other absent
-      // adapter falls back to.
       dev = adapters.dev ?? false;
       if (onlyDev(adapters)) return;
       if (adapters.document !== undefined) dirty.install(adapters.document);
       if (adapters.history !== undefined) history = adapters.history;
       if (adapters.navigate !== undefined) navigate = adapters.navigate;
-      // The outgoing registry may still be watching the old document for the
-      // end of its parse, so it is torn down before the replacement takes over.
+      // The outgoing registry may still watch the old document's parse, so it is
+      // torn down before the replacement takes over.
       assets._reset();
       assets = createAssets(assetsDeps(adapters));
       detachLayers();
       detachTriggers();
-      // Stop the old instance's pollers and observers before the rebuild, or
-      // they would keep fetching through the live wire as orphans, the same
-      // reason the SSE bridge resets here.
+      // Stop the old pollers and observers, or they orphan onto the live wire.
       triggers._reset();
       sse._reset();
       layers = createLayers(layerDeps(adapters));

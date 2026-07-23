@@ -77,9 +77,8 @@ describe("morph node reuse", () => {
   });
 
   it("refuses a soft match at a pointer that carries a persistent id", () => {
-    // The pointer #a shares an id present on both sides, so it is reserved for a
-    // hard match. A keyless new <li> finds no hard match and the soft match at
-    // #a is refused, so a fresh node is inserted ahead of the reserved #a.
+    // #a carries a persistent id and is reserved for a hard match, so the keyless
+    // new <li> is inserted ahead of it rather than soft-matching it.
     const target = mount('<ul id="l"><li id="a">a</li></ul>');
     const reserved = target.querySelector("#a");
     morph(target, '<ul id="l"><li>fresh</li><li id="a">a</li></ul>');
@@ -89,8 +88,8 @@ describe("morph node reuse", () => {
   });
 
   it("soft-matches a pointer whose only id is gone from the new tree", () => {
-    // #ghost lives on the old side alone, so it owns no persistent vote. The
-    // keyless new <li> takes it as a soft match rather than inserting fresh.
+    // #ghost lives on the old side alone, so it owns no persistent vote and the
+    // keyless new <li> soft-matches it.
     const target = mount('<ul id="l"><li id="ghost">old</li></ul>');
     const ghost = target.querySelector("#ghost");
     morph(target, '<ul id="l"><li>new</li></ul>');
@@ -239,8 +238,8 @@ describe("morph modes and root", () => {
   });
 
   it("returns the new root on a tag change of a detached target", () => {
-    // A target with no parent cannot be relinked, so the new root is returned
-    // and the old detached node is simply left behind.
+    // A detached target cannot be relinked, so the new root is returned and the
+    // old node is left behind.
     const target = document.createElement("div");
     target.id = "r";
     target.textContent = "x";
@@ -452,9 +451,8 @@ describe("morph hooks and events", () => {
   });
 
   it("re-focuses and restores the caret when a relocate drops focus", () => {
-    // A real browser blurs a focused node while it is being relocated. jsdom
-    // keeps focus through insertBefore, so the move adapter blurs to model the
-    // native behaviour and drive the focus-loss restore branch.
+    // A real browser blurs a relocated node, jsdom does not, so the move adapter
+    // blurs to drive the focus-loss restore branch.
     const target = mount(
       '<ul id="l"><li id="a"><input id="ia" name="a" value="hello"></li>' +
         '<li id="b">b</li></ul>',
@@ -479,8 +477,8 @@ describe("morph hooks and events", () => {
   });
 
   it("re-focuses a checkbox whose caret read is null without a range restore", () => {
-    // A checkbox reports a null selectionStart, so snap.start stays null and the
-    // restore re-focuses the box but never reaches setSelectionRange.
+    // A checkbox reports a null selectionStart, so the restore re-focuses but
+    // never reaches setSelectionRange.
     const target = mount(
       '<ul id="l"><li id="a"><input id="ca" type="checkbox" name="a"></li>' +
         '<li id="b">b</li></ul>',
@@ -502,8 +500,8 @@ describe("morph hooks and events", () => {
   });
 
   it("re-focuses a button and skips a caret restore it cannot accept", () => {
-    // A button exposes no settable selection range, so the caret restore enters
-    // and setSelectionRange throws, exercising the swallow on the restore path.
+    // A button has no settable selection range, so setSelectionRange throws and
+    // the restore swallows it.
     const target = mount(
       '<ul id="l"><li id="a"><button id="btn">go</button></li>' +
         '<li id="b">b</li></ul>',

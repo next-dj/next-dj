@@ -1,24 +1,8 @@
 // The asset loader and the version safeguard. A registry of URLs already on the
-// page is seeded by scanning the DOM on `ready` and again once parsing ends,
-// since the bootstrap runs above the co-located tags. The envelope ships a
-// full manifest of its rendered targets, the client computes the delta against
-// that registry, so the loaded-asset list never travels from client to server.
-//
-// An asset is inserted by its verb, not by its kind. The server derives the verb
-// from the renderer registered for the kind, so a project-named kind still
-// reaches the browser as a link, a script, or a module.
-//
-// Two views, two rules: the link verb is inserted and awaited (bounded) before
-// the ops run so there is no FOUC, the script verbs run after the ops so the
-// target DOM is already in place. Each URL executes once per page life. A delta
-// taken while the parser is still mid-document would read its unparsed tail as
-// missing, so an envelope landing in that window waits for the end of the parse
-// before its assets and its ops go in.
-//
-// A version mismatch triggers a single full visit under a reload-once flag so a
-// stale CDN cannot loop the page. The link loader, the navigation, and the store
-// are injectable seams: jsdom loads no resources, fires no link.onload, and does
-// not implement location.assign.
+// page is the baseline against which an envelope manifest is a delta, so the
+// loaded-asset list never travels from client to server. A version mismatch
+// triggers a single full visit under a reload-once flag so a stale CDN cannot
+// loop the page.
 
 import {
   defaultClock,
@@ -34,9 +18,12 @@ import type { Clock, Navigate } from "./wire";
 const RELOAD_FLAG = "next:partial:reloaded";
 const CSS_TIMEOUT_MS = 3000;
 
-// Insert a stylesheet and signal load, timeout, or error through one callback.
-// The real implementation lives behind a seam because jsdom never fires
-// link.onload, so the timeout and error branches are otherwise untestable.
+/**
+ * Insert a stylesheet and signal load, timeout, or error through one callback.
+ *
+ * A seam because jsdom never fires link.onload, so the timeout and error
+ * branches are otherwise untestable.
+ */
 export type LinkLoader = (
   url: string,
   nonce: string | undefined,
@@ -45,56 +32,66 @@ export type LinkLoader = (
   timeoutMs: number,
 ) => void;
 
-// The minimal session store the reload-once guard needs. Injected so the
-// harness drives the flag without a real Storage, and so the guard survives
-// environments where sessionStorage throws (private mode, disabled storage).
+/**
+ * The minimal session store the reload-once guard needs.
+ *
+ * Injected so the guard survives environments where sessionStorage throws
+ * (private mode, disabled storage) and the harness can drive the flag.
+ */
 export interface SessionStore {
   get(key: string): string | null;
   set(key: string, value: string): void;
   remove(key: string): void;
 }
 
+/** The injectable seams createAssets accepts, each defaulting to a real adapter. */
 export interface AssetsDeps {
   dispatch: (event: string, detail: Record<string, unknown>) => void;
   document?: Document;
   clock?: Clock;
-  // The CSS loader seam. Absent, the default inserts a real <link>.
+  // Absent, the default inserts a real <link>.
   loadLink?: LinkLoader;
-  // The full-visit navigation for a version mismatch. Absent, the default
-  // calls location.assign.
+  // Absent, the default calls location.assign.
   navigate?: Navigate;
-  // The reload-once store. Absent, the default wraps sessionStorage.
+  // Absent, the default wraps sessionStorage.
   session?: SessionStore;
-  // The bounded CSS wait. A test passes a small value, production keeps the
-  // default so a slow stylesheet does not block ops forever.
+  // The bounded CSS wait, so a slow stylesheet does not block ops forever.
   cssTimeoutMs?: number;
 }
 
+/** The asset runtime a partial apply drives, backed by a per-page URL registry. */
 export interface Assets {
-  // Seed the registry from the assets already present in the document, the
-  // baseline against which envelope manifests are a delta.
+  /** Seed the registry from the assets already present in the document. */
   seed(): void;
-  // Insert the missing link-verb assets of a manifest and call done once every
-  // new sheet has loaded, errored, or timed out. With none missing the callback
-  // runs synchronously so the ops apply in the same tick, unless the document is
-  // still parsing, where the whole phase waits for the end of the parse.
+  /**
+   * Insert the missing link-verb assets of a manifest and call done once every
+   * new sheet has loaded, errored, or timed out.
+   *
+   * With none missing done runs synchronously, unless the document is still
+   * parsing, where the whole phase waits for the end of the parse.
+   */
   loadCss(manifest: readonly Asset[], done: () => void): void;
-  // Run the missing script and module verbs of a manifest after the ops, each
-  // URL and each inline body once per page. Deferred past the parse window like
-  // loadCss, since the delta is only honest against a complete document.
+  /**
+   * Run the missing script and module verbs of a manifest after the ops, each
+   * URL and each inline body once per page.
+   */
   loadJs(manifest: readonly Asset[]): void;
-  // The current asset version known to the client, sent on every request.
+  /** The current asset version known to the client, sent on every request. */
   version(): string;
-  // Compare the envelope version against the known one. A mismatch returns true
-  // and starts a single full visit under the reload-once flag, or fires
-  // partial:error when a reload already happened. true means "do not apply".
+  /**
+   * Compare the envelope version against the known one, true meaning do not
+   * apply.
+   *
+   * A mismatch starts a single full visit under the reload-once flag, or fires
+   * partial:error when a reload already happened.
+   */
   versionMismatch(envelopeVersion: string, url: string): boolean;
-  // Record the version of an applied envelope and clear the reload-once flag,
-  // since a matching version means the deploy settled.
+  /** Record the version of an applied envelope and clear the reload-once flag. */
   acceptVersion(envelopeVersion: string): void;
   _reset(): void;
 }
 
+/** Build an Assets runtime over the given seams. */
 export function createAssets(deps: AssetsDeps): Assets {
   const doc = deps.document ?? document;
   const clock = deps.clock ?? defaultClock();
@@ -102,29 +99,24 @@ export function createAssets(deps: AssetsDeps): Assets {
   const navigate = deps.navigate ?? defaultNavigate();
   const session = deps.session ?? defaultSession();
   const cssTimeout = deps.cssTimeoutMs ?? CSS_TIMEOUT_MS;
-  // Every URL inserted or scanned, normalised by urlKey, the dedup key for
-  // "execute once per page".
+  // Every URL inserted or scanned, normalised by urlKey, the dedup key.
   const loaded = new Set<string>();
-  // The nonce remembered from the script that bootstrapped the runtime, copied
-  // onto every dynamically inserted asset so CSP keeps allowing them.
+  // Copied onto every dynamically inserted asset so CSP keeps allowing them.
   const nonce = rememberNonce(doc);
   let knownVersion = "";
 
   // The dedup key of a URL asset, one form for both sides of the delta. The DOM
-  // reports absolute urls on link.href and script.src while a manifest carries
-  // whatever the server wrote, so the raw strings would never meet. Resolution
-  // goes against baseURI rather than location so a <base href> counts.
+  // reports absolute urls while a manifest carries whatever the server wrote,
+  // so resolution goes against baseURI (not location) to make raw strings meet.
   function urlKey(raw: string): string {
     try {
       const url = new URL(raw, doc.baseURI);
-      // The query stays in the identity, a versioned asset differs by ?v= alone.
-      // The fragment leaves it, since it never reaches the network and two
-      // entries parted only by a # are the same bytes.
+      // The query stays in the identity (a versioned asset differs by ?v=
+      // alone), the fragment leaves it since it never reaches the network.
       url.hash = "";
       return url.href;
     } catch {
-      // The manifest is wire data and can carry anything. An unparsable url
-      // keys as itself rather than throwing out of the apply.
+      // The manifest is wire data, so an unparsable url keys as itself.
       return raw;
     }
   }
@@ -132,19 +124,18 @@ export function createAssets(deps: AssetsDeps): Assets {
   // Detach the pending catch-up scan, undefined once the registry is complete.
   // Doubles as the "still watching the parse window" flag.
   let unwatch: (() => void) | undefined;
-  // The asset phases waiting for the end of the parse, held so a discarded
-  // instance can drop them instead of firing into a document it no longer seeds.
+  // Asset phases waiting for the end of the parse, held so a discarded instance
+  // can drop them instead of firing into a document it no longer seeds.
   const deferred = new Set<() => void>();
-  // Whether this instance has taken its one baseline scan. _configure builds a
-  // registry it never seeds, so a delta can arrive first and an unseeded
-  // registry would read as an empty page and re-insert the whole manifest.
+  // Whether this instance has taken its one baseline scan. A delta can arrive
+  // before seed(), and an unseeded registry would re-insert the whole manifest.
   let seeded = false;
 
   function seed(): void {
     seeded = true;
     scan();
-    // The bootstrap is an inline script the server puts above the co-located
-    // asset tags, so the first scan sees only a prefix of the document.
+    // The bootstrap runs above the co-located asset tags, so the first scan
+    // sees only a prefix of the document and a catch-up scan finishes it.
     if (doc.readyState !== "loading" || unwatch !== undefined) return;
     const onParsed = (): void => catchUp();
     doc.addEventListener("DOMContentLoaded", onParsed);
@@ -154,12 +145,10 @@ export function createAssets(deps: AssetsDeps): Assets {
     };
   }
 
-  // Re-seed in front of a delta whose loader has cleared the parse window. Every
-  // caller runs it through whenParsed, so the document is no longer "loading"
-  // and the seed prefix can be completed with a full scan, then the watch drops.
+  // Re-seed in front of a delta whose loader has cleared the parse window, so
+  // the seed prefix is completed with a full scan and the watch then drops.
   function catchUp(): void {
-    // An unseeded registry takes its one baseline scan here, and seed() decides
-    // from there whether the parse window is open at all.
+    // An unseeded registry takes its one baseline scan here instead.
     if (!seeded) {
       seed();
       return;
@@ -170,10 +159,9 @@ export function createAssets(deps: AssetsDeps): Assets {
     settled();
   }
 
-  // Hold an asset phase back until the document is fully parsed. While the
-  // parser is mid-document the registry is incomplete by construction, so a
-  // delta taken there counts a tag not yet reached as missing and inserts a
-  // second copy of it. A `lazy="load"` zone GET fires exactly in that window.
+  // Hold an asset phase back until the document is fully parsed, since a delta
+  // taken mid-document counts a not-yet-reached tag as missing and doubles it.
+  // A `lazy="load"` zone GET fires exactly in that window.
   function whenParsed(run: () => void): void {
     if (doc.readyState !== "loading") {
       run();
@@ -193,18 +181,15 @@ export function createAssets(deps: AssetsDeps): Assets {
     )) {
       loaded.add(urlKey(link.href));
     }
-    // A server-rendered module is a <script type="module" src>, so matching on
-    // the src attribute alone seeds it like any other script. A module inserted
-    // a second time would mount its island twice.
+    // A server-rendered module is a <script type="module" src>, so the src
+    // attribute seeds it like any other script and it never mounts twice.
     for (const script of Array.from(
       doc.querySelectorAll<HTMLScriptElement>("script[src]"),
     )) {
       loaded.add(urlKey(script.src));
     }
-    // Seed the inline bodies the server already materialised into the head, so a
-    // first zone GET does not re-insert the <style> or re-execute the <script>.
-    // The key is the verb that would have inserted the element, the same form
-    // the manifest delta computes.
+    // Seed the inline bodies already materialised into the head, keyed by the
+    // verb that would have inserted them, so a first zone GET does not re-run.
     for (const style of Array.from(doc.querySelectorAll<HTMLStyleElement>("style"))) {
       loaded.add(inlineKey("link", textOf(style)));
     }
@@ -216,24 +201,21 @@ export function createAssets(deps: AssetsDeps): Assets {
     }
   }
 
-  // Claim a dedup key for insertion, false when this page already ran it. The
-  // key is taken before the insert, so a manifest naming one asset twice or a
-  // re-entrant apply still inserts it once.
+  // Claim a dedup key for insertion, false when this page already ran it. Taken
+  // before the insert, so a doubled manifest entry still inserts once.
   function claim(key: string): boolean {
     if (loaded.has(key)) return false;
     loaded.add(key);
     return true;
   }
 
-  // The verb a manifest entry asks for, or undefined when the entry is malformed,
-  // names a kind whose server renderer implies no client verb, or carries an
-  // inline body the server sent no verb for.
+  // The verb a manifest entry asks for, undefined when the entry is malformed
+  // or its kind carries no client verb.
   function verbOf(asset: Asset): AssetLoad | undefined {
     if (!isAsset(asset)) return undefined;
     return assetLoad(asset.kind, asset.load, asset.inline);
   }
 
-  // Insert an inline style with the page nonce so CSP still allows it.
   function insertStyle(body: string): void {
     const el = doc.createElement("style");
     el.textContent = body;
@@ -241,10 +223,8 @@ export function createAssets(deps: AssetsDeps): Assets {
     doc.head.append(el);
   }
 
-  // The <script> both script verbs insert. async is pinned to false so a src
-  // element joins the in-order list instead of running as soon as it is ready.
-  // It orders nothing for an inline classic script, which has nothing to fetch
-  // and executes on append, ahead of a src script queued before it.
+  // async is pinned to false so a src element joins the in-order list instead
+  // of running as soon as it is ready.
   function makeScript(load: "script" | "module"): HTMLScriptElement {
     const el = doc.createElement("script");
     if (load === "module") el.type = "module";
@@ -254,14 +234,12 @@ export function createAssets(deps: AssetsDeps): Assets {
   }
 
   // done rides inside the parse gate with the delta, so an envelope that lands
-  // mid-parse applies its ops once the document is whole. That is the right
-  // order anyway: such a patch would otherwise morph a zone the parser has not
-  // reached yet.
+  // mid-parse applies its ops once the document is whole.
   function loadCss(manifest: readonly Asset[], done: () => void): void {
     whenParsed(() => {
       catchUp();
-      // Inline styles insert synchronously and need no load gate, so they go in
-      // during this pass and never join the url delta done waits on.
+      // Inline styles insert synchronously and never join the url delta done
+      // waits on.
       const urls: string[] = [];
       for (const asset of manifest) {
         if (verbOf(asset) !== "link") continue;
@@ -276,16 +254,16 @@ export function createAssets(deps: AssetsDeps): Assets {
         done();
         return;
       }
-      // A 404 or a timeout on one sheet must not strand the whole envelope, so
-      // each settles on its own and the ops run once the last one resolves.
+      // A 404 or timeout on one sheet must not strand the envelope, so each
+      // settles on its own and the ops run once the last one resolves.
       let pending = urls.length;
       let errored = false;
       const settle = (ok: boolean): void => {
         if (!ok) errored = true;
         pending -= 1;
         if (pending > 0) return;
-        // The ops still run, so one 404 after a deploy cannot leave a form
-        // response unapplied. partial:error reports the styling gap.
+        // The ops still run, so a 404 cannot leave a response unapplied.
+        // partial:error reports the styling gap.
         if (errored) {
           deps.dispatch("partial:error", {
             kind: "asset",
@@ -300,8 +278,8 @@ export function createAssets(deps: AssetsDeps): Assets {
     });
   }
 
-  // One pass in manifest order rather than a pass per verb, so a module and a
-  // classic script insert in the order the server listed them.
+  // One pass in manifest order so a module and a classic script insert in the
+  // order the server listed them.
   function loadJs(manifest: readonly Asset[]): void {
     whenParsed(() => {
       catchUp();
@@ -327,13 +305,13 @@ export function createAssets(deps: AssetsDeps): Assets {
   function versionMismatch(envelopeVersion: string, url: string): boolean {
     if (envelopeVersion === "" || envelopeVersion === knownVersion) return false;
     if (knownVersion === "") {
-      // The first envelope of the page teaches the runtime the live version,
-      // there is nothing to be out of sync with yet.
+      // The first envelope teaches the runtime the live version, nothing to be
+      // out of sync with yet.
       knownVersion = envelopeVersion;
       return false;
     }
     if (readFlag()) {
-      // A reload already happened and the version still does not match: a stale
+      // A reload already happened and the version still mismatches, so a stale
       // CDN is serving the old bundle. Degrade to plain navigation, no loop.
       clearFlag();
       deps.dispatch("partial:error", {
@@ -374,9 +352,8 @@ export function createAssets(deps: AssetsDeps): Assets {
     versionMismatch,
     acceptVersion,
     _reset() {
-      // A discarded instance must not keep watching a document it no longer
-      // seeds, or its scan would fire into a page the live registry owns. The
-      // seeded flag stays set, since a rescan here would read that same document.
+      // A discarded instance must stop watching a document it no longer seeds.
+      // seeded stays set, since a rescan here would read that same document.
       unwatch?.();
       for (const onParsed of deferred) {
         doc.removeEventListener("DOMContentLoaded", onParsed);
@@ -388,28 +365,24 @@ export function createAssets(deps: AssetsDeps): Assets {
   };
 }
 
-// A url-form entry that spells no address. new URL("", baseURI) resolves to the
-// document itself, so the entry would fetch the page as a stylesheet and claim
-// the key of a real asset addressing that same url.
+// An empty url resolves to the document itself, so such an entry would fetch
+// the page as a stylesheet and claim the key of the real asset addressing it.
 function isEmptyUrl(asset: Asset): boolean {
   return asset.url === "";
 }
 
-// The dedup key for an inline body, shared by seed and the inline delta so the
-// head bodies and the manifest bodies match byte for byte. Scoped by the
-// insertion verb rather than the kind, so any kind carrying it still matches.
+// The dedup key for an inline body, scoped by the insertion verb so head bodies
+// and manifest bodies match byte for byte across any kind carrying them.
 function inlineKey(load: AssetLoad, body: string): string {
   return `inline:${load}:${body}`;
 }
 
-// The text body of an element, a plain string on element nodes.
 function textOf(element: Element): string {
   return element.textContent;
 }
 
-// The bootstrap script carries the page nonce. document.currentScript is null by
-// the time a patch lands, so the value is captured at module evaluation and
-// reused for every dynamically inserted asset.
+// document.currentScript is null by the time a patch lands, so the bootstrap
+// nonce is captured at module evaluation and reused for every inserted asset.
 function rememberNonce(doc: Document): string | undefined {
   const current = doc.currentScript;
   const value = current instanceof HTMLElement ? current.nonce : "";

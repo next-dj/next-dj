@@ -5,8 +5,7 @@ import type { DialogAdapter } from "./layers";
 import type { EventSourceAdapter, SourceControl } from "./sse";
 import { manualPollClock, manualVisibility } from "./test-doubles";
 
-// A patches response the configured fetch returns so the wire resolves without a
-// real server.
+// A patches response the fetch returns so the wire resolves without a server.
 function patchesResponse(body = '{"version":"v1","ops":[],"assets":[],"form":null}') {
   return new Response(body, {
     status: 200,
@@ -71,8 +70,7 @@ describe("createPartial surface", () => {
     document.body.innerHTML =
       '<div data-next-zone="z"><details id="d" open></details></div>';
     const details = document.querySelector<HTMLDetailsElement>("#d")!;
-    // The delegated toggle listener the dirty tracker installs stamps the
-    // element, so the morph reads it as user-owned and keeps its open state.
+    // Stamps the element as user-owned, so the morph keeps its open state.
     details.dispatchEvent(new Event("toggle"));
     partial.apply({
       version: "v1",
@@ -481,8 +479,7 @@ describe("createPartial surface", () => {
     document.querySelector("input")!.dispatchEvent(new FocusEvent("blur"));
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     await Promise.resolve();
-    // The submit ran without throwing, so the wire's abort seam fired for the
-    // validate zone the blur opened.
+    // The submit ran without throwing, so the wire's abort seam fired.
     expect(calls.length).toBeGreaterThan(0);
   });
 
@@ -535,8 +532,8 @@ describe("createPartial surface", () => {
       }),
     );
     await Promise.resolve();
-    // The refresh op itself fetched once. Dropping that call proves the next
-    // one comes from the resume revalidation, not the stream event.
+    // Drop the refresh op's own fetch, so the next call proves the resume
+    // revalidation fired, not the stream event.
     calls.length = 0;
     visibility.setHidden(true);
     clock = 5000;
@@ -573,8 +570,7 @@ describe("createPartial surface", () => {
   it("opening the dev channel keeps the ops registered before it", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const seen: unknown[] = [];
-    // A MANUAL-injection page runs its own script ahead of the bootstrap, so a
-    // custom verb can be registered before the dev channel opens.
+    // A verb registered before the dev channel opens must survive it.
     partial.defineOp("confetti", (patch) => seen.push(patch.origin));
     partial._configure({ dev: true });
     partial.apply({
@@ -584,8 +580,7 @@ describe("createPartial surface", () => {
       form: null,
     });
     expect(seen).toEqual(["btn"]);
-    // The same apply proves the channel really opened, so the surviving verb is
-    // not the silence of a flag that never flipped.
+    // The dropped-ops warning proves the channel really opened.
     expect(warn).toHaveBeenCalledWith("[next] dropped malformed ops: 1");
   });
 
@@ -620,8 +615,7 @@ describe("createPartial surface", () => {
       configurable: true,
     });
     const made = makeSurface();
-    // The inline `_init` is what opens the channel, and it carries no nonce of
-    // its own under a CSP that allows it by hash.
+    // The inline `_init` opens the channel carrying no nonce of its own.
     Object.defineProperty(document, "currentScript", {
       value: document.createElement("script"),
       configurable: true,

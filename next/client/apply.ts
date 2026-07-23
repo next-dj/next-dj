@@ -1,6 +1,6 @@
-// Envelope parsing, the built-in verbs, the custom-op registry, and the
-// structural neutralisation of script elements before insertion. The applier
-// stays a thin executor: the server authors every address and verb.
+// Envelope parsing, the built-in verbs, the custom-op registry, and script
+// neutralisation before insertion. The applier is a thin executor, the server
+// authors every address and verb.
 
 import { fireRemoved, morph } from "./morph";
 import {
@@ -24,10 +24,7 @@ export interface Target {
   css?: string;
 }
 
-// The built-in verbs as a discriminated union keyed by op, so a handler that has
-// narrowed on op reads its own fields without re-deriving them from unknown. Each
-// variant lists only the fields the server authors for that verb, so an extra
-// property is a type error rather than a silent passthrough.
+/** The built-in verbs as a discriminated union keyed by op. */
 export interface MorphPatch {
   op: "morph";
   target?: Target;
@@ -121,8 +118,7 @@ export type BuiltinPatch =
   | VisitPatch
   | ContextPatch;
 
-// A custom op registered through defineOp. Its op is any non-built-in string and
-// its payload is open, so a plugin reads its own fields off the index signature.
+/** A custom op registered through defineOp, its payload open past the op. */
 export interface CustomPatch {
   op: string;
   [extra: string]: unknown;
@@ -130,10 +126,8 @@ export interface CustomPatch {
 
 export type Patch = BuiltinPatch | CustomPatch;
 
-// The set of built-in op names, kept in sync with the BuiltinPatch union by the
-// isBuiltin guard below. #applyOp tests isBuiltin first, so a custom op
-// registered under a built-in name never reaches the registry, the built-in
-// switch claims the name.
+// The built-in op names, kept in sync with the BuiltinPatch union. A custom op
+// under a built-in name never reaches the registry, the switch claims it.
 const BUILTIN_OPS = new Set<string>([
   "morph",
   "replace",
@@ -151,48 +145,42 @@ const BUILTIN_OPS = new Set<string>([
   "context",
 ] satisfies BuiltinPatch["op"][]);
 
-// Narrow a patch to a built-in verb by its op. A type predicate rather than an
-// op-only check so the switch in #applyBuiltin sees a BuiltinPatch, with no
-// CustomPatch in the union to defeat the per-op narrowing.
+// A type predicate, not an op check, so #applyBuiltin sees a BuiltinPatch and
+// keeps the per-op narrowing.
 function isBuiltin(patch: Patch): patch is BuiltinPatch {
   return BUILTIN_OPS.has(patch.op);
 }
 
-// A wire op is a record naming its verb, the one field every patch shares, so
-// an op-less record is dropped at the boundary like any other malformed op.
+// An op-less record is dropped at the boundary like any other malformed op.
 function isPatch(value: unknown): value is Patch {
   return isRecord(value) && typeof value.op === "string";
 }
 
-// How an asset is inserted, the one thing the loader has to know. kind stays a
-// project vocabulary the server owns, the verb is what the client can act on.
+/** How an asset is inserted, the verb the loader acts on. */
 export type AssetLoad = "link" | "script" | "module";
 
 export interface Asset {
   kind: string;
   url: string;
-  // The insertion verb the server derived from the renderer registered for the
-  // kind. Absent when that renderer is a custom one the client has no verb for.
+  // The server-derived insertion verb. Absent for a custom kind with no verb.
   load?: AssetLoad;
-  // The body of a co-located inline asset, absent on a URL-form asset. The
-  // server collects a zone's inline styles and scripts that have no URL, so the
-  // loader inserts the body itself rather than a <link>/<script src>.
+  // The inline body of a co-located asset, absent on a URL-form asset.
   inline?: string;
 }
 
-// The closed set of insertion verbs. The Asset type promises subscribers one of
-// these three, so a wire load spelling anything else must not ride into assets.
+// A wire load spelling anything outside the three verbs must not ride into assets.
 function isAssetLoad(value: unknown): value is AssetLoad {
   return value === "link" || value === "script" || value === "module";
 }
 
-// The insertion verb of a wire asset. A verb the server spelled out wins, and a
-// url-form entry of a built-in kind keeps its implied verb so an envelope from a
-// server that predates the field still loads. An inline body takes no such
-// fallback: the server only spells the verb when the kind's inline wrapper is the
-// element this runtime would build, and the module kind has no such wrapper, so
-// guessing from the name would execute a body a full page render prints
-// verbatim.
+/**
+ * The insertion verb of a wire asset.
+ *
+ * A url-form entry of a built-in kind keeps its implied verb so an older
+ * server's envelope still loads. An inline body takes no such fallback, since
+ * guessing the verb from the kind name would execute a body the full render
+ * prints verbatim.
+ */
 export function assetLoad(
   kind: unknown,
   load: unknown,
@@ -206,13 +194,7 @@ export function assetLoad(
   return undefined;
 }
 
-// Narrow an unknown wire entry to an Asset. The manifest crosses the wire
-// boundary like the ops do, so a malformed entry is dropped here rather than
-// cast blind into envelope.assets and the event details. The kind is checked
-// against the type it is declared as, so this boundary and the dev breakdown
-// call the same entries broken. An entry whose insertion verb does not resolve
-// is dropped too, since a partial:applied listener would otherwise read a load
-// the type promises is a verb.
+/** Narrow an unknown wire entry to an Asset, dropping a malformed one. */
 export function isAsset(value: unknown): value is Asset {
   return (
     isWellFormedAsset(value) &&
@@ -226,8 +208,7 @@ export interface FormMeta {
   errors: Record<string, string[]>;
 }
 
-// The parsed wire envelope is read-only past the boundary: the applier and the
-// partial:before-apply listeners observe it, none of them rewrite it.
+/** The parsed wire envelope, read-only past the boundary. */
 export interface Envelope {
   readonly version: string;
   readonly ops: readonly Patch[];
@@ -237,11 +218,7 @@ export interface Envelope {
   request_id?: string;
 }
 
-// A custom-op handler receives the open patch shape, so a plugin reads its own
-// server-authored fields off the index signature. Built-in verbs and custom ops
-// share one apply path and one ApplyContext, the core eating its own dog food,
-// but the built-ins carry static variants and so dispatch through a typed switch
-// rather than the registry that erases their shape.
+/** A custom-op handler over the open patch shape and the shared ApplyContext. */
 export type OpHandler = (patch: CustomPatch, ctx: ApplyContext) => void;
 
 export interface ApplyContext {
@@ -251,13 +228,7 @@ export interface ApplyContext {
   dev: boolean;
 }
 
-// The layer-aware bits the applier needs from the layer stack: a zone resolve
-// (top-down, or scoped to the page a zone GET fetched), the unscoped selector
-// resolve for form targets, the owning-page URL of an element, the open and
-// close verbs, and the toast container. The LayerStack satisfies this
-// structurally, so partial.ts passes it directly. A server-initiated open
-// carries no opener element and may seed a zone, an href with a zone, or
-// neither.
+/** The layer-stack surface the applier needs, satisfied structurally by LayerStack. */
 export interface LayerBridge {
   resolveZone(name: string, root: ParentNode, page?: string): Element | null;
   resolveSelector(selector: string, root: ParentNode): Element | null;
@@ -267,18 +238,13 @@ export interface LayerBridge {
   toast(text: string, variant: string): void;
 }
 
-// The history seam for the `url` verb. The server validates the href, so the
-// runtime only pushes or replaces. Injectable because jsdom's history is shared
-// global state the harness inspects.
+/** The history seam for the url verb, injectable for the jsdom harness. */
 export interface HistoryAdapter {
   push(href: string): void;
   replace(href: string): void;
 }
 
-// The asset and version bridge the applier consults around the ops. The applier
-// gates ops behind the CSS delta and runs the JS delta after, but owns neither
-// the loader nor the registry: those live in assets.ts. Absent, the ops run
-// inline with no asset handling, the path the verb-only tests exercise.
+/** The asset and version bridge the applier consults around the ops. */
 export interface AssetBridge {
   loadCss(manifest: readonly Asset[], done: () => void): void;
   loadJs(manifest: readonly Asset[]): void;
@@ -286,32 +252,24 @@ export interface AssetBridge {
   acceptVersion(envelopeVersion: string): void;
 }
 
-// The re-executable mount registry: a callback runs over the document on `ready`
-// and over every inserted subtree after each apply, the one-to-one replacement
-// for DOMContentLoaded. triggers.ts also rides this hook to bind delegated
-// handlers on newly inserted zones.
+/** A mount callback run over every inserted subtree, the DOMContentLoaded replacement. */
 export type MountCallback = (root: ParentNode) => void;
 
 export interface MountRegistry {
-  // Run the registered callbacks over a freshly inserted subtree.
+  /** Run the registered callbacks over a freshly inserted subtree. */
   run(root: ParentNode): void;
 }
 
-// The fetch bridge the `refresh` verb uses to re-GET a zone with its own
-// cookies. Absent, it is a no-op. The same shape the layer stack already
-// passes, so partial.ts wires one binding.
+/** The fetch bridge the refresh verb uses to re-GET a zone. */
 export type ZoneFetch = (request: {
   url: string;
   zone: string;
   headers?: Record<string, string>;
 }) => void;
 
-// The mutable state of a single apply, captured once per envelope and threaded
-// through the ops rather than stored on the applier. When an envelope ships new
-// CSS its ops defer behind loadCss, so a second apply (an SSE event takes no
-// lock) can start before the first resumes. A per-apply struct keeps each
-// envelope's dirty predicate, request key, and touched set bound to its own run
-// instead of letting the later apply clobber the earlier one's instance fields.
+// The mutable state of a single apply, threaded through the ops so two
+// overlapping applies (the second starting while the first defers behind
+// loadCss) keep their state apart.
 interface ApplyState {
   isDirty: (field: Element) => boolean;
   requestKey: string | undefined;
@@ -324,48 +282,32 @@ export interface ApplyDeps {
   dispatch: (event: string, detail: Record<string, unknown>) => void;
   mergeContext: (data: Record<string, unknown>) => void;
   document?: Document;
-  // Dev builds warn on each neutralised script. The flag is injectable so
-  // tests assert both the warn-on and the silent-off behaviour, and a getter
-  // form lets the owner flip it without rebuilding the applier and losing the
-  // custom ops registered against it.
+  // The dev flag, injectable and getter-friendly so the owner can flip it.
   dev?: DevFlag;
-  // Build the morph dirty predicate from the request snapshot wire.ts threads
-  // in. Absent, no field is treated as dirty and the server value always wins.
+  // Builds the morph dirty predicate from a request snapshot. Absent, no field is dirty.
   dirtySince?: (snapshot: number) => (field: Element) => boolean;
-  // Whether an element was ever touched, blind to any snapshot. It carries the
-  // <details> open state past a patch the user never asked for. Absent, no
-  // element reads as touched and the server open state wins.
+  // Whether an element was ever touched, carrying <details> open state past a patch.
   isTouched?: (el: Element) => boolean;
-  // The layer stack, consulted for zone targets (top layer down) and the home
-  // of layer.close and toast. Absent, zone resolve falls back to the document.
+  // The layer stack. Absent, zone resolve falls back to the document.
   layers?: LayerBridge;
   // The history seam for the url verb. Absent, the verb is a no-op.
   history?: HistoryAdapter;
-  // The navigation seam for the visit verb, a hard navigation to a
-  // server-validated redirect. Absent, the verb is a no-op.
+  // The navigation seam for the visit verb. Absent, the verb is a no-op.
   navigate?: Navigate;
-  // The asset loader and version safeguard. Absent, ops run with no CSS gate,
-  // no JS delta, and no version check.
+  // The asset loader and version safeguard. Absent, ops run with no asset handling.
   assets?: AssetBridge;
-  // The re-executable mount registry, run over every inserted subtree. Absent,
-  // only next:mounted fires.
+  // The mount registry, run over every inserted subtree. Absent, only next:mounted fires.
   mount?: MountRegistry;
   // The zone re-GET used by the refresh verb. Absent, it is a no-op.
   refresh?: ZoneFetch;
-  // The current URL the version safeguard reloads on a mismatch. Absent, the
-  // document's own location is used.
+  // The current URL for the version safeguard. Absent, the document location is used.
   here?: () => string;
 }
 
-// The raw shape of a wire envelope after the only structural check JSON.parse
-// leaves to do. Every field is still unknown: parseEnvelope narrows each one,
-// so the typed Envelope is built from honest checks rather than a blind cast
-// over the wire boundary.
+// The raw wire envelope, every field still unknown until parseEnvelope narrows it.
 type RawEnvelope = Record<string, unknown>;
 
-// Narrow a form-errors record to the field-to-messages shape, keeping only
-// string-array values so a malformed errors map cannot smuggle a non-array past
-// the boundary.
+// Narrow a form-errors record, keeping only string-array values.
 function parseFormErrors(value: unknown): Record<string, string[]> {
   if (!isRecord(value)) return {};
   const errors: Record<string, string[]> = {};
@@ -377,9 +319,7 @@ function parseFormErrors(value: unknown): Record<string, string[]> {
   return errors;
 }
 
-// Build the typed form meta from its unknown wire value, reading each field
-// through a check rather than pretending the record already has the shape. An
-// absent or non-record form collapses to null.
+// Build the typed form meta from its unknown wire value, null when absent.
 function parseFormMeta(value: unknown): FormMeta | null {
   if (!isRecord(value)) return null;
   const uid = asString(value.uid) ?? "";
@@ -387,10 +327,9 @@ function parseFormMeta(value: unknown): FormMeta | null {
   return { uid, valid, errors: parseFormErrors(value.errors) };
 }
 
-// A wire asset is well-formed when it names a kind, carries a url or an inline
-// body, and spells no load outside the three verbs. Blind to which kind it is,
-// since the server registers custom kinds and a shape check is the only honest
-// measure of "broken" at this boundary.
+// A wire asset is well-formed when it names a kind, carries a url or inline
+// body, and spells no load outside the three verbs. Blind to the kind, since
+// the server registers custom kinds.
 function isWellFormedAsset(
   value: unknown,
 ): value is { kind: string; load: AssetLoad | undefined; inline?: unknown } {
@@ -402,9 +341,8 @@ function isWellFormedAsset(
   );
 }
 
-// parseEnvelope drops a non-list field whole, and the per-entry counters would
-// then report zero malformed, which reads as nothing wrong. An absent field is
-// the normal terse envelope and says nothing.
+// A non-list field is dropped whole, so the per-entry counters cannot report it.
+// An absent field is the normal terse envelope and says nothing.
 function reportNonArray(field: string, value: unknown): void {
   if (value !== undefined && !Array.isArray(value)) {
     console.warn(`[next] envelope ${field} is not an array, all ${field} dropped`);
@@ -436,17 +374,15 @@ function reportDropped(wire: RawEnvelope): void {
   if (malformedAssets > 0) {
     console.warn(`[next] dropped malformed assets: ${malformedAssets}`);
   }
-  // A debug line rather than a warn, since a custom kind whose renderer implies
-  // no insertion verb is a normal configuration and the asset is intact. The
-  // kinds are named because that is the only signal such an asset leaves.
+  // A debug line, not a warn, since a custom kind with no insertion verb is a
+  // normal configuration. The kinds are named as the only signal such an asset leaves.
   if (skipped > 0) {
     const named = Array.from(kinds).join(", ");
     console.debug(`[next] skipped assets of unsupported kind (${skipped}): ${named}`);
   }
 }
 
-// Narrow an unknown JSON value into an Envelope. Missing meta collapses to its
-// empty value so a terse server envelope parses without optional-field noise.
+/** Narrow an unknown JSON value into an Envelope, collapsing absent meta. */
 export function parseEnvelope(raw: unknown, dev = false): Envelope {
   if (!isRecord(raw)) {
     throw new TypeError("partial envelope is not an object");
@@ -456,9 +392,8 @@ export function parseEnvelope(raw: unknown, dev = false): Envelope {
   if (version === undefined) {
     throw new TypeError("partial envelope is missing version");
   }
-  // Keep only ops naming a verb, so a non-object element (ops: [null]) or an
-  // op-less record is a dropped op rather than a poison that throws mid-apply
-  // over a half-mutated DOM.
+  // Keep only ops naming a verb, so a malformed element is dropped rather than
+  // left to throw mid-apply over a half-mutated DOM.
   const ops = Array.isArray(wire.ops) ? wire.ops.filter(isPatch) : [];
   const assets = Array.isArray(wire.assets) ? wire.assets.filter(isAsset) : [];
   if (dev) reportDropped(wire);
@@ -515,31 +450,29 @@ export class Applier {
     this.#here = deps.here ?? (() => currentUrl(this.#document));
   }
 
-  // Drop every custom op so vitest files do not leak registrations into one
-  // another. The built-ins live in the typed switch, not the registry, so they
-  // survive the clear with no re-seat.
+  /** Drop every custom op, leaving the typed built-ins untouched. */
   _reset(): void {
     this.#ops.clear();
     this.#applied.clear();
   }
 
-  // The apply counter of a zone, exposed so the lazy-zone triggers drop a GET
-  // aimed at a generation that has already moved on.
+  /** The apply counter of a zone, read by the lazy-zone triggers. */
   generation(zone: string): number {
     return this.#applied.get(zone) ?? 0;
   }
 
+  /** Register a custom op handler under a non-built-in name. */
   defineOp(name: string, handler: OpHandler): void {
     this.#ops.set(name, handler);
   }
 
-  // The snapshot is the dirty counter wire.ts captured at fetch time. A direct
-  // apply with no snapshot uses the highest mark, so no field reads as dirty.
-  // The page scopes zone patches to the page a zone GET fetched. The pipeline
-  // is normative: version, before-apply, CSS delta, ops, JS delta, mount, then
-  // applied. CSS is gated before the ops, so the body after the gate runs in
-  // a continuation. With no asset bridge the gate is a straight-through call
-  // and the whole apply stays synchronous.
+  /**
+   * Parse and apply a wire envelope, returning the parsed form.
+   *
+   * The pipeline runs in a fixed order — version, before-apply, CSS delta, ops,
+   * JS delta, mount, then applied. CSS gates the ops, so with an asset bridge
+   * the body after the gate runs in a continuation.
+   */
   apply(raw: unknown, snapshot?: number, key?: string, page?: string): Envelope {
     const envelope = parseEnvelope(raw, this.#dev());
     // A version mismatch is a full visit instead of an apply, guarded against a
@@ -549,9 +482,8 @@ export class Applier {
     }
     const beforeApply = this.#emit("partial:before-apply", { envelope }, true);
     if (beforeApply.defaultPrevented) return envelope;
-    // The per-apply state is captured here and threaded through the ops so two
-    // overlapping applies (the second arriving while the first defers behind
-    // loadCss) keep their dirty predicate, request key, and touched set apart.
+    // Captured per-apply and threaded through the ops, so two overlapping
+    // applies keep their dirty predicate, request key, and touched set apart.
     const state: ApplyState = {
       isDirty: snapshot === undefined ? () => false : this.#dirtySince(snapshot),
       requestKey: key,
@@ -568,14 +500,12 @@ export class Applier {
   }
 
   #runOps(envelope: Envelope, state: ApplyState): void {
-    // ok stays true only while every op applies clean. A contained op failure or
-    // an unknown verb flips it, so partial:applied carries an honest degraded
-    // signal even though mount and the event still run over what did change.
+    // ok flips on any contained failure or unknown verb, so partial:applied
+    // carries an honest degraded signal.
     let ok = true;
     for (const op of envelope.ops) {
-      // A single failing op is contained so it never poisons the envelope: the
-      // remaining ops still apply, the failure surfaces as partial:error, and
-      // mount and partial:applied still run over what did change.
+      // A single failing op is contained, the rest still apply and the failure
+      // surfaces as partial:error.
       try {
         if (!this.#timedOp(op, state)) ok = false;
       } catch (error) {
@@ -591,8 +521,8 @@ export class Applier {
     this.#emit("partial:applied", { envelope, ok }, false);
   }
 
-  // next:mounted on each touched node and a mount-registry pass over each, so
-  // "behaviour, revive what was inserted" gets the DOM and the code together.
+  // next:mounted and a mount-registry pass on each touched node, reviving what
+  // was inserted.
   #runMount(state: ApplyState): void {
     for (const node of state.touched) {
       if (!node.isConnected) continue;
@@ -601,16 +531,14 @@ export class Applier {
     }
   }
 
-  // Dev times every op so an apply shows up in the Performance panel beside the
-  // rest of the page timeline. Production stops at the first line, one branch on
-  // the hot path.
+  // Dev times every op for the Performance panel. Production stops at the first
+  // line, one branch on the hot path.
   #timedOp(patch: Patch, state: ApplyState): boolean {
     if (!this.#dev()) return this.#applyOp(patch, state);
     const zone = zoneOf(patch);
     const label = zone ?? patch.op;
-    // The serial keeps this mark distinct from the mark of a nested apply under
-    // the same label, whose finally would otherwise clear it. The measure keeps
-    // the plain name a reader looks for in the panel.
+    // The serial keeps this mark distinct from a nested apply under the same
+    // label, whose finally would otherwise clear it.
     this.#timings += 1;
     const startMark = `next:apply:${label}:start:${this.#timings}`;
     openMeasure(startMark);
@@ -628,21 +556,16 @@ export class Applier {
     }
   }
 
-  // Returns true when the op dispatched to a known verb, false when it was an
-  // unknown verb the envelope is degraded by. A thrown op is caught by the
-  // caller, which records the same failure.
+  // Returns false for an unknown verb the envelope is degraded by. A thrown op
+  // is caught by the caller.
   #applyOp(patch: Patch, state: ApplyState): boolean {
-    // A built-in verb dispatches through a typed switch, where narrowing on op
-    // gives each verb its own variant without re-deriving fields from unknown.
-    // Checking built-ins first also narrows the remaining patch to CustomPatch,
-    // so a custom handler reads its own server-authored fields off the open
-    // shape with no cast at the call site.
+    // Built-ins first, so the switch narrows each verb and the remaining patch
+    // narrows to CustomPatch for the handler with no cast.
     if (isBuiltin(patch)) {
       this.#applyBuiltin(patch, state);
       return true;
     }
-    // A custom op registered through defineOp shares this apply path and the
-    // same ApplyContext as the built-ins, the core eating its own dog food.
+    // A custom op shares this apply path and ApplyContext with the built-ins.
     const handler = this.#ops.get(patch.op);
     if (handler !== undefined) {
       handler(patch, this.#context());
@@ -653,9 +576,8 @@ export class Applier {
     return false;
   }
 
-  // The partial:error of one failed op, its target named when the patch carried
-  // a recognised address. Shared by the contained-throw path and the unknown
-  // verb so both report the failure the same way.
+  // The partial:error of one failed op, shared by the contained-throw path and
+  // the unknown verb.
   #opError(patch: Patch, error: unknown): void {
     const target = describeOpTarget(patch);
     this.#emit(
@@ -670,9 +592,8 @@ export class Applier {
     );
   }
 
-  // The built-in verbs ride the same apply path and ApplyContext as the custom
-  // ops, the core eating its own dog food, but their static variants dispatch
-  // through this switch rather than a registry that would erase the shape.
+  // The built-in verbs dispatch through this switch rather than the registry,
+  // keeping their static variants.
   #applyBuiltin(patch: BuiltinPatch, state: ApplyState): void {
     switch (patch.op) {
       case "morph":
@@ -758,23 +679,20 @@ export class Applier {
     else this.#history?.push(patch.href);
   }
 
-  // A redirect is a hard navigation, not a history push: location.assign takes
-  // any origin, so the same seam carries an external redirect. The external flag
-  // is the server's, the client does not branch on it.
+  // A redirect is a hard navigation, not a history push. The same seam carries
+  // an external redirect, the client does not branch on the external flag.
   #visit(patch: VisitPatch): void {
     if (patch.href !== undefined) this.#navigate?.(patch.href);
   }
 
-  // Merge server-serialised provider values into the client context, which fires
-  // context-updated so islands react. Only registered serialize providers reach
-  // here, the server builds the data.
+  // Merge server-serialised provider values into the client context, which
+  // fires context-updated so islands react.
   #contextOp(patch: ContextPatch): void {
     if (isRecord(patch.data)) this.#mergeContext(patch.data);
   }
 
-  // The default verb. The new content is parsed and script-neutralised, then the
-  // morph engine brings the live target up to it with the dirty predicate of the
-  // envelope in flight. extract carves the target node out of a full document.
+  // The default verb, parsing and neutralising content then morphing the live
+  // target. extract carves the target node out of a full document.
   #morph(patch: MorphPatch, state: ApplyState): void {
     const node = this.#resolve(patch.target, state);
     if (node === null) return;
@@ -794,9 +712,8 @@ export class Applier {
     this.#mark(result, patch.target, state);
   }
 
-  // Parse a full document and carve out the node matching the target, the path
-  // for a server reply that ships the whole page. The cut node still goes
-  // through script neutralisation before the engine sees it.
+  // Carve out the target node from a full-document reply, still script-
+  // neutralised before the engine sees it.
   #extract(
     html: string,
     target: Element,
@@ -836,9 +753,8 @@ export class Applier {
     this.#mark(node, patch.target, state);
   }
 
-  // append and prepend dedupe by data-next-key, falling back to id: an existing
-  // node with the same key is replaced in place, not duplicated, so a re-fetched
-  // page of a paginated list cannot double its rows.
+  // append and prepend dedupe by data-next-key, then id, replacing a matching
+  // node in place so a re-fetched list cannot double its rows.
   #merge(patch: MergePatch, state: ApplyState): void {
     const node = this.#resolve(patch.target, state);
     if (node === null) return;
@@ -850,13 +766,11 @@ export class Applier {
     // The keyed rows that found no match, carried with their key so the
     // reconcile pass below can look them up again without re-reading the key.
     const missed: [string, Element][] = [];
-    // One pass over the live children instead of a scan per incoming row, so m
-    // rows merged into n cost n + m rather than n * m. The index waits for the
-    // first keyed row, since a keyless batch matches nothing.
+    // One pass over the live children, not a scan per row, so n rows and m cost
+    // n + m. The index waits for the first keyed row, a keyless batch matches nothing.
     let index: Map<string, Element> | undefined;
-    // Whether an island unmount hook has run. fireRemoved is the only point
-    // between the index build and the last row where page code can touch the
-    // container, so this is exactly "the snapshot may have gone stale".
+    // Whether an island unmount hook has run, the only point where page code can
+    // touch the container and stale the index snapshot.
     let fired = false;
     for (const child of incoming) {
       const key = keyOf(child);
@@ -866,10 +780,8 @@ export class Applier {
       }
       index ??= keyIndex(node);
       const existing = index.get(key);
-      // The index is a snapshot while fireRemoved runs island unmount listeners
-      // that may detach another row, and replaceWith on a detached node is a
-      // no-op that would swallow this row. A hit that left the container reads
-      // as a miss, the same as an absent entry.
+      // The index is a snapshot, and replaceWith on a detached node is a no-op
+      // that would swallow this row. A hit that left the container reads as a miss.
       if (existing?.parentNode !== node) {
         fresh.append(child);
         missed.push([key, child]);
@@ -896,20 +808,17 @@ export class Applier {
     for (const child of incoming) state.touched.push(child);
   }
 
-  // Match the rows that missed against the container an unmount hook has since
-  // rewritten. A keyed row such a hook inserts is invisible to the snapshot, and
-  // without this pass it would land beside the key it was meant to replace. One
-  // rebuild per merge, taken only when a hook ran and left rows unmatched, so
-  // the cost stays n + m and an adversarial hook cannot make the merge unbounded.
+  // Match the missed rows against the container a hook has since rewritten. One
+  // rebuild per merge, taken only when a hook ran and left rows unmatched, so an
+  // adversarial hook cannot make the merge unbounded.
   #reconcile(node: Element, missed: [string, Element][]): void {
     const live = keyIndex(node);
     for (const [key, child] of missed) {
       const existing = live.get(key);
       if (existing === undefined) continue;
       fireRemoved(existing);
-      // A hook running inside this pass can still detach its own row, and the
-      // fresh fragment already holds the replacement, so an unreplaced row
-      // lands at the edge instead of being swapped away inside the fragment.
+      // A hook here can still detach its own row, and the fresh fragment holds
+      // the replacement, so an unreplaced row lands at the edge.
       if (existing.parentNode !== node) continue;
       existing.replaceWith(child);
       live.set(key, child);
@@ -923,12 +832,9 @@ export class Applier {
     node.remove();
   }
 
-  // refresh re-GETs the zone with its own cookies, the safe default of an SSE
-  // fan-out: the server says "this zone is stale", the client fetches it fresh.
-  // The re-GET targets the page that owns the zone, resolved through the layer
-  // stack like a poll tick, so a base-page zone refreshes against its own page
-  // even while a modal holds the address bar. A zone absent from the DOM falls
-  // back to the current URL.
+  // refresh re-GETs the zone with its own cookies, against the page that owns
+  // the zone so a base-page zone refreshes even while a modal holds the address
+  // bar. A zone absent from the DOM falls back to the current URL.
   #refreshOp(patch: RefreshPatch, state: ApplyState): void {
     const zone = patch.zone ?? patch.target?.zone;
     if (zone === undefined) return;
@@ -946,10 +852,8 @@ export class Applier {
     this.#emit(patch.name, detail, false);
   }
 
-  // Parse a fragment through `<template>` and structurally neutralise every
-  // script before the node ever reaches the live document, so no server html can
-  // run a script through a patch. The guarantee is observable from jsdom, not
-  // leaning on template semantics.
+  // Parse through <template> and neutralise every script before the node reaches
+  // the live document, so no server html can run a script through a patch.
   #fragment(html: string, target: Target | undefined): DocumentFragment {
     const template = this.#document.createElement("template");
     template.innerHTML = html;
@@ -988,9 +892,8 @@ export class Applier {
     return this.#resolveIn(this.#document, target, state);
   }
 
-  // Resolve a target against any root, the live document for the verbs or the
-  // parsed document for extract. The layer-aware zone resolve lives in #resolve,
-  // so the parsed extract document never consults the stack.
+  // Resolve a target against any root. The layer-aware zone resolve lives in
+  // #resolve, so the parsed extract document never consults the stack.
   #resolveIn(
     root: Document,
     target: Target | undefined,
@@ -1061,9 +964,8 @@ export class Applier {
   }
 }
 
-// When the target address is absent from the parsed document, fall back to the
-// first body element sharing the live target's tag. text/html parsing already
-// seats tr/td inside the right table context, so this keeps those intact.
+// When the target is absent from the parsed document, fall back to the first
+// body element sharing the live target's tag, seated in its table context.
 function matchByTag(parsed: Document, target: Element): Element | null {
   const tag = target.tagName.toLowerCase();
   return parsed.body.querySelector(tag);
@@ -1075,9 +977,8 @@ function keyOf(el: Element): string | null {
   return el.getAttribute(ATTR_KEY) ?? (el.id !== "" ? el.id : null);
 }
 
-// Index the keyed children of a merge container. The first child holding a key
-// wins, so a repeated key resolves to the same node an ordered scan would have
-// stopped at. Keyless children stay out, a row with no identity never matches.
+// Index the keyed children of a merge container, first holder of a key wins.
+// Keyless children stay out, a row with no identity never matches.
 function keyIndex(container: Element): Map<string, Element> {
   const index = new Map<string, Element>();
   for (const child of container.children) {
@@ -1087,9 +988,8 @@ function keyIndex(container: Element): Map<string, Element> {
   return index;
 }
 
-// Open the diagnostic span of one op. Same containment as closeMeasure: the mark
-// runs before the try block that guards the op, so a page whose user timing is
-// stubbed or exhausted would otherwise fail the op it was about to measure.
+// Open the diagnostic span of one op. Contained so a stubbed or exhausted user
+// timing cannot fail the op it was about to measure.
 function openMeasure(startMark: string): void {
   try {
     performance.mark(startMark);
@@ -1099,8 +999,7 @@ function openMeasure(startMark: string): void {
 }
 
 // Close the diagnostic span of one op. A user-timing failure stays inside here,
-// since thrown from the finally of #timedOp it would displace the outcome of the
-// op and the real error of an op that threw.
+// so the finally of #timedOp cannot displace the op's outcome.
 function closeMeasure(name: string, startMark: string): void {
   try {
     performance.measure(name, startMark);
@@ -1113,9 +1012,8 @@ function closeMeasure(name: string, startMark: string): void {
   }
 }
 
-// The timing line of one op. A page can replace console.debug with a throwing
-// stub (analytics wrappers, dev overlays do), and thrown from the finally of
-// #timedOp it would displace the outcome of the op it reports on.
+// The timing line of one op. A page may replace console.debug with a throwing
+// stub, so the failure stays inside and cannot displace the op's outcome.
 function reportTiming(message: string): void {
   try {
     console.debug(message);
@@ -1124,10 +1022,8 @@ function reportTiming(message: string): void {
   }
 }
 
-// The zone an op addresses, the label a reader recognises in a timeline. Each
-// verb is read the way it resolves its own zone, so refresh prefers its
-// top-level zone over the target one and layer.open carries only the top-level
-// field.
+// The zone an op addresses, read the way each verb resolves its own zone, so
+// refresh prefers its top-level zone and layer.open carries only that field.
 function zoneOf(patch: {
   op: string;
   target?: unknown;
@@ -1142,16 +1038,13 @@ function zoneOf(patch: {
 }
 
 // The human-readable address an op aimed at, for the error detail. A foreign or
-// empty record carries none of the addresses describeTarget reads and so
-// describes nothing, the same as an absent target, and the key stays off the
-// payload.
+// empty record describes nothing, the same as an absent target.
 function describeOpTarget(patch: { op: string; target?: unknown }): string | undefined {
   return isRecord(patch.target) ? describeTarget(patch.target as Target) : undefined;
 }
 
 // The addresses a target may carry, in the order #resolveIn reads them, so a
-// description names the address the op resolved through rather than the first
-// key the server serialised.
+// description names the address the op resolved through.
 const TARGET_KEYS = [
   "zone",
   "form",
@@ -1159,15 +1052,12 @@ const TARGET_KEYS = [
   "css",
 ] as const satisfies (keyof Target)[];
 
-// The human-readable address a target spells. Absent when it carries none of the
-// addresses the resolver reads, or when that address refuses to serialise:
-// JSON.stringify throws on a circular value, so a description that cannot be
-// produced reads as no description rather than deciding the fate of the op it
-// describes from inside the very catch that contains that op.
+// The human-readable address a target spells. Absent when it carries no
+// recognised address, or when that address refuses to serialise (a circular
+// value), so a description that cannot be produced reads as no description.
 function describeTarget(target: Target | undefined): string | undefined {
-  // Script neutralisation only runs on a resolved node, which requires a target
-  // carrying a recognised address, so the no-target guard is unreachable from
-  // either caller and exists only to keep the helper total.
+  // The no-target guard is unreachable from either caller, present only to keep
+  // the helper total.
   /* v8 ignore start */
   if (target === undefined) return undefined;
   /* v8 ignore stop */

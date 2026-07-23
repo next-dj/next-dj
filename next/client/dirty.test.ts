@@ -33,7 +33,6 @@ describe("createDirtyTracker", () => {
     const el = document.createElement("details");
     expect(tracker.isTouched(el)).toBe(false);
     tracker.stamp(el);
-    // Blind to any snapshot: the stamp predates none, yet the element is touched.
     expect(tracker.isTouched(el)).toBe(true);
   });
 

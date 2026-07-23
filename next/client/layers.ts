@@ -1,15 +1,6 @@
-// Modal layers over the native <dialog> with accept/dismiss semantics. A layer
-// opens from a click on <a data-next-layer="name">: the runtime builds the
-// dialog and a zone container named after the link before any request, so the
-// first morph resolves the target by the ordinary path. Targets resolve from
-// the top layer down, so a master zone inside the modal is found before the
-// same-named page zone underneath it. The layer content never knows it is in a
-// layer.
-//
-// The native modality (showModal, the focus trap, dismiss wiring for Esc,
-// backdrop, and <form method="dialog">) lives behind an injectable adapter, so
-// the surface here is exercised in jsdom while the untestable browser globals
-// stay in the excluded adapters file.
+// Modal layers over the native <dialog> with accept/dismiss semantics. Targets
+// resolve top layer down, so a zone inside the modal wins over the same-named
+// page zone underneath. The native modality lives behind an injectable adapter.
 
 import { defaultDialog, defaultHistory, defaultPopState } from "./adapters";
 import type { HistoryAdapter } from "./apply";
@@ -25,28 +16,24 @@ const LAYER_ATTR = "data-next-layer";
 const ACCEPTED_ATTR = "data-next-accepted";
 const BUSY_ATTR = "data-next-busy";
 
+/** The detail passed to close, an accept result or a dismiss reason. */
 export interface LayerCloseEvent {
-  // The result of an accept close, or undefined for a dismiss.
+  // The accept result, absent on a dismiss.
   result?: unknown;
-  // The reason of a dismiss close: "dialog" form, "escape", "backdrop", or a
-  // server-authored string. Absent on accept.
+  // The dismiss reason ("escape", "backdrop", "dialog", or server text), absent on accept.
   reason?: string;
   dismiss?: boolean;
 }
 
-// The native dialog modality, behind a seam the harness overrides. open shows
-// the modal, traps focus, and wires the browser dismiss gestures (Esc,
-// backdrop, <form method="dialog">) to the callback. It returns the close that
-// ends the dialog from the runtime side without re-firing dismiss.
+/** Ends the dialog from the runtime side without re-firing dismiss. */
 export type DialogControl = () => void;
 
+/** The native dialog modality behind a seam, open traps focus and wires the dismiss gestures. */
 export interface DialogAdapter {
   open(dialog: HTMLDialogElement, onDismiss: (reason: string) => void): DialogControl;
 }
 
-// The popstate seam for the intercepting modal lifecycle. listen registers the
-// Back handler and returns its teardown, so the browser global stays in the
-// excluded adapters file while tests invoke the handler through a mock.
+/** The popstate seam, listen registers the Back handler and returns its teardown. */
 export interface PopStateAdapter {
   listen(handler: () => void): () => void;
 }
@@ -54,28 +41,22 @@ export interface PopStateAdapter {
 interface Layer {
   dialog: HTMLDialogElement;
   root: HTMLElement;
-  // The link that opened the layer, or null for a server-initiated open. It
-  // carries data-next-accepted and receives focus on close.
+  // The opener link, or null for a server-initiated open. Takes focus on close.
   opener: HTMLElement | null;
   close: DialogControl;
-  // The element to return focus to once the layer closes.
   returnFocus: Element | null;
-  // The URL of the page that opened the layer, path plus query, captured at
-  // open time. It rides X-Next-Origin on the layer's requests so the server
-  // resolves the host for a page-addressed out-of-band render of its zones,
-  // rather than falling back to the step page the form lives on.
+  // The opening page URL, captured at open time. Rides X-Next-Origin so the
+  // server resolves the host for an out-of-band render of its zones.
   host: string;
-  // The honest URL pushed when the layer opened, so the modal is shareable and
-  // refresh-resolves to the standalone page. Absent for a layer that never
-  // touched history. A programmatic close replaces it back to the host, and the
-  // popstate handler closes the layer once Back moves past it.
+  // The honest URL pushed on open, absent for a layer that never touched
+  // history. A programmatic close replaces it back to the host.
   pushedUrl?: string;
 }
 
+/** The seams createLayers needs, each defaulting to a platform adapter. */
 export interface LayerDeps {
   dispatch: (event: string, detail: Record<string, unknown>) => void;
-  // The partial fetch, used to GET the layer body and the host re-GET on
-  // accept. The layer layer never builds its own fetch.
+  // The partial fetch, GETs the layer body and the host re-GET on accept.
   fetch: (request: {
     url: string;
     zone: string;
@@ -83,49 +64,35 @@ export interface LayerDeps {
   }) => Promise<void>;
   document?: Document;
   dialog?: DialogAdapter;
-  // The history seam, shared with the applier, so an opening layer pushes its
-  // honest URL and a programmatic close replaces it back to the host.
+  // The history seam shared with the applier, so open pushes and close replaces.
   history?: HistoryAdapter;
-  // The Back-gesture seam. A popstate whose URL no longer matches the top
-  // layer's pushed URL closes that layer.
+  // The Back-gesture seam, a popstate past the top layer's pushed URL closes it.
   popstate?: PopStateAdapter;
 }
 
 export interface LayerStack {
-  // Resolve a zone for a patch: scoped to the page a zone GET fetched, or the
-  // top-down walk (layer target wins) when no page is known.
+  /** Resolve a zone, scoped to the page that fetched it or the top-down walk. */
   resolveZone(name: string, root: ParentNode, page?: string): Element | null;
-  // Resolve any selector with the same top-down walk, so a form patch inside a
-  // modal wins over a same-uid form on the page underneath it.
+  /** Resolve any selector with the top-down walk, a modal match wins. */
   resolveSelector(selector: string, root: ParentNode): Element | null;
-  // The URL of the page that owns an element: a layer's pushed URL for an
-  // element inside its subtree, the host page for the base document even while
-  // layers are open, the current URL when none are. A poll tick GETs this
-  // rather than the address bar, which reads the modal route while one is up.
+  /** The URL of the page that owns an element, a poll tick GETs this not the bar. */
   urlFor(el: Element): string;
-  // Open a layer. Builds the dialog and the zone container before the request,
-  // then GETs the body into it when both an href and a zone address one. The
-  // opener link, when present, carries data-next-accepted and takes focus back
-  // on close. A server-initiated open passes null and may seed both, a zone
-  // alone, or neither. An href alone names no container, so it is ignored.
+  /** Open a layer, building the dialog and zone container before the request. */
   open(opener: HTMLElement | null, href?: string, zone?: string): Promise<void>;
-  // Close the top layer. A result accepts, a dismiss rejects with a reason. An
-  // empty argument accepts with no result.
+  /** Close the top layer, a result accepts and a dismiss rejects with a reason. */
   close(detail: LayerCloseEvent): void;
-  // Append a toast to the built-in container. The text is set as textContent,
-  // never parsed as HTML, so server text cannot inject markup.
+  /** Append a toast as textContent, never parsed as HTML. */
   toast(text: string, variant: string): void;
-  // The number of open layers, for tests and the applier's top-down resolve.
+  /** The number of open layers. */
   size(): number;
-  // Mark the initiator and target busy for the duration of a layer request, and
-  // return the releaser. Exposed so the open path and the applier share it.
+  /** Mark the initiator and target busy for a request, returning the releaser. */
   busy(initiator: Element | null, target: Element | null): () => void;
-  // Install the delegated click handler that opens layers without JS-less
-  // breakage. Returns the teardown.
+  /** Install the delegated click handler, returning its teardown. */
   install(doc: Document): () => void;
   _reset(): void;
 }
 
+/** The layer stack over the seams in deps, defaulting each to a platform adapter. */
 export function createLayers(deps: LayerDeps): LayerStack {
   const doc = deps.document ?? document;
   const dialogAdapter = deps.dialog ?? defaultDialog();
@@ -144,9 +111,8 @@ export function createLayers(deps: LayerDeps): LayerStack {
     return pageUrl(doc);
   }
 
-  // A page-scoped lookup searches only the fetched page's subtree: the layer
-  // whose pushed URL matches, or the base document outside every dialog. An
-  // unmatched page (its layer closed mid-flight) degrades to the top-down walk.
+  // A page-scoped lookup searches only that page's subtree, an unmatched page
+  // (its layer closed mid-flight) degrades to the top-down walk.
   function resolveZone(name: string, root: ParentNode, page?: string): Element | null {
     const selector = `[data-next-zone="${cssEscape(name)}"]`;
     if (page !== undefined) {
@@ -160,7 +126,7 @@ export function createLayers(deps: LayerDeps): LayerStack {
     return resolveSelector(selector, root);
   }
 
-  // Top-down walk: the topmost layer holding a match wins, the document last.
+  // Top-down walk, the topmost layer holding a match wins and the document last.
   function resolveSelector(selector: string, root: ParentNode): Element | null {
     for (const layer of Array.from(stack).reverse()) {
       const found = findIn(layer.root, selector);
@@ -176,8 +142,7 @@ export function createLayers(deps: LayerDeps): LayerStack {
     return container.querySelector(selector);
   }
 
-  // Dialogs live in the body, so a bare querySelector would still reach a
-  // layer's zone: skip matches inside any dialog subtree.
+  // Dialogs live in the body, so skip matches inside any dialog subtree.
   function findOutsideLayers(selector: string, root: ParentNode): Element | null {
     for (const el of Array.from(root.querySelectorAll(selector))) {
       if (!stack.some((layer) => layer.dialog.contains(el))) return el;
@@ -185,10 +150,8 @@ export function createLayers(deps: LayerDeps): LayerStack {
     return null;
   }
 
-  // Top layer down, the same walk as resolveZone: an element inside a layer's
-  // subtree belongs to that layer's pushed URL. An element in no layer belongs
-  // to the base page, which is the bottom layer's host while any layer is open
-  // (the address bar reads the modal route then) and the current URL otherwise.
+  // An element inside a layer belongs to its pushed URL, one in no layer to the
+  // base page (the bottom layer's host while any is open, else the current URL).
   function urlFor(el: Element): string {
     for (const layer of Array.from(stack).reverse()) {
       if (layer.root.contains(el)) {
@@ -221,9 +184,8 @@ export function createLayers(deps: LayerDeps): LayerStack {
     href?: string,
     zone?: string,
   ): Promise<void> {
-    // Mark the opener busy before any dialog or history mutation, the single
-    // source of truth the double-click guard reads. A second open for the same
-    // opener is dropped here too, so neither path stacks a second modal.
+    // Mark the opener busy before any mutation, the double-click guard reads it.
+    // A second open for a busy opener is dropped here, so neither path stacks a modal.
     if (opener !== null) {
       if (opener.hasAttribute(BUSY_ATTR)) return;
       opener.setAttribute(BUSY_ATTR, "");
@@ -233,15 +195,13 @@ export function createLayers(deps: LayerDeps): LayerStack {
     dialog.setAttribute("data-next-dialog", "");
     const root = doc.createElement("div");
     // A seeded zone names the container before the request, so the first morph
-    // finds the target by the ordinary resolve. An empty open leaves it
-    // unnamed, an empty shell only a css-targeted patch can address.
+    // resolves the target normally. An empty open leaves the shell unnamed.
     if (zone !== undefined) root.setAttribute("data-next-zone", zone);
     dialog.append(root);
     doc.body.append(dialog);
     const returnFocus = doc.activeElement;
-    // The host page is the one that opened the layer, captured before the
-    // request so a later navigation cannot move it. The canon keeps the
-    // query, so a filtered host page comes back with its filters intact.
+    // The opening page, captured before the request so a later navigation cannot
+    // move it. The query is kept, so a filtered host comes back with its filters.
     const host = currentUrl();
     // A browser dismiss gesture (Esc, backdrop, dialog form) reaches the same
     // close path as a server dismiss, so the reason flows through one channel.
@@ -250,15 +210,13 @@ export function createLayers(deps: LayerDeps): LayerStack {
     stack.push(layer);
     // The opener already carries busy, so only the target zone is marked here.
     const release = busy(null, root);
-    // A body fetch needs both the URL to GET and the zone to name it. A
-    // zone-only or empty open shows a bare modal for a later patch to seed,
-    // with no history entry and no body request of its own.
+    // A body fetch needs both the URL and the zone. A zone-only or empty open
+    // shows a bare modal for a later patch to seed, with no history entry.
     const seeded = href !== undefined && zone !== undefined;
     try {
       if (seeded) {
-        // Push the honest URL of the layer body so the modal is shareable and
-        // Back closes it. Inside the try: pushState can throw (Safari's rate
-        // limit) and the half-open layer must unwind, not strand on the stack.
+        // Push the honest URL so the modal is shareable and Back closes it. Inside
+        // the try because pushState can throw (Safari rate limit) and must unwind.
         history.push(href);
         layer.pushedUrl = currentUrl();
       }
@@ -295,10 +253,8 @@ export function createLayers(deps: LayerDeps): LayerStack {
     emit("partial:layer-accepted", { result: detail.result });
     const accepted = layer.opener?.getAttribute(ACCEPTED_ATTR);
     if (accepted) {
-      // The opener wires master and list: on accept the host page is re-GET for
-      // the named zone, so the list under the modal morphs. The master never
-      // names the list. The host is the page that opened the layer, remembered
-      // at open time and sent as X-Next-Origin so the server resolves it.
+      // On accept the host page is re-GET for the opener's named zone, so the list
+      // under the modal morphs. The host rides X-Next-Origin so the server resolves it.
       void deps.fetch({
         url: layer.host,
         zone: accepted,
@@ -318,32 +274,26 @@ export function createLayers(deps: LayerDeps): LayerStack {
   // Splice the layer out, end its dialog, and return focus to the opener.
   function remove(layer: Layer): void {
     const index = stack.indexOf(layer);
-    // remove can land twice on one layer: a dismiss gesture (Esc, backdrop)
-    // tears it down while open's fetch is still in flight, then that fetch
-    // rejects and the catch arm calls remove again on the already-spliced
-    // layer. The early return makes the second call a true no-op so close,
-    // dialog.remove, focus, and the history rollback never run twice.
+    // remove can land twice on one layer: a dismiss gesture tears it down while
+    // open's fetch is in flight, then the reject re-enters here. The early return
+    // makes the second call a no-op so nothing runs twice.
     if (index === -1) return;
     stack.splice(index, 1);
     layer.close();
-    // Fire next:removed on the detaching dialog root, the same contract the
-    // apply verbs keep, so an island mounted inside the modal unmounts before
-    // the subtree leaves the document rather than leaking its listeners.
+    // Fire next:removed on the detaching root so an island inside the modal
+    // unmounts before the subtree leaves the document, the apply verbs' contract.
     fireRemoved(layer.dialog);
     layer.dialog.remove();
     if (layer.returnFocus instanceof HTMLElement) layer.returnFocus.focus();
-    // A programmatic close still sits on the pushed URL, so replace it back to
-    // the host. A close driven by Back already moved the URL, so the guard
-    // skips it and no second history entry is written, which also keeps the
-    // popstate handler from looping back into this layer.
+    // A programmatic close still sits on the pushed URL, so replace it back to the
+    // host. A Back-driven close already moved the URL, so the guard skips it.
     if (layer.pushedUrl !== undefined && currentUrl() === layer.pushedUrl) {
       history.replace(layer.host);
     }
   }
 
-  // Back past the topmost pushed URL closes that layer and the bare layers
-  // stacked above it. Never restores zones or writes history, the narrow
-  // contract that keeps this short of a client router.
+  // Back past the topmost pushed URL closes that layer and the bare layers above
+  // it. Never restores zones or writes history, short of a client router.
   function onPopstate(): void {
     const layers = Array.from(stack).reverse();
     const anchor = layers.find((layer) => layer.pushedUrl !== undefined);
@@ -358,8 +308,7 @@ export function createLayers(deps: LayerDeps): LayerStack {
     const host = ensureToastHost();
     const item = doc.createElement("div");
     item.setAttribute("data-next-toast", variant);
-    // textContent, never innerHTML: a toast string from drained messages or a
-    // server patch cannot smuggle markup.
+    // textContent, never innerHTML, so a server toast string cannot smuggle markup.
     item.textContent = text;
     host.append(item);
     emit("next:toast", { text, variant });
@@ -387,11 +336,10 @@ export function createLayers(deps: LayerDeps): LayerStack {
     if (!(opener instanceof HTMLElement)) return;
     const zone = opener.getAttribute(LAYER_ATTR);
     const href = opener.getAttribute("href");
-    // No zone or no href is a plain navigation: the no-JS path is untouched.
+    // No zone or no href is a plain navigation, the no-JS path is untouched.
     if (zone === null || zone === "" || href === null || href === "") return;
     event.preventDefault();
-    // A second click while the first request is in flight is dropped, so a
-    // double click stacks neither a second dialog nor a second history entry.
+    // A second click while the first is in flight is dropped, no double dialog.
     if (opener.hasAttribute(BUSY_ATTR)) return;
     void open(opener, href, zone);
   }
@@ -424,9 +372,8 @@ export function createLayers(deps: LayerDeps): LayerStack {
         toastHost.remove();
         toastHost = null;
       }
-      // A clean slate also drops the delegated click and popstate listeners
-      // install bound, so a reset between tests leaves nothing on the document
-      // or the window.
+      // Also drop the delegated click and popstate listeners install bound, so a
+      // reset leaves nothing on the document or window.
       if (detach !== null) {
         detach();
         detach = null;

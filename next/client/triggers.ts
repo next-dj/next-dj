@@ -1,16 +1,6 @@
-// Delegated handlers for the data-next-* triggers. Listeners bind once on the
-// document so morph and any insertion survive for free (the delegation idiom).
-// The imperative lazy-zone activation, on the other hand, runs per inserted
-// subtree after each apply (never a module-load scan, never a whole-document
-// scan): a load zone fires its batched GET on `ready`, a revealed zone is handed
-// to the observer when it enters the DOM, a pagination sentinel arms itself.
-//
-// Per-element debounce runs through an injected clock. The revealed trigger runs
-// through an injected IntersectionObserver adapter, since jsdom models no
-// geometry. Inline validation submits a FormData stripped of file fields on
-// blur, collapses bursts through a latest-wins counter, and a form submit
-// cancels its own in-flight validation so a late validation answer cannot
-// overwrite a response the server already accepted.
+// Delegated handlers for the data-next-* triggers, bound once on the document.
+// Lazy-zone activation runs per inserted subtree after each apply: load zones
+// batch on ready, revealed zones and pagination sentinels wait for the observer.
 
 import {
   defaultClock,
@@ -41,39 +31,34 @@ const CONFIRM_ATTR = "data-next-confirm";
 const LAZY_ATTR = "data-next-lazy";
 const POLL_ATTR = "data-next-poll";
 const VALIDATE_ATTR = "data-next-validate";
-// X-Next-Validate is local to inline validation, so it stays here rather than in
-// the shared protocol vocabulary.
+// X-Next-Validate is local to inline validation, not shared protocol vocabulary.
 const HEADER_VALIDATE = "X-Next-Validate";
 
-// The closed value sets of the hand-written attributes the dev warning guards.
-// A lazy value outside the set is silently dropped client-side. A merge value is
-// forwarded to the server, whose accepted vocabulary this set mirrors, so a typo
-// is caught at authoring time rather than failing quietly downstream.
+// The closed value sets the dev warning guards, so a typo is caught at authoring
+// time rather than dropped in silence. Merge mirrors the server's vocabulary.
 const LAZY_VALUES = new Set(["load", "revealed"]);
 const MERGE_VALUES = new Set(["append", "prepend"]);
 
-// One interval group of the poller engine: every zone on the same cadence
-// rides one timer chain and one batched GET. lastFire anchors the visibility
-// resume, so only a group whose own interval elapsed while hidden runs at
-// once. A null handle is a sleeping group: the tab is hidden, no timer is
-// live.
+// One interval group of the poller: every zone on the same cadence rides one
+// timer chain and one batched GET. lastFire anchors the resume, a null handle is
+// a sleeping group.
 interface PollGroup {
   handle: number | null;
   lastFire: number;
   elements: Set<Element>;
 }
 
-// The geometry seam: real IntersectionObserver behind a mock the harness drives
-// by calling the callback, since jsdom reports no intersections.
+/** The geometry seam over IntersectionObserver, which jsdom does not model. */
 export interface IntersectionAdapter {
   observe(el: Element, onReveal: () => void): () => void;
 }
 
+/** The confirm gate, injectable so tests drive accept and cancel without a dialog. */
 export type ConfirmAdapter = (text: string) => boolean;
 
+/** The seams the triggers draw on. */
 export interface TriggerDeps {
-  // The partial fetch, the only transport the triggers reach. They name zones
-  // and merge intent, never selectors.
+  // The partial fetch, named by zone and merge intent, never selectors.
   fetch: (request: {
     url: string;
     method?: string;
@@ -84,48 +69,44 @@ export interface TriggerDeps {
     abortable?: boolean;
     key?: string;
   }) => void;
-  // Abort the in-flight request on a zone queue, called when a form submit must
-  // cancel its own inline validation.
+  // Abort the in-flight request on a zone queue, so a submit cancels its own
+  // inline validation.
   abort: (zone: string) => void;
   document?: Document;
   clock?: Clock;
   observer?: IntersectionAdapter;
   // The tab-visibility seam, shared with the SSE bridge: a hidden tab holds no
-  // poll timers, a returning tab runs each group only once its own interval
-  // elapsed while hidden.
+  // poll timers.
   visibility?: VisibilityAdapter;
-  // The URL of the page that owns an element, answered by the layer stack.
-  // Absent, lazy and poll GETs read the address bar.
+  // The owning page of an element, answered by the layer stack. Absent, lazy and
+  // poll GETs read the address bar.
   pageUrl?: (el: Element) => string;
-  // The confirm gate. Absent, the default calls window.confirm. Injectable so
-  // tests drive accept and cancel without a real dialog.
+  // The confirm gate. Absent, the default calls window.confirm.
   confirm?: ConfirmAdapter;
-  // Dev builds warn on a hand-written data-next-* value outside its closed set,
-  // which the runtime would otherwise drop in silence. Injectable so tests
-  // assert both the warn-on and the silent-off behaviour, and a getter form lets
-  // the owner flip it without rebuilding the delegated listeners and the timers.
+  // Dev builds warn on a hand-written value outside its closed set. A getter form
+  // lets the owner flip it without rebuilding the listeners and timers.
   dev?: DevFlag;
 }
 
+/** The triggers handle, installed once and scanned per apply. */
 export interface Triggers {
-  // Bind the delegated listeners once, the same lifecycle as the layer stack.
+  // Bind the delegated listeners once, the lifecycle of the layer stack.
   install(doc: Document): () => void;
-  // Fire the batched load zones of the document on `ready`.
+  // Fire the batched load zones on ready.
   ready(): void;
-  // Activate the lazy zones and arm the sentinels inside a freshly inserted
-  // subtree, run from the mount registry after every apply.
+  // Activate lazy zones and arm sentinels in a freshly inserted subtree.
   scan(root: ParentNode): void;
   _reset(): void;
 }
 
-// Add a zone to the per-page batch, one comma-joined GET per owning page. The
-// load scan and the poll tick both group zones by their layer-resolved page.
+// Add a zone to the per-page batch, one comma-joined GET per owning page.
 function addZone(batches: Map<string, string[]>, url: string, zone: string): void {
   const zones = batches.get(url);
   if (zones === undefined) batches.set(url, [zone]);
   else zones.push(zone);
 }
 
+/** Build the trigger handlers over the given seams. */
 export function createTriggers(deps: TriggerDeps): Triggers {
   const doc = deps.document ?? document;
   const clock = deps.clock ?? defaultClock();
@@ -133,15 +114,15 @@ export function createTriggers(deps: TriggerDeps): Triggers {
   const confirm = deps.confirm ?? defaultConfirm();
   const visibility = deps.visibility ?? defaultVisibility();
   const dev = devReader(deps.dev);
-  // Per-element debounce handles, keyed by the element itself.
+  // Per-element debounce handles, keyed by the element.
   const timers = new WeakMap<Element, number>();
-  // Lazy zones already activated, so a parent morph that re-inserts the same
-  // zone element does not fire a second GET for it.
+  // Lazy zones already activated, so a parent morph re-inserting the same element
+  // fires no second GET.
   const activated = new WeakSet<Element>();
   // Observer teardowns, dropped on reset so vitest files do not leak observers.
   const observed: (() => void)[] = [];
-  // Poller groups keyed by interval, plus each element's group index so a
-  // re-scan never arms a second timer and _reset can stop every chain.
+  // Poller groups keyed by interval, plus each element's group so a re-scan arms
+  // no second timer and _reset can stop every chain.
   const groups = new Map<number, PollGroup>();
   const membership = new Map<Element, number>();
   let detach: (() => void) | null = null;
@@ -152,8 +133,8 @@ export function createTriggers(deps: TriggerDeps): Triggers {
 
   const pageUrl = deps.pageUrl ?? (() => here());
 
-  // The abortable zone key of a form's inline validation, shared by the sender
-  // and the submit canceller so they address the same queue.
+  // The abortable zone key of a form's inline validation, shared by the sender and
+  // the submit canceller.
   function validateZone(uid: string | null): string {
     return `validate:${uid ?? ""}`;
   }
@@ -183,16 +164,15 @@ export function createTriggers(deps: TriggerDeps): Triggers {
   }
 
   // A filter form auto-submits its query as a zone GET and syncs the address bar
-  // with replaceState, no history entry: this is an address sync, not a visit.
+  // with replaceState, an address sync not a visit.
   function submitFilter(form: HTMLFormElement, zone: string): void {
-    // URLSearchParams takes string pairs, so the FormData is walked and file
-    // fields are dropped, rather than casting the whole FormData past the check.
+    // URLSearchParams takes string pairs, so file fields are walked out.
     const pairs: [string, string][] = [];
     for (const [name, value] of new FormData(form)) {
       if (typeof value === "string") pairs.push([name, value]);
     }
     const query = new URLSearchParams(pairs).toString();
-    // An absent and an empty action both mean the current URL sans query.
+    // An absent or empty action means the current URL sans query.
     const attr = form.getAttribute("action");
     const action = attr === null || attr === "" ? here().replace(/\?.*$/, "") : attr;
     const url = query === "" ? action : `${action}?${query}`;
@@ -200,35 +180,31 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     zoneGet(url, zone);
   }
 
-  // The one shape of a zone GET. The wire stamps X-Next-Zone from request.zone
-  // and asserts the asset version once one is learned, so the triggers pass
-  // intent, never headers.
+  // The one shape of a zone GET. The wire stamps X-Next-Zone from request.zone, so
+  // the triggers pass intent, never headers.
   function zoneGet(url: string, zone: string): void {
     deps.fetch({ url, zone });
   }
 
-  // Fire one comma-joined zone GET per owning page, the batch the load scan and
-  // the poll tick both build.
+  // Fire one comma-joined zone GET per owning page.
   function flushBatches(batches: Map<string, string[]>): void {
     for (const [url, zones] of batches) zoneGet(url, zones.join(","));
   }
 
   // A pagination link or sentinel GETs the next page with a merge intent, the
-  // server authors the append patch with dedup.
+  // server authors the append patch.
   function paginate(el: Element, zone: string): void {
     const href = el.getAttribute("href");
     if (href === null || href === "") return;
-    // Every caller (onClick and the sentinel activate) reaches paginate only via
-    // a [data-next-merge] match, so the attribute is always present and the
-    // "append" fallback is never taken.
+    // Every caller reaches paginate via a [data-next-merge] match, so the
+    // fallback never runs.
     /* v8 ignore next */
     const merge = el.getAttribute(MERGE_ATTR) ?? "append";
     deps.fetch({ url: href, zone, headers: { [HEADER_MERGE]: merge } });
   }
 
-  // Inline validation on blur. The FormData drops file fields so a multipart
-  // form does not re-upload on every blur, the request carries the field name,
-  // and the abortable zone queue collapses a burst of blurs to latest-wins.
+  // Inline validation on blur. The FormData drops file fields so a multipart form
+  // does not re-upload on every blur, and the abortable zone collapses a burst.
   function validateField(form: HTMLFormElement, field: string): void {
     const uid = form.getAttribute(ATTR_ACTION);
     const data = new FormData();
@@ -239,9 +215,8 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     deps.fetch({
       url: form.getAttribute("action") ?? here(),
       method: "POST",
-      // The validate request rides a POST for its body but mutates nothing: it
-      // is keyed by zone and abortable, never taking the uid mutation lock, so a
-      // fresh blur or a submit of the same form aborts it through the queue.
+      // The validate POST carries a body but mutates nothing: keyed by zone and
+      // abortable, never taking the uid lock, so a fresh blur or submit aborts it.
       zone: validateZone(uid),
       abortable: true,
       headers: { [HEADER_VALIDATE]: field },
@@ -278,23 +253,19 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     if (!(form instanceof HTMLFormElement)) return;
     const uid = form.getAttribute(ATTR_ACTION);
     if (uid === null) return;
-    // A submit cancels its own in-flight validation: the wire aborts the
-    // validate zone so a late answer never morphs the form the server is about
-    // to re-render from the submit.
+    // A submit cancels its own in-flight validation, so a late answer never morphs
+    // the form the server is about to re-render.
     deps.abort(validateZone(uid));
-    // Intercept the submit as a partial mutation under the uid lock. Without
-    // the runtime the form posts natively for the full post-then-redirect
-    // cycle, so this is the enhancement and never the only path.
+    // Intercept as a partial mutation under the uid lock. Without the runtime the
+    // form posts natively, so this is the enhancement, never the only path.
     event.preventDefault();
     const body = new FormData(form);
-    // A native submit carries the pressed button, so a Continue or a Back name
-    // reaches the server: replay it onto the data the engine sends.
+    // A native submit carries the pressed button, so replay its name onto the body.
     const submitter = (event as SubmitEvent).submitter;
     const name = submitter?.getAttribute("name") ?? "";
     if (name !== "") body.append(name, submitter?.getAttribute("value") ?? "");
-    // The zone the form declares travels as the morph target, so an invalid
-    // submit repaints that zone and a wizard step advances it in place. Without
-    // one the server falls back to the form by uid.
+    // The declared zone travels as the morph target. Without one the server falls
+    // back to the form by uid.
     const zone = targetZone(form);
     // The form's own key, so the response morphs this instance.
     const key = form.getAttribute(ATTR_KEY);
@@ -313,8 +284,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     if (!(el instanceof Element)) return;
     const confirmer = el.closest(`[${CONFIRM_ATTR}]`);
     if (confirmer !== null) {
-      // closest matched on the attribute's presence, so getAttribute returns a
-      // string (empty at worst) and the "" fallback is never taken.
+      // closest matched the attribute, so getAttribute returns a string.
       /* v8 ignore next */
       const text = confirmer.getAttribute(CONFIRM_ATTR) ?? "";
       if (!confirm(text)) {
@@ -324,9 +294,8 @@ export function createTriggers(deps: TriggerDeps): Triggers {
       }
     }
     const link = el.closest(`a[${MERGE_ATTR}][${TARGET_ATTR}]`);
-    // The selector restricts the match to <a> elements, which are always
-    // HTMLAnchorElement, so the narrowing guard's false branch never runs. The
-    // instanceof stays for the type narrowing the closure below relies on.
+    // The selector restricts the match to <a>, so the false branch never runs. The
+    // instanceof stays for the narrowing the closure relies on.
     /* v8 ignore next */
     if (link instanceof HTMLAnchorElement) {
       const zone = link.getAttribute(TARGET_ATTR);
@@ -337,9 +306,8 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     }
   }
 
-  // Activate one lazy zone or sentinel. load fires straight away (its batch is
-  // handled on ready), revealed waits for the observer, a sentinel arms its
-  // observer to paginate.
+  // Activate one lazy zone or sentinel. load fires straight away (batched on
+  // ready), revealed and sentinels wait for the observer.
   function activate(el: Element): void {
     if (activated.has(el)) return;
     const zone = el.getAttribute(ATTR_ZONE);
@@ -360,9 +328,8 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     }
   }
 
-  // The poll interval under a strict decimal grammar: parseInt("5s") is 5 and
-  // would poll at 5ms, so only an all-digit value within the server tag's own
-  // bounds is an interval.
+  // The poll interval under a strict decimal grammar: only an all-digit value in
+  // the server tag's bounds is an interval, so parseInt("5s")=5 is rejected.
   function pollMs(el: Element): number | null {
     const raw = el.getAttribute(POLL_ATTR);
     if (raw === null || !/^\d+$/.test(raw)) return null;
@@ -370,8 +337,8 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     return ms >= MIN_POLL_MS && ms <= MAX_POLL_MS ? ms : null;
   }
 
-  // Chained setTimeout, no setInterval, so tests drive ticks one by one. On a
-  // hidden tab the group registers sleeping and the visible flip wakes it.
+  // Chained setTimeout, not setInterval, so tests drive ticks one by one. A hidden
+  // tab registers the group sleeping.
   function joinPoll(el: Element, interval: number): void {
     membership.set(el, interval);
     const group = groups.get(interval);
@@ -396,16 +363,15 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     joinPoll(el, ms);
   }
 
-  // Each element is re-read live: the server keeps data-next-poll on partial
-  // responses, so a wrapper missing either attribute was morphed away and
-  // tears down, and a changed interval migrates after this fetch. A group
-  // already gone (_reset won the race) returns silently.
+  // Each element is re-read live: a wrapper missing either attribute was morphed
+  // away and tears down, a changed interval migrates. A group already gone returns
+  // silently.
   function pollTick(interval: number): void {
     const group = groups.get(interval);
     if (group === undefined) return;
     if (visibility.hidden()) {
-      // Safety net for an undelivered hidden visibilitychange: sleep instead
-      // of rescheduling, the visible flip wakes the group.
+      // Safety net for an undelivered hidden visibilitychange: sleep, the visible
+      // flip wakes the group.
       group.handle = null;
       return;
     }
@@ -434,11 +400,9 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     group.handle = clock.setTimeout(() => pollTick(interval), interval);
   }
 
-  // On hidden, silence every live timer but keep the groups sleeping. On
-  // visible, each group measures elapsed against its own lastFire: due ticks
-  // run at once, the rest resume with the remaining time. Live handles are
-  // cleared first so a repeated visible event cannot stack a second chain.
-  // Entries are copied since a tick may delete its group mid-walk.
+  // On hidden, silence every live timer but keep the groups sleeping. On visible,
+  // each group measures elapsed against its own lastFire: due ticks run at once,
+  // the rest resume with the remaining time.
   function onVisibility(): void {
     if (visibility.hidden()) {
       for (const group of groups.values()) {
@@ -461,10 +425,8 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     }
   }
 
-  // Batch the load zones into one comma-joined GET per owning page, one round
-  // trip for every load zone the page contributed. The batch groups by the
-  // layer-resolved page URL: a base-page zone and a layer zone activated by
-  // the same apply GET their own pages, not whatever the address bar reads.
+  // Batch the load zones into one comma-joined GET per owning page. Grouping by
+  // the layer-resolved page keeps a base-page zone and a layer zone apart.
   function loadBatch(root: ParentNode): void {
     const batches = new Map<string, string[]>();
     for (const el of matching(root, `[${LAZY_ATTR}="load"]`)) {
@@ -474,21 +436,19 @@ export function createTriggers(deps: TriggerDeps): Triggers {
       activated.add(el);
       addZone(batches, pageUrl(el), zone);
     }
-    // The wire queues per path and zone batch, so a re-fired batch supersedes
-    // its own page's predecessor and never another page's.
+    // The wire queues per path and zone batch, so a re-fired batch supersedes its
+    // own page's predecessor and never another page's.
     flushBatches(batches);
   }
 
-  // The attribute of an element matched by an attribute selector, so the null
-  // arm cannot occur and stays out of the branch count.
+  // The attribute of an element matched by an attribute selector, so the null arm
+  // cannot occur.
   function attrOf(el: Element, name: string): string {
     /* v8 ignore next */
     return el.getAttribute(name) ?? "";
   }
 
-  // Warn on hand-written values the runtime drops in silence: an attribute
-  // outside its closed set, a poll interval failing the grammar or bounds, a
-  // poll element naming no zone. Dev-only.
+  // Warn on hand-written values the runtime drops in silence. Dev-only.
   function validateAttrs(root: ParentNode): void {
     if (!dev()) return;
     for (const el of matching(root, `[${LAZY_ATTR}]`)) {
@@ -532,8 +492,8 @@ export function createTriggers(deps: TriggerDeps): Triggers {
       activate(el);
     }
     for (const el of matching(root, `a[${MERGE_ATTR}][${TARGET_ATTR}]`)) {
-      // Only sentinels (non-anchor or marked) arm an observer, plain pagination
-      // links stay click-driven and are skipped here.
+      // Only marked sentinels arm an observer, plain pagination links stay
+      // click-driven.
       if (el.hasAttribute(LAZY_ATTR)) activate(el);
     }
     for (const el of matching(root, `[${POLL_ATTR}]`)) {
@@ -549,8 +509,8 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     target.addEventListener("blur", onBlur, true);
     target.addEventListener("submit", onSubmit, true);
     target.addEventListener("click", onClick, true);
-    // The visibility subscription pauses and resumes the poll timers, torn
-    // down with the event listeners, the same choreography as the SSE bridge.
+    // The visibility subscription pauses and resumes the poll timers, the same
+    // choreography as the SSE bridge.
     const stopVisibility = visibility.onChange(onVisibility);
     detach = () => {
       target.removeEventListener("input", onInput);

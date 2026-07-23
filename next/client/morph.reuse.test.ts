@@ -6,8 +6,8 @@ function mount(html: string): Element {
   return document.body.firstElementChild!;
 }
 
-// A move adapter that records moves and falls back to insertBefore, since the
-// native moveBefore is absent from jsdom.
+// A move adapter that records moves and falls back to insertBefore, since native
+// moveBefore is absent from jsdom.
 function recordingMove() {
   const moved: Element[] = [];
   return {
@@ -126,7 +126,6 @@ describe("middle insertion into a keyless list shifts the tail onto the wrong ro
         "</ul>",
       { move, isDirty: () => true },
     );
-    // The structural result is correct: four rows in the requested order.
     const after = [...target.querySelectorAll("li")];
     expect(after).toHaveLength(4);
     expect(after.map((li) => li.querySelector("input")!.name)).toEqual([
@@ -135,20 +134,18 @@ describe("middle insertion into a keyless list shifts the tail onto the wrong ro
       "b",
       "c",
     ]);
-    // A keyless soft match only checks the pointer position, never a forward
-    // scan, so old rows are reused in document order and a fresh node fills the
-    // final slot. No move was needed because nothing was found further down.
+    // A keyless soft match only checks the pointer, never a forward scan, so old
+    // rows are reused in document order and a fresh node fills the final slot.
     expect(moved).toHaveLength(0);
-    // The original tail node stays connected but slides to the B position, the
-    // dirty pin carries the typed value onto a row the server now names "b".
+    // The tail slides to the B position, the dirty pin carries the typed value
+    // onto a row the server now names "b".
     expect(tail.isConnected).toBe(true);
     expect(after.indexOf(tail)).toBe(2);
     expect(tail.querySelector<HTMLInputElement>("input")!.name).toBe("b");
     expect(tail.querySelector<HTMLInputElement>("input")!.value).toBe(
       "typed-into-tail",
     );
-    // The new last row is a fresh node carrying the clean server default, the
-    // user's input no longer lives on the row they edited.
+    // The new last row is a fresh node carrying the clean server default.
     expect(after[3]).not.toBe(tail);
     expect(after[3]!.querySelector<HTMLInputElement>("input")!.value).toBe("vc");
     expect(after.map((li) => li.querySelector("input")!.value)).toEqual([
@@ -164,9 +161,8 @@ describe("middle insertion into a keyless list shifts the tail onto the wrong ro
     const [oldA, oldB, oldC] = [...target.querySelectorAll("li")];
     morph(target, '<ul id="l"><li>A</li><li>X</li><li>B</li><li>C</li></ul>');
     const rows = [...target.querySelectorAll("li")];
-    // Soft match at the pointer reuses A for A, then old B for X, old C for B,
-    // and creates a brand-new node for the final C. Every old node stays
-    // connected, but each carries a different label than before.
+    // Soft match at the pointer reuses A, B, C for A, X, B and creates a fresh
+    // node for the final C. Every old node stays connected under a new label.
     expect(rows[0]).toBe(oldA);
     expect(rows[1]).toBe(oldB);
     expect(rows[2]).toBe(oldC);
@@ -205,7 +201,7 @@ describe("deletion from the middle of a keyed list", () => {
     expect(target.querySelector("#c")).toBe(c);
     expect(c.querySelector<HTMLInputElement>("input")!.value).toBe("typed-c");
     expect(b.isConnected).toBe(false);
-    // c sat further down the scan past the discarded b, so it moved into place.
+    // c sat past the discarded b in the scan, so it moved into place.
     expect(moved.map((m) => m.id)).toEqual(["c"]);
   });
 });

@@ -26,9 +26,8 @@ function css(url: string): Asset {
   return { kind: "css", url };
 }
 
-// The inline forms a modern server sends. It spells the verb out only when the
-// kind's inline wrapper is the element the runtime builds, so an inline body
-// without a load carries no verb at all and the loader has nothing to insert.
+// An inline body spells its verb out only when the kind's wrapper is the
+// element the runtime builds, so a body without a load carries no verb.
 function inlineCss(body: string): Asset {
   return { kind: "css", url: "", inline: body, load: "link" };
 }
@@ -37,9 +36,8 @@ function inlineJs(body: string): Asset {
   return { kind: "js", url: "", inline: body, load: "script" };
 }
 
-// An inline body carrying the module verb. No built-in kind produces this pair,
-// since the module verb builds a typed script no inline wrapper can name, so it
-// only ever reaches the loader from a source that spells the verb out.
+// The module verb builds a typed script no inline wrapper can name, so no
+// built-in kind produces this pair unless a source spells the verb out.
 function inlineModule(body: string): Asset {
   return { kind: "module", url: "", inline: body, load: "module" };
 }
@@ -84,7 +82,7 @@ describe("assets registry and delta", () => {
     assets.seed();
     assets._reset();
     // Reset drops the registry but keeps the seeded flag, so no rescan restores
-    // the key and the sheet still on the page counts as missing again.
+    // the key and the sheet on the page counts as missing again.
     assets.loadCss([css("http://x/kept.css")], () => undefined);
     expect(loaded).toEqual(["http://x/kept.css"]);
   });
@@ -100,8 +98,6 @@ describe("assets registry and delta", () => {
   });
 
   it("does not insert a module the server already rendered into the page", () => {
-    // A server-rendered module is a <script type="module" src>, so the src scan
-    // seeds it and a second element would mount its island twice.
     document.head.innerHTML =
       '<script type="module" src="http://x/island.mjs"></script>';
     const { assets } = makeAssets();
@@ -113,8 +109,6 @@ describe("assets registry and delta", () => {
   });
 
   it("scans on the first js delta when nobody seeded the registry", () => {
-    // _configure builds a fresh registry and does not re-seed it, so an apply
-    // can reach the delta before seed() ever ran.
     document.head.innerHTML =
       '<script type="module" src="http://x/island.mjs"></script>';
     const { assets } = makeAssets();
@@ -368,14 +362,12 @@ describe("assets registry and delta", () => {
 
   it("prefers the server verb over the legacy meaning of the kind", () => {
     const { assets, loaded } = makeAssets();
-    // A project that named its stylesheet kind "js" still gets a <link>, since
-    // the server verb wins over the legacy meaning of the kind.
     assets.loadCss(
       [{ kind: "js", url: "http://x/odd.css", load: "link" }],
       () => undefined,
     );
-    // A url of its own, so only the verb guard can keep it out of the head. The
-    // sheet above already holds its key and would be skipped as a duplicate.
+    // A url of its own, so only the verb guard (not the dedup key) can keep it
+    // out of the head.
     assets.loadJs([{ kind: "js", url: "http://x/other.css", load: "link" }]);
     expect(loaded).toEqual(["http://x/odd.css"]);
     expect(document.head.querySelectorAll("script")).toHaveLength(0);
@@ -391,8 +383,8 @@ describe("assets registry and delta", () => {
 
   it("leaves an inline body of the module kind alone when no verb spells it out", () => {
     // The module kind registers no inline wrapper, so the server withholds the
-    // verb and a full page render prints the body verbatim. Building a
-    // type=module script here would execute what the other render only shows.
+    // verb and building a type=module script here would execute what a full
+    // render only prints.
     const { assets } = makeAssets();
     assets.loadJs([{ kind: "module", url: "", inline: "mount()" }]);
     expect(document.head.querySelectorAll("script")).toHaveLength(0);
@@ -411,7 +403,7 @@ describe("assets registry and delta", () => {
     const { assets } = makeAssets();
     assets.seed();
     // The seeded body ran as a classic script, so the module form of the same
-    // source has not run yet and still has to be inserted.
+    // source still has to be inserted.
     assets.loadJs([inlineModule("mount()")]);
     const scripts =
       document.head.querySelectorAll<HTMLScriptElement>("script:not([src])");
@@ -547,8 +539,8 @@ describe("url dedup keys", () => {
       '<script type="module" src="http://cdn.example.com/build/app.mjs"></script>';
     const { assets } = makeAssets();
     assets.seed();
-    // Keyed against the location the relative url would resolve elsewhere and a
-    // second element would evaluate the module again.
+    // Keyed against the location, the relative url would resolve elsewhere and
+    // the module would evaluate twice.
     assets.loadJs([{ kind: "module", url: "app.mjs", load: "module" }]);
     expect(document.head.querySelectorAll("script[src]")).toHaveLength(1);
   });
@@ -573,8 +565,8 @@ describe("url dedup keys", () => {
 
   it("skips a stylesheet entry whose url is empty rather than keying the page", () => {
     const { assets, loaded } = makeAssets();
-    // An empty url resolves to the document itself, so the entry would fetch
-    // the page as a stylesheet and claim the key of a real asset addressing it.
+    // An empty url resolves to the document itself, so the entry would fetch the
+    // page as a stylesheet and claim a real asset's key.
     assets.loadCss([{ kind: "css", url: "" }, css(document.baseURI)], () => undefined);
     expect(loaded).toEqual([document.baseURI]);
   });
@@ -604,8 +596,7 @@ describe("url dedup keys", () => {
 });
 
 describe("seeding across the parse window", () => {
-  // The bootstrap is an inline script the server places above the co-located
-  // asset tags, so seed() runs while the parser is still mid-document.
+  // seed() runs while the parser is still mid-document, above the asset tags.
   function readyState(state: DocumentReadyState): void {
     Object.defineProperty(document, "readyState", {
       value: state,
@@ -664,7 +655,7 @@ describe("seeding across the parse window", () => {
     assets.seed();
     parseTag('<script type="module" src="/static/w.js"></script>');
     assets.loadJs([{ kind: "module", url: "/static/w.js", load: "module" }]);
-    // The delta waits, so the module is not evaluated a second time here.
+    // The delta waits, so the module is not evaluated a second time.
     expect(document.querySelectorAll('script[src="/static/w.js"]')).toHaveLength(1);
     finishParsing();
     expect(document.querySelectorAll('script[src="/static/w.js"]')).toHaveLength(1);
@@ -673,7 +664,7 @@ describe("seeding across the parse window", () => {
   it("defers a stylesheet delta taken inside the window to the end of the parse", () => {
     const { assets, loaded } = makeAssets();
     // Seeded up front, so a load zone firing mid-parse holds its delta until the
-    // whole document has arrived rather than reading the unparsed tail as missing.
+    // whole document has arrived instead of reading the unparsed tail as missing.
     assets.seed();
     parseTag('<link rel="stylesheet" href="/static/mid.css">');
     assets.loadCss([css("/static/mid.css")], () => undefined);
@@ -686,16 +677,16 @@ describe("seeding across the parse window", () => {
     assets.seed();
     parseTag('<script src="/static/d.js"></script>');
     // A deferred script runs once readyState has flipped but before the event,
-    // so the pending catch-up, not the readyState, has to gate the rescan.
+    // so the pending catch-up gates the rescan.
     readyState("interactive");
     assets.loadJs([{ kind: "js", url: "/static/d.js" }]);
     expect(document.querySelectorAll('script[src="/static/d.js"]')).toHaveLength(1);
   });
 
   it("holds the js delta until parsing ends, seeing a tag parsed after seed", () => {
-    // The bug: a lazy load zone GETs mid-parse, so the manifest names a script
-    // the parser has not reached yet. A delta taken here counts it missing and
-    // inserts a second copy. Deferred to DOMContentLoaded, the scan sees the tag.
+    // A lazy load zone GETs mid-parse for a script the parser has not reached,
+    // so an eager delta doubles it. Deferred to DOMContentLoaded, the scan sees
+    // the tag.
     const { assets } = makeAssets();
     assets.seed();
     assets.loadJs([{ kind: "js", url: "/static/react-dom.js" }]);
@@ -711,8 +702,8 @@ describe("seeding across the parse window", () => {
     const done = vi.fn();
     assets.seed();
     assets.loadCss([css("/static/mid.css")], done);
-    // The sheet is still being parsed when the load zone answers, so the delta
-    // and the done that runs the ops both wait for the whole document.
+    // The sheet is still parsing when the load zone answers, so the delta and
+    // the done that runs the ops both wait for the whole document.
     expect(done).not.toHaveBeenCalled();
     parseTag('<link rel="stylesheet" href="/static/mid.css">');
     finishParsing();

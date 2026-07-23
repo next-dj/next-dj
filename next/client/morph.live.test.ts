@@ -172,17 +172,15 @@ describe("details open obeys the touched rule", () => {
   });
 
   it("an untouched details syncs shut from the server too", () => {
-    // The open state is server-owned until the user touches it, so the server
-    // may both open and close it.
+    // Server-owned until the user touches it, so the server may open and close it.
     const target = mount('<details id="d" open></details>');
     morph(target, '<details id="d"></details>');
     expect(target.hasAttribute("open")).toBe(false);
   });
 
   it("a touched details keeps the user open state against an unrequested patch", () => {
-    // The touch predates the request snapshot, so a poll or SSE patch the user
-    // never asked for must not resync it shut: touched, not dirty-since, is the
-    // signal, since a details toggle has no live focus a field relies on.
+    // The touch predates the snapshot, so a poll or SSE patch must not resync it
+    // shut. Touched, not dirty-since, is the signal, a toggle has no live focus.
     const target = mount('<details id="d" open></details>');
     morph(target, '<details id="d"></details>', { isTouched: () => true });
     expect(target.hasAttribute("open")).toBe(true);

@@ -155,10 +155,8 @@ describe("parseEnvelope", () => {
   });
 
   it("drops an inline body whose kind name is the only thing naming a verb", () => {
-    // The server withholds the verb from an inline body whenever the kind's own
-    // inline wrapper is not the element the runtime builds, and the module kind
-    // registers none, so guessing from the name would execute a body the full
-    // render prints verbatim.
+    // The module kind registers no inline wrapper, so guessing the verb from the
+    // name would execute a body the full render prints verbatim.
     const parsed = parseEnvelope({
       version: "v1",
       assets: [
@@ -809,8 +807,7 @@ describe("Applier script neutralisation", () => {
 
 describe("Applier dev timing", () => {
   // The user timing runs for real, the spies only record the names the runtime
-  // writes: the assertions are about those names, not about the entry-buffer
-  // semantics of a browser. Only console.debug is silenced.
+  // writes. Only console.debug is silenced.
   function spyTiming() {
     return {
       mark: vi.spyOn(performance, "mark"),

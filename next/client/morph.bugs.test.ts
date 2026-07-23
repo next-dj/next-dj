@@ -6,8 +6,7 @@ function mount(html: string): Element {
   return document.body.firstElementChild!;
 }
 
-// A registered custom element whose lifecycle callbacks are spies, so a test can
-// assert the engine treats it atomically or replaces it whole.
+// A registered custom element whose lifecycle callbacks are spies.
 const lifecycle = {
   connected: vi.fn(),
   disconnected: vi.fn(),
@@ -47,8 +46,8 @@ interface BugCase {
   before: string;
   after: string;
   setup?: (target: Element) => void;
-  // A field carrying user input is dirty by construction, the registry stamps it
-  // on the keystroke, so a case that types into a field marks it dirty here.
+  // A field carrying user input is dirty by construction, so a case that types
+  // into a field marks it dirty here.
   dirty?: (target: Element) => (el: Element) => boolean;
   verify: (result: Element, target: Element) => void;
 }
@@ -77,7 +76,7 @@ const bugTable: BugCase[] = [
       '<div id="r"><tracked-widget id="w" v="1"><b>old</b></tracked-widget></div>',
     after: '<div id="r"><tracked-widget id="w" v="2"><i>new</i></tracked-widget></div>',
     setup: () => {
-      // The connect from mount counts as a baseline, cleared before the morph.
+      // The connect from mount is a baseline, cleared before the morph.
       lifecycle.connected.mockClear();
       lifecycle.disconnected.mockClear();
     },
@@ -112,8 +111,8 @@ const bugTable: BugCase[] = [
     after:
       '<form id="f"><input id="i" name="i" value="y"><span id="s">new</span></form>',
     verify: () => {
-      // Morph the same pair twice, once with focus inside and once without, and
-      // assert the serialised result is byte-identical.
+      // Morph the same pair with focus inside and without, the serialised result
+      // must be byte-identical.
       const withFocus = mount(
         '<form id="f"><input id="i" name="i" value="x"><span id="s">old</span></form>',
       );
@@ -231,8 +230,8 @@ describe("idiomorph bug checklist", () => {
     lifecycle.attributeChanged.mockClear();
     morph(target, '<div id="r"><tracked-widget id="w" v="2"></tracked-widget></div>');
     const widget = target.querySelector("#w")!;
-    // The attribute is synced, the children are not, the shadow boundary is never
-    // crossed, so the only lifecycle that fired is attributeChangedCallback.
+    // The attribute syncs, the children do not, the shadow boundary is never
+    // crossed, so only attributeChangedCallback fires.
     expect(widget.getAttribute("v")).toBe("2");
     expect(widget.querySelector("b")).not.toBeNull();
     expect(lifecycle.attributeChanged).toHaveBeenCalled();
@@ -282,8 +281,8 @@ describe("idiomorph bug checklist", () => {
         },
       }),
     ).toThrow("boom");
-    // Every node is still either inside the target or removed, no stray wrapper
-    // sits at the document root.
+    // Every node is still inside the target or removed, no stray wrapper at the
+    // document root.
     for (const node of Array.from(document.body.children)) {
       expect(node).toBe(target);
     }
@@ -303,8 +302,7 @@ describe("dirty and keep beyond the checklist", () => {
     );
     const a = target.querySelector<HTMLInputElement>("#a")!;
     const b = target.querySelector<HTMLInputElement>("#b")!;
-    // The user typed into B after the request snapshot, so the dirty registry
-    // marks only B dirty relative to the response.
+    // The user typed into B after the request snapshot, so only B is dirty.
     b.value = "typed-into-b";
     const dirty = new Set<Element>([b]);
     morph(

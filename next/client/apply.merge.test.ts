@@ -501,9 +501,8 @@ describe("append and prepend dedup", () => {
       '<ul data-next-zone="rows"><li data-next-key="1">one</li></ul>';
     const list = document.querySelector("ul")!;
     let ghost: Element | undefined;
-    // The first unmount hook adds a keyed row, the next one takes that row back
-    // out, so the deferred rows find a match that is gone by the time it is
-    // replaced and have to stay whole.
+    // The first unmount hook adds a keyed row, the next takes it back out, so the
+    // deferred rows find a match gone by replace time and stay whole.
     list.addEventListener("next:removed", (event) => {
       if (ghost === undefined) {
         ghost = document.createElement("li");
@@ -539,8 +538,7 @@ describe("append and prepend dedup", () => {
     const list = document.querySelector("ul")!;
     let added = false;
     // The hook puts its keyed row ahead of the replacement, so a rebuilt index
-    // would resolve key 1 to the ghost while the live index still points at the
-    // row the merge just landed.
+    // would resolve key 1 to the ghost, not the row the merge just landed.
     list.addEventListener("next:removed", () => {
       if (added) return;
       added = true;
@@ -613,9 +611,8 @@ describe("append and prepend dedup", () => {
       applier.apply(
         envelope([{ op: "append", target: { zone: "rows" }, html: "<li>fresh</li>" }]),
       );
-      // A keyless row matches nothing, so the merge reads the key of the one
-      // incoming row and never walks the 500 live children. Only the key reads
-      // are counted: the zone selector itself walks the document in jsdom.
+      // A keyless row matches nothing, so the merge reads the one incoming key
+      // and never walks the 500 live children. Only key reads are counted.
       const keyReads = spy.mock.calls.filter((call) => call[0] === "data-next-key");
       expect(keyReads).toHaveLength(1);
     } finally {
@@ -642,9 +639,8 @@ describe("append and prepend dedup", () => {
     // even if the apply throws.
     try {
       applier.apply(envelope([{ op: "append", target: { zone: "rows" }, html }]));
-      // A scan per incoming row would cost 500 * 100 reads. The constant is
-      // loose on purpose: the assertion is linearity, not a jsdom call count,
-      // and the fragment parse and the removal sweep read attributes too.
+      // A scan per row would cost 500 * 100 reads. The loose constant asserts
+      // linearity, not a jsdom call count.
       expect(spy.mock.calls.length).toBeLessThan(10 * (500 + 100));
     } finally {
       spy.mockRestore();

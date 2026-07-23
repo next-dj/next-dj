@@ -1,30 +1,25 @@
-// The public facade: the global `Next` every page reaches. It owns the client
-// context store, the event bus (Next.on), the plugin hook (Next.use), and mounts
-// Next.partial for the morph and fetch runtime. A static class, never
-// instantiated, since there is one runtime per page.
+// The global `Next` facade every page reaches. Owns the client context store,
+// the event bus, the plugin hook, and mounts Next.partial for the morph and
+// fetch runtime.
 
 import { createPartial } from "./partial";
 import type { PartialSurface } from "./partial";
 import type { Envelope } from "./apply";
 import type { PartialError } from "./protocol";
 
-// The client context store, the same shape _init seeds and the context op and
-// csrf meta merge into.
+/** The client context store, shared by _init, the context op, and csrf meta. */
 export type NextContext = Readonly<Record<string, unknown>>;
 
-// PartialError lives with the wire vocabulary so every emitting module stamps
-// its payload against one shape, re-exported here as the public surface.
 export type { PartialError, PartialErrorKind } from "./protocol";
 
-// The payload of every runtime event reaching the Next.on bus, keyed by event
-// name, so a known event types its listener argument. This is only the bus
-// channel: the next:* DOM events (next:mounted, next:removed) fire on the
-// document instead and are not in this map. A custom event op or a plugin event
-// falls through to the open on() overload.
+/**
+ * Payloads of the runtime events on the Next.on bus, keyed by event name.
+ * The next:* DOM events fire on the document instead and are not in this map.
+ */
 export interface NextEventMap {
   ready: NextContext;
-  // context is the whole merged store, changed lists only the keys of the delta
-  // that landed, so an island can skip a re-render its keys did not cause.
+  // changed lists only the delta keys, so an island can skip a re-render its
+  // own keys did not cause.
   "context-updated": { context: NextContext; changed: string[] };
   "partial:before-request": {
     url: string;
@@ -32,8 +27,8 @@ export interface NextEventMap {
     intent: { zone?: string; uid?: string };
   };
   "partial:before-apply": { envelope: Envelope };
-  // ok is false when any op threw or was an unknown verb, so a listener can tell
-  // a clean apply from a degraded one that still mounted what did change.
+  // ok is false when any op threw or was an unknown verb, so a listener can
+  // tell a clean apply from a degraded one that still mounted what changed.
   "partial:applied": { envelope: Envelope; ok: boolean };
   "partial:error": PartialError;
   "partial:layer-opened": { opener: HTMLElement | null };
@@ -45,6 +40,7 @@ export interface NextEventMap {
 type NextListener = (payload: Record<string, unknown>) => void;
 type NextPlugin<T> = (next: typeof Next) => T;
 
+/** The window-exposed runtime facade, a static class since there is one per page. */
 class Next {
   static #context: Record<string, unknown> = {};
   static #listeners = new Map<string, Set<NextListener>>();
@@ -59,29 +55,22 @@ class Next {
     return Object.freeze({ ...Next.#context });
   }
 
-  // The entry point the template's inline script calls once per page with the
-  // server-seeded context. It is the runtime's true bootstrap, ahead of any
-  // co-located script, so it seeds context and mounts before ready listeners run.
+  /** Bootstrap called once per page, seeding context and mounting before ready runs. */
   static _init(context: Record<string, unknown>): void {
     // Only the literal true opens the dev channel, so a stray "true" string
-    // leaves production quiet. It runs before ready() so the initial trigger
-    // scan already validates the hand-written attributes it walks.
+    // leaves production quiet. Runs before the initial trigger scan.
     if (context.$dev === true) Next.partial._configure({ dev: true });
     Next.#context = context;
     Next.#ready = true;
     // The initial seed is one big delta, so every seeded key is changed.
     Next.#dispatch("context-updated", { context, changed: Object.keys(context) });
-    // Seed the asset registry, mount the initial DOM, and fire the batched load
-    // zones before `ready` listeners run, so a `ready` handler sees a mounted
-    // document.
+    // Mount before ready listeners run, so a ready handler sees a mounted document.
     Next.partial.ready();
     Next.#dispatch("ready", context);
   }
 
-  // A known runtime event types its listener payload through NextEventMap, a
-  // custom event op or a plugin event falls through to the open overload. The
-  // dispatch mechanism is unchanged: every listener lands in the same
-  // Map<string, Set>, the overloads are a type-only narrowing of the argument.
+  /** Subscribe to a runtime event, returning an unsubscribe function. */
+  // The overloads are a type-only narrowing, every listener lands in one Map.
   static on<K extends keyof NextEventMap>(
     event: K,
     listener: (payload: NextEventMap[K]) => void,
@@ -106,8 +95,8 @@ class Next {
     return plugin(Next);
   }
 
-  // The operation `context` and the `csrf` meta merge into the same store
-  // that `_init` owns, so context islands see one consistent snapshot.
+  // The context op and csrf meta merge into the store _init owns, so islands
+  // see one consistent snapshot.
   static #mergeContext(data: Record<string, unknown>): void {
     const changed = Object.keys(data);
     Next.#context = { ...Next.#context, ...data };
@@ -117,9 +106,8 @@ class Next {
   static #dispatch(event: string, payload: Record<string, unknown>): void {
     const bucket = Next.#listeners.get(event);
     if (bucket === undefined) return;
-    // Snapshot so a listener that subscribes or unsubscribes mid-fan-out cannot
-    // mutate the Set under iteration, and isolate each call so one throwing
-    // plugin does not abort delivery to the rest.
+    // Snapshot against mid-fan-out mutation, isolate each call so one throwing
+    // listener does not abort delivery to the rest.
     for (const listener of [...bucket]) {
       try {
         listener(payload);

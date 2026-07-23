@@ -21,9 +21,8 @@ function mockDialog() {
   return { adapter, dismissed };
 }
 
-// Every stack made in this file registers here, and the module-level afterEach
-// resets them all, so a failing assertion never leaks dialogs or listeners into
-// the next test.
+// Every stack registers here so the afterEach resets them all, no leaked
+// dialogs or listeners into the next test.
 const madeStacks: LayerStack[] = [];
 
 function createTrackedLayers(deps: LayerDeps): LayerStack {
@@ -206,8 +205,7 @@ describe("layer stack", () => {
     });
     local.install(document);
     local._reset();
-    // The popstate detach ran exactly once, and a click on a layer link no
-    // longer opens a layer: the delegated handler came off the document.
+    // _reset detaches popstate once and takes the delegated click off the document.
     expect(popstateDetached).toBe(1);
     const opener = document.createElement("a");
     opener.setAttribute("href", "/wizard/");
@@ -216,8 +214,7 @@ describe("layer stack", () => {
     opener.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     expect(local.size()).toBe(0);
 
-    // A fresh install after the reset rebinds the handler, so the click opens
-    // again.
+    // A fresh install after the reset rebinds the handler.
     local.install(document);
     opener.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     expect(local.size()).toBe(1);

@@ -3,8 +3,8 @@ import { Wire } from "./wire";
 import type { SessionStore } from "./assets";
 import { ACCEPT, CONTENT_TYPE, HEADER_REQUEST_ID, REQUEST_FLAG } from "./protocol";
 
-// An in-memory reload-once store, so the navigate-once flag stays isolated per
-// harness rather than leaking through the shared jsdom sessionStorage.
+// Isolated per harness so the navigate-once flag does not leak through the
+// shared jsdom sessionStorage.
 function memorySession(): SessionStore {
   const store = new Map<string, string>();
   return {
@@ -356,7 +356,6 @@ describe("Wire safe-GET queue", () => {
     expect(signals[0]!.aborted).toBe(true);
     resolveFirst(envelopeResponse(ENVELOPE));
     await Promise.all([first, second]);
-    // Only the latest response is applied, the stale one is dropped.
     expect(h.envelopes).toHaveLength(1);
   });
 
@@ -370,7 +369,6 @@ describe("Wire safe-GET queue", () => {
       if (n === 1) return new Promise<Response>((r) => (resolveFirst = r));
       return Promise.resolve(envelopeResponse(ENVELOPE));
     });
-    // Two pages sharing a zone name must not abort each other.
     const first = h.wire.fetch({ url: "/host/", zone: "list" });
     const second = h.wire.fetch({ url: "/modal/", zone: "list" });
     expect(signals[0]!.aborted).toBe(false);
@@ -646,7 +644,6 @@ describe("Wire reset", () => {
     const h = makeWire(() => new Promise<Response>(() => {}));
     void h.wire.fetch({ url: "/p1/", zone: "list" });
     h.wire._reset();
-    // After reset the queue key is free, a fresh GET starts at seq 1.
     const h2 = makeWire(async () => envelopeResponse(ENVELOPE));
     await h2.wire.fetch({ url: "/p2/", zone: "list" });
     expect(h2.envelopes).toHaveLength(1);
