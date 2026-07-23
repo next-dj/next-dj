@@ -123,7 +123,7 @@ class PollsConfig(AppConfig):
         from polls import providers, signals  # noqa: F401, PLC0415
 ```
 
-The `vue` kind binds the `.vue` extension to the `scripts` slot and reuses the framework built-in `render_module_tag`. The `signals` import wires both the Vite dev-asset injector and the `action_dispatched` listener that drives the broker fan-out.
+The `vue` kind binds the `.vue` extension to the `scripts` slot and reuses the framework built-in `render_module_tag`. Reusing a built-in renderer is what earns the kind a client insertion verb: every asset in a patch envelope carries a `load` field, and the `.vue` files ride out as `load: "module"` while the co-located `component.css` rides as `load: "link"`. A kind registered with a renderer of your own carries no verb and its assets reach the browser only on a full render, which the framework reports as `next.W074`. The `signals` import wires both the Vite dev-asset injector and the `action_dispatched` listener that drives the broker fan-out.
 
 ### 3. The stream through the page escape hatch
 

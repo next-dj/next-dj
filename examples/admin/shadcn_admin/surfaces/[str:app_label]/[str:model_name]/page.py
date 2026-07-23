@@ -23,8 +23,8 @@ _EMPTY = mark_safe("&mdash;")
 
 
 def _visible_columns(cl: ChangeList) -> list[str]:
-    # `cl.list_display` adds "action_checkbox" when actions are registered;
-    # we render the selection column ourselves through `selectable=`.
+    # `cl.list_display` adds "action_checkbox" when actions are registered.
+    # We render the selection column ourselves through `selectable=`.
     return [n for n in cl.list_display if n != "action_checkbox"]
 
 

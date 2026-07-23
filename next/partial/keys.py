@@ -22,6 +22,7 @@ HTML: Final = "html"
 KIND: Final = "kind"
 URL: Final = "url"
 INLINE: Final = "inline"
+LOAD: Final = "load"
 
 UID: Final = "uid"
 VALID: Final = "valid"
@@ -42,6 +43,7 @@ __all__ = [
     "HTML",
     "INLINE",
     "KIND",
+    "LOAD",
     "OP",
     "OPS",
     "REQUEST_ID",

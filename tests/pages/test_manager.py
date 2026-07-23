@@ -1,8 +1,10 @@
+import textwrap
 from pathlib import Path
 from unittest import mock
 from unittest.mock import patch
 
 import pytest
+from django.core.checks import Error
 from django.http import HttpRequest
 
 import next.pages.loaders as loaders_module
@@ -14,8 +16,10 @@ from next.pages.loaders import (
     TemplateLoader,
     _load_python_module_memo,
 )
+from next.pages.manager import iter_serialized_page_context_keys
 from next.pages.registry import PageContextRegistry
 from next.static import default_manager as static_default_manager
+from tests.support import patch_checks_router_manager
 
 
 class TestPage:
@@ -1250,3 +1254,74 @@ class TestCustomTemplateLoaderIntegration:
         page_file.write_text("")
         paths = page_instance._get_template_source_paths(page_file)
         assert md in paths
+
+
+class TestSerializedPageContextKeys:
+    """iter_serialized_page_context_keys reports what a page.py declares."""
+
+    def _write_page(self, tmp_path: Path, body: str) -> Path:
+        page_file = tmp_path / "page.py"
+        page_file.write_text(textwrap.dedent(body))
+        loaders_module._MODULE_MEMO.pop(page_file, None)
+        return page_file
+
+    def test_no_router_manager_reports_nothing(self) -> None:
+        with patch(
+            "next.pages.manager.get_router_manager", return_value=(None, [Error("x")])
+        ):
+            assert list(iter_serialized_page_context_keys()) == []
+
+    def test_keyed_serialized_key_is_reported_once_per_page(self, tmp_path) -> None:
+        page_file = self._write_page(
+            tmp_path,
+            """
+            from next.pages import page
+
+
+            @page.context("unread", serialize=True)
+            def unread():
+                return 3
+            """,
+        )
+        with patch_checks_router_manager(
+            pages_directory=tmp_path,
+            scan_routes=[("first", page_file), ("second", page_file)],
+        ):
+            found = list(iter_serialized_page_context_keys())
+        assert found == [(page_file, "unread")]
+
+    def test_unserialized_and_keyless_contexts_are_skipped(self, tmp_path) -> None:
+        page_file = self._write_page(
+            tmp_path,
+            """
+            from next.pages import page
+
+
+            @page.context("plain")
+            def plain():
+                return 1
+
+
+            @page.context(serialize=True)
+            def spread() -> dict:
+                return {"$dev": True}
+            """,
+        )
+        with patch_checks_router_manager(
+            pages_directory=tmp_path, scan_routes=[("route", page_file)]
+        ):
+            assert list(iter_serialized_page_context_keys()) == []
+
+    def test_virtual_page_path_is_skipped(self, tmp_path) -> None:
+        missing = tmp_path / "virtual" / "page.py"
+        with patch_checks_router_manager(
+            pages_directory=tmp_path, scan_routes=[("virtual", missing)]
+        ):
+            assert list(iter_serialized_page_context_keys()) == []
+
+    def test_unimportable_page_is_skipped(self, tmp_path) -> None:
+        page_file = self._write_page(tmp_path, "def broken(:\n")
+        with patch_checks_router_manager(
+            pages_directory=tmp_path, scan_routes=[("broken", page_file)]
+        ):
+            assert list(iter_serialized_page_context_keys()) == []

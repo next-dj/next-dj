@@ -11,7 +11,9 @@ from next.static import NextScriptBuilder, ScriptInjectionPolicy
 from next.static.collector import StaticCollector
 from next.static.scripts import (
     CSRF_PAYLOAD_KEY,
+    DEV_PAYLOAD_KEY,
     NEXT_JS_STATIC_PATH,
+    RESERVED_PAYLOAD_KEYS,
     csrf_header_name,
     csrf_payload,
     csrf_payload_for,
@@ -307,6 +309,16 @@ class TestNextJsStaticPath:
     def test_namespace_prefix(self) -> None:
         assert NEXT_JS_STATIC_PATH.startswith("next/")
         assert NEXT_JS_STATIC_PATH.endswith(".js")
+
+
+class TestReservedPayloadKeys:
+    """The reserved set is the single source of truth for framework-owned keys."""
+
+    def test_holds_every_framework_wire_name(self) -> None:
+        assert frozenset({"$csrf", "$dev"}) == RESERVED_PAYLOAD_KEYS
+
+    def test_key_constants_carry_the_wire_names(self) -> None:
+        assert (CSRF_PAYLOAD_KEY, DEV_PAYLOAD_KEY) == ("$csrf", "$dev")
 
 
 class TestCsrfPayload:

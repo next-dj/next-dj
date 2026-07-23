@@ -14,11 +14,14 @@ The Nonce From currentScript
 ----------------------------
 
 The runtime remembers the nonce of the script that bootstrapped it.
-On load it reads ``document.currentScript.nonce`` and copies that value onto every script element it injects for a co-located asset delta.
-A dynamically inserted ``<script>`` carries the page nonce, so a policy that allows nonced scripts allows the asset the runtime loads.
+On load it reads ``document.currentScript.nonce`` and copies that value onto every element it injects for a co-located asset delta, script, module, ``<link rel="stylesheet">``, and inline ``<style>`` alike.
+A dynamically inserted element carries the page nonce, so a policy that allows nonced scripts and styles allows the assets the runtime loads.
 
 The bootstrap script tag already carries the nonce your CSP middleware stamps on it, so there is nothing extra to configure on the runtime side.
-The asset scripts inherit it.
+The asset elements inherit it.
+
+The nonce is the only attribute the runtime carries over from the page.
+An element it builds for a patch-inserted asset takes a fixed attribute set, so an ``integrity`` or ``crossorigin`` attribute a backend writes into its tag templates reaches the browser on a full render alone, see :doc:`/content/topics/partial-rendering/limitations`.
 
 Scripts in Patches Never Run
 ----------------------------
@@ -32,7 +35,8 @@ The consequence for a CSP is that a morph cannot smuggle an inline script past t
 Behaviour arrives only through the co-located asset manifest, whose scripts are nonced, and through the ``event`` verb, which carries no code.
 A widget that relied on an inline initialiser in its markup has to move to a co-located module, see :doc:`/content/topics/partial-rendering/co-located-js`.
 
-In a development build the runtime prints a ``console.warn`` for every script it neutralises, so an inline initialiser that stopped working is visible rather than silent.
+With the runtime's dev mode on, that is with Django ``DEBUG``, the runtime prints a ``console.warn`` for every script it neutralises.
+An inline initialiser that stopped working is therefore visible rather than silent.
 
 strict-dynamic as a Recommendation
 -----------------------------------
@@ -56,7 +60,7 @@ A nonce-based policy with ``'strict-dynamic'`` looks like this, with ``{nonce}``
 
    Content-Security-Policy: script-src 'nonce-{nonce}' 'strict-dynamic'; object-src 'none'; base-uri 'none'
 
-The bootstrap script tag carries ``nonce="{nonce}"``, the runtime copies that nonce onto every asset script it injects, and ``'strict-dynamic'`` lets the bootstrap load them.
+The bootstrap script tag carries ``nonce="{nonce}"``, the runtime copies that nonce onto every asset element it injects, and ``'strict-dynamic'`` lets the bootstrap load the scripts among them.
 No patch can introduce an inline script, so no patch needs a nonce of its own.
 
 See Also

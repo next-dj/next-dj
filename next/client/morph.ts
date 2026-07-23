@@ -1,53 +1,52 @@
-// The morph engine: an old target subtree is brought up to a new HTML string by
-// reusing the live nodes that already match, so a submit keeps focus, caret,
-// typed values, open `<details>`, playing media, and scroll. The match runs on
-// id-sets (a wrapper without an id still matches through the ids of its
-// children), then a left-to-right child walk reuses, moves, creates, or discards
-// nodes. Live properties (value/checked/selected/open) split from their
-// attribute twins and honour an injected dirty predicate. The server authors the
-// target, so the engine never reaches outside it.
+// The morph engine brings an old subtree up to new HTML by reusing the live
+// nodes that still match, so focus, caret, typed values, open details, and
+// scroll survive a patch. Matching runs on id-sets, then a child walk reuses.
 
 import { defaultMove } from "./adapters";
 
+/** Whether a morph replaces the target itself or only its children. */
 export type MorphMode = "node" | "children";
 
-// Relocate a live node before a reference node. The default moveBefore-or-
-// insertBefore adapter lives in adapters.ts, callers inject a mock in tests.
+/** Relocate a live node before a reference node, a DI seam for the move adapter. */
 export type Move = (parent: ParentNode, node: Node, before: Node | null) => void;
 
+/** Injectable hooks and predicates that steer one morph run. */
 export interface MorphOptions {
   // Morph the target itself or only its children. Default "node".
   mode?: MorphMode;
-  // A field carrying local input made after the request snapshot. Default
-  // () => false. A dirty field keeps its live value untouched.
+  // A dirty field keeps its live value against the server default. Default false.
   isDirty?: (field: Element) => boolean;
-  // The move adapter. Default moveBefore with an insertBefore fallback. It is a
-  // DI-seam so the native branch is exercised through a mock in jsdom.
+  // A touched <details> keeps its open state against a patch it never asked for,
+  // since the toggle has no live focus signal a field relies on. Default false.
+  isTouched?: (el: Element) => boolean;
+  // The move adapter, a DI seam so the native branch runs through a mock in jsdom.
   move?: Move;
-  // Before a pair of nodes. false skips the whole pair, the node and subtree.
+  // Before a pair. false skips the whole pair and its subtree.
   beforeNode?: (oldNode: Node | null, newNode: Node) => boolean | void;
   // After a pair has morphed.
   afterNode?: (oldNode: Node, newNode: Node) => void;
-  // An old node found no pair and is about to be discarded. false keeps it.
+  // An unmatched old node is about to be discarded. false keeps it.
   onDiscard?: (node: Node) => boolean | void;
+  // Emit markup diagnostics to the console. Default false.
+  dev?: boolean;
 }
 
 interface Ctx {
   ids: Map<Element, Set<string>>;
   isDirty: (field: Element) => boolean;
+  isTouched: (el: Element) => boolean;
   move: Move;
   beforeNode: (oldNode: Node | null, newNode: Node) => boolean | void;
   afterNode: (oldNode: Node, newNode: Node) => void;
   onDiscard: (node: Node) => boolean | void;
 }
 
-// Read an id strictly through getAttribute: the `id` property is subject to DOM
-// clobbering, an `<input name="id">` inside a form shadows form.id.
-function readId(el: Element): string | null {
+// Read the id through getAttribute: the `id` property is subject to DOM
+// clobbering, an `<input name="id">` shadows form.id.
+function readId(el: Element, dev: boolean): string | null {
   const key = el.getAttribute("data-next-key");
   if (key !== null) {
-    if (el.getAttribute("id") !== null) {
-      // dev warn: a node carries either a key or an id, not both.
+    if (dev && el.getAttribute("id") !== null) {
       console.warn("[next.morph] data-next-key and id on one node", el);
     }
     return key;
@@ -55,19 +54,19 @@ function readId(el: Element): string | null {
   return el.getAttribute("id");
 }
 
-// Build id-sets for one tree in a single querySelectorAll pass. Each element's
-// own id bubbles up into every ancestor's set, so a wrapper without an id still
-// votes through its descendants' ids. Every collected id also lands in the raw
-// universe, the source of the persistent (both-sides) intersection.
+// Build id-sets for one tree in a single pass. Each element's id bubbles into
+// every ancestor's set, so a wrapper without an id still votes through its
+// descendants. Collected ids also land in the universe for the intersection.
 function collectIds(
   root: Element,
   into: Map<Element, Set<string>>,
   universe: Set<string>,
+  dev: boolean,
 ): void {
-  consume(root, root, into, universe);
+  consume(root, root, into, universe, dev);
   const tagged = root.querySelectorAll("[id],[data-next-key]");
   for (const el of Array.from(tagged)) {
-    consume(el, root, into, universe);
+    consume(el, root, into, universe, dev);
   }
 }
 
@@ -76,8 +75,9 @@ function consume(
   root: Element,
   into: Map<Element, Set<string>>,
   universe: Set<string>,
+  dev: boolean,
 ): void {
-  const id = readId(el);
+  const id = readId(el, dev);
   if (id === null) return;
   universe.add(id);
   let node: Element | null = el;
@@ -93,8 +93,8 @@ function consume(
   }
 }
 
-// Persistent ids are those present in both trees. An id on one side only owns no
-// match and must not vote, a match on it would be a match with nothing.
+// Persistent ids are present in both trees. An id on one side owns no match, so
+// it must not vote.
 function intersects(a: Set<string> | undefined, persistent: Set<string>): boolean {
   if (a === undefined) return false;
   for (const id of a) {
@@ -122,8 +122,7 @@ function isElement(node: Node): node is Element {
   return node.nodeType === 1;
 }
 
-// A node is hard-matchable when both sides are elements with the same tag and a
-// non-empty persistent id-set intersection.
+// A hard match is two same-tag elements sharing a persistent id.
 function isHardMatch(
   ctx: Ctx,
   oldNode: Node,
@@ -138,8 +137,8 @@ function isHardMatch(
   );
 }
 
-// A soft match is a same nodeType, same tag pair with empty id-sets. Elements
-// carrying a persistent id are reserved for a future hard match.
+// A soft match is a same-tag pair with no persistent id, ids are reserved for a
+// hard match.
 function isSoftMatch(
   ctx: Ctx,
   oldNode: Node,
@@ -154,10 +153,9 @@ function isSoftMatch(
   return true;
 }
 
-// Find a match for one new child among old siblings from the pointer. A hard
-// match is searched along the whole scan, then a soft match is taken only at the
-// pointer. A pointer carrying a persistent id is reserved for a hard match the
-// scan would have found, so isSoftMatch refuses it and the new node is inserted.
+// Find a match for one new child. A hard match is searched along the whole scan,
+// a soft match is taken only at the pointer, which is reserved when it carries a
+// persistent id.
 function findMatch(
   ctx: Ctx,
   pointer: Node | null,
@@ -175,18 +173,14 @@ function findMatch(
   return pointer;
 }
 
-// An element with a hyphen in its tag or with a shadowRoot is an atomic unit: on
-// a tag match only its attributes sync, its children are not morphed, the engine
-// never enters the shadow root. Declarative shadow DOM in the new markup is part
-// of this atomic rule.
+// A hyphenated tag or a shadow root is atomic: on a tag match only attributes
+// sync, children are never morphed, the engine never enters the shadow root.
 function isAtomic(el: Element): boolean {
   return el.tagName.includes("-") || el.shadowRoot != null;
 }
 
-// A keep node is left untouched so a foreign root mounted into it survives a
-// morph. With an id the child walk pairs it by hard match, without one it pairs
-// by position, so a framework root the server renders with no stable id is
-// preserved all the same.
+// A keep node is left untouched so a foreign root mounted into it survives, hard
+// matched by id or paired by position when the server gives it no stable id.
 function isKept(el: Element): boolean {
   return el.hasAttribute("data-next-keep");
 }
@@ -197,10 +191,7 @@ function emit(target: Element, name: string, detail: Record<string, unknown>): b
   return !event.defaultPrevented;
 }
 
-// Signal an element is about to detach so an adapter root mounted into it can
-// unmount before the node leaves the document. Fired on the detaching root
-// itself, bubbles to the document where the delegated listener lives, and is
-// not cancelable: the detach is already decided. The complement of next:mounted.
+/** Signal an element is about to detach so a mounted adapter root can unmount. */
 export function fireRemoved(node: Element): void {
   node.dispatchEvent(new CustomEvent("next:removed", { bubbles: true }));
 }
@@ -211,9 +202,9 @@ function discard(ctx: Ctx, node: Node): void {
   (node as ChildNode).remove();
 }
 
-// Sync the live value/checked/selected and the open state. The attribute twin is
-// synced by the attribute pass (server default), the live property is set only
-// when the field is neither active nor dirty.
+// Sync the live value/checked/selected. The attribute twin is handled by the
+// attribute pass, the live property is set only when the field is neither active
+// nor dirty.
 function syncLive(ctx: Ctx, oldEl: Element, newEl: Element): void {
   const tag = oldEl.tagName;
   if (tag === "INPUT") {
@@ -242,25 +233,27 @@ function syncLive(ctx: Ctx, oldEl: Element, newEl: Element): void {
     const n = newEl as HTMLOptionElement;
     const select = o.closest("select");
     const locked = select !== null && isActiveOrDirty(ctx, select);
-    // Setting defaultSelected reflects the selected attribute and can perturb
-    // the live selection, so under a dirty select the live selected is pinned.
+    // defaultSelected reflects the selected attribute and can perturb the live
+    // selection, so a dirty select pins the live selected.
     const wasSelected = o.selected;
     o.defaultSelected = n.defaultSelected;
     o.selected = locked ? wasSelected : n.selected;
   }
 }
 
-// Some attributes are owned by syncLive, not the generic pass: the value, checked
-// and selected twins are set there with their dirty rule, a toggled <details> is
-// dirty and keeps its open state, and a <dialog>'s open belongs to the layer
-// surface, the morph boundary.
+// Some attributes are owned by syncLive, not the generic pass: value/checked/
+// selected twins, a touched <details> open, and a <dialog> open that belongs to
+// the layer surface.
 function skipAttribute(ctx: Ctx, el: Element, name: string): boolean {
   const tag = el.tagName;
   if (name === "value" || name === "checked") return tag === "INPUT";
   if (name === "selected") return tag === "OPTION";
   if (name === "open") {
     if (tag === "DIALOG") return true;
-    return tag === "DETAILS" && ctx.isDirty(el);
+    // A <details> is server-owned until the user first toggles it, then the
+    // user's for the life of the page, so a poll or SSE patch must not resync it
+    // shut on a toggle that predates the snapshot and reads as clean.
+    return tag === "DETAILS" && ctx.isTouched(el);
   }
   return false;
 }
@@ -269,8 +262,8 @@ function isActiveOrDirty(ctx: Ctx, el: Element): boolean {
   return el.ownerDocument.activeElement === el || ctx.isDirty(el);
 }
 
-// Three-phase attribute sync: add the missing, update the changed, remove the
-// extra. Matching attributes are left alone so no extra mutation restarts a CSS
+// Three-phase attribute sync: add missing, update changed, remove extra.
+// Matching attributes are left alone so no extra mutation restarts a CSS
 // animation or wakes a MutationObserver. Each change is cancelable.
 function syncAttributes(ctx: Ctx, oldEl: Element, newEl: Element): void {
   const newAttrs = newEl.attributes;
@@ -287,8 +280,8 @@ function syncAttributes(ctx: Ctx, oldEl: Element, newEl: Element): void {
       }
     }
   }
-  // Snapshot the old attribute names: removeAttribute mutates the live
-  // NamedNodeMap, so a fixed list keeps the pass stable while it removes.
+  // Snapshot the old names: removeAttribute mutates the live NamedNodeMap, so a
+  // fixed list keeps the pass stable while it removes.
   const oldNames = Array.from(oldEl.attributes, (attr) => attr.name);
   for (const name of oldNames) {
     if (newEl.hasAttribute(name) || skipAttribute(ctx, oldEl, name)) continue;
@@ -298,9 +291,8 @@ function syncAttributes(ctx: Ctx, oldEl: Element, newEl: Element): void {
   }
 }
 
-// Morph a single pair. data-next-keep, custom-element atomicity, the attribute
-// pass, the live-property pass, then recursion. The pair is reused, never the
-// new node grafted in.
+// Morph a single pair: keep, atomicity, attributes, live properties, recursion.
+// The pair is reused, never the new node grafted in.
 function morphNode(
   ctx: Ctx,
   oldEl: Element,
@@ -325,12 +317,10 @@ function morphNode(
   ctx.afterNode(oldEl, newEl);
 }
 
-// Walk new children left to right with an insertion pointer into old children.
-// hard match, then soft match, then create. A match at the pointer is morphed in place
-// and the pointer advances. A match found further on is moved before the pointer
-// and morphed, the pointer stays so the skipped old nodes are revisited by later
-// new children or swept at the end. The trailing old children are discarded once
-// the new children run out.
+// Walk new children left to right against an insertion pointer into old children:
+// hard match, soft match, or create. A match at the pointer morphs in place, a
+// match found further on is moved before the pointer, and trailing old children
+// are discarded when the new ones run out.
 function morphChildren(
   ctx: Ctx,
   oldParent: Element,
@@ -343,8 +333,8 @@ function morphChildren(
     const next = newChild.nextSibling;
     const match = findMatch(ctx, pointer, newChild, persistent);
     if (match === null) {
-      // No match: insert a fresh node before the pointer. The only path new
-      // content takes into the document, already script-neutralised upstream.
+      // No match: insert a fresh node before the pointer, the only path new
+      // content takes into the document.
       if (ctx.beforeNode(null, newChild) !== false) {
         oldParent.insertBefore(newChild, pointer);
       }
@@ -359,7 +349,6 @@ function morphChildren(
     applyMatch(ctx, match, newChild, persistent);
     newChild = next;
   }
-  // Discard the trailing old children.
   while (pointer !== null) {
     const after = pointer.nextSibling;
     discard(ctx, pointer);
@@ -367,9 +356,9 @@ function morphChildren(
   }
 }
 
-// A match always shares the tag of its new pair, so an atomic element with a
-// changed tag never matches: it is inserted fresh and the old one discarded,
-// which is the honest connected/disconnected lifecycle for a custom element.
+// A match always shares its new pair's tag, so an atomic element with a changed
+// tag never matches: it is inserted fresh and the old one discarded, the honest
+// connected/disconnected lifecycle for a custom element.
 function applyMatch(
   ctx: Ctx,
   match: Node,
@@ -398,8 +387,8 @@ function snapshotFocus(doc: Document): FocusSnapshot {
   let start: number | null = null;
   let end: number | null = null;
   let direction: string | null = null;
-  // jsdom keeps document.activeElement at <body> at minimum so the null branch
-  // is unreachable under the test runner, it guards a real null in older agents.
+  // jsdom keeps activeElement at <body> at minimum, so the null branch is
+  // unreachable under the runner and guards a real null in older agents.
   /* v8 ignore next */
   if (el !== null) {
     try {
@@ -414,9 +403,8 @@ function snapshotFocus(doc: Document): FocusSnapshot {
   return { el, start, end, direction };
 }
 
-// Restore focus only on a real loss: a stray focus() is itself visible. The
-// caret restore runs in try/catch. Focus never participates in matching, a
-// reused active node keeps focus natively because it never left the document.
+// Restore focus only on a real loss, a stray focus() is itself visible. A reused
+// active node keeps focus natively since it never left the document.
 function restoreFocus(doc: Document, snap: FocusSnapshot): void {
   const el = snap.el;
   if (el === null || el === doc.body) return;
@@ -435,8 +423,8 @@ function restoreFocus(doc: Document, snap: FocusSnapshot): void {
   }
 }
 
-// Parse a string through an inert <template>. Full documents for extract are
-// parsed by the applier and handed in already cut out as an element.
+// Parse a string through an inert <template>. A non-string is already a parsed
+// element or fragment.
 function parseContent(
   target: Element,
   html: string | Element | DocumentFragment,
@@ -454,8 +442,7 @@ function firstElement(fragment: DocumentFragment): Element | null {
   return null;
 }
 
-// Bring target up to html. Returns the resulting root, which may differ from
-// target by reference when the root tag changed and the root was recreated.
+/** Bring target up to html and return the resulting root, a new node when the root tag changed. */
 export function morph(
   target: Element,
   html: string | Element | DocumentFragment,
@@ -463,6 +450,7 @@ export function morph(
 ): Element {
   const content = parseContent(target, html);
   const mode = options.mode ?? "node";
+  const dev = options.dev ?? false;
   const doc = target.ownerDocument;
 
   const newRoot =
@@ -473,17 +461,17 @@ export function morph(
       : content;
   if (newRoot === null) return target;
 
-  // One id-map across both trees, plus a raw id universe per side. Persistent
-  // ids are those present on both sides, the only ones that vote in matching.
+  // One id-map across both trees plus a raw universe per side. Persistent ids are
+  // present on both sides, the only ones that vote.
   const ids = new Map<Element, Set<string>>();
   const oldUniverse = new Set<string>();
   const newUniverse = new Set<string>();
-  collectIds(target, ids, oldUniverse);
+  collectIds(target, ids, oldUniverse, dev);
   if (newRoot instanceof Element) {
-    collectIds(newRoot, ids, newUniverse);
+    collectIds(newRoot, ids, newUniverse, dev);
   } else {
     for (const child of Array.from(newRoot.childNodes)) {
-      if (isElement(child)) collectIds(child, ids, newUniverse);
+      if (isElement(child)) collectIds(child, ids, newUniverse, dev);
     }
   }
   const persistent = new Set<string>();
@@ -494,6 +482,7 @@ export function morph(
   const ctx: Ctx = {
     ids,
     isDirty: options.isDirty ?? (() => false),
+    isTouched: options.isTouched ?? (() => false),
     move: options.move ?? defaultMove,
     beforeNode: options.beforeNode ?? (() => undefined),
     afterNode: options.afterNode ?? (() => undefined),
@@ -510,8 +499,8 @@ export function morph(
     if (target.tagName === root.tagName) {
       morphNode(ctx, target, root, persistent);
     } else {
-      // Root tag changed: recreate the node so the result root is the new node
-      // and it sits on the target position.
+      // Root tag changed: recreate the node so the result root is the new node in
+      // the target's position.
       const parent = target.parentNode;
       if (parent !== null) {
         parent.insertBefore(root, target);

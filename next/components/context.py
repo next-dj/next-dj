@@ -13,12 +13,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, overload
 
+from next.checks.common import get_components_manager
 from next.deps import resolver
 from next.utils import caller_source_path
 
+from .backends import FileComponentsBackend
+
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Iterator, Sequence
 
     from next.static.serializers import JsContextSerializer
 
@@ -183,10 +186,30 @@ component = ComponentContextManager()
 context = component.context
 
 
+def iter_serialized_component_context_keys() -> Iterator[tuple[Path, str]]:
+    """Yield the `component.py` path and key of every keyed `serialize=True` context.
+
+    A keyless `serialize=True` callable spreads the keys of the dict it
+    returns at render time, so those keys exist only at runtime and never
+    travel through here. Reading the keys imports every `component.py`, since
+    the decorator state is the truth, so a check calling this pays that import
+    even under `LAZY_COMPONENT_MODULES`.
+    """
+    manager = get_components_manager()
+    for backend in manager._backends:
+        if not isinstance(backend, FileComponentsBackend):
+            continue
+        for module_path in backend.loaded_module_paths():
+            for entry in component.get_functions(module_path):
+                if entry.serialize and entry.key is not None:
+                    yield module_path, entry.key
+
+
 __all__ = [
     "ComponentContextManager",
     "ComponentContextRegistry",
     "ContextFunction",
     "component",
     "context",
+    "iter_serialized_component_context_keys",
 ]

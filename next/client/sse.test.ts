@@ -12,8 +12,7 @@ interface MockSource {
   closed: boolean;
 }
 
-// A mock EventSource adapter: each open records a controllable handle the test
-// drives directly, since jsdom does not implement EventSource.
+// A mock EventSource adapter the test drives directly, since jsdom lacks one.
 function mockSource(): { adapter: EventSourceAdapter; opened: MockSource[] } {
   const opened: MockSource[] = [];
   const adapter: EventSourceAdapter = {
@@ -65,8 +64,6 @@ describe("createSse", () => {
   ) {
     return createSse({
       apply: (raw) => applied.push(raw),
-      // The request object is recorded as handed over, so an assertion on its
-      // exact shape proves the bridge passes intent and stamps no headers.
       fetch: (request) => fetched.push(request),
       dispatch: (event, detail) => dispatched.push({ event, detail }),
       document,
@@ -119,6 +116,44 @@ describe("createSse", () => {
     opened[0]!.message(envelope([], "r0"));
     expect(applied).toHaveLength(1);
     opened[0]!.message(envelope([], "r25"));
+    expect(applied).toHaveLength(1);
+  });
+
+  it("still suppresses the oldest id while the ring sits exactly at the limit", () => {
+    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    const { adapter, opened } = mockSource();
+    const sse = makeSse(adapter, manualVisibility());
+    sse.scan(document);
+    for (let i = 0; i < 25; i += 1) sse.remember(`r${i}`);
+    for (let i = 0; i < 25; i += 1) opened[0]!.message(envelope([], `r${i}`));
+    expect(applied).toHaveLength(0);
+  });
+
+  it("evicts only the oldest id when one more overflows the ring", () => {
+    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    const { adapter, opened } = mockSource();
+    const sse = makeSse(adapter, manualVisibility());
+    sse.scan(document);
+    for (let i = 0; i < 25; i += 1) sse.remember(`r${i}`);
+    sse.remember("r25");
+    opened[0]!.message(envelope([], "r0"));
+    expect(applied).toHaveLength(1);
+    for (let i = 1; i < 26; i += 1) opened[0]!.message(envelope([], `r${i}`));
+    expect(applied).toHaveLength(1);
+  });
+
+  it("a repeated id moves to the young end of the ring", () => {
+    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    const { adapter, opened } = mockSource();
+    const sse = makeSse(adapter, manualVisibility());
+    sse.scan(document);
+    for (let i = 0; i < 25; i += 1) sse.remember(`r${i}`);
+    // Re-feeding the oldest id renews it, so the next overflow evicts r1 not r0.
+    sse.remember("r0");
+    sse.remember("r25");
+    opened[0]!.message(envelope([], "r0"));
+    expect(applied).toHaveLength(0);
+    opened[0]!.message(envelope([], "r1"));
     expect(applied).toHaveLength(1);
   });
 
@@ -191,15 +226,13 @@ describe("createSse", () => {
     let clock = 0;
     const sse = makeSse(adapter, visibility, { now: () => clock });
     visibility.setHidden(true);
-    // A zone mounts in the background tab: its container registers a connection
-    // but opens no socket while the stream is paused.
+    // A background-tab mount registers a connection but opens no socket while paused.
     document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
     sse.scan(document);
     expect(opened).toHaveLength(0);
     expect(sse.size()).toBe(1);
     clock = 5000;
     visibility.setHidden(false);
-    // Resume opens the deferred socket rather than stranding the zone's feed.
     expect(opened).toHaveLength(1);
     expect(opened[0]!.url).toBe("/stream/");
     expect(sse.size()).toBe(1);
@@ -234,8 +267,7 @@ describe("createSse", () => {
     );
     visibility.setHidden(true);
     expect(opened[0]!.closed).toBe(true);
-    // A pause longer than the revalidate threshold may have missed events, so
-    // resume re-GETs every bound zone.
+    // A pause past the revalidate threshold re-GETs every bound zone.
     clock = 5000;
     visibility.setHidden(false);
     expect(opened).toHaveLength(2);
@@ -254,8 +286,7 @@ describe("createSse", () => {
     sse.scan(document);
     opened[0]!.message(envelope([{ op: "refresh", zone: "poll" }]));
     visibility.setHidden(true);
-    // The address bar moved while the tab was hidden, so resume must still
-    // target the page the stream subscribed from, query filters and all.
+    // The address bar moved while hidden, but resume targets the subscribed page.
     window.history.replaceState(null, "", "/catalog/?q=other");
     clock = 5000;
     visibility.setHidden(false);
@@ -271,8 +302,7 @@ describe("createSse", () => {
     let clock = 0;
     const sse = makeSse(adapter, visibility, {
       now: () => clock,
-      // The layer stack answers the host page while a modal holds the address
-      // bar, so the stream subscribes for the page that owns its container.
+      // The layer stack answers the host page while a modal holds the address bar.
       pageUrl: () => "/host/",
     });
     sse.scan(document);
@@ -295,8 +325,6 @@ describe("createSse", () => {
     visibility.setHidden(true);
     clock = 5000;
     visibility.setHidden(false);
-    // The wire stamps X-Next-Zone from the zone intent, so the exact request
-    // shape carries url and zone and nothing else.
     expect(fetched).toEqual([{ url: "/", zone: "poll" }]);
   });
 
@@ -305,8 +333,7 @@ describe("createSse", () => {
     const el = document.querySelector("div")!;
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
-    // A replace patch scans the new wrapper element itself, so the container
-    // binds even when it is the subtree root and not a descendant.
+    // A replace patch scans the new wrapper element itself, not a descendant.
     sse.scan(el);
     expect(opened).toHaveLength(1);
     expect(opened[0]!.url).toBe("/stream/");
@@ -326,8 +353,6 @@ describe("createSse", () => {
       ]),
     );
     visibility.setHidden(true);
-    // A momentary alt-tab reconnects the stream but skips the zone re-GET, so
-    // flicking between tabs does not storm the server.
     clock = 500;
     visibility.setHidden(false);
     expect(opened).toHaveLength(2);
@@ -392,8 +417,7 @@ describe("createSse", () => {
     clock = 5000;
     visibility.setHidden(false);
     fetched.length = 0;
-    // The paused predecessor still holds its message closure. A stray event on
-    // it must not bind into the resumed connection, which carries its own copy.
+    // A stray event on the paused predecessor must not bind into the resumed copy.
     opened[0]!.message(envelope([{ op: "refresh", zone: "stale" }]));
     clock = 10000;
     visibility.setHidden(true);
@@ -446,5 +470,19 @@ describe("createSse", () => {
     expect(opened[0]!.closed).toBe(true);
     expect(sse.size()).toBe(0);
     expect(detach).toHaveBeenCalledOnce();
+  });
+
+  it("_reset empties the echo ring so a remembered id no longer suppresses", () => {
+    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    const { adapter, opened } = mockSource();
+    const sse = makeSse(adapter, manualVisibility());
+    sse.scan(document);
+    sse.remember("r1");
+    opened[0]!.message(envelope([], "r1"));
+    expect(applied).toHaveLength(0);
+    sse._reset();
+    sse.scan(document);
+    opened[1]!.message(envelope([], "r1"));
+    expect(applied).toHaveLength(1);
   });
 });

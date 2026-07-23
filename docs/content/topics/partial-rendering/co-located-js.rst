@@ -7,7 +7,8 @@ A morph replaces DOM nodes.
 A node that arrives in a patch was not in the document when the page loaded, and a node that a morph removes takes any listener bound to it with it.
 Co-located JavaScript has to survive that, and the rule is to attach behaviour to something that outlives the morph rather than to the markup itself.
 
-Each asset runs exactly once per page lifetime, a URL deduped by its address and an inline body by its content.
+Each asset runs exactly once per page lifetime, a URL deduped by its address resolved against the document base, query included and fragment ignored, and an inline body by its content.
+The registry behind that promise is built from the document while it parses, so an asset a third party inserts after parsing ends stays outside it and a later manifest naming the same URL or the same inline body inserts it a second time.
 A module loaded for the first zone that needs it is not re-run when a later patch brings more of the same markup.
 A module that wires itself up at load time finds the markup that exists at load time and nothing later.
 Use one of the three idioms below.
@@ -98,7 +99,8 @@ The asset URL is already in the runtime's loaded registry from the first open, s
 
 Migrate a module-load scan to one of the three idioms above.
 The search catalogue's minimum-length hint and the wiki's markdown preview both register through ``onMount`` for exactly this reason.
-In a development build the runtime prints a ``console.warn`` for every ``<script>`` it neutralises out of a patch, which surfaces a widget that died silently rather than letting it fail in quiet.
+With the runtime's dev mode on, that is with Django ``DEBUG``, the runtime prints a ``console.warn`` for every ``<script>`` it neutralises out of a patch.
+That surfaces a widget which died silently rather than letting it fail in quiet.
 
 Scripts in Patches Never Run
 ----------------------------
@@ -111,7 +113,9 @@ See :doc:`/content/security/csp-and-nonce` for how this interacts with a Content
 
 What the applier neutralises is the script inside the patch markup itself.
 The zone's co-located assets travel separately, in the envelope's asset manifest, and those do load.
-A stylesheet or module URL the page has not seen is inserted, and so is an inline body it has not seen, each once per page lifetime.
+A stylesheet, a classic script, or a module URL the page has not seen is inserted, and so is an inline body it has not seen whose kind wraps it in the element the verb builds, each once per page lifetime.
+The runtime inserts an asset by the verb the server derived from the kind's renderer, so a custom kind registered with ``render_link_tag``, ``render_script_tag``, or ``render_module_tag`` arrives the same way the built-in kinds do.
+A kind registered with a custom renderer carries no verb and is skipped, which the ``next.W074`` check reports at ``manage.py check``.
 Behaviour co-located with a zone therefore arrives on a standalone zone render.
 It must still use the three idioms above because of the once-per-page execution, not because a delivery channel is missing.
 
@@ -122,4 +126,5 @@ See Also
 
    :doc:`/content/security/csp-and-nonce` for serving the runtime under a CSP.
    :doc:`/content/topics/static-assets/index` for how co-located assets are discovered and bundled.
+   :doc:`/content/topics/static-assets/asset-kinds` for which kinds load through a patch envelope.
    :doc:`reference` for the lifecycle events the runtime fires.

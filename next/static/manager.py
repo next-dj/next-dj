@@ -19,6 +19,7 @@ import contextlib
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
+from django.conf import settings
 from django.contrib.staticfiles.storage import staticfiles_storage
 from django.utils.functional import LazyObject, empty
 
@@ -32,7 +33,9 @@ from .collector import HEAD_CLOSE, StaticCollector, default_placeholders
 from .discovery import AssetDiscovery, PathResolver
 from .scripts import (
     CSRF_PAYLOAD_KEY,
+    DEV_PAYLOAD_KEY,
     NEXT_JS_STATIC_PATH,
+    RESERVED_PAYLOAD_KEYS,
     NextScriptBuilder,
     ScriptInjectionPolicy,
     csrf_payload_for,
@@ -184,20 +187,39 @@ class StaticManager:
             return self._wrap_with_runtime(user_tags, collector, request=request)
         return user_tags
 
+    def _reserved_payload(self, request: HttpRequest | None) -> dict[str, Any]:
+        """Return the framework-owned init-payload entries for this render."""
+        payload: dict[str, Any] = {}
+        csrf = csrf_payload_for(request)
+        if csrf is not None:
+            payload[CSRF_PAYLOAD_KEY] = csrf
+        if settings.DEBUG:
+            payload[DEV_PAYLOAD_KEY] = True
+        return payload
+
     def _wrap_with_runtime(
         self, user_tags: str, collector: StaticCollector, *, request: HttpRequest | None
     ) -> str:
         builder = self._next_script_builder()
         if builder.policy is ScriptInjectionPolicy.AUTO:
-            csrf = csrf_payload_for(request)
-            if csrf is None:
-                js_context: dict[str, Any] = collector.js_context()
-            else:
-                js_context = {**collector.js_context(), CSRF_PAYLOAD_KEY: csrf}
+            js_context: dict[str, Any] = collector.js_context()
+            encoded = collector.js_context_encoded()
+            serializers = collector.js_context_serializers()
+            collided = RESERVED_PAYLOAD_KEYS.intersection(js_context)
+            if collided:
+                # Fresh mappings leave the collector untouched. A reserved key
+                # belongs to the framework on every render, so the fragment and
+                # the serializer a colliding key recorded go out with the value.
+                js_context = {k: v for k, v in js_context.items() if k not in collided}
+                encoded = {k: v for k, v in encoded.items() if k not in collided}
+                serializers = {
+                    k: v for k, v in serializers.items() if k not in collided
+                }
+            reserved = self._reserved_payload(request)
+            if reserved:
+                js_context = {**js_context, **reserved}
             init_payload = builder.init_script(
-                js_context,
-                key_serializers=collector.js_context_serializers(),
-                encoded=collector.js_context_encoded(),
+                js_context, key_serializers=serializers, encoded=encoded
             )
             next_scripts = f"{builder.script_tag()}\n{init_payload}\n"
             return next_scripts + user_tags if user_tags else next_scripts

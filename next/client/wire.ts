@@ -1,6 +1,5 @@
-// The fetch layer: intent headers, CSRF from the payload, response
-// classification (a non-envelope content-type is navigation), per-target GET
-// queues with latest-wins aborts, and the per-uid mutation lock.
+// The fetch layer: intent headers, CSRF, response classification, per-target
+// GET queues with latest-wins aborts, and the per-uid mutation lock.
 
 import {
   ACCEPT,
@@ -12,48 +11,56 @@ import {
   REQUEST_FLAG,
 } from "./protocol";
 import type { PartialError } from "./protocol";
-import { defaultFetch, defaultNavigate } from "./adapters";
+import { defaultFetch, defaultNavigate, defaultSession } from "./adapters";
+import type { SessionStore } from "./assets";
 
 const SAFE_METHODS = new Set(["GET", "HEAD"]);
 
-// Stand-ins for the platform globals so vitest drives fetch and the clock
-// deterministically and jsdom's missing navigation hook is mockable.
+// Kept apart from the version guard's own flag in assets.ts. The two loops have
+// different causes and one must not clear the other.
+const NAVIGATED_FLAG = "next:partial:navigated";
+
+/** Fetch stand-in so vitest can drive requests deterministically. */
 export type FetchAdapter = (input: string, init: RequestInit) => Promise<Response>;
 
+/** Clock stand-in so vitest can drive time deterministically. */
 export interface Clock {
   now(): number;
   setTimeout(handler: () => void, ms: number): number;
   clearTimeout(handle: number): void;
 }
 
+/** Navigation stand-in so jsdom's missing navigation hook is mockable. */
 export type Navigate = (url: string) => void;
 
+/** The CSRF header name and token carried by mutating requests. */
 export interface CsrfPayload {
   header: string;
   token: string;
 }
 
+/** A single wire request with its queueing and locking intent. */
 export interface WireRequest {
   url: string;
   method?: string;
-  // The lock key for mutations is the form uid, the queue key for safe GETs is
-  // the url and target zone pair. Absent both, the request runs unqueued and
-  // unlocked.
+  // A mutation locks on the form uid, a safe GET queues on url plus zone.
+  // Absent both, the request runs unqueued and unlocked.
   uid?: string;
   zone?: string;
   headers?: Record<string, string>;
   body?: BodyInit;
-  // An inline validation rides a POST to carry the body and reach the validate
-  // branch, but it mutates nothing, so it joins the abortable zone queue and
-  // skips the mutation lock: a fresh blur or a submit aborts it (latest-wins).
+  // An inline validation rides a POST to carry the body but mutates nothing, so
+  // it joins the abortable zone queue and skips the mutation lock.
   abortable?: boolean;
   // The initiating form's data-next-key, threaded to apply for a repeated form.
   key?: string;
 }
 
-// The snapshot is the dirty counter captured at fetch time, threaded to apply so
-// a field touched after this request is protected from its own response. The
-// page is the URL a safe zone GET fetched, absent on mutations.
+/**
+ * Sink for a recognised envelope. The snapshot is the dirty counter captured at
+ * fetch time so a field touched after the request is protected from its own
+ * response. The page is the URL a safe zone GET fetched, absent on mutations.
+ */
 export type EnvelopeHandler = (
   raw: unknown,
   response: Response,
@@ -62,22 +69,24 @@ export type EnvelopeHandler = (
   page: string | undefined,
 ) => void;
 
-// A parse-hook turns a non-default content-type body into a JSON-ish envelope.
-// Plugins register a foreign wire format here, before the apply pipeline.
+/** Turns a foreign content-type body into a JSON-ish envelope before apply. */
 export type ParseHook = (response: Response, body: string) => unknown;
 
+/** Injected collaborators for a Wire, all defaulted for the browser. */
 export interface WireDeps {
   fetch?: FetchAdapter;
   navigate?: Navigate;
+  // The navigate-once store of the non-envelope fallback. Absent, the default
+  // wraps sessionStorage, the same store the version guard writes to.
+  session?: SessionStore;
   dispatch: (event: string, detail: Record<string, unknown>) => void;
   onEnvelope: EnvelopeHandler;
   version?: () => string;
   csrf?: () => CsrfPayload | undefined;
   // The dirty counter read at fetch time, threaded to apply with the response.
   dirtySnapshot?: () => number;
-  // The mutation request id sink: every mutating request stamps X-Next-Request-Id
-  // and reports it here so the SSE echo ring drops the matching stream event,
-  // whose POST already brought the fresh zone. Absent, no id is stamped.
+  // Every mutating request stamps X-Next-Request-Id and reports it here so the
+  // SSE echo ring drops the matching stream event. Absent, no id is stamped.
   rememberRequestId?: (id: string) => void;
 }
 
@@ -90,10 +99,8 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
 
-// A ring id for a mutation, unique enough to suppress the SSE echo of this
-// client's own change. crypto.randomUUID is present in every secure context and
-// in jsdom, the timestamp fallback covers a plain-HTTP origin, where the
-// runtime object is narrower than the lib type claims.
+// The timestamp fallback covers a plain-HTTP origin, where crypto.randomUUID is
+// absent and the runtime object is narrower than the lib type claims.
 function newRequestId(): string {
   const impl = globalThis.crypto as { randomUUID?: () => string } | undefined;
   return impl?.randomUUID
@@ -101,9 +108,11 @@ function newRequestId(): string {
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+/** Shapes requests, classifies responses, and queues them per target. */
 export class Wire {
   readonly #fetch: FetchAdapter;
   readonly #navigate: Navigate;
+  readonly #session: SessionStore;
   readonly #dispatch: (event: string, detail: Record<string, unknown>) => void;
   readonly #onEnvelope: EnvelopeHandler;
   readonly #version: () => string;
@@ -111,8 +120,7 @@ export class Wire {
   readonly #dirtySnapshot: () => number;
   readonly #rememberRequestId: (id: string) => void;
 
-  // Latest-wins per-target GET queues and the per-uid mutation lock. Both are
-  // wiped by `_reset` so vitest files start from a clean slate.
+  // Latest-wins per-target GET queues and the per-uid mutation lock.
   readonly #queues = new Map<string, QueueEntry>();
   readonly #busy = new Set<string>();
   readonly #parseHooks = new Map<string, ParseHook>();
@@ -120,6 +128,7 @@ export class Wire {
   constructor(deps: WireDeps) {
     this.#fetch = deps.fetch ?? defaultFetch();
     this.#navigate = deps.navigate ?? defaultNavigate();
+    this.#session = deps.session ?? defaultSession();
     this.#dispatch = deps.dispatch;
     this.#onEnvelope = deps.onEnvelope;
     this.#version = deps.version ?? (() => "");
@@ -128,6 +137,7 @@ export class Wire {
     this.#rememberRequestId = deps.rememberRequestId ?? (() => undefined);
   }
 
+  /** Abort every in-flight request and drop all state, for vitest isolation. */
   _reset(): void {
     for (const entry of this.#queues.values()) {
       entry.controller.abort();
@@ -137,15 +147,19 @@ export class Wire {
     this.#parseHooks.clear();
   }
 
-  // A plugin registers a parse-hook per content-type. The hook owns the body
-  // before classification, so a foreign wire format never reaches navigation.
+  /**
+   * Register a parse-hook per content-type. The hook owns the body before
+   * classification, so a foreign wire format never reaches navigation.
+   */
   parseHook(contentType: string, hook: ParseHook): void {
     this.#parseHooks.set(contentType, hook);
   }
 
-  // Abort the in-flight request on a zone queue without starting a new one. A
-  // form submit calls this to cancel its own inline validation: the bumped seq
-  // also makes any answer already on the wire discard itself.
+  /**
+   * Abort the in-flight request on a zone queue without starting a new one, so
+   * a form submit can cancel its own inline validation. The bumped seq also
+   * makes any answer already on the wire discard itself.
+   */
   abort(zone: string): void {
     const entry = this.#queues.get(zone);
     if (entry === undefined) return;
@@ -158,16 +172,16 @@ export class Wire {
     });
   }
 
+  /** Shape, queue or lock, send, and classify a single request. */
   async fetch(request: WireRequest): Promise<void> {
     const method = (request.method ?? "GET").toUpperCase();
     const safe = SAFE_METHODS.has(method);
     const uid = request.uid;
-    // An abortable request (inline validation) is queue-managed like a safe GET
-    // even though it is a POST: it never takes the mutation lock.
+    // An abortable POST (inline validation) is queue-managed like a safe GET
+    // and never takes the mutation lock.
     const locked = !safe && !request.abortable && uid !== undefined;
     if (locked) {
-      // Per-uid mutation lock: a second submit drops while busy, so a double
-      // click yields exactly one fetch.
+      // A second submit drops while busy, so a double click yields one fetch.
       if (this.#busy.has(uid)) return;
       this.#busy.add(uid);
     }
@@ -182,11 +196,10 @@ export class Wire {
     }
   }
 
-  // A safe GET queues per path+zone: two pages may legally GET the same zone
-  // name at once, while a re-filtered GET of the same page differs only in
-  // query and must supersede its predecessor. The space separator cannot
-  // appear in either part. An abortable POST keeps the bare zone key that
-  // abort() addresses.
+  // A safe GET queues per path+zone so two pages sharing a zone name run
+  // independently while a re-filtered GET of the same page supersedes its
+  // predecessor. The space separator cannot appear in either part. An abortable
+  // POST keeps the bare zone key that abort() addresses.
   #queueKey(request: WireRequest, safe: boolean): string | undefined {
     if (request.zone === undefined) return undefined;
     if (safe) return `${request.url.split("?")[0]} ${request.zone}`;
@@ -278,18 +291,16 @@ export class Wire {
     const hook = this.#parseHooks.get(baseType);
     if (hook !== undefined) {
       const body = await this.#text(response);
-      this.#onEnvelope(hook(response, body), response, snapshot, request.key, page);
+      this.#deliver(hook(response, body), response, snapshot, request.key, page);
       return;
     }
-    // Any non-envelope content-type, or a redirected response, is a full
-    // navigation to the final URL. No attempt to parse the body. A
-    // redirect (a guard sending the browser to login) and a safe GET both
-    // point at a page, but a non-redirect non-envelope on a mutating request
-    // points at the action endpoint, not a page, so navigating there would
-    // 405: it surfaces as an error and leaves the page in place.
+    // A non-envelope content-type or a redirect is a full navigation to the
+    // final URL. A non-redirect non-envelope on a mutation points at the action
+    // endpoint, not a page, so navigating there would 405: surface it as an
+    // error and leave the page in place instead.
     if (baseType !== CONTENT_TYPE || response.redirected) {
       if (response.redirected || SAFE_METHODS.has(method)) {
-        this.#navigate(response.url || request.url);
+        this.#fallbackNavigate(response.url || request.url);
         return;
       }
       const body = await this.#text(response);
@@ -312,7 +323,37 @@ export class Wire {
       } satisfies PartialError);
       return;
     }
-    this.#onEnvelope(raw, response, snapshot, request.key, page);
+    this.#deliver(raw, response, snapshot, request.key, page);
+  }
+
+  // Clearing the navigate-once flag on a correct classify lets the next
+  // non-envelope on the same page earn its own single navigation.
+  #deliver(
+    raw: unknown,
+    response: Response,
+    snapshot: number,
+    key: string | undefined,
+    page: string | undefined,
+  ): void {
+    this.#session.remove(NAVIGATED_FLAG);
+    this.#onEnvelope(raw, response, snapshot, key, page);
+  }
+
+  // Guarded so a page that keeps answering non-envelope (login redirect, WAF
+  // stub, maintenance) cannot loop navigation: a `lazy="load"` zone re-asks on
+  // every page. The first navigates under the flag, a second while it stands
+  // degrades to a partial:error and leaves the page in place.
+  #fallbackNavigate(url: string): void {
+    if (this.#session.get(NAVIGATED_FLAG) === "1") {
+      this.#session.remove(NAVIGATED_FLAG);
+      this.#dispatch("partial:error", {
+        kind: "network",
+        error: new Error("zone answered non-envelope after a navigation"),
+      } satisfies PartialError);
+      return;
+    }
+    this.#session.set(NAVIGATED_FLAG, "1");
+    this.#navigate(url);
   }
 
   #text(response: Response): Promise<string> {
@@ -334,8 +375,7 @@ export class Wire {
       const csrf = this.#csrf();
       if (csrf !== undefined) headers[csrf.header] = csrf.token;
       // A true mutation (not an abortable validate POST) carries a ring id so
-      // the SSE bridge suppresses its own echo. The id is reported to the ring
-      // before it leaves, the fresh zone the POST returns arrives anyway.
+      // the SSE bridge suppresses its own echo.
       if (request.abortable !== true && headers[HEADER_REQUEST_ID] === undefined) {
         const id = newRequestId();
         headers[HEADER_REQUEST_ID] = id;

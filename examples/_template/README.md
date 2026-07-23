@@ -7,6 +7,7 @@ This folder is not a working example. It is the canonical skeleton copied for ev
 - `PAGES_DIR` is set to `routes`, `COMPONENTS_DIR` is set to `_widgets`. Every example overrides both to show that the naming is user-controlled. Pick names that fit the domain.
 - Tailwind is loaded via the Play CDN in the root layout. No build step.
 - `conftest.py` uses `next.testing.eager_load_pages` and `NextClient`.
+- `PARTIAL_BACKENDS` pins an explicit asset `VERSION` through `next.conf.extend_default_backend`. Static files are served straight from disk in an example, so the default `"manifest"` sentinel has no hashed manifest to read and the deploy-mismatch guard would stay dead — `next.W069` says so. Bump the tag when assets change and the runtime asks open clients to reload.
 - Every file is intentionally short. Fill in what you need, drop what you do not.
 
 ## How to run

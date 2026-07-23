@@ -4,8 +4,7 @@ import { createTriggers } from "./triggers";
 import type { IntersectionAdapter, TriggerDeps, Triggers } from "./triggers";
 import type { Clock } from "./wire";
 
-// The captured request is exactly what the runtime hands its fetch seam, so the
-// assertions read the same shape (carrying abortable) the triggers emit.
+// The captured request is exactly the shape the triggers hand their fetch seam.
 type Request = Parameters<TriggerDeps["fetch"]>[0];
 
 function manualClock(): Clock & { run(): void } {
@@ -627,7 +626,6 @@ describe("zone polling", () => {
     const { triggers, requests } = makeTriggers({ clock });
     detach = triggers.install(document);
     triggers.scan(document.body);
-    // One cadence, one timer chain: the second zone joins the first's group.
     expect(clock.pending()).toBe(1);
     clock.tick();
     expect(requests).toHaveLength(1);
@@ -662,13 +660,9 @@ describe("zone polling", () => {
     const { triggers, requests } = makeTriggers({ clock, visibility });
     detach = triggers.install(document);
     triggers.scan(document.body);
-    // Hidden arming registers the group with no live timer, so a background
-    // tab never wakes.
     expect(clock.pending()).toBe(0);
     clock.tick();
     expect(requests).toHaveLength(0);
-    // The reveal lands past the group's own interval, so its tick runs at once
-    // and exactly one chain re-arms.
     clock.setNow(6000);
     visibility.setHidden(false);
     expect(requests).toHaveLength(1);
@@ -688,8 +682,6 @@ describe("zone polling", () => {
     triggers.scan(document.body);
     clock.setNow(3000);
     visibility.setHidden(false);
-    // The interval never elapsed, so nothing fetches: the countdown resumes
-    // where the hidden span left it.
     expect(requests).toHaveLength(0);
     expect(clock.pending()).toBe(1);
     expect(clock.intervals).toEqual([2000]);
@@ -702,8 +694,8 @@ describe("zone polling", () => {
     const visibility = manualVisibility();
     document.body.innerHTML = '<div data-next-zone="t" data-next-poll="5000"></div>';
     const { triggers, requests } = makeTriggers({ clock, visibility });
-    // No install: the hidden flip delivers no visibilitychange, so the armed
-    // timer fires into the in-tick safety net and stops rescheduling.
+    // No install, so the hidden flip delivers no visibilitychange and the armed
+    // timer fires into the in-tick safety net.
     triggers.scan(document.body);
     visibility.setHidden(true);
     clock.tick();
@@ -751,8 +743,6 @@ describe("zone polling", () => {
     clock.tick();
     expect(requests).toHaveLength(1);
     visibility.setHidden(true);
-    // The hide spans the poller's own interval, so a tick was missed and the
-    // reveal runs it at once.
     clock.setNow(6000);
     visibility.setHidden(false);
     expect(requests).toHaveLength(2);
@@ -773,8 +763,7 @@ describe("zone polling", () => {
     visibility.setHidden(true);
     clock.setNow(1000);
     visibility.setHidden(false);
-    // The interval never elapsed, so nothing fetches and the countdown resumes
-    // with the remaining time instead of restarting: rapid switching can never
+    // The countdown resumes with the remaining time, so rapid switching cannot
     // postpone a due tick.
     expect(requests).toHaveLength(1);
     expect(clock.pending()).toBe(1);
@@ -790,8 +779,8 @@ describe("zone polling", () => {
     const { triggers, requests } = makeTriggers({ clock, visibility });
     detach = triggers.install(document);
     triggers.scan(document.body);
-    // A visible event with no intervening hidden (delivered twice here) clears
-    // the live handle before re-arming, so exactly one chain survives.
+    // A visible event with no intervening hidden clears the live handle before
+    // re-arming, so a second one forks no chain.
     visibility.setHidden(false);
     visibility.setHidden(false);
     expect(clock.pending()).toBe(1);
@@ -876,7 +865,6 @@ describe("zone polling", () => {
     const el = document.querySelector("div")!;
     const { triggers, requests } = makeTriggers({ clock });
     detach = triggers.install(document);
-    // A replace patch scans the new wrapper element itself, not a parent.
     triggers.scan(el);
     clock.tick();
     expect(requests).toHaveLength(1);
@@ -952,9 +940,8 @@ describe("zone polling", () => {
   });
 
   it("a tick that outlived _reset returns without re-inserting its group", () => {
-    // A clock whose clearTimeout is a no-op models the callback the browser
-    // already dequeued when the clear arrived: the orphan tick must find its
-    // group gone and die silently instead of fetching or re-arming.
+    // A no-op clearTimeout models a callback the browser already dequeued, so the
+    // orphan tick must find its group gone and die silently.
     const handlers: (() => void)[] = [];
     const clock: Clock = {
       now: () => 0,
@@ -1116,8 +1103,7 @@ describe("dev attribute validation", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { triggers } = makeTriggers({ dev: true });
     detach = triggers.install(document);
-    // A replace patch scans the new wrapper element itself, so the dev warning
-    // must cover the root and not only its descendants.
+    // A replace patch scans the new wrapper element itself, not only descendants.
     triggers.scan(el);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0]![0]).toContain('data-next-lazy="loaded"');

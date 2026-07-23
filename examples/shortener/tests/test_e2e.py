@@ -259,6 +259,22 @@ class TestDeleteRemovesRow:
         assert response.status_code == 404
 
 
+class TestLatestLinksZoneOwnsItsCondition:
+    """The zone body picks the list or the empty state on a standalone render."""
+
+    def test_zone_render_shows_the_empty_state_without_links(self, client) -> None:
+        envelope = envelope_of(client.get_zones("/", "latest-links"))
+        assert envelope.zone_targets() == ["latest-links"]
+        assert "No links yet" in envelope.html_for_zone("latest-links")
+
+    def test_zone_render_lists_rows_once_links_exist(self, client) -> None:
+        Link.objects.create(slug="alpha", url="https://example.com/a")
+        envelope = envelope_of(client.get_zones("/", "latest-links"))
+        html = envelope.html_for_zone("latest-links")
+        assert 'data-next-key="alpha"' in html
+        assert "No links yet" not in html
+
+
 class TestCreatePrependsRow:
     """Creating a link prepends its keyed row to the latest-links list."""
 

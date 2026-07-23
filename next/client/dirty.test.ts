@@ -28,6 +28,14 @@ describe("createDirtyTracker", () => {
     expect(tracker.isDirtySince(0)(fresh)).toBe(false);
   });
 
+  it("reports a touched element regardless of the snapshot", () => {
+    const tracker = createDirtyTracker();
+    const el = document.createElement("details");
+    expect(tracker.isTouched(el)).toBe(false);
+    tracker.stamp(el);
+    expect(tracker.isTouched(el)).toBe(true);
+  });
+
   it("stamps through delegated input, change, and toggle listeners", () => {
     const tracker = createDirtyTracker();
     tracker.install(document);

@@ -128,8 +128,8 @@ The server re-renders only the ``note-list`` zone and answers with a single morp
         "html": "<ul data-next-zone=\"note-list\">…matching notes…</ul>"}
      ],
      "assets": [
-       {"kind": "css", "url": "…/note_card/component.css"},
-       {"kind": "js", "url": "…/note_card/component.js"}
+       {"kind": "css", "url": "…/note_card/component.css", "load": "link"},
+       {"kind": "js", "url": "…/note_card/component.js", "load": "script"}
      ],
      "form": null
    }

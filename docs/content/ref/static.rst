@@ -53,7 +53,10 @@ See :doc:`/content/topics/static-assets/js-context` for the runtime script optio
 
 .. automodule:: next.static.scripts
    :members:
-   :exclude-members: csrf_header_name, csrf_payload, csrf_payload_for, CSRF_PAYLOAD_KEY
+   :exclude-members: csrf_header_name, csrf_payload, csrf_payload_for
+
+The init payload reserves the ``$csrf`` and ``$dev`` keys for the framework, so an automatically injected payload drops a project key of either name before it reaches ``window.Next.context``.
+See :doc:`/content/topics/static-assets/js-context` for the ownership rule and the ``next.W075`` check that reports a collision.
 
 JS Context Serializer
 ~~~~~~~~~~~~~~~~~~~~~

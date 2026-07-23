@@ -1,10 +1,32 @@
 from __future__ import annotations
 
+from unittest.mock import MagicMock, patch
+
+import pytest
 from django.core.checks import Error, Warning as DjangoWarning
 from django.core.checks.registry import registry
 from django.test import override_settings
 
-from next.static.checks import check_js_context_serializer, check_static_backends
+import next.pages.loaders as loaders_module
+import next.static.checks as checks_module
+from next.checks import NEXT, reset_check_caches
+from next.components import FileComponentsBackend
+from next.static import KindRegistry
+from next.static.checks import (
+    check_asset_kinds_are_loadable,
+    check_inline_asset_bodies_are_loadable,
+    check_js_context_serializer,
+    check_reserved_js_context_keys,
+    check_static_backends,
+)
+from tests.support import patch_checks_router_manager
+
+
+@pytest.fixture(autouse=True)
+def _reset_check_caches():
+    reset_check_caches()
+    yield
+    reset_check_caches()
 
 
 def _ids(messages: list) -> list[str]:
@@ -137,12 +159,22 @@ class TestOptionsWarnings:
 
 
 class TestChecksRegistered:
-    """System checks discovery picks up check_static_backends."""
+    """System check discovery picks up every static check under the NEXT tag."""
 
-    def test_registered_under_compatibility_tag(self) -> None:
+    @pytest.mark.parametrize(
+        "check",
+        [
+            check_static_backends,
+            check_js_context_serializer,
+            check_asset_kinds_are_loadable,
+            check_inline_asset_bodies_are_loadable,
+            check_reserved_js_context_keys,
+        ],
+    )
+    def test_registered_under_next_tag(self, check) -> None:
 
-        ids = {getattr(c, "__name__", None) for c in registry.registered_checks}
-        assert "check_static_backends" in ids
+        assert check in registry.registered_checks
+        assert NEXT in getattr(check, "tags", ())
 
 
 class _NotASerializer:
@@ -230,3 +262,190 @@ class _Boom:
     def __init__(self) -> None:
         msg = "boom"
         raise TypeError(msg)
+
+
+class TestAssetKindLoadableCheck:
+    """check_asset_kinds_are_loadable flags kinds the runtime cannot insert."""
+
+    def test_builtin_kinds_are_silent(self) -> None:
+        assert check_asset_kinds_are_loadable() == []
+
+    def test_module_renderer_kind_is_silent(self, monkeypatch) -> None:
+        registry_with_vue = KindRegistry()
+        registry_with_vue.register(
+            "vue", extension=".vue", slot="scripts", renderer="render_module_tag"
+        )
+        monkeypatch.setattr(checks_module, "default_kinds", registry_with_vue)
+        assert check_asset_kinds_are_loadable() == []
+
+    def test_custom_renderer_kind_emits_w074(self, monkeypatch) -> None:
+        mixed = KindRegistry()
+        mixed.register(
+            "css", extension=".css", slot="styles", renderer="render_link_tag"
+        )
+        mixed.register(
+            "jsx", extension=".jsx", slot="scripts", renderer="render_babel_script_tag"
+        )
+        monkeypatch.setattr(checks_module, "default_kinds", mixed)
+        messages = check_asset_kinds_are_loadable()
+        assert _ids(messages) == ["next.W074"]
+        assert isinstance(messages[0], DjangoWarning)
+        assert "'jsx'" in messages[0].msg
+        assert "'render_babel_script_tag'" in messages[0].msg
+
+
+class TestInlineAssetBodyLoadableCheck:
+    """check_inline_asset_bodies_are_loadable flags lost inline bodies."""
+
+    def test_builtin_kinds_are_silent(self) -> None:
+        assert check_inline_asset_bodies_are_loadable() == []
+
+    def test_kind_without_inline_tag_is_silent(self, monkeypatch) -> None:
+        verbatim = KindRegistry()
+        verbatim.register(
+            "mjs", extension=".mjs", slot="scripts", renderer="render_module_tag"
+        )
+        monkeypatch.setattr(checks_module, "default_kinds", verbatim)
+        assert check_inline_asset_bodies_are_loadable() == []
+
+    def test_custom_renderer_kind_is_left_to_w074(self, monkeypatch) -> None:
+        custom = KindRegistry()
+        custom.register(
+            "jsx",
+            extension=".jsx",
+            slot="scripts",
+            renderer="render_babel_script_tag",
+            inline_tag="script",
+        )
+        monkeypatch.setattr(checks_module, "default_kinds", custom)
+        assert check_inline_asset_bodies_are_loadable() == []
+
+    def test_mismatched_inline_tag_emits_w076(self, monkeypatch) -> None:
+        mismatched = KindRegistry()
+        mismatched.register(
+            "css",
+            extension=".css",
+            slot="styles",
+            renderer="render_link_tag",
+            inline_tag="style",
+        )
+        mismatched.register(
+            "tpl",
+            extension=".tpl",
+            slot="styles",
+            renderer="render_link_tag",
+            inline_tag="div",
+        )
+        monkeypatch.setattr(checks_module, "default_kinds", mismatched)
+        messages = check_inline_asset_bodies_are_loadable()
+        assert _ids(messages) == ["next.W076"]
+        assert isinstance(messages[0], DjangoWarning)
+        assert "'tpl'" in messages[0].msg
+        assert "'render_link_tag'" in messages[0].msg
+        assert "'div'" in messages[0].msg
+        assert "inline bodies carry no client insertion verb" in messages[0].msg
+
+    def test_module_kind_with_an_inline_tag_emits_w076(self, monkeypatch) -> None:
+        wrapped_module = KindRegistry()
+        wrapped_module.register(
+            "vue",
+            extension=".vue",
+            slot="scripts",
+            renderer="render_module_tag",
+            inline_tag="script",
+        )
+        monkeypatch.setattr(checks_module, "default_kinds", wrapped_module)
+        assert _ids(check_inline_asset_bodies_are_loadable()) == ["next.W076"]
+
+
+class TestReservedJsContextKeyCheck:
+    """check_reserved_js_context_keys flags keys the init payload owns."""
+
+    def test_no_keys_is_silent(self, monkeypatch) -> None:
+        monkeypatch.setattr(
+            checks_module, "iter_serialized_page_context_keys", lambda: iter(())
+        )
+        monkeypatch.setattr(
+            checks_module, "iter_serialized_component_context_keys", lambda: iter(())
+        )
+        assert check_reserved_js_context_keys() == []
+
+    def test_page_registering_a_reserved_key_emits_w075(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text(
+            "from next.pages import page\n\n\n"
+            '@page.context("$csrf", serialize=True)\n'
+            "def csrf_token():\n"
+            '    return {"token": "app"}\n\n\n'
+            '@page.context("unread", serialize=True)\n'
+            "def unread():\n"
+            "    return 3\n"
+        )
+        loaders_module._MODULE_MEMO.pop(page_file, None)
+        with patch_checks_router_manager(
+            pages_directory=tmp_path, scan_routes=[("test", page_file)]
+        ):
+            messages = check_reserved_js_context_keys()
+        assert _ids(messages) == ["next.W075"]
+        assert "'$csrf'" in messages[0].msg
+        assert "Rename the key." in messages[0].msg
+
+    @pytest.mark.parametrize("key", ["$dev", "$csrf"])
+    def test_message_promises_no_environment_where_the_value_survives(
+        self, tmp_path, key
+    ) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text(
+            "from next.pages import page\n\n\n"
+            f'@page.context("{key}", serialize=True)\n'
+            "def provider():\n"
+            "    return False\n"
+        )
+        loaders_module._MODULE_MEMO.pop(page_file, None)
+        with patch_checks_router_manager(
+            pages_directory=tmp_path, scan_routes=[("test", page_file)]
+        ):
+            messages = check_reserved_js_context_keys()
+        assert _ids(messages) == ["next.W075"]
+        assert f"'{key}'" in messages[0].msg
+        assert f"The framework owns {key} on every render" in messages[0].msg
+        assert "never reaches window.Next.context" in messages[0].msg
+        assert "DEBUG" not in messages[0].msg
+
+    def test_component_registering_a_reserved_key_emits_w075(self, tmp_path) -> None:
+        comp_dir = tmp_path / "widget"
+        comp_dir.mkdir()
+        (comp_dir / "component.djx").write_text("<div/>")
+        (comp_dir / "component.py").write_text(
+            "from next.components import context\n\n\n"
+            '@context("$csrf", serialize=True)\n'
+            "def csrf_token():\n"
+            '    return {"token": "app"}\n'
+        )
+        backend = FileComponentsBackend(
+            {"DIRS": [str(tmp_path)], "COMPONENTS_DIR": "_components"}
+        )
+        manager = MagicMock()
+        manager._backends = [backend]
+        with patch(
+            "next.components.context.get_components_manager", return_value=manager
+        ):
+            messages = check_reserved_js_context_keys()
+        assert _ids(messages) == ["next.W075"]
+        assert messages[0].msg.startswith("Component context key '$csrf'")
+        assert messages[0].obj == str(comp_dir / "component.py")
+
+    def test_unserialized_reserved_key_is_silent(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text(
+            "from next.pages import page\n\n\n"
+            '@page.context("$csrf")\n'
+            "def csrf_token():\n"
+            '    return {"token": "app"}\n'
+        )
+        loaders_module._MODULE_MEMO.pop(page_file, None)
+        with patch_checks_router_manager(
+            pages_directory=tmp_path, scan_routes=[("test", page_file)]
+        ):
+            messages = check_reserved_js_context_keys()
+        assert messages == []

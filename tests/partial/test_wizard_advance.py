@@ -193,7 +193,11 @@ class TestWizardAdvanceShipsZoneAssetsAndContext:
         )
         response = _advance_identity(next_client, zones="wizard-zone")
         envelope = envelope_of(response)
-        assert {"kind": "css", "url": "/static/next/wizard.css"} in envelope.assets
+        assert {
+            "kind": "css",
+            "url": "/static/next/wizard.css",
+            "load": "link",
+        } in envelope.assets
         context_ops = [op for op in envelope.ops if op["op"] == "context"]
         assert context_ops == [{"op": "context", "data": {"progress": 42}}]
 

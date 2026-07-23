@@ -15,6 +15,9 @@ from next.partial import (
 from next.partial.headers import CONTENT_TYPE
 from next.partial.patches import ReservedPatchKeyError
 from next.partial.registry import patch_op_registry
+from next.partial.render import ZoneRenderResult
+from next.static import KindRegistry
+from next.static.manager import default_manager
 from tests.support import partial_request
 
 
@@ -54,6 +57,64 @@ class TestAssetAsDict:
             "url": "",
             "inline": ".x { color: red; }",
         }
+
+    def test_load_travels_when_set(self) -> None:
+        asset = Asset(kind="module", url="/a.mjs", load="module")
+        assert asset.as_dict() == {"kind": "module", "url": "/a.mjs", "load": "module"}
+
+
+class TestAddAssetResolvesLoad:
+    """`add_asset` stamps the insertion verb the kind registry knows."""
+
+    @pytest.mark.parametrize(
+        ("kind", "expected"), [("css", "link"), ("js", "script"), ("module", "module")]
+    )
+    def test_builtin_kind_carries_its_verb(self, kind: str, expected: str) -> None:
+        envelope = Patches.versioned("v1").add_asset(kind, f"/a.{kind}").envelope()
+        assert envelope.assets[0].as_dict()["load"] == expected
+
+    def test_unregistered_kind_travels_without_a_verb(self) -> None:
+        envelope = Patches.versioned("v1").add_asset("whatever", "/a.bin").envelope()
+        assert envelope.assets[0].load is None
+        assert envelope.assets[0].as_dict() == {"kind": "whatever", "url": "/a.bin"}
+
+    def test_custom_renderer_kind_travels_without_a_verb(self, monkeypatch) -> None:
+        registry = KindRegistry()
+        registry.register(
+            "jsx", extension=".jsx", slot="scripts", renderer="render_babel_tag"
+        )
+        monkeypatch.setattr(next.partial.patches, "default_kinds", registry)
+        envelope = Patches.versioned("v1").add_asset("jsx", "/a.jsx").envelope()
+        assert "load" not in envelope.assets[0].as_dict()
+
+    def test_inline_asset_carries_its_verb(self) -> None:
+        envelope = (
+            Patches.versioned("v1").add_asset("css", "", inline=".x {}").envelope()
+        )
+        assert envelope.assets[0].as_dict()["load"] == "link"
+
+    def test_inline_module_body_travels_without_a_verb(self) -> None:
+        envelope = (
+            Patches.versioned("v1")
+            .add_asset("module", "", inline="export const a = 1;")
+            .envelope()
+        )
+        assert envelope.assets[0].load is None
+        assert "load" not in envelope.assets[0].as_dict()
+
+    def test_inline_body_of_a_kind_without_a_wrapper_has_no_verb(
+        self, monkeypatch
+    ) -> None:
+        registry = KindRegistry()
+        registry.register(
+            "snippet", extension=".snip", slot="scripts", renderer="render_script_tag"
+        )
+        monkeypatch.setattr(next.partial.patches, "default_kinds", registry)
+        envelope = (
+            Patches.versioned("v1").add_asset("snippet", "", inline="x()").envelope()
+        )
+        assert envelope.assets[0].load is None
+        assert envelope.assets[0].as_dict()["inline"] == "x()"
 
 
 class TestEnvelopeAsDict:
@@ -197,14 +258,16 @@ class TestPatchesBuilder:
         envelope = (
             Patches.versioned("v1").add_asset("css", "/x.css").set_form(form).envelope()
         )
-        assert envelope.assets[0] == Asset(kind="css", url="/x.css")
+        assert envelope.assets[0] == Asset(kind="css", url="/x.css", load="link")
         assert envelope.form is form
 
     def test_add_asset_records_an_inline_body(self) -> None:
         envelope = (
             Patches.versioned("v1").add_asset("css", "", inline=".x {}").envelope()
         )
-        assert envelope.assets[0] == Asset(kind="css", url="", inline=".x {}")
+        assert envelope.assets[0] == Asset(
+            kind="css", url="", inline=".x {}", load="link"
+        )
 
     def test_add_context_records_a_context_op(self) -> None:
         envelope = Patches.versioned("v1")._add_context({"unread": 3}).envelope()
@@ -249,6 +312,7 @@ class TestBuilderExceptionSurface:
         "BuiltinPatchOpError",
         "CrossSiteHrefError",
         "DynamicForeignPageError",
+        "ReservedContextKeyError",
         "ReservedEventNameError",
         "ReservedPatchKeyError",
         "UnknownContextNameError",
@@ -317,8 +381,13 @@ class TestBuilderZoneManifest:
             "kind": "css",
             "url": "",
             "inline": ".zone-styled { color: crimson; }",
+            "load": "link",
         } in wire
-        assert {"kind": "css", "url": "/static/next/zoned_inline.css"} in wire
+        assert {
+            "kind": "css",
+            "url": "/static/next/zoned_inline.css",
+            "load": "link",
+        } in wire
 
     def test_inline_script_asset_travels(self) -> None:
         envelope = (
@@ -328,7 +397,12 @@ class TestBuilderZoneManifest:
         )
         inline = [a.as_dict() for a in envelope.assets if a.url == ""]
         assert inline == [
-            {"kind": "js", "url": "", "inline": 'console.log("zone scripted");'}
+            {
+                "kind": "js",
+                "url": "",
+                "inline": 'console.log("zone scripted");',
+                "load": "script",
+            }
         ]
 
     def test_builder_path_emits_no_automatic_context_op(self) -> None:
@@ -348,6 +422,38 @@ class TestBuilderZoneManifest:
         )
         assert [op.op for op in envelope.ops] == ["morph", "context"]
         assert envelope.ops[1].as_dict() == {"op": "context", "data": {"seen": 7}}
+
+
+class TestZoneDeltaReservedKeys:
+    """A zone js-context delta never patches a reserved init-payload key."""
+
+    @staticmethod
+    def _result(js_context: dict[str, object]) -> ZoneRenderResult:
+        """Build a zone result whose collector carries the given js-context."""
+        collector = default_manager.create_collector()
+        for key, value in js_context.items():
+            collector.add_js_context(key, value)
+        return ZoneRenderResult(html={}, bodies={}, collector=collector)
+
+    def test_reserved_key_is_dropped_from_the_delta(self) -> None:
+        result = self._result({"$csrf": {"token": "forged"}, "unread": 3})
+        envelope = Patches.versioned("v1")._absorb_zone_result(result).envelope()
+        assert envelope.ops[0].as_dict() == {"op": "context", "data": {"unread": 3}}
+
+    def test_dev_key_is_dropped_too(self) -> None:
+        result = self._result({"$dev": False, "unread": 3})
+        envelope = Patches.versioned("v1")._absorb_zone_result(result).envelope()
+        assert envelope.ops[0].as_dict()["data"] == {"unread": 3}
+
+    def test_only_reserved_keys_emit_no_context_op(self) -> None:
+        result = self._result({"$csrf": {"token": "forged"}, "$dev": True})
+        envelope = Patches.versioned("v1")._absorb_zone_result(result).envelope()
+        assert envelope.ops == ()
+
+    def test_plain_delta_still_rides_out(self) -> None:
+        result = self._result({"unread": 3})
+        envelope = Patches.versioned("v1")._absorb_zone_result(result).envelope()
+        assert envelope.ops[0].as_dict() == {"op": "context", "data": {"unread": 3}}
 
 
 class TestOriginRenderContextMemoised:

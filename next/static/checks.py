@@ -1,22 +1,7 @@
-"""System checks for `NEXT_FRAMEWORK['STATIC_BACKENDS']`.
+"""System checks for the static subsystem.
 
-The checks are hooked into `manage.py check` via the `@register`
-decorator. All identifiers live in the `next.*` namespace to avoid
-collisions with Django core checks.
-
-Registered identifiers.
-
-- `next.W030`. Warning raised when `STATIC_BACKENDS` is empty.
-  The framework falls back to the built-in staticfiles backend.
-- `next.E036`. Error raised when a backend dotted path fails to import.
-- `next.E037`. Error raised when the resolved class is not a
-  `StaticBackend` subclass.
-- `next.E038`. Error raised when the same `BACKEND` entry appears more
-  than once in the configuration list.
-- `next.W031`. Warning raised when `OPTIONS['css_tag']` or
-  `OPTIONS['js_tag']` does not contain the `{url}` placeholder.
-- `next.W042`. Warning raised when `JS_CONTEXT_SERIALIZER` is set but does
-  not resolve to a class implementing the `JsContextSerializer` protocol.
+All identifiers live in the `next.*` namespace to avoid collisions with
+Django core checks.
 """
 
 from __future__ import annotations
@@ -27,14 +12,19 @@ from django.conf import settings
 from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register
 
 from next.checks import NEXT
+from next.components.context import iter_serialized_component_context_keys
 from next.conf import import_class_cached, next_framework_settings
+from next.pages.manager import iter_serialized_page_context_keys
 
+from .assets import default_kinds
 from .backends import StaticBackend
+from .scripts import RESERVED_PAYLOAD_KEYS
 from .serializers import JsContextSerializer
 
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+    from pathlib import Path
 
 
 def _validate_tag_template(
@@ -149,6 +139,89 @@ def check_static_backends(**kwargs) -> list[CheckMessage]:
     for index, config in enumerate(configs):
         messages.extend(_check_single_backend(config, index, seen))
     return messages
+
+
+@register(NEXT)
+def check_asset_kinds_are_loadable(*args, **kwargs) -> list[CheckMessage]:
+    """Warn about a registered kind the partial runtime cannot insert."""
+    return [
+        DjangoWarning(
+            f"Asset kind {kind!r} is registered with renderer "
+            f"{default_kinds.renderer(kind)!r}, which carries no client "
+            "insertion verb. Assets of this kind reach the browser only on a "
+            "full page render, never through a patch envelope. Register the "
+            "kind with render_link_tag, render_script_tag, or render_module_tag.",
+            obj=settings,
+            id="next.W074",
+        )
+        for kind in default_kinds.kinds()
+        if default_kinds.load(kind) is None
+    ]
+
+
+def _loses_inline_bodies(kind: str) -> bool:
+    """Return True when a kind's URL form has an insertion verb but its bodies do not.
+
+    A kind without an `inline_tag` is left to `next.W074`, since its inline
+    bodies render verbatim and name no element either render can build.
+    """
+    if default_kinds.inline_tag(kind) is None:
+        return False
+    return (
+        default_kinds.load(kind) is not None
+        and default_kinds.load(kind, inline=True) is None
+    )
+
+
+@register(NEXT)
+def check_inline_asset_bodies_are_loadable(*args, **kwargs) -> list[CheckMessage]:
+    """Warn about a kind whose inline bodies the partial runtime cannot insert."""
+    return [
+        DjangoWarning(
+            f"Asset kind {kind!r} is registered with renderer "
+            f"{default_kinds.renderer(kind)!r} and inline_tag "
+            f"{default_kinds.inline_tag(kind)!r}, which name different elements. "
+            "URL-form assets of this kind travel in a patch envelope, but their "
+            "inline bodies carry no client insertion verb and reach the browser "
+            "only on a full page render. Pair render_link_tag with "
+            "inline_tag='style' or render_script_tag with inline_tag='script'.",
+            obj=settings,
+            id="next.W076",
+        )
+        for kind in default_kinds.kinds()
+        if _loses_inline_bodies(kind)
+    ]
+
+
+def _reserved_key_warning(origin: str, source_path: Path, key: str) -> CheckMessage:
+    """Return the `next.W075` warning for one reserved-key collision."""
+    return DjangoWarning(
+        f"{origin} context key {key!r} in {source_path} is reserved for the "
+        f"next.min.js init payload. The framework owns {key} on every render, "
+        "so the registered value never reaches window.Next.context and no "
+        "context patch can update it. Rename the key.",
+        obj=str(source_path),
+        id="next.W075",
+    )
+
+
+@register(NEXT)
+def check_reserved_js_context_keys(*args, **kwargs) -> list[CheckMessage]:
+    """Warn about a page or component context key the init payload reserves.
+
+    Pages and components feed the same init payload, so both registries are
+    walked against the reserved namespace.
+    """
+    sources = (
+        ("Page", iter_serialized_page_context_keys()),
+        ("Component", iter_serialized_component_context_keys()),
+    )
+    return [
+        _reserved_key_warning(origin, source_path, key)
+        for origin, entries in sources
+        for source_path, key in entries
+        if key in RESERVED_PAYLOAD_KEYS
+    ]
 
 
 def _w042(message: str) -> CheckMessage:

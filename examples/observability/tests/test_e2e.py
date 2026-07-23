@@ -1,5 +1,9 @@
+import json
+import re
+
 import pytest
 from django.core.management import call_command
+from django.test import override_settings
 from obs import metrics
 from obs.models import MetricSnapshot
 
@@ -51,20 +55,33 @@ GROUP_SAMPLES: dict[str, list] = {
 pytestmark = pytest.mark.django_db
 
 
+DASHBOARD_PATHS: tuple[str, ...] = (
+    "/",
+    "/stats/",
+    "/stats/?window=1m",
+    "/stats/pages/",
+    "/stats/components/",
+    "/stats/forms/",
+    "/stats/static/",
+)
+
+_INIT_PAYLOAD = re.compile(r"Next\._init\((.*?)\);</script>")
+
+_ZONE_ATTR = re.compile(r'data-next-zone="([^"]+)"')
+
+
 def _walk_dashboard(client) -> None:
     """Hit every observability page so receivers accumulate counters."""
-    paths = [
-        "/",
-        "/stats/",
-        "/stats/?window=1m",
-        "/stats/pages/",
-        "/stats/components/",
-        "/stats/forms/",
-        "/stats/static/",
-    ]
-    for url in paths:
+    for url in DASHBOARD_PATHS:
         response = client.get(url)
         assert response.status_code == 200
+
+
+def _init_payload(html: str) -> dict:
+    """Return the decoded `Next._init(...)` payload of a rendered page."""
+    match = _INIT_PAYLOAD.search(html)
+    assert match is not None, "Next._init call missing"
+    return json.loads(match.group(1))
 
 
 class TestOverview:
@@ -119,11 +136,9 @@ class TestLiveStatsSerializerOverride:
         assert '"live_stats":{"v":1,"data":{' in body
 
     def test_render_rates_stays_flat_through_global_serializer(self, client) -> None:
+        """`render_chart` declares no `serializer=`, so its key lands flat."""
         response = client.get("/stats/")
         body = response.content.decode()
-        # `render_rates` is owned by `_widgets/render_chart` which has
-        # no `serializer=` override, so it travels through the global
-        # `JS_CONTEXT_SERIALIZER` and lands flat.
         assert '"render_rates":{' in body
         assert '"render_rates":{"v":1' not in body
 
@@ -146,16 +161,17 @@ class TestWindowFilters:
     def test_only_recent_buckets_count_under_one_minute_window(
         self, client, frozen_now
     ) -> None:
+        """A bucket 30 minutes old falls outside the one-minute read window.
+
+        The render of `/stats/` itself lands in the current minute, so the
+        recent counter is at least the two increments seeded here.
+        """
         with frozen_now(self.BASE) as traveller:
             metrics.incr("pages.rendered", "/old", by=99)
             traveller.move_to("2026-05-08T12:30:00+00:00")
             metrics.incr("pages.rendered", "/recent", by=2)
             response = client.get("/stats/?window=1m")
             body = response.content.decode()
-            # `live_stats.totals.pages` reads through `read_window`, so
-            # the 99 from 30 minutes ago is excluded under window=1m.
-            # The page-render of `/stats/` itself counts toward the
-            # current minute too, so the recent total is at least 2.
             assert '"window":"1m"' in body or '"window": "1m"' in body
             recent = metrics.read_window("pages.rendered", minutes=1)
             assert "/old" not in recent
@@ -198,6 +214,51 @@ class TestJsxAssetPipeline:
         assert body.index("chart.umd.min.js") < body.index(
             "/static/next/components/render_chart.js"
         )
+
+
+class TestDevFlagChannel:
+    """The framework owns `$dev` in the init payload and gates it on DEBUG."""
+
+    @override_settings(DEBUG=True)
+    def test_debug_render_announces_the_dev_flag(self, client) -> None:
+        payload = _init_payload(client.get("/").content.decode())
+        assert payload["$dev"] is True
+
+    @override_settings(DEBUG=False)
+    def test_production_render_omits_the_dev_flag(self, client) -> None:
+        payload = _init_payload(client.get("/").content.decode())
+        assert "$dev" not in payload
+        assert "$csrf" in payload
+
+    @override_settings(DEBUG=True)
+    def test_dashboard_context_keys_travel_beside_the_reserved_ones(
+        self, client
+    ) -> None:
+        payload = _init_payload(client.get("/stats/").content.decode())
+        assert "live_stats" in payload
+        assert payload["$dev"] is True
+
+
+class TestSparklineStaysOutsideEveryZone:
+    """No zone on the dashboard renders the sparkline mount.
+
+    The `next.W074` silencing in `config/settings.py` is honest only while
+    the Babel-compiled `component.jsx` never has to ride a patch envelope,
+    so this walk fails the moment the widget is pulled into a zone.
+    """
+
+    def test_full_render_owns_the_sparkline(self, client) -> None:
+        assert "sparkline-mount" in client.get("/").content.decode()
+
+    def test_no_zone_body_carries_the_sparkline_mount(self, client) -> None:
+        checked: list[str] = []
+        for url in DASHBOARD_PATHS:
+            body = client.get(url).content.decode()
+            for zone in sorted(set(_ZONE_ATTR.findall(body))):
+                html = envelope_of(client.get_zones(url, zone)).html_for_zone(zone)
+                assert "sparkline-mount" not in html
+                checked.append(zone)
+        assert set(checked) >= {"overview-totals", "busiest-pages", "live-totals"}
 
 
 class TestFilterFormDispatch:
@@ -326,14 +387,15 @@ class TestSignalGroupsCovered:
     """A walk through the dashboard increments every signal group at least once."""
 
     def test_each_group_increments(self, client) -> None:
+        """Lifecycle-only signals are provoked inside the recorder window.
+
+        `settings_reloaded`, `provider_registered`, and `watch_specs_ready`
+        never fire on a plain page render, so the walk triggers one of each.
+        """
         recorder_signals = [
             sig for signals in GROUP_SAMPLES.values() for sig in signals
         ]
         with SignalRecorder(*recorder_signals) as recorder:
-            # `settings_reloaded`, `provider_registered`, and
-            # `watch_specs_ready` only fire on explicit lifecycle events,
-            # so the test triggers one of each before the walk so every
-            # signal group is exercised inside the same recorder window.
             next_framework_settings.reload()
 
             class _TestProbeProvider(RegisteredParameterProvider):

@@ -50,6 +50,7 @@ _DEMOTED = {
     "BuiltinPatchOpError": next.partial.patches,
     "CrossSiteHrefError": next.partial.patches,
     "DynamicForeignPageError": next.partial.patches,
+    "ReservedContextKeyError": next.partial.patches,
     "ReservedEventNameError": next.partial.patches,
     "ReservedPatchKeyError": next.partial.patches,
     "UnknownContextNameError": next.partial.patches,

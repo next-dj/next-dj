@@ -37,6 +37,17 @@ NEXT_JS_STATIC_PATH: Final = "next/next.min.js"
 
 CSRF_PAYLOAD_KEY: Final = "$csrf"
 
+# Present in the init payload only while Django runs with `DEBUG = True`, so a
+# production render carries no dev-only bytes.
+DEV_PAYLOAD_KEY: Final = "$dev"
+
+# The init-payload keys the framework owns. A colliding js-context key never reaches
+# the payload, whether or not this render has a framework value to write under it, so
+# the client store carries one meaning for the key in every environment.
+RESERVED_PAYLOAD_KEYS: Final[frozenset[str]] = frozenset(
+    {CSRF_PAYLOAD_KEY, DEV_PAYLOAD_KEY}
+)
+
 # Escape the inline-init payload for the HTML `<script>` context, mirroring
 # Django's `json_script`. These code points only ever appear inside JSON string
 # literals, so `\u00XX` and `\u202X` keep the value semantically identical while

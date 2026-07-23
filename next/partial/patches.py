@@ -10,6 +10,8 @@ from django.utils.http import url_has_allowed_host_and_scheme
 
 from next.forms.origin import resolve_origin, resolve_url_to_page
 from next.pages import page
+from next.static.assets import default_kinds
+from next.static.scripts import RESERVED_PAYLOAD_KEYS
 from next.static.serializers import resolve_serializer
 
 from . import keys
@@ -181,6 +183,26 @@ class UnknownContextNameError(LookupError):
         super().__init__(message)
 
 
+class ReservedContextKeyError(ValueError):
+    """Raised when `context()` names a key the init payload owns.
+
+    A full render keeps a reserved key for the framework, so a context
+    patch that names one would leave the client store disagreeing with the
+    page it patches. The explicit naming is a caller bug refused at the
+    builder rather than merged on the client.
+    """
+
+    def __init__(self, reserved: frozenset[str]) -> None:
+        """Store the reserved keys the call collided with."""
+        self.keys = reserved
+        names = ", ".join(sorted(reserved))
+        super().__init__(
+            f"Context patch names the reserved init-payload key(s) {names}. "
+            "The framework owns those keys on every render, rename the "
+            "serialize provider instead."
+        )
+
+
 class UnknownDedupeError(ValueError):
     """Raised when a merge op names a dedupe strategy the client cannot apply.
 
@@ -270,17 +292,25 @@ class Patch:
 
 @dataclass(frozen=True, slots=True)
 class Asset:
-    """One co-located asset of a rendered target by kind, URL, and inline body."""
+    """One co-located asset of a rendered target by kind, URL, and inline body.
+
+    The `load` field is the client insertion verb resolved from the kind
+    registry. It stays None for a kind the runtime cannot insert, and the
+    wire then omits the field entirely.
+    """
 
     kind: str
     url: str
     inline: str | None = None
+    load: str | None = None
 
     def as_dict(self) -> dict[str, str]:
         """Return the wire form of the asset, carrying its inline body when set."""
         data = {keys.KIND: self.kind, keys.URL: self.url}
         if self.inline is not None:
             data[keys.INLINE] = self.inline
+        if self.load is not None:
+            data[keys.LOAD] = self.load
         return data
 
 
@@ -588,9 +618,15 @@ class Patches:
         """Merge named serialize provider values into the client context.
 
         Only the names of registered `serialize=True` providers on the
-        origin page are accepted. The values are serialized through
-        `resolve_serializer()` so the wire carries plain data.
+        origin page are accepted. A framework-owned init-payload key raises
+        `ReservedContextKeyError` whether or not the origin page registered
+        it, so the refusal does not depend on the collision the check warns
+        about. The values are serialized through `resolve_serializer()` so
+        the wire carries plain data.
         """
+        reserved = RESERVED_PAYLOAD_KEYS & names.keys()
+        if reserved:
+            raise ReservedContextKeyError(frozenset(reserved))
         allowed = self._serializable_names()
         serializer = resolve_serializer()
         data: dict[str, Any] = {}
@@ -713,8 +749,21 @@ class Patches:
         return self
 
     def add_asset(self, kind: str, url: str, *, inline: str | None = None) -> "Patches":
-        """Record a co-located asset in the envelope manifest."""
-        self._assets.append(Asset(kind=kind, url=url, inline=inline))
+        """Record a co-located asset in the envelope manifest.
+
+        The insertion verb comes from the kind registry, so an unregistered
+        kind still travels and only loses the field the runtime would use.
+        An inline body keeps the verb only when the runtime builds the same
+        element the full page render wraps it in.
+        """
+        self._assets.append(
+            Asset(
+                kind=kind,
+                url=url,
+                inline=inline,
+                load=default_kinds.load(kind, inline=inline is not None),
+            )
+        )
         return self
 
     def set_form(self, form: FormMeta) -> "Patches":
@@ -856,10 +905,17 @@ class Patches:
 
         The framework render paths, zone GET and wizard advance, forward
         both so a zone body that first introduces a co-located asset or a
-        serialize provider still ships it to the client.
+        serialize provider still ships it to the client. A reserved
+        init-payload key is dropped rather than raised, since the delta is a
+        by-product of the render and not a handler naming the key, and the
+        collision is already reported at startup by the reserved-key check.
         """
         self._collect_zone_assets(result)
-        delta = result.js_context_delta()
+        delta = {
+            name: value
+            for name, value in result.js_context_delta().items()
+            if name not in RESERVED_PAYLOAD_KEYS
+        }
         if delta:
             self._add_context(delta)
         return self
@@ -926,6 +982,7 @@ __all__ = [
     "Patch",
     "PatchResponse",
     "Patches",
+    "ReservedContextKeyError",
     "ReservedEventNameError",
     "ReservedPatchKeyError",
     "UnknownContextNameError",

@@ -5,8 +5,7 @@ import type { DialogAdapter } from "./layers";
 import type { EventSourceAdapter, SourceControl } from "./sse";
 import { manualPollClock, manualVisibility } from "./test-doubles";
 
-// A patches response the configured fetch returns so the wire resolves without a
-// real server.
+// A patches response the fetch returns so the wire resolves without a server.
 function patchesResponse(body = '{"version":"v1","ops":[],"assets":[],"form":null}') {
   return new Response(body, {
     status: 200,
@@ -65,6 +64,27 @@ describe("createPartial surface", () => {
       form: null,
     });
     expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("new");
+  });
+
+  it("a user-toggled details survives an unrequested morph patch", () => {
+    document.body.innerHTML =
+      '<div data-next-zone="z"><details id="d" open></details></div>';
+    const details = document.querySelector<HTMLDetailsElement>("#d")!;
+    // Stamps the element as user-owned, so the morph keeps its open state.
+    details.dispatchEvent(new Event("toggle"));
+    partial.apply({
+      version: "v1",
+      ops: [
+        {
+          op: "morph",
+          target: { zone: "z" },
+          html: '<div data-next-zone="z"><details id="d"></details></div>',
+        },
+      ],
+      assets: [],
+      form: null,
+    });
+    expect(document.querySelector("#d")!.hasAttribute("open")).toBe(true);
   });
 
   it("defineOp registers a custom verb reachable from apply", () => {
@@ -321,6 +341,32 @@ describe("createPartial surface", () => {
     expect(calls).toHaveLength(1);
   });
 
+  it("_configure drops the asset watch the previous configuration armed", () => {
+    Object.defineProperty(document, "readyState", {
+      value: "loading",
+      configurable: true,
+    });
+    const forget = vi.spyOn(document, "removeEventListener");
+    partial._configure({ document });
+    partial.ready();
+    partial._configure({ document });
+    Reflect.deleteProperty(document, "readyState");
+    expect(forget.mock.calls.some(([type]) => type === "DOMContentLoaded")).toBe(true);
+  });
+
+  it("_reset drops the asset watch on the current document", () => {
+    Object.defineProperty(document, "readyState", {
+      value: "loading",
+      configurable: true,
+    });
+    partial._configure({ document });
+    partial.ready();
+    const forget = vi.spyOn(document, "removeEventListener");
+    partial._reset();
+    Reflect.deleteProperty(document, "readyState");
+    expect(forget.mock.calls.some(([type]) => type === "DOMContentLoaded")).toBe(true);
+  });
+
   it("a poll tick GETs the host page while a layer holds the address bar", async () => {
     window.history.replaceState(null, "", "/host/");
     document.body.innerHTML = '<div data-next-zone="t" data-next-poll="5000"></div>';
@@ -433,8 +479,7 @@ describe("createPartial surface", () => {
     document.querySelector("input")!.dispatchEvent(new FocusEvent("blur"));
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     await Promise.resolve();
-    // The submit ran without throwing, so the wire's abort seam fired for the
-    // validate zone the blur opened.
+    // The submit ran without throwing, so the wire's abort seam fired.
     expect(calls.length).toBeGreaterThan(0);
   });
 
@@ -487,8 +532,8 @@ describe("createPartial surface", () => {
       }),
     );
     await Promise.resolve();
-    // The refresh op itself fetched once. Dropping that call proves the next
-    // one comes from the resume revalidation, not the stream event.
+    // Drop the refresh op's own fetch, so the next call proves the resume
+    // revalidation fired, not the stream event.
     calls.length = 0;
     visibility.setHidden(true);
     clock = 5000;
@@ -500,6 +545,108 @@ describe("createPartial surface", () => {
         (c) => (c.init.headers as Record<string, string>)["X-Next-Zone"] === "poll",
       ),
     ).toBe(true);
+  });
+
+  it("the dev flag reaches the applier's boundary diagnostics", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "debug").mockImplementation(() => {});
+    document.body.innerHTML = '<div data-next-zone="z">old</div>';
+    const wire = {
+      version: "v1",
+      ops: [null, { op: "inner", target: { zone: "z" }, html: "new" }],
+      assets: [],
+      form: null,
+    };
+    partial._configure({ document, dev: true });
+    partial.apply(wire);
+    expect(warn).toHaveBeenCalledWith("[next] dropped malformed ops: 1");
+    warn.mockClear();
+    partial._configure({ document });
+    partial.apply(wire);
+    expect(warn).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("new");
+  });
+
+  it("opening the dev channel keeps the ops registered before it", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const seen: unknown[] = [];
+    // A verb registered before the dev channel opens must survive it.
+    partial.defineOp("confetti", (patch) => seen.push(patch.origin));
+    partial._configure({ dev: true });
+    partial.apply({
+      version: "v1",
+      ops: [null, { op: "confetti", origin: "btn" }],
+      assets: [],
+      form: null,
+    });
+    expect(seen).toEqual(["btn"]);
+    // The dropped-ops warning proves the channel really opened.
+    expect(warn).toHaveBeenCalledWith("[next] dropped malformed ops: 1");
+  });
+
+  it("opening the dev channel keeps the parse hooks registered before it", async () => {
+    document.body.innerHTML = '<div data-next-zone="z">old</div>';
+    partial._configure({
+      document,
+      fetch: async () =>
+        new Response("stream-body", {
+          status: 200,
+          headers: { "content-type": "text/vnd.next.stream+html" },
+        }),
+      navigate: () => {},
+    });
+    partial.parseHook("text/vnd.next.stream+html", () => ({
+      version: "v1",
+      ops: [{ op: "inner", target: { zone: "z" }, html: "hooked" }],
+      assets: [],
+      form: null,
+    }));
+    partial._configure({ dev: true });
+    await partial.fetch({ url: "/list/", zone: "z" });
+    expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("hooked");
+  });
+
+  it("opening the dev channel keeps the nonce taken at the bootstrap", () => {
+    document.head.innerHTML = "";
+    const boot = document.createElement("script");
+    boot.nonce = "nonce-7a3f";
+    Object.defineProperty(document, "currentScript", {
+      value: boot,
+      configurable: true,
+    });
+    const made = makeSurface();
+    // The inline `_init` opens the channel carrying no nonce of its own.
+    Object.defineProperty(document, "currentScript", {
+      value: document.createElement("script"),
+      configurable: true,
+    });
+    made.partial._configure({ dev: true });
+    made.partial.apply({
+      version: "v1",
+      ops: [],
+      assets: [{ kind: "css", url: "", inline: ".z{}", load: "link" }],
+      form: null,
+    });
+    Object.defineProperty(document, "currentScript", {
+      value: null,
+      configurable: true,
+    });
+    expect(document.head.querySelector("style")!.nonce).toBe("nonce-7a3f");
+    made.partial._reset();
+  });
+
+  it("the dev flag reaches the trigger attribute diagnostics", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    document.body.innerHTML = '<div data-next-zone="t" data-next-poll="soon"></div>';
+    partial._configure({ document, dev: true });
+    partial.ready();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('data-next-poll="soon" is not a whole number'),
+    );
+    warn.mockClear();
+    partial._configure({ document });
+    partial.ready();
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it("onMount returns a teardown that unregisters the callback", () => {
@@ -531,9 +678,18 @@ describe("createPartial surface", () => {
     expect(() => partial._configure({ document, history })).not.toThrow();
   });
 
-  it("_configure without a document installs over the global document", () => {
+  it("_configure naming no seam at all rebuilds nothing", () => {
     const made = makeSurface();
-    expect(() => made.partial._configure({})).not.toThrow();
+    const seen: unknown[] = [];
+    made.partial.defineOp("confetti", (patch) => seen.push(patch.origin));
+    made.partial._configure({});
+    made.partial.apply({
+      version: "v1",
+      ops: [{ op: "confetti", origin: "btn" }],
+      assets: [],
+      form: null,
+    });
+    expect(seen).toEqual(["btn"]);
     made.partial._reset();
   });
 

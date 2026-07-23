@@ -75,9 +75,11 @@ Zone Assets on a Standalone Render
 
 A standalone zone render collects the co-located assets its body registers, component widgets included.
 The envelope carries them outward as an asset manifest, URL-form and inline alike.
-The client loads only what the page does not already have, missing CSS before the operations apply and missing JS after, and each asset executes once per page lifetime.
+The client loads only what the page does not already have, inserting the link-verb assets before the operations apply and the script and module verbs after, and each asset executes once per page lifetime.
+The verb comes from the renderer registered for the asset kind, so a kind registered with a custom renderer is skipped and reaches the browser only on a full render.
+An inline body keeps that verb only when the kind wraps it in the element the runtime builds, so a body of a kind that wraps it differently, or not at all, also stays with the full render.
 On a zone ``GET`` the envelope also ships the values of the page's ``serialize=True`` context providers, introduced in :doc:`/content/topics/context`, as a ``context`` patch, so ``Next.context`` stays in step with the re-rendered zone.
-See :doc:`co-located-js` for what once-per-page execution means for behaviour, and :doc:`/content/topics/static-assets/index` for how the assets are discovered and bundled.
+See :doc:`co-located-js` for what once-per-page execution means for behaviour, :doc:`/content/topics/static-assets/asset-kinds` for the renderer that decides the verb, and :doc:`/content/topics/static-assets/index` for how the assets are discovered and bundled.
 
 Poll a Zone on an Interval
 --------------------------
@@ -139,7 +141,7 @@ A node it replaces wholesale loses that state, so matching is what keeps a row s
 For a list of rows the engine needs a stable key.
 Give every row of a dynamic list a ``data-next-key`` or an ``id``.
 The engine reads identity from ``data-next-key`` first and falls back to ``id`` when no key is present.
-A row that carries both earns a console warning, and the key wins.
+A row that carries both earns a console warning in dev, and the key wins.
 
 .. code-block:: jinja
    :caption: keyed rows
@@ -159,7 +161,8 @@ A merge that brings a row whose key already exists replaces the existing row rat
 The morph leaves an ``<input type="file">`` untouched, so a file the user already chose survives a morph of the surrounding zone.
 A multipart selection is never reset by a re-render of the form around it.
 
-A ``<details>`` the user toggled keeps its open state across a morph, because a ``toggle`` event stamps the element dirty and the morph then skips its ``open`` attribute.
+A ``<details>`` the user toggled keeps its open state across a morph, because a ``toggle`` event marks the element touched and the morph then skips its ``open`` attribute for the life of the page.
+The ``open`` state has no live focus signal a form field relies on, so once the user has toggled it the state is theirs even against a poll or stream patch they never asked for.
 A ``<details>`` the user never touched takes whatever ``open`` state the server sends.
 An element the server renders open on the first paint and closed on a later morph collapses, since no toggle ever stamped it.
 Render the same ``open`` state the client should keep, or let a real toggle carry the state forward.

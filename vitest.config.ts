@@ -4,6 +4,10 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     include: ["next/client/**/*.test.ts"],
+    // Spies come off the shared globals (console, performance, Element.prototype)
+    // after every case, so one genuine failure cannot leak a live spy into the
+    // rest of the file and turn a single red into a cascade.
+    restoreMocks: true,
     coverage: {
       provider: "v8",
       include: ["next/client/*.ts"],

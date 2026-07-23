@@ -71,15 +71,33 @@ class FileComponentsBackend(ComponentsBackend):
         if not bool(getattr(next_framework_settings, "LAZY_COMPONENT_MODULES", False)):
             self.import_all_component_modules()
 
+    def _distinct_module_paths(self) -> tuple[Path, ...]:
+        """Return each registered `component.py` path once, in discovery order."""
+        return tuple(
+            dict.fromkeys(
+                info.module_path
+                for info in self._registry.get_all()
+                if info.module_path is not None
+            )
+        )
+
     def import_all_component_modules(self) -> None:
         """Load each `component.py` so decorators such as `@forms.action` run."""
-        seen: set[Path] = set()
-        for info in self._registry.get_all():
-            mp = info.module_path
-            if mp is None or mp in seen:
-                continue
-            seen.add(mp)
-            self._module_loader.load(mp)
+        for module_path in self._distinct_module_paths():
+            self._module_loader.load(module_path)
+
+    def loaded_module_paths(self) -> tuple[Path, ...]:
+        """Return every discovered `component.py` path with its module imported.
+
+        Under `LAZY_COMPONENT_MODULES` nothing imports a `component.py` before
+        a render needs it, so a caller reading decorator state asks for the
+        import here instead of finding a half-populated registry. The import is
+        deliberately unconditional, which is why a system check that walks
+        decorator state pays the eager import that the lazy mode avoids.
+        """
+        self._ensure_loaded()
+        self.import_all_component_modules()
+        return self._distinct_module_paths()
 
     def _discover_in_component_root(self, component_root: Path) -> None:
         components = self._scanner.scan_directory(component_root, component_root, "")

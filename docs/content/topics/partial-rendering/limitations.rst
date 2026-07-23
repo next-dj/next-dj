@@ -44,9 +44,24 @@ Scripts in Patch HTML Never Run
 -------------------------------
 
 A zone's co-located assets ship on a standalone render, inline bodies and URLs alike, through the envelope's asset manifest.
+A URL loads when its kind registers one of the three bundled renderers, and an inline body loads when the kind also wraps it in the element that renderer's verb builds.
+A kind registered with a custom renderer reaches the browser only on a full render, which the ``next.W074`` check reports.
+A kind whose ``inline_tag`` names another element keeps its URL form on a patch and leaves its inline bodies to the full render, which the ``next.W076`` check reports.
+The full render and the patch therefore agree on which element holds a body, because an inline entry that carries no verb is dropped rather than wrapped in an element the full render would not build.
 What never runs is a ``<script>`` inside the patch HTML itself, which the applier strips before the markup reaches the document.
 Every asset executes once per page lifetime, so behaviour binds through the mount idioms rather than a load-time scan.
-See :doc:`co-located-js`.
+See :doc:`co-located-js` and :doc:`/content/topics/static-assets/asset-kinds`.
+
+Patch-Inserted Assets Carry a Fixed Attribute Set
+-------------------------------------------------
+
+A full page render emits an asset through the backend tag templates, so ``css_tag``, ``js_tag``, and ``module_tag`` decide which attributes the element carries.
+A patch has no server-rendered tag, so the runtime builds the element itself from a fixed set of attributes.
+A stylesheet gets ``rel``, ``href``, and the page nonce, a script or a module gets ``type``, ``async``, and the page nonce.
+An attribute a project adds to its tag templates, such as ``media``, ``integrity``, ``crossorigin``, or ``defer``, therefore reaches the browser on a full render and not on a patch.
+Subresource Integrity in particular does not apply to a patch-inserted asset, so a deployment that relies on it treats the assets a patch brings as outside that guarantee.
+An asset the full render already emitted stays in the runtime's loaded registry and is never re-inserted, so the gap covers only assets that arrive for the first time through an envelope.
+See :doc:`/content/security/static-assets` for the backend-side SRI recipe and :doc:`/content/topics/static-assets/backends` for the tag templates.
 
 See Also
 --------

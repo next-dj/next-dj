@@ -1,6 +1,18 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { Wire } from "./wire";
+import type { SessionStore } from "./assets";
 import { ACCEPT, CONTENT_TYPE, HEADER_REQUEST_ID, REQUEST_FLAG } from "./protocol";
+
+// Isolated per harness so the navigate-once flag does not leak through the
+// shared jsdom sessionStorage.
+function memorySession(): SessionStore {
+  const store = new Map<string, string>();
+  return {
+    get: (key) => store.get(key) ?? null,
+    set: (key, value) => void store.set(key, value),
+    remove: (key) => void store.delete(key),
+  };
+}
 
 function envelopeResponse(
   body: string,
@@ -21,19 +33,25 @@ type Harness = ReturnType<typeof makeWire>;
 
 function makeWire(
   responder: (url: string, init: RequestInit) => Promise<Response>,
-  opts: { version?: string; csrf?: { header: string; token: string } } = {},
+  opts: {
+    version?: string;
+    csrf?: { header: string; token: string };
+    session?: SessionStore;
+  } = {},
 ) {
   const dispatched: { event: string; detail: Record<string, unknown> }[] = [];
   const navigated: string[] = [];
   const envelopes: unknown[] = [];
   const pages: (string | undefined)[] = [];
   const calls: { url: string; init: RequestInit }[] = [];
+  const session = opts.session ?? memorySession();
   const wire = new Wire({
     fetch: (url, init) => {
       calls.push({ url, init });
       return responder(url, init);
     },
     navigate: (url) => navigated.push(url),
+    session,
     dispatch: (event, detail) => dispatched.push({ event, detail }),
     onEnvelope: (raw, _response, _snapshot, _key, page) => {
       envelopes.push(raw);
@@ -42,7 +60,7 @@ function makeWire(
     version: () => opts.version ?? "v1",
     csrf: () => opts.csrf,
   });
-  return { wire, dispatched, navigated, envelopes, pages, calls };
+  return { wire, dispatched, navigated, envelopes, pages, calls, session };
 }
 
 const ENVELOPE = '{"version":"v1","ops":[],"assets":[],"form":null}';
@@ -222,6 +240,87 @@ describe("Wire classification", () => {
   });
 });
 
+describe("Wire non-envelope navigate-once", () => {
+  const NAVIGATED = "next:partial:navigated";
+
+  function html(url: string): Response {
+    return envelopeResponse("<html>login</html>", { type: "text/html", url });
+  }
+
+  it("navigates and sets the flag on the first non-envelope", async () => {
+    const session = memorySession();
+    const h = makeWire(async () => html("/login/"), { session });
+    await h.wire.fetch({ url: "/list/", zone: "z" });
+    expect(h.navigated).toEqual(["/login/"]);
+    expect(session.get(NAVIGATED)).toBe("1");
+  });
+
+  it("degrades to partial:error without navigating when the flag stands", async () => {
+    const session = memorySession();
+    session.set(NAVIGATED, "1");
+    const h = makeWire(async () => html("/login/"), { session });
+    await h.wire.fetch({ url: "/list/", zone: "z" });
+    expect(h.navigated).toEqual([]);
+    const err = h.dispatched.find((d) => d.event === "partial:error");
+    expect(err!.detail.kind).toBe("network");
+    expect(err!.detail.error).toBeInstanceOf(Error);
+    expect(session.get(NAVIGATED)).toBeNull();
+  });
+
+  it("clears the flag once a correct envelope classifies", async () => {
+    const session = memorySession();
+    session.set(NAVIGATED, "1");
+    const h = makeWire(async () => envelopeResponse(ENVELOPE), { session });
+    await h.wire.fetch({ url: "/list/", zone: "z" });
+    expect(h.envelopes).toHaveLength(1);
+    expect(session.get(NAVIGATED)).toBeNull();
+  });
+
+  it("clears the flag on a parse-hook envelope too", async () => {
+    const session = memorySession();
+    session.set(NAVIGATED, "1");
+    const h = makeWire(
+      async () => envelopeResponse("raw", { type: "text/vnd.next.stream+html" }),
+      { session },
+    );
+    h.wire.parseHook("text/vnd.next.stream+html", () => ({ version: "v1", ops: [] }));
+    await h.wire.fetch({ url: "/list/", zone: "z" });
+    expect(h.envelopes).toHaveLength(1);
+    expect(session.get(NAVIGATED)).toBeNull();
+  });
+
+  it("guards the redirect branch the same way", async () => {
+    const session = memorySession();
+    session.set(NAVIGATED, "1");
+    const h = makeWire(
+      async () => envelopeResponse(ENVELOPE, { url: "/final/", redirected: true }),
+      { session },
+    );
+    await h.wire.fetch({ url: "/list/", zone: "z" });
+    expect(h.navigated).toEqual([]);
+    const err = h.dispatched.find((d) => d.event === "partial:error");
+    expect(err!.detail.kind).toBe("network");
+  });
+
+  it("still errors on a mutating non-envelope with no redirect, flag untouched", async () => {
+    const session = memorySession();
+    const h = makeWire(
+      async () =>
+        envelopeResponse("<html>denied</html>", {
+          status: 403,
+          type: "text/html",
+          url: "/_next/form/u1/",
+        }),
+      { session },
+    );
+    await h.wire.fetch({ url: "/_next/form/u1/", method: "POST", uid: "u1" });
+    expect(h.navigated).toEqual([]);
+    const err = h.dispatched.find((d) => d.event === "partial:error");
+    expect(err!.detail.kind).toBe("http");
+    expect(session.get(NAVIGATED)).toBeNull();
+  });
+});
+
 describe("Wire mutation lock", () => {
   it("drops a second submit while busy: double click yields one fetch", async () => {
     let resolve!: (r: Response) => void;
@@ -257,7 +356,6 @@ describe("Wire safe-GET queue", () => {
     expect(signals[0]!.aborted).toBe(true);
     resolveFirst(envelopeResponse(ENVELOPE));
     await Promise.all([first, second]);
-    // Only the latest response is applied, the stale one is dropped.
     expect(h.envelopes).toHaveLength(1);
   });
 
@@ -271,7 +369,6 @@ describe("Wire safe-GET queue", () => {
       if (n === 1) return new Promise<Response>((r) => (resolveFirst = r));
       return Promise.resolve(envelopeResponse(ENVELOPE));
     });
-    // Two pages sharing a zone name must not abort each other.
     const first = h.wire.fetch({ url: "/host/", zone: "list" });
     const second = h.wire.fetch({ url: "/modal/", zone: "list" });
     expect(signals[0]!.aborted).toBe(false);
@@ -547,7 +644,6 @@ describe("Wire reset", () => {
     const h = makeWire(() => new Promise<Response>(() => {}));
     void h.wire.fetch({ url: "/p1/", zone: "list" });
     h.wire._reset();
-    // After reset the queue key is free, a fresh GET starts at seq 1.
     const h2 = makeWire(async () => envelopeResponse(ENVELOPE));
     await h2.wire.fetch({ url: "/p2/", zone: "list" });
     expect(h2.envelopes).toHaveLength(1);

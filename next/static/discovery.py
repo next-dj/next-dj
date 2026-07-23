@@ -105,21 +105,9 @@ class BackendProvider(Protocol):
 class StemRegistry:
     """Map discovery role to registered filename stems.
 
-    Default roles and their stems are as follows. The `template` role
-    maps to `["template"]` and matches `template.css` or `template.js`.
-    The `layout` role maps to `["layout"]` and matches `layout.css` or
-    `layout.js`. The `component` role maps to `["component"]` and
-    matches `component.css`.
-
-    Users may register extra stems during `AppConfig.ready` to teach
-    discovery about new filenames.
-
-    Example::
-
-        default_stems.register("template", "page")
-
-    The example above teaches discovery to also pick up `page.css` or
-    `page.js` alongside `template.css` or `template.js`.
+    The built-in `template`, `layout`, and `component` roles each carry
+    the stem of their own name. Users register extra stems during
+    `AppConfig.ready` to teach discovery about further filenames.
     """
 
     DEFAULT_ROLES: tuple[str, ...] = ("template", "layout", "component")

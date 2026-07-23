@@ -3,6 +3,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from django.test import override_settings
 
 import next.components as next_components_mod
 from next.components import (
@@ -233,6 +234,41 @@ class TestFileComponentsBackend:
 
         reads_for_comp = [p for p in disk_reads if p == component_py]
         assert len(reads_for_comp) == 1
+
+    def test_loaded_module_paths_imports_lazy_modules(
+        self, tmp_path: Path, min_component_config: dict
+    ) -> None:
+        """Lazy discovery still imports every ``component.py`` on demand."""
+        comp_dir = tmp_path / "lazy_c"
+        comp_dir.mkdir()
+        (comp_dir / "component.py").write_text("# lazy\n")
+        (comp_dir / "component.djx").write_text("<div/>")
+        config = {**min_component_config, "DIRS": [str(tmp_path)]}
+
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "COMPONENT_BACKENDS": [config],
+                "LAZY_COMPONENT_MODULES": True,
+            }
+        ):
+            backend = FileComponentsBackend(config)
+            with patch.object(
+                backend._module_loader, "load", wraps=backend._module_loader.load
+            ) as load_spy:
+                paths = backend.loaded_module_paths()
+
+        assert paths == (comp_dir / "component.py",)
+        assert load_spy.call_count == 1
+
+    def test_loaded_module_paths_ignores_module_less_components(
+        self, tmp_path: Path, min_component_config: dict
+    ) -> None:
+        """A simple component carries no ``component.py`` and yields no path."""
+        (tmp_path / "header.djx").write_text("<header/>")
+        backend = FileComponentsBackend(
+            {**min_component_config, "DIRS": [str(tmp_path)]}
+        )
+        assert backend.loaded_module_paths() == ()
 
 
 class TestComponentsFactory:
