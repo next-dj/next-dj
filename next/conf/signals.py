@@ -7,8 +7,6 @@ Django `setting_changed` signal so that tests using `override_settings`
 trigger the reload path automatically.
 """
 
-from __future__ import annotations
-
 from django.core.signals import setting_changed
 from django.dispatch import Signal
 

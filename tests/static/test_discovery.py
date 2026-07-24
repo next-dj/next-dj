@@ -63,10 +63,6 @@ class TestStemRegistryDefaults:
         reg = StemRegistry()
         assert reg.stems("ghost") == ()
 
-    def test_roles_returns_all(self) -> None:
-        reg = StemRegistry()
-        assert set(reg.roles()) == {"template", "layout", "component"}
-
 
 class TestStemRegistryRegister:
     def test_add_stem_to_existing_role(self) -> None:
@@ -77,7 +73,6 @@ class TestStemRegistryRegister:
     def test_add_stem_creates_role(self) -> None:
         reg = StemRegistry()
         reg.register("meta", "head")
-        assert "meta" in reg.roles()
         assert reg.stems("meta") == ("head",)
 
     def test_register_is_idempotent(self) -> None:
@@ -92,7 +87,7 @@ class TestDefaultStems:
         assert isinstance(default_stems, StemRegistry)
 
     def test_preserves_core_roles(self) -> None:
-        assert "template" in default_stems.roles()
+        assert "template" in default_stems.stems("template")
 
 
 class TestPathResolverFindPageRoot:

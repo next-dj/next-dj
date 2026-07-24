@@ -71,7 +71,7 @@ def _collect_component_paths_under_page_trees() -> set[Path]:
             continue
         fs_backend: Any = backend
         comp_name = str(fs_backend._components_folder_name)
-        scanner = ComponentScanner(comp_name)
+        scanner = ComponentScanner()
         for root in itertools.chain(
             (p.resolve() for p in fs_backend._get_root_pages_paths()),
             (
@@ -102,7 +102,7 @@ def _collect_component_paths_from_backend_dirs() -> set[Path]:
             continue
         if not isinstance(backend, FileComponentsBackend):
             continue
-        scanner = ComponentScanner(backend.components_dir, module_loader=ModuleLoader())
+        scanner = ComponentScanner(module_loader=ModuleLoader())
         for root in component_extra_roots_from_config(config):
             try:
                 for info in scanner.scan_directory(root, root, ""):

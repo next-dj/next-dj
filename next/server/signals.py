@@ -5,8 +5,6 @@ watch specs. Subscribers can inspect or augment the effective spec set
 without subclassing the reloader.
 """
 
-from __future__ import annotations
-
 from django.dispatch import Signal
 
 

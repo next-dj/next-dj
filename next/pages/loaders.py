@@ -302,31 +302,11 @@ class LayoutTemplateLoader(TemplateLoader):
 
 
 class LayoutManager:
-    """Cache composed layout strings per page path."""
+    """Hold the layout template loader used to compose page bodies."""
 
     def __init__(self) -> None:
-        """Initialise an empty layout cache."""
-        self._layout_registry: dict[Path, str] = {}
+        """Instantiate the layout loader."""
         self._layout_loader = LayoutTemplateLoader()
-
-    def discover_layouts_for_template(self, template_path: Path) -> str | None:
-        """Compose and store layout text when `LayoutTemplateLoader` applies."""
-        if not self._layout_loader.can_load(template_path):
-            return None
-
-        composed_template = self._layout_loader.load_template(template_path)
-        if composed_template:
-            self._layout_registry[template_path] = composed_template
-
-        return composed_template
-
-    def get_layout_template(self, template_path: Path) -> str | None:
-        """Return the cached composed template for `template_path`."""
-        return self._layout_registry.get(template_path)
-
-    def clear_registry(self) -> None:
-        """Drop all cached layout strings."""
-        self._layout_registry.clear()
 
 
 # A single-slot holder mutated in place so cache invalidation never rebinds a

@@ -60,7 +60,6 @@ class TestPage:
         frame_chain,
     ) -> None:
         """Test context decorator with different variations."""
-        # set up the frame chain based on the test case
         frame = mock_frame.return_value
         for attr in frame_chain.split("."):
             frame = getattr(frame, attr)
@@ -81,7 +80,6 @@ class TestPage:
 
             func = get_context_data
 
-        # verify context function was registered
         assert context_temp_file in page_instance._context_manager._context_registry
         assert (
             expected_key
@@ -104,7 +102,6 @@ class TestPage:
         def get_inherited_value() -> str:
             return "inherited_value"
 
-        # verify context function was registered with inherit_context=True
         assert context_temp_file in page_instance._context_manager._context_registry
         assert (
             "inherited_key"
@@ -129,7 +126,6 @@ class TestPage:
         def get_context_data():
             return {"key1": "value1", "key2": "value2"}
 
-        # verify context function was registered with inherit_context=True
         assert context_temp_file in page_instance._context_manager._context_registry
         assert (
             None in page_instance._context_manager._context_registry[context_temp_file]
@@ -206,24 +202,20 @@ class TestPage:
         expected,
     ) -> None:
         """Test various render scenarios with parametrized test cases."""
-        # register template
         page_instance.register_template(test_file_path, template_str)
 
-        # register context functions if any
         if context_setup:
             for key, func in context_setup.items():
                 page_instance._context_manager.register_context(
                     test_file_path, key, func
                 )
 
-        # render
         result = page_instance.render(test_file_path, **render_kwargs)
 
         assert result == expected
 
     def test_render_with_multiple_files(self, page_instance) -> None:
         """Test render method with multiple files having different templates and contexts."""
-        # first file
         file1 = Path("/test/path/page1.py")
         template1 = "Page 1: {{ title }}"
         page_instance.register_template(file1, template1)
@@ -231,7 +223,6 @@ class TestPage:
             file1, "title", lambda: "First Page"
         )
 
-        # second file
         file2 = Path("/test/path/page2.py")
         template2 = "Page 2: {{ title }}"
         page_instance.register_template(file2, template2)
@@ -239,7 +230,6 @@ class TestPage:
             file2, "title", lambda: "Second Page"
         )
 
-        # render both
         result1 = page_instance.render(file1)
         result2 = page_instance.render(file2)
 
@@ -248,7 +238,6 @@ class TestPage:
 
     def test_render_with_inherited_context(self, page_instance, tmp_path) -> None:
         """Test render method with inherited context from layout directories."""
-        # create layout structure
         layout_dir = tmp_path / "layout_dir"
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
@@ -259,16 +248,13 @@ class TestPage:
         page_file = layout_dir / "page.py"
         page_file.write_text("")
 
-        # create child directory
         child_dir = layout_dir / "child"
         child_dir.mkdir()
         child_page_file = child_dir / "page.py"
 
-        # register template for child page
         template_str = "Child page: {{ inherited_var }}"
         page_instance.register_template(child_page_file, template_str)
 
-        # register context in layout page.py with inherit_context=True
         def layout_func() -> str:
             return "inherited_value"
 
@@ -276,7 +262,6 @@ class TestPage:
             page_file, "inherited_var", layout_func, inherit_context=True
         )
 
-        # render child page
         result = page_instance.render(child_page_file)
 
         assert "Child page: inherited_value" in result
@@ -285,7 +270,6 @@ class TestPage:
         self, page_instance, tmp_path
     ) -> None:
         """Test that child page context overrides inherited context."""
-        # create layout structure
         layout_dir = tmp_path / "layout_dir"
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
@@ -296,16 +280,13 @@ class TestPage:
         page_file = layout_dir / "page.py"
         page_file.write_text("")
 
-        # create child directory
         child_dir = layout_dir / "child"
         child_dir.mkdir()
         child_page_file = child_dir / "page.py"
 
-        # register template for child page
         template_str = "Child page: {{ var }}"
         page_instance.register_template(child_page_file, template_str)
 
-        # register context in layout page.py with inherit_context=True
         def layout_func() -> str:
             return "layout_value"
 
@@ -313,7 +294,6 @@ class TestPage:
             page_file, "var", layout_func, inherit_context=True
         )
 
-        # register context in child page.py (should override inherited)
         def child_func() -> str:
             return "child_value"
 
@@ -321,17 +301,14 @@ class TestPage:
             child_page_file, "var", child_func, inherit_context=False
         )
 
-        # render child page
         result = page_instance.render(child_page_file)
 
-        # child context should override inherited context
         assert "Child page: child_value" in result
 
     def test_context_registry_defaultdict_behavior(
         self, page_instance, test_file_path
     ) -> None:
         """Test that context registry uses defaultdict-like behavior."""
-        # register context function - should create the file entry
         page_instance._context_manager.register_context(
             test_file_path, "test_key", lambda: "test_value"
         )
@@ -683,84 +660,7 @@ class TestLayoutManager:
     def test_init(self) -> None:
         """Test LayoutManager initialization."""
         manager = LayoutManager()
-        assert manager._layout_registry == {}
         assert isinstance(manager._layout_loader, LayoutTemplateLoader)
-
-    def test_discover_layouts_for_template(self, tmp_path) -> None:
-        """Test discover_layouts_for_template method."""
-        manager = LayoutManager()
-
-        # create layout structure
-        layout_file = tmp_path / "layout.djx"
-        layout_file.write_text(
-            "<html><body>{% block template %}{% endblock template %}</body></html>"
-        )
-
-        sub_dir = tmp_path / "sub"
-        sub_dir.mkdir()
-        template_file = sub_dir / "template.djx"
-        template_file.write_text("<h1>Test</h1>")
-
-        page_file = sub_dir / "page.py"
-        result = manager.discover_layouts_for_template(page_file)
-
-        assert result is not None
-        assert page_file in manager._layout_registry
-
-    def test_discover_layouts_no_layouts(self, tmp_path) -> None:
-        """Test discover_layouts_for_template when no layouts exist."""
-        manager = LayoutManager()
-
-        sub_dir = tmp_path / "sub"
-        sub_dir.mkdir()
-        page_file = sub_dir / "page.py"
-
-        result = manager.discover_layouts_for_template(page_file)
-
-        assert result is None
-        assert page_file not in manager._layout_registry
-
-    def test_get_layout_template(self, tmp_path) -> None:
-        """Test get_layout_template method."""
-        manager = LayoutManager()
-
-        # create layout structure
-        layout_file = tmp_path / "layout.djx"
-        layout_file.write_text(
-            "<html><body>{% block template %}{% endblock template %}</body></html>"
-        )
-
-        sub_dir = tmp_path / "sub"
-        sub_dir.mkdir()
-        template_file = sub_dir / "template.djx"
-        template_file.write_text("<h1>Test</h1>")
-
-        page_file = sub_dir / "page.py"
-        manager.discover_layouts_for_template(page_file)
-
-        result = manager.get_layout_template(page_file)
-        assert result is not None
-
-    def test_get_layout_template_not_found(self, tmp_path) -> None:
-        """Test get_layout_template when template not found."""
-        manager = LayoutManager()
-
-        page_file = tmp_path / "page.py"
-        result = manager.get_layout_template(page_file)
-
-        assert result is None
-
-    def test_clear_registry(self) -> None:
-        """Test clear_registry method."""
-        layout_manager = LayoutManager()
-
-        # add some data to registry
-        layout_manager._layout_registry["test_path"] = "test_template"
-        assert len(layout_manager._layout_registry) == 1
-
-        # clear registry
-        layout_manager.clear_registry()
-        assert len(layout_manager._layout_registry) == 0
 
 
 class TestLayoutIntegration:
@@ -775,14 +675,12 @@ class TestLayoutIntegration:
         self, page_instance, tmp_path, url_parser
     ) -> None:
         """Test create_url_pattern with layout inheritance."""
-        # create layout structure
         layout_file = tmp_path / "layout.djx"
         layout_content = (
             "<html><body>{% block template %}{% endblock template %}</body></html>"
         )
         layout_file.write_text(layout_content)
 
-        # create template.djx
         sub_dir = tmp_path / "sub"
         sub_dir.mkdir()
         template_file = sub_dir / "template.djx"
@@ -793,37 +691,29 @@ class TestLayoutIntegration:
         pattern = page_instance.create_url_pattern("test", page_file, url_parser)
 
         assert pattern is not None
-        # Template loaded lazily at first render
         result = page_instance.render(page_file, title="Test")
         assert "Test" in result
 
     def test_render_with_layout_inheritance(self, page_instance, tmp_path) -> None:
-        """Test rendering with layout inheritance."""
-        # create layout structure
-        layout_file = tmp_path / "layout.djx"
-        layout_content = (
+        """`Page.render` nests a sibling layout inside its ancestor layout."""
+        (tmp_path / "layout.djx").write_text(
             "<html><body>{% block template %}{% endblock template %}</body></html>"
         )
-        layout_file.write_text(layout_content)
 
-        # create template.djx
         sub_dir = tmp_path / "sub"
         sub_dir.mkdir()
-        template_file = sub_dir / "template.djx"
-        template_content = "<h1>{{ title }}</h1>"
-        template_file.write_text(template_content)
+        (sub_dir / "layout.djx").write_text(
+            "<main>{% block template %}{% endblock template %}</main>"
+        )
+        (sub_dir / "template.djx").write_text("<h1>{{ title }}</h1>")
 
         page_file = sub_dir / "page.py"
+        result = page_instance.render(page_file, title="Test")
 
-        # discover layouts
-        page_instance._layout_manager.discover_layouts_for_template(page_file)
-        layout_template = page_instance._layout_manager.get_layout_template(page_file)
-        page_instance.register_template(page_file, layout_template)
-
-        # check that template contains layout content
-        assert "<html><body>" in layout_template
-        assert "</body></html>" in layout_template
-        assert "{% block template %}" in layout_template
+        assert result.startswith("<html><body><main>")
+        assert "<h1>Test</h1>" in result
+        assert result.endswith("</main></body></html>")
+        assert "{% block template %}" not in result
 
     def test_render_composes_template_djx_under_ancestor_layout(
         self, page_instance, tmp_path
@@ -851,14 +741,12 @@ class TestLayoutIntegration:
         self, page_instance, tmp_path
     ) -> None:
         """Test render method with layout template detection."""
-        # create a template that looks like a layout template but doesn't use extends
         page_file = tmp_path / "page.py"
         template_str = "<h1>{{ title }}</h1>"
         page_instance.register_template(page_file, template_str)
 
         result = page_instance.render(page_file, title="Test")
 
-        # should use regular template rendering
         assert result == "<h1>Test</h1>"
 
 
@@ -867,7 +755,6 @@ class TestLoadPythonModule:
 
     def test_load_python_module_invalid_file(self, tmp_path) -> None:
         """Test _load_python_module with invalid Python file."""
-        # create an invalid Python file
         invalid_file = tmp_path / "invalid.py"
         invalid_file.write_text("invalid python syntax {")
 
@@ -917,11 +804,9 @@ class TestUnifiedViewBodyResolution:
     def _isolate(self):
         page._template_registry.clear()
         page._template_source_mtimes.clear()
-        page._layout_manager._layout_registry.clear()
         yield
         page._template_registry.clear()
         page._template_source_mtimes.clear()
-        page._layout_manager._layout_registry.clear()
 
     def test_template_attribute_with_ancestor_layout_composes(
         self, page_instance, tmp_path
@@ -1177,7 +1062,7 @@ class TestLayoutComposeBody:
 
 
 class _MdLoader(TemplateLoader):
-    """Test double: render sibling `template.md` as `<article>{body}</article>`."""
+    """Test-only loader wrapping a sibling `template.md` in an `<article>`."""
 
     source_name = "template.md"
 

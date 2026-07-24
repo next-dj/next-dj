@@ -244,11 +244,5 @@ class ComponentVisibilityResolver:
         except ValueError:
             return None
 
-    def clear_cache(self) -> None:
-        """Drop every cached visibility result and scope index."""
-        self._path_cache.clear()
-        self._result_cache.clear()
-        self._scope_index_registry_version = -1
-
 
 __all__ = ["ComponentRegistry", "ComponentVisibilityResolver"]

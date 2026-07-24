@@ -1,19 +1,8 @@
 """URL routing, router backends, and URL parameter injection providers.
 
-Built-in entry points.
-
-- `RouterBackend` and `FileRouterBackend` as extension surface.
-- `RouterFactory` to map dotted paths to backend classes.
-- `RouterManager` plus singleton `router_manager`.
-- `URLPatternParser` for bracket-segment parsing.
-- `DuplicateURLParameterError` raised on conflicting bracket names.
-- `DUrl` marker used in `@context` annotations for URL path segments.
-- `DQuery` marker used in `@context` annotations for query parameters.
-- `TrieURLResolver` dispatching resolve() through a route trie.
-- Django integration via `app_name` and `urlpatterns`.
-
-Deep-import paths expose `FilesystemTreeDispatcher`, `scan_pages_tree`,
-the parameter providers, and `_LazyUrlPatterns` for advanced callers.
+`__all__` is the supported surface. Advanced callers reach the walk
+helpers and `_LazyUrlPatterns` through deep imports, which keeps the
+package namespace small.
 """
 
 from . import checks, signals

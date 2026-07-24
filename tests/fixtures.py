@@ -10,7 +10,7 @@ from django.test import Client
 
 from next.conf import NextFrameworkSettings, next_framework_settings
 from next.pages import Page
-from next.pages.loaders import DjxTemplateLoader, LayoutManager, PythonTemplateLoader
+from next.pages.loaders import DjxTemplateLoader, PythonTemplateLoader
 from next.pages.registry import PageContextRegistry
 from next.server import NextStatReloader
 from next.urls import URLPatternParser
@@ -78,12 +78,6 @@ def djx_template_loader():
 def context_manager():
     """Create a PageContextRegistry instance for testing."""
     return PageContextRegistry(None)
-
-
-@pytest.fixture()
-def layout_manager():
-    """Create a LayoutManager instance for testing."""
-    return LayoutManager()
 
 
 @pytest.fixture()

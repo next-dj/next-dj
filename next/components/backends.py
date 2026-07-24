@@ -51,9 +51,7 @@ class FileComponentsBackend(ComponentsBackend):
 
         self._registry = ComponentRegistry()
         self._module_loader = ModuleLoader()
-        self._scanner = ComponentScanner(
-            self.components_dir, module_loader=self._module_loader
-        )
+        self._scanner = ComponentScanner(module_loader=self._module_loader)
         self._visibility_resolver = ComponentVisibilityResolver(self._registry)
 
         self._loaded = False
@@ -128,7 +126,6 @@ class DummyBackend(ComponentsBackend):
     def __init__(self, config: dict[str, Any]) -> None:
         """Keep `config` on `self` for assertions about wiring."""
         self.config = config
-        self.created = True
 
     @override
     def get_component(self, _name: str, _template_path: Path) -> ComponentInfo | None:

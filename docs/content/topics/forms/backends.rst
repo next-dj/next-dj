@@ -310,9 +310,6 @@ Tests that register actions through ``@action`` must drop the global registry be
 Call :func:`next.testing.reset_form_actions` from a pytest fixture or a ``setUp`` method.
 The helper invokes ``form_action_manager._reload_config()``, which rebuilds the backend list from the current ``NEXT_FRAMEWORK["FORM_ACTION_BACKENDS"]`` setting and discards any actions registered against the previous backend instances.
 
-A test that registers extra actions on a live ``RegistryFormActionBackend`` takes a snapshot first and restores it afterwards.
-``backend.snapshot()`` returns a ``RegistryBackendSnapshot``, an immutable copy of the three registry maps, and ``backend.restore(snapshot)`` puts the registry back exactly as it was, without reaching into the backend's private state.
-
 See :doc:`/content/topics/testing` for the surrounding helpers and fixtures.
 
 System Checks

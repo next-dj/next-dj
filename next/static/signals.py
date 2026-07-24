@@ -28,8 +28,6 @@ instantiates a backend. The sender is the backend class. The keyword
 arguments are `config` and `instance`.
 """
 
-from __future__ import annotations
-
 from django.dispatch import Signal
 
 

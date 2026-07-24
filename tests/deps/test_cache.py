@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from next.deps import Depends, resolver
-from next.deps.cache import _IN_PROGRESS, DependencyCache
+import pytest
+
+from next.deps import DependencyResolver, Depends, resolver
+from next.deps.cache import _CACHE_MISS, _IN_PROGRESS, DependencyCache
 
 
 if TYPE_CHECKING:
@@ -21,6 +23,14 @@ class TestDependencyCache:
         cache.set("dep", "done")
         assert cache.get("dep") == "done"
 
+    def test_unmark_in_progress_returns_key_to_cache_miss(self) -> None:
+        """After unmark_in_progress the key reads as a miss, not as in-progress."""
+        cache = DependencyCache()
+        cache.mark_in_progress("dep")
+        assert cache.get("dep") is _IN_PROGRESS
+        cache.unmark_in_progress("dep")
+        assert cache.get("dep") is _CACHE_MISS
+
     def test_len_and_contains_use_backing_cache(self) -> None:
         """__len__ and __contain__ reflect stored values, not in-progress markers."""
         cache = DependencyCache()
@@ -29,14 +39,6 @@ class TestDependencyCache:
         cache.set("x", 1)
         assert len(cache) == 1
         assert "x" in cache
-
-    def test_is_in_progress_and_unmark(self) -> None:
-        """The ``is_in_progress`` flag reflects ``mark``. ``unmark`` clears it."""
-        cache = DependencyCache()
-        cache.mark_in_progress("k")
-        assert cache.is_in_progress("k")
-        cache.unmark_in_progress("k")
-        assert not cache.is_in_progress("k")
 
 
 class TestCallableDependencyCache:
@@ -77,6 +79,33 @@ class TestCallableDependencyCache:
             assert cache.get("current_user") == "alice"
         finally:
             resolver._dependency_callables.pop("current_user", None)
+
+    def test_failed_dependency_is_retried_on_the_next_resolve(self) -> None:
+        """A dependency that raised is retried, not read back as a false cycle."""
+        attempts = 0
+
+        def flaky() -> str:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                msg = "first attempt fails"
+                raise RuntimeError(msg)
+            return "ok"
+
+        r = DependencyResolver()
+        r.register_dependency("flaky", flaky)
+
+        def view(value: str = Depends("flaky")) -> str:
+            return value
+
+        # The shared DependencyCache instance also shares the in-progress set,
+        # which a dict-backed cache would not.
+        cache = DependencyCache()
+        with pytest.raises(RuntimeError):
+            r.resolve_dependencies(view, _cache=cache)
+
+        assert r.resolve_dependencies(view, _cache=cache) == {"value": "ok"}
+        assert attempts == 2
 
     def test_without_cache_dependency_called_each_resolve(
         self, mock_http_request

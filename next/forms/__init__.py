@@ -30,7 +30,6 @@ from .backends import (
     ActionRegistration,
     FormActionBackend,
     FormActionNotFoundError,
-    RegistryBackendSnapshot,
     RegistryFormActionBackend,
 )
 from .base import (
@@ -184,7 +183,6 @@ __all__ = [
     "PermissionOutcome",
     "RadioSelect",
     "RegexField",
-    "RegistryBackendSnapshot",
     "RegistryFormActionBackend",
     "Select",
     "SelectMultiple",

@@ -30,7 +30,7 @@ class TestPartialIntentParsing:
         request = RequestFactory().get("/")
         intent = partial_intent(request)
         assert intent == PartialIntent()
-        assert intent.is_partial is False
+        assert intent.partial is False
         assert is_partial_request(request) is False
 
     def test_flag_other_than_one_is_not_partial(self) -> None:

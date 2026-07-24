@@ -86,7 +86,6 @@ class Page:
         self._template_registry: dict[Path, str] = {}
         self._compiled_registry: dict[Path, Template] = {}
         self._template_source_mtimes: dict[Path, dict[Path, float]] = {}
-        self._resolver: DependencyResolver | None = None
         self._context_manager = PageContextRegistry(None)
         self._layout_manager = LayoutManager()
 
@@ -451,9 +450,7 @@ class Page:
             if resolution.http_response is not None:
                 return resolution.http_response
             # next.partial imports next.pages, so the zone branch defers
-            # its imports to break the cycle. Without the partial switch the
-            # intent carries no zones and the full render path below runs
-            # byte-for-byte the same as before.
+            # its imports to break the cycle.
             from next.partial import partial_intent  # noqa: PLC0415
             from next.partial.view import zone_response  # noqa: PLC0415
 

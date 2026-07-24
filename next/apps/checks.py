@@ -1,13 +1,8 @@
 """System checks for next-dj template engine wiring.
 
-Registered identifiers.
-
-- `next.W062`. Warning raised when no `DjangoTemplates` engine is
-  configured in `TEMPLATES`. The next-dj `{% %}` tags install only into
-  that backend, so they are unavailable without it.
-- `next.W063`. Warning raised when a tag library module under
-  `next.templatetags` is not listed in the explicit builtin tuple, so it
-  never installs as a template builtin.
+The next-dj tags install only into a `DjangoTemplates` backend and only
+through the explicit builtin tuple, so both conditions are worth a
+warning rather than a silent missing tag at render time.
 """
 
 from __future__ import annotations

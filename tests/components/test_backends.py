@@ -50,7 +50,7 @@ class TestComponentInfo:
 
 
 class TestComponentInfoDunders:
-    """ComponentInfo repr, hash, eq, scope_key."""
+    """ComponentInfo repr, hash, eq."""
 
     def test_repr_contains_fields(self) -> None:
         """Repr includes name and scope fields."""
@@ -69,13 +69,12 @@ class TestComponentInfoDunders:
         assert "ComponentInfo" in r
 
     def test_hash_eq_includes_paths(self) -> None:
-        """Same name and scope but different files are not equal. ``scope_key`` can still match."""
+        """Same name and scope but different files are not equal."""
         r = Path("/p")
         a = ComponentInfo("x", r, "", Path("/p/a.djx"), None, True)
         b = ComponentInfo("x", r, "", Path("/p/b.djx"), None, True)
         c = ComponentInfo("x", r, "sub", Path("/p/a.djx"), None, True)
         assert a != b
-        assert a.scope_key == b.scope_key
         assert a != c
         d = ComponentInfo("x", r, "", Path("/p/a.djx"), None, True)
         assert a == d
