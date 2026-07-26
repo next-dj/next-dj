@@ -6,8 +6,6 @@ the signal to observe provider wiring, typically in tests or
 diagnostics.
 """
 
-from __future__ import annotations
-
 from django.dispatch import Signal
 
 

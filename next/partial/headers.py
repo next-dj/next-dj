@@ -58,11 +58,6 @@ class PartialIntent:
     request_id: str | None = None
     origin: str | None = None
 
-    @property
-    def is_partial(self) -> bool:
-        """Return True when the request carries the partial switch."""
-        return self.partial
-
 
 def _split_names(raw: str | None) -> tuple[str, ...]:
     """Split a comma-separated header value into trimmed non-empty names."""

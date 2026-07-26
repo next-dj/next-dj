@@ -48,7 +48,6 @@ class DependencyCache:
         """Initialise storage, optionally sharing an externally owned dict."""
         self._cache: dict[str, Any] = backing_dict if backing_dict is not None else {}
         self._in_progress: set[str] = set()
-        self._owns_cache = backing_dict is None
 
     def get(self, key: str) -> object:
         """Return the cached value, `_IN_PROGRESS`, or `_CACHE_MISS`."""
@@ -70,10 +69,6 @@ class DependencyCache:
     def unmark_in_progress(self, key: str) -> None:
         """Clear the in-progress marker for the key."""
         self._in_progress.discard(key)
-
-    def is_in_progress(self, key: str) -> bool:
-        """Return True while the key is mid-resolution."""
-        return key in self._in_progress
 
     def __len__(self) -> int:
         """Return the number of stored values."""

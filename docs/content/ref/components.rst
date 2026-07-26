@@ -105,7 +105,6 @@ Prefer the Application Imports tier unless you are building framework tooling.
 .. autoclass:: next.components.ComponentInfo
    :members:
 
-``scope_key`` is a stable value-object tuple for grouping by name and scope.
 The duplicate-name check groups by ``(scope_root, name)`` and ignores ``scope_relative``, so two same-named components anywhere in one tree collide under ``next.E020``.
 
 .. autoclass:: next.components.ContextFunction

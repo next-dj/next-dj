@@ -50,7 +50,7 @@ class TestComponentInfo:
 
 
 class TestComponentInfoDunders:
-    """ComponentInfo repr, hash, eq, scope_key."""
+    """ComponentInfo repr, hash, eq."""
 
     def test_repr_contains_fields(self) -> None:
         """Repr includes name and scope fields."""
@@ -69,13 +69,12 @@ class TestComponentInfoDunders:
         assert "ComponentInfo" in r
 
     def test_hash_eq_includes_paths(self) -> None:
-        """Same name and scope but different files are not equal. ``scope_key`` can still match."""
+        """Same name and scope but different files are not equal."""
         r = Path("/p")
         a = ComponentInfo("x", r, "", Path("/p/a.djx"), None, True)
         b = ComponentInfo("x", r, "", Path("/p/b.djx"), None, True)
         c = ComponentInfo("x", r, "sub", Path("/p/a.djx"), None, True)
         assert a != b
-        assert a.scope_key == b.scope_key
         assert a != c
         d = ComponentInfo("x", r, "", Path("/p/a.djx"), None, True)
         assert a == d
@@ -104,7 +103,7 @@ class TestFileComponentsBackend:
     def test_discover_in_component_root_simple(
         self, tmp_path: Path, min_component_config: dict
     ) -> None:
-        """Root component dir: .djx files are discovered as simple components."""
+        """A bare ``.djx`` file in a component root registers as a simple component."""
         (tmp_path / "header.djx").write_text("<header>Hi</header>")
         backend = FileComponentsBackend(
             {**min_component_config, "DIRS": [str(tmp_path)]}
@@ -122,7 +121,7 @@ class TestFileComponentsBackend:
     def test_discover_in_component_root_composite(
         self, tmp_path: Path, min_component_config: dict
     ) -> None:
-        """Root component dir: subdir with component.djx is composite."""
+        """A subdirectory holding ``component.djx`` registers as a composite."""
         (tmp_path / "profile").mkdir()
         (tmp_path / "profile" / "component.djx").write_text("<div>profile</div>")
         backend = FileComponentsBackend(
@@ -283,19 +282,18 @@ class TestComponentsFactory:
         }
         backend = ComponentsFactory.create_backend(config)
         assert isinstance(backend, FileComponentsBackend)
-        assert backend.components_dir == "_components"
+        assert backend._extra_component_roots == []
 
-    def test_create_backend_file_with_component_dirs(self) -> None:
-        """Create FileComponentsBackend with ``COMPONENTS_DIR`` and empty ``DIRS``."""
+    def test_create_backend_file_ignores_the_components_dir_name(self) -> None:
+        """``COMPONENTS_DIR`` names a router skip folder and never reaches the backend."""
         config = {
             "BACKEND": "next.components.FileComponentsBackend",
-            "DIRS": [],
+            "DIRS": [str(Path(__file__).parent)],
             "COMPONENTS_DIR": "components",
         }
         backend = ComponentsFactory.create_backend(config)
         assert isinstance(backend, FileComponentsBackend)
-        assert backend.components_dir == "components"
-        assert backend._extra_component_roots == []
+        assert backend._extra_component_roots == [Path(__file__).parent]
 
     def test_create_backend_unknown_raises(self) -> None:
         """Unknown backend class path raises ImportError."""

@@ -32,14 +32,14 @@ class TestBenchEnsureBackends:
 
     @pytest.mark.benchmark(group="forms.manager")
     def test_ensure_backends_warm(self, benchmark) -> None:
-        """Hot path: backends already loaded, no settings touch."""
+        """Backends are already loaded, so the call touches no settings."""
         manager = FormActionManager()
         manager._ensure_backends()
         benchmark(manager._ensure_backends)
 
     @pytest.mark.benchmark(group="forms.manager")
     def test_reload_config_cold(self, benchmark) -> None:
-        """Cold path: drop and reload backends from settings."""
+        """Dropping the backends forces a full reload from settings."""
         manager = FormActionManager()
 
         def run() -> None:

@@ -27,20 +27,8 @@ logger = logging.getLogger(__name__)
 class ComponentScanner:
     """Scan one folder for `.djx` files and composite component directories."""
 
-    DEFAULT_COMPONENTS_DIR_NAME: str = "_components"
-
-    def __init__(
-        self,
-        components_dir: str | None = None,
-        *,
-        module_loader: ModuleLoader | None = None,
-    ) -> None:
-        """Store the configured dir name and wire a module loader."""
-        self._components_dir = (
-            components_dir
-            if components_dir is not None
-            else self.DEFAULT_COMPONENTS_DIR_NAME
-        )
+    def __init__(self, *, module_loader: ModuleLoader | None = None) -> None:
+        """Wire a module loader for composite `component.py` files."""
         self._module_loader = module_loader or ModuleLoader()
 
     def scan_directory(

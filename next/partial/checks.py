@@ -72,24 +72,6 @@ _FORM_TARGET_ATTR: Final = "data-next-target"
 _FORM_KEY_ATTR: Final = "data-next-key"
 
 
-CHECK_IDS: Final = (
-    E_DUPLICATE_ZONE,
-    E_NON_ASCII_ZONE,
-    E_ZONE_IN_FOR,
-    E_ZONE_IN_IF,
-    E_LAZY_WITHOUT_PLACEHOLDER,
-    E_ZONE_IN_COMPONENT,
-    E_UNREGISTERED_OP,
-    E_COMPOSED_TEMPLATE_SYNTAX,
-    E_BACKEND_WITHOUT_PATH,
-    W_WITH_OVER_ZONE,
-    W_FORM_BACKEND_NOT_AWARE,
-    W_MANIFEST_VERSION_NO_STORAGE,
-    W_FORM_IN_FOR_NO_KEY,
-    W_TOO_MANY_BACKENDS,
-)
-
-
 _ZONE_SLUG = re.compile(r"\A[A-Za-z0-9_-]+\Z")
 
 
@@ -665,7 +647,6 @@ def _staticfiles_storage_path() -> str | None:
 
 
 __all__ = [
-    "CHECK_IDS",
     "E_BACKEND_WITHOUT_PATH",
     "E_COMPOSED_TEMPLATE_SYNTAX",
     "E_DUPLICATE_ZONE",

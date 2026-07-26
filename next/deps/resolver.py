@@ -62,10 +62,6 @@ class DependencyResolver:
 
     EXPLICIT_RESOLVE_KEYS: ClassVar[frozenset[str]] = RESERVED_KEYS
 
-    def __get__(self, obj: object, owner: type[object]) -> DependencyResolver:
-        """Return the resolver itself when accessed as a descriptor."""
-        return self
-
     def __init__(
         self, *providers: ParameterProvider | RegisteredParameterProvider
     ) -> None:

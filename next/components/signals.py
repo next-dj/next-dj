@@ -1,7 +1,5 @@
 """Django signals emitted by the components subsystem."""
 
-from __future__ import annotations
-
 from django.dispatch import Signal
 
 

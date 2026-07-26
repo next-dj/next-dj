@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 class FilesystemTreeDispatcher:
-    """Run one depth-first walk: routes per node or skip component folders."""
+    """Run one depth-first walk that yields routes and skips component folders."""
 
     def __init__(
         self,
@@ -89,22 +89,6 @@ def scan_pages_tree(
         register_components=register_components,
     )
     yield from dispatcher.walk(pages_path)
-
-
-def _scan_pages_directory(
-    pages_path: Path,
-    skip_dir_names: Iterable[str] = (),
-    *,
-    components_folder_name: str = "_components",
-    register_components: bool = False,
-) -> Generator[tuple[str, Path], None, None]:
-    """Yield the same pairs as `scan_pages_tree`."""
-    yield from scan_pages_tree(
-        pages_path,
-        skip_dir_names,
-        components_folder_name=components_folder_name,
-        register_components=register_components,
-    )
 
 
 __all__ = ["FilesystemTreeDispatcher", "scan_pages_tree"]

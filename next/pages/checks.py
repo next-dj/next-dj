@@ -196,7 +196,6 @@ def _check_missing_page_files(
             if page_file.exists() or layout_file.exists() or template_file.exists():
                 continue
 
-            # Check if parameter directory has child routes
             has_child_routes = False
             for child in item.iterdir():
                 if child.is_dir() and (child / "page.py").exists():

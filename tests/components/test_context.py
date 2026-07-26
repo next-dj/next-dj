@@ -194,7 +194,7 @@ class TestComponentContextRegistryInternals:
             reg.register(p, "slot", g2)
 
     def test_is_same_function_true_same_file_same_name(self, tmp_path: Path) -> None:
-        """Heuristic: identical name and source file counts as same function."""
+        """An identical name and source file counts as the same function."""
 
         def h() -> int:
             return 7

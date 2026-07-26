@@ -10,7 +10,7 @@ from django.test import Client
 
 from next.conf import NextFrameworkSettings, next_framework_settings
 from next.pages import Page
-from next.pages.loaders import DjxTemplateLoader, LayoutManager, PythonTemplateLoader
+from next.pages.loaders import DjxTemplateLoader, PythonTemplateLoader
 from next.pages.registry import PageContextRegistry
 from next.server import NextStatReloader
 from next.urls import URLPatternParser
@@ -81,12 +81,6 @@ def context_manager():
 
 
 @pytest.fixture()
-def layout_manager():
-    """Create a LayoutManager instance for testing."""
-    return LayoutManager()
-
-
-@pytest.fixture()
 def mock_frame():
     """Mock inspect.currentframe for testing."""
     with patch("next.pages.manager.inspect.currentframe") as mock_frame:
@@ -136,7 +130,7 @@ def csrf_request():
 
 @pytest.fixture()
 def dependency_resolver(request):
-    """Indirect fixture: ``DependencyResolver`` from ``next.deps`` (``minimal``, ``with_form``, or ``full``)."""
+    """Build a ``DependencyResolver`` for the ``minimal``, ``with_form``, or ``full`` param."""
     kind = getattr(request, "param", "minimal")
     factories = {
         "minimal": _minimal_resolver,
@@ -148,7 +142,7 @@ def dependency_resolver(request):
 
 @pytest.fixture()
 def reloader_tick_scenario(request):
-    """Indirect: param is a key from ``tests.support.TICK_SCENARIOS``."""
+    """Run the reloader tick scenario named by the indirect param."""
     name = request.param
     reloader = NextStatReloader()
     with tick_scenario(name, reloader) as payload:
@@ -157,7 +151,7 @@ def reloader_tick_scenario(request):
 
 @pytest.fixture()
 def checks_router_patch(request, tmp_path):
-    """Indirect: ``request.param`` is ``list[tuple[str, Path]]`` routes for page checks mocks."""
+    """Patch the checks router manager with the routes given as the indirect param."""
     routes = request.param
     with patch_checks_router_manager(
         pages_directory=tmp_path, scan_routes=routes

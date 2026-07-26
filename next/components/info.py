@@ -31,11 +31,6 @@ class ComponentInfo:
             resolved = self.scope_root
         object.__setattr__(self, "resolved_scope_root", resolved)
 
-    @property
-    def scope_key(self) -> tuple[str, Path, str]:
-        """Stable tuple for grouping by name and scope (ignores template paths)."""
-        return (self.name, self.scope_root, self.scope_relative)
-
 
 def _paths_from_component_info(info: ComponentInfo) -> set[Path]:
     """Return resolved filesystem paths that define one component."""

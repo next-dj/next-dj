@@ -212,7 +212,7 @@ class TestComponentTag:
         expected_substring: str,
         forbidden_substrings: tuple[str, ...],
     ) -> None:
-        """End-to-end: props named like a slot never leak into the slot lookup.
+        """A prop named like a slot never leaks into the slot lookup.
 
         The component template wraps its content in
         ``{% #set_slot "description" %}<i>fallback</i>{% /set_slot %}``.

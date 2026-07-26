@@ -48,7 +48,7 @@ class _AppRouter:
 
 
 class TestPageChecks:
-    """Test cases for page checks functionality."""
+    """Checks that decide whether a routed ``page.py`` can produce a body."""
 
     @pytest.mark.parametrize(
         ("page_content", "create_djx", "djx_content", "expected_result"),
@@ -78,7 +78,7 @@ def render(request, **kwargs):
     def test_has_template_or_djx(
         self, tmp_path, page_content, create_djx, djx_content, expected_result
     ) -> None:
-        """Test _has_template_or_djx with different scenarios."""
+        """Only a ``template`` attribute or a sibling ``template.djx`` counts, ``render()`` does not."""
         page_file = tmp_path / "page.py"
         page_file.write_text(page_content)
 
@@ -91,7 +91,7 @@ def render(request, **kwargs):
 
 
 class TestLayoutChecks:
-    """Test cases for layout checks functionality."""
+    """Checks over ``layout.djx`` files found in the page trees."""
 
     @pytest.mark.parametrize(
         ("layout_body", "expected_warnings", "msg_substring"),
@@ -330,7 +330,7 @@ class TestCheckTemplateLoaders:
         assert "cannot be imported" in msgs[0].msg
 
     @override_settings(
-        NEXT_FRAMEWORK={"TEMPLATE_LOADERS": ["next.pages.loaders.LayoutManager"]}
+        NEXT_FRAMEWORK={"TEMPLATE_LOADERS": ["next.pages.registry.PageContextRegistry"]}
     )
     def test_non_subclass_entry_is_e043(self) -> None:
 
@@ -445,10 +445,10 @@ class TestBodySourceConflicts:
 
 
 class TestContextFunctionsChecks:
-    """Test cases for context functions checks."""
+    """Checks over the return shape of registered ``@context`` functions."""
 
     def test_check_context_functions_valid_dict_return(self, tmp_path) -> None:
-        """Test check_context_functions with valid dict return."""
+        """A keyless ``@context`` returning a dict raises nothing."""
         page_file = tmp_path / "page.py"
         page_file.write_text("""
 from next.pages import context
@@ -590,7 +590,7 @@ def get_context_data():
         assert second == []
 
     def test_check_context_functions_with_key_not_checked(self, tmp_path) -> None:
-        """Test check_context_functions ignores functions with key."""
+        """A keyed ``@context`` may return any type and is left alone."""
         page_file = tmp_path / "page.py"
         page_file.write_text("""
 from next.pages import context

@@ -41,13 +41,14 @@ def _no_request() -> None:
     return None
 
 
-class TestResolverDescriptor:
-    """``ContextByNameProvider`` accesses ``resolver`` via class descriptor."""
+class TestProviderResolverAttribute:
+    """``ContextByNameProvider`` reads ``resolver`` from the class attribute."""
 
     def test_context_provider_resolver_attribute_returns_singleton(self) -> None:
-        """ContextByNameProvider has no resolver in ``__init__``. ``self.resolver`` returns the global resolver."""
+        """A provider without a ``resolver`` argument sees the global resolver."""
         provider = ContextByNameProvider()
         assert provider.resolver is resolver
+        assert ContextByNameProvider.resolver is resolver
 
 
 class TestHttpRequestProvider:

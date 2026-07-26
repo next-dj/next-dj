@@ -10,7 +10,7 @@ from next.pages.watch import (
     iter_pages_roots_with_components_folder_names,
 )
 from next.urls import FileRouterBackend, RouterBackend
-from next.urls.dispatcher import _scan_pages_directory, scan_pages_tree
+from next.urls.dispatcher import scan_pages_tree
 from next.utils import classify_dirs_entries
 
 
@@ -220,13 +220,6 @@ class TestScanPagesDirectory:
             )
         assert len(calls) == 1
         assert calls[0][0].name == "_components"
-
-    def test_scan_pages_directory_matches_scan_pages_tree(self, tmp_path) -> None:
-        """The module helper yields the same pairs as ``scan_pages_tree``."""
-        (tmp_path / "page.py").write_text("x=1")
-        a = list(scan_pages_tree(tmp_path))
-        b = list(_scan_pages_directory(tmp_path))
-        assert a == b
 
 
 class TestClassifyDirsEntries:

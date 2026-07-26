@@ -150,7 +150,7 @@ class TestFormActionNotFoundError:
 
 
 class TestFormActionManager:
-    """FormActionManager: get_action_url, default_backend, __iter__."""
+    """``FormActionManager`` reverse URLs, its default backend, and iteration."""
 
     def test_get_action_url_returns_url(self) -> None:
         """Return URL for known action."""

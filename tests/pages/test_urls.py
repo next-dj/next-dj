@@ -4,7 +4,7 @@ from next.urls import FileRouterBackend, URLPatternParser
 
 
 class TestURLPatternParser:
-    """Test cases for URL pattern parsing methods."""
+    """``URLPatternParser`` turning bracket segments into Django path patterns."""
 
     @pytest.mark.parametrize(
         ("url_pattern", "expected_pattern", "expected_params"),
@@ -40,7 +40,7 @@ class TestURLPatternParser:
     def test_parse_url_pattern_variations(
         self, url_parser, url_pattern, expected_pattern, expected_params
     ) -> None:
-        """Test parsing URL patterns with different variations."""
+        """Each bracket form maps to its Django converter and a normalised parameter name."""
         pattern, params = url_parser.parse_url_pattern(url_pattern)
         assert pattern == expected_pattern
         assert params == expected_params
@@ -65,7 +65,7 @@ class TestURLPatternParser:
     def test_parse_url_pattern_complex(
         self, url_parser, url_pattern, expected_contains
     ) -> None:
-        """Test parsing complex URL pattern."""
+        """Typed, slug, and catch-all segments coexist in one pattern."""
         pattern, params = url_parser.parse_url_pattern(url_pattern)
 
         for expected in expected_contains:
@@ -87,7 +87,7 @@ class TestURLPatternParser:
     def test_parse_url_pattern_edge_cases(
         self, url_parser, url_pattern, pattern_contains, params_condition
     ) -> None:
-        """Test parsing URL pattern edge cases."""
+        """Malformed brackets pass through without raising."""
         pattern, params = url_parser.parse_url_pattern(url_pattern)
         assert any(contains in pattern for contains in pattern_contains)
         assert params_condition(params)
@@ -106,7 +106,7 @@ class TestURLPatternParser:
     def test_parse_param_name_and_type_variations(
         self, url_parser, param_string, expected_name, expected_type
     ) -> None:
-        """Test parsing parameter name and type with different variations."""
+        """A bare name defaults to ``str``, a leading colon leaves the type empty."""
         name, type_name = url_parser._parse_param_name_and_type(param_string)
         assert name == expected_name
         assert type_name == expected_type
@@ -125,7 +125,7 @@ class TestURLPatternParser:
     def test_parse_url_pattern_with_args_and_params(
         self, url_parser, url_path, expected_params, expected_pattern
     ) -> None:
-        """Test parsing URL pattern with both args and regular parameters."""
+        """A catch-all segment and a typed segment resolve side by side."""
         django_pattern, parameters = url_parser.parse_url_pattern(url_path)
 
         for param in expected_params:
@@ -147,13 +147,13 @@ class TestURLPatternParser:
     def test_prepare_url_name_with_colons(
         self, url_parser, url_path, expected_name
     ) -> None:
-        """Test URL name preparation with colons in parameter syntax."""
+        """The route name flattens brackets and colons into a reversible identifier."""
         clean_name = url_parser.prepare_url_name(url_path)
         assert clean_name == expected_name
         assert ":" not in clean_name
 
     def test_scan_pages_directory_virtual_view_detection(self, tmp_path) -> None:
-        """Test _scan_pages_directory detects virtual views (template.djx without page.py)."""
+        """A directory holding only ``template.djx`` routes to a synthesised ``page.py``."""
         backend = FileRouterBackend()
 
         virtual_dir = tmp_path / "virtual"
@@ -170,7 +170,7 @@ class TestURLPatternParser:
 
 
 class TestCreateUrlPatternScenarios:
-    """Test cases for different URL pattern creation scenarios."""
+    """``create_url_pattern`` across the body sources a page can have."""
 
     @pytest.mark.parametrize(
         (
@@ -247,7 +247,7 @@ def render(request, **kwargs):
         expected_pattern_name,
         expected_template,
     ) -> None:
-        """Test various create_url_pattern scenarios."""
+        """A page yields a named pattern whenever any body source can serve it."""
         page_file = tmp_path / "page.py"
 
         if page_content:
@@ -272,7 +272,7 @@ def render(request, **kwargs):
     def test_create_url_pattern_render_function_fallback(
         self, page_instance, tmp_path, url_parser
     ) -> None:
-        """Test that render function is used as fallback when no template is found."""
+        """A ``render()`` with no template beside it still produces a route."""
         page_file = tmp_path / "page.py"
         page_file.write_text("""
 from django.http import HttpResponse
@@ -289,7 +289,7 @@ def render(request, **kwargs):
     def test_create_url_pattern_virtual_view_rendering(
         self, page_instance, tmp_path, url_parser
     ) -> None:
-        """Test that virtual view can be rendered with context."""
+        """A virtual page backed only by ``template.djx`` renders its interpolated body."""
         page_file = tmp_path / "page.py"
         djx_file = tmp_path / "template.djx"
         djx_content = "<h1>{{ title }}</h1><p>Hello {{ name }}!</p>"
@@ -305,7 +305,7 @@ def render(request, **kwargs):
     def test_create_url_pattern_with_context_functions(
         self, page_instance, tmp_path, url_parser
     ) -> None:
-        """Test create_url_pattern with context functions for virtual view."""
+        """A virtual page reads the ``@context`` values registered against its path."""
         page_file = tmp_path / "page.py"
         djx_file = tmp_path / "template.djx"
         djx_content = "<h1>{{ title }}</h1><p>{{ description }}</p>"
@@ -327,12 +327,12 @@ def render(request, **kwargs):
 
 
 class TestPageCreateUrlPattern:
-    """Test Page create_url_pattern functionality."""
+    """``_create_regular_page_pattern`` refusing pages it cannot serve."""
 
     def test_create_regular_page_pattern_no_module(
         self, page_instance, tmp_path
     ) -> None:
-        """Test _create_regular_page_pattern when module cannot be loaded."""
+        """A ``page.py`` that fails to import yields no pattern."""
         page_file = tmp_path / "page.py"
         page_file.write_text("invalid python syntax {")
 
@@ -348,7 +348,7 @@ class TestPageCreateUrlPattern:
     def test_create_regular_page_pattern_no_template_no_render(
         self, page_instance, tmp_path
     ) -> None:
-        """Test _create_regular_page_pattern when no template and no render function."""
+        """A module with neither a body nor ``render()`` yields no pattern."""
         page_file = tmp_path / "page.py"
         page_file.write_text("def other_function(): pass")
 

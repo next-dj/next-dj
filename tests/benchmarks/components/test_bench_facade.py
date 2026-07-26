@@ -25,7 +25,7 @@ def _send_component_rendered(
 class TestBenchComponentRenderedSignal:
     @pytest.mark.benchmark(group="components.signals")
     def test_send_no_receiver(self, tmp_path: Path, benchmark) -> None:
-        """Baseline: ``component_rendered.send`` with zero receivers."""
+        """``component_rendered.send`` with zero receivers."""
         info = build_component_info(tmp_path)
         benchmark(_send_component_rendered, component_rendered, object(), info)
 

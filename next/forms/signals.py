@@ -60,8 +60,6 @@ denial. `reason` is `"raised"` when the hook raised `PermissionDenied`,
 `HttpResponse` short-circuit.
 """
 
-from __future__ import annotations
-
 from django.dispatch import Signal
 
 

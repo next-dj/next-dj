@@ -17,8 +17,6 @@ keyword arguments are `file_path`, `duration_ms`, `styles_count`,
 `scripts_count`, and `context_keys`.
 """
 
-from __future__ import annotations
-
 from django.dispatch import Signal
 
 

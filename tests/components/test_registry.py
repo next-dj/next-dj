@@ -132,8 +132,10 @@ class TestComponentVisibilityResolver:
         outside.parent.mkdir(parents=True)
         assert resolver.resolve_visible(outside) == {}
 
-    def test_path_cache_and_clear_cache(self, tmp_path: Path) -> None:
-        """The second resolve reuses the cache. ``clear_cache`` resets it."""
+    def test_second_resolve_returns_the_cached_result_object(
+        self, tmp_path: Path
+    ) -> None:
+        """The second resolve hands back the very mapping built by the first."""
         pages = tmp_path / "pages"
         tmpl = pages / "home.djx"
         tmpl.parent.mkdir(parents=True)
@@ -149,11 +151,8 @@ class TestComponentVisibilityResolver:
         res = ComponentVisibilityResolver(reg)
         r1 = res.resolve_visible(tmpl)
         r2 = res.resolve_visible(tmpl)
-        assert r1 == r2
-        assert "c" in r1
+        assert r2 is r1
         assert r1["c"].name == "c"
-        res.clear_cache()
-        assert res._path_cache == {}
 
     def test_scope_index_reused_for_second_template_path(self, tmp_path: Path) -> None:
         """Second template path does not rebuild the per-root index."""
@@ -171,8 +170,37 @@ class TestComponentVisibilityResolver:
         t1.parent.mkdir(parents=True, exist_ok=True)
         t1.write_text("z")
         t2.write_text("z")
-        res.resolve_visible(t1)
-        res.resolve_visible(t2)
+        assert "c" in res.resolve_visible(t1)
+        index_after_first = res._scope_index
+        version_after_first = res._scope_index_registry_version
+
+        assert "c" in res.resolve_visible(t2)
+        assert res._scope_index is index_after_first
+        assert res._scope_index_registry_version == version_after_first
+
+    def test_scope_index_rebuilt_after_registry_changes(self, tmp_path: Path) -> None:
+        """A registry mutation invalidates the scope index and the result caches."""
+        pages = tmp_path / "pages"
+        comp_dir = pages / "about" / "_components"
+        comp_dir.mkdir(parents=True)
+        (comp_dir / "c.djx").write_text("x")
+        reg = ComponentRegistry()
+        reg.register(
+            ComponentInfo("c", pages.resolve(), "about", comp_dir / "c.djx", None, True)
+        )
+        res = ComponentVisibilityResolver(reg)
+        tmpl = pages / "about" / "a.djx"
+        tmpl.write_text("z")
+        first = res.resolve_visible(tmpl)
+        index_after_first = res._scope_index
+        assert set(first) == {"c"}
+
+        reg.register(
+            ComponentInfo("d", pages.resolve(), "about", comp_dir / "d.djx", None, True)
+        )
+        second = res.resolve_visible(tmpl)
+        assert res._scope_index is not index_after_first
+        assert set(second) == {"c", "d"}
 
     def test_global_root_component_with_scope_relative_not_visible_far_away(
         self, tmp_path: Path

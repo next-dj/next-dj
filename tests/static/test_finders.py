@@ -244,7 +244,7 @@ class TestMappedSourceStorage:
 
 
 class TestCollectstaticIntegration:
-    """E2E: --dry-run must enumerate next-namespace assets."""
+    """``collectstatic --dry-run`` enumerates the next-namespace assets."""
 
     def test_finder_is_registered(self) -> None:
 

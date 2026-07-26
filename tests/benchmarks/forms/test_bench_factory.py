@@ -12,13 +12,13 @@ _REGISTRY_CONFIG = {"BACKEND": "next.forms.RegistryFormActionBackend"}
 class TestBenchFormActionFactory:
     @pytest.mark.benchmark(group="forms.factory")
     def test_create_backend_cached(self, benchmark) -> None:
-        """Warm cache: dotted path served from the framework import cache."""
+        """The dotted path is served from the framework import cache."""
         FormActionFactory.create_backend(_REGISTRY_CONFIG)
         benchmark(FormActionFactory.create_backend, _REGISTRY_CONFIG)
 
     @pytest.mark.benchmark(group="forms.factory")
     def test_create_backend_cold(self, benchmark) -> None:
-        """Cache-miss path: framework import cache cleared per round.
+        """The framework import cache is cleared on every round.
 
         `clear_import_cache()` only invalidates the per-framework dict
         cache. The underlying module already lives in `sys.modules`, so

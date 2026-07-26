@@ -5,8 +5,6 @@ Import from here when one module subscribes to several subsystems and prefers on
 import path.
 """
 
-from __future__ import annotations
-
 from next.components.signals import (
     component_backend_loaded,
     component_registered,

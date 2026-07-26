@@ -33,10 +33,6 @@ class _FirstTagAttrs(HTMLParser):
             self.tag = tag
             self.attrs = {k: ("" if v is None else v) for k, v in attrs}
 
-    def error(self, message: str) -> None:  # pragma: no cover
-        """Silence the (unused on Py3.10+) abstract error hook."""
-        return
-
 
 class _TextOnly(HTMLParser):
     """Collect text nodes, ignore tags and comments."""
@@ -49,10 +45,6 @@ class _TextOnly(HTMLParser):
     def handle_data(self, data: str) -> None:
         """Append text data chunks."""
         self.parts.append(data)
-
-    def error(self, message: str) -> None:  # pragma: no cover
-        """Silence the (unused on Py3.10+) abstract error hook."""
-        return
 
 
 def _first_tag_attrs(fragment: str) -> dict[str, str]:

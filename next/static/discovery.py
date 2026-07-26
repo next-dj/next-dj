@@ -110,8 +110,6 @@ class StemRegistry:
     `AppConfig.ready` to teach discovery about further filenames.
     """
 
-    DEFAULT_ROLES: tuple[str, ...] = ("template", "layout", "component")
-
     def __init__(self) -> None:
         """Seed the registry with the built-in template, layout, and component roles."""
         self._roles: dict[str, list[str]] = {
@@ -129,10 +127,6 @@ class StemRegistry:
     def stems(self, role: str) -> tuple[str, ...]:
         """Return registered stems for the role in registration order."""
         return tuple(self._roles.get(role, ()))
-
-    def roles(self) -> tuple[str, ...]:
-        """Return all registered roles in registration order."""
-        return tuple(self._roles)
 
 
 default_stems: StemRegistry = StemRegistry()
