@@ -1,8 +1,8 @@
 """URL routing, router backends, and URL parameter injection providers.
 
-`__all__` is the supported surface. Advanced callers reach the walk
-helpers and `_LazyUrlPatterns` through deep imports, which keeps the
-package namespace small.
+`_LazyUrlPatterns` and the tree-walk helpers stay out of `__all__` on
+purpose. They are wiring internals, and a caller that needs one imports
+it from the module that defines it.
 """
 
 from . import checks, signals

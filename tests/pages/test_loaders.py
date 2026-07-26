@@ -21,7 +21,7 @@ from tests.support import default_page_router_config, file_router_config_entry
 
 
 class TestPythonTemplateLoader:
-    """Test cases for Python template loader."""
+    """``PythonTemplateLoader`` reading a ``template`` attribute out of ``page.py``."""
 
     @pytest.mark.parametrize(
         ("file_content", "expected_can_load", "expected_load_result"),
@@ -40,7 +40,7 @@ class TestPythonTemplateLoader:
         expected_can_load,
         expected_load_result,
     ) -> None:
-        """Test can_load and load_template with different file contents."""
+        """Only a ``page.py`` defining ``template`` loads, a broken or bare one does not."""
         page_file = tmp_path / "page.py"
         page_file.write_text(file_content)
 
@@ -52,7 +52,7 @@ class TestPythonTemplateLoader:
 
 
 class TestDjxTemplateLoader:
-    """Test cases for DJX template loader."""
+    """``DjxTemplateLoader`` reading a sibling ``template.djx``."""
 
     @pytest.mark.parametrize(
         ("create_djx_file", "djx_content", "expected_result"),
@@ -74,7 +74,7 @@ class TestDjxTemplateLoader:
         djx_content,
         expected_result,
     ) -> None:
-        """Test loading of template.djx template with different scenarios."""
+        """A sibling ``template.djx`` loads verbatim, its absence yields ``None``."""
         page_file = tmp_path / "page.py"
         page_file.write_text('print("test")')
 
@@ -117,7 +117,7 @@ class TestDjxTemplateLoader:
         djx_content,
         expected_template,
     ) -> None:
-        """Test create_url_pattern with different template scenarios."""
+        """A ``template`` attribute wins over a sibling ``template.djx`` at render time."""
         page_file = tmp_path / "page.py"
         page_file.write_text(page_content)
 
@@ -136,7 +136,7 @@ class TestDjxTemplateLoader:
         assert expected_rendered in result
 
     def test_render_djx_template_with_context(self, page_instance, tmp_path) -> None:
-        """Test rendering template.djx template with context."""
+        """A ``template.djx`` body interpolates the keyword arguments passed to render."""
         page_file = tmp_path / "page.py"
         page_file.write_text('print("test")')
 
@@ -157,7 +157,7 @@ class TestDjxTemplateLoader:
     def test_render_djx_template_with_django_tags(
         self, page_instance, tmp_path
     ) -> None:
-        """Test rendering template.djx template with Django tags."""
+        """Django ``if`` and ``for`` tags inside ``template.djx`` execute normally."""
         page_file = tmp_path / "page.py"
         page_file.write_text('print("test")')
 
@@ -192,7 +192,7 @@ class TestDjxTemplateLoader:
         assert "<li>" in result
 
     def test_djx_template_with_context_functions(self, page_instance, tmp_path) -> None:
-        """Test template.djx template with context functions."""
+        """A registered ``@context`` key resolves inside a ``template.djx`` body."""
         page_file = tmp_path / "page.py"
         page_file.write_text("""
 from next.pages import context
@@ -231,7 +231,7 @@ def get_landing_data(*args, **kwargs):
 
 
 class TestLayoutTemplateLoader:
-    """Test cases for LayoutTemplateLoader."""
+    """``LayoutTemplateLoader`` discovering and composing the ``layout.djx`` chain."""
 
     @pytest.mark.parametrize(
         ("create_layout", "create_template", "expected_can_load"),
@@ -246,7 +246,7 @@ class TestLayoutTemplateLoader:
     def test_can_load_with_layout_files(
         self, tmp_path, create_layout, create_template, expected_can_load
     ) -> None:
-        """Test can_load with different layout and template combinations."""
+        """An ancestor ``layout.djx`` alone makes the page loadable, a lone template does not."""
         loader = LayoutTemplateLoader()
 
         sub_dir = tmp_path / "sub" / "nested"
@@ -268,7 +268,7 @@ class TestLayoutTemplateLoader:
         assert result is expected_can_load
 
     def test_get_additional_layout_files_with_next_pages_config(self, tmp_path) -> None:
-        """Test _get_additional_layout_files with ``NEXT['PAGES']['ROUTERS']``."""
+        """Layout roots configured on a page backend contribute their ``layout.djx``."""
         loader = LayoutTemplateLoader()
 
         layout_file = tmp_path / "layout.djx"
@@ -311,7 +311,7 @@ class TestLayoutTemplateLoader:
     def test_get_additional_layout_files_scenarios(
         self, tmp_path, test_case, config, expected_result
     ) -> None:
-        """Test _get_additional_layout_files with different configuration scenarios."""
+        """A malformed entry or a missing directory contributes no layout files."""
         loader = LayoutTemplateLoader()
 
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": config}):
@@ -336,7 +336,7 @@ class TestLayoutTemplateLoader:
     def test_get_pages_dirs_for_config_scenarios(
         self, tmp_path, test_case, config, expected_list
     ) -> None:
-        """Test _get_pages_dirs_for_config with different configuration scenarios."""
+        """Only existing ``DIRS`` paths become page roots, ``APP_DIRS`` alone yields none."""
         loader = LayoutTemplateLoader()
 
         if test_case == "with_pages_dir":
@@ -410,7 +410,7 @@ class TestLayoutTemplateLoader:
         template_content,
         expected_result,
     ) -> None:
-        """Test _wrap_in_template_block with different file scenarios."""
+        """A body is wrapped in a ``template`` block only when no local layout owns it."""
         loader = LayoutTemplateLoader()
 
         if create_layout:
@@ -429,7 +429,7 @@ class TestLayoutTemplateLoader:
     def test_find_layout_files_with_duplicate_additional_layouts(
         self, tmp_path
     ) -> None:
-        """Test _find_layout_files when additional layouts are already in local hierarchy."""
+        """A configured root that repeats the local layout is not counted twice."""
         loader = LayoutTemplateLoader()
 
         layout_file = tmp_path / "layout.djx"
@@ -451,7 +451,7 @@ class TestLayoutTemplateLoader:
         assert layout_file in result
 
     def test_get_additional_layout_files_with_duplicate_layouts(self, tmp_path) -> None:
-        """Test _get_additional_layout_files with duplicate layout files."""
+        """Two backends pointing at one root yield that root's layout once."""
         loader = LayoutTemplateLoader()
 
         layout_file = tmp_path / "layout.djx"
@@ -471,7 +471,7 @@ class TestLayoutTemplateLoader:
     def test_find_layout_files_with_additional_layouts_already_present(
         self, tmp_path
     ) -> None:
-        """Test _find_layout_files when additional layouts are already in layout_files."""
+        """A configured root above the page adds nothing the local walk already found."""
         loader = LayoutTemplateLoader()
 
         parent_dir = tmp_path / "parent"
@@ -499,7 +499,7 @@ class TestLayoutTemplateLoader:
     def test_find_layout_files_with_different_additional_layouts(
         self, tmp_path
     ) -> None:
-        """Test _find_layout_files when additional layouts are different from local ones."""
+        """A configured root outside the page hierarchy adds its own layout to the chain."""
         loader = LayoutTemplateLoader()
 
         local_layout = tmp_path / "layout.djx"
@@ -527,7 +527,7 @@ class TestLayoutTemplateLoader:
         assert additional_layout in result
 
     def test_load_template_with_single_layout(self, tmp_path) -> None:
-        """Test load_template with single layout file."""
+        """One ancestor layout wraps the body and keeps its ``template`` block."""
         loader = LayoutTemplateLoader()
 
         layout_file = tmp_path / "layout.djx"
@@ -552,7 +552,7 @@ class TestLayoutTemplateLoader:
         assert "{% block template %}" in result
 
     def test_load_template_with_multiple_layouts(self, tmp_path) -> None:
-        """Test load_template with multiple layout files in hierarchy."""
+        """Nested layouts compose outermost first, with the body innermost."""
         loader = LayoutTemplateLoader()
 
         root_layout = tmp_path / "layout.djx"
@@ -583,7 +583,7 @@ class TestLayoutTemplateLoader:
         assert "{% block template %}" in result
 
     def test_load_template_without_template_djx(self, tmp_path) -> None:
-        """Test load_template when template.djx doesn't exist."""
+        """A layout with no body behind it composes to an empty ``template`` block."""
         loader = LayoutTemplateLoader()
 
         layout_file = tmp_path / "layout.djx"
@@ -616,7 +616,7 @@ class TestLayoutTemplateLoader:
         assert "{% block template %}{% endblock template %}" in result
 
     def test_find_layout_files(self, tmp_path) -> None:
-        """Test _find_layout_files method."""
+        """The walk collects every ``layout.djx`` from the page up to the tree root."""
         loader = LayoutTemplateLoader()
 
         sub_dir = tmp_path / "sub" / "nested"
@@ -637,7 +637,7 @@ class TestLayoutTemplateLoader:
         assert root_layout in layout_files
 
     def test_compose_layout_hierarchy_exception_handling(self, tmp_path) -> None:
-        """Test _compose_layout_hierarchy handles exceptions gracefully."""
+        """A layout that cannot be read leaves the body unwrapped instead of raising."""
         loader = LayoutTemplateLoader()
 
         layout_file = tmp_path / "layout.djx"
@@ -651,7 +651,7 @@ class TestLayoutTemplateLoader:
             assert result == "test content"
 
     def test_load_template_no_layout_files(self, tmp_path) -> None:
-        """Test load_template when no layout files exist."""
+        """A page with no layout above it yields ``None``."""
         loader = LayoutTemplateLoader()
 
         page_file = tmp_path / "page.py"
@@ -662,10 +662,10 @@ class TestLayoutTemplateLoader:
 
 
 class TestContextProcessors:
-    """Test context_processors functionality."""
+    """Resolving context processors from page backends and from ``TEMPLATES``."""
 
     def test_get_context_processors_empty_config(self, page_instance) -> None:
-        """Test _get_context_processors with empty ``ROUTERS`` list."""
+        """No backends and no ``TEMPLATES`` resolve to no processors."""
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": []}, TEMPLATES=[]):
             next_framework_settings.reload()
             processors = _get_context_processors()
@@ -682,7 +682,7 @@ class TestContextProcessors:
             assert processors == []
 
     def test_get_context_processors_no_context_processors(self, page_instance) -> None:
-        """Test _get_context_processors with routers but no context_processors."""
+        """A backend that declares no processors contributes none."""
         config = [file_router_config_entry(app_dirs=True)]
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": config}, TEMPLATES=[]):
             next_framework_settings.reload()
@@ -692,7 +692,7 @@ class TestContextProcessors:
     def test_get_context_processors_inherits_from_templates(
         self, page_instance
     ) -> None:
-        """Test _get_context_processors inherits from TEMPLATES when routers omit processors."""
+        """A backend silent on processors falls back to the ``TEMPLATES`` list."""
 
         def test_processor(request):
             return {"test_var": "test_value"}
@@ -826,7 +826,7 @@ class TestContextProcessors:
             assert result == []
 
     def test_get_context_processors_with_valid_processors(self, page_instance) -> None:
-        """Test _get_context_processors with valid context processors."""
+        """Declared processors are imported and kept in declaration order."""
 
         def test_processor(request):
             return {"test_var": "test_value"}
@@ -859,7 +859,7 @@ class TestContextProcessors:
                 assert processors[1] == another_processor
 
     def test_get_context_processors_with_invalid_processor(self, page_instance) -> None:
-        """Test _get_context_processors with invalid processor path."""
+        """An unimportable path is warned about and dropped, the rest still load."""
         config = [
             file_router_config_entry(
                 app_dirs=True,
@@ -890,7 +890,7 @@ class TestContextProcessors:
             mock_warning.assert_called_once()
 
     def test_import_context_processor_non_callable(self, page_instance) -> None:
-        """Test _import_context_processor with non-callable import."""
+        """A dotted path resolving to a non-callable yields ``None``."""
         with patch("next.pages.processors.import_string") as mock_import:
             mock_import.return_value = "not a callable"
 
@@ -898,7 +898,7 @@ class TestContextProcessors:
             assert processor is None
 
     def test_render_with_context_processors(self, page_instance, tmp_path) -> None:
-        """Test render method with context_processors."""
+        """Processor output reaches the template alongside the render keyword arguments."""
         page_file = tmp_path / "page.py"
         template_str = "<h1>{{ title }}</h1><p>{{ request_var }}</p>"
         page_instance.register_template(page_file, template_str)
@@ -918,7 +918,7 @@ class TestContextProcessors:
             assert "from_processor" in result
 
     def test_render_without_request_object(self, page_instance, tmp_path) -> None:
-        """Test render method without request object (should use regular Context)."""
+        """Without a request the processors never run."""
         page_file = tmp_path / "page.py"
         template_str = "<h1>{{ title }}</h1>"
         page_instance.register_template(page_file, template_str)
@@ -935,7 +935,7 @@ class TestContextProcessors:
             assert "from_processor" not in result
 
     def test_render_without_context_processors(self, page_instance, tmp_path) -> None:
-        """Test render method without context_processors (should use regular Context)."""
+        """An empty processor list renders through a plain context."""
         page_file = tmp_path / "page.py"
         template_str = "<h1>{{ title }}</h1>"
         page_instance.register_template(page_file, template_str)
@@ -949,7 +949,7 @@ class TestContextProcessors:
             assert result == "<h1>Test Title</h1>"
 
     def test_render_with_context_processor_error(self, page_instance, tmp_path) -> None:
-        """Test render method with context processor that raises an exception."""
+        """A raising processor is warned about and skipped, later ones still apply."""
         page_file = tmp_path / "page.py"
         template_str = "<h1>{{ title }}</h1><p>{{ good_var }}</p>"
         page_instance.register_template(page_file, template_str)
@@ -1004,7 +1004,7 @@ class TestContextProcessors:
     def test_render_with_context_processor_non_dict_return(
         self, page_instance, tmp_path
     ) -> None:
-        """Test render method with context processor that returns non-dict."""
+        """A processor returning a non-mapping is ignored, later ones still apply."""
         page_file = tmp_path / "page.py"
         template_str = "<h1>{{ title }}</h1><p>{{ good_var }}</p>"
         page_instance.register_template(page_file, template_str)
@@ -1100,7 +1100,7 @@ class TestBuildRegisteredLoaders:
             "TEMPLATE_LOADERS": [
                 123,
                 "does.not.exist.Loader",
-                "next.pages.loaders.LayoutManager",
+                "next.pages.registry.PageContextRegistry",
                 "next.pages.loaders.DjxTemplateLoader",
             ]
         }

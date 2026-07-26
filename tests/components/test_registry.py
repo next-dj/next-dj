@@ -150,8 +150,6 @@ class TestComponentVisibilityResolver:
         (pages / "_components" / "c.djx").write_text("y")
         res = ComponentVisibilityResolver(reg)
         r1 = res.resolve_visible(tmpl)
-        assert (tmpl.resolve(), pages.resolve()) in res._path_cache
-        assert res._resolved_path_cache[tmpl] == tmpl.resolve()
         r2 = res.resolve_visible(tmpl)
         assert r2 is r1
         assert r1["c"].name == "c"

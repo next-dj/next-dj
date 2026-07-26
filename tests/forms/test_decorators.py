@@ -232,7 +232,7 @@ class TestActionDecoratorFormClass:
 
 
 class TestBaseFormGetInitial:
-    """BaseForm.get_initial: default implementation and override."""
+    """``BaseForm.get_initial`` in its default form and when a subclass overrides it."""
 
     def test_get_initial_returns_empty_dict_by_default(self) -> None:
         """Default get_initial returns empty dict."""

@@ -1,4 +1,3 @@
-import copy
 from collections.abc import Generator
 from pathlib import Path
 
@@ -39,17 +38,14 @@ _PARTIAL_MODULES = (
 def _partial_form_registries():
     """Register the partial-suite forms and restore the clean baseline after.
 
-    The registries are copied before the partial modules load, so the teardown
+    The snapshot is taken before the partial modules load, so the teardown
     drops every action and provider they registered. A later forms suite
     then sees the registry exactly as it was, not the partial fixtures.
     Re-execution each test is idempotent because registration keys on the
     file path.
     """
     backend = form_action_manager.default_backend
-    registry_snapshot = copy.deepcopy(backend._registry)
-    uid_snapshot = copy.deepcopy(backend._uid_to_name)
-    name_index_snapshot = copy.deepcopy(backend._name_index)
-    url_cache_snapshot = copy.deepcopy(backend._url_cache)
+    backend_snapshot = backend.snapshot()
     diagnostics_snapshot = registration_diagnostics.snapshot()
 
     wizard_backend_manager.reset()
@@ -60,15 +56,7 @@ def _partial_form_registries():
 
     yield
 
-    backend._registry.clear()
-    backend._registry.update(registry_snapshot)
-    backend._uid_to_name.clear()
-    backend._uid_to_name.update(uid_snapshot)
-    backend._name_index.clear()
-    backend._name_index.update(name_index_snapshot)
-    backend._url_cache.clear()
-    backend._url_cache.update(url_cache_snapshot)
-
+    backend.restore(backend_snapshot)
     registration_diagnostics.restore(diagnostics_snapshot)
 
     wizard_backend_manager.reset()

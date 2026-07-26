@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from next.pages import Page
-from next.pages.loaders import DjxTemplateLoader, LayoutManager, PythonTemplateLoader
+from next.pages.loaders import DjxTemplateLoader, PythonTemplateLoader
 from next.pages.registry import PageContextRegistry
 from next.pages.signals import context_registered, page_rendered, template_loaded
 from next.urls import URLPatternParser
@@ -41,12 +41,6 @@ def djx_template_loader():
 def context_manager():
     """Create a PageContextRegistry instance for testing."""
     return PageContextRegistry(None)
-
-
-@pytest.fixture()
-def layout_manager():
-    """Create a LayoutManager instance for testing."""
-    return LayoutManager()
 
 
 @pytest.fixture()

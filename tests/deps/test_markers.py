@@ -106,7 +106,7 @@ class TestRegisterDependency:
     def test_depends_provider_resolve_returns_none_when_default_not_depends(
         self,
     ) -> None:
-        """Defensive: DependsProvider.resolve returns None when default isn't Depends."""
+        """``DependsProvider.resolve`` yields ``None`` for a non-``Depends`` default."""
         provider = DependsProvider(DependencyResolver())
         param = inspect_parameter("x", int, default=123)
         ctx = _ctx()

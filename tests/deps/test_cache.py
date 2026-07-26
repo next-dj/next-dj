@@ -98,8 +98,8 @@ class TestCallableDependencyCache:
         def view(value: str = Depends("flaky")) -> str:
             return value
 
-        # The shared DependencyCache instance also shares the in-progress set,
-        # which a dict-backed cache would not.
+        # One DependencyCache instance carries the in-progress set across both
+        # resolves, which a plain dict-backed cache would not.
         cache = DependencyCache()
         with pytest.raises(RuntimeError):
             r.resolve_dependencies(view, _cache=cache)

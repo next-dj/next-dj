@@ -45,8 +45,12 @@ class FileComponentsBackend(ComponentsBackend):
     """Load components from `DIRS` and from the filesystem walk in `next.urls`."""
 
     def __init__(self, config: dict[str, Any]) -> None:
-        """Build registry and scanner from merged `COMPONENTS_DIR` and `DIRS`."""
-        self.components_dir = str(config["COMPONENTS_DIR"])
+        """Build registry and scanner from the merged `DIRS` roots.
+
+        `COMPONENTS_DIR` is not read here. It names the folder the URL
+        router skips inside a page tree, and `FileRouterBackend` reads it
+        straight from the settings.
+        """
         self._extra_component_roots = component_extra_roots_from_config(config)
 
         self._registry = ComponentRegistry()

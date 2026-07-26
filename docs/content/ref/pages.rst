@@ -70,14 +70,11 @@ It runs on a dedicated path and is not registered through ``TEMPLATE_LOADERS``.
 .. autoclass:: next.pages.loaders.LayoutTemplateLoader
    :members:
 
-``LayoutManager`` holds the ``LayoutTemplateLoader`` instance the page manager composes bodies through.
-It keeps no cache of its own.
-Composition results live on ``Page`` instead, where ``composed_template_for`` stores the composed source alongside the compiled ``Template``, so a warm render reads no files and parses nothing.
-Both layers are dropped together once a ``template.djx`` or ``layout.djx`` behind the page changes on disk.
-A page whose body comes from ``render()`` bypasses that cache and recomposes the layout chain on every request.
-
-.. autoclass:: next.pages.loaders.LayoutManager
-   :members:
+``LayoutTemplateLoader`` keeps no cache of its own.
+Composition results live on ``Page``, where ``composed_template_for`` stores the composed source alongside the compiled ``Template``, so a warm render parses nothing and opens no template file.
+It still stats every source file behind the page to detect a change.
+Both layers are dropped together once a ``template.djx`` or ``layout.djx`` changes on disk.
+A page whose body comes from a module-level ``render()`` in ``page.py`` bypasses that cache and recomposes the layout chain on every request.
 
 Processors
 ~~~~~~~~~~

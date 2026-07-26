@@ -301,14 +301,6 @@ class LayoutTemplateLoader(TemplateLoader):
         return result
 
 
-class LayoutManager:
-    """Hold the layout template loader used to compose page bodies."""
-
-    def __init__(self) -> None:
-        """Instantiate the layout loader."""
-        self._layout_loader = LayoutTemplateLoader()
-
-
 # A single-slot holder mutated in place so cache invalidation never rebinds a
 # module global, which keeps the reset and read paths free of `global`.
 _REGISTERED_LOADERS_CACHE: dict[str, list[TemplateLoader] | None] = {"value": None}

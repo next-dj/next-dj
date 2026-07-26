@@ -12,10 +12,10 @@ from tests.support import inspect_parameter
 
 
 class TestPageContextRegistry:
-    """Test cases for PageContextRegistry."""
+    """``PageContextRegistry`` storing and collecting ``@context`` functions."""
 
     def test_init(self, context_manager) -> None:
-        """Test PageContextRegistry initialization."""
+        """A fresh registry holds no entries."""
         assert context_manager._context_registry == {}
 
     def test_get_resolver_returns_injected_resolver(self) -> None:
@@ -39,7 +39,7 @@ class TestPageContextRegistry:
     def test_register_and_collect_context(
         self, context_manager, test_file_path, key, func_return, expected_result
     ) -> None:
-        """Test registering and collecting context with different key types."""
+        """A keyed function fills its key, a keyless one merges its dict."""
         context_manager.register_context(test_file_path, key, func_return)
 
         assert test_file_path in context_manager._context_registry
@@ -55,7 +55,7 @@ class TestPageContextRegistry:
     def test_collect_context_multiple_functions(
         self, context_manager, test_file_path
     ) -> None:
-        """Test collecting context with multiple functions."""
+        """Keyed and keyless functions on one file merge into a single mapping."""
 
         def func1() -> str:
             return "value1"
@@ -116,7 +116,7 @@ class TestPageContextRegistry:
     def test_collect_context_no_functions(
         self, context_manager, test_file_path
     ) -> None:
-        """Test collecting context when no functions are registered."""
+        """A file with no registrations collects an empty context."""
         result = context_manager.collect_context(test_file_path)
 
         assert result.context_data == {}
@@ -125,7 +125,7 @@ class TestPageContextRegistry:
     def test_register_context_with_inherit_context(
         self, context_manager, test_file_path
     ) -> None:
-        """Test registering context with inherit_context=True."""
+        """``inherit_context`` is recorded on the entry at registration time."""
 
         def test_func() -> str:
             return "inherited_value"
@@ -142,7 +142,7 @@ class TestPageContextRegistry:
         assert entry.serialize is False
 
     def test_collect_inherited_context(self, context_manager, tmp_path) -> None:
-        """Test collecting inherited context from layout directories."""
+        """A child page picks up an inheritable value from the layout directory above it."""
         layout_dir = tmp_path / "layout_dir"
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
@@ -190,7 +190,7 @@ class TestPageContextRegistry:
     def test_collect_inherited_context_multiple_levels(
         self, context_manager, tmp_path
     ) -> None:
-        """Test collecting inherited context from multiple layout levels."""
+        """Inheritable values accumulate down every layout level on the way to the page."""
         root_dir = tmp_path / "root"
         root_dir.mkdir()
         root_layout = root_dir / "layout.djx"
@@ -234,7 +234,7 @@ class TestPageContextRegistry:
     def test_collect_inherited_context_no_layout(
         self, context_manager, tmp_path
     ) -> None:
-        """Test collecting context when no layout files exist."""
+        """With no layout above it a page inherits nothing."""
         page_file = tmp_path / "page.py"
         result = context_manager.collect_context(page_file)
         assert result.context_data == {}
@@ -242,7 +242,7 @@ class TestPageContextRegistry:
     def test_collect_inherited_context_no_page_py(
         self, context_manager, tmp_path
     ) -> None:
-        """Test collecting context when layout.djx exists but no page.py."""
+        """A layout directory without ``page.py`` contributes no inherited context."""
         layout_dir = tmp_path / "layout_dir"
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
@@ -291,7 +291,7 @@ class TestPageContextRegistry:
     def test_collect_inherited_context_inherit_false(
         self, context_manager, tmp_path
     ) -> None:
-        """Test that context with inherit_context=False is not inherited."""
+        """A value registered without ``inherit_context`` stays in its own directory."""
         layout_dir = tmp_path / "layout_dir"
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
@@ -320,7 +320,7 @@ class TestPageContextRegistry:
     def test_collect_inherited_context_dict_return(
         self, context_manager, tmp_path
     ) -> None:
-        """Test collecting inherited context with dict return (key=None)."""
+        """A keyless inheritable function merges its whole dict into the child."""
         layout_dir = tmp_path / "layout_dir"
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
@@ -485,7 +485,7 @@ class TestContextMarker:
     def test_context_provider_resolve_returns_none_when_default_not_context(
         self,
     ) -> None:
-        """Defensive: ContextByDefaultProvider.resolve returns None when default isn't Context."""
+        """``ContextByDefaultProvider.resolve`` yields ``None`` for a non-``Context`` default."""
         provider = ContextByDefaultProvider(DependencyResolver())
         param = inspect_parameter("x", int, default=123)
         ctx = MagicMock()
@@ -633,7 +633,7 @@ class TestPageContextRegistrySerializerOverride:
         assert result.js_context_serializers == {}
 
     def test_render_routes_override_key_through_marker(self, tmp_path) -> None:
-        """End-to-end: the override serializer encodes its key in the init script."""
+        """A render carries the override serializer's key through to the init script."""
         marker = self._MarkerSerializer()
         page_inst = Page()
         path = tmp_path / "page.py"

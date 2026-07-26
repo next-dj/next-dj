@@ -21,18 +21,18 @@ _WRONG_SUBCLASS = {"FORM_ACTION_BACKENDS": [{"BACKEND": "django.http.HttpRespons
 class TestBenchFormActionBackendsCheck:
     @pytest.mark.benchmark(group="forms.checks")
     def test_check_clean(self, benchmark) -> None:
-        """Happy path: two valid entries that import cleanly."""
+        """Two valid entries that import cleanly."""
         with override_settings(NEXT_FRAMEWORK=_VALID_TWO_ENTRY):
             benchmark(check_form_action_backends_configuration)
 
     @pytest.mark.benchmark(group="forms.checks")
     def test_check_e044_unimportable(self, benchmark) -> None:
-        """E044 path: dotted path raises ``ImportError``."""
+        """An unimportable dotted path raises ``ImportError``."""
         with override_settings(NEXT_FRAMEWORK=_INVALID_BACKEND_PATH):
             benchmark(check_form_action_backends_configuration)
 
     @pytest.mark.benchmark(group="forms.checks")
     def test_check_e045_wrong_subclass(self, benchmark) -> None:
-        """E045 path: imported class is not a `FormActionBackend`."""
+        """An imported class that is not a `FormActionBackend` raises E045."""
         with override_settings(NEXT_FRAMEWORK=_WRONG_SUBCLASS):
             benchmark(check_form_action_backends_configuration)

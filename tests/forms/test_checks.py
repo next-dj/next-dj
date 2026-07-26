@@ -112,7 +112,7 @@ class TestFormActionCollisions:
         assert callable(record_possible_collision)
 
     def test_first_registration_records_no_collision(self) -> None:
-        """Common case: a name registered once never touches the collision map."""
+        """A name registered once never touches the collision map."""
         backend = RegistryFormActionBackend()
         backend.register_action(
             ActionRegistration(

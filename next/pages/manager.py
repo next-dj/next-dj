@@ -25,7 +25,11 @@ from next.conf import next_framework_settings
 from next.deps import DependencyResolver, resolver
 from next.utils import caller_source_path
 
-from .loaders import LayoutManager, _load_python_module_memo, build_registered_loaders
+from .loaders import (
+    LayoutTemplateLoader,
+    _load_python_module_memo,
+    build_registered_loaders,
+)
 from .processors import _get_context_processors
 from .registry import PageContextRegistry
 from .signals import page_rendered, template_loaded
@@ -77,7 +81,7 @@ class Page:
     """Coordinate template loading, context, layouts, rendering, and URL wiring."""
 
     def __init__(self) -> None:
-        """Initialise fresh registries and layout manager.
+        """Initialise fresh registries and the layout loader.
 
         File-based template loaders are not held as an instance
         attribute. The module-level `build_registered_loaders()` helper
@@ -87,7 +91,7 @@ class Page:
         self._compiled_registry: dict[Path, Template] = {}
         self._template_source_mtimes: dict[Path, dict[Path, float]] = {}
         self._context_manager = PageContextRegistry(None)
-        self._layout_manager = LayoutManager()
+        self._layout_loader = LayoutTemplateLoader()
 
     def _get_resolver(self) -> DependencyResolver:
         """Return the shared `resolver` singleton."""
@@ -365,7 +369,7 @@ class Page:
         produced by `render()` do not poison the cache.
         """
         start = time.perf_counter()
-        composed = self._layout_manager._layout_loader.compose_body(body, file_path)
+        composed = self._layout_loader.compose_body(body, file_path)
         return self._render_template_str(file_path, composed, start, request, **kwargs)
 
     def composed_template_for(self, file_path: Path) -> Template:
@@ -383,7 +387,7 @@ class Page:
             self._template_source_mtimes.pop(file_path, None)
             module = _load_python_module_memo(file_path)
             body = self._load_static_body(file_path, module)
-            composed = self._layout_manager._layout_loader.compose_body(body, file_path)
+            composed = self._layout_loader.compose_body(body, file_path)
             self.register_template(file_path, composed)
             self._record_template_source_mtimes(file_path)
         compiled = self._compiled_registry.get(file_path)
@@ -474,7 +478,7 @@ class Page:
         self, file_path: Path, module: types.ModuleType | None = None
     ) -> bool:
         """Return whether any source can supply a template for this path."""
-        if self._layout_manager._layout_loader.can_load(file_path):
+        if self._layout_loader.can_load(file_path):
             return True
         if module is not None and hasattr(module, "template"):
             return True
@@ -487,7 +491,7 @@ class Page:
             source = loader.source_path(file_path)
             if source is not None:
                 loader_paths.append(source)
-        layout_files = self._layout_manager._layout_loader._find_layout_files(file_path)
+        layout_files = self._layout_loader._find_layout_files(file_path)
         return loader_paths + (layout_files or [])
 
     def _record_template_source_mtimes(self, file_path: Path) -> None:
@@ -563,7 +567,7 @@ class Page:
                 return True
         if any(loader.can_load(file_path) for loader in build_registered_loaders()):
             return True
-        return self._layout_manager._layout_loader.can_load(file_path)
+        return self._layout_loader.can_load(file_path)
 
     def create_url_pattern(
         self, url_path: str, file_path: Path, url_parser: URLPatternParser

@@ -87,7 +87,9 @@ class TestDefaultStems:
         assert isinstance(default_stems, StemRegistry)
 
     def test_preserves_core_roles(self) -> None:
-        assert "template" in default_stems.stems("template")
+        assert default_stems.stems("template") == ("template",)
+        assert default_stems.stems("layout") == ("layout",)
+        assert default_stems.stems("component") == ("component",)
 
 
 class TestPathResolverFindPageRoot:

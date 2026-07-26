@@ -1,8 +1,8 @@
 """System checks for next-dj template engine wiring.
 
 The next-dj tags install only into a `DjangoTemplates` backend and only
-through the explicit builtin tuple, so both conditions are worth a
-warning rather than a silent missing tag at render time.
+through the explicit builtin tuple. A project missing either one gets a
+warning here instead of a missing-tag error at render time.
 """
 
 from __future__ import annotations

@@ -21,7 +21,12 @@ from next.forms import (
     FormActionNotFoundError,
     RegistryFormActionBackend,
 )
-from next.forms.backends import FormActionFactory, file_to_dotted_module, scope_key_for
+from next.forms.backends import (
+    FormActionFactory,
+    RegistryBackendSnapshot,
+    file_to_dotted_module,
+    scope_key_for,
+)
 from next.forms.manager import FormActionManager, form_action_manager
 
 
@@ -145,7 +150,7 @@ class TestFormActionNotFoundError:
 
 
 class TestFormActionManager:
-    """FormActionManager: get_action_url, default_backend, __iter__."""
+    """``FormActionManager`` reverse URLs, its default backend, and iteration."""
 
     def test_get_action_url_returns_url(self) -> None:
         """Return URL for known action."""
@@ -1105,3 +1110,44 @@ class TestSharedScopeKeysAcrossApps:
         ]
         uids = {meta["uid"] for meta in backend._registry.values()}
         assert len(uids) == 2
+
+
+def _register(backend: RegistryFormActionBackend, name: str) -> None:
+    def handler() -> None:
+        pass
+
+    backend.register_action(
+        ActionRegistration(
+            name=name, file_path=_FAKE_FILE, scope="shared", handler=handler
+        )
+    )
+
+
+class TestRegistryBackendSnapshotRestore:
+    """`snapshot`/`restore` roll the action maps back without private access."""
+
+    def test_restore_drops_actions_registered_after_the_snapshot(self) -> None:
+        backend = RegistryFormActionBackend()
+        _register(backend, "kept")
+        saved = backend.snapshot()
+        _register(backend, "extra")
+        assert backend.get_meta("extra") is not None
+        backend.restore(saved)
+        assert backend.get_meta("extra") is None
+        assert backend.get_meta("kept") is not None
+
+    def test_snapshot_is_a_value_object_copy(self) -> None:
+        backend = RegistryFormActionBackend()
+        _register(backend, "kept")
+        saved = backend.snapshot()
+        assert isinstance(saved, RegistryBackendSnapshot)
+        _register(backend, "extra")
+        assert "extra" not in {name for _, name in saved.name_index.values()}
+
+    def test_restore_resets_the_reverse_url_cache(self) -> None:
+        backend = RegistryFormActionBackend()
+        _register(backend, "kept")
+        saved = backend.snapshot()
+        _register(backend, "extra")
+        backend.restore(saved)
+        assert backend._url_cache == {}

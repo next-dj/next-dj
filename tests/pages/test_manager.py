@@ -11,7 +11,6 @@ import next.pages.loaders as loaders_module
 from next.checks import _load_python_module
 from next.pages import Page, context, page
 from next.pages.loaders import (
-    LayoutManager,
     LayoutTemplateLoader,
     TemplateLoader,
     _load_python_module_memo,
@@ -23,16 +22,16 @@ from tests.support import patch_checks_router_manager
 
 
 class TestPage:
-    """Test cases for Page class."""
+    """Registration, context collection, and rendering on a fresh ``Page``."""
 
     def test_init(self, page_instance) -> None:
-        """Test Page initialization."""
+        """A fresh ``Page`` starts with empty registries and its own layout loader."""
         assert page_instance._template_registry == {}
         assert isinstance(page_instance._context_manager, PageContextRegistry)
-        assert isinstance(page_instance._layout_manager, LayoutManager)
+        assert isinstance(page_instance._layout_loader, LayoutTemplateLoader)
 
     def test_register_template_direct(self, page_instance) -> None:
-        """Test register_template method with direct file path."""
+        """``register_template`` stores the source under the exact path it was given."""
         file_path = Path("/test/path/page.py")
         template_str = "Hello {{ name }}!"
 
@@ -59,7 +58,7 @@ class TestPage:
         expected_key,
         frame_chain,
     ) -> None:
-        """Test context decorator with different variations."""
+        """``@context`` keys on the caller file whether or not a key and parentheses are given."""
         frame = mock_frame.return_value
         for attr in frame_chain.split("."):
             frame = getattr(frame, attr)
@@ -95,7 +94,7 @@ class TestPage:
     def test_context_decorator_with_inherit_context(
         self, page_instance, context_temp_file, mock_frame
     ) -> None:
-        """Test context decorator with inherit_context=True."""
+        """A keyed ``@context`` records ``inherit_context`` on the registry entry."""
         mock_frame.return_value.f_back.f_globals = {"__file__": str(context_temp_file)}
 
         @page_instance.context("inherited_key", inherit_context=True)
@@ -117,7 +116,7 @@ class TestPage:
     def test_context_decorator_without_key_inherit_context(
         self, page_instance, context_temp_file, mock_frame
     ) -> None:
-        """Test context decorator without key but with inherit_context=True."""
+        """A dict-merge ``@context`` registers under the ``None`` key and keeps inheritance."""
         mock_frame.return_value.f_back.f_back.f_globals = {
             "__file__": str(context_temp_file)
         }
@@ -201,7 +200,7 @@ class TestPage:
         render_kwargs,
         expected,
     ) -> None:
-        """Test various render scenarios with parametrized test cases."""
+        """``render`` merges registered context functions with the caller keyword arguments."""
         page_instance.register_template(test_file_path, template_str)
 
         if context_setup:
@@ -215,7 +214,7 @@ class TestPage:
         assert result == expected
 
     def test_render_with_multiple_files(self, page_instance) -> None:
-        """Test render method with multiple files having different templates and contexts."""
+        """Two page paths keep separate templates and context, with no cross-talk."""
         file1 = Path("/test/path/page1.py")
         template1 = "Page 1: {{ title }}"
         page_instance.register_template(file1, template1)
@@ -237,7 +236,7 @@ class TestPage:
         assert result2 == "Page 2: Second Page"
 
     def test_render_with_inherited_context(self, page_instance, tmp_path) -> None:
-        """Test render method with inherited context from layout directories."""
+        """A child page reads a parent ``page.py`` value marked ``inherit_context``."""
         layout_dir = tmp_path / "layout_dir"
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
@@ -269,7 +268,7 @@ class TestPage:
     def test_render_with_inherited_context_override(
         self, page_instance, tmp_path
     ) -> None:
-        """Test that child page context overrides inherited context."""
+        """A child page value shadows the inherited one under the same key."""
         layout_dir = tmp_path / "layout_dir"
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
@@ -308,7 +307,7 @@ class TestPage:
     def test_context_registry_defaultdict_behavior(
         self, page_instance, test_file_path
     ) -> None:
-        """Test that context registry uses defaultdict-like behavior."""
+        """Registering a key creates the per-file entry without pre-seeding it."""
         page_instance._context_manager.register_context(
             test_file_path, "test_key", lambda: "test_value"
         )
@@ -527,7 +526,7 @@ class TestComposedTemplateCache:
 
 
 class TestGlobalPageInstance:
-    """Test cases for global page instance."""
+    """The module-level ``page`` singleton and its ``context`` alias."""
 
     @pytest.fixture(autouse=True)
     def clear_global_state(self):
@@ -553,18 +552,18 @@ class TestGlobalPageInstance:
         page._context_manager._context_registry.update(context_snapshot)
 
     def test_global_page_instance(self) -> None:
-        """Test that global page instance is properly initialized."""
+        """The exported ``page`` is a ``Page`` carrying the same registries."""
         assert page is not None
         assert isinstance(page, Page)
         assert page._template_registry == {}
         assert page._context_manager._context_registry == {}
 
     def test_context_alias(self) -> None:
-        """Test that context alias points to page.context."""
+        """The exported ``context`` is the singleton's own bound decorator."""
         assert context == page.context
 
     def test_global_page_template_registration(self, global_file_path) -> None:
-        """Test template registration using global page instance."""
+        """A template registered on the singleton lands in its registry."""
         template_str = "Global template: {{ message }}"
         page.register_template(global_file_path, template_str)
 
@@ -574,7 +573,7 @@ class TestGlobalPageInstance:
     def test_global_page_context_registration(
         self, global_file_path, mock_frame
     ) -> None:
-        """Test context registration using global page instance."""
+        """A context function registered on the singleton lands in its registry."""
         mock_frame.return_value.f_back.f_globals = {"__file__": str(global_file_path)}
 
         @page.context("global_key")
@@ -585,7 +584,7 @@ class TestGlobalPageInstance:
         assert "global_key" in page._context_manager._context_registry[global_file_path]
 
     def test_global_page_render(self, global_file_path, mock_frame) -> None:
-        """Test rendering using global page instance."""
+        """The singleton renders a registered template with its own context."""
         template_str = "Global: {{ key }}"
         page.register_template(global_file_path, template_str)
 
@@ -601,7 +600,7 @@ class TestGlobalPageInstance:
     def test_context_decorator_with_global_page(
         self, global_file_path, mock_frame
     ) -> None:
-        """Test context decorator with global page instance."""
+        """The exported ``context`` decorator registers against the calling file."""
         mock_frame.return_value.f_back.f_globals = {"__file__": str(global_file_path)}
 
         @context("test_key")
@@ -644,7 +643,7 @@ class TestGlobalPageInstance:
     def test_get_caller_path_error_cases(
         self, page_instance, test_case, frame_setup
     ) -> None:
-        """Test _get_caller_path error cases with parametrized test cases."""
+        """A frame chain with no usable ``__file__`` raises instead of guessing a path."""
         with patch("next.pages.manager.inspect.currentframe") as mock_frame:
             frame_setup(mock_frame)
 
@@ -654,27 +653,13 @@ class TestGlobalPageInstance:
                 page_instance._get_caller_path(1)
 
 
-class TestLayoutManager:
-    """Test cases for LayoutManager."""
-
-    def test_init(self) -> None:
-        """Test LayoutManager initialization."""
-        manager = LayoutManager()
-        assert isinstance(manager._layout_loader, LayoutTemplateLoader)
-
-
 class TestLayoutIntegration:
-    """Test cases for layout integration with Page class."""
-
-    def test_page_with_layout_manager(self, page_instance) -> None:
-        """Test that Page class has LayoutManager."""
-        assert hasattr(page_instance, "_layout_manager")
-        assert isinstance(page_instance._layout_manager, LayoutManager)
+    """``Page`` composing page bodies through the ``layout.djx`` chain."""
 
     def test_create_url_pattern_with_layout(
         self, page_instance, tmp_path, url_parser
     ) -> None:
-        """Test create_url_pattern with layout inheritance."""
+        """A pattern built before any render still renders through the ancestor layout."""
         layout_file = tmp_path / "layout.djx"
         layout_content = (
             "<html><body>{% block template %}{% endblock template %}</body></html>"
@@ -740,7 +725,7 @@ class TestLayoutIntegration:
     def test_render_with_layout_template_detection(
         self, page_instance, tmp_path
     ) -> None:
-        """Test render method with layout template detection."""
+        """A body with no layout on disk renders verbatim, with nothing wrapped around it."""
         page_file = tmp_path / "page.py"
         template_str = "<h1>{{ title }}</h1>"
         page_instance.register_template(page_file, template_str)
@@ -751,10 +736,10 @@ class TestLayoutIntegration:
 
 
 class TestLoadPythonModule:
-    """Test _load_python_module functionality."""
+    """Loading a ``page.py`` module from a filesystem path."""
 
     def test_load_python_module_invalid_file(self, tmp_path) -> None:
-        """Test _load_python_module with invalid Python file."""
+        """A file that fails to parse yields ``None`` rather than raising."""
         invalid_file = tmp_path / "invalid.py"
         invalid_file.write_text("invalid python syntax {")
 
@@ -762,14 +747,14 @@ class TestLoadPythonModule:
         assert result is None
 
     def test_load_python_module_nonexistent_file(self, tmp_path) -> None:
-        """Test _load_python_module with nonexistent file."""
+        """A path that does not exist yields ``None``."""
         nonexistent_file = tmp_path / "nonexistent.py"
 
         result = _load_python_module(nonexistent_file)
         assert result is None
 
     def test_load_python_module_no_spec_returns_none(self, tmp_path) -> None:
-        """Test _load_python_module when spec_from_file_location returns None."""
+        """A path importlib cannot build a spec for yields ``None``."""
         valid_file = tmp_path / "page.py"
         valid_file.write_text("x = 1")
         with patch("importlib.util.spec_from_file_location", return_value=None):
@@ -777,7 +762,7 @@ class TestLoadPythonModule:
         assert result is None
 
     def test_load_python_module_valid_file_returns_module(self, tmp_path) -> None:
-        """Test _load_python_module with valid Python file returns the module."""
+        """A valid module is imported and handed back with its attributes bound."""
         valid_file = tmp_path / "page.py"
         valid_file.write_text("x = 42\ntemplate = '<p>{{ x }}</p>'")
 
