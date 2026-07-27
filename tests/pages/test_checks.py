@@ -15,7 +15,13 @@ from next.checks import (
     reset_check_caches,
 )
 from next.conf import next_framework_settings as s
-from next.pages.checks import check_context_processor_signature, check_template_loaders
+from next.pages.checks import (
+    check_context_processor_signature,
+    check_context_registration_files,
+    check_template_loaders,
+)
+from next.pages.manager import page
+from next.pages.registry import PageContextRegistry
 from tests.support import (
     patch_checks_router_manager,
     patch_checks_router_manager_with_routers,
@@ -857,3 +863,63 @@ class TestContextChecksDeduplicate:
         with patch_checks_router_manager_with_routers(routers=routers):
             messages = check_context_functions(None)
         assert [m.id for m in messages] == ["next.E029"]
+
+
+class TestContextRegistrationFileCheck:
+    """`check_context_registration_files` catches a context bound to a helper module."""
+
+    def test_context_on_imported_helper_is_e077(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text(
+            "from next.pages import context\n"
+            "from tests.support.attribution import handler_declared_here\n\n"
+            "context('greeting')(handler_declared_here)\n"
+        )
+        loaders_module._MODULE_MEMO.pop(page_file, None)
+        with (
+            patch.object(page, "_context_manager", PageContextRegistry(None)),
+            patch_checks_router_manager(
+                pages_directory=tmp_path, scan_routes=[("test", page_file)]
+            ),
+        ):
+            messages = check_context_registration_files(None)
+        assert [m.id for m in messages] == ["next.E077"]
+        assert "attribution.py" in messages[0].msg
+        assert "handler_declared_here" in messages[0].msg
+
+    def test_e077_names_the_function_behind_a_partial(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text(
+            "import functools\n\n"
+            "from next.pages import context\n"
+            "from tests.support.attribution import handler_declared_here\n\n"
+            "context('greeting')(functools.partial(handler_declared_here))\n"
+        )
+        loaders_module._MODULE_MEMO.pop(page_file, None)
+        with (
+            patch.object(page, "_context_manager", PageContextRegistry(None)),
+            patch_checks_router_manager(
+                pages_directory=tmp_path, scan_routes=[("test", page_file)]
+            ),
+        ):
+            messages = check_context_registration_files(None)
+        assert [m.id for m in messages] == ["next.E077"]
+        assert "handler_declared_here" in messages[0].msg
+
+    def test_context_declared_in_the_page_file_reports_nothing(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text(
+            "from next.pages import context\n\n"
+            "@context('greeting')\n"
+            "def greeting() -> str:\n"
+            "    return 'hi'\n"
+        )
+        loaders_module._MODULE_MEMO.pop(page_file, None)
+        with (
+            patch.object(page, "_context_manager", PageContextRegistry(None)),
+            patch_checks_router_manager(
+                pages_directory=tmp_path, scan_routes=[("test", page_file)]
+            ),
+        ):
+            messages = check_context_registration_files(None)
+        assert messages == []

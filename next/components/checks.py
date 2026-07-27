@@ -11,8 +11,10 @@ from django.core.checks import CheckMessage, Error, register
 from next.checks import NEXT
 from next.checks.common import errors_for_unknown_keys, get_components_manager
 from next.conf import next_framework_settings
+from next.utils import callable_name
 
 from .backends import FileComponentsBackend
+from .context import component
 
 
 if TYPE_CHECKING:
@@ -20,6 +22,9 @@ if TYPE_CHECKING:
 
 
 _COMPONENT_BACKEND_SETTINGS_KEY = "COMPONENT_BACKENDS"
+
+# The scanner discovers only this name, so a context on another file is dead.
+_COMPONENT_FILE_NAME = "component.py"
 
 _FILE_COMPONENT_BACKEND_CONFIG_KEYS = frozenset({"BACKEND", "COMPONENTS_DIR", "DIRS"})
 
@@ -240,7 +245,44 @@ def check_component_py_no_pages_context(*args, **kwargs) -> list[CheckMessage]:
     return errors
 
 
+@register(NEXT)
+def check_component_context_registration_files(*args, **kwargs) -> list[CheckMessage]:
+    """Flag a `@component.context` bound to no `component.py` (`next.E078`).
+
+    A registration keys on the file declaring the callable, so decorating an
+    imported helper binds it to that module, which no component render reads.
+    """
+    configs = next_framework_settings.COMPONENT_BACKENDS
+    if not isinstance(configs, list) or not configs:
+        return []
+
+    manager = get_components_manager()
+    for backend in manager._backends:
+        if isinstance(backend, FileComponentsBackend):
+            backend.loaded_module_paths()
+
+    errors: list[CheckMessage] = []
+    registry = component._registry._registry
+    for file_path in sorted(registry, key=str):
+        if file_path.name == _COMPONENT_FILE_NAME:
+            continue
+        names = ", ".join(
+            sorted(callable_name(entry.func) for entry in registry[file_path].values())
+        )
+        errors.append(
+            Error(
+                f"{file_path} registers @component.context callables ({names}) but "
+                "is not a component.py, so no render collects them. Declare the "
+                "callable in the component.py that needs it, wrapping this helper.",
+                obj=str(file_path),
+                id="next.E078",
+            )
+        )
+    return errors
+
+
 __all__ = [
+    "check_component_context_registration_files",
     "check_component_py_no_pages_context",
     "check_cross_root_component_name_conflicts",
     "check_duplicate_component_names",

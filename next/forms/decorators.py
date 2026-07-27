@@ -1,10 +1,11 @@
 """The @action decorator for named form actions."""
 
-import sys
 import types
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any, overload
+
+from next.utils import defining_file
 
 from .backends import (
     ActionGuard,
@@ -87,15 +88,13 @@ def action(
     guard the endpoint before origin resolution, `get_initial`, and form
     binding, so no application code runs for a denied request.
     """
-    # The definition file must be captured here. The bare form invokes the
-    # inner decorator from this module, so a frame lookup inside it would
-    # name decorators.py instead of the defining module.
-    file_path = sys._getframe(1).f_code.co_filename
     if isinstance(name, type):
         _record_class_misuse(name)
         return name
     if isinstance(name, types.FunctionType):
-        _register_handler(name, file_path, _HandlerSpec(name=name.__name__))
+        _register_handler(
+            name, str(defining_file(name)), _HandlerSpec(name=name.__name__)
+        )
         return name
     if isinstance(form_class, type) and _is_self_registered(form_class):
         msg = (
@@ -115,7 +114,7 @@ def action(
             return func
         _register_handler(
             func,
-            file_path,
+            str(defining_file(func)),
             _HandlerSpec(
                 name=action_name if action_name is not None else func.__name__,
                 scope=scope,

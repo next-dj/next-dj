@@ -12,6 +12,7 @@ from next.forms.decorators import action as action_decorator
 from next.forms.diagnostics import registration_diagnostics
 from next.forms.dispatch import _form_action_context_callable
 from next.forms.manager import build_form_namespace_for_action, form_action_manager
+from tests.support import attribution, handler_declared_here
 
 
 class TestBuildFormNamespaceForAction:
@@ -127,6 +128,19 @@ class TestActionDecoratorBareForm:
         assert (
             form_action_manager.default_backend.get_meta("bare_decorated_class") is None
         )
+
+
+class TestActionDecoratorAttribution:
+    """Where ``@action`` attributes a handler declared in another module."""
+
+    def test_imported_function_keys_on_declaring_file_not_call_site(self) -> None:
+        """An imported handler keys on its own module, not on the decorating file."""
+        action_decorator(name="imported_handler_action")(handler_declared_here)
+
+        meta = form_action_manager.default_backend.get_meta("imported_handler_action")
+        assert meta is not None
+        assert meta["file_path"] == str(Path(attribution.__file__).resolve())
+        assert meta["file_path"] != str(Path(__file__).resolve())
 
 
 class TestActionDecoratorScope:

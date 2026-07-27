@@ -1,6 +1,8 @@
 import importlib.util
+import os
 import sys
 from pathlib import Path
+from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -18,17 +20,19 @@ from next.forms import (
     wizard as forms_wizard,
 )
 from next.forms.base import (
+    _DJANGO_FORMS_ROOT,
     _FRAMEWORK_ROOT,
     _auto_register_form_class,
     _compute_scope,
-    _find_definition_frame,
-    _is_framework_file,
+    _definition_file_of,
     _is_self_registered,
     _record_invalid_meta_scope,
     _to_snake_case,
 )
 from next.forms.diagnostics import registration_diagnostics
 from next.forms.manager import form_action_manager
+from next.pages.loaders import _load_python_module
+from next.utils import defining_file
 
 
 class TestAutoRegistration:
@@ -43,7 +47,7 @@ class TestAutoRegistration:
         fake_path = str(app_dir / "forms.py")
         Path(fake_path).write_text("")
 
-        with patch("next.forms.base._find_definition_frame", return_value=fake_path):
+        with patch("next.forms.base._definition_file_of", return_value=fake_path):
 
             class SharedRegistrationForm(Form):
                 title = django_forms.CharField()
@@ -61,7 +65,7 @@ class TestAutoRegistration:
         fake_path = str(page_dir / "page.py")
         Path(fake_path).write_text("")
 
-        with patch("next.forms.base._find_definition_frame", return_value=fake_path):
+        with patch("next.forms.base._definition_file_of", return_value=fake_path):
 
             class PageScopeForm(Form):
                 title = django_forms.CharField()
@@ -81,7 +85,7 @@ class TestAutoRegistration:
         fake_path = str(comp_dir / "component.py")
         Path(fake_path).write_text("")
 
-        with patch("next.forms.base._find_definition_frame", return_value=fake_path):
+        with patch("next.forms.base._definition_file_of", return_value=fake_path):
 
             class ComponentScopeForm(Form):
                 title = django_forms.CharField()
@@ -99,7 +103,7 @@ class TestAutoRegistration:
         fake_path = str(app_dir / "other.py")
         Path(fake_path).write_text("")
 
-        with patch("next.forms.base._find_definition_frame", return_value=fake_path):
+        with patch("next.forms.base._definition_file_of", return_value=fake_path):
 
             class MetaPageForm(Form):
                 title = django_forms.CharField()
@@ -120,7 +124,7 @@ class TestAutoRegistration:
         fake_path = str(page_dir / "page.py")
         Path(fake_path).write_text("")
 
-        with patch("next.forms.base._find_definition_frame", return_value=fake_path):
+        with patch("next.forms.base._definition_file_of", return_value=fake_path):
 
             class MetaSharedForm(Form):
                 title = django_forms.CharField()
@@ -142,7 +146,7 @@ class TestAutoRegistration:
         Path(fake_path).write_text("")
 
         registration_diagnostics.clear()
-        with patch("next.forms.base._find_definition_frame", return_value=fake_path):
+        with patch("next.forms.base._definition_file_of", return_value=fake_path):
 
             class BadMetaScopeForm(Form):
                 title = django_forms.CharField()
@@ -167,7 +171,7 @@ class TestAutoRegistration:
         Path(fake_path).write_text("")
 
         registration_diagnostics.clear()
-        with patch("next.forms.base._find_definition_frame", return_value=fake_path):
+        with patch("next.forms.base._definition_file_of", return_value=fake_path):
 
             class OutsideForm(Form):
                 title = django_forms.CharField()
@@ -179,9 +183,48 @@ class TestAutoRegistration:
         backend = form_action_manager.default_backend
         assert backend.get_meta("outside_form") is None
 
+    def test_sibling_of_base_dir_records_warning(self, settings, tmp_path) -> None:
+        """A directory whose name extends BASE_DIR is outside it."""
+        settings.BASE_DIR = tmp_path / "project"
+        sibling = tmp_path / "project-extra"
+        sibling.mkdir()
+        fake_path = str(sibling / "forms.py")
+        Path(fake_path).write_text("")
+
+        registration_diagnostics.clear()
+        with patch("next.forms.base._definition_file_of", return_value=fake_path):
+
+            class SiblingOfBaseDirForm(Form):
+                title = django_forms.CharField()
+
+        assert any(
+            "SiblingOfBaseDirForm" in name
+            for name, _ in registration_diagnostics.outside_base_dir
+        )
+        backend = form_action_manager.default_backend
+        assert backend.get_meta("sibling_of_base_dir_form") is None
+
+    def test_filesystem_root_base_dir_contains_every_path(
+        self, settings, tmp_path
+    ) -> None:
+        """A BASE_DIR that already ends in a separator still contains its files."""
+        settings.BASE_DIR = os.sep
+        app_dir = tmp_path / "myapp"
+        app_dir.mkdir()
+        fake_path = str(app_dir / "forms.py")
+        Path(fake_path).write_text("")
+
+        with patch("next.forms.base._definition_file_of", return_value=fake_path):
+
+            class RootBaseDirForm(Form):
+                title = django_forms.CharField()
+
+        backend = form_action_manager.default_backend
+        assert backend.get_meta("root_base_dir_form") is not None
+
     def test_virtual_path_skipped(self) -> None:
         """Files with paths starting with '<' (interactive/virtual) are skipped."""
-        with patch("next.forms.base._find_definition_frame", return_value="<stdin>"):
+        with patch("next.forms.base._definition_file_of", return_value="<stdin>"):
 
             class VirtualForm(Form):
                 title = django_forms.CharField()
@@ -190,28 +233,14 @@ class TestAutoRegistration:
         assert backend.get_meta("virtual_form") is None
 
     def test_empty_path_skipped(self) -> None:
-        """Empty file path from _find_definition_frame is skipped."""
-        with patch("next.forms.base._find_definition_frame", return_value=""):
+        """Empty file path from _definition_file_of is skipped."""
+        with patch("next.forms.base._definition_file_of", return_value=""):
 
             class EmptyPathForm(Form):
                 title = django_forms.CharField()
 
         backend = form_action_manager.default_backend
         assert backend.get_meta("empty_path_form") is None
-
-    def test_framework_file_skipped(self) -> None:
-        """Forms inside the next framework package itself are not registered."""
-        framework_path = str(_FRAMEWORK_ROOT / "forms" / "base.py")
-
-        with patch(
-            "next.forms.base._find_definition_frame", return_value=framework_path
-        ):
-
-            class FrameworkInternalForm(Form):
-                title = django_forms.CharField()
-
-        backend = form_action_manager.default_backend
-        assert backend.get_meta("framework_internal_form") is None
 
     def test_duplicate_name_same_scope_records_collision(
         self, settings, tmp_path
@@ -255,7 +284,7 @@ class TestAutoRegistration:
         fake_path = str(app_dir / "forms.py")
         Path(fake_path).write_text("")
 
-        with patch("next.forms.base._find_definition_frame", return_value=fake_path):
+        with patch("next.forms.base._definition_file_of", return_value=fake_path):
 
             class NoDirForm(Form):
                 title = django_forms.CharField()
@@ -265,18 +294,40 @@ class TestAutoRegistration:
         assert meta is not None
 
 
-def _exec_module_from_file(module_name: str, module_file: Path) -> None:
+def _exec_module_from_file(module_name: str, module_file: Path) -> ModuleType:
+    """Execute a file as a module the way the import system does."""
     spec = importlib.util.spec_from_file_location(module_name, module_file)
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    # The entry must exist before the body runs, otherwise classes declared
+    # there cannot resolve their own module.
+    sys.modules[module_name] = module
     spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture()
+def user_module():
+    """Load user files as modules and drop their sys.modules entries afterwards."""
+    names: list[str] = []
+
+    def load(module_name: str, module_file: Path) -> ModuleType:
+        names.append(module_name)
+        return _exec_module_from_file(module_name, module_file)
+
+    yield load
+
+    for name in names:
+        sys.modules.pop(name, None)
 
 
 class TestUserFormsPackageRegistration:
-    """Forms declared in a user forms/ package register via the real frame walk."""
+    """Forms declared in a user forms/ package register under their own file."""
 
-    def test_form_in_forms_package_module_registers(self, settings, tmp_path) -> None:
+    def test_form_in_forms_package_module_registers(
+        self, settings, tmp_path, user_module
+    ) -> None:
         """A Form in myapp/forms/models.py registers with its own file_path."""
         settings.BASE_DIR = tmp_path
         forms_pkg = tmp_path / "myapp" / "forms"
@@ -292,7 +343,7 @@ class TestUserFormsPackageRegistration:
             "    title = CharField()\n"
         )
 
-        _exec_module_from_file("user_forms_pkg_models", module_file)
+        user_module("user_forms_pkg_models", module_file)
 
         backend = form_action_manager.default_backend
         meta = backend.get_meta("packaged_models_form")
@@ -300,7 +351,9 @@ class TestUserFormsPackageRegistration:
         assert meta["file_path"] == str(module_file.resolve())
         assert meta["scope"] == "shared"
 
-    def test_form_in_forms_package_init_registers(self, settings, tmp_path) -> None:
+    def test_form_in_forms_package_init_registers(
+        self, settings, tmp_path, user_module
+    ) -> None:
         """A Form in myapp/forms/__init__.py registers with its own file_path."""
         settings.BASE_DIR = tmp_path
         forms_pkg = tmp_path / "myapp" / "forms"
@@ -315,7 +368,7 @@ class TestUserFormsPackageRegistration:
             "    title = CharField()\n"
         )
 
-        _exec_module_from_file("user_forms_pkg_init", module_file)
+        user_module("user_forms_pkg_init", module_file)
 
         backend = form_action_manager.default_backend
         meta = backend.get_meta("packaged_init_form")
@@ -324,24 +377,91 @@ class TestUserFormsPackageRegistration:
         assert meta["scope"] == "shared"
 
 
-class TestFindDefinitionFrame:
-    """_find_definition_frame walks the call stack to find the definition site."""
+class TestRouterLoadedPageRegistration:
+    """A page.py the file router execs registers its forms under that page."""
 
-    def test_returns_string(self) -> None:
-        """_find_definition_frame returns a string (the caller's filename)."""
-        result = _find_definition_frame()
-        assert isinstance(result, str)
+    def test_form_in_router_loaded_page_registers_under_that_page(
+        self, settings, tmp_path
+    ) -> None:
+        """A Form declared in a router-loaded page.py registers with that page's path."""
+        settings.BASE_DIR = tmp_path
+        page_file = tmp_path / "page.py"
+        page_file.write_text(
+            "from next.forms import CharField, Form\n"
+            "\n"
+            "\n"
+            "class RouterLoadedForm(Form):\n"
+            "    title = CharField()\n"
+        )
 
-    def test_does_not_return_framework_file(self) -> None:
-        """The returned path is not the framework's own base.py."""
-        result = _find_definition_frame()
-        if result:
-            assert not _is_framework_file(result)
+        module = _load_python_module(page_file)
 
-    def test_returns_empty_when_stack_exhausted(self) -> None:
-        """When sys._getframe raises ValueError, _find_definition_frame returns ''."""
+        assert module is not None
+        # The router leaves no sys.modules entry, so only the stack names the file.
+        assert sys.modules.get("page_module") is None
+        backend = form_action_manager.default_backend
+        meta = backend.get_meta("router_loaded_form", str(page_file))
+        assert meta is not None
+        assert meta["file_path"] == str(page_file.resolve())
+        assert meta["scope"] == "page"
+
+
+class TestDefinitionFileOf:
+    """_definition_file_of attributes a form class to its declaration site."""
+
+    @pytest.mark.parametrize(
+        ("file_name", "class_name"),
+        [("page.py", "AnchoredForm"), ("shared_forms.py", "SharedModuleForm")],
+        ids=["anchor_file", "shared_module"],
+    )
+    def test_class_declared_in_imported_module(
+        self, tmp_path, user_module, file_name, class_name
+    ) -> None:
+        """A Form is attributed to the module file declaring it."""
+        module_file = tmp_path / file_name
+        module_file.write_text(
+            "from next.forms import CharField, Form\n"
+            "\n"
+            "\n"
+            f"class {class_name}(Form):\n"
+            "    title = CharField()\n"
+        )
+
+        module = user_module(f"attribution_{module_file.stem}", module_file)
+
+        assert _definition_file_of(getattr(module, class_name)) == str(module_file)
+
+    def test_class_from_unimportable_module_falls_back_to_stack(self) -> None:
+        """A class whose module is absent from sys.modules falls back to the stack."""
+
+        class Detached:
+            pass
+
+        Detached.__module__ = "next_dj_virtual_module"
+        assert _definition_file_of(Detached) == __file__
+
+    def test_class_from_main_without_file_falls_back_to_stack(self) -> None:
+        """A __main__ class with no __file__ falls back to the stack."""
+
+        class Detached:
+            pass
+
+        Detached.__module__ = "__main__"
+        with patch.dict(sys.modules, {"__main__": ModuleType("__main__")}):
+            assert _definition_file_of(Detached) == __file__
+
+    def test_class_built_inside_django_forms_falls_back_to_stack(self) -> None:
+        """A class attributed to django.forms falls back to the stack."""
+        assert _definition_file_of(django_forms.models.ModelForm) == __file__
+
+    def test_class_built_inside_framework_falls_back_to_stack(self) -> None:
+        """A class attributed to next.forms falls back to the stack."""
+        assert _definition_file_of(Form) == __file__
+
+    def test_fallback_returns_empty_when_stack_exhausted(self) -> None:
+        """The fallback returns '' once sys._getframe runs out of frames."""
+        # Every frame reports a framework file, so the walk never accepts one.
         framework_file = str(_FRAMEWORK_ROOT / "forms" / "fake.py")
-
         call_count = {"n": 0}
 
         def mock_getframe(depth: int) -> object:
@@ -354,9 +474,39 @@ class TestFindDefinitionFrame:
             return frame
 
         with patch.object(sys, "_getframe", side_effect=mock_getframe):
-            result = _find_definition_frame()
+            assert _definition_file_of(django_forms.models.ModelForm) == ""
 
-        assert result == ""
+
+class TestModelFormFactoryAttribution:
+    """A class built by modelform_factory keeps the caller's file, not Django's."""
+
+    def test_factory_built_class_registers_under_calling_module(
+        self, settings, tmp_path, user_module
+    ) -> None:
+        """The registered file_path is the calling module, not Django's."""
+        settings.BASE_DIR = tmp_path
+        module_file = tmp_path / "admin_forms.py"
+        module_file.write_text(
+            "from django.contrib.auth.models import User\n"
+            "\n"
+            "from next.forms import ModelForm, modelform_factory\n"
+            "\n"
+            "\n"
+            "def user_form_factory():\n"
+            "    return modelform_factory(User, form=ModelForm, fields=['username'])\n"
+        )
+        module = user_module("attribution_factory_module", module_file)
+
+        form_class = module.user_form_factory()
+
+        backend = form_action_manager.default_backend
+        meta = backend.get_meta("user_form")
+        assert meta is not None
+        assert meta["file_path"] == str(module_file.resolve())
+        # Plain attribution lands in Django, so registration used the stack fallback.
+        assert (
+            Path(defining_file(form_class)).resolve().is_relative_to(_DJANGO_FORMS_ROOT)
+        )
 
 
 class TestModelFormAutoRegistration:
@@ -373,7 +523,7 @@ class TestModelFormAutoRegistration:
         fake_path = str(app_dir / "forms.py")
         Path(fake_path).write_text("")
 
-        with patch("next.forms.base._find_definition_frame", return_value=fake_path):
+        with patch("next.forms.base._definition_file_of", return_value=fake_path):
 
             class AuthorModelForm(ModelForm):
                 class Meta:
@@ -395,7 +545,7 @@ class TestModelFormAutoRegistration:
         fake_path = str(page_dir / "page.py")
         Path(fake_path).write_text("")
 
-        with patch("next.forms.base._find_definition_frame", return_value=fake_path):
+        with patch("next.forms.base._definition_file_of", return_value=fake_path):
 
             class PageModelForm(ModelForm):
                 class Meta:
@@ -428,7 +578,7 @@ class TestAutoRegisterFormClassDirectly:
         class DirectForm(Form):
             title = django_forms.CharField()
 
-        with patch("next.forms.base._find_definition_frame", return_value=fake_path):
+        with patch("next.forms.base._definition_file_of", return_value=fake_path):
             _auto_register_form_class(DirectForm)
 
         backend = form_action_manager.default_backend
@@ -523,7 +673,7 @@ class TestAbstractForms:
         fake_path = str(app_dir / "forms.py")
         Path(fake_path).write_text("")
 
-        with patch("next.forms.base._find_definition_frame", return_value=fake_path):
+        with patch("next.forms.base._definition_file_of", return_value=fake_path):
 
             class AbstractTenantForm(Form):
                 class Meta:
@@ -547,7 +697,7 @@ class TestAbstractForms:
         fake_path = str(app_dir / "forms.py")
         Path(fake_path).write_text("")
 
-        with patch("next.forms.base._find_definition_frame", return_value=fake_path):
+        with patch("next.forms.base._definition_file_of", return_value=fake_path):
 
             class RegisteredBaseForm(Form):
                 title = django_forms.CharField()
@@ -613,17 +763,35 @@ def test_to_snake_case(name: str, expected: str) -> None:
     assert _to_snake_case(name) == expected
 
 
-class TestIsFrameworkFileUsed:
-    """_is_framework_file detects paths inside the framework root."""
+class TestIsForeignFile:
+    """_is_foreign_file detects paths inside django.forms or the framework."""
 
-    def test_framework_file_detected(self) -> None:
-        """A path inside the framework root is recognised as a framework file."""
-        framework_path = str(_FRAMEWORK_ROOT / "forms" / "base.py")
-        assert _is_framework_file(framework_path) is True
+    @pytest.mark.parametrize(
+        "root", [_DJANGO_FORMS_ROOT, _FRAMEWORK_ROOT], ids=["django", "framework"]
+    )
+    def test_file_under_foreign_root_detected(self, root: Path) -> None:
+        """A path inside either foreign root is foreign."""
+        assert forms_base._is_foreign_file(str(root / "widgets.py")) is True
 
-    def test_non_framework_file_not_detected(self, tmp_path) -> None:
-        """A path outside the framework root is not a framework file."""
-        assert _is_framework_file(str(tmp_path / "myapp" / "forms.py")) is False
+    @pytest.mark.parametrize(
+        "root", [_DJANGO_FORMS_ROOT, _FRAMEWORK_ROOT], ids=["django", "framework"]
+    )
+    def test_sibling_root_with_shared_prefix_not_detected(self, root: Path) -> None:
+        """A sibling directory whose name extends a foreign root is outside it."""
+        sibling = root.parent / f"{root.name}-extra"
+        assert forms_base._is_foreign_file(str(sibling / "widgets.py")) is False
+
+    def test_decision_is_memoised(self, tmp_path) -> None:
+        """The second call answers from the cache instead of resolving the path."""
+        user_path = str(tmp_path / "myapp" / "forms.py")
+        forms_base._foreign_file_cache.pop(user_path, None)
+
+        assert forms_base._is_foreign_file(user_path) is False
+        assert forms_base._foreign_file_cache[user_path] is False
+
+        # A poisoned entry can only win if the second call skips resolution.
+        forms_base._foreign_file_cache[user_path] = True
+        assert forms_base._is_foreign_file(user_path) is True
 
 
 class TestComputeScope:

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import functools
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from next.utils import caller_source_path, resolve_base_dir
+from next.utils import callable_name, defining_file, resolve_base_dir
+from tests.support import attribution, unwrapped_decorator, wraps_decorator
 
 
 class TestResolveBaseDir:
@@ -40,32 +42,112 @@ class TestResolveBaseDir:
             assert resolve_base_dir() is None
 
 
-class TestCallerSourcePath:
-    """Tests for ``caller_source_path``."""
+class TestDefiningFile:
+    """Tests for ``defining_file``."""
 
-    def test_raises_when_no_mode_specified(self) -> None:
-        """Callers must pass exactly one of the two skip strategies."""
-        with pytest.raises(ValueError, match="Specify skip_while_filename_endswith"):
-            caller_source_path()
+    def test_plain_function_returns_its_own_file(self) -> None:
+        """A function declared here is attributed to this test module."""
 
-    def test_raises_when_both_modes_specified(self) -> None:
-        """Passing both strategies at once raises ValueError."""
-        with pytest.raises(ValueError, match="only one of"):
-            caller_source_path(
-                skip_while_filename_endswith=("a.py",),
-                skip_framework_file=("b.py", "next"),
-            )
+        def handler() -> None:
+            pass
 
-    def test_skip_while_filename_endswith_returns_caller_file(self) -> None:
-        """``skip_while_filename_endswith`` skips pytest internals and returns this file."""
-        result = caller_source_path(skip_while_filename_endswith=("_pytest/python.py",))
-        assert result.exists()
-        assert result.suffix == ".py"
+        assert defining_file(handler) == Path(__file__)
 
-    def test_skip_framework_file_returns_caller_file(self) -> None:
-        """``skip_framework_file`` skips the named framework module and returns this file."""
-        result = caller_source_path(
-            skip_framework_file=("_pytest/python.py", "_pytest")
-        )
-        assert result.exists()
-        assert result.suffix == ".py"
+    def test_function_wrapped_with_functools_wraps_returns_user_file(self) -> None:
+        """A wrapper built with ``functools.wraps`` is unwrapped to the user file."""
+
+        @wraps_decorator
+        def handler() -> None:
+            pass
+
+        assert defining_file(handler) == Path(__file__)
+
+    def test_function_wrapped_without_functools_wraps_returns_wrapper_file(
+        self,
+    ) -> None:
+        """Without ``functools.wraps`` the wrapper's own file wins."""
+
+        @unwrapped_decorator
+        def handler() -> None:
+            pass
+
+        assert defining_file(handler) == Path(attribution.__file__)
+
+    def test_class_returns_the_file_it_was_declared_in(self) -> None:
+        """A class is attributed to the file declaring it."""
+
+        class Marker:
+            pass
+
+        assert defining_file(Marker) == Path(__file__)
+
+    def test_partial_returns_the_file_of_the_wrapped_function(self) -> None:
+        """A ``functools.partial`` is attributed to the function it binds."""
+
+        def handler(value: int) -> int:
+            return value
+
+        assert defining_file(functools.partial(handler, 1)) == Path(__file__)
+
+    def test_nested_partial_unwraps_to_the_innermost_function(self) -> None:
+        """Stacked partials resolve through to the declaring file."""
+
+        def handler(first: int, second: int) -> int:
+            return first + second
+
+        stacked = functools.partial(functools.partial(handler, 1), 2)
+        assert defining_file(stacked) == Path(__file__)
+
+    def test_partial_of_a_builtin_raises_type_error(self) -> None:
+        """A partial binding a builtin has no declaring file either."""
+        with pytest.raises(TypeError, match=r"could not determine the file where"):
+            defining_file(functools.partial(len))
+
+    def test_callable_instance_returns_the_file_of_its_class(self) -> None:
+        """An instance with ``__call__`` is attributed through that method."""
+
+        class Handler:
+            def __call__(self) -> None:
+                pass
+
+        assert defining_file(Handler()) == Path(__file__)
+
+    def test_callable_without_code_object_raises_type_error(self) -> None:
+        """A builtin has no ``__code__`` and raises ``TypeError``."""
+        with pytest.raises(TypeError, match=r"could not determine the file where"):
+            defining_file(len)
+
+    def test_non_callable_object_raises_type_error_naming_the_object(self) -> None:
+        """A non-callable value raises ``TypeError`` naming the value."""
+        with pytest.raises(TypeError, match=r"'not a callable'"):
+            defining_file("not a callable")
+
+
+class TestCallableName:
+    """Tests for ``callable_name``."""
+
+    def test_function_keeps_its_own_name(self) -> None:
+        """A plain function reports ``__name__``."""
+
+        def handler() -> None:
+            pass
+
+        assert callable_name(handler) == "handler"
+
+    def test_partial_reports_the_wrapped_function(self) -> None:
+        """A partial has no ``__name__``, so the bound function names it."""
+
+        def handler(value: int) -> int:
+            return value
+
+        stacked = functools.partial(functools.partial(handler, 1))
+        assert callable_name(stacked) == "handler"
+
+    def test_callable_instance_reports_its_class(self) -> None:
+        """An instance with ``__call__`` reports the class name."""
+
+        class Handler:
+            def __call__(self) -> None:
+                pass
+
+        assert callable_name(Handler()) == "Handler"

@@ -1,7 +1,6 @@
+import functools
 import importlib.util
-import inspect
 import textwrap
-import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -20,6 +19,7 @@ from next.components import (
 )
 from next.components.context import iter_serialized_component_context_keys
 from next.static import StaticCollector
+from tests.support import handler_declared_here
 
 
 class TestComponentContextManager:
@@ -145,53 +145,35 @@ class TestComponentContextRegistryInternals:
         reg.register(p, "y", fy)
         assert len(reg) == 2
 
-    def test_duplicate_after_getsourcefile_oserror(self, tmp_path: Path) -> None:
-        """When inspect.getsourcefile fails, different functions are not 'same'."""
+    def test_same_name_from_another_file_is_a_duplicate(self, tmp_path: Path) -> None:
+        """Two callables sharing a name but not a file are different functions."""
         reg = ComponentContextRegistry()
         p = (tmp_path / "d" / "component.py").resolve()
         p.parent.mkdir(parents=True)
 
-        def f1() -> int:
+        def local() -> int:
             return 1
 
-        def f2() -> int:
-            return 2
+        local.__name__ = handler_declared_here.__name__
 
-        reg.register(p, "slot", f1)
-        nope = OSError("nope")
-        with (
-            patch.object(inspect, "getsourcefile", side_effect=nope),
-            pytest.raises(ValueError, match="Duplicate"),
-        ):
-            reg.register(p, "slot", f2)
+        reg.register(p, "slot", local)
+        with pytest.raises(ValueError, match="Duplicate"):
+            reg.register(p, "slot", handler_declared_here)
 
-    def test_is_same_function_false_when_sourcefile_missing(
-        self, tmp_path: Path
-    ) -> None:
-        """Same __name__ but getsourcefile returns None leads to duplicate error."""
+    def test_unattributable_callable_is_a_duplicate(self, tmp_path: Path) -> None:
+        """A callable with no declaring file can never match the registered one."""
         reg = ComponentContextRegistry()
         p = (tmp_path / "e" / "component.py").resolve()
         p.parent.mkdir(parents=True)
 
-        def g1() -> int:
+        def local() -> int:
             return 1
 
-        def g2() -> int:
-            return 2
+        local.__name__ = "len"
 
-        g1.__name__ = "g"
-        g2.__name__ = "g"
-
-        reg.register(p, "slot", g1)
-
-        def gs(_: object) -> str | None:
-            return None
-
-        with (
-            patch.object(inspect, "getsourcefile", gs),
-            pytest.raises(ValueError, match="Duplicate"),
-        ):
-            reg.register(p, "slot", g2)
+        reg.register(p, "slot", local)
+        with pytest.raises(ValueError, match="Duplicate"):
+            reg.register(p, "slot", len)
 
     def test_is_same_function_true_same_file_same_name(self, tmp_path: Path) -> None:
         """An identical name and source file counts as the same function."""
@@ -205,58 +187,42 @@ class TestComponentContextRegistryInternals:
         reg.register(p, "x", h)
         reg.register(p, "x", h)
 
-    def test_is_same_function_path_compare_raises_typeerror(
+    def test_equivalent_partial_reregisters_without_raising(
         self, tmp_path: Path
     ) -> None:
-        """If Path.resolve raises, _is_same_function returns False (except branch)."""
+        """A re-executed module rebuilds its partial, which is not a duplicate."""
         reg = ComponentContextRegistry()
         p = (tmp_path / "g" / "component.py").resolve()
         p.parent.mkdir(parents=True)
 
-        def u1() -> int:
+        def bound(value: int) -> dict[str, int]:
+            return {"value": value}
+
+        reg.register(p, "slot", functools.partial(bound, 1))
+        reg.register(p, "slot", functools.partial(bound, 1))
+
+        assert len(reg) == 1
+
+
+class TestComponentContextManagerAttribution:
+    """How ComponentContextManager attributes a decorated callable to a file."""
+
+    def test_context_decorator_registers_declaring_test_module(self) -> None:
+        """A callable declared here registers under this test module."""
+        mgr = ComponentContextManager()
+
+        @mgr.context("here")
+        def get_here() -> int:
             return 1
 
-        def u2() -> int:
-            return 2
-
-        u1.__name__ = "u"
-        u2.__name__ = "u"
-        reg.register(p, "slot", u1)
-
-        def gs(fn: object) -> object:
-            return str(p) if fn is u1 else 123
-
-        with (
-            patch.object(inspect, "getsourcefile", gs),
-            pytest.raises(ValueError, match="Duplicate"),
-        ):
-            reg.register(p, "slot", u2)
-
-
-class TestComponentContextManagerFrames:
-    """How ComponentContextManager finds the caller's file."""
-
-    def test_get_caller_path_raises_when_back_count_too_large(self) -> None:
-        """Exceeding frame chain raises RuntimeError."""
-        mgr = ComponentContextManager()
-        with pytest.raises(RuntimeError, match="Could not determine caller"):
-            mgr._get_caller_path(10_000)
-
-    def test_get_caller_path_raises_when_no_python_file_in_chain(self) -> None:
-        """Walk stops if no frame exposes a ``.py`` __file__."""
-        inner = types.SimpleNamespace(f_back=None, f_globals={"__file__": "/x.txt"})
-        start = types.SimpleNamespace(f_back=inner, f_globals={"__file__": "/y.txt"})
-        mgr = ComponentContextManager()
-        with (
-            patch("next.utils.inspect.currentframe", return_value=start),
-            pytest.raises(RuntimeError, match="no __file__ in caller frames"),
-        ):
-            mgr._get_caller_path(1)
+        funcs = mgr.get_functions(Path(__file__))
+        assert len(funcs) == 1
+        assert funcs[0].func is get_here
 
     def test_context_decorator_without_key_registers_caller(
         self, tmp_path: Path
     ) -> None:
-        """@mgr.context on a function registers unkeyed context at caller file."""
+        """@mgr.context on a function registers unkeyed context at its own file."""
         script = tmp_path / "comp" / "component.py"
         script.parent.mkdir(parents=True)
         script.write_text(
@@ -282,7 +248,7 @@ class TestComponentContextManagerFrames:
         assert funcs[0].key is None
 
     def test_context_decorator_with_string_key_registers(self, tmp_path: Path) -> None:
-        """@mgr.context('key') uses _get_caller_path(1) and keyed register branch."""
+        """@mgr.context('key') registers a keyed context for the component module."""
         script = tmp_path / "keyed" / "component.py"
         script.parent.mkdir(parents=True)
         script.write_text(

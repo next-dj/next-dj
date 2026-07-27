@@ -19,6 +19,7 @@ from django.core.checks import (
 from next.checks import NEXT
 from next.checks.common import get_router_manager, iter_scanned_page_pairs
 from next.conf import import_class_cached, next_framework_settings
+from next.utils import callable_name
 
 from .loaders import TemplateLoader, _load_python_module_memo, build_registered_loaders
 from .manager import page
@@ -37,6 +38,9 @@ EXPECTED_PARAMETER_PARTS = 2
 
 # A page declares a body-source conflict only when two or more sources claim it.
 _MIN_CONFLICTING_BODY_SOURCES = 2
+
+# The file router discovers only this name, so a context on another file is dead.
+_PAGE_FILE_NAME = "page.py"
 
 
 @register(Tags.templates, NEXT)
@@ -524,16 +528,18 @@ def _check_context_function(
 def _check_registered_context_functions(page_path: Path) -> list[CheckMessage]:
     """Return keyless `@context` errors recorded for `page_path` in the registry.
 
-    The registry keys on the caller's `__file__`, which is the same path the
-    check loads the module by, so a direct `page_path` lookup matches whatever
-    spelling the scanner used without resolving symlinks on either side.
+    The registry keys on the file declaring the callable, which for a `page.py`
+    is the absolute path importlib gave the module, the same path this check
+    loads it by, so a direct lookup needs no symlink resolution on either side.
     """
     errors: list[CheckMessage] = []
     registry = page._context_manager._context_registry.get(page_path, {})
     for key, entry in registry.items():
         if key is not None:
             continue
-        error = _check_context_function(entry.func.__name__, entry.func, page_path)
+        error = _check_context_function(
+            callable_name(entry.func), entry.func, page_path
+        )
         if error is not None:
             errors.append(error)
     return errors
@@ -585,6 +591,40 @@ def check_context_functions(*args, **kwargs) -> list[CheckMessage]:
         if _load_python_module_memo(page_path) is None:
             continue
         errors.extend(_check_registered_context_functions(page_path))
+    return errors
+
+
+@register(Tags.templates, NEXT)
+def check_context_registration_files(*args, **kwargs) -> list[CheckMessage]:
+    """Flag a `@context` bound to a file that is no `page.py` (`next.E077`).
+
+    A registration keys on the file declaring the callable, so decorating an
+    imported helper binds it to that helper's module, which no render reads.
+    """
+    router_manager, init_errors = get_router_manager()
+    if router_manager is None:
+        return init_errors
+
+    for page_path in _iter_existing_scanned_pages(router_manager, set()):
+        _load_python_module_memo(page_path)
+
+    errors: list[CheckMessage] = []
+    registry = page._context_manager._context_registry
+    for file_path in sorted(registry, key=str):
+        if file_path.name == _PAGE_FILE_NAME:
+            continue
+        names = ", ".join(
+            sorted(callable_name(entry.func) for entry in registry[file_path].values())
+        )
+        errors.append(
+            Error(
+                f"{file_path} registers @context callables ({names}) but is not a "
+                "page.py, so no render collects them. Declare the callable in the "
+                "page.py that needs it, wrapping this helper.",
+                obj=str(file_path),
+                id="next.E077",
+            )
+        )
     return errors
 
 
@@ -722,6 +762,7 @@ def check_template_loaders(*args, **kwargs) -> list[CheckMessage]:
 __all__ = [
     "check_context_functions",
     "check_context_processor_signature",
+    "check_context_registration_files",
     "check_layout_templates",
     "check_page_functions",
     "check_page_module_imports",

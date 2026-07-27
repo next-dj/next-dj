@@ -13,6 +13,7 @@ import logging
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from next.deps import DependencyResolver, get_request_dep_cache, resolver
+from next.utils import callable_name
 
 from .context import ContextResult
 from .signals import context_registered
@@ -114,14 +115,13 @@ class PageContextRegistry:
         bucket = self._context_registry.setdefault(file_path, {})
         existing = bucket.get(None)
         # Compare by name so a re-executed module (same name) is not a conflict.
-        if (
-            key is None
-            and existing is not None
-            and existing.func.__name__ != func.__name__
-        ):
-            self._keyless_conflicts.setdefault(
-                file_path, [existing.func.__name__]
-            ).append(func.__name__)
+        if key is None and existing is not None:
+            existing_name = callable_name(existing.func)
+            new_name = callable_name(func)
+            if existing_name != new_name:
+                self._keyless_conflicts.setdefault(file_path, [existing_name]).append(
+                    new_name
+                )
         bucket[key] = PageContextEntry(
             func=func,
             inherit_context=inherit_context,

@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import functools
 import inspect
 from pathlib import Path
+from types import CodeType
 from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 
 
 if TYPE_CHECKING:
-    from types import FrameType
+    from collections.abc import Callable
 
 
 def resolve_base_dir() -> Path | None:
@@ -73,85 +75,44 @@ def classify_dirs_entries(
     return path_roots, frozenset(segments)
 
 
-_CALLER_PATH_ERROR = "Could not determine caller file path"
+def _code_filename(func: Callable[..., Any]) -> str | None:
+    """Return the source file behind ``func.__code__``, or ``None`` when it has none."""
+    code = getattr(inspect.unwrap(func), "__code__", None)
+    return code.co_filename if isinstance(code, CodeType) else None
 
 
-def caller_source_path(
-    *,
-    back_count: int = 1,
-    max_walk: int = 15,
-    skip_while_filename_endswith: tuple[str, ...] | None = None,
-    skip_framework_file: tuple[str, str] | None = None,
-) -> Path:
-    """Resolve ``Path`` of the caller module's ``__file__`` for decorator registration.
+def defining_file(obj: object) -> Path:
+    """Return the file where ``obj`` was declared, for decorator registration.
 
-    ``back_count`` is how many frames to step up before scanning. Use this to skip
-    past a decorator wrapper.
-
-    For pages and forms pass ``skip_while_filename_endswith``, for example
-    ``("pages.py",)``. Walk frames until ``__file__`` is missing or no longer ends
-    with one of those suffixes. Then return that path.
-
-    For components pass ``skip_framework_file`` as ``(basename, parent_dir_name)``,
-    for example ``("components.py", "next")``. Only ``str`` paths ending in ``.py``
-    are considered. The resolved framework module path is skipped.
+    Wrappers stay transparent only while they set ``__wrapped__`` through
+    :func:`functools.wraps`, and a class built by ``type()`` inside foreign
+    code keeps no link to the file that asked for it. A callable instance
+    answers through the code object of its ``__call__``, which names the
+    file even for a module absent from ``sys.modules``.
     """
-    if skip_while_filename_endswith is not None and skip_framework_file is not None:
-        msg = "Specify only one of skip_while_filename_endswith or skip_framework_file"
-        raise ValueError(msg)
-    if skip_while_filename_endswith is None and skip_framework_file is None:
-        msg = "Specify skip_while_filename_endswith or skip_framework_file"
-        raise ValueError(msg)
-
-    frame = _walk_back(inspect.currentframe(), back_count)
-    if skip_while_filename_endswith is not None:
-        return _scan_by_suffix(frame, skip_while_filename_endswith, max_walk)
-    if skip_framework_file is None:  # pragma: no cover
-        raise RuntimeError(_CALLER_PATH_ERROR)
-    return _scan_framework_file(frame, skip_framework_file, max_walk)
-
-
-def _walk_back(frame: FrameType | None, back_count: int) -> FrameType | None:
-    """Step up ``back_count`` frames before scanning, raising when they run out."""
-    for _ in range(back_count):
-        if not frame or not frame.f_back:
-            raise RuntimeError(_CALLER_PATH_ERROR)
-        frame = frame.f_back
-    return frame
+    if inspect.isclass(obj):
+        return Path(inspect.getfile(obj))
+    if isinstance(obj, functools.partial):
+        return defining_file(obj.func)
+    if callable(obj):
+        filename = _code_filename(obj) or _code_filename(type(obj).__call__)
+        if filename is not None:
+            return Path(filename)
+    msg = (
+        f"next.dj could not determine the file where {obj!r} was declared, "
+        "so the registration has no page or component to belong to. Declare a "
+        "function with 'def' in the file that uses it and decorate that."
+    )
+    raise TypeError(msg)
 
 
-def _scan_by_suffix(
-    frame: FrameType | None, suffixes: tuple[str, ...], max_walk: int
-) -> Path:
-    """Return the first caller frame whose ``__file__`` is not a framework suffix."""
-    for _ in range(max_walk):
-        if not frame:
-            break
-        raw = frame.f_globals.get("__file__")
-        if raw and isinstance(raw, str):
-            if any(raw.endswith(sfx) for sfx in suffixes):
-                frame = frame.f_back
-                continue
-            return Path(raw)
-        frame = frame.f_back
-    raise RuntimeError(_CALLER_PATH_ERROR)
+def callable_name(obj: object) -> str:
+    """Return the name a registration reports for ``obj`` in diagnostics.
 
-
-def _scan_framework_file(
-    frame: FrameType | None, skip_framework_file: tuple[str, str], max_walk: int
-) -> Path:
-    """Return the first caller frame outside the named framework module file."""
-    base, parent = skip_framework_file
-    err_components = f"{_CALLER_PATH_ERROR}: no __file__ in caller frames"
-    for _ in range(max_walk):
-        if not frame:
-            break
-        raw = frame.f_globals.get("__file__")
-        if isinstance(raw, str) and raw.endswith(".py"):
-            path = Path(raw).resolve()
-            if path.name == base and path.parent.name == parent:
-                frame = frame.f_back
-                continue
-            return path
-        frame = frame.f_back
-    raise RuntimeError(err_components)
+    A partial and a callable instance carry no ``__name__``, so the name of
+    the wrapped function or of the class stands in for one.
+    """
+    if isinstance(obj, functools.partial):
+        return callable_name(obj.func)
+    name = getattr(obj, "__name__", None)
+    return name if isinstance(name, str) else type(obj).__name__

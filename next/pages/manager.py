@@ -9,7 +9,6 @@ application-wide singleton. `context` is a convenience alias for
 from __future__ import annotations
 
 import contextlib
-import inspect
 import logging
 import time
 from dataclasses import dataclass
@@ -23,7 +22,7 @@ from django.urls import URLPattern, path
 from next.checks.common import get_router_manager, iter_scanned_page_pairs
 from next.conf import next_framework_settings
 from next.deps import DependencyResolver, resolver
-from next.utils import caller_source_path
+from next.utils import defining_file
 
 from .loaders import (
     LayoutTemplateLoader,
@@ -107,14 +106,6 @@ class Page:
         self._compiled_registry.pop(file_path, None)
         template_loaded.send(sender=Page, file_path=file_path)
 
-    def _get_caller_path(self, back_count: int = 1) -> Path:
-        """Return the filesystem path of the user caller outside this module."""
-        return caller_source_path(
-            back_count=back_count,
-            max_walk=10,
-            skip_while_filename_endswith=("manager.py",),
-        )
-
     @overload
     def context[C: Callable[..., Any]](self, func_or_key: C, /) -> C: ...
     @overload
@@ -145,9 +136,8 @@ class Page:
 
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             if callable(func_or_key):
-                caller_path = self._get_caller_path(2)
                 self._context_manager.register_context(
-                    caller_path,
+                    defining_file(func),
                     None,
                     func_or_key,
                     inherit_context=inherit_context,
@@ -155,9 +145,8 @@ class Page:
                     serializer=serializer,
                 )
             else:
-                caller_path = self._get_caller_path(1)
                 self._context_manager.register_context(
-                    caller_path,
+                    defining_file(func),
                     func_or_key,
                     func,
                     inherit_context=inherit_context,
@@ -591,9 +580,6 @@ class Page:
         return self._create_virtual_page_pattern(
             file_path, django_pattern, parameters, clean_name
         )
-
-
-_ = inspect  # keep `inspect` import reachable for test-time patching
 
 
 page: Page = Page()

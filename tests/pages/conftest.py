@@ -1,7 +1,6 @@
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 
@@ -44,13 +43,6 @@ def context_manager():
 
 
 @pytest.fixture()
-def mock_frame():
-    """Mock inspect.currentframe for testing."""
-    with patch("next.pages.manager.inspect.currentframe") as mock_frame:
-        yield mock_frame
-
-
-@pytest.fixture()
 def test_file_path():
     """Create a test file path for render tests."""
     return Path("/test/path/page.py")
@@ -66,13 +58,6 @@ def global_file_path():
 def temp_python_file():
     """Create a temporary Python file for testing."""
     with named_temp_py('template = "test template"') as path:
-        yield path
-
-
-@pytest.fixture()
-def context_temp_file():
-    """Create a temporary file for context decorator tests."""
-    with named_temp_py("def test_func(): pass") as path:
         yield path
 
 

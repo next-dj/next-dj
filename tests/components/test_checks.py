@@ -4,12 +4,14 @@ from unittest.mock import patch
 import pytest
 
 from next.checks import (
+    check_component_context_registration_files,
     check_component_py_no_pages_context,
     check_cross_root_component_name_conflicts,
     check_duplicate_component_names,
     reset_check_caches,
 )
 from next.components import ComponentInfo, FileComponentsBackend
+from next.components.context import ComponentContextRegistry, component
 from tests.support import (
     next_framework_settings_for_checks_backends_value as _next_framework_settings_for_checks_backends_value,
     patch_checks_components_manager,
@@ -130,3 +132,52 @@ class TestChecks:
         with patch_checks_components_manager(fake_backend):
             errors = check_component_py_no_pages_context()
         assert any(e.id == "next.E021" for e in errors)
+
+    def test_component_context_on_imported_helper_is_e078(
+        self, tmp_path: Path, min_component_config: dict
+    ) -> None:
+        """A component context bound to a helper module is reported as E078."""
+        module_path = tmp_path / "component.py"
+        module_path.write_text(
+            "from next.components import context\n"
+            "from tests.support.attribution import handler_declared_here\n\n"
+            "context('greeting')(handler_declared_here)\n"
+        )
+        fake_backend = FileComponentsBackend(dict(min_component_config))
+        fake_backend._registry.register(
+            ComponentInfo("card", tmp_path, "", None, module_path, False)
+        )
+        fake_backend._loaded = True
+
+        with (
+            patch.object(component, "_registry", ComponentContextRegistry()),
+            patch_checks_components_manager(fake_backend),
+        ):
+            errors = check_component_context_registration_files()
+
+        assert [e.id for e in errors] == ["next.E078"]
+        assert "attribution.py" in errors[0].msg
+        assert "handler_declared_here" in errors[0].msg
+
+    def test_component_context_declared_in_component_py_reports_nothing(
+        self, tmp_path: Path, min_component_config: dict
+    ) -> None:
+        """A component context declared in the component.py raises nothing."""
+        module_path = tmp_path / "component.py"
+        module_path.write_text(
+            "from next.components import context\n\n"
+            "@context('greeting')\n"
+            "def greeting() -> str:\n"
+            "    return 'hi'\n"
+        )
+        fake_backend = FileComponentsBackend(dict(min_component_config))
+        fake_backend._registry.register(
+            ComponentInfo("card", tmp_path, "", None, module_path, False)
+        )
+        fake_backend._loaded = True
+
+        with (
+            patch.object(component, "_registry", ComponentContextRegistry()),
+            patch_checks_components_manager(fake_backend),
+        ):
+            assert check_component_context_registration_files() == []

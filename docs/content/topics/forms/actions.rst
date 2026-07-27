@@ -89,6 +89,9 @@ Override with ``Meta.scope``.
 Customise the set of anchor file names through ``NEXT_FRAMEWORK["FORM_ANCHOR_FILES"]``.
 The default set is ``["page.py", "component.py"]``.
 
+The file is the one the ``class`` statement is written in, not the file that imports the class.
+A class built by a factory such as ``next.forms.modelform_factory`` is attributed to the module that calls the factory, not to the module that runs the underlying ``type()`` call.
+
 .. _topics-forms-actions-uid:
 
 UID Stability
@@ -204,6 +207,32 @@ The ``login_required`` and ``permission_required`` keywords guard the endpoint, 
 Applying ``@action`` to a class registers no action.
 The decorator records the misuse, returns the class unchanged, and ``manage.py check`` reports it as ``next.E053``.
 Form classes register through ``__init_subclass__`` and must not use ``@action``.
+
+Stacking Decorators on ``@action``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``@action`` keys the registration on the file where the decorated function is declared, not on the file that runs the decorator.
+Decorating an imported function registers it under the module that defines that function.
+A shared helper therefore needs a thin wrapper in the page module that uses it, the same wrapper :doc:`/content/topics/context` shows for context functions.
+
+Keep ``@action`` outermost when other decorators apply to the same handler.
+
+.. code-block:: python
+   :caption: page.py
+
+   from django.db import transaction
+   from django.http import HttpRequest
+   from next.forms import action, redirect_to_origin
+   from next.urls import DUrl
+
+   @action("publish_note")
+   @transaction.atomic
+   def publish_note(request: HttpRequest, note_id: DUrl["id", int]):
+       Note.objects.filter(pk=note_id).update(published=True)
+       return redirect_to_origin(request)
+
+``transaction.atomic`` copies ``__wrapped__`` through :func:`functools.wraps`, so the action still registers under this ``page.py``.
+A hand-written decorator that omits ``functools.wraps`` hides the wrapped function, and the action registers under the decorator's own module instead.
 
 Injecting the Form Into a Handler
 ---------------------------------

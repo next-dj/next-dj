@@ -8,20 +8,19 @@ component template is rendered.
 
 from __future__ import annotations
 
-import inspect
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, overload
 
 from next.checks.common import get_components_manager
 from next.deps import resolver
-from next.utils import caller_source_path
+from next.utils import callable_name, defining_file
 
 from .backends import FileComponentsBackend
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
+    from pathlib import Path
 
     from next.static.serializers import JsContextSerializer
 
@@ -96,17 +95,11 @@ class ComponentContextRegistry:
     ) -> bool:
         if func1 is func2:
             return True
-        name1 = getattr(func1, "__name__", None)
-        name2 = getattr(func2, "__name__", None)
-        if not name1 or not name2 or name1 != name2:
+        if callable_name(func1) != callable_name(func2):
             return False
         try:
-            file1 = inspect.getsourcefile(func1)
-            file2 = inspect.getsourcefile(func2)
-            if not file1 or not file2:
-                return False
-            return Path(file1).resolve() == Path(file2).resolve()
-        except (OSError, TypeError, ValueError):
+            return defining_file(func1).resolve() == defining_file(func2).resolve()
+        except (OSError, TypeError):
             return False
 
     def __len__(self) -> int:
@@ -120,13 +113,6 @@ class ComponentContextManager:
     def __init__(self) -> None:
         """Create an empty registry for context callables."""
         self._registry = ComponentContextRegistry()
-
-    def _get_caller_path(self, back_count: int = 1) -> Path:
-        return caller_source_path(
-            back_count=back_count,
-            max_walk=10,
-            skip_framework_file=("context.py", "components"),
-        )
 
     @overload
     def context[C: Callable[..., Any]](self, func_or_key: C, /) -> C: ...
@@ -156,18 +142,16 @@ class ComponentContextManager:
 
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             if callable(func_or_key):
-                caller_path = self._get_caller_path(2)
                 self._registry.register(
-                    caller_path,
+                    defining_file(func),
                     None,
                     func_or_key,
                     serialize=serialize,
                     serializer=serializer,
                 )
             else:
-                caller_path = self._get_caller_path(1)
                 self._registry.register(
-                    caller_path,
+                    defining_file(func),
                     func_or_key,
                     func,
                     serialize=serialize,
