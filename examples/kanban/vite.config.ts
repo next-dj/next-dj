@@ -14,6 +14,10 @@ const entries = Object.fromEntries(
 export default defineConfig({
   plugins: [react()],
   root: path.resolve(__dirname),
+  // A typed route segment is spelled [int:id], and the dev server refuses any
+  // path holding a colon before it consults server.fs.allow. vitest.config.ts
+  // carries the same flag.
+  server: { fs: { strict: false } },
   build: {
     outDir: "kanban/static/kanban/dist",
     emptyOutDir: true,

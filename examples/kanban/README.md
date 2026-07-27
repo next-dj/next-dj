@@ -27,20 +27,22 @@ uv run python manage.py runserver     # http://127.0.0.1:8000/
 
 The first `migrate` run seeds three demo boards. Open the index to land on the board list.
 
-For the React layer to hot-reload, start the Vite dev server:
+The React layer loads from the Vite dev server, so start it next to Django:
 
 ```bash
 npm install
 npm run dev                            # http://localhost:5173
 ```
 
-With the dev server running, Django resolves every `.jsx` asset to the Vite dev-server URL and the React Refresh preamble plus the `@vite/client` HMR script load through the `collector_finalized` signal. Override the Vite origin with the `VITE_ORIGIN` environment variable.
+Django resolves every `.jsx` asset to a dev-server URL, and the React Refresh preamble plus the `@vite/client` HMR script load through the `collector_finalized` signal. `VITE_ORIGIN` overrides that origin for the asset URLs and the HMR client.
 
-For a production-shaped build:
+A typed route segment such as `[int:id]` puts a colon in the directory name, and the Vite dev server refuses to serve a path holding one before it consults `server.fs.allow`. Co-locating assets under a typed segment therefore needs `server: { fs: { strict: false } }`, which both `vite.config.ts` and `vitest.config.ts` carry. Only the dev server applies that guard, so the production build and Django static serving stay untouched.
+
+For a production-shaped build, hand the backend an empty origin so it resolves through the manifest:
 
 ```bash
 npm run build                          # writes hashed files into kanban/static/kanban/dist/
-uv run python manage.py runserver
+VITE_ORIGIN= uv run python manage.py runserver
 ```
 
 The backend reads `dist/.vite/manifest.json` and delegates URL resolution to Django staticfiles. If the manifest file is missing, the backend logs a single warning and falls back to staticfiles so dev workflows stay unblocked.

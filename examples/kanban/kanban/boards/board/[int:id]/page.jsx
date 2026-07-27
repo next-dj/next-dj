@@ -89,7 +89,9 @@ export function Board() {
   );
 }
 
-const roots = new WeakMap();
+// A hot update re-evaluates this module, so the registry lives on window to
+// outlive it and React Refresh keeps updating Board inside the existing root.
+const roots = (window.__kanbanRoots ??= new WeakMap());
 
 // onMount re-runs over an element a morph reconciled in place, so the
 // WeakMap guard keeps the mount idempotent.

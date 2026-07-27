@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from next.conf import extend_default_backend
@@ -99,7 +100,9 @@ NEXT_FRAMEWORK = {
             "OPTIONS": {
                 "DEDUP_STRATEGY": "next.static.collector.HashContentDedup",
                 "JS_CONTEXT_POLICY": "next.static.collector.DeepMergePolicy",
-                "DEV_ORIGIN": "http://localhost:5173",
+                # The HMR receiver reads this value back from the backend
+                # options, so one variable moves every dev-server URL.
+                "DEV_ORIGIN": os.environ.get("VITE_ORIGIN", "http://localhost:5173"),
                 "VITE_ROOT": str(BASE_DIR),
                 "MANIFEST_PATH": str(
                     BASE_DIR / "kanban/static/kanban/dist/.vite/manifest.json"

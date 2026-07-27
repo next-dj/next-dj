@@ -1,8 +1,8 @@
 import base64
-import os
 
 from django.conf import settings
 
+from next.conf import next_framework_settings
 from next.static.assets import StaticAsset
 from next.static.signals import collector_finalized
 
@@ -10,6 +10,15 @@ from next.static.signals import collector_finalized
 def _has_module_assets(collector: object) -> bool:
     scripts = collector.assets_in_slot("scripts")  # type: ignore[attr-defined]
     return any(asset.kind == "jsx" for asset in scripts)
+
+
+def _dev_origin() -> str:
+    """Return the origin the static backend resolves jsx assets against."""
+    for backend in next_framework_settings.STATIC_BACKENDS:
+        origin = (backend.get("OPTIONS") or {}).get("DEV_ORIGIN", "")
+        if origin:
+            return str(origin)
+    return ""
 
 
 def inject_vite_dev_assets(sender: object, **kwargs) -> None:
@@ -21,11 +30,12 @@ def inject_vite_dev_assets(sender: object, **kwargs) -> None:
     preamble JS is base64-encoded into a `data:` URL so it stays a
     single self-contained module script tag. The receiver only fires on
     pages that actually carry jsx scripts so the index page stays free
-    of Vite dev plumbing.
+    of Vite dev plumbing, and only while the backend points jsx at a
+    dev server.
     """
-    if not _has_module_assets(sender):
+    origin = _dev_origin()
+    if not origin or not _has_module_assets(sender):
         return
-    origin = os.environ.get("VITE_ORIGIN", "http://localhost:5173")
     preamble_code = (
         f'import RefreshRuntime from "{origin}/@react-refresh";'
         "RefreshRuntime.injectIntoGlobalHook(window);"
