@@ -12,7 +12,9 @@ def recent_links() -> list[Link]:
     return list(Link.objects.order_by("-clicks", "-created_at")[:10])
 
 
-context("pending_clicks")(pending_clicks)
+@context("pending_clicks")
+def admin_pending_clicks() -> dict[str, int]:
+    return pending_clicks()
 
 
 class EditLinkForm(ModelForm):

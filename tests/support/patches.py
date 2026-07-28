@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
@@ -10,6 +11,19 @@ from tests.support.helpers import next_framework_settings_for_checks
 if TYPE_CHECKING:
     from collections.abc import Generator, Iterable
     from pathlib import Path
+
+
+@contextmanager
+def importable_dir(directory: Path) -> Generator[None, None, None]:
+    """Put `directory` on `sys.path` and drop the modules imported from it."""
+    before = set(sys.modules)
+    sys.path.insert(0, str(directory))
+    try:
+        yield
+    finally:
+        sys.path.remove(str(directory))
+        for name in set(sys.modules) - before:
+            del sys.modules[name]
 
 
 @contextmanager

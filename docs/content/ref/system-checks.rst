@@ -302,6 +302,15 @@ Errors
    * - ``next.E073``
      - A ``PARTIAL_BACKENDS`` entry has no ``BACKEND`` key, so the factory would refuse it with ``ImproperlyConfigured`` on the first partial request.
      - ``next.partial.checks``
+   * - ``next.E074``
+     - A ``@context`` registration binds to a file no page render collects.
+       A registration keys on the file declaring the callable, so decorating an imported helper binds it to the helper's module, and decorating a callable imported from a sibling ``page.py`` binds it to that other page.
+       Declare the callable in the ``page.py`` that needs it and let it call the shared helper.
+     - ``next.pages.checks``
+   * - ``next.E075``
+     - A ``@component.context`` registration binds to a file no component render collects.
+       The rule and the fix match ``next.E074``.
+     - ``next.components.checks``
 
 A code emitted by ``next.checks.common`` is produced by a shared helper that the listed subsystem check modules call.
 

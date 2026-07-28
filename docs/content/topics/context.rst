@@ -115,20 +115,31 @@ The inherit_context Flag
 Use this for header copy, brand colors, feature flags, and other shared values.
 Without the flag the value is only available when that exact ``page.py`` handles the request, and descendant routes cannot read it.
 
-Direct Registration
-~~~~~~~~~~~~~~~~~~~
+Reusing a Shared Helper
+~~~~~~~~~~~~~~~~~~~~~~~
 
-Treat ``context("key")`` as a callable that registers an existing function.
+``@context`` keys the registration on the file where the decorated function is declared, not on the file that runs the decorator.
+A helper that lives in a shared module therefore needs a thin wrapper in the page module that uses it.
 
 .. code-block:: python
-   :caption: registering an external function
+   :caption: notes/pages/dashboard/page.py
 
    from next.pages import context
    from notes.cache import pending_clicks
 
-   context("pending_clicks")(pending_clicks)
+   @context("pending_clicks")
+   def dashboard_pending_clicks() -> dict[str, int]:
+       return pending_clicks()
 
-This is useful when the function lives in a shared module and you want to register it without a decorator on the original source.
+The same rule holds for ``@component.context``.
+Decorating the imported helper directly registers it under the module that declares it, where no render reaches it.
+A function imported from a sibling ``page.py`` lands the same way, on that other page rather than on the one running the decorator.
+``manage.py check`` reports both as ``next.E074`` for a page context and ``next.E075`` for a component one.
+:doc:`/content/topics/forms/actions` covers ``@action`` and what a decorator stacked under it has to preserve.
+
+The decorated object has to carry a declaring file of its own, which a function, a class, or a ``functools.partial`` over either does.
+A built-in such as ``datetime.now`` carries none, and decorating one raises ``TypeError`` at import time naming the object.
+Wrap it in a function declared in the page module instead.
 
 Reading Values Into a Context Function
 --------------------------------------

@@ -255,7 +255,7 @@ class TestValidateInstanceFromUrlE049:
         fake_path = str(app_dir / "forms.py")
         Path(fake_path).write_text("")
 
-        with patch("next.forms.base._find_definition_frame", return_value=fake_path):
+        with patch("next.forms.base._definition_file_of", return_value=fake_path):
 
             class PlainFormWithSpec(Form):
                 class Meta:

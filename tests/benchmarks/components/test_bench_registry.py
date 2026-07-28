@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from next.components.context import ComponentContextManager
 from next.components.registry import ComponentRegistry, ComponentVisibilityResolver
 from tests.benchmarks.factories import build_component_info_list
 
@@ -39,6 +40,22 @@ class TestBenchComponentRegistry:
     ) -> None:
         registry, _root = populated_component_registry
         benchmark(registry.__contains__, "not_registered")
+
+
+class TestBenchComponentContext:
+    @pytest.mark.benchmark(group="components.registry")
+    def test_context_decorator(self, benchmark) -> None:
+        """Import-time cost of `@component.context` attributing each callable."""
+
+        def ctx() -> dict[str, int]:
+            return {"count": 1}
+
+        def run() -> None:
+            manager = ComponentContextManager()
+            for i in range(20):
+                manager.context(f"k_{i}")(ctx)
+
+        benchmark(run)
 
 
 class TestBenchComponentVisibility:

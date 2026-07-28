@@ -1,6 +1,7 @@
 """Base form classes and auto-registration machinery for next.forms."""
 
 import inspect
+import os
 import re
 import sys
 from pathlib import Path
@@ -17,6 +18,7 @@ from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 
 from next.conf import next_framework_settings
+from next.utils import defining_file
 
 from .backends import (
     ActionGuard,
@@ -29,28 +31,53 @@ from .manager import form_action_manager
 from .uid import redirect_to_origin
 
 
+def _root_prefix(root: str) -> str:
+    """Return the root with one trailing separator so prefix tests respect segments."""
+    return root if root.endswith(os.sep) else root + os.sep
+
+
 _ANCHOR_FILE_NAMES: frozenset[str] = frozenset({"page.py", "component.py"})
 _SELF_REGISTERED_ATTR: Final[str] = "__next_registered__"
 _FRAMEWORK_ROOT: Final[Path] = Path(__file__).resolve().parent.parent
 _DJANGO_FORMS_ROOT: Final[Path] = Path(inspect.getfile(django_forms)).resolve().parent
+_FRAMEWORK_ROOT_STR: Final[str] = str(_FRAMEWORK_ROOT)
+_FRAMEWORK_ROOT_PREFIX: Final[str] = _root_prefix(_FRAMEWORK_ROOT_STR)
+# A class attributed to either root was built by type() inside foreign code,
+# so only the stack names the file that asked for it.
+_FOREIGN_ROOTS: Final[tuple[tuple[str, str], ...]] = (
+    (str(_DJANGO_FORMS_ROOT), _root_prefix(str(_DJANGO_FORMS_ROOT))),
+    (_FRAMEWORK_ROOT_STR, _FRAMEWORK_ROOT_PREFIX),
+)
+
+# Both roots are process constants, so a per-path answer can never go stale.
+# The BASE_DIR decision stays uncached because settings repoint it.
+_foreign_file_cache: dict[str, bool] = {}
 
 # HttpResponseRedirect is a subclass of HttpResponse, so the login-redirect
 # short-circuit needs no extra arm.
 type PermissionOutcome = bool | HttpResponse | None
 
 
+_ACRONYM_BOUNDARY_RE: Final[re.Pattern[str]] = re.compile(r"([A-Z]+)([A-Z][a-z])")
+_CASE_BOUNDARY_RE: Final[re.Pattern[str]] = re.compile(r"([a-z\d])([A-Z])")
+
+
 def _to_snake_case(name: str) -> str:
-    s1 = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
-    return re.sub(r"([a-z\d])([A-Z])", r"\1_\2", s1).lower()
+    s1 = _ACRONYM_BOUNDARY_RE.sub(r"\1_\2", name)
+    return _CASE_BOUNDARY_RE.sub(r"\1_\2", s1).lower()
 
 
-def _is_framework_file(file_path: str) -> bool:
-    try:
-        Path(_resolved_path_str(file_path)).relative_to(_FRAMEWORK_ROOT)
-    except ValueError:
-        return False
-    else:
-        return True
+def _is_foreign_file(file_path: str) -> bool:
+    """Return True when file_path resolves inside django.forms or the framework."""
+    cached = _foreign_file_cache.get(file_path)
+    if cached is None:
+        resolved = _resolved_path_str(file_path)
+        cached = any(
+            resolved == root or resolved.startswith(prefix)
+            for root, prefix in _FOREIGN_ROOTS
+        )
+        _foreign_file_cache[file_path] = cached
+    return cached
 
 
 def _compute_scope(file_path: str) -> str:
@@ -59,9 +86,9 @@ def _compute_scope(file_path: str) -> str:
     anchor_names = (
         frozenset(configured) if configured is not None else _ANCHOR_FILE_NAMES
     )
-    return (
-        "page" if Path(_resolved_path_str(file_path)).name in anchor_names else "shared"
-    )
+    # The tail after the last separator equals PurePath.name for a resolved path.
+    name = _resolved_path_str(file_path).rpartition(os.sep)[2]
+    return "page" if name in anchor_names else "shared"
 
 
 def _record_invalid_meta_scope(cls: type, bad_value: object) -> None:
@@ -125,17 +152,8 @@ def _validate_instance_from_url(cls: type, *, is_model_form: bool) -> None:
             )
 
 
-def _is_django_forms_file(file_path: str) -> bool:
-    try:
-        Path(_resolved_path_str(file_path)).relative_to(_DJANGO_FORMS_ROOT)
-    except ValueError:
-        return False
-    else:
-        return True
-
-
-def _find_definition_frame() -> str:
-    """Walk the call stack to find the file where a class was defined."""
+def _find_frame_outside() -> str:
+    """Walk the stack for the first frame outside django.forms and the framework."""
     depth = 1
     while True:
         try:
@@ -143,10 +161,41 @@ def _find_definition_frame() -> str:
         except ValueError:
             return ""
         filename = frame.f_code.co_filename
-        if _is_django_forms_file(filename) or _is_framework_file(filename):
+        if _is_foreign_file(filename):
             depth += 1
             continue
         return filename
+
+
+def _module_declared_file(cls: type) -> str | None:
+    """Return the file of the module that still binds cls under its own name.
+
+    The file router execs every `page.py` under one throwaway module name it
+    never registers, so a same-named module a project happens to import must
+    not answer for a class it never declared.
+    """
+    module = sys.modules.get(getattr(cls, "__module__", "") or "")
+    if module is None or getattr(module, cls.__name__, None) is not cls:
+        return None
+    try:
+        return str(defining_file(cls))
+    except (OSError, TypeError):
+        # A module without __file__, such as one built for an interactive
+        # session, names no file for the classes declared in it.
+        return None
+
+
+def _definition_file_of(cls: type) -> str:
+    """Return the file where cls was declared, empty when no frame names one.
+
+    `__init_subclass__` runs while the declaring frame is still on the stack,
+    so the walk answers wherever the module cannot. A foreign file never
+    survives it, which is why the caller needs no framework arm.
+    """
+    file_path = _module_declared_file(cls)
+    if file_path is None or _is_foreign_file(file_path):
+        return _find_frame_outside()
+    return file_path
 
 
 def _registration_gate(cls: type) -> tuple[str, str, str] | None:
@@ -156,22 +205,17 @@ def _registration_gate(cls: type) -> tuple[str, str, str] | None:
     if getattr(cls.__dict__.get("Meta"), "abstract", False):
         return None
 
-    file_path = _find_definition_frame()
+    file_path = _definition_file_of(cls)
 
     # Skip virtual frames (importlib bootstrap, interactive shell, etc.)
     if not file_path or file_path.startswith("<"):
         return None
 
-    if _is_framework_file(file_path):
-        return None
-
     base = getattr(settings, "BASE_DIR", None)
     if base is not None:
-        try:
-            Path(_resolved_path_str(file_path)).relative_to(
-                Path(_resolved_path_str(str(base)))
-            )
-        except ValueError:
+        resolved = _resolved_path_str(file_path)
+        base_root = _resolved_path_str(str(base))
+        if resolved != base_root and not resolved.startswith(_root_prefix(base_root)):
             registration_diagnostics.outside_base_dir.append(
                 (cls.__qualname__, file_path)
             )

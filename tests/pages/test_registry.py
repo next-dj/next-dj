@@ -1,3 +1,4 @@
+import functools
 from unittest.mock import MagicMock
 
 import pytest
@@ -406,6 +407,20 @@ class TestKeylessConflicts:
         context_manager.register_context(test_file_path, None, get_context_data)
 
         assert context_manager._keyless_conflicts == {}
+
+    def test_partial_and_function_conflict_records_unwrapped_names(
+        self, context_manager, test_file_path
+    ) -> None:
+        def bound() -> dict:
+            return {}
+
+        def plain() -> dict:
+            return {}
+
+        context_manager.register_context(test_file_path, None, functools.partial(bound))
+        context_manager.register_context(test_file_path, None, plain)
+
+        assert context_manager._keyless_conflicts[test_file_path] == ["bound", "plain"]
 
     def test_reset_clears_keyless_conflicts(
         self, context_manager, test_file_path

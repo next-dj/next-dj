@@ -98,16 +98,18 @@ def link_context(link: DLink[Link]) -> dict[str, object]:
 
 `@context("link")` + `@context("cache_key")` would each trigger the `DLink` provider and hit the database twice. The unkeyed form runs the dependency once, merges the dict into the template context.
 
-**Direct registration** of an already-existing function — no wrapper needed:
+**Reusing a shared helper** — wrap it in the page module that needs it:
 
 ```python
 # routes/admin/page.py
 from shortener.cache import pending_clicks
 
-context("pending_clicks")(pending_clicks)
+@context("pending_clicks")
+def admin_pending_clicks() -> dict[str, int]:
+    return pending_clicks()
 ```
 
-`context("key")` returns the decorator, and calling it on a function registers the function exactly like `@context("key")` would.
+`@context` keys the registration on the file where the decorated function is declared, so decorating `pending_clicks` in place would bind it to `shortener/cache.py` instead of to this page.
 
 ### 4. `inherit_context=True` — sharing context down the tree
 

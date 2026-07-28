@@ -9,10 +9,16 @@ from django.conf import settings
 from django.core.checks import CheckMessage, Error, register
 
 from next.checks import NEXT
-from next.checks.common import errors_for_unknown_keys, get_components_manager
+from next.checks.common import (
+    RegistrationSubject,
+    errors_for_unknown_keys,
+    get_components_manager,
+    registration_file_errors,
+)
 from next.conf import next_framework_settings
 
 from .backends import FileComponentsBackend
+from .context import component
 
 
 if TYPE_CHECKING:
@@ -20,6 +26,15 @@ if TYPE_CHECKING:
 
 
 _COMPONENT_BACKEND_SETTINGS_KEY = "COMPONENT_BACKENDS"
+
+# The scanner renders only this name, so a context bound anywhere else is dead,
+# including one bound to the component.py next door.
+_COMPONENT_CONTEXT_SUBJECT = RegistrationSubject(
+    decorator="@component.context",
+    anchor_name="component.py",
+    render="component render",
+    code="next.E075",
+)
 
 _FILE_COMPONENT_BACKEND_CONFIG_KEYS = frozenset({"BACKEND", "COMPONENTS_DIR", "DIRS"})
 
@@ -240,7 +255,34 @@ def check_component_py_no_pages_context(*args, **kwargs) -> list[CheckMessage]:
     return errors
 
 
+@register(NEXT)
+def check_component_context_registration_files(*args, **kwargs) -> list[CheckMessage]:
+    """Flag a `@component.context` no component render collects (`next.E075`).
+
+    A registration keys on the file declaring the callable, so decorating an
+    imported helper binds it to that module, and decorating a callable from a
+    sibling `component.py` binds it to that other component.
+    """
+    configs = next_framework_settings.COMPONENT_BACKENDS
+    if not isinstance(configs, list) or not configs:
+        return []
+
+    manager = get_components_manager()
+    for backend in manager._backends:
+        if isinstance(backend, FileComponentsBackend):
+            # Called for the import it performs, which is what runs the
+            # decorators this check then reads out of the registry.
+            backend.loaded_module_paths()
+
+    return registration_file_errors(
+        _COMPONENT_CONTEXT_SUBJECT,
+        registrations=component._registry.registered_names(),
+        misattributed=component._registry.misattributed(),
+    )
+
+
 __all__ = [
+    "check_component_context_registration_files",
     "check_component_py_no_pages_context",
     "check_cross_root_component_name_conflicts",
     "check_duplicate_component_names",

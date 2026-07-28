@@ -17,7 +17,6 @@ from django.test import RequestFactory, override_settings
 
 from next.conf import next_framework_settings
 from next.forms import Form, ModelForm, PermissionOutcome
-from next.forms.base import _FRAMEWORK_ROOT
 from next.forms.diagnostics import registration_diagnostics
 from next.forms.manager import form_action_manager
 from next.forms.wizard import (
@@ -212,7 +211,7 @@ class TestWizardRegistration:
 
     def test_virtual_path_skips_registration(self) -> None:
         """A wizard defined in a virtual frame is not registered."""
-        with patch("next.forms.base._find_definition_frame", return_value="<stdin>"):
+        with patch("next.forms.base._definition_file_of", return_value="<stdin>"):
 
             class VirtualWizard(FormWizard):
                 class Meta:
@@ -222,26 +221,13 @@ class TestWizardRegistration:
 
     def test_empty_path_skips_registration(self) -> None:
         """A wizard whose definition frame is empty is not registered."""
-        with patch("next.forms.base._find_definition_frame", return_value=""):
+        with patch("next.forms.base._definition_file_of", return_value=""):
 
             class EmptyPathWizard(FormWizard):
                 class Meta:
                     steps: ClassVar = [("identity", IdentityStep)]
 
         assert form_action_manager.default_backend.get_meta("empty_path_wizard") is None
-
-    def test_framework_file_skips_registration(self) -> None:
-        """A wizard defined inside the framework package is not registered."""
-        framework_path = str(_FRAMEWORK_ROOT / "forms" / "wizard.py")
-        with patch(
-            "next.forms.base._find_definition_frame", return_value=framework_path
-        ):
-
-            class FrameworkWizard(FormWizard):
-                class Meta:
-                    steps: ClassVar = [("identity", IdentityStep)]
-
-        assert form_action_manager.default_backend.get_meta("framework_wizard") is None
 
     def test_outside_base_dir_records_warning(self, settings, tmp_path) -> None:
         """A wizard outside BASE_DIR is flagged for W046 and not registered."""
@@ -251,7 +237,7 @@ class TestWizardRegistration:
         fake_path = str(outside / "wizards.py")
         Path(fake_path).write_text("")
 
-        with patch("next.forms.base._find_definition_frame", return_value=fake_path):
+        with patch("next.forms.base._definition_file_of", return_value=fake_path):
 
             class OutsideWizard(FormWizard):
                 class Meta:
@@ -474,7 +460,7 @@ class TestWizardStorageScopeIsolation:
     """Same-named wizards from different modules use distinct storage buckets."""
 
     def _make_wizard(self, fake_path: str) -> type[FormWizard]:
-        with patch("next.forms.base._find_definition_frame", return_value=fake_path):
+        with patch("next.forms.base._definition_file_of", return_value=fake_path):
 
             class CheckoutWizard(FormWizard):
                 class Meta:
@@ -539,7 +525,7 @@ class TestWizardStorageScopeIsolation:
 
     def test_unregistered_wizard_falls_back_to_module_scope(self) -> None:
         """An unregistered wizard derives its storage scope from its module."""
-        with patch("next.forms.base._find_definition_frame", return_value="<stdin>"):
+        with patch("next.forms.base._definition_file_of", return_value="<stdin>"):
 
             class GhostWizard(FormWizard):
                 class Meta:

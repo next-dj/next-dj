@@ -10,9 +10,11 @@ from django.test import override_settings
 
 from next.checks import NEXT, register_all
 from next.checks.common import (
+    RegistrationSubject,
     get_components_manager,
     get_router_manager,
     iter_scanned_page_pairs,
+    registration_file_errors,
     reset_components_manager_cache,
     reset_router_manager_cache,
 )
@@ -291,3 +293,74 @@ class TestNextTag:
         ]
         assert next_checks
         assert all("compatibility" not in check.tags for check in next_checks)
+
+
+class TestRegistrationFileErrors:
+    """`registration_file_errors` turns registry state into check messages."""
+
+    subject = RegistrationSubject(
+        decorator="@context",
+        anchor_name="page.py",
+        render="page render",
+        code="next.E074",
+    )
+
+    def test_anchor_file_registration_reports_nothing(self, tmp_path: Path) -> None:
+        errors = registration_file_errors(
+            self.subject,
+            registrations={tmp_path / "page.py": ("greeting",)},
+            misattributed=[],
+        )
+        assert errors == []
+
+    def test_helper_file_registration_reports_the_dead_binding(
+        self, tmp_path: Path
+    ) -> None:
+        helper = tmp_path / "helpers.py"
+        errors = registration_file_errors(
+            self.subject,
+            registrations={helper: ("greeting", "farewell")},
+            misattributed=[],
+        )
+        assert [e.id for e in errors] == ["next.E074"]
+        assert "farewell, greeting" in errors[0].msg
+
+    def test_misattributed_name_is_not_repeated_by_the_helper_arm(
+        self, tmp_path: Path
+    ) -> None:
+        helper = tmp_path / "helpers.py"
+        page_file = tmp_path / "page.py"
+        errors = registration_file_errors(
+            self.subject,
+            registrations={helper: ("greeting", "farewell")},
+            misattributed=[(page_file, helper, "greeting")],
+        )
+        assert [e.id for e in errors] == ["next.E074", "next.E074"]
+        assert "greeting" in errors[0].msg
+        assert errors[1].msg.count("farewell") == 1
+        assert "greeting" not in errors[1].msg
+
+    def test_fully_misattributed_helper_reports_once(self, tmp_path: Path) -> None:
+        helper = tmp_path / "helpers.py"
+        page_file = tmp_path / "page.py"
+        errors = registration_file_errors(
+            self.subject,
+            registrations={helper: ("greeting",)},
+            misattributed=[(page_file, helper, "greeting")],
+        )
+        assert len(errors) == 1
+        assert str(page_file) in errors[0].msg
+
+    def test_records_are_ordered_by_their_paths(self, tmp_path: Path) -> None:
+        helper = tmp_path / "helpers.py"
+        first = tmp_path / "a" / "page.py"
+        second = tmp_path / "b" / "page.py"
+        errors = registration_file_errors(
+            self.subject,
+            registrations={},
+            misattributed=[(second, helper, "later"), (first, helper, "earlier")],
+        )
+        assert [str(first) in errors[0].msg, str(second) in errors[1].msg] == [
+            True,
+            True,
+        ]

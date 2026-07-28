@@ -9,10 +9,11 @@ application-wide singleton. `context` is a convenience alias for
 from __future__ import annotations
 
 import contextlib
-import inspect
 import logging
+import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast, overload
 
 from django.http import HttpRequest, HttpResponse
@@ -23,7 +24,7 @@ from django.urls import URLPattern, path
 from next.checks.common import get_router_manager, iter_scanned_page_pairs
 from next.conf import next_framework_settings
 from next.deps import DependencyResolver, resolver
-from next.utils import caller_source_path
+from next.utils import defining_file
 
 from .loaders import (
     LayoutTemplateLoader,
@@ -38,7 +39,6 @@ from .signals import page_rendered, template_loaded
 if TYPE_CHECKING:
     import types
     from collections.abc import Callable, Iterator
-    from pathlib import Path
 
     from next.static import StaticCollector
     from next.static.serializers import JsContextSerializer
@@ -107,14 +107,6 @@ class Page:
         self._compiled_registry.pop(file_path, None)
         template_loaded.send(sender=Page, file_path=file_path)
 
-    def _get_caller_path(self, back_count: int = 1) -> Path:
-        """Return the filesystem path of the user caller outside this module."""
-        return caller_source_path(
-            back_count=back_count,
-            max_walk=10,
-            skip_while_filename_endswith=("manager.py",),
-        )
-
     @overload
     def context[C: Callable[..., Any]](self, func_or_key: C, /) -> C: ...
     @overload
@@ -134,7 +126,7 @@ class Page:
         serialize: bool = False,
         serializer: JsContextSerializer | None = None,
     ) -> Callable[..., Any]:
-        """Register a keyed or dict-merge `@context` for the caller file.
+        """Register a keyed or dict-merge `@context` for the file declaring `func`.
 
         Pass `serialize=True` to include the return value in
         `Next.context` so JavaScript code on the page can read it via
@@ -142,28 +134,25 @@ class Page:
         through a custom `JsContextSerializer` instead of the global
         `JS_CONTEXT_SERIALIZER` setting.
         """
+        # Captured here rather than inside the decorator so both spellings see
+        # the page.py that ran `@context`, not this module.
+        registered_from = Path(sys._getframe(1).f_code.co_filename)
 
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-            if callable(func_or_key):
-                caller_path = self._get_caller_path(2)
-                self._context_manager.register_context(
-                    caller_path,
-                    None,
-                    func_or_key,
-                    inherit_context=inherit_context,
-                    serialize=serialize,
-                    serializer=serializer,
+            declared_in = defining_file(func)
+            if declared_in != registered_from:
+                self._context_manager.note_misattribution(
+                    registered_from, declared_in, func
                 )
-            else:
-                caller_path = self._get_caller_path(1)
-                self._context_manager.register_context(
-                    caller_path,
-                    func_or_key,
-                    func,
-                    inherit_context=inherit_context,
-                    serialize=serialize,
-                    serializer=serializer,
-                )
+            key = None if callable(func_or_key) else func_or_key
+            self._context_manager.register_context(
+                declared_in,
+                key,
+                func,
+                inherit_context=inherit_context,
+                serialize=serialize,
+                serializer=serializer,
+            )
             return func
 
         return decorator(func_or_key) if callable(func_or_key) else decorator
@@ -591,9 +580,6 @@ class Page:
         return self._create_virtual_page_pattern(
             file_path, django_pattern, parameters, clean_name
         )
-
-
-_ = inspect  # keep `inspect` import reachable for test-time patching
 
 
 page: Page = Page()

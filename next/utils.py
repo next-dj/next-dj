@@ -1,16 +1,18 @@
-"""Filesystem path helpers."""
+"""Filesystem path helpers and the declaration-site attribution they back."""
 
 from __future__ import annotations
 
+import functools
 import inspect
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from types import CodeType
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from django.conf import settings
 
 
 if TYPE_CHECKING:
-    from types import FrameType
+    from collections.abc import Callable
 
 
 def resolve_base_dir() -> Path | None:
@@ -73,85 +75,114 @@ def classify_dirs_entries(
     return path_roots, frozenset(segments)
 
 
-_CALLER_PATH_ERROR = "Could not determine caller file path"
+_CLASS_BODY_MEMBERS: tuple[str, ...] = ("__call__", "__init__")
 
 
-def caller_source_path(
-    *,
-    back_count: int = 1,
-    max_walk: int = 15,
-    skip_while_filename_endswith: tuple[str, ...] | None = None,
-    skip_framework_file: tuple[str, str] | None = None,
-) -> Path:
-    """Resolve ``Path`` of the caller module's ``__file__`` for decorator registration.
+def _code_filename(func: object) -> str | None:
+    """Return the source file behind ``func.__code__``, or ``None`` when it has none."""
+    target = func
+    if callable(func):
+        try:
+            target = inspect.unwrap(func)
+        except ValueError:
+            # A ``__wrapped__`` cycle names no innermost function, so the
+            # outermost wrapper answers rather than the registration failing.
+            target = func
+    code = getattr(target, "__code__", None)
+    return code.co_filename if isinstance(code, CodeType) else None
 
-    ``back_count`` is how many frames to step up before scanning. Use this to skip
-    past a decorator wrapper.
 
-    For pages and forms pass ``skip_while_filename_endswith``, for example
-    ``("pages.py",)``. Walk frames until ``__file__`` is missing or no longer ends
-    with one of those suffixes. Then return that path.
+def _class_filename(cls: type) -> str | None:
+    """Return the file declaring ``cls``, reading its own body when the module is gone.
 
-    For components pass ``skip_framework_file`` as ``(basename, parent_dir_name)``,
-    for example ``("components.py", "next")``. Only ``str`` paths ending in ``.py``
-    are considered. The resolved framework module path is skipped.
+    The file router execs a ``page.py`` from a spec it never registers, so
+    ``sys.modules`` names no file for classes declared there. A method written
+    in the class body still carries the path in its code object.
     """
-    if skip_while_filename_endswith is not None and skip_framework_file is not None:
-        msg = "Specify only one of skip_while_filename_endswith or skip_framework_file"
-        raise ValueError(msg)
-    if skip_while_filename_endswith is None and skip_framework_file is None:
-        msg = "Specify skip_while_filename_endswith or skip_framework_file"
-        raise ValueError(msg)
-
-    frame = _walk_back(inspect.currentframe(), back_count)
-    if skip_while_filename_endswith is not None:
-        return _scan_by_suffix(frame, skip_while_filename_endswith, max_walk)
-    if skip_framework_file is None:  # pragma: no cover
-        raise RuntimeError(_CALLER_PATH_ERROR)
-    return _scan_framework_file(frame, skip_framework_file, max_walk)
+    try:
+        return inspect.getfile(cls)
+    except (OSError, TypeError):
+        for name in _CLASS_BODY_MEMBERS:
+            filename = _code_filename(cls.__dict__.get(name))
+            if filename is not None:
+                return filename
+    return None
 
 
-def _walk_back(frame: FrameType | None, back_count: int) -> FrameType | None:
-    """Step up ``back_count`` frames before scanning, raising when they run out."""
-    for _ in range(back_count):
-        if not frame or not frame.f_back:
-            raise RuntimeError(_CALLER_PATH_ERROR)
-        frame = frame.f_back
-    return frame
+def defining_file(obj: object) -> Path:
+    """Return the file where ``obj`` was declared, for decorator registration.
+
+    Wrappers stay transparent only while they set ``__wrapped__`` through
+    :func:`functools.wraps`, and a class built by ``type()`` inside foreign
+    code keeps no link to the file that asked for it. Where ``sys.modules``
+    names no file, a code object from the object's own body answers instead.
+    """
+    if isinstance(obj, functools.partial):
+        return defining_file(obj.func)
+    if inspect.isclass(obj):
+        filename = _class_filename(obj)
+    elif callable(obj):
+        filename = _code_filename(obj) or _code_filename(type(obj).__call__)
+    else:
+        filename = None
+    if filename is not None:
+        return Path(filename)
+    msg = (
+        f"next.dj could not determine the file where {obj!r} was declared, "
+        "so the registration has no page or component to belong to. Declare a "
+        "function with 'def' in the file that uses it and decorate that."
+    )
+    raise TypeError(msg)
 
 
-def _scan_by_suffix(
-    frame: FrameType | None, suffixes: tuple[str, ...], max_walk: int
-) -> Path:
-    """Return the first caller frame whose ``__file__`` is not a framework suffix."""
-    for _ in range(max_walk):
-        if not frame:
-            break
-        raw = frame.f_globals.get("__file__")
-        if raw and isinstance(raw, str):
-            if any(raw.endswith(sfx) for sfx in suffixes):
-                frame = frame.f_back
-                continue
-            return Path(raw)
-        frame = frame.f_back
-    raise RuntimeError(_CALLER_PATH_ERROR)
+def callable_name(obj: object) -> str:
+    """Return the name a registration reports for ``obj`` in diagnostics.
+
+    A partial and a callable instance carry no ``__name__``, so the name of
+    the wrapped function or of the class stands in for one.
+    """
+    if isinstance(obj, functools.partial):
+        return callable_name(obj.func)
+    name = getattr(obj, "__name__", None)
+    return name if isinstance(name, str) else type(obj).__name__
 
 
-def _scan_framework_file(
-    frame: FrameType | None, skip_framework_file: tuple[str, str], max_walk: int
-) -> Path:
-    """Return the first caller frame outside the named framework module file."""
-    base, parent = skip_framework_file
-    err_components = f"{_CALLER_PATH_ERROR}: no __file__ in caller frames"
-    for _ in range(max_walk):
-        if not frame:
-            break
-        raw = frame.f_globals.get("__file__")
-        if isinstance(raw, str) and raw.endswith(".py"):
-            path = Path(raw).resolve()
-            if path.name == base and path.parent.name == parent:
-                frame = frame.f_back
-                continue
-            return path
-        frame = frame.f_back
-    raise RuntimeError(err_components)
+class MisattributedContext(NamedTuple):
+    """One registration whose callable was declared outside the file running it.
+
+    Both files are kept because a diagnostic has to name the file that
+    expected the value and the one the registration landed on.
+    """
+
+    registered_from: Path
+    declared_in: Path
+    name: str
+
+
+class MisattributionLog:
+    """Collect registrations bound to a file other than the one running them."""
+
+    def __init__(self) -> None:
+        """Start with no recorded registration."""
+        # Keyed by the whole record so a module executed more than once
+        # reports one diagnostic rather than one per execution.
+        self._records: dict[MisattributedContext, None] = {}
+
+    def record(
+        self, registered_from: Path, declared_in: Path, func: Callable[..., Any]
+    ) -> None:
+        """Note that `func` bound to `declared_in` while `registered_from` ran."""
+        entry = MisattributedContext(
+            registered_from=registered_from,
+            declared_in=declared_in,
+            name=callable_name(func),
+        )
+        self._records[entry] = None
+
+    def entries(self) -> tuple[MisattributedContext, ...]:
+        """Return every recorded registration, in the order first seen."""
+        return tuple(self._records)
+
+    def clear(self) -> None:
+        """Drop every recorded registration."""
+        self._records.clear()

@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from tests.support.attribution import (
+    handler_declared_here,
+    unwrapped_decorator,
+    wraps_decorator,
+)
 from tests.support.cases import (
     COERCE_URL_VALUE_CASES,
     URL_BY_ANNOTATION_RESOLVE_CASES,
@@ -32,6 +37,7 @@ from tests.support.partial_requests import (
     plain_request,
 )
 from tests.support.patches import (
+    importable_dir,
     patch_checks_components_manager,
     patch_checks_router_manager,
     patch_checks_router_manager_with_routers,
@@ -69,6 +75,8 @@ __all__ = [
     "default_page_router_config",
     "file_router_backend_from_params",
     "file_router_config_entry",
+    "handler_declared_here",
+    "importable_dir",
     "inspect_parameter",
     "named_temp_py",
     "next_framework_settings_component_backends_list",
@@ -88,4 +96,6 @@ __all__ = [
     "tick_scenario_route_set_grows",
     "tick_scenario_route_set_unchanged",
     "tick_scenario_watch_raises",
+    "unwrapped_decorator",
+    "wraps_decorator",
 ]

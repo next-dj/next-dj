@@ -1,3 +1,4 @@
+import importlib.util
 import textwrap
 from pathlib import Path
 from unittest import mock
@@ -18,7 +19,11 @@ from next.pages.loaders import (
 from next.pages.manager import iter_serialized_page_context_keys
 from next.pages.registry import PageContextRegistry
 from next.static import default_manager as static_default_manager
-from tests.support import patch_checks_router_manager
+from tests.support import (
+    attribution,
+    handler_declared_here,
+    patch_checks_router_manager,
+)
 
 
 class TestPage:
@@ -41,29 +46,18 @@ class TestPage:
         assert page_instance._template_registry[file_path] == template_str
 
     @pytest.mark.parametrize(
-        ("decorator_type", "expected_key", "frame_chain"),
+        ("decorator_type", "expected_key"),
         [
-            ("with_key", "user_name", "f_back"),
-            ("without_key", None, "f_back.f_back"),
-            ("without_parentheses", None, "f_back.f_back"),
+            ("with_key", "user_name"),
+            ("without_key", None),
+            ("without_parentheses", None),
         ],
         ids=["with_key", "without_key", "without_parentheses"],
     )
     def test_context_decorator_variations(
-        self,
-        page_instance,
-        context_temp_file,
-        mock_frame,
-        decorator_type,
-        expected_key,
-        frame_chain,
+        self, page_instance, decorator_type, expected_key
     ) -> None:
-        """``@context`` keys on the caller file whether or not a key and parentheses are given."""
-        frame = mock_frame.return_value
-        for attr in frame_chain.split("."):
-            frame = getattr(frame, attr)
-        frame.f_globals = {"__file__": str(context_temp_file)}
-
+        """``@context`` keys on the declaring file whether or not a key is given."""
         if decorator_type == "with_key":
 
             @page_instance.context("user_name")
@@ -71,67 +65,55 @@ class TestPage:
                 return "John Doe"
 
             func = get_user_name
-        else:
+        elif decorator_type == "without_key":
 
-            @page_instance.context
+            @page_instance.context()
             def get_context_data():
                 return {"key1": "value1", "key2": "value2"}
 
             func = get_context_data
+        else:
 
-        assert context_temp_file in page_instance._context_manager._context_registry
-        assert (
-            expected_key
-            in page_instance._context_manager._context_registry[context_temp_file]
-        )
-        entry = page_instance._context_manager._context_registry[context_temp_file][
-            expected_key
-        ]
+            @page_instance.context
+            def get_context_data_bare():
+                return {"key1": "value1", "key2": "value2"}
+
+            func = get_context_data_bare
+
+        registry = page_instance._context_manager._context_registry
+        assert Path(__file__) in registry
+        assert expected_key in registry[Path(__file__)]
+        entry = registry[Path(__file__)][expected_key]
         assert entry.func == func
         assert entry.inherit_context is False
         assert entry.serialize is False
 
-    def test_context_decorator_with_inherit_context(
-        self, page_instance, context_temp_file, mock_frame
-    ) -> None:
+    def test_context_decorator_with_inherit_context(self, page_instance) -> None:
         """A keyed ``@context`` records ``inherit_context`` on the registry entry."""
-        mock_frame.return_value.f_back.f_globals = {"__file__": str(context_temp_file)}
 
         @page_instance.context("inherited_key", inherit_context=True)
         def get_inherited_value() -> str:
             return "inherited_value"
 
-        assert context_temp_file in page_instance._context_manager._context_registry
-        assert (
-            "inherited_key"
-            in page_instance._context_manager._context_registry[context_temp_file]
-        )
-        entry = page_instance._context_manager._context_registry[context_temp_file][
-            "inherited_key"
-        ]
+        registry = page_instance._context_manager._context_registry
+        assert Path(__file__) in registry
+        assert "inherited_key" in registry[Path(__file__)]
+        entry = registry[Path(__file__)]["inherited_key"]
         assert entry.func == get_inherited_value
         assert entry.inherit_context is True
         assert entry.serialize is False
 
-    def test_context_decorator_without_key_inherit_context(
-        self, page_instance, context_temp_file, mock_frame
-    ) -> None:
+    def test_context_decorator_without_key_inherit_context(self, page_instance) -> None:
         """A dict-merge ``@context`` registers under the ``None`` key and keeps inheritance."""
-        mock_frame.return_value.f_back.f_back.f_globals = {
-            "__file__": str(context_temp_file)
-        }
 
         @page_instance.context(inherit_context=True)
         def get_context_data():
             return {"key1": "value1", "key2": "value2"}
 
-        assert context_temp_file in page_instance._context_manager._context_registry
-        assert (
-            None in page_instance._context_manager._context_registry[context_temp_file]
-        )
-        entry = page_instance._context_manager._context_registry[context_temp_file][
-            None
-        ]
+        registry = page_instance._context_manager._context_registry
+        assert Path(__file__) in registry
+        assert None in registry[Path(__file__)]
+        entry = registry[Path(__file__)][None]
         assert entry.func == get_context_data
         assert entry.inherit_context is True
         assert entry.serialize is False
@@ -570,87 +552,103 @@ class TestGlobalPageInstance:
         assert global_file_path in page._template_registry
         assert page._template_registry[global_file_path] == template_str
 
-    def test_global_page_context_registration(
-        self, global_file_path, mock_frame
-    ) -> None:
+    def test_global_page_context_registration(self) -> None:
         """A context function registered on the singleton lands in its registry."""
-        mock_frame.return_value.f_back.f_globals = {"__file__": str(global_file_path)}
 
         @page.context("global_key")
         def get_global_value() -> str:
             return "global_value"
 
-        assert global_file_path in page._context_manager._context_registry
-        assert "global_key" in page._context_manager._context_registry[global_file_path]
+        registry = page._context_manager._context_registry
+        assert Path(__file__) in registry
+        assert "global_key" in registry[Path(__file__)]
 
-    def test_global_page_render(self, global_file_path, mock_frame) -> None:
+    def test_global_page_render(self) -> None:
         """The singleton renders a registered template with its own context."""
-        template_str = "Global: {{ key }}"
-        page.register_template(global_file_path, template_str)
-
-        mock_frame.return_value.f_back.f_globals = {"__file__": str(global_file_path)}
+        page.register_template(Path(__file__), "Global: {{ key }}")
 
         @page.context("key")
         def get_key() -> str:
             return "value"
 
-        result = page.render(global_file_path)
+        result = page.render(Path(__file__))
         assert result == "Global: value"
 
-    def test_context_decorator_with_global_page(
-        self, global_file_path, mock_frame
-    ) -> None:
-        """The exported ``context`` decorator registers against the calling file."""
-        mock_frame.return_value.f_back.f_globals = {"__file__": str(global_file_path)}
+    def test_context_decorator_with_global_page(self) -> None:
+        """The exported ``context`` decorator registers against the declaring file."""
 
         @context("test_key")
         def test_function() -> str:
             return "test_value"
 
-        assert global_file_path in page._context_manager._context_registry
-        assert "test_key" in page._context_manager._context_registry[global_file_path]
-        entry = page._context_manager._context_registry[global_file_path]["test_key"]
+        registry = page._context_manager._context_registry
+        assert Path(__file__) in registry
+        assert "test_key" in registry[Path(__file__)]
+        entry = registry[Path(__file__)]["test_key"]
         assert entry.func == test_function
         assert entry.inherit_context is False
         assert entry.serialize is False
 
-    @pytest.mark.parametrize(
-        ("test_case", "frame_setup"),
-        [
-            (
-                "frame_none",
-                lambda mock_frame: setattr(mock_frame.return_value, "f_back", None),
-            ),
-            (
-                "final_none",
-                lambda mock_frame: setattr(mock_frame, "return_value", None),
-            ),
-            (
-                "no_file",
-                lambda mock_frame: setattr(
-                    mock_frame.return_value.f_back, "f_globals", {"__file__": None}
-                ),
-            ),
-            (
-                "exhausted_frames",
-                lambda mock_frame: setattr(
-                    mock_frame.return_value.f_back, "f_back", None
-                ),
-            ),
-        ],
-        ids=["frame_none", "final_none", "no_file", "exhausted_frames"],
-    )
-    def test_get_caller_path_error_cases(
-        self, page_instance, test_case, frame_setup
+    def test_context_registered_from_another_module_keys_on_that_module(
+        self, tmp_path
     ) -> None:
-        """A frame chain with no usable ``__file__`` raises instead of guessing a path."""
-        with patch("next.pages.manager.inspect.currentframe") as mock_frame:
-            frame_setup(mock_frame)
+        """A page module registers under its own file, not under this test file."""
+        script = tmp_path / "page.py"
+        script.write_text(
+            textwrap.dedent(
+                """
+                from next.pages import context
 
-            with pytest.raises(
-                RuntimeError, match="Could not determine caller file path"
-            ):
-                page_instance._get_caller_path(1)
+                @context("from_page_module")
+                def get_value():
+                    return "value"
+                """
+            ).lstrip()
+        )
+        spec = importlib.util.spec_from_file_location("dyn_page_ctx", script)
+        assert spec is not None
+        assert spec.loader is not None
+        spec.loader.exec_module(importlib.util.module_from_spec(spec))
+
+        registry = page._context_manager._context_registry
+        assert script in registry
+        assert "from_page_module" in registry[script]
+        assert "from_page_module" not in registry.get(Path(__file__), {})
+
+
+class TestContextMisattribution:
+    """A decorator run on a callable declared elsewhere is recorded as such."""
+
+    def test_declaring_file_matching_the_caller_records_nothing(self) -> None:
+        """A callable declared where the decorator runs is attributed cleanly."""
+        instance = Page()
+
+        @instance.context("here")
+        def declared_here() -> str:
+            return "value"
+
+        assert instance._context_manager.misattributed() == ()
+
+    def test_helper_from_another_module_is_recorded_once(self) -> None:
+        """Decorating an imported helper records the pair of files it spans."""
+        instance = Page()
+
+        instance.context("greeting")(handler_declared_here)
+        instance.context("greeting_again")(handler_declared_here)
+
+        records = instance._context_manager.misattributed()
+        assert [(r.registered_from, r.declared_in, r.name) for r in records] == [
+            (Path(__file__), Path(attribution.__file__), "handler_declared_here")
+        ]
+
+    def test_reset_drops_recorded_misattributions(self) -> None:
+        """A registry reset clears the diagnostic along with the registrations."""
+        instance = Page()
+        instance.context("greeting")(handler_declared_here)
+
+        instance._context_manager.reset()
+
+        assert instance._context_manager.misattributed() == ()
 
 
 class TestLayoutIntegration:

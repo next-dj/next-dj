@@ -1,11 +1,14 @@
 import base64
+import copy
 import importlib.util
 import inspect
 import json
 from pathlib import Path
 
 import pytest
+from django.conf import settings
 from django.http import Http404, HttpRequest
+from django.test import override_settings
 from kanban.backends import ViteManifestBackend
 from kanban.forms import CreateCardForm, MoveCardForm
 from kanban.models import Board, Card, Column
@@ -423,6 +426,13 @@ def _decode_preamble_data_url(url: str) -> str:
     return base64.b64decode(url[len(prefix) :]).decode()
 
 
+def _static_backend_origin(origin: str):
+    config = copy.deepcopy(settings.NEXT_FRAMEWORK)
+    for backend in config["STATIC_BACKENDS"]:
+        backend.setdefault("OPTIONS", {})["DEV_ORIGIN"] = origin
+    return override_settings(NEXT_FRAMEWORK=config)
+
+
 class TestInjectViteDevAssetsGuard:
     def test_skips_when_no_jsx_assets(self) -> None:
         collector = StaticCollector()
@@ -440,16 +450,24 @@ class TestInjectViteDevAssetsGuard:
         assert preamble_idx < vite_idx < jsx_idx
         assert "RefreshRuntime" in _decode_preamble_data_url(urls[preamble_idx])
 
-    def test_uses_env_origin(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("VITE_ORIGIN", "http://example.test:4242")
+    def test_uses_backend_origin(self) -> None:
         collector = StaticCollector()
         collector.add(StaticAsset(url="/static/page.jsx", kind="jsx"))
-        inject_vite_dev_assets(collector)
+        with _static_backend_origin("http://example.test:4242"):
+            inject_vite_dev_assets(collector)
         urls = [a.url for a in collector.assets_in_slot("scripts")]
         assert "http://example.test:4242/@vite/client" in urls
         preamble = next(u for u in urls if u.startswith("data:"))
         decoded = _decode_preamble_data_url(preamble)
         assert 'from "http://example.test:4242/@react-refresh"' in decoded
+
+    def test_skips_when_no_dev_origin_configured(self) -> None:
+        collector = StaticCollector()
+        collector.add(StaticAsset(url="/static/page.jsx", kind="jsx"))
+        with _static_backend_origin(""):
+            inject_vite_dev_assets(collector)
+        urls = [a.url for a in collector.assets_in_slot("scripts")]
+        assert urls == ["/static/page.jsx"]
 
 
 class TestColumnCardsContext:
