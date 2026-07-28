@@ -9,8 +9,8 @@ from notes.markdown_render import render_markdown
 from notes.models import Note
 from notes.providers import DTenant
 
+from next import context
 from next.forms import ComponentWidget, ModelForm, PermissionOutcome
-from next.pages import context
 
 
 def get_owned_note(tenant: object, note_id: int) -> Note:

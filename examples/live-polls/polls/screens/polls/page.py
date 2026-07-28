@@ -2,7 +2,7 @@ from django.db.models import Count, QuerySet, Sum, Value
 from django.db.models.functions import Coalesce
 from polls.models import Poll
 
-from next.pages import context
+from next import context
 
 
 @context("polls")

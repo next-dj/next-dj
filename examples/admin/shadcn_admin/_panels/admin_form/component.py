@@ -3,8 +3,7 @@ from typing import Any
 from django.http import HttpRequest
 from shadcn_admin.forms import AdminFormSpec, AdminInlineSpec, build_inline_formsets
 
-from next.components import component
-from next.deps import Depends
+from next import Depends, component
 from next.forms import form_spec, formset_spec
 
 

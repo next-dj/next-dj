@@ -86,7 +86,7 @@ Use Inside a Component
 .. code-block:: python
    :caption: _components/note_link/component.py
 
-   from next.components import component
+   from next import component
    from next.urls import page_reverse
    from notes.models import Note
 

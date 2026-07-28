@@ -1,4 +1,4 @@
-from next.components import component
+from next import component
 
 
 BASE = (

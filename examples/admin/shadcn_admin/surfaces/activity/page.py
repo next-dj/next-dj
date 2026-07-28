@@ -2,7 +2,7 @@ from typing import Any
 
 from admin_audit.models import AdminActivityLog
 
-from next.pages import context
+from next import context
 
 
 _LIMIT = 50

@@ -1,6 +1,6 @@
 from kanban.models import Board
 
-from next.pages import context
+from next import context
 
 
 @context("boards")

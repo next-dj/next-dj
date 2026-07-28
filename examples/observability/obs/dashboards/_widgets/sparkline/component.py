@@ -2,7 +2,7 @@ from typing import Any
 
 from obs.serializers import WrappedJsContextSerializer
 
-from next.components import component
+from next import component
 
 
 # React and Babel-standalone are declared at the page level

@@ -70,7 +70,7 @@ A captioned code block holds the complete content of the named file unless the p
    :caption: notes/pages/page.py
 
    from notes.models import Note
-   from next.pages import context
+   from next import context
 
    @context("notes")
    def recent_notes() -> list[Note]:

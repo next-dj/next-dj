@@ -1,7 +1,7 @@
 from flags.models import Flag
 from flags.providers import DFlag
 
-from next.components import component
+from next import component
 
 
 @component.context("state")

@@ -5,7 +5,7 @@ from obs import metrics
 from obs.forms import DEFAULT_WINDOW
 from obs.serializers import WrappedJsContextSerializer
 
-from next.pages import context
+from next import context
 
 
 # Chart.js is declared at the page level rather than next to the

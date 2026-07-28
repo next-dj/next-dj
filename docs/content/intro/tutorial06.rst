@@ -76,7 +76,7 @@ Update ``notes/pages/page.py`` so the ``notes`` context honours ``q``, and publi
 
    from django.http import HttpRequest
    from notes.models import Note
-   from next.pages import context
+   from next import context
 
    @context("site_name", inherit_context=True)
    def site_name() -> str:

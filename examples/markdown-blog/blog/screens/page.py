@@ -2,7 +2,7 @@ from pathlib import Path
 
 from blog.markdown_template import post_metadata
 
-from next.pages import context
+from next import context
 
 
 POSTS_DIR = Path(__file__).parent / "posts"

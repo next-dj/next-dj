@@ -89,7 +89,7 @@ A ``@context`` callable asks for the request by annotation and reads ``request.u
    :caption: notes/pages/page.py
 
    from django.http import HttpRequest
-   from next.pages import context
+   from next import context
 
    @context("greeting")
    def greeting(request: HttpRequest) -> str:
@@ -110,7 +110,7 @@ A branded 403 page needs a ``403.html`` template or a ``handler403`` in the root
 
    from django.core.exceptions import PermissionDenied
    from django.http import HttpRequest
-   from next.pages import context
+   from next import context
 
    @context("notes")
    def notes(request: HttpRequest) -> list:

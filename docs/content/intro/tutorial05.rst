@@ -211,7 +211,7 @@ Add the two page files.
 .. code-block:: python
    :caption: notes/pages/about/page.py
 
-   from next.pages import context
+   from next import context
 
    @context("body")
    def about_body() -> str:

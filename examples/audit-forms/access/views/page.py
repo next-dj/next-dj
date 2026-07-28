@@ -1,6 +1,6 @@
 from access.models import AccessRequest, AuditEntry
 
-from next.pages import context
+from next import context
 
 
 @context("recent_requests")

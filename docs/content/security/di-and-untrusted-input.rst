@@ -42,7 +42,7 @@ Always validate the string before passing it into ORM lookups or external servic
 
    from django.shortcuts import get_object_or_404
    from notes.models import Note
-   from next.pages import context
+   from next import context
    from next.urls import DUrl
 
    @context("note")
@@ -80,7 +80,7 @@ Validate the resulting values against business rules.
 .. code-block:: python
    :caption: notes/pages/page.py
 
-   from next.pages import context
+   from next import context
    from next.urls import DQuery
 
    @context("page")

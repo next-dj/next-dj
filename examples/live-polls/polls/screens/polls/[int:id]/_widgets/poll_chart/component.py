@@ -1,7 +1,7 @@
 from django.db.models import Sum
 from polls.models import Poll
 
-from next.components import component
+from next import component
 
 
 @component.context("results", serialize=True)

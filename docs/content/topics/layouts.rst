@@ -101,7 +101,7 @@ Use it to publish values that the layout markup needs and, with ``inherit_contex
 .. code-block:: python
    :caption: notes/pages/page.py
 
-   from next.pages import context
+   from next import context
    from notes.models import Note
 
    @context("site_name", inherit_context=True)

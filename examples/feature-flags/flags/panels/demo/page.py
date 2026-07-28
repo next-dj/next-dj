@@ -1,6 +1,6 @@
 from flags.models import Flag
 
-from next.pages import context
+from next import context
 
 
 DEMO_FLAG_NAMES = ("beta_checkout", "dark_sidebar", "ai_suggestions")

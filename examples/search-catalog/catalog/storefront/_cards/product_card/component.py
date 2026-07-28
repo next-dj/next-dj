@@ -1,7 +1,7 @@
 from catalog.models import Product
 from django.urls import reverse
 
-from next.components import component
+from next import component
 
 
 @component.context("detail_url")

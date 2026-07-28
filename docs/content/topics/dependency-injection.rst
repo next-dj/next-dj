@@ -83,7 +83,7 @@ The URL path provider coerces the captured segment to the requested type.
    :caption: notes/pages/notes/[int:note_id]/page.py
 
    from notes.models import Note
-   from next.pages import context
+   from next import context
    from next.urls import DUrl
 
    @context("note")
@@ -158,7 +158,7 @@ The query provider reads from ``request.GET``.
    :caption: notes/pages/search/page.py
 
    from notes.models import Note
-   from next.pages import context
+   from next import context
    from next.urls import DQuery
 
    @context("results")
@@ -235,8 +235,8 @@ See :doc:`/content/internals/di-resolver` for the cycle and cache mechanics.
 .. code-block:: python
    :caption: consuming context and depends
 
-   from next.deps import Depends
-   from next.pages import Context, context
+   from next import Depends, context
+   from next.pages import Context
 
    @context("ready_message")
    def ready_message(
@@ -271,7 +271,8 @@ When two of them ask for each other, directly or through a longer chain, resolut
 .. code-block:: python
    :caption: notes/deps.py
 
-   from next.deps import Depends, resolver
+   from next import Depends
+   from next.deps import resolver
 
    @resolver.dependency("profile")
    def profile(settings: dict = Depends("settings")) -> dict:
@@ -299,7 +300,8 @@ Here ``settings`` does not need ``profile`` at all, so the fix is to drop that p
 .. code-block:: python
    :caption: notes/deps.py
 
-   from next.deps import Depends, resolver
+   from next import Depends
+   from next.deps import resolver
 
    @resolver.dependency("settings")
    def settings() -> dict:
@@ -356,7 +358,7 @@ Use the new marker.
 
    from notes.models import Note
    from notes.providers import DNote
-   from next.pages import context
+   from next import context
 
    @context("note")
    def current_note(note: DNote[Note]) -> Note:

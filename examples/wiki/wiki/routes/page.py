@@ -1,7 +1,7 @@
 from django.urls import reverse
 from wiki.models import Article
 
-from next.pages import context
+from next import context
 
 
 @context("file_pages")

@@ -37,7 +37,7 @@ Create the folder ``notes/pages/_components/info_card/`` with three files.
 .. code-block:: python
    :caption: notes/pages/_components/info_card/component.py
 
-   from next.components import component
+   from next import component
 
    @component.context("subtitle")
    def subtitle(subtitle: str = "") -> str:

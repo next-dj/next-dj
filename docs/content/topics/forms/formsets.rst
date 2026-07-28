@@ -51,7 +51,7 @@ Without the flag, ``__init_subclass__`` registers ``NoteRowForm`` as a standalon
    from django.forms.formsets import BaseFormSet
    from django.http import HttpResponseRedirect
    from django.urls import reverse
-   from next.forms import action
+   from next import action
    from notes.forms import NoteFormSet
 
    def build_bulk_formset() -> tuple[type[BaseFormSet], dict]:
@@ -115,8 +115,8 @@ Build the formset inside a ``@context`` callable named after the action and retu
    :caption: notes/pages/notes/bulk/page.py
 
    from types import SimpleNamespace
+   from next import context
    from next.forms import cleanup_extra_initial
-   from next.pages import context
    from notes.forms import NoteFormSet
 
    def build_formset(initial: list[dict]) -> NoteFormSet:
@@ -159,8 +159,7 @@ Use ``modelformset_factory`` for editing several existing instances.
    from django.forms.formsets import BaseFormSet
    from django.http import HttpResponseRedirect
    from django.urls import reverse
-   from next.forms import action
-   from next.pages import context
+   from next import action, context
    from notes.forms import NoteEditFormSet
    from notes.models import Note
 
@@ -231,7 +230,7 @@ The parent form is ``abstract`` because it dispatches only through the ``update_
 
    from django.http import HttpResponseRedirect
    from django.shortcuts import get_object_or_404
-   from next.forms import action
+   from next import action
    from next.urls import DUrl
    from notes.forms import NoteForm
    from notes.models import Note

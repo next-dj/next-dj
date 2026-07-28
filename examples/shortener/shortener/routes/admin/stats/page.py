@@ -3,7 +3,7 @@ from shortener.cache import pending_clicks
 from shortener.models import Link
 from shortener.receivers import action_counts
 
-from next.pages import context
+from next import context
 
 
 @context("totals")

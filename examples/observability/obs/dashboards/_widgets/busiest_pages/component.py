@@ -1,6 +1,6 @@
 from obs import metrics
 
-from next.components import component
+from next import component
 
 
 @component.context("busiest_pages")

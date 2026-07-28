@@ -89,7 +89,7 @@ A value is pushed by the name of a registered ``serialize=True`` provider on the
 
    from django.http import HttpRequest
 
-   from next.pages import context
+   from next import context
    from next.partial import Patches
 
 

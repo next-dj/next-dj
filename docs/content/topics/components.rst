@@ -303,7 +303,7 @@ Use ``@component.context("key")`` to publish a value under that key for the temp
    :caption: _components/note_card/component.py
 
    from notes.models import Note
-   from next.components import component
+   from next import component
 
    @component.context("preview")
    def preview(note: Note) -> str:
@@ -461,7 +461,7 @@ The components subsystem contributes Django system checks.
 
 - ``next.E020`` reports two components with the same name in the same scope.
   Rename one of the colliding components or move it to a different scope root.
-- ``next.E021`` reports a ``component.py`` that uses ``context`` from ``next.pages``.
+- ``next.E021`` reports a ``component.py`` that uses the page ``context`` decorator, whether it comes from ``next.pages`` or from the curated ``next`` root.
   Use ``@component.context`` from ``next.components`` instead.
 - ``next.E034`` reports one component name used at the root route scope of more than one page tree.
   Rename one of the colliding components or move it to a different scope root.

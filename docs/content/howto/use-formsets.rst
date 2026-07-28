@@ -47,7 +47,8 @@ Register the action.
    from django.forms.formsets import BaseFormSet
    from django.http import HttpRequest, HttpResponseRedirect
 
-   from next.forms import action, redirect_to_origin
+   from next import action
+   from next.forms import redirect_to_origin
    from notes.forms import NoteFormSet
 
    def build_bulk_formset() -> tuple[type[BaseFormSet], dict]:
@@ -102,8 +103,8 @@ Use ``cleanup_extra_initial`` to clear initial values from blank extra rows befo
 
    from types import SimpleNamespace
 
+   from next import context
    from next.forms import cleanup_extra_initial
-   from next.pages import context
    from notes.forms import NoteFormSet
 
    @context("bulk_create")

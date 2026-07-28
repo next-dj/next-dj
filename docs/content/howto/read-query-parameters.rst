@@ -29,7 +29,7 @@ The default is used when the key is absent from the query string.
    :caption: storefront/page.py
 
    from catalog.models import Product
-   from next.pages import context
+   from next import context
    from next.urls import DQuery
 
    DEFAULT_FEATURED = 3
@@ -99,7 +99,7 @@ Each annotation drives its own coercion.
 .. code-block:: python
    :caption: storefront/catalog/page.py
 
-   from next.pages import context
+   from next import context
    from next.urls import DQuery
 
    @context("results")
@@ -178,7 +178,7 @@ Child callables then ask for ``category`` by parameter name and never re-query.
 
    from catalog.models import Category
    from django.http import Http404
-   from next.pages import context
+   from next import context
 
    @context("category", inherit_context=True)
    def category(category: object) -> Category:
@@ -195,7 +195,7 @@ A descendant page reads the resolved instance back through its parameter name.
    :caption: storefront/catalog/[category]/products/page.py
 
    from catalog.models import Category, Product
-   from next.pages import context
+   from next import context
 
    @context("products")
    def products(category: Category) -> list[Product]:

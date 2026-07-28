@@ -107,7 +107,7 @@ Name your directories without hyphens when you want the parameter name and the d
 .. code-block:: python
    :caption: routes/posts/[int:post_id]/page.py
 
-   from next.pages import context
+   from next import context
    from next.urls import DUrl
    from notes.models import Note
 

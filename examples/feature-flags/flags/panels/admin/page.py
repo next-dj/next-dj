@@ -5,9 +5,8 @@ from django.http import HttpRequest, HttpResponseRedirect
 from flags.models import Flag
 from flags.providers import WRITE_GATE_FLAG, FlagService
 
-from next.deps import Depends
+from next import Depends, context
 from next.forms import Form
-from next.pages import context
 
 
 class BulkToggleForm(Form):

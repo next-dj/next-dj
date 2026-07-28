@@ -1,7 +1,7 @@
 from django.db.models import QuerySet
 from kanban.models import Card, Column
 
-from next.components import component
+from next import component
 
 
 @component.context("cards")

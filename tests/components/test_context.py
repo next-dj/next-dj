@@ -13,11 +13,11 @@ from next.components import (
     ContextFunction,
     DummyBackend,
     FileComponentsBackend,
-    _inject_component_context,
     component,
     render_component,
 )
 from next.components.context import iter_serialized_component_context_keys
+from next.components.renderers import _inject_component_context
 from next.static import StaticCollector
 from tests.support import attribution, handler_declared_here
 

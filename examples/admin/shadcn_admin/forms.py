@@ -18,8 +18,9 @@ from django.http import (
 )
 from django.template import Context, Template
 
-from next.deps import Depends, resolver
-from next.forms import BaseModelForm, action, cleanup_extra_initial, form_spec
+from next import Depends, action
+from next.deps import resolver
+from next.forms import BaseModelForm, cleanup_extra_initial, form_spec
 from next.partial import Patches, is_partial_request
 from shadcn_admin import utils
 

@@ -9,8 +9,8 @@ from django.template import Context, Template
 from shortener.cache import pending_clicks
 from shortener.models import Link
 
+from next import context
 from next.forms import ComponentWidget, Form
-from next.pages import context
 from next.partial import Patches, is_partial_request
 
 

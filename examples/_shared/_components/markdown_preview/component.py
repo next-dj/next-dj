@@ -1,6 +1,6 @@
 from django.utils.safestring import SafeString
 
-from next.components import component
+from next import component
 
 
 scripts = ["https://cdn.jsdelivr.net/npm/marked/marked.min.js"]

@@ -6,8 +6,8 @@ from notes.markdown_render import render_markdown
 from notes.models import Note
 from notes.providers import DTenant
 
+from next import context
 from next.forms import ComponentWidget, Form
-from next.pages import context
 
 
 class NoteCreateForm(Form):

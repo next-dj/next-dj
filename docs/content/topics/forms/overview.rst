@@ -128,7 +128,8 @@ A bare ``@action`` registers the function under its own name.
    :caption: page.py
 
    from django.http import HttpRequest
-   from next.forms import action, redirect_to_origin
+   from next import action
+   from next.forms import redirect_to_origin
    from next.urls import DUrl
 
    @action("delete_article")

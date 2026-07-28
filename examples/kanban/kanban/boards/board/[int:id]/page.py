@@ -4,8 +4,8 @@ from django.middleware.csrf import get_token
 from kanban.models import Board, Card, Column
 from kanban.providers import DBoard
 
+from next import context
 from next.forms.manager import form_action_manager
-from next.pages import context
 
 
 @context("board_object", inherit_context=True)

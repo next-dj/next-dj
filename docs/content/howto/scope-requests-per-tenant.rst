@@ -134,7 +134,7 @@ Keep real annotations in these modules, because the resolver compares parameter 
 
    from notes.models import Note
    from notes.providers import DTenant
-   from next.pages import context
+   from next import context
 
    @context("notes")
    def notes(active_tenant: DTenant) -> list[Note]:
@@ -151,7 +151,7 @@ A ``@context(..., inherit_context=True)`` callable on the workspace root publish
 
    from notes.models import Note
    from notes.providers import DTenant
-   from next.pages import context
+   from next import context
 
    @context("tenant", inherit_context=True)
    def tenant(active_tenant: DTenant) -> "Tenant":

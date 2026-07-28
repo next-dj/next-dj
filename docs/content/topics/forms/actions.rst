@@ -187,7 +187,8 @@ A bare ``@action`` or an empty ``@action()`` registers the function under its ow
    :caption: page.py
 
    from django.http import HttpRequest
-   from next.forms import action, redirect_to_origin
+   from next import action
+   from next.forms import redirect_to_origin
    from next.urls import DUrl
 
    @action("delete_note")
@@ -222,7 +223,8 @@ Keep ``@action`` outermost when other decorators apply to the same handler.
 
    from django.db import transaction
    from django.http import HttpRequest
-   from next.forms import action, redirect_to_origin
+   from next import action
+   from next.forms import redirect_to_origin
    from next.urls import DUrl
 
    @action("publish_note")
@@ -253,7 +255,7 @@ Mark such a class abstract, or move the handler logic into its ``on_valid``.
    from django.shortcuts import redirect
 
    import next.forms
-   from next.forms import action
+   from next import action
    from next.forms.markers import DForm
 
    class ContactForm(next.forms.ModelForm):
@@ -290,7 +292,7 @@ A ``(FormClass, init_kwargs)`` tuple.
    :caption: page.py — a factory returning the tuple form
 
    from django.shortcuts import get_object_or_404, redirect
-   from next.forms import action
+   from next import action
    from next.urls import DUrl
 
    def edit_form_factory(note_id: DUrl["id", int]) -> tuple:
@@ -346,7 +348,8 @@ Declare the access requirements on the action itself.
    from django.http import HttpRequest
 
    import next.forms
-   from next.forms import action, redirect_to_origin
+   from next import action
+   from next.forms import redirect_to_origin
    from next.urls import DUrl
 
    class NoteDeleteForm(next.forms.Form):
@@ -423,7 +426,7 @@ Declare ``request`` to read the user, and any further parameter the injector res
    from notes.models import Note
 
    import next.forms
-   from next.deps import Depends
+   from next import Depends
    from next.urls import DUrl
 
    class WorkspaceNoteForm(next.forms.ModelForm):
@@ -544,7 +547,8 @@ Call ``messages.success`` in the handler body instead.
 
    from django.contrib import messages
    from django.http import HttpRequest
-   from next.forms import action, redirect_to_origin
+   from next import action
+   from next.forms import redirect_to_origin
    from next.urls import DUrl
 
    @action("archive_note")

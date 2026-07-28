@@ -172,7 +172,7 @@ Errors
      - A component name is registered more than once within the same scope.
      - ``next.components.checks``
    * - ``next.E021``
-     - A ``component.py`` imports ``context`` from ``next.pages`` instead of ``next.components``.
+     - A ``component.py`` reaches for the page ``context`` decorator instead of the component one, under any spelling: ``next.pages``, the ``next`` package root, or ``next.page.context``.
      - ``next.components.checks``
    * - ``next.E022``
      - ``PAGE_BACKENDS`` is empty.

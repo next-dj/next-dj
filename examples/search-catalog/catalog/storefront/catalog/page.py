@@ -2,7 +2,7 @@ from catalog.models import Category, Product
 from catalog.providers import DFilters, DPage
 from catalog.queries import cached_search
 
-from next.pages import context
+from next import context
 
 
 @context("page_obj")

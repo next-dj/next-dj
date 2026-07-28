@@ -21,7 +21,7 @@ Add the context function to the segment's ``page.py``.
 .. code-block:: python
    :caption: notes/pages/page.py
 
-   from next.pages import context
+   from next import context
    from notes.models import Note
 
    @context("note_count", inherit_context=True)
@@ -53,7 +53,7 @@ Drop the flag for values that should stay local to the current page only.
 .. code-block:: python
    :caption: notes/pages/page.py (local only)
 
-   from next.pages import context
+   from next import context
 
    @context("nav_links")
    def nav_links() -> list:

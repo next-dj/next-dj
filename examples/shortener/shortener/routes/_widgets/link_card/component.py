@@ -1,7 +1,7 @@
 from django.urls import reverse
 from shortener.models import Link
 
-from next.components import component
+from next import component
 
 
 @component.context("short_url")

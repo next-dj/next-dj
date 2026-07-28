@@ -1,6 +1,6 @@
 from flags.models import Flag
 
-from next.pages import context
+from next import context
 
 
 @context("active_flags")

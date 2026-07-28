@@ -38,6 +38,11 @@ _COMPONENT_CONTEXT_SUBJECT = RegistrationSubject(
 
 _FILE_COMPONENT_BACKEND_CONFIG_KEYS = frozenset({"BACKEND", "COMPONENTS_DIR", "DIRS"})
 
+# The curated root re-exports the page decorator, so every spelling below names
+# the same wrong `context` inside a component.py.
+_PAGE_CONTEXT_MODULES = frozenset({"next", "next.pages"})
+_PAGE_CONTEXT_OWNERS = frozenset({"next", "page", "next.page", "next.pages"})
+
 
 def _validate_single_component_backend(
     config: dict[str, object], index: int
@@ -197,8 +202,18 @@ def check_cross_root_component_name_conflicts(*args, **kwargs) -> list[CheckMess
     return errors
 
 
+def _dotted_owner(node: ast.expr) -> str | None:
+    """Spell an attribute owner back as a dotted name, or None when it is computed."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        parent = _dotted_owner(node.value)
+        return None if parent is None else f"{parent}.{node.attr}"
+    return None
+
+
 def _component_py_uses_pages_context(file_path: Path) -> bool:
-    """Return True if `component.py` imports `context` from `next.pages`."""
+    """Return True if `component.py` reaches for the page `context` decorator."""
     try:
         source = file_path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
@@ -208,18 +223,14 @@ def _component_py_uses_pages_context(file_path: Path) -> bool:
     except SyntaxError:
         return False
     for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.ImportFrom)
-            and getattr(node, "module", None) == "next.pages"
-        ):
+        if isinstance(node, ast.ImportFrom) and node.module in _PAGE_CONTEXT_MODULES:
             for alias in node.names:
                 if getattr(alias, "name", None) == "context":
                     return True
         if (
             isinstance(node, ast.Attribute)
-            and isinstance(node.value, ast.Name)
-            and node.value.id == "page"
             and node.attr == "context"
+            and _dotted_owner(node.value) in _PAGE_CONTEXT_OWNERS
         ):
             return True
     return False
@@ -246,8 +257,9 @@ def check_component_py_no_pages_context(*args, **kwargs) -> list[CheckMessage]:
             if _component_py_uses_pages_context(info.module_path):
                 errors.append(
                     Error(
-                        "component.py must not use context from next.pages. "
-                        "Use component context from next.components instead.",
+                        "component.py must not use context from next.pages or "
+                        "the next package root. Use component context from "
+                        "next.components instead.",
                         obj=str(info.module_path),
                         id="next.E021",
                     )

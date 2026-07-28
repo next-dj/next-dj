@@ -45,7 +45,7 @@ Search is idempotent. A bookmark of `?q=iphone&brand=Acme&page=2` should reprodu
 [`next/urls/markers.py`](../../next/urls/markers.py) ships a marker that mirrors `DUrl[T]` and reads `request.GET`. Any GET listing page can declare a typed parameter and skip the `request.GET.get(...)` plumbing.
 
 ```python
-from next.pages import context
+from next import context
 from next.urls import DQuery
 
 @context("results")

@@ -6,8 +6,7 @@ from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from shadcn_admin import utils
 
-from next.forms import action
-from next.pages import context
+from next import action, context
 
 
 @context("delete_state")

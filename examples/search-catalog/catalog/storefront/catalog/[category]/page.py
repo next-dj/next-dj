@@ -3,7 +3,7 @@ from catalog.providers import DFilters, DPage
 from catalog.queries import cached_search
 from django.http import Http404
 
-from next.pages import context
+from next import context
 
 
 @context("category", inherit_context=True)
