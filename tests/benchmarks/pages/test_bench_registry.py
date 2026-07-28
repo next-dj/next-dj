@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from next.pages import Page
 from next.pages.registry import PageContextRegistry
 
 
@@ -24,6 +25,17 @@ class TestBenchPageContextRegistry:
             registry = PageContextRegistry(None)
             for i in range(20):
                 registry.register_context(page_path, f"k_{i}", _context_func)
+
+        benchmark(run)
+
+    @pytest.mark.benchmark(group="pages.registry")
+    def test_context_decorator(self, benchmark) -> None:
+        """Import-time cost of `@context`, which attributes each callable to a file."""
+
+        def run() -> None:
+            page = Page()
+            for i in range(20):
+                page.context(f"k_{i}")(_context_func)
 
         benchmark(run)
 

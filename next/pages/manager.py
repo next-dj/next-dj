@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast, overload
 
 from django.http import HttpRequest, HttpResponse
@@ -37,7 +39,6 @@ from .signals import page_rendered, template_loaded
 if TYPE_CHECKING:
     import types
     from collections.abc import Callable, Iterator
-    from pathlib import Path
 
     from next.static import StaticCollector
     from next.static.serializers import JsContextSerializer
@@ -125,7 +126,7 @@ class Page:
         serialize: bool = False,
         serializer: JsContextSerializer | None = None,
     ) -> Callable[..., Any]:
-        """Register a keyed or dict-merge `@context` for the caller file.
+        """Register a keyed or dict-merge `@context` for the file declaring `func`.
 
         Pass `serialize=True` to include the return value in
         `Next.context` so JavaScript code on the page can read it via
@@ -133,26 +134,25 @@ class Page:
         through a custom `JsContextSerializer` instead of the global
         `JS_CONTEXT_SERIALIZER` setting.
         """
+        # Captured here rather than inside the decorator so both spellings see
+        # the page.py that ran `@context`, not this module.
+        registered_from = Path(sys._getframe(1).f_code.co_filename)
 
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-            if callable(func_or_key):
-                self._context_manager.register_context(
-                    defining_file(func),
-                    None,
-                    func_or_key,
-                    inherit_context=inherit_context,
-                    serialize=serialize,
-                    serializer=serializer,
+            declared_in = defining_file(func)
+            if declared_in != registered_from:
+                self._context_manager.note_misattribution(
+                    registered_from, declared_in, func
                 )
-            else:
-                self._context_manager.register_context(
-                    defining_file(func),
-                    func_or_key,
-                    func,
-                    inherit_context=inherit_context,
-                    serialize=serialize,
-                    serializer=serializer,
-                )
+            key = None if callable(func_or_key) else func_or_key
+            self._context_manager.register_context(
+                declared_in,
+                key,
+                func,
+                inherit_context=inherit_context,
+                serialize=serialize,
+                serializer=serializer,
+            )
             return func
 
         return decorator(func_or_key) if callable(func_or_key) else decorator

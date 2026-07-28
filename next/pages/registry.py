@@ -13,7 +13,7 @@ import logging
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from next.deps import DependencyResolver, get_request_dep_cache, resolver
-from next.utils import callable_name
+from next.utils import MisattributedContext, MisattributionLog, callable_name
 
 from .context import ContextResult
 from .signals import context_registered
@@ -84,6 +84,7 @@ class PageContextRegistry:
         # Keyless callables share the `None` slot, so the registry keeps only
         # the last. Retain the overwritten names for the `next.E018` diagnostic.
         self._keyless_conflicts: dict[Path, list[str]] = {}
+        self._misattributions = MisattributionLog()
         self._resolver = resolver
 
     def _get_resolver(self) -> DependencyResolver:
@@ -100,6 +101,28 @@ class PageContextRegistry:
         """
         self._context_registry.clear()
         self._keyless_conflicts.clear()
+        self._misattributions.clear()
+
+    def misattributed(self) -> tuple[MisattributedContext, ...]:
+        """Return every registration bound to a file other than the one running it."""
+        return self._misattributions.entries()
+
+    def note_misattribution(
+        self, registered_from: Path, declared_in: Path, func: Callable[..., Any]
+    ) -> None:
+        """Record a `@context` whose callable was declared outside the running file.
+
+        The registration binds to `declared_in`, which no render of
+        `registered_from` reads, so the pair feeds the `next.E074` diagnostic.
+        """
+        self._misattributions.record(registered_from, declared_in, func)
+
+    def registered_names(self) -> dict[Path, tuple[str, ...]]:
+        """Return the callable names registered per file, for the diagnostics."""
+        return {
+            file_path: tuple(callable_name(entry.func) for entry in entries.values())
+            for file_path, entries in self._context_registry.items()
+        }
 
     def register_context(
         self,

@@ -72,6 +72,9 @@ STATIC_URL = "static/"
 SHARED_DIR = BASE_DIR.parent / "_shared"
 STATICFILES_DIRS = [SHARED_DIR / "static"]
 
+VITE_DEV_ORIGIN = "http://localhost:5173"
+VITE_MANIFEST = BASE_DIR / "kanban/static/kanban/dist/.vite/manifest.json"
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 NEXT_FRAMEWORK = {
@@ -101,12 +104,11 @@ NEXT_FRAMEWORK = {
                 "DEDUP_STRATEGY": "next.static.collector.HashContentDedup",
                 "JS_CONTEXT_POLICY": "next.static.collector.DeepMergePolicy",
                 # The HMR receiver reads this value back from the backend
-                # options, so one variable moves every dev-server URL.
-                "DEV_ORIGIN": os.environ.get("VITE_ORIGIN", "http://localhost:5173"),
+                # options, so one variable moves every dev-server URL. An empty
+                # value is what routes assets through the built manifest.
+                "DEV_ORIGIN": os.environ.get("VITE_ORIGIN", VITE_DEV_ORIGIN),
                 "VITE_ROOT": str(BASE_DIR),
-                "MANIFEST_PATH": str(
-                    BASE_DIR / "kanban/static/kanban/dist/.vite/manifest.json"
-                ),
+                "MANIFEST_PATH": str(VITE_MANIFEST),
             },
         }
     ],

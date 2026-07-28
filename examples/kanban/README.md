@@ -38,12 +38,14 @@ Django resolves every `.jsx` asset to a dev-server URL, and the React Refresh pr
 
 A typed route segment such as `[int:id]` puts a colon in the directory name, and the Vite dev server refuses to serve a path holding one before it consults `server.fs.allow`. Co-locating assets under a typed segment therefore needs `server: { fs: { strict: false } }`, which both `vite.config.ts` and `vitest.config.ts` carry. Only the dev server applies that guard, so the production build and Django static serving stay untouched.
 
-For a production-shaped build, hand the backend an empty origin so it resolves through the manifest:
+For a production-shaped build, hand the backend an empty origin so it resolves through the manifest instead of the dev server:
 
 ```bash
 npm run build                          # writes hashed files into kanban/static/kanban/dist/
 VITE_ORIGIN= uv run python manage.py runserver
 ```
+
+The origin decides the mode on its own rather than following the presence of a build, so a stale `dist/` never silently changes how `runserver` behaves.
 
 The backend reads `dist/.vite/manifest.json` and delegates URL resolution to Django staticfiles. If the manifest file is missing, the backend logs a single warning and falls back to staticfiles so dev workflows stay unblocked.
 

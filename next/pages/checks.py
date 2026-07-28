@@ -17,7 +17,12 @@ from django.core.checks import (
 )
 
 from next.checks import NEXT
-from next.checks.common import get_router_manager, iter_scanned_page_pairs
+from next.checks.common import (
+    RegistrationSubject,
+    get_router_manager,
+    iter_scanned_page_pairs,
+    registration_file_errors,
+)
 from next.conf import import_class_cached, next_framework_settings
 from next.utils import callable_name
 
@@ -39,8 +44,11 @@ EXPECTED_PARAMETER_PARTS = 2
 # A page declares a body-source conflict only when two or more sources claim it.
 _MIN_CONFLICTING_BODY_SOURCES = 2
 
-# The file router discovers only this name, so a context on another file is dead.
-_PAGE_FILE_NAME = "page.py"
+# The file router routes only this name, so a context bound anywhere else is
+# dead, including one bound to the page.py next door.
+_PAGE_CONTEXT_SUBJECT = RegistrationSubject(
+    decorator="@context", anchor_name="page.py", render="page render", code="next.E074"
+)
 
 
 @register(Tags.templates, NEXT)
@@ -596,10 +604,11 @@ def check_context_functions(*args, **kwargs) -> list[CheckMessage]:
 
 @register(Tags.templates, NEXT)
 def check_context_registration_files(*args, **kwargs) -> list[CheckMessage]:
-    """Flag a `@context` bound to a file that is no `page.py` (`next.E077`).
+    """Flag a `@context` no page render collects (`next.E074`).
 
     A registration keys on the file declaring the callable, so decorating an
-    imported helper binds it to that helper's module, which no render reads.
+    imported helper binds it to that helper's module, and decorating a
+    callable from a sibling `page.py` binds it to that other page.
     """
     router_manager, init_errors = get_router_manager()
     if router_manager is None:
@@ -608,24 +617,11 @@ def check_context_registration_files(*args, **kwargs) -> list[CheckMessage]:
     for page_path in _iter_existing_scanned_pages(router_manager, set()):
         _load_python_module_memo(page_path)
 
-    errors: list[CheckMessage] = []
-    registry = page._context_manager._context_registry
-    for file_path in sorted(registry, key=str):
-        if file_path.name == _PAGE_FILE_NAME:
-            continue
-        names = ", ".join(
-            sorted(callable_name(entry.func) for entry in registry[file_path].values())
-        )
-        errors.append(
-            Error(
-                f"{file_path} registers @context callables ({names}) but is not a "
-                "page.py, so no render collects them. Declare the callable in the "
-                "page.py that needs it, wrapping this helper.",
-                obj=str(file_path),
-                id="next.E077",
-            )
-        )
-    return errors
+    return registration_file_errors(
+        _PAGE_CONTEXT_SUBJECT,
+        registrations=page._context_manager.registered_names(),
+        misattributed=page._context_manager.misattributed(),
+    )
 
 
 @register(Tags.templates, NEXT)

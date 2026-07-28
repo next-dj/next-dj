@@ -231,7 +231,7 @@ Keep ``@action`` outermost when other decorators apply to the same handler.
        Note.objects.filter(pk=note_id).update(published=True)
        return redirect_to_origin(request)
 
-``transaction.atomic`` copies ``__wrapped__`` through :func:`functools.wraps`, so the action still registers under this ``page.py``.
+``transaction.atomic`` sets ``__wrapped__`` through :func:`functools.wraps`, so the action still registers under this ``page.py``.
 A hand-written decorator that omits ``functools.wraps`` hides the wrapped function, and the action registers under the decorator's own module instead.
 
 Injecting the Form Into a Handler

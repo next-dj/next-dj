@@ -1,26 +1,32 @@
 """Context registration for `component.py` modules.
 
 `ComponentContextManager` is the public handle used by decorator
-`@component.context` inside a `component.py` file. It records the
-caller's path so the right context callables run when the matching
-component template is rendered.
+`@component.context` inside a `component.py` file. It records the file
+declaring each callable so the right context functions run when the
+matching component template is rendered.
 """
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, overload
 
 from next.checks.common import get_components_manager
 from next.deps import resolver
-from next.utils import callable_name, defining_file
+from next.utils import (
+    MisattributedContext,
+    MisattributionLog,
+    callable_name,
+    defining_file,
+)
 
 from .backends import FileComponentsBackend
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
-    from pathlib import Path
 
     from next.static.serializers import JsContextSerializer
 
@@ -46,6 +52,28 @@ class ComponentContextRegistry:
     def __init__(self) -> None:
         """Create an empty path-keyed context-function mapping."""
         self._registry: dict[Path, dict[str | None, ContextFunction]] = {}
+        self._misattributions = MisattributionLog()
+
+    def misattributed(self) -> tuple[MisattributedContext, ...]:
+        """Return every registration bound to a file other than the one running it."""
+        return self._misattributions.entries()
+
+    def note_misattribution(
+        self, registered_from: Path, declared_in: Path, func: Callable[..., Any]
+    ) -> None:
+        """Record a `@component.context` declared outside the running file.
+
+        The registration binds to `declared_in`, which no render of
+        `registered_from` reads, so the pair feeds the `next.E075` diagnostic.
+        """
+        self._misattributions.record(registered_from, declared_in, func)
+
+    def registered_names(self) -> dict[Path, tuple[str, ...]]:
+        """Return the callable names registered per file, for the diagnostics."""
+        return {
+            file_path: tuple(callable_name(entry.func) for entry in entries.values())
+            for file_path, entries in self._registry.items()
+        }
 
     def register(
         self,
@@ -139,24 +167,18 @@ class ComponentContextManager:
         through a custom `JsContextSerializer` instead of the global
         `JS_CONTEXT_SERIALIZER` setting.
         """
+        # Captured here rather than inside the decorator so both spellings see
+        # the component.py that ran `@component.context`, not this module.
+        registered_from = Path(sys._getframe(1).f_code.co_filename)
 
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-            if callable(func_or_key):
-                self._registry.register(
-                    defining_file(func),
-                    None,
-                    func_or_key,
-                    serialize=serialize,
-                    serializer=serializer,
-                )
-            else:
-                self._registry.register(
-                    defining_file(func),
-                    func_or_key,
-                    func,
-                    serialize=serialize,
-                    serializer=serializer,
-                )
+            declared_in = defining_file(func)
+            if declared_in != registered_from:
+                self._registry.note_misattribution(registered_from, declared_in, func)
+            key = None if callable(func_or_key) else func_or_key
+            self._registry.register(
+                declared_in, key, func, serialize=serialize, serializer=serializer
+            )
             return func
 
         return decorator(func_or_key) if callable(func_or_key) else decorator

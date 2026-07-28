@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
+from next.pages.loaders import _load_python_module
 from next.utils import callable_name, defining_file, resolve_base_dir
 from tests.support import attribution, unwrapped_decorator, wraps_decorator
 
@@ -121,6 +122,42 @@ class TestDefiningFile:
         """A non-callable value raises ``TypeError`` naming the value."""
         with pytest.raises(TypeError, match=r"'not a callable'"):
             defining_file("not a callable")
+
+    def test_wrapper_loop_falls_back_to_the_outer_function(self, tmp_path) -> None:
+        """A ``__wrapped__`` cycle answers with the file of the outer wrapper."""
+        module_file = tmp_path / "page.py"
+        module_file.write_text("def inner() -> None:\n    pass\n")
+        module = _load_python_module(module_file)
+
+        def outer() -> None:
+            pass
+
+        outer.__wrapped__ = module.inner
+        module.inner.__wrapped__ = outer
+
+        assert defining_file(outer) == Path(__file__)
+
+    @pytest.mark.parametrize("member", ["__call__", "__init__"], ids=["call", "init"])
+    def test_class_without_a_registered_module_reads_its_own_body(
+        self, tmp_path, member
+    ) -> None:
+        """A class the loader execs without sys.modules answers through its body."""
+        module_file = tmp_path / "page.py"
+        module_file.write_text(
+            f"class Declared:\n    def {member}(self) -> None:\n        pass\n"
+        )
+        module = _load_python_module(module_file)
+
+        assert defining_file(module.Declared) == module_file
+
+    def test_class_without_a_module_or_body_raises_type_error(self, tmp_path) -> None:
+        """A body-less class outside sys.modules names no file at all."""
+        module_file = tmp_path / "page.py"
+        module_file.write_text("class Declared:\n    marker = 1\n")
+        module = _load_python_module(module_file)
+
+        with pytest.raises(TypeError, match=r"could not determine the file where"):
+            defining_file(module.Declared)
 
 
 class TestCallableName:

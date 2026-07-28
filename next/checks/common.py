@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from weakref import WeakKeyDictionary
@@ -14,10 +15,104 @@ from next.conf.signals import settings_reloaded
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterable, Iterator
 
     from next.components.manager import ComponentsManager
     from next.urls import FileRouterBackend, RouterBackend, RouterManager
+
+
+@dataclass(frozen=True, slots=True)
+class RegistrationSubject:
+    """The wording one context decorator uses in its registration-file check."""
+
+    decorator: str
+    anchor_name: str
+    render: str
+    code: str
+
+
+def registration_file_errors(
+    subject: RegistrationSubject,
+    *,
+    registrations: dict[Path, tuple[str, ...]],
+    misattributed: Iterable[tuple[Path, Path, str]],
+) -> list[CheckMessage]:
+    """Report registrations that no render of the intended file ever collects.
+
+    A registration keys on the file declaring the callable, so decorating an
+    imported helper binds it either to a file that is no anchor at all, or to
+    another anchor file whose render answers a different URL.
+    """
+    records = sorted(misattributed, key=_by_paths)
+    errors = _cross_file_errors(subject, records)
+    errors.extend(_dead_file_errors(subject, registrations, _names_by_file(records)))
+    return errors
+
+
+def _names_by_file(records: list[tuple[Path, Path, str]]) -> dict[Path, set[str]]:
+    """Group the misattributed names by the file they landed on."""
+    grouped: dict[Path, set[str]] = {}
+    for _registered_from, declared_in, name in records:
+        grouped.setdefault(declared_in, set()).add(name)
+    return grouped
+
+
+def _cross_file_errors(
+    subject: RegistrationSubject, records: list[tuple[Path, Path, str]]
+) -> list[CheckMessage]:
+    """Report each registration that landed on a file other than the one running it."""
+    errors: list[CheckMessage] = []
+    for registered_from, declared_in, name in records:
+        errors.append(
+            Error(
+                f"{registered_from} runs {subject.decorator} on {name}, declared in "
+                f"{declared_in}, so the registration binds to {declared_in} and no "
+                f"{subject.render} of {registered_from} collects it. Declare the "
+                f"callable in {registered_from}, wrapping the shared helper.",
+                obj=str(registered_from),
+                id=subject.code,
+            )
+        )
+    return errors
+
+
+def _dead_file_errors(
+    subject: RegistrationSubject,
+    registrations: dict[Path, tuple[str, ...]],
+    already_reported: dict[Path, set[str]],
+) -> list[CheckMessage]:
+    """Report registrations sitting on a file the renderer never looks at.
+
+    A name in `already_reported` is left out, because the cross-file report
+    has named that callable and its fix already.
+    """
+    errors: list[CheckMessage] = []
+    for file_path in sorted(registrations, key=str):
+        if file_path.name == subject.anchor_name:
+            continue
+        unreported = set(registrations[file_path]) - already_reported.get(
+            file_path, set()
+        )
+        if not unreported:
+            continue
+        names = ", ".join(sorted(unreported))
+        errors.append(
+            Error(
+                f"{file_path} registers {subject.decorator} callables ({names}) but "
+                f"is not a {subject.anchor_name}, so no {subject.render} collects "
+                f"them. Declare the callable in the {subject.anchor_name} that "
+                "needs it, wrapping this helper.",
+                obj=str(file_path),
+                id=subject.code,
+            )
+        )
+    return errors
+
+
+def _by_paths(record: tuple[Path, Path, str]) -> tuple[str, str, str]:
+    """Order misattribution records so the report is stable across runs."""
+    registered_from, declared_in, name = record
+    return (str(registered_from), str(declared_in), name)
 
 
 def errors_for_unknown_keys(

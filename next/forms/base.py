@@ -167,20 +167,33 @@ def _find_frame_outside() -> str:
         return filename
 
 
+def _module_declared_file(cls: type) -> str | None:
+    """Return the file of the module that still binds cls under its own name.
+
+    The file router execs every `page.py` under one throwaway module name it
+    never registers, so a same-named module a project happens to import must
+    not answer for a class it never declared.
+    """
+    module = sys.modules.get(getattr(cls, "__module__", "") or "")
+    if module is None or getattr(module, cls.__name__, None) is not cls:
+        return None
+    try:
+        return str(defining_file(cls))
+    except (OSError, TypeError):
+        # A module without __file__, such as one built for an interactive
+        # session, names no file for the classes declared in it.
+        return None
+
+
 def _definition_file_of(cls: type) -> str:
     """Return the file where cls was declared, empty when no frame names one.
 
-    A foreign file never survives, so the caller needs no framework arm.
+    `__init_subclass__` runs while the declaring frame is still on the stack,
+    so the walk answers wherever the module cannot. A foreign file never
+    survives it, which is why the caller needs no framework arm.
     """
-    try:
-        path = defining_file(cls)
-    except (OSError, TypeError):
-        # inspect.getfile raises for a class whose module has no __file__ or
-        # is missing from sys.modules, which is every page.py the file router
-        # execs from a spec it never registers.
-        return _find_frame_outside()
-    file_path = str(path)
-    if _is_foreign_file(file_path):
+    file_path = _module_declared_file(cls)
+    if file_path is None or _is_foreign_file(file_path):
         return _find_frame_outside()
     return file_path
 

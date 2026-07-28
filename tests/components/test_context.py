@@ -19,7 +19,7 @@ from next.components import (
 )
 from next.components.context import iter_serialized_component_context_keys
 from next.static import StaticCollector
-from tests.support import handler_declared_here
+from tests.support import attribution, handler_declared_here
 
 
 class TestComponentContextManager:
@@ -218,6 +218,23 @@ class TestComponentContextManagerAttribution:
         funcs = mgr.get_functions(Path(__file__))
         assert len(funcs) == 1
         assert funcs[0].func is get_here
+        assert mgr._registry.misattributed() == ()
+
+    def test_helper_from_another_module_is_recorded_once(self) -> None:
+        """Decorating an imported helper records the pair of files it spans."""
+        mgr = ComponentContextManager()
+
+        mgr.context("greeting")(handler_declared_here)
+        mgr.context("greeting_again")(handler_declared_here)
+
+        records = mgr._registry.misattributed()
+        assert [(r.registered_from, r.declared_in, r.name) for r in records] == [
+            (
+                Path(__file__),
+                Path(attribution.__file__).resolve(),
+                "handler_declared_here",
+            )
+        ]
 
     def test_context_decorator_without_key_registers_caller(
         self, tmp_path: Path

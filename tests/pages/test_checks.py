@@ -23,6 +23,7 @@ from next.pages.checks import (
 from next.pages.manager import page
 from next.pages.registry import PageContextRegistry
 from tests.support import (
+    importable_dir,
     patch_checks_router_manager,
     patch_checks_router_manager_with_routers,
 )
@@ -866,9 +867,9 @@ class TestContextChecksDeduplicate:
 
 
 class TestContextRegistrationFileCheck:
-    """`check_context_registration_files` catches a context bound to a helper module."""
+    """`check_context_registration_files` catches a context bound to another file."""
 
-    def test_context_on_imported_helper_is_e077(self, tmp_path) -> None:
+    def test_context_on_imported_helper_is_e074(self, tmp_path) -> None:
         page_file = tmp_path / "page.py"
         page_file.write_text(
             "from next.pages import context\n"
@@ -883,11 +884,36 @@ class TestContextRegistrationFileCheck:
             ),
         ):
             messages = check_context_registration_files(None)
-        assert [m.id for m in messages] == ["next.E077"]
+        assert [m.id for m in messages] == ["next.E074"]
         assert "attribution.py" in messages[0].msg
         assert "handler_declared_here" in messages[0].msg
+        assert str(page_file) in messages[0].msg
 
-    def test_e077_names_the_function_behind_a_partial(self, tmp_path) -> None:
+    def test_context_from_another_page_py_is_e074(self, tmp_path) -> None:
+        donor_dir = tmp_path / "donor"
+        donor_dir.mkdir()
+        (donor_dir / "__init__.py").write_text("")
+        (donor_dir / "page.py").write_text("def donated() -> str:\n    return 'hi'\n")
+        page_file = tmp_path / "page.py"
+        page_file.write_text(
+            "from next.pages import context\n"
+            "from donor.page import donated\n\n"
+            "context('greeting')(donated)\n"
+        )
+        loaders_module._MODULE_MEMO.pop(page_file, None)
+        with (
+            patch.object(page, "_context_manager", PageContextRegistry(None)),
+            patch_checks_router_manager(
+                pages_directory=tmp_path, scan_routes=[("test", page_file)]
+            ),
+            importable_dir(tmp_path),
+        ):
+            messages = check_context_registration_files(None)
+        assert [m.id for m in messages] == ["next.E074"]
+        assert "donated" in messages[0].msg
+        assert str(donor_dir / "page.py") in messages[0].msg
+
+    def test_e074_names_the_function_behind_a_partial(self, tmp_path) -> None:
         page_file = tmp_path / "page.py"
         page_file.write_text(
             "import functools\n\n"
@@ -903,7 +929,7 @@ class TestContextRegistrationFileCheck:
             ),
         ):
             messages = check_context_registration_files(None)
-        assert [m.id for m in messages] == ["next.E077"]
+        assert [m.id for m in messages] == ["next.E074"]
         assert "handler_declared_here" in messages[0].msg
 
     def test_context_declared_in_the_page_file_reports_nothing(self, tmp_path) -> None:

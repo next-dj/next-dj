@@ -1,3 +1,4 @@
+import importlib
 import importlib.util
 import os
 import sys
@@ -21,6 +22,7 @@ from next.forms import (
 )
 from next.forms.base import (
     _DJANGO_FORMS_ROOT,
+    _FOREIGN_ROOTS,
     _FRAMEWORK_ROOT,
     _auto_register_form_class,
     _compute_scope,
@@ -33,6 +35,7 @@ from next.forms.diagnostics import registration_diagnostics
 from next.forms.manager import form_action_manager
 from next.pages.loaders import _load_python_module
 from next.utils import defining_file
+from tests.support import importable_dir
 
 
 class TestAutoRegistration:
@@ -221,6 +224,34 @@ class TestAutoRegistration:
 
         backend = form_action_manager.default_backend
         assert backend.get_meta("root_base_dir_form") is not None
+
+    def test_form_declared_inside_the_framework_never_registers(
+        self, settings, tmp_path
+    ) -> None:
+        """A Form declared in a framework file registers nowhere when imported."""
+        settings.BASE_DIR = tmp_path
+        module_file = tmp_path / "framework_internal_forms.py"
+        module_file.write_text(
+            "from next.forms import CharField, Form\n"
+            "\n"
+            "\n"
+            "class FrameworkInternalForm(Form):\n"
+            "    title = CharField()\n"
+        )
+        # Treating tmp_path as a framework root makes the import behave like one
+        # of next's own modules, which the stack walk answers with an importlib
+        # frame rather than a user file.
+        foreign_roots = (*_FOREIGN_ROOTS, (str(tmp_path), str(tmp_path) + os.sep))
+
+        with (
+            patch.object(forms_base, "_FOREIGN_ROOTS", foreign_roots),
+            patch.dict(forms_base._foreign_file_cache, {}, clear=True),
+            importable_dir(tmp_path),
+        ):
+            importlib.import_module("framework_internal_forms")
+
+        backend = form_action_manager.default_backend
+        assert backend.get_meta("framework_internal_form") is None
 
     def test_virtual_path_skipped(self) -> None:
         """Files with paths starting with '<' (interactive/virtual) are skipped."""
@@ -447,7 +478,10 @@ class TestDefinitionFileOf:
             pass
 
         Detached.__module__ = "__main__"
-        with patch.dict(sys.modules, {"__main__": ModuleType("__main__")}):
+        interactive = ModuleType("__main__")
+        # The module binds the class, so only its missing __file__ can refuse.
+        interactive.Detached = Detached
+        with patch.dict(sys.modules, {"__main__": interactive}):
             assert _definition_file_of(Detached) == __file__
 
     def test_class_built_inside_django_forms_falls_back_to_stack(self) -> None:
@@ -457,6 +491,23 @@ class TestDefinitionFileOf:
     def test_class_built_inside_framework_falls_back_to_stack(self) -> None:
         """A class attributed to next.forms falls back to the stack."""
         assert _definition_file_of(Form) == __file__
+
+    def test_module_holding_another_class_of_that_name_is_ignored(
+        self, tmp_path, user_module
+    ) -> None:
+        """A same-named module that never declared the class does not answer for it."""
+        impostor_file = tmp_path / "impostor.py"
+        impostor_file.write_text("class Shadowed:\n    pass\n")
+        impostor = user_module("attribution_impostor", impostor_file)
+
+        class Shadowed:
+            pass
+
+        Shadowed.__module__ = impostor.__name__
+        # The impostor binds a different class under that name, which is the
+        # collision the attribution has to notice.
+        assert impostor.Shadowed is not Shadowed
+        assert _definition_file_of(Shadowed) == __file__
 
     def test_fallback_returns_empty_when_stack_exhausted(self) -> None:
         """The fallback returns '' once sys._getframe runs out of frames."""

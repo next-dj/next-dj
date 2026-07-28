@@ -133,8 +133,13 @@ A helper that lives in a shared module therefore needs a thin wrapper in the pag
 
 The same rule holds for ``@component.context``.
 Decorating the imported helper directly registers it under the module that declares it, where no render reaches it.
-``manage.py check`` reports that as ``next.E077`` for a page context and ``next.E078`` for a component one.
+A function imported from a sibling ``page.py`` lands the same way, on that other page rather than on the one running the decorator.
+``manage.py check`` reports both as ``next.E074`` for a page context and ``next.E075`` for a component one.
 :doc:`/content/topics/forms/actions` covers ``@action`` and what a decorator stacked under it has to preserve.
+
+The decorated object has to carry a declaring file of its own, which a function, a class, or a ``functools.partial`` over either does.
+A built-in such as ``datetime.now`` carries none, and decorating one raises ``TypeError`` at import time naming the object.
+Wrap it in a function declared in the page module instead.
 
 Reading Values Into a Context Function
 --------------------------------------

@@ -19,7 +19,11 @@ from next.pages.loaders import (
 from next.pages.manager import iter_serialized_page_context_keys
 from next.pages.registry import PageContextRegistry
 from next.static import default_manager as static_default_manager
-from tests.support import patch_checks_router_manager
+from tests.support import (
+    attribution,
+    handler_declared_here,
+    patch_checks_router_manager,
+)
 
 
 class TestPage:
@@ -610,6 +614,41 @@ class TestGlobalPageInstance:
         assert script in registry
         assert "from_page_module" in registry[script]
         assert "from_page_module" not in registry.get(Path(__file__), {})
+
+
+class TestContextMisattribution:
+    """A decorator run on a callable declared elsewhere is recorded as such."""
+
+    def test_declaring_file_matching_the_caller_records_nothing(self) -> None:
+        """A callable declared where the decorator runs is attributed cleanly."""
+        instance = Page()
+
+        @instance.context("here")
+        def declared_here() -> str:
+            return "value"
+
+        assert instance._context_manager.misattributed() == ()
+
+    def test_helper_from_another_module_is_recorded_once(self) -> None:
+        """Decorating an imported helper records the pair of files it spans."""
+        instance = Page()
+
+        instance.context("greeting")(handler_declared_here)
+        instance.context("greeting_again")(handler_declared_here)
+
+        records = instance._context_manager.misattributed()
+        assert [(r.registered_from, r.declared_in, r.name) for r in records] == [
+            (Path(__file__), Path(attribution.__file__), "handler_declared_here")
+        ]
+
+    def test_reset_drops_recorded_misattributions(self) -> None:
+        """A registry reset clears the diagnostic along with the registrations."""
+        instance = Page()
+        instance.context("greeting")(handler_declared_here)
+
+        instance._context_manager.reset()
+
+        assert instance._context_manager.misattributed() == ()
 
 
 class TestLayoutIntegration:

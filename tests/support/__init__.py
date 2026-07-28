@@ -37,6 +37,7 @@ from tests.support.partial_requests import (
     plain_request,
 )
 from tests.support.patches import (
+    importable_dir,
     patch_checks_components_manager,
     patch_checks_router_manager,
     patch_checks_router_manager_with_routers,
@@ -75,6 +76,7 @@ __all__ = [
     "file_router_backend_from_params",
     "file_router_config_entry",
     "handler_declared_here",
+    "importable_dir",
     "inspect_parameter",
     "named_temp_py",
     "next_framework_settings_component_backends_list",
