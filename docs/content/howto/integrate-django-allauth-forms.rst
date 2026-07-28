@@ -74,7 +74,7 @@ The factory passes the request into the allauth constructor, and the handler han
    from allauth.account.forms import LoginForm
    from django.http import HttpRequest, HttpResponse
 
-   from next.forms import action
+   from next import action
 
    def login_form_factory(request: HttpRequest) -> tuple[type[LoginForm], dict[str, HttpRequest]]:
        return LoginForm, {"request": request}
@@ -110,7 +110,7 @@ The neutral ``{"initial": {}}`` keeps construction on the factory path, the same
    from allauth.account.utils import complete_signup
    from django.http import HttpRequest, HttpResponse
 
-   from next.forms import action
+   from next import action
 
    def signup_form_factory() -> tuple[type[SignupForm], dict[str, dict[str, object]]]:
        return SignupForm, {"initial": {}}
@@ -135,7 +135,7 @@ Password Reset
    from allauth.account.forms import ResetPasswordForm
    from django.http import HttpRequest, HttpResponseRedirect
 
-   from next.forms import action
+   from next import action
 
    def reset_form_factory() -> tuple[type[ResetPasswordForm], dict[str, dict[str, object]]]:
        return ResetPasswordForm, {"initial": {}}

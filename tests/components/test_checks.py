@@ -118,11 +118,23 @@ class TestChecks:
             errors = check_cross_root_component_name_conflicts()
         assert any(e.id == "next.E034" for e in errors)
 
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "from next.pages import context\n",
+            "from next import context\n",
+            "from next import context as page_context\n",
+            "from next import page\n\n@page.context\ndef data():\n    return {}\n",
+            "import next\n\n@next.context\ndef data():\n    return {}\n",
+            "import next\n\n@next.page.context\ndef data():\n    return {}\n",
+            "import next.pages\n\n@next.pages.context\ndef data():\n    return {}\n",
+        ],
+    )
     def test_check_component_py_no_pages_context_reports_import(
-        self, tmp_path: Path, min_component_config: dict
+        self, source: str, tmp_path: Path, min_component_config: dict
     ) -> None:
-        """check_component_py_no_pages_context reports when component.py imports context from next.pages."""
-        (tmp_path / "component.py").write_text("from next.pages import context\n")
+        """Every spelling of the page context decorator in component.py is reported."""
+        (tmp_path / "component.py").write_text(source)
         fake_backend = FileComponentsBackend(dict(min_component_config))
 
         fake_backend._registry.register(
@@ -133,6 +145,31 @@ class TestChecks:
         with patch_checks_components_manager(fake_backend):
             errors = check_component_py_no_pages_context()
         assert any(e.id == "next.E021" for e in errors)
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "from next import component\n\n@component.context\ndef data():\n    return {}\n",
+            "from next.components import context\n",
+            "from next import component\n\n@component.page.context\ndef data():\n    return {}\n",
+            "def loader():\n    return None\n\n@loader().context\ndef data():\n    return {}\n",
+        ],
+    )
+    def test_check_component_py_no_pages_context_allows_component_context(
+        self, source: str, tmp_path: Path, min_component_config: dict
+    ) -> None:
+        """The component context decorator stays clean under either spelling."""
+        (tmp_path / "component.py").write_text(source)
+        fake_backend = FileComponentsBackend(dict(min_component_config))
+
+        fake_backend._registry.register(
+            ComponentInfo("good", tmp_path, "", None, tmp_path / "component.py", False)
+        )
+        fake_backend._loaded = True
+
+        with patch_checks_components_manager(fake_backend):
+            errors = check_component_py_no_pages_context()
+        assert errors == []
 
     def test_component_context_on_imported_helper_is_e075(
         self, tmp_path: Path, min_component_config: dict

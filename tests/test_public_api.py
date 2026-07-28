@@ -1,3 +1,4 @@
+import importlib
 import pkgutil
 import subprocess
 import sys
@@ -52,14 +53,25 @@ class TestCuratedSurface:
 
 
 class TestDirContract:
-    """Module __dir__ lists the version constant and every curated name."""
+    """Module __dir__ lists the curated names on top of the live namespace."""
 
-    def test_dir_matches_all(self) -> None:
-        assert set(next_dj.__dir__()) == set(next_dj.__all__)
+    def test_dir_covers_all(self) -> None:
+        assert set(next_dj.__all__) <= set(next_dj.__dir__())
 
     def test_dir_is_sorted(self) -> None:
         listed = next_dj.__dir__()
         assert listed == sorted(listed)
+
+    def test_dir_has_no_duplicates(self) -> None:
+        listed = next_dj.__dir__()
+        assert len(listed) == len(set(listed))
+
+    def test_dir_lists_the_metadata_globals(self) -> None:
+        assert {"__title__", "__version__", "__author__"} <= set(next_dj.__dir__())
+
+    def test_dir_lists_an_imported_subpackage(self) -> None:
+        importlib.import_module("next.deps")
+        assert "deps" in next_dj.__dir__()
 
 
 class TestImportStaysDjangoFree:

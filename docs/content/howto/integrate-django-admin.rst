@@ -80,7 +80,7 @@ Use ``reverse`` from inside the file router.
    :caption: notes/pages/page.py
 
    from django.urls import reverse
-   from next.pages import context
+   from next import context
 
    @context("admin_url")
    def admin_url() -> str:

@@ -66,7 +66,7 @@ The ``inherit_context=True`` flag on the three layout-scope callables stays from
    :caption: notes/pages/page.py
 
    from notes.models import Note
-   from next.pages import context
+   from next import context
 
    @context("site_name", inherit_context=True)
    def site_name() -> str:
@@ -146,8 +146,7 @@ It receives the same DI-resolved parameters as any other callable, including URL
    from django.urls import reverse
    from notes.forms import CreateNoteForm
    from notes.models import Note
-   from next.forms import action
-   from next.pages import context
+   from next import action, context
    from next.urls import DUrl
 
    @context("note")
@@ -240,7 +239,7 @@ The detail ``page.py`` only needs to add its own context.
    from django.shortcuts import get_object_or_404
    from django.urls import reverse
    from notes.models import Note
-   from next.pages import context
+   from next import context
    from next.urls import DUrl
 
    @context("note")

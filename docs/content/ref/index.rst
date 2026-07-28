@@ -26,6 +26,9 @@ Import them from the package root with ``from next import Depends, action, compo
 ``next.Depends``
    The dependency marker for injected values, re-exported from :doc:`deps`.
 
+``next.VERSION``
+   The framework version string, the sixth and only eager name in ``next.__all__``.
+
 Each of the five resolves from its owning subpackage on first attribute access, so ``import next`` on its own pulls in no Django module.
 Anything outside the five stays a deep import, such as ``from next.urls import DUrl`` or ``from next.forms import Form``.
 The subsystem pages below are the reference for that wider surface.

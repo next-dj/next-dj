@@ -69,7 +69,7 @@ The decorator takes a single key and the function returns the value.
 .. code-block:: python
    :caption: notes/pages/page.py
 
-   from next.pages import context
+   from next import context
    from notes.models import Note
 
    @context("notes")
@@ -86,7 +86,7 @@ Decorating a function with bare ``@context`` and returning a dict merges every k
 .. code-block:: python
    :caption: shared dependency
 
-   from next.pages import context
+   from next import context
 
    @context
    def post_context(post: Post) -> dict[str, object]:
@@ -106,7 +106,7 @@ The inherit_context Flag
 .. code-block:: python
    :caption: notes/pages/page.py
 
-   from next.pages import context
+   from next import context
 
    @context("site_name", inherit_context=True)
    def site_name() -> str:
@@ -124,7 +124,7 @@ A helper that lives in a shared module therefore needs a thin wrapper in the pag
 .. code-block:: python
    :caption: notes/pages/dashboard/page.py
 
-   from next.pages import context
+   from next import context
    from notes.cache import pending_clicks
 
    @context("pending_clicks")
@@ -165,7 +165,8 @@ The factory takes its own dependency-injected arguments, so it can ask for the r
 .. code-block:: python
    :caption: notes/pages/notes/[int:note_id]/page.py
 
-   from next.pages import Context, context
+   from next import context
+   from next.pages import Context
    from next.urls import DUrl
    from notes.models import Note
 
@@ -229,7 +230,7 @@ Leave the parameter untyped and return early when it is already a model instance
 .. code-block:: python
    :caption: notes/pages/notes/[category]/page.py
 
-   from next.pages import context
+   from next import context
    from notes.models import Category
 
    @context("category", inherit_context=True)
@@ -303,7 +304,7 @@ Publish the page title from each page.
 .. code-block:: python
    :caption: notes/pages/notes/[id]/page.py
 
-   from next.pages import context
+   from next import context
    from next.urls import DUrl
    from notes.models import Note
 
@@ -332,7 +333,7 @@ Combine a context function with the ``DQuery[T]`` marker to read filters from th
 .. code-block:: python
    :caption: notes/pages/page.py
 
-   from next.pages import context
+   from next import context
    from next.urls import DQuery
 
    @context("active_tag")

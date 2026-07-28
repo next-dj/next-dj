@@ -167,7 +167,7 @@ Add a ``component.py`` next to the template.
    :caption: notes/pages/_components/note_card/component.py
 
    from notes.models import Note
-   from next.components import component
+   from next import component
 
    @component.context("preview")
    def preview(note: Note) -> str:

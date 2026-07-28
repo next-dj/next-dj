@@ -89,7 +89,7 @@ The override applies only to that key.
 .. code-block:: python
    :caption: per key serializer
 
-   from next.pages import context
+   from next import context
    from next.static import PydanticJsContextSerializer
 
    @context("featured", serialize=True, serializer=PydanticJsContextSerializer())
@@ -217,7 +217,7 @@ Register the key server-side with ``serialize=True``.
 .. code-block:: python
    :caption: notes/pages/page.py
 
-   from next.pages import context
+   from next import context
    from notes.models import Note
 
    @context("note_count", serialize=True)

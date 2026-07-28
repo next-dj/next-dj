@@ -135,7 +135,7 @@ A ``@context`` decorator publishes one or more values into the template scope.
 .. code-block:: python
    :caption: keyed single value
 
-   from next.pages import context
+   from next import context
 
    @context("notes")
    def all_notes() -> list:
@@ -170,7 +170,7 @@ Pass ``serializer=`` with a ``JsContextSerializer`` instance to use a per-key se
 .. code-block:: python
    :caption: page.py
 
-   from next.pages import context
+   from next import context
 
    @context("featured", serialize=True)
    def featured_payload() -> dict:
@@ -179,7 +179,7 @@ Pass ``serializer=`` with a ``JsContextSerializer`` instance to use a per-key se
 .. code-block:: python
    :caption: unkeyed dict
 
-   from next.pages import context
+   from next import context
 
    @context
    def post_context(post: Post) -> dict[str, object]:

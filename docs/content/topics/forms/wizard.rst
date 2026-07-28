@@ -147,7 +147,7 @@ Beyond the reserved names, ``done`` declares markers and named dependencies like
 .. code-block:: python
    :caption: pulling a named dependency into the finaliser
 
-   from next.deps import Depends
+   from next import Depends
 
    def done(self, request: HttpRequest, cleaned_data, tenant=Depends("active_tenant")):
        AccessRequest.objects.create(tenant=tenant, **cleaned_data)
@@ -261,7 +261,7 @@ A progress bar reads the step status in Python and iterates the precomputed list
 
    from typing import Any
 
-   from next.components import component
+   from next import component
    from next.forms import FormWizard
 
    @component.context("steps")

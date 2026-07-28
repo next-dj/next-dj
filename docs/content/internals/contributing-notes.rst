@@ -47,7 +47,7 @@ Public Callables
 ~~~~~~~~~~~~~~~~
 
 Names exposed through ``@page.context``, ``@component.context``, ``@action``, and through provider classes never start with an underscore.
-``@context`` imported from ``next.pages`` is the documented alias for ``@page.context`` used in page modules.
+``@context`` imported from ``next`` is the documented alias for ``@page.context`` used in page modules.
 Names prefixed with ``_`` stay module internal.
 
 System Checks

@@ -11,12 +11,12 @@ r"""                  __           __
 A next-gen framework based on Django without the tears.
 """
 
+# Every annotation here is a builtin, so the module skips
+# `from __future__ import annotations` and the import it would add to `import next`.
 import importlib
 from typing import TYPE_CHECKING
 
 
-# No annotation here references these names, so the module does without
-# `from __future__ import annotations` and the import cost it adds to `import next`.
 if TYPE_CHECKING:
     from next.components import component
     from next.deps import Depends
@@ -42,7 +42,7 @@ _LAZY_ATTRIBUTES: dict[str, str] = {
 }
 
 
-def __getattr__(name: str) -> object:
+def _resolve(name: str) -> object:
     """Resolve a curated top-level name from its owning subpackage on demand.
 
     Importing any subpackage pulls in Django, so the facade stays lazy to keep
@@ -55,6 +55,13 @@ def __getattr__(name: str) -> object:
     return getattr(importlib.import_module(module_name), name)
 
 
+# A visible module `__getattr__` would make any name typecheck, so only the binding
+# hides from type checkers and `_resolve` stays outside the guard to keep its body
+# checked.
+if not TYPE_CHECKING:
+    __getattr__ = _resolve
+
+
 def __dir__() -> list[str]:
-    """List the version constant plus every lazily resolved curated name."""
-    return sorted({"VERSION", *_LAZY_ATTRIBUTES})
+    """List the curated names alongside the live module namespace."""
+    return sorted(set(__all__) | set(globals()))
