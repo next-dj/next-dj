@@ -136,7 +136,7 @@ Create one page in the ``notes`` application to confirm the wiring.
 .. code-block:: python
    :caption: notes/pages/page.py
 
-   from next.pages import context
+   from next import context
 
    @context("title")
    def page_title() -> str:

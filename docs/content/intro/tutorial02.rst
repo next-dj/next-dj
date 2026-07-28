@@ -77,7 +77,7 @@ Pass ``inherit_context=True`` so every descendant page can read the value too.
 .. code-block:: python
    :caption: notes/pages/page.py
 
-   from next.pages import context
+   from next import context
 
    @context("site_name", inherit_context=True)
    def site_name() -> str:
@@ -104,7 +104,7 @@ The typed ``[int:id]`` directory form rejects non-numeric URLs at routing time b
 
    from django.shortcuts import get_object_or_404
    from notes.models import Note
-   from next.pages import context
+   from next import context
    from next.urls import DUrl
 
    @context("note")

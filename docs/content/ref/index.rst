@@ -6,6 +6,44 @@ API Reference
 Module by module reference for the next.dj public API.
 Each page lists the public surface plus configuration and signal entries that belong to the subsystem.
 
+.. rubric:: Top-Level API
+
+The ``next`` package itself exports five curated names, the ones that page modules, component modules, and form handlers use most often.
+Import them from the package root with ``from next import Depends, action, component, context, page``.
+
+``next.page``
+   The page manager that owns template registration and rendering, re-exported from :doc:`pages`.
+
+``next.context``
+   The page context decorator, re-exported from :doc:`pages` and documented in :doc:`decorators`.
+
+``next.component``
+   The component context manager behind ``@component.context``, re-exported from :doc:`components`.
+
+``next.action``
+   The form action decorator, re-exported from :doc:`forms`.
+
+``next.Depends``
+   The dependency marker for injected values, re-exported from :doc:`deps`.
+
+Each of the five resolves from its owning subpackage on first attribute access, so ``import next`` on its own pulls in no Django module.
+Anything outside the five stays a deep import, such as ``from next.urls import DUrl`` or ``from next.forms import Form``.
+The subsystem pages below are the reference for that wider surface.
+
+.. warning::
+
+   ``next.page`` and ``next.pages`` differ by one letter and name different things.
+   ``next.page`` is the manager object re-exported at the package root, while ``next.pages`` is the subpackage that owns it together with the rest of the pages API.
+
+.. note::
+
+   The curated ``context`` is the decorator, not the ``Context`` and ``ContextResult`` classes that share the word.
+   Those classes belong to the same subpackage and stay behind ``from next.pages import Context, ContextResult``.
+
+The laziness covers the package root, not the subsystems it fronts.
+Reading ``Depends`` imports ``next.deps``, which pulls in a small set of modules from ``django.dispatch`` and ``django.utils``.
+Reading ``page``, ``context``, ``component``, or ``action`` loads a much larger part of Django.
+
 .. rubric:: Subsystems
 
 :doc:`pages`
