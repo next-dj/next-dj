@@ -14,8 +14,8 @@ from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.utils.safestring import SafeString, mark_safe
 from shadcn_admin import utils
 
-from next.forms import action, redirect_to_origin
-from next.pages import context
+from next import action, context
+from next.forms import redirect_to_origin
 from next.urls import with_query
 
 

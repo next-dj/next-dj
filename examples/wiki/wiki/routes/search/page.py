@@ -3,7 +3,7 @@ from django.http import HttpRequest
 from django.urls import reverse
 from wiki.models import Article
 
-from next.pages import context
+from next import context
 
 
 FILE_DOC_CATALOGUE = (

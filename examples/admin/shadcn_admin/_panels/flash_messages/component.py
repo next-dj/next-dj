@@ -3,7 +3,7 @@ from typing import Any
 from django.contrib.messages import get_messages
 from django.http import HttpRequest
 
-from next.components import component
+from next import component
 
 
 _LEVEL_TO_VARIANT = {

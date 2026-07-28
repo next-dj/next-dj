@@ -1,6 +1,6 @@
 from typing import Any
 
-from next.components import component
+from next import component
 from next.forms import FormWizard
 
 

@@ -5,7 +5,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.http import HttpRequest
 from shadcn_admin import utils
 
-from next.pages import context
+from next import context
 
 
 _ACTION_LABELS = {1: "Added", 2: "Changed", 3: "Deleted"}

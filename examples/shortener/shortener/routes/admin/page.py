@@ -2,8 +2,8 @@ from django.http import Http404, HttpRequest, HttpResponse
 from shortener.cache import pending_clicks
 from shortener.models import Link
 
-from next.forms import ModelForm, action
-from next.pages import context
+from next import action, context
+from next.forms import ModelForm
 from next.partial import Patches
 
 

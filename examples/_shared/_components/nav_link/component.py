@@ -3,7 +3,7 @@ from collections.abc import Mapping, Sequence
 from django.http import HttpRequest
 from django.urls import NoReverseMatch, reverse
 
-from next.components import component
+from next import component
 
 
 _HOVER_ACCENT = "hover:bg-accent hover:text-accent-foreground"

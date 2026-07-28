@@ -1,4 +1,4 @@
-from next.components import component
+from next import component
 
 
 BASE = "relative w-full rounded-lg border p-4 text-sm"

@@ -7,8 +7,8 @@ from wiki.markdown_render import render_markdown
 from wiki.models import RESERVED_SLUGS, Article
 from wiki.providers import DArticle
 
+from next import context
 from next.forms import ComponentWidget, ModelForm, PermissionOutcome
-from next.pages import context
 
 
 class ArticleEditForm(ModelForm):

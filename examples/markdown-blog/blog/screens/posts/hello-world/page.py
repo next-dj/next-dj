@@ -2,7 +2,7 @@ from pathlib import Path
 
 from blog.markdown_template import post_metadata, read_post_body, reading_minutes
 
-from next.pages import context
+from next import context
 
 
 _POST = Path(__file__).parent / "template.md"

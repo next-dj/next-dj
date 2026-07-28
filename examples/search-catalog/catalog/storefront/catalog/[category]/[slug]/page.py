@@ -1,7 +1,7 @@
 from catalog.models import Category, Product
 from django.http import Http404
 
-from next.pages import context
+from next import context
 
 
 @context("product")

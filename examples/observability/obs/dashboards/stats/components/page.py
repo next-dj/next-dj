@@ -1,6 +1,6 @@
 from obs import metrics
 
-from next.pages import context
+from next import context
 
 
 @context("counters")

@@ -2,7 +2,7 @@ from catalog.models import Category
 from catalog.providers import DFilters, Filters
 from django.urls import reverse
 
-from next.components import component
+from next import component
 
 
 @component.context("submit_url")

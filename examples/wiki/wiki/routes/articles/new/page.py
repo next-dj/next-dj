@@ -4,8 +4,8 @@ from django.utils.safestring import SafeString
 from wiki.markdown_render import render_markdown
 from wiki.models import RESERVED_SLUGS, Article
 
+from next import context
 from next.forms import ComponentWidget, Form
-from next.pages import context
 
 
 class ArticleCreateForm(Form):

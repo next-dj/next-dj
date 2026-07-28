@@ -2,7 +2,7 @@ from polls.broker import build_snapshot
 from polls.models import Poll
 from polls.providers import DPoll
 
-from next.pages import context
+from next import context
 
 
 @context("poll", inherit_context=True)

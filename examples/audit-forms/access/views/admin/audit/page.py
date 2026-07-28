@@ -1,7 +1,7 @@
 from access.models import AuditEntry
 from django.http import HttpRequest
 
-from next.pages import context
+from next import context
 from next.partial import zone_requested
 
 

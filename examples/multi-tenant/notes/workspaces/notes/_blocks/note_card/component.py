@@ -1,7 +1,7 @@
 from django.urls import reverse
 from notes.models import Note
 
-from next.components import component
+from next import component
 
 
 EXCERPT_LIMIT = 140

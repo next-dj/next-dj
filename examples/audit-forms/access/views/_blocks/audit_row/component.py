@@ -2,7 +2,7 @@ from typing import Any
 
 from access.models import AuditEntry
 
-from next.components import component
+from next import component
 
 
 _KIND_CLASS = {

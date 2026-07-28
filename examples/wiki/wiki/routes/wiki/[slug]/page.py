@@ -3,7 +3,7 @@ from wiki.markdown_render import render_markdown
 from wiki.models import Article
 from wiki.providers import DArticle
 
-from next.pages import context
+from next import context
 
 
 @context("article")

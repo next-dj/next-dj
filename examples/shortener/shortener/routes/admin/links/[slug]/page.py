@@ -3,8 +3,7 @@ from shortener.cache import CLICK_PREFIX, reset_clicks
 from shortener.models import Link
 from shortener.providers import DLink
 
-from next.forms import action
-from next.pages import context
+from next import action, context
 from next.partial import Patches
 
 

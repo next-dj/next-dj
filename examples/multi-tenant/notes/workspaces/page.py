@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING
 from notes.models import Note
 from notes.providers import DTenant
 
-from next.pages import context
+from next import context
 
 
 if TYPE_CHECKING:

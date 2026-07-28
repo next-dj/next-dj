@@ -6,7 +6,7 @@ from django.contrib import admin
 from django.http import HttpRequest
 from shadcn_admin import utils
 
-from next.pages import context
+from next import context
 
 
 _AUTH_PREFIXES = (utils.LOGIN_URL, utils.LOGOUT_URL)

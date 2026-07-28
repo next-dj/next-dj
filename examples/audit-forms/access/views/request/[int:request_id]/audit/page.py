@@ -1,7 +1,7 @@
 from access.models import AccessRequest, AuditEntry
 from django.http import Http404, HttpRequest
 
-from next.pages import context
+from next import context
 
 
 @context("access_request")

@@ -266,7 +266,7 @@ mark-parentheses = true
 fixture-parentheses = true
 
 [tool.ruff.lint.flake8-bugbear]
-extend-immutable-calls = ["next.deps.Depends"]
+extend-immutable-calls = ["next.Depends", "next.deps.Depends"]
 
 [tool.ruff.format]
 quote-style = "double"

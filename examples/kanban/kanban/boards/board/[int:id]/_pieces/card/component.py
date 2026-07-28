@@ -1,6 +1,6 @@
 from kanban.models import Card
 
-from next.components import component
+from next import component
 
 
 @component.context("excerpt")

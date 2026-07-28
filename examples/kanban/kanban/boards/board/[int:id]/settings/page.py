@@ -1,4 +1,4 @@
-from next.pages import context
+from next import context
 
 
 @context("settings_active")

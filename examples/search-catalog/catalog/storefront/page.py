@@ -1,6 +1,6 @@
 from catalog.models import Category, Product
 
-from next.pages import context
+from next import context
 from next.urls import DQuery
 
 
