@@ -4,7 +4,6 @@ from unittest.mock import patch
 
 from django.test import RequestFactory, override_settings
 
-import next.components as next_components_mod
 from next.components import (
     ComponentInfo,
     ComponentRenderer,
@@ -15,7 +14,6 @@ from next.components import (
     FileComponentsBackend,
     ModuleLoader,
     SimpleComponentRenderer,
-    _inject_component_context,
     components_manager,
     get_component,
     get_component_paths_for_watch,
@@ -23,6 +21,7 @@ from next.components import (
     register_components_folder_from_router_walk,
     render_component,
 )
+from next.components.renderers import _inject_component_context, _merge_csrf_context
 from next.conf import next_framework_settings
 from tests.support import (
     next_framework_settings_component_backends_list as _next_framework_settings_component_backends_list,
@@ -374,7 +373,7 @@ class TestComponentRenderers:
     def test_merge_csrf_context_no_op_without_request(self) -> None:
         """Early return when ``request`` is None (defensive API)."""
         ctx: dict[str, object] = {}
-        next_components_mod._merge_csrf_context(ctx, None)
+        _merge_csrf_context(ctx, None)
         assert "csrf_token" not in ctx
 
     def test_merge_csrf_context_skips_when_csrf_token_present(self) -> None:
@@ -382,7 +381,7 @@ class TestComponentRenderers:
         req = RequestFactory().get("/")
         existing = "__test_merge_csrf_existing__"
         ctx: dict[str, object] = {"csrf_token": existing}
-        next_components_mod._merge_csrf_context(ctx, req)
+        _merge_csrf_context(ctx, req)
         assert ctx["csrf_token"] == existing
 
     def test_render_with_template_returns_empty_when_no_template_string(
