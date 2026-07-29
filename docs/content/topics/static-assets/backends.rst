@@ -158,7 +158,9 @@ List the dotted path of the backend in ``STATIC_BACKENDS``.
        ]
    }
 
-The ``StaticsFactory`` builds the backend instance from the config dict and emits the ``backend_loaded`` signal.
+The manager builds the backend instance from the config dict through ``load_backends`` and emits the ``backend_loaded`` signal.
+An entry that names a class outside the ``StaticBackend`` family, or a path that cannot be imported, is logged and skipped, and the remaining entries still load.
+When no entry survives, the manager seeds the built-in staticfiles backend so rendering always has one, and that seed announces itself through the same signal.
 
 Request Aware Output
 --------------------
@@ -182,7 +184,7 @@ See the `multi-tenant example <https://github.com/next-dj/next-dj/tree/main/exam
 Signals
 -------
 
-The ``backend_loaded`` signal fires once per backend when the factory builds it.
+The ``backend_loaded`` signal fires once per configured backend when the manager builds it.
 The payload carries ``sender`` as the backend class, ``config`` as the config dict, and ``instance`` as the backend instance.
 
 System Checks

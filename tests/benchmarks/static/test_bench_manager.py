@@ -60,6 +60,23 @@ def _warmed_manager(
     return manager
 
 
+class TestBenchEnsureBackends:
+    """`_ensure_backends` guards every discovery and injection entry point."""
+
+    @pytest.mark.benchmark(group="static.manager.load")
+    def test_ensure_backends_warm(self, benchmark) -> None:
+        """Backends are already loaded, so the call touches no settings."""
+        manager = StaticManager()
+        manager._ensure_backends()
+        benchmark(manager._ensure_backends)
+
+    @pytest.mark.benchmark(group="static.manager.load")
+    def test_reload_config_cold(self, benchmark) -> None:
+        """A reload rereads settings and rebuilds every configured backend."""
+        manager = StaticManager()
+        benchmark(manager._reload_config)
+
+
 class TestBenchStaticManagerInject:
     @pytest.mark.benchmark(group="static.manager")
     def test_inject_typical_page(self, benchmark) -> None:

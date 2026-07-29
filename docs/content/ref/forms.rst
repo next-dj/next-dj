@@ -44,10 +44,9 @@ Framework machinery.
    ``FormActionDispatch`` lives in ``next.forms.dispatch``.
    ``FormActionManager``, the ``form_action_manager`` instance, and
    ``build_form_namespace_for_action`` live in ``next.forms.manager``.
-   ``ActionMeta``, ``FormActionFactory``, ``file_to_dotted_module``, ``scope_key_for``,
+   ``ActionMeta``, ``file_to_dotted_module``, ``scope_key_for``,
    ``build_action_guard``, and ``record_possible_collision`` live in ``next.forms.backends``.
-   ``WizardBackendManager`` and the ``wizard_backend_manager`` instance live in
-   ``next.forms.wizard``.
+   The ``wizard_backend_manager`` instance lives in ``next.forms.wizard``.
    ``FormProvider`` and ``CleanedDataProvider`` live in ``next.forms.markers``.
    ``bind_component_widgets`` lives in ``next.forms.widgets``.
    ``render_form_page_with_errors`` lives in ``next.forms.rendering``.
@@ -134,11 +133,14 @@ See :doc:`/content/topics/forms/wizard` and :doc:`/content/topics/forms/wizard-b
 .. autoclass:: next.forms.CacheFormWizardBackend
    :members:
 
-``WizardBackendManager`` is the lazy holder for the single configured wizard backend,
-exposed as the ``wizard_backend_manager`` instance in ``next.forms.wizard``.
-It reads ``FORM_WIZARD_BACKEND`` on first use and caches the result.
+``wizard_backend_manager`` in ``next.forms.wizard`` is the lazy holder for the single
+configured wizard backend, a ``SingleBackendManager`` bound to ``FORM_WIZARD_BACKEND``.
+It reads the setting on first use and caches the result.
+A malformed entry, an unimportable path, or a class outside the ``FormWizardBackend``
+family raises ``ImproperlyConfigured`` out of ``get``, since a family with one backend
+has nothing to fall back to.
 
-.. autoclass:: next.forms.wizard.WizardBackendManager
+.. autoclass:: next.backends.SingleBackendManager
    :members:
 
 Fields and Widgets
@@ -221,9 +223,8 @@ The target is one of ``handler``, ``form_class``, or ``wizard_class``, which let
 ``ActionGuard`` is the frozen access-requirement record built from ``Meta.login_required`` and ``Meta.permission_required`` or the matching ``@action`` keywords.
 It is stored under the ``guard`` key of ``ActionMeta`` and enforced by the dispatch pipeline before the form is built, so custom backends see the declared requirements without extra wiring.
 ``iter_actions`` yields every stored ``ActionMeta``, including its ``name`` key, which is how the forms system checks inspect any configured backend.
-``ActionMeta``, ``FormActionFactory``, and ``file_to_dotted_module`` import from ``next.forms.backends`` directly.
-``FormActionFactory`` instantiates one backend per ``FORM_ACTION_BACKENDS`` entry, passing the whole config dict to the backend constructor.
-``FormActionManager`` calls it, so application code rarely does.
+``ActionMeta`` and ``file_to_dotted_module`` import from ``next.forms.backends`` directly.
+``FormActionManager`` instantiates one backend per ``FORM_ACTION_BACKENDS`` entry, passing the whole config dict to the backend constructor.
 ``scope_key_for`` derives the registry scope key from a declaration file path and a scope, the same key that partitions actions and wizard storage.
 ``build_action_guard`` builds an ``ActionGuard`` from the declared ``login_required`` and ``permission_required`` values, or ``None`` when both are unset.
 ``record_possible_collision`` files a name collision into the registration diagnostics when a name is re-registered with a distinct handler, feeding the ``next.E041`` check.

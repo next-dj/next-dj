@@ -16,7 +16,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.db.models import Model
 from django.http import HttpRequest, HttpResponse
 
-from next.conf import import_class_cached, next_framework_settings
+from next.backends import SingleBackendManager
 from next.conf.signals import settings_reloaded
 
 from .backends import ActionRegistration, scope_key_for
@@ -38,6 +38,7 @@ if TYPE_CHECKING:
 
 
 _WIZARD_LOAD_CACHE_ATTR: Final[str] = "_next_wizard_load_cache"
+_FORM_WIZARD_BACKEND_KEY: Final[str] = "FORM_WIZARD_BACKEND"
 
 type _JSONValue = (
     None | bool | int | float | str | list[_JSONValue] | dict[str, _JSONValue]
@@ -268,27 +269,10 @@ class SessionFormWizardBackend(FormWizardBackend):
             session.pop(self._key(storage_id), None)
 
 
-class WizardBackendManager:
-    """Lazily instantiates the single configured wizard backend."""
-
-    def __init__(self) -> None:
-        """Initialise an empty backend cache."""
-        self._backend: FormWizardBackend | None = None
-
-    def reset(self) -> None:
-        """Drop the cached backend so a fresh config takes effect."""
-        self._backend = None
-
-    def get(self) -> FormWizardBackend:
-        """Return the backend configured by `FORM_WIZARD_BACKEND`."""
-        if self._backend is None:
-            config = next_framework_settings.FORM_WIZARD_BACKEND
-            backend_class = import_class_cached(config["BACKEND"])
-            self._backend = cast("FormWizardBackend", backend_class(config))
-        return self._backend
-
-
-wizard_backend_manager = WizardBackendManager()
+# The settings key carries its own default path, so no fallback here.
+wizard_backend_manager = SingleBackendManager(
+    _FORM_WIZARD_BACKEND_KEY, base=FormWizardBackend
+)
 
 
 def _on_settings_reloaded(**kwargs) -> None:
@@ -577,6 +561,5 @@ __all__ = [
     "FormWizard",
     "FormWizardBackend",
     "SessionFormWizardBackend",
-    "WizardBackendManager",
     "wizard_backend_manager",
 ]

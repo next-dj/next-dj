@@ -1,13 +1,13 @@
-"""Facade owning the protocol-backend factory, manager, and version resolution."""
+"""Facade owning the protocol-backend manager and version resolution."""
 
 import hashlib
 import json
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 from django.contrib.staticfiles.storage import ManifestFilesMixin, staticfiles_storage
 from django.core.exceptions import ImproperlyConfigured
 
-from next.conf import import_class_cached, next_framework_settings
+from next.backends import SingleBackendManager
 from next.conf.signals import settings_reloaded
 
 from .backends import PartialProtocolBackend
@@ -27,69 +27,27 @@ _DEFAULT_BACKEND_PATH = (
 )
 
 
-class PartialProtocolFactory:
-    """Instantiates protocol backends from `PARTIAL_BACKENDS` entries."""
-
-    @classmethod
-    def create_backend(cls, config: "Mapping[str, Any]") -> PartialProtocolBackend:
-        """Return a single backend instance for one settings entry."""
-        backend_path = config.get("BACKEND")
-        if not isinstance(backend_path, str):
-            msg = (
-                "A PARTIAL_BACKENDS entry names its protocol backend by a "
-                f"dotted path under BACKEND, got {config!r}."
-            )
-            raise ImproperlyConfigured(msg)
-        backend_class = import_class_cached(backend_path)
-        return cast("PartialProtocolBackend", backend_class(config))
+# PARTIAL_BACKENDS is a list, but one protocol is active (next.W071).
+partial_backend_manager = SingleBackendManager(
+    _PARTIAL_BACKENDS_KEY, base=PartialProtocolBackend, default=_DEFAULT_BACKEND_PATH
+)
 
 
-class PartialBackendManager:
-    """Lazily instantiates the single configured protocol backend.
+def asset_version() -> str:
+    """Return the asset version string stamped on a partial response.
 
-    Only the first valid PARTIAL_BACKENDS entry is used, a second entry is
-    reported by next.W071.
+    An explicit `VERSION` option wins so a deployment may pin the version
+    to a release tag. The `"manifest"` sentinel resolves to a stable hash
+    of the staticfiles manifest when the active staticfiles storage hashes
+    its files, so the deploy-mismatch guard works out of the box. Without
+    a manifest storage the sentinel falls back to a stable default and the
+    guard never fires.
     """
-
-    def __init__(self) -> None:
-        """Initialise an empty backend cache."""
-        self._backend: PartialProtocolBackend | None = None
-
-    def reset(self) -> None:
-        """Drop the cached backend so a reloaded config takes effect."""
-        self._backend = None
-
-    def _ensure_backend(self) -> PartialProtocolBackend:
-        if self._backend is None:
-            configs = getattr(next_framework_settings, _PARTIAL_BACKENDS_KEY, [])
-            config = next(
-                (c for c in configs if isinstance(c, dict)),
-                {"BACKEND": _DEFAULT_BACKEND_PATH},
-            )
-            self._backend = PartialProtocolFactory.create_backend(config)
-        return self._backend
-
-    def get(self) -> PartialProtocolBackend:
-        """Return the active protocol backend."""
-        return self._ensure_backend()
-
-    def version(self) -> str:
-        """Return the asset version string stamped on a partial response.
-
-        An explicit `VERSION` option wins so a deployment may pin the
-        version to a release tag. The `"manifest"` sentinel resolves to a
-        stable hash of the staticfiles manifest when the active
-        staticfiles storage hashes its files, so the deploy-mismatch guard
-        works out of the box. Without a manifest storage the sentinel
-        falls back to a stable default and the guard never fires.
-        """
-        configured = self.get().options.get(_VERSION_OPTION, _MANIFEST_VERSION)
-        if isinstance(configured, str) and configured != _MANIFEST_VERSION:
-            return configured
-        return _manifest_version()
-
-
-partial_backend_manager = PartialBackendManager()
+    options = partial_backend_manager.get().options
+    configured = options.get(_VERSION_OPTION, _MANIFEST_VERSION)
+    if isinstance(configured, str) and configured != _MANIFEST_VERSION:
+        return configured
+    return _manifest_version()
 
 
 def _manifest_version() -> str:
@@ -131,4 +89,4 @@ def _on_settings_reloaded(**kwargs) -> None:
 settings_reloaded.connect(_on_settings_reloaded)
 
 
-__all__ = ["PartialBackendManager", "PartialProtocolFactory", "partial_backend_manager"]
+__all__ = ["asset_version", "partial_backend_manager"]

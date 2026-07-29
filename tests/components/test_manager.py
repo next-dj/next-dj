@@ -2,6 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
 from django.test import RequestFactory, override_settings
 
 from next.components import (
@@ -11,6 +12,7 @@ from next.components import (
     ComponentsManager,
     ComponentTemplateLoader,
     CompositeComponentRenderer,
+    DummyBackend,
     FileComponentsBackend,
     ModuleLoader,
     SimpleComponentRenderer,
@@ -21,6 +23,7 @@ from next.components import (
     register_components_folder_from_router_walk,
     render_component,
 )
+from next.components.manager import _on_settings_reloaded
 from next.components.renderers import _inject_component_context, _merge_csrf_context
 from next.conf import next_framework_settings
 from tests.support import (
@@ -48,7 +51,7 @@ class TestComponentsManager:
             assert manager.collect_visible_components(Path("/x")) == {}
 
     def test_reload_config_swallows_backend_creation_error(self) -> None:
-        """When create_backend raises, _reload_config logs and continues."""
+        """An unimportable ``BACKEND`` is logged and costs only its own entry."""
         mock_ns = _next_framework_settings_component_backends_list(
             [{"BACKEND": "next.components.NonexistentBackend", "OPTIONS": {}}]
         )
@@ -67,17 +70,163 @@ class TestComponentsManager:
         assert isinstance(mgr.component_renderer, ComponentRenderer)
 
 
+class TestBackendsLoadedOnce:
+    """Settings are read once, whatever the load leaves behind."""
+
+    def test_empty_settings_do_not_reload_on_every_access(self) -> None:
+        """An empty list is a load result, not a reason to reread settings."""
+        manager = ComponentsManager()
+        mock_ns = _next_framework_settings_component_backends_list([])
+        with (
+            patch("next.components.manager.next_framework_settings", mock_ns),
+            patch(
+                "next.components.manager.load_backends", return_value=[]
+            ) as load_backends_mock,
+        ):
+            manager._ensure_backends()
+            manager.get_component("card", Path("/t.djx"))
+            manager.collect_visible_components(Path("/t.djx"))
+        assert load_backends_mock.call_count == 1
+
+    def test_unusable_settings_do_not_reload_on_every_access(self) -> None:
+        """A list nobody can load stays loaded rather than retrying per call."""
+        manager = ComponentsManager()
+        mock_ns = _next_framework_settings_component_backends_list(
+            [{"BACKEND": "next.components.NoSuchBackend"}]
+        )
+        with (
+            patch("next.components.manager.next_framework_settings", mock_ns),
+            patch(
+                "next.components.manager.load_backends", return_value=[]
+            ) as load_backends_mock,
+        ):
+            manager._ensure_backends()
+            manager._ensure_backends()
+        assert load_backends_mock.call_count == 1
+
+    def test_a_caller_emptying_the_list_does_not_trigger_a_reload(self) -> None:
+        """The flag, not the list, answers whether settings were read."""
+        manager = ComponentsManager()
+        mock_ns = _next_framework_settings_component_backends_list(
+            [{"BACKEND": "next.components.DummyBackend"}]
+        )
+        with patch("next.components.manager.next_framework_settings", mock_ns):
+            manager._ensure_backends()
+            manager._backends.clear()
+            manager._ensure_backends()
+        assert manager._backends == []
+
+    def test_reload_config_reads_settings_again(self) -> None:
+        """The explicit reload is still eager, which test helpers rely on."""
+        manager = ComponentsManager()
+        mock_ns = _next_framework_settings_component_backends_list(
+            [{"BACKEND": "next.components.DummyBackend"}]
+        )
+        with patch("next.components.manager.next_framework_settings", mock_ns):
+            manager._ensure_backends()
+            first = manager._backends[0]
+            manager._reload_config()
+        assert manager._backends[0] is not first
+
+
+class TestEntryWithoutBackendKey:
+    """The manager and the watch scan resolve a ``BACKEND``-less entry alike."""
+
+    def test_manager_falls_back_to_the_file_backend(self) -> None:
+        """An entry naming no ``BACKEND`` loads the filesystem source."""
+        manager = ComponentsManager()
+        mock_ns = _next_framework_settings_component_backends_list(
+            [{"DIRS": [], "COMPONENTS_DIR": "_components"}]
+        )
+        with patch("next.components.manager.next_framework_settings", mock_ns):
+            manager._ensure_backends()
+        assert isinstance(manager._backends[0], FileComponentsBackend)
+
+    def test_watch_scan_falls_back_to_the_file_backend(self, tmp_path: Path) -> None:
+        """The read-only scan applies the same default, so it still sees the roots."""
+        root = tmp_path / "extra"
+        root.mkdir()
+        (root / "solo.djx").write_text("x")
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "PAGE_BACKENDS": [],
+                "COMPONENT_BACKENDS": [
+                    {"DIRS": [str(root)], "COMPONENTS_DIR": "_components"}
+                ],
+            }
+        ):
+            next_framework_settings.reload()
+            paths = get_component_paths_for_watch()
+        next_framework_settings.reload()
+        assert (root / "solo.djx").resolve() in paths
+
+
+class TestBackendConstructionErrorsEscape:
+    """Only configuration errors are swallowed, backend bugs are not."""
+
+    def test_runtime_error_from_backend_init_propagates(self) -> None:
+        """A user backend raising from ``__init__`` reaches the caller."""
+        manager = ComponentsManager()
+        mock_ns = _next_framework_settings_component_backends_list(
+            [{"BACKEND": "next.components.BoomBackend"}]
+        )
+        with (
+            patch("next.components.manager.next_framework_settings", mock_ns),
+            pytest.raises(RuntimeError, match="boom"),
+        ):
+            manager._ensure_backends()
+
+
+class TestSettingsReloadedIsLazy:
+    """The settings receiver invalidates and leaves the rebuild to the next access."""
+
+    def test_receiver_does_not_build_backends(self) -> None:
+        """A reload costs no backend construction on its own."""
+        manager = ComponentsManager()
+        mock_ns = _next_framework_settings_component_backends_list(
+            [{"BACKEND": "next.components.DummyBackend"}]
+        )
+        with patch("next.components.manager.next_framework_settings", mock_ns):
+            manager._ensure_backends()
+            assert len(manager._backends) == 1
+            with patch("next.components.manager.load_backends") as load_backends_mock:
+                manager._invalidate()
+            load_backends_mock.assert_not_called()
+            assert manager._backends == []
+            assert manager._loaded is False
+
+            manager._ensure_backends()
+        assert isinstance(manager._backends[0], DummyBackend)
+
+    def test_receiver_drops_the_render_pipeline_and_walk_folders(self) -> None:
+        """Cached pipeline and router-walk bookkeeping go with the backends."""
+        manager = ComponentsManager()
+        mock_ns = _next_framework_settings_component_backends_list([])
+        with patch("next.components.manager.next_framework_settings", mock_ns):
+            manager._ensure_backends()
+            assert manager.template_loader is not None
+            assert manager._claim_router_walk_folder(Path("/tmp")) is True
+            manager._invalidate()
+        assert manager._component_renderer is None
+        assert manager._walk_registered_folders == set()
+
+    def test_receiver_invalidates_the_module_level_manager(self) -> None:
+        """The wired receiver drops the shared manager state without a rebuild."""
+        components_manager._ensure_backends()
+        with patch("next.components.manager.load_backends") as load_backends_mock:
+            _on_settings_reloaded()
+        load_backends_mock.assert_not_called()
+        assert components_manager._loaded is False
+
+
 class TestRegisterComponentsFolderFromRouterWalk:
     """``register_components_folder_from_router_walk`` wiring."""
 
     def test_registers_scanned_components_on_backend(
-        self, tmp_path: Path, min_component_config: dict
+        self, tmp_path: Path, installed_file_backend: FileComponentsBackend
     ) -> None:
         """Each folder is scanned into the first file components backend registry."""
-        components_manager._walk_registered_folders.clear()
-        components_manager._backends.clear()
-        backend = FileComponentsBackend(dict(min_component_config))
-        components_manager._backends.append(backend)
+        backend = installed_file_backend
         folder = tmp_path / "_components"
         folder.mkdir()
         (folder / "z.djx").write_text("z")
@@ -86,13 +235,10 @@ class TestRegisterComponentsFolderFromRouterWalk:
         assert "z" in names
 
     def test_second_call_skips_same_resolved_folder(
-        self, tmp_path: Path, min_component_config: dict
+        self, tmp_path: Path, installed_file_backend: FileComponentsBackend
     ) -> None:
         """Repeated registration for the same path is ignored."""
-        components_manager._walk_registered_folders.clear()
-        components_manager._backends.clear()
-        backend = FileComponentsBackend(dict(min_component_config))
-        components_manager._backends.append(backend)
+        backend = installed_file_backend
         folder = tmp_path / "_components"
         folder.mkdir()
         (folder / "a.djx").write_text("a")
@@ -101,13 +247,10 @@ class TestRegisterComponentsFolderFromRouterWalk:
         assert len(list(backend._registry.get_all())) == 1
 
     def test_loads_component_py_when_composite_has_module(
-        self, tmp_path: Path, min_component_config: dict
+        self, tmp_path: Path, installed_file_backend: FileComponentsBackend
     ) -> None:
         """Router walk loads ``component.py`` for composite components (coverage)."""
-        components_manager._walk_registered_folders.clear()
-        components_manager._backends.clear()
-        backend = FileComponentsBackend(dict(min_component_config))
-        components_manager._backends.append(backend)
+        backend = installed_file_backend
         comp_dir = tmp_path / "_components" / "news"
         comp_dir.mkdir(parents=True)
         (comp_dir / "component.djx").write_text("<span>news</span>")
@@ -636,14 +779,14 @@ class TestGetComponentPathsForWatch:
                 assert get_component_paths_for_watch() == set()
         next_framework_settings.reload()
 
-    def test_swallows_component_backend_create_error(self) -> None:
-        """Failure to build a component backend is skipped."""
+    def test_swallows_component_backend_resolution_error(self) -> None:
+        """An entry whose ``BACKEND`` does not import is logged and skipped."""
         with override_settings(
             NEXT_FRAMEWORK={
                 "PAGE_BACKENDS": [],
                 "COMPONENT_BACKENDS": [
                     {
-                        "BACKEND": "next.components.FileComponentsBackend",
+                        "BACKEND": "next.components.NoSuchBackend",
                         "DIRS": [],
                         "COMPONENTS_DIR": "_components",
                     }
@@ -651,11 +794,7 @@ class TestGetComponentPathsForWatch:
             }
         ):
             next_framework_settings.reload()
-            with patch(
-                "next.components.manager.ComponentsFactory.create_backend",
-                side_effect=RuntimeError("boom"),
-            ):
-                assert get_component_paths_for_watch() == set()
+            assert get_component_paths_for_watch() == set()
         next_framework_settings.reload()
 
     def test_skips_non_file_component_backend(self) -> None:

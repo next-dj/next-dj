@@ -558,9 +558,9 @@ _STATICFILES_ALIAS: Final = "staticfiles"
 def check_partial_backend_names_a_path(*args, **kwargs) -> list[CheckMessage]:
     """Error when a PARTIAL_BACKENDS entry omits its BACKEND key (`next.E073`).
 
-    The factory refuses such an entry with `ImproperlyConfigured` on the
-    first partial request. The check surfaces the same misconfiguration at
-    startup, naming the entry that lacks a dotted path.
+    Such an entry falls back to the default protocol backend, so the
+    intended wire format would silently never load. The check names the
+    entry that lacks a dotted path at startup instead.
     """
     messages: list[CheckMessage] = []
     for index, config in enumerate(_partial_backend_configs()):

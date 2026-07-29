@@ -65,10 +65,11 @@ Modules
 ``next.components.backends``.
    ``ComponentsBackend`` contract.
    ``FileComponentsBackend`` default implementation.
-   ``ComponentsFactory`` instantiates a backend from its ``BACKEND`` dotted path.
 
 ``next.components.manager``.
-   ``ComponentsManager`` orchestrates the backends, shares one render pipeline between them, and rebuilds on ``settings_reloaded``.
+   ``ComponentsManager`` orchestrates the backends, shares one render pipeline between them, and builds the list with the shared ``load_backends`` helper.
+   A ``settings_reloaded`` drops the cached backends, and the next access rebuilds them.
+   ``next.components.watch`` resolves the same entries with ``resolve_backend_class`` and never instantiates them, because its scan is read-only.
 
 ``next.components.checks``.
    The components system checks, including ``next.E020`` and ``next.E034``.
@@ -123,7 +124,7 @@ The pipeline fires four signals.
 
 - ``component_registered`` once per component on startup or reload.
 - ``components_registered`` once per bulk discovery cycle with the full list.
-- ``component_backend_loaded`` once per backend instance.
+- ``component_backend_loaded`` once per backend instance, sent by the backend class with ``config`` and ``instance``.
 - ``component_rendered`` after each render, carrying the ``ComponentInfo`` and its ``template_path``.
 
 Extension Points

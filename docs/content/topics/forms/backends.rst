@@ -35,14 +35,16 @@ A custom backend is the right tool when every dispatch needs an extra step such 
 How Backends Are Instantiated
 -----------------------------
 
-``FormActionManager`` builds one backend instance per entry in ``FORM_ACTION_BACKENDS`` through ``FormActionFactory``.
-The factory imports the ``BACKEND`` dotted path and calls the class with the whole config dict, including ``BACKEND`` and any ``OPTIONS``.
+``FormActionManager`` builds one backend instance per entry in ``FORM_ACTION_BACKENDS``, through the same loading helper every backend family shares.
+The helper imports the ``BACKEND`` dotted path, checks the class against ``FormActionBackend``, and calls it with the whole config dict, including ``BACKEND`` and any ``OPTIONS``.
 
 .. code-block:: python
-   :caption: what the factory does per entry
+   :caption: what the loader does per entry
 
    backend_class = import_class_cached(config["BACKEND"])
    backend = backend_class(config)
+
+An entry that names no importable ``FormActionBackend`` subclass is logged and skipped, so one broken entry costs its own backend and the rest of the list still loads.
 
 The constructor therefore receives the full entry, not only ``OPTIONS``.
 ``RegistryFormActionBackend.__init__`` accepts the config and ignores it, which is why a subclass that reads no options needs no constructor at all.
@@ -308,7 +310,8 @@ Testing
 
 Tests that register actions through ``@action`` must drop the global registry between cases so action names from one test do not leak into the next.
 Call :func:`next.testing.reset_form_actions` from a pytest fixture or a ``setUp`` method.
-The helper invokes ``form_action_manager._reload_config()``, which rebuilds the backend list from the current ``NEXT_FRAMEWORK["FORM_ACTION_BACKENDS"]`` setting and discards any actions registered against the previous backend instances.
+The helper invokes the manager's private ``_reload_config()``, which rebuilds the backend list from the current ``NEXT_FRAMEWORK["FORM_ACTION_BACKENDS"]`` setting and discards any actions registered against the previous backend instances.
+The rebuild also marks the manager as loaded, so a configuration that yields no backend is read once instead of on every later call.
 
 A test that registers extra actions on a live ``RegistryFormActionBackend`` takes a snapshot first and restores it afterwards.
 ``backend.snapshot()`` returns a ``RegistryBackendSnapshot``, an immutable copy of the three registry maps, and ``backend.restore(snapshot)`` puts the registry back exactly as it was, without reaching into the backend's private state.

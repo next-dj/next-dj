@@ -2,18 +2,18 @@
 
 The manager loads configured backends lazily, shares a render pipeline
 between them, and subscribes to `settings_reloaded` so a fresh config
-rebuilds its state without reimporting this module.
+drops the cached state without reimporting this module.
 """
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING, cast
 
+from next.backends import load_backends
 from next.conf import next_framework_settings
 from next.conf.signals import settings_reloaded
 
-from .backends import ComponentsBackend, ComponentsFactory
+from .backends import _DEFAULT_BACKEND_PATH, ComponentsBackend
 from .loading import ModuleLoader
 from .renderers import (
     ComponentRenderer,
@@ -31,15 +31,14 @@ if TYPE_CHECKING:
     from .info import ComponentInfo
 
 
-logger = logging.getLogger(__name__)
-
-
 class ComponentsManager:
     """Loads backends from settings and merges name resolution across them."""
 
     def __init__(self) -> None:
         """Prepare an empty backend list and load settings on first access."""
         self._backends: list[ComponentsBackend] = []
+        # An empty list is a legitimate load result, so only a flag knows.
+        self._loaded: bool = False
         self._walk_registered_folders: set[Path] = set()
         self._template_loader: ComponentTemplateLoader | None = None
         self._component_renderer: ComponentRenderer | None = None
@@ -72,30 +71,32 @@ class ComponentsManager:
         self._ensure_render_pipeline()
         return cast("ComponentRenderer", self._component_renderer)
 
-    def _reload_config(self) -> None:
+    def _invalidate(self) -> None:
+        """Drop cached backends and the render pipeline without rebuilding.
+
+        Settings reload far more often than a component renders, so the
+        rebuild waits for the next access instead of running in the
+        signal receiver.
+        """
         self._reset_render_pipeline()
-        self._backends.clear()
+        self._backends = []
         self._walk_registered_folders.clear()
+        self._loaded = False
+
+    def _reload_config(self) -> None:
+        self._invalidate()
         configs = next_framework_settings.COMPONENT_BACKENDS
-        if not isinstance(configs, list):
-            return
-        for config in configs:
-            if not isinstance(config, dict):
-                continue
-            try:
-                backend = ComponentsFactory.create_backend(config)
-            except Exception:
-                logger.exception(
-                    "Error creating component backend from config %s", config
-                )
-                continue
-            component_backend_loaded.send(
-                sender=ComponentsManager, backend=backend, config=config
-            )
-            self._backends.append(backend)
+        entries = configs if isinstance(configs, list) else []
+        self._backends = load_backends(
+            [config for config in entries if isinstance(config, dict)],
+            base=ComponentsBackend,
+            default=_DEFAULT_BACKEND_PATH,
+            signal=component_backend_loaded,
+        )
+        self._loaded = True
 
     def _ensure_backends(self) -> None:
-        if not self._backends:
+        if not self._loaded:
             self._reload_config()
 
     def _claim_router_walk_folder(self, folder: Path) -> bool:
@@ -136,8 +137,8 @@ components_manager = ComponentsManager()
 
 
 def _on_settings_reloaded(**kwargs) -> None:
-    """Rebuild component backends when framework settings reload."""
-    components_manager._reload_config()
+    """Drop cached component backends when framework settings reload."""
+    components_manager._invalidate()
 
 
 settings_reloaded.connect(_on_settings_reloaded)

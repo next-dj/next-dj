@@ -57,9 +57,6 @@ Backends
 .. autoclass:: next.components.FileComponentsBackend
    :members:
 
-.. autoclass:: next.components.ComponentsFactory
-   :members:
-
 .. autofunction:: next.components.register_components_folder_from_router_walk
 
 The URL router calls this during the page-tree walk and application code does not invoke it directly.
@@ -131,16 +128,16 @@ The duplicate-name check groups by ``(scope_root, name)`` and ignores ``scope_re
 Test Doubles
 ~~~~~~~~~~~~
 
-``DummyBackend`` and ``BoomBackend`` are minimal ``ComponentsBackend`` implementations kept in this module so that dotted-path resolution in tests works through the standard factory.
+``DummyBackend`` and ``BoomBackend`` are minimal ``ComponentsBackend`` implementations kept in this module so that dotted-path resolution in tests works through the standard loader.
 They are **not** intended for production use.
 
 ``DummyBackend`` accepts a config dict, stores it on ``self``, and resolves no components.
-Use it to test factory wiring.
+Use it to test backend wiring.
 
 .. autoclass:: next.components.DummyBackend
    :members:
 
-``BoomBackend`` raises ``RuntimeError`` from ``__init__`` so you can assert that ``ComponentsManager`` catches and logs a failed backend instantiation.
+``BoomBackend`` raises ``RuntimeError`` from ``__init__`` so you can assert that a backend bug reaches the caller instead of being logged as a configuration error.
 
 .. autoclass:: next.components.BoomBackend
    :members:
@@ -166,8 +163,8 @@ The module ``next.components.signals`` exposes four ``django.dispatch.Signal`` i
      - ``ComponentRegistry``
      - ``infos`` (tuple of ``ComponentInfo``)
    * - ``component_backend_loaded``
-     - ``ComponentsManager``
-     - ``backend`` (``ComponentsBackend``), ``config`` (mapping)
+     - The component backend class
+     - ``instance`` (``ComponentsBackend``), ``config`` (mapping)
    * - ``component_rendered``
      - ``ComponentsManager``
      - ``info`` (``ComponentInfo``), ``template_path`` (``Path`` or ``None``)

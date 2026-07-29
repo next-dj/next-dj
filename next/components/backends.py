@@ -1,19 +1,17 @@
-"""Components backend contract, factory, and file-based implementation.
+"""Components backend contract and file-based implementation.
 
 `ComponentsBackend` is the ABC for alternative component sources.
 `FileComponentsBackend` is the default filesystem-based backend.
-`ComponentsFactory` creates backend instances from merged
-`COMPONENT_BACKENDS` entries. `DummyBackend` and `BoomBackend`
-are tiny doubles kept here so dotted-path resolution in tests works
-through `import_class_cached`.
+`DummyBackend` and `BoomBackend` are tiny doubles kept here so
+dotted-path resolution in tests works through `import_class_cached`.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, cast, override
+from typing import TYPE_CHECKING, Any, override
 
-from next.conf import import_class_cached, next_framework_settings
+from next.conf import next_framework_settings
 
 from .loading import ModuleLoader
 from .registry import ComponentRegistry, ComponentVisibilityResolver
@@ -25,6 +23,10 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from .info import ComponentInfo
+
+
+# An entry that names no BACKEND means the filesystem source.
+_DEFAULT_BACKEND_PATH = "next.components.FileComponentsBackend"
 
 
 class ComponentsBackend(ABC):
@@ -145,10 +147,10 @@ class DummyBackend(ComponentsBackend):
 
 
 class BoomBackend(ComponentsBackend):
-    """Test double that raises from `__init__` for factory error handling tests."""
+    """Test double that raises from `__init__` for load error-path tests."""
 
     def __init__(self, config: dict[str, Any]) -> None:
-        """Raise immediately so `ComponentsManager` logs and skips this entry."""
+        """Raise the kind of error the loader never swallows."""
         _ = config
         msg = "boom"
         raise RuntimeError(msg)
@@ -164,17 +166,6 @@ class BoomBackend(ComponentsBackend):
     ) -> Mapping[str, ComponentInfo]:
         """Unreachable because construction always raises."""
         raise NotImplementedError
-
-
-class ComponentsFactory:
-    """Instantiates backends from merged `COMPONENT_BACKENDS` entries."""
-
-    @classmethod
-    def create_backend(cls, config: dict[str, Any]) -> ComponentsBackend:
-        """Return a single backend from one config dict (`BACKEND` class path)."""
-        backend_path = config.get("BACKEND", "next.components.FileComponentsBackend")
-        backend_class = import_class_cached(backend_path)
-        return cast("ComponentsBackend", backend_class(config))
 
 
 def register_components_folder_from_router_walk(
@@ -201,7 +192,6 @@ def register_components_folder_from_router_walk(
 __all__ = [
     "BoomBackend",
     "ComponentsBackend",
-    "ComponentsFactory",
     "DummyBackend",
     "FileComponentsBackend",
     "register_components_folder_from_router_walk",

@@ -15,16 +15,13 @@ from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.test import RequestFactory, override_settings
 
-from next.conf import next_framework_settings
 from next.forms import Form, ModelForm, PermissionOutcome
 from next.forms.diagnostics import registration_diagnostics
 from next.forms.manager import form_action_manager
 from next.forms.wizard import (
     CacheFormWizardBackend,
     FormWizard,
-    FormWizardBackend,
     SessionFormWizardBackend,
-    WizardBackendManager,
     _ensure_session_key,
     _replace_step_segment,
     wizard_backend_manager,
@@ -1005,69 +1002,45 @@ class TestSessionFormWizardBackend:
         backend.clear(request, "wiz")
 
 
-class _StubWizardBackend(FormWizardBackend):
-    """Minimal backend recording the config it was constructed with."""
+class TestWizardBackendSelection:
+    """The shared manager serves the backend named by `FORM_WIZARD_BACKEND`."""
 
-    instances: ClassVar[list] = []
+    def test_default_setting_yields_the_session_backend(self) -> None:
+        """The bundled default resolves to session-backed draft storage."""
+        assert isinstance(wizard_backend_manager.get(), SessionFormWizardBackend)
 
-    def __init__(self, config=None) -> None:
-        type(self).instances.append(config)
-
-    def load(self, request, storage_id):
-        return {}
-
-    def save_step(self, request, storage_id, step, data) -> None:
-        return None
-
-    def clear(self, request, storage_id) -> None:
-        return None
-
-
-class TestWizardBackendManager:
-    """`WizardBackendManager` caches, resets, and reloads the configured backend."""
-
-    def test_get_returns_default_backend_and_caches(self) -> None:
-        """`get` instantiates the configured backend once and caches it."""
-        manager = WizardBackendManager()
-        first = manager.get()
-        second = manager.get()
-        assert isinstance(first, SessionFormWizardBackend)
-        assert first is second
-
-    def test_reset_forces_reinstantiation(self) -> None:
-        """`reset` drops the cached backend so the next `get` rebuilds it."""
-        manager = WizardBackendManager()
-        first = manager.get()
-        manager.reset()
-        assert manager.get() is not first
-
-    def test_custom_backend_from_settings_is_used(self) -> None:
-        """A configured custom backend path is imported and constructed with config."""
-        _StubWizardBackend.instances.clear()
+    def test_configured_backend_replaces_the_default(self) -> None:
+        """A reloaded config swaps the backend the manager hands out."""
         config = {
-            "BACKEND": f"{__name__}._StubWizardBackend",
-            "OPTIONS": {"flag": True},
+            "BACKEND": "next.forms.wizard.CacheFormWizardBackend",
+            "OPTIONS": {"CACHE_ALIAS": "alt"},
         }
         with override_settings(NEXT_FRAMEWORK={"FORM_WIZARD_BACKEND": config}):
-            next_framework_settings.reload()
-            manager = WizardBackendManager()
-            backend = manager.get()
-        assert isinstance(backend, _StubWizardBackend)
-        assert _StubWizardBackend.instances[-1]["OPTIONS"] == {"flag": True}
+            backend = wizard_backend_manager.get()
 
-    def test_settings_reloaded_signal_resets_global_manager(self) -> None:
-        """The settings_reloaded signal drops the shared manager's backend."""
-        first = wizard_backend_manager.get()
-        with override_settings(
-            NEXT_FRAMEWORK={
-                "FORM_WIZARD_BACKEND": {
-                    "BACKEND": "next.forms.wizard.CacheFormWizardBackend",
-                    "OPTIONS": {},
-                }
-            }
+        assert isinstance(backend, CacheFormWizardBackend)
+        assert backend.cache_alias == "alt"
+
+    def test_backend_without_a_dotted_path_is_refused(self) -> None:
+        """A BACKEND that is not a dotted path raises instead of a bare KeyError."""
+        with (
+            override_settings(
+                NEXT_FRAMEWORK={"FORM_WIZARD_BACKEND": {"BACKEND": None}}
+            ),
+            pytest.raises(ImproperlyConfigured, match="under BACKEND"),
         ):
-            next_framework_settings.reload()
-            assert wizard_backend_manager.get() is not first
+            wizard_backend_manager.get()
+
+    def test_backend_outside_the_family_is_refused(self) -> None:
+        """A class that is no `FormWizardBackend` never reaches wizard storage."""
+        config = {"BACKEND": "next.forms.RegistryFormActionBackend"}
+        with (
+            override_settings(NEXT_FRAMEWORK={"FORM_WIZARD_BACKEND": config}),
+            pytest.raises(
+                ImproperlyConfigured, match="not a FormWizardBackend subclass"
+            ),
+        ):
+            wizard_backend_manager.get()
 
 
 class PermStep(Form):

@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from . import signals
 from .assets import KindRegistry, StaticAsset, default_kinds
-from .backends import StaticBackend, StaticFilesBackend, StaticsFactory
+from .backends import StaticBackend, StaticFilesBackend
 from .collector import (
     PlaceholderRegistry,
     PlaceholderSlot,
@@ -68,7 +68,6 @@ __all__ = [
     "StaticCollector",
     "StaticFilesBackend",
     "StaticManager",
-    "StaticsFactory",
     "collect_component_assets",
     "default_kinds",
     "default_manager",

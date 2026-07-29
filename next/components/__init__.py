@@ -4,7 +4,7 @@ Each subsystem lives in a small submodule. `info` holds the value
 object, `loading` the module cache, `scanner` the filesystem walk,
 `registry` the ordered store and visibility resolver, `context` the
 `@component.context` decorator, `renderers` the render strategies,
-`backends` the backend contract and factory, `manager` the orchestrator,
+`backends` the backend contract, `manager` the orchestrator,
 `watch` the read-only autoreload scan, and `facade` the short helpers
 used from templates. Internal classes are reachable with deep imports
 of the form `from next.components.registry import ComponentRegistry`.
@@ -16,7 +16,6 @@ from . import checks, signals
 from .backends import (
     BoomBackend,
     ComponentsBackend,
-    ComponentsFactory,
     DummyBackend,
     FileComponentsBackend,
     register_components_folder_from_router_walk,
@@ -56,7 +55,6 @@ __all__ = [
     "ComponentTemplateLoader",
     "ComponentVisibilityResolver",
     "ComponentsBackend",
-    "ComponentsFactory",
     "ComponentsManager",
     "CompositeComponentRenderer",
     "ContextFunction",

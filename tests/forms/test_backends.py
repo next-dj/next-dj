@@ -1,4 +1,5 @@
 import copy
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -22,7 +23,6 @@ from next.forms import (
     RegistryFormActionBackend,
 )
 from next.forms.backends import (
-    FormActionFactory,
     RegistryBackendSnapshot,
     file_to_dotted_module,
     scope_key_for,
@@ -847,42 +847,80 @@ class TestFormActionManagerReloadConfig:
         assert len(manager._backends) == 1
         assert isinstance(manager._backends[0], RegistryFormActionBackend)
 
-    def test_factory_failure_is_logged_and_skipped(self, settings, caplog) -> None:
-        """If a backend constructor raises ImproperlyConfigured, the entry is skipped and logged."""
+    @pytest.mark.parametrize(
+        "broken",
+        [
+            pytest.param({"OPTIONS": {}}, id="missing-backend"),
+            pytest.param({"BACKEND": "next.forms.NoSuchBackend"}, id="unimportable"),
+            pytest.param({"BACKEND": "next.forms.ActionOutcome"}, id="outside-family"),
+        ],
+    )
+    def test_broken_entry_is_logged_and_the_rest_of_the_list_loads(
+        self, settings, caplog, broken
+    ) -> None:
+        """A broken entry costs its own backend and nothing else."""
+        settings.NEXT_FRAMEWORK = {
+            "FORM_ACTION_BACKENDS": [
+                broken,
+                {"BACKEND": "next.forms.RegistryFormActionBackend"},
+            ]
+        }
+        manager = FormActionManager()
+        with caplog.at_level(logging.ERROR, logger="next.backends"):
+            manager._reload_config()
+        assert [type(backend) for backend in manager._backends] == [
+            RegistryFormActionBackend
+        ]
+        assert "error creating FormActionBackend from config" in caplog.text
+
+
+class TestFormActionManagerLoadedFlag:
+    """Settings are read once even when they yield no usable backend."""
+
+    def test_unusable_configuration_loads_once(self, settings) -> None:
+        """A list nobody can load stays loaded, rather than retrying per call."""
+        settings.NEXT_FRAMEWORK = {
+            "FORM_ACTION_BACKENDS": [{"BACKEND": "next.forms.NoSuchBackend"}]
+        }
+        manager = FormActionManager()
+        with patch(
+            "next.forms.manager.load_backends", return_value=[]
+        ) as load_backends_mock:
+            assert manager.backends == ()
+            assert manager.get_action_meta("missing") is None
+            with pytest.raises(ImproperlyConfigured):
+                manager.register_action(
+                    ActionRegistration(
+                        name="never_registered",
+                        file_path=_FAKE_FILE,
+                        scope="shared",
+                        handler=lambda: None,
+                    )
+                )
+        assert load_backends_mock.call_count == 1
+
+    def test_empty_configuration_keeps_the_version_stable(self, settings) -> None:
+        """No reload per call means the urlpatterns cache token stops churning."""
+        settings.NEXT_FRAMEWORK = {"FORM_ACTION_BACKENDS": []}
+        manager = FormActionManager()
+        assert manager.backends == ()
+        version = manager._version
+        assert manager.backends == ()
+        assert manager.get_action_meta("missing") is None
+        assert manager._version == version
+
+    def test_explicit_backends_are_not_replaced_by_settings(self, settings) -> None:
+        """A manager built with backends never reads the settings list."""
         settings.NEXT_FRAMEWORK = {
             "FORM_ACTION_BACKENDS": [
                 {"BACKEND": "next.forms.RegistryFormActionBackend"}
             ]
         }
-
-        def boom(_config: dict) -> None:
-            msg = "boom"
-            raise ImproperlyConfigured(msg)
-
-        with patch.object(FormActionFactory, "create_backend", side_effect=boom):
-            manager = FormActionManager()
-            with caplog.at_level("ERROR"):
-                manager._reload_config()
-        assert manager._backends == []
-        assert any(
-            "Error creating form-action backend" in r.message for r in caplog.records
-        )
-
-
-class TestFormActionFactory:
-    """`FormActionFactory.create_backend` resolves dotted paths to backends."""
-
-    def test_explicit_backend_path(self) -> None:
-        """Explicit `BACKEND` path is honoured."""
-        backend = FormActionFactory.create_backend(
-            {"BACKEND": "next.forms.RegistryFormActionBackend"}
-        )
-        assert isinstance(backend, RegistryFormActionBackend)
-
-    def test_missing_backend_key_raises_keyerror(self) -> None:
-        """Configuration without `BACKEND` is the system-check's responsibility."""
-        with pytest.raises(KeyError):
-            FormActionFactory.create_backend({})
+        explicit = _MinimalBackend()
+        manager = FormActionManager(backends=[explicit])
+        with patch("next.forms.manager.load_backends") as load_backends_mock:
+            assert manager.backends == (explicit,)
+        load_backends_mock.assert_not_called()
 
 
 class TestGetActionUrlNoReverseMatchFallback:

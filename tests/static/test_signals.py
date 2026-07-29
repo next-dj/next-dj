@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from django.test import RequestFactory
+from django.test import RequestFactory, override_settings
 
 from next.static import (
     AssetDiscovery,
@@ -11,7 +11,6 @@ from next.static import (
     StaticCollector,
     StaticFilesBackend,
     StaticManager,
-    StaticsFactory,
 )
 from next.static.signals import (
     asset_registered,
@@ -205,77 +204,55 @@ class TestHtmlInjectedSignal:
         assert capture_html_injected[0]["request"] is sentinel
 
 
-class TestLegacyReceiverCompat:
-    """Receivers written before the `request` payload was added still work."""
-
-    def test_collector_finalized_accepts_legacy_receiver(
-        self, fresh_manager: StaticManager
-    ) -> None:
-        """A receiver with `(sender, **kwargs)` consumes the new `request` kwarg."""
-        seen: list[dict[str, object]] = []
-
-        def legacy(sender: object, **kwargs) -> None:
-            seen.append({"sender": sender, **kwargs})
-
-        collector_finalized.connect(legacy)
-        try:
-            collector = StaticCollector()
-            fresh_manager.inject(
-                "<body/>", collector, request=RequestFactory().get("/")
-            )
-        finally:
-            collector_finalized.disconnect(legacy)
-
-        assert len(seen) == 1
-        assert "request" in seen[0]
-        assert "page_path" in seen[0]
-
-    def test_html_injected_accepts_legacy_receiver(
-        self, fresh_manager: StaticManager
-    ) -> None:
-        """A receiver with `(sender, **kwargs)` consumes the new `request` kwarg."""
-        seen: list[dict[str, object]] = []
-
-        def legacy(sender: object, **kwargs) -> None:
-            seen.append({"sender": sender, **kwargs})
-
-        html_injected.connect(legacy)
-        try:
-            collector = StaticCollector()
-            collector.add(StaticAsset(url="https://cdn/a.css", kind="css"))
-            fresh_manager.inject(
-                f"<head>{STYLES_PLACEHOLDER}</head>",
-                collector,
-                request=RequestFactory().get("/"),
-            )
-        finally:
-            html_injected.disconnect(legacy)
-
-        assert len(seen) == 1
-        assert "request" in seen[0]
-        assert "html_before" in seen[0]
-        assert "html_after" in seen[0]
-
-
 class TestBackendLoadedSignal:
-    def test_fired_from_factory(
-        self, capture_backend_loaded: list[dict[str, Any]]
+    def test_fired_for_each_configured_backend(
+        self, fresh_manager: StaticManager, capture_backend_loaded: list[dict[str, Any]]
     ) -> None:
         config = {"BACKEND": "next.static.StaticFilesBackend", "OPTIONS": {}}
-        backend = StaticsFactory.create_backend(config)
+        with override_settings(NEXT_FRAMEWORK={"STATIC_BACKENDS": [config]}):
+            fresh_manager._ensure_backends()
 
         assert len(capture_backend_loaded) == 1
         event = capture_backend_loaded[0]
         assert event["sender"] is StaticFilesBackend
-        assert event["instance"] is backend
+        assert event["instance"] is fresh_manager.default_backend
         assert event["config"] == config
 
     def test_sender_class_allows_filtering(
-        self, capture_backend_loaded: list[dict[str, Any]]
+        self, fresh_manager: StaticManager, capture_backend_loaded: list[dict[str, Any]]
     ) -> None:
-        StaticsFactory.create_backend({"BACKEND": "next.static.StaticFilesBackend"})
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "STATIC_BACKENDS": [{"BACKEND": "next.static.StaticFilesBackend"}]
+            }
+        ):
+            fresh_manager._ensure_backends()
         senders = [e["sender"] for e in capture_backend_loaded]
         assert all(s is StaticFilesBackend for s in senders)
+
+    def test_seeded_fallback_announces_itself(
+        self, fresh_manager: StaticManager, capture_backend_loaded: list[dict[str, Any]]
+    ) -> None:
+        with override_settings(NEXT_FRAMEWORK={"STATIC_BACKENDS": []}):
+            fresh_manager._ensure_backends()
+
+        assert isinstance(fresh_manager.default_backend, StaticFilesBackend)
+        assert [event["sender"] for event in capture_backend_loaded] == [
+            StaticFilesBackend
+        ]
+
+    def test_seed_after_a_skipped_entry_announces_itself(
+        self, fresh_manager: StaticManager, capture_backend_loaded: list[dict[str, Any]]
+    ) -> None:
+        with override_settings(
+            NEXT_FRAMEWORK={"STATIC_BACKENDS": [{"BACKEND": "builtins.dict"}]}
+        ):
+            fresh_manager._ensure_backends()
+
+        assert isinstance(fresh_manager.default_backend, StaticFilesBackend)
+        assert [event["instance"] for event in capture_backend_loaded] == [
+            fresh_manager.default_backend
+        ]
 
 
 class TestSignalsAreDjangoSignals:

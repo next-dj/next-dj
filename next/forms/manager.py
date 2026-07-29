@@ -1,14 +1,14 @@
 """Manager for form action backends and routing."""
 
-import logging
 import types
 from typing import TYPE_CHECKING, Any, cast, override
 
 from django.core.exceptions import ImproperlyConfigured
 
+from next.backends import load_backends
 from next.conf import next_framework_settings
 
-from .backends import FormActionFactory, FormActionNotFoundError
+from .backends import FormActionBackend, FormActionNotFoundError
 from .dispatch import _form_action_context_callable
 from .origin import _url_kwargs_for_request
 
@@ -19,10 +19,7 @@ if TYPE_CHECKING:
     from django.http import HttpRequest
     from django.urls import URLPattern
 
-    from .backends import ActionMeta, ActionRegistration, FormActionBackend
-
-
-logger = logging.getLogger(__name__)
+    from .backends import ActionMeta, ActionRegistration
 
 
 class FormActionManager:
@@ -36,6 +33,8 @@ class FormActionManager:
     def __init__(self, backends: "list[FormActionBackend] | None" = None) -> None:
         """Initialise with explicit backends or defer loading to settings."""
         self._backends: list[FormActionBackend] = list(backends) if backends else []
+        # An empty list is a legitimate load result, so only a flag knows.
+        self._loaded: bool = bool(self._backends)
 
     @override
     def __repr__(self) -> str:
@@ -49,23 +48,17 @@ class FormActionManager:
             yield from backend.generate_urls()
 
     def _reload_config(self) -> None:
-        self._version += 1
-        self._backends = []
-        configs = cast(
+        entries = cast(
             "list[Any]", getattr(next_framework_settings, "FORM_ACTION_BACKENDS", [])
         )
-        for config in configs:
-            if not isinstance(config, dict):
-                continue
-            try:
-                self._backends.append(FormActionFactory.create_backend(config))
-            except ImproperlyConfigured:
-                logger.exception(
-                    "Error creating form-action backend from config %s", config
-                )
+        configs = [entry for entry in entries if isinstance(entry, dict)]
+        self._version += 1
+        # No default: an entry without BACKEND is a next.E044 misconfiguration.
+        self._backends = load_backends(configs, base=FormActionBackend)
+        self._loaded = True
 
     def _ensure_backends(self) -> None:
-        if not self._backends:
+        if not self._loaded:
             self._reload_config()
 
     def _first_backend(self) -> "FormActionBackend":

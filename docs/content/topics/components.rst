@@ -446,8 +446,8 @@ The framework emits four signals during the component lifecycle.
      - ``ComponentRegistry``
      - ``infos``
    * - ``component_backend_loaded``
-     - ``ComponentsManager``
-     - ``backend``, ``config``
+     - The component backend class
+     - ``config``, ``instance``
    * - ``component_rendered``
      - ``ComponentsManager``
      - ``info``, ``template_path``

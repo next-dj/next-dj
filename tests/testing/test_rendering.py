@@ -47,16 +47,17 @@ class TestRenderComponentByName:
 
         config = {"DIRS": [str(root)], "COMPONENTS_DIR": "_components"}
         backend = FileComponentsBackend(config)
-        previous = list(components_manager._backends)
-        components_manager._backends.clear()
-        components_manager._backends.append(backend)
+        previous = components_manager._backends
+        previously_loaded = components_manager._loaded
+        components_manager._backends = [backend]
+        components_manager._loaded = True
         try:
             html = render_component_by_name(
                 "greeter", at=tmp_path / "page.djx", context={"name": "World"}
             )
         finally:
-            components_manager._backends.clear()
-            components_manager._backends.extend(previous)
+            components_manager._backends = previous
+            components_manager._loaded = previously_loaded
         assert "<b>World</b>" in html
 
     def test_accepts_str_anchor(self, tmp_path: Path) -> None:

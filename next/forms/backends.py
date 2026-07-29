@@ -5,7 +5,7 @@ import hashlib
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypedDict, cast, override
+from typing import TYPE_CHECKING, Any, TypedDict, override
 from weakref import WeakSet
 
 from django.core.exceptions import ImproperlyConfigured
@@ -13,8 +13,6 @@ from django.core.signals import setting_changed
 from django.http import Http404
 from django.urls import get_script_prefix, path
 from django.views.decorators.http import require_http_methods
-
-from next.conf import import_class_cached
 
 from .diagnostics import registration_diagnostics
 from .dispatch import ActionOutcome, FormActionDispatch
@@ -554,23 +552,11 @@ class RegistryFormActionBackend(FormActionBackend):
         return render_form_page_with_errors(self, request, params, page_file_path)
 
 
-class FormActionFactory:
-    """Instantiates backends from merged `FORM_ACTION_BACKENDS` entries."""
-
-    @classmethod
-    def create_backend(cls, config: dict[str, Any]) -> FormActionBackend:
-        """Return a single backend instance for one settings entry."""
-        backend_path = config["BACKEND"]
-        backend_class = import_class_cached(backend_path)
-        return cast("FormActionBackend", backend_class(config))
-
-
 __all__ = [
     "ActionGuard",
     "ActionMeta",
     "ActionRegistration",
     "FormActionBackend",
-    "FormActionFactory",
     "FormActionNotFoundError",
     "RegistryBackendSnapshot",
     "RegistryFormActionBackend",

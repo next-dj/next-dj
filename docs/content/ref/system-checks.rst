@@ -300,7 +300,7 @@ Errors
      - A composed page template does not compile, so the syntax error would otherwise surface only as a 500 on the first request to the page.
      - ``next.partial.checks``
    * - ``next.E073``
-     - A ``PARTIAL_BACKENDS`` entry has no ``BACKEND`` key, so the factory would refuse it with ``ImproperlyConfigured`` on the first partial request.
+     - A ``PARTIAL_BACKENDS`` entry has no ``BACKEND`` key, so the entry would fall back to the default protocol backend and the intended wire format would never load.
      - ``next.partial.checks``
    * - ``next.E074``
      - A ``@context`` registration binds to a file no page render collects.

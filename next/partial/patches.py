@@ -21,7 +21,7 @@ from .headers import (
     is_partial_request,
     set_partial_vary,
 )
-from .manager import partial_backend_manager
+from .manager import asset_version, partial_backend_manager
 from .registry import BUILTIN_OPS, patch_op_registry
 from .render import render_zone
 
@@ -381,7 +381,7 @@ class Patches:
         response path leaves it unset since the answer already reaches the
         initiator.
         """
-        self._init_state(request, partial_backend_manager.version(), echo_of)
+        self._init_state(request, asset_version(), echo_of)
 
     @classmethod
     def versioned(cls, version: str, *, echo_of: str | None = None) -> "Patches":

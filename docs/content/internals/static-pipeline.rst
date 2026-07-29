@@ -80,7 +80,8 @@ Modules
    Also holds ``PlaceholderSlot``, ``PlaceholderRegistry``, and the ``default_placeholders`` instance.
 
 ``next.static.backends``.
-   ``StaticBackend`` abstract base class plus the bundled ``StaticFilesBackend`` and the ``StaticsFactory``.
+   ``StaticBackend`` abstract base class plus the bundled ``StaticFilesBackend``.
+   Instances come from ``load_backends``, the shared loader every backend family uses.
 
 ``next.static.manager``.
    ``StaticManager`` orchestrates discovery and the per request collector lifecycle.
@@ -121,7 +122,8 @@ The pipeline fires four signals.
   Module-level ``styles`` and ``scripts`` lists and inline ``{% #use_script %}`` and ``{% #use_style %}`` blocks call ``collector.add`` directly and do not emit it.
 - ``collector_finalized`` once per request after the collector closes its set.
 - ``html_injected`` once per request after the manager replaces the placeholder slots.
-- ``backend_loaded`` once per backend instance when the factory builds it.
+- ``backend_loaded`` once per backend instance when the manager builds it, including
+  the staticfiles backend it seeds when no entry survives.
 
 A standalone zone render runs the same discovery but ships the collected assets in the patch envelope, so ``collector_finalized`` and ``html_injected`` fire only on full-page renders.
 

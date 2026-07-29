@@ -54,6 +54,7 @@ class TestResetFormActions:
             form_action_manager.default_backend._uid_to_name.update(saved_uids)
 
     def test_clear_registries_skips_backends_without_method(self) -> None:
+        form_action_manager._ensure_backends()
         manager_backends = form_action_manager._backends
         stub = _BackendWithoutClear()
         form_action_manager._backends = [*manager_backends, stub]

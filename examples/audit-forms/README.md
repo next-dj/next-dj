@@ -61,7 +61,7 @@ NEXT_FRAMEWORK = {
 }
 ```
 
-The framework loads each entry lazily on first access via `next.forms.backends.FormActionFactory`. `AuditedFormActionBackend` subclasses `RegistryFormActionBackend`, so all `@action` registrations are still honoured — the override only wraps `dispatch` to add the audit rows.
+The framework loads each entry lazily on first access: `FormActionManager` hands the list to the shared `load_backends` helper, which imports every `BACKEND` dotted path, checks it against `FormActionBackend`, and calls it with the whole entry. `AuditedFormActionBackend` subclasses `RegistryFormActionBackend`, so all `@action` registrations are still honoured — the override only wraps `dispatch` to add the audit rows.
 
 ```python
 # access/backends.py
@@ -244,7 +244,7 @@ def done(self, request, cleaned_data):
     )
 ```
 
-The session key still threads the new request id to the backend audit row, exactly as before — the builder change does not break the correlation column.
+The session key threads the request id to the backend audit row, so the correlation column stays populated.
 
 **With the runtime.** The link opens a native `<dialog>` and creates an empty `access-wizard` container before the request, then GETs the step page for that zone alone. Each step submits inside the modal: an invalid step morphs only the `access-wizard` zone and the modal stays open, a valid non-final step morphs the zone to the next step with no redirect, and the final step's `done` returns `layer.close` plus a toast. The runtime closes the modal and, because the opening link named `data-next-accepted`, re-GETs the `request-list` zone of the landing page with its own cookies, so the list authorizes and renders in its own view before morphing under the now-closed modal.
 

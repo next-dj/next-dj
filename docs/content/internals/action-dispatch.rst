@@ -87,7 +87,8 @@ Modules
    Manages the bound form, the dependency cache reuse, and the response selection.
 
 ``next.forms.backends``.
-   ``FormActionBackend`` abstract contract, ``RegistryFormActionBackend`` default implementation, ``FormActionFactory``, and the ``FormActionNotFoundError`` exception.
+   ``FormActionBackend`` abstract contract, ``RegistryFormActionBackend`` default implementation, and the ``FormActionNotFoundError`` exception.
+   Turning the configured entries into instances is not the module's job: ``FormActionManager`` delegates that to the shared ``load_backends`` helper every backend family uses.
 
 ``next.forms.uid``.
    ``redirect_to_origin``, ``reverse_form_action``, and ``validated_origin_path`` helpers for the origin page round trip, plus the ``ORIGIN_FIELD_NAME`` wire constant and the ``FORM_ORIGIN_OVERRIDE_KEY`` render-context key the partial shaping layer sets on a wizard advance.
@@ -96,7 +97,7 @@ Modules
    Resolution of the posted origin path into the page module and the typed URL kwargs, memoised per request.
 
 ``next.forms.wizard``.
-   ``FormWizard`` base class, the ``FormWizardBackend`` contract with the session and cache implementations, and the ``WizardBackendManager`` holder.
+   ``FormWizard`` base class, the ``FormWizardBackend`` contract with the session and cache implementations, and the ``wizard_backend_manager`` holder.
 
 ``next.forms.widgets``.
    ``ComponentWidget`` and the ``bind_component_widgets`` binder the ``{% form %}`` tag calls before rendering.

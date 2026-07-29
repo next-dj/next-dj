@@ -60,8 +60,8 @@ not be retained past the receiver call.
        A standalone zone render does not fire this signal.
        ``request`` may be ``None`` outside a request.
    * - ``component_backend_loaded``
-     - ``ComponentsManager``
-     - ``backend``, ``config``
+     - The component backend class
+     - ``config``, ``instance``
      - After a component backend is created from its configuration entry.
    * - ``component_registered``
      - ``ComponentRegistry``

@@ -11,9 +11,12 @@ import itertools
 import logging
 from typing import TYPE_CHECKING, Any
 
+from django.core.exceptions import ImproperlyConfigured
+
+from next.backends import resolve_backend_class
 from next.conf import next_framework_settings
 
-from .backends import ComponentsFactory, FileComponentsBackend
+from .backends import _DEFAULT_BACKEND_PATH, ComponentsBackend, FileComponentsBackend
 from .info import _paths_from_component_info
 from .loading import ModuleLoader
 from .scanner import ComponentScanner, component_extra_roots_from_config
@@ -94,13 +97,16 @@ def _collect_component_paths_from_backend_dirs() -> set[Path]:
         if not isinstance(config, dict):
             continue
         try:
-            backend = ComponentsFactory.create_backend(config)
-        except Exception:
+            klass = resolve_backend_class(
+                config, base=ComponentsBackend, default=_DEFAULT_BACKEND_PATH
+            )
+        except (ImproperlyConfigured, ImportError):
             logger.exception(
-                "error creating component backend for autoreload scan %s", config
+                "error resolving component backend for autoreload scan %s", config
             )
             continue
-        if not isinstance(backend, FileComponentsBackend):
+        # A read-only scan reads roots off the config, so it skips the instance.
+        if not issubclass(klass, FileComponentsBackend):
             continue
         scanner = ComponentScanner(module_loader=ModuleLoader())
         for root in component_extra_roots_from_config(config):

@@ -86,7 +86,7 @@ The sender is the static manager.
 backend_loaded
 ~~~~~~~~~~~~~~
 
-Fires after the static factory instantiates a backend.
+Fires after the static manager instantiates a configured backend.
 The sender is the backend class.
 The payload carries ``config`` and ``instance``.
 
