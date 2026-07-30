@@ -12,7 +12,7 @@ Plain functions register through the ``@action`` decorator.
    :local:
    :depth: 2
 
-Class-Bound Forms
+Class-bound forms
 -----------------
 
 Declaring a subclass of ``next.forms.Form`` or ``next.forms.ModelForm`` registers the class automatically.
@@ -20,6 +20,8 @@ No decorator is needed.
 
 .. code-block:: python
    :caption: notes/pages/note/page.py
+
+   from django.http import HttpRequest
 
    import next.forms
    from next.forms import redirect_to_origin
@@ -29,13 +31,13 @@ No decorator is needed.
            model = Note
            fields = ["title", "body"]
 
-       def on_valid(self, request):
+       def on_valid(self, request: HttpRequest):
            self.save()
            return redirect_to_origin(request)
 
 The framework derives the action name from the class name and infers the scope from the file where the class is declared.
 
-Name Derivation
+Name derivation
 ---------------
 
 The action name is the ``CamelCase`` class name converted to ``snake_case`` by inserting underscores before each uppercase letter that is preceded by a lowercase letter or a digit.
@@ -66,7 +68,7 @@ The conversion collapses consecutive uppercase runs, so an acronym stays a singl
    The exception message lists the closest registered names, so a rename typo is usually visible in the error itself.
    Update every template and reverse call when renaming a class.
 
-Anchor Files and Scope
+Anchor files and scope
 ----------------------
 
 The scope of a form class depends on the file it is declared in.
@@ -94,7 +96,7 @@ A class built by a factory such as ``next.forms.modelform_factory`` is attribute
 
 .. _topics-forms-actions-uid:
 
-UID Stability
+UID stability
 -------------
 
 Each action gets a stable URL at ``/_next/form/<uid>/``.
@@ -121,7 +123,7 @@ The UID is derived, never stored in a template by hand.
 A ``{% form "name" %}`` tag reverses the current UID at render time, so a freshly rendered page always posts to the right URL.
 Only out-of-band references to a stale UID break.
 
-The ``on_valid`` Method
+The ``on_valid`` method
 -----------------------
 
 ``on_valid`` runs after the framework validates the submitted form.
@@ -129,16 +131,16 @@ The method signature uses the same dependency-injection rules as any other DI-re
 
 .. code-block:: python
 
-   def on_valid(self, request):
+   def on_valid(self, request: HttpRequest):
        ...
 
 ``self`` is the bound, validated form instance.
-``request`` is the current ``HttpRequest``.
+``request`` receives the current ``HttpRequest`` only when the parameter is annotated ``HttpRequest``, an unannotated ``request`` parameter resolves to ``None``.
 Any additional parameter is resolved through the DI injector, through ``DUrl[...]`` markers, ``Depends`` providers, and similar mechanisms.
 
 The default implementation on ``BaseForm`` redirects to ``Meta.success_url`` when declared, otherwise it returns ``redirect_to_origin(request)``.
 The default implementation on ``BaseModelForm`` calls ``self.save()`` then follows the same redirect rule.
-See `Success Feedback`_ for the ``success_url`` contract.
+See `Success feedback`_ for the ``success_url`` contract.
 
 The return value follows the same contract as a handler function, checked in a fixed order.
 An ``HttpResponse`` instance passes through unchanged, and this check runs first, so every rich response type the framework ships subclasses ``HttpResponse``.
@@ -148,7 +150,7 @@ A model instance with a ``get_absolute_url`` method redirects to that URL, the `
 Any other object with a truthy ``url`` attribute redirects to that URL, a last-resort convenience for model-like objects.
 Any other return value emits a ``RuntimeWarning`` and is treated as ``None``.
 
-``get_initial`` Pre-Populates the Form
+``get_initial`` pre-populates the form
 --------------------------------------
 
 Override ``get_initial`` as a classmethod to provide initial data before the first render.
@@ -157,7 +159,7 @@ The classmethod is DI-resolved, so it can receive ``request``, URL parameters, o
 .. code-block:: python
 
    @classmethod
-   def get_initial(cls, request, note_id: int | None = None):
+   def get_initial(cls, request: HttpRequest, note_id: int | None = None):
        if note_id is None:
            return {}
        return Note.objects.get(pk=note_id)
@@ -168,14 +170,14 @@ The framework uses it as the ``instance`` kwarg when constructing the form.
 
 You never call ``get_initial`` yourself.
 The dispatcher calls it through the dependency injector before the initial render.
-``request`` is supplied by the framework.
+``request`` is supplied by the framework only to a parameter annotated ``HttpRequest``, an unannotated ``request`` parameter resolves to ``None``.
 A parameter whose name matches a captured URL segment is filled from the URL, so ``note_id`` above receives the ``note_id`` route kwarg.
 Any other parameter resolves through a registered provider, the same as on a handler.
 The base signatures carry no positional arguments of their own.
 ``BaseForm.get_initial(cls)`` takes none, and ``BaseModelForm.get_initial(cls, **url_kwargs)`` accepts the URL kwargs as keywords.
 Declare only the parameters an override actually reads.
 
-Form-Less Actions
+Form-less actions
 -----------------
 
 Use ``@action`` to register a plain callable when no form fields are needed.
@@ -203,13 +205,13 @@ The scope of a form-less action follows the same anchor-file rule.
 All other files produce shared actions.
 Pass ``scope="page"`` or ``scope="shared"`` to override the file-derived scope, the same override ``Meta.scope`` provides for a form class.
 Any other value triggers ``next.E047`` and the action is not registered.
-The ``login_required`` and ``permission_required`` keywords guard the endpoint, see `Access Guards`_.
+The ``login_required`` and ``permission_required`` keywords guard the endpoint, see `Access guards`_.
 
 Applying ``@action`` to a class registers no action.
 The decorator records the misuse, returns the class unchanged, and ``manage.py check`` reports it as ``next.E053``.
 Form classes register through ``__init_subclass__`` and must not use ``@action``.
 
-Stacking Decorators on ``@action``
+Stacking decorators on ``@action``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``@action`` keys the registration on the file where the decorated function is declared, not on the file that runs the decorator.
@@ -236,7 +238,7 @@ Keep ``@action`` outermost when other decorators apply to the same handler.
 ``transaction.atomic`` sets ``__wrapped__`` through :func:`functools.wraps`, so the action still registers under this ``page.py``.
 A hand-written decorator that omits ``functools.wraps`` hides the wrapped function, and the action registers under the decorator's own module instead.
 
-Injecting the Form Into a Handler
+Injecting the form into a handler
 ---------------------------------
 
 A handler registered with ``@action("name", form_class=...)`` receives the bound, validated form.
@@ -274,7 +276,7 @@ The marker only types the parameter.
 The framework still injects the same bound form a parameter named ``form`` would receive.
 See :doc:`/content/ref/decorators` for ``DForm`` and ``FormProvider``.
 
-Dynamic Form Classes
+Dynamic form classes
 --------------------
 
 A ``form_class=`` argument may be a factory callable instead of a form class.
@@ -310,7 +312,7 @@ See :doc:`formsets` for the same pattern applied to formset and inline-formset a
 
 .. _topics-forms-actions-abstract:
 
-Preventing Registration
+Preventing registration
 -----------------------
 
 A project base class that other forms subclass should not register as an action of its own.
@@ -319,11 +321,16 @@ Set ``Meta.abstract = True`` to skip auto-registration.
 .. code-block:: python
    :caption: app/forms.py — a shared base that does not register
 
+   from django.http import HttpRequest
+
+   import next.forms
+   from next.forms import redirect_to_origin
+
    class TenantForm(next.forms.Form):
        class Meta:
            abstract = True
 
-       def on_valid(self, request):
+       def on_valid(self, request: HttpRequest):
            return redirect_to_origin(request)
 
    class InviteForm(TenantForm):
@@ -335,7 +342,7 @@ The same ``Meta.abstract`` flag works on a ``FormWizard`` base class.
 
 .. _topics-forms-actions-guards:
 
-Access Guards
+Access guards
 -------------
 
 The dispatch endpoint of an action lives at ``/_next/form/<uid>/``, outside the page URL space, so page-level protection does not cover it.
@@ -384,7 +391,7 @@ The ``next.W060`` check warns when ``permission_required`` is declared while ``d
 
 .. _topics-forms-actions-dynamic-guards:
 
-Dynamic Permission Hooks
+Dynamic permission hooks
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The static guard answers a fixed question frozen at import time, whether the user is authenticated and holds a named permission.
@@ -481,10 +488,10 @@ The static guard runs first and pre-database.
 A request it denies never reaches a dynamic hook, so the static guard stays the cheap default for the authentication-and-named-permission case.
 ``check_permissions`` runs next, then the form binds, then ``has_object_permission`` runs on the bound form.
 
-The view hook resolves on the resolved form class, so a factory ``form_class`` is covered as well, see `Dynamic Form Classes`_.
+The view hook resolves on the resolved form class, so a factory ``form_class`` is covered as well, see `Dynamic form classes`_.
 A handler-only ``@action`` carries no class to host a method, so it has no dynamic hook.
 Such a handler runs its own check in the body and raises :exc:`~django.core.exceptions.PermissionDenied` or returns a redirect,
-the same pattern shown for ``messages.success`` under `Success Messages`_.
+the same pattern shown for ``messages.success`` under `Success messages`_.
 
 An object-level denial returns a bare HTTP 403.
 It does not re-render the origin page.
@@ -512,12 +519,12 @@ A wizard step binds from posted data and ``get_form_kwargs`` and never runs ``ge
 
 .. _topics-forms-actions-success:
 
-Success Feedback
+Success feedback
 ----------------
 
 Two ``Meta`` keys describe what a valid submission tells the user, a flash message and a redirect target.
 
-Success Messages
+Success messages
 ~~~~~~~~~~~~~~~~
 
 ``Meta.success_message`` flashes a message through :doc:`django.contrib.messages <django:ref/contrib/messages>` after a valid submission.
@@ -557,7 +564,7 @@ Call ``messages.success`` in the handler body instead.
        messages.success(request, "Note archived.")
        return redirect_to_origin(request)
 
-Success Redirects
+Success redirects
 ~~~~~~~~~~~~~~~~~
 
 ``Meta.success_url`` names where the default ``on_valid`` redirects after a valid submission.
@@ -584,7 +591,7 @@ Returning the instance redirects to its ``get_absolute_url()``, the ``CreateView
    def on_valid(self, request: HttpRequest):
        return self.save()
 
-System Checks
+System checks
 -------------
 
 The forms subsystem contributes Django system checks that run through ``python manage.py check``.
@@ -631,7 +638,7 @@ A UID hash collision between two distinct registrations is not reported as a sys
 It raises ``ImproperlyConfigured`` at import time when two different ``(scope_key, name)`` pairs hash to the same UID.
 This is distinct from the ``next.E041`` name collision above, which fires when one name is registered from two different handlers.
 
-See Also
+See also
 --------
 
 .. seealso::

@@ -1,6 +1,6 @@
 .. _topics-forms-plain-forms:
 
-Plain Forms
+Plain forms
 ===========
 
 A plain :doc:`Form <django:topics/forms/index>` collects and validates input without a Django model behind it.
@@ -11,7 +11,7 @@ The form validates ``cleaned_data`` and hands it to ``on_valid``, where the page
    :local:
    :depth: 2
 
-When To Reach For One
+When to reach for one
 ---------------------
 
 Use a plain ``Form`` when the submission does not map to a single model write.
@@ -47,7 +47,7 @@ See :doc:`actions` for the full scope rules.
      <button type="submit">Apply</button>
    {% endform %}
 
-Handling Submissions
+Handling submissions
 --------------------
 
 The default ``on_valid`` on a plain ``Form`` redirects to ``Meta.success_url`` when declared, otherwise back to the origin page through ``redirect_to_origin(request)``.
@@ -91,7 +91,7 @@ There is no model to save, so the page owns every write.
                    flag.save(update_fields=["enabled", "updated_at"])
            return HttpResponseRedirect("/admin/")
 
-Dynamic Choices
+Dynamic choices
 ---------------
 
 Populate choices in ``__init__`` when they depend on the database or the request.
@@ -132,7 +132,7 @@ The same pattern narrows a ``ModelChoiceField`` queryset to the submitted parent
            if poll_pk:
                self.fields["choice"].queryset = Choice.objects.filter(poll_id=poll_pk)
 
-See Also
+See also
 --------
 
 .. seealso::

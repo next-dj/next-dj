@@ -1,9 +1,9 @@
 .. _ref-pages:
 
-Pages Reference
+Pages reference
 ===============
 
-Module Summary
+Module summary
 --------------
 
 ``next.pages`` exposes the page module API, the ``@context`` decorator, and the layout composition helpers.
@@ -82,20 +82,23 @@ Processors
 .. automodule:: next.pages.processors
    :members:
 
-System Checks
+System checks
 ~~~~~~~~~~~~~
 
 ``next.pages.checks`` registers the Django system checks for the pages subsystem.
 They run through ``uv run python manage.py check``.
 
-The module exports seven check callables.
+The module exports ten check callables.
 
 - ``check_context_functions``.
 - ``check_context_processor_signature``.
+- ``check_context_registration_files``.
 - ``check_layout_templates``.
 - ``check_page_functions``.
+- ``check_page_module_imports``.
 - ``check_pages_structure``.
 - ``check_request_in_context``.
+- ``check_single_keyless_context``.
 - ``check_template_loaders``.
 
 See :doc:`system-checks` for each check identifier, its condition, and the full autodoc of ``next.pages.checks``.
@@ -105,7 +108,7 @@ Signals
 
 See :doc:`signals` and :doc:`/content/topics/signals` for the pages signals (``template_loaded``, ``context_registered``, ``page_rendered``).
 
-See Also
+See also
 --------
 
 .. seealso::

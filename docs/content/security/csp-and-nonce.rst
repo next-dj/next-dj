@@ -1,6 +1,6 @@
 .. _security-csp-and-nonce:
 
-CSP and Nonce
+CSP and nonce
 =============
 
 A Content Security Policy restricts which scripts a page may run.
@@ -10,7 +10,7 @@ The client runtime is designed to live under one, and this page covers how the r
    :local:
    :depth: 1
 
-The Nonce From currentScript
+The nonce from currentScript
 ----------------------------
 
 The runtime remembers the nonce of the script that bootstrapped it.
@@ -23,7 +23,7 @@ The asset elements inherit it.
 The nonce is the only attribute the runtime carries over from the page.
 An element it builds for a patch-inserted asset takes a fixed attribute set, so an ``integrity`` or ``crossorigin`` attribute a backend writes into its tag templates reaches the browser on a full render alone, see :doc:`/content/topics/partial-rendering/limitations`.
 
-Scripts in Patches Never Run
+Scripts in patches never run
 ----------------------------
 
 A ``<script>`` inside patch HTML is never executed by any insertion path.
@@ -38,7 +38,7 @@ A widget that relied on an inline initialiser in its markup has to move to a co-
 With the runtime's dev mode on, that is with Django ``DEBUG``, the runtime prints a ``console.warn`` for every script it neutralises.
 An inline initialiser that stopped working is therefore visible rather than silent.
 
-strict-dynamic as a Recommendation
+strict-dynamic as a recommendation
 -----------------------------------
 
 ``'strict-dynamic'`` lets a script already trusted by a nonce load further scripts without each one needing its own nonce in the policy.
@@ -50,7 +50,7 @@ The framework carries the nonce and refuses to run inline patch scripts, which r
 It does not author your policy, validate your directives, or promise that any particular policy is correct for your site.
 Treat ``'strict-dynamic'`` as a sensible default for a nonce-based policy and verify the resulting headers against your own threat model.
 
-A Worked Policy
+A worked policy
 ---------------
 
 A nonce-based policy with ``'strict-dynamic'`` looks like this, with ``{nonce}`` filled in per request by your CSP middleware.
@@ -63,7 +63,7 @@ A nonce-based policy with ``'strict-dynamic'`` looks like this, with ``{nonce}``
 The bootstrap script tag carries ``nonce="{nonce}"``, the runtime copies that nonce onto every asset element it injects, and ``'strict-dynamic'`` lets the bootstrap load the scripts among them.
 No patch can introduce an inline script, so no patch needs a nonce of its own.
 
-See Also
+See also
 --------
 
 .. seealso::

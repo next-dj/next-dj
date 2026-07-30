@@ -6,7 +6,7 @@ ModelForms
 An edit page in plain Django reloads the instance by hand in both the initial render and the save handler, mapping each field twice.
 next.dj collapses that to one declarative line.
 A :doc:`ModelForm <django:topics/forms/modelforms>` adapts a Django model to a form, and ``Meta.instance_from_url`` loads the row the page already addresses in its URL, so a single class serves both create and edit.
-The `Before and After`_ section below shows the delta against the hand-written lookup.
+The `Before and after`_ section below shows the delta against the hand-written lookup.
 
 next.dj supports ModelForms anywhere a plain ``Form`` works.
 This page covers the ``next.forms.ModelForm`` base class, the declarative ``Meta.instance_from_url`` key that loads an instance for edit pages, and the create-and-edit-with-one-class pattern that follows from it.
@@ -15,7 +15,7 @@ This page covers the ``next.forms.ModelForm`` base class, the declarative ``Meta
    :local:
    :depth: 2
 
-Base Class Setup
+Base class setup
 ----------------
 
 Subclass the framework's ``ModelForm`` base class.
@@ -38,13 +38,13 @@ There is no ``@action`` decorator on the class and no ``form_class`` argument an
 Subclassing ``next.forms.ModelForm`` registers the form through the ``__init_subclass__`` hook the moment Python runs the ``class`` statement.
 See :doc:`actions` for the full registration rules and scope derivation.
 
-Loading an Instance From the URL
+Loading an instance from the URL
 --------------------------------
 
 ``Meta.instance_from_url`` tells the default ``get_initial`` how to find the model instance an edit page operates on.
 It is the primary CRUD path and replaces a hand-written instance lookup otherwise duplicated across ``get_initial`` and the handler.
 
-String Form
+String form
 ~~~~~~~~~~~
 
 A string names a URL kwarg that doubles as the model lookup field.
@@ -58,9 +58,9 @@ A string names a URL kwarg that doubles as the model lookup field.
            fields = ["slug", "title", "body"]
            instance_from_url = "slug"
 
-On a page whose route captures ``slug``, the default ``get_initial`` runs :func:`~django.shortcuts.get_object_or_404` with ``Note.objects.get(slug=<captured value>)`` and binds the result as the form instance.
+On a page whose route captures ``slug``, the default ``get_initial`` runs ``get_object_or_404(Note, slug=<captured value>)`` and binds the result as the form instance.
 
-Dict Form
+Dict form
 ~~~~~~~~~
 
 A dict maps a URL kwarg name to a different model lookup field for the case where the two names differ.
@@ -77,7 +77,7 @@ A dict maps a URL kwarg name to a different model lookup field for the case wher
 Here the route captures ``id`` and the form loads the instance with ``Note.objects.get(pk=<captured value>)``.
 The dict key is the URL kwarg name and the value is the model field used in the lookup.
 
-Lookup Behaviour
+Lookup behaviour
 ~~~~~~~~~~~~~~~~
 
 The declarative key has two boundary behaviours worth stating plainly.
@@ -91,7 +91,7 @@ When the kwarg is present but no row matches, :func:`~django.shortcuts.get_objec
 The field named by ``instance_from_url`` should be unique.
 :func:`~django.shortcuts.get_object_or_404` turns only the not-found case into a 404, so a lookup matching several rows surfaces as a server error instead.
 
-Ownership Is Not Scoped by Default
+Ownership is not scoped by default
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. warning::
@@ -117,13 +117,15 @@ Ownership Is Not Scoped by Default
    If the lookup cannot carry the scope, verify ownership in ``on_valid`` before ``self.save()``.
    See :doc:`/content/security/di-and-untrusted-input` for the untrusted-input rules and :doc:`/content/security/overview` for object-level authorization.
 
-Before and After
+Before and after
 ----------------
 
 Without ``Meta.instance_from_url``, an edit form loads the article twice and maps each field by hand.
 
 .. code-block:: python
    :caption: before — manual lookup duplicated across get_initial and on_valid
+
+   from django.http import HttpRequest
 
    class ArticleEditForm(next.forms.Form):
        article_id = next.forms.IntegerField(widget=next.forms.HiddenInput)
@@ -132,7 +134,7 @@ Without ``Meta.instance_from_url``, an edit form loads the article twice and map
        body_md = next.forms.CharField(required=False)
 
        @classmethod
-       def get_initial(cls, request, slug=None):
+       def get_initial(cls, request: HttpRequest, slug=None):
            if slug is None:
                return {}
            article = get_object_or_404(Article, slug=slug)
@@ -143,7 +145,7 @@ Without ``Meta.instance_from_url``, an edit form loads the article twice and map
                "body_md": article.body_md,
            }
 
-       def on_valid(self, request):
+       def on_valid(self, request: HttpRequest):
            article = get_object_or_404(Article, pk=self.cleaned_data["article_id"])
            article.slug = self.cleaned_data["slug"]
            article.title = self.cleaned_data["title"]
@@ -167,7 +169,7 @@ The instance-loading plumbing collapses to one line.
 The hidden ``article_id`` field, the second :func:`~django.shortcuts.get_object_or_404`, and the field-by-field copy all give way to ``instance_from_url = "slug"``.
 A real ModelForm still carries whatever genuine logic the page needs, such as a custom ``on_valid``, a ``clean_slug`` validator, or widget overrides under ``Meta.widgets``.
 
-Create and Edit With One Class
+Create and edit with one class
 ------------------------------
 
 The same ModelForm class can drive both a create page and an edit page.
@@ -203,7 +205,7 @@ The wiki example's create page declares a plain ``ArticleCreateForm`` while its 
 The multi-tenant example's create page likewise declares its own ``NoteCreateForm`` apart from the edit form.
 Split the two when the create and edit fields diverge, when validation differs, or when the rows must be scoped to something the URL does not carry.
 
-Handling Submissions
+Handling submissions
 --------------------
 
 The default ``on_valid`` on ``ModelForm`` calls ``self.save()`` and then redirects to the origin page.
@@ -236,7 +238,7 @@ To attach a request-derived value before writing the row, save with ``commit=Fal
 
 Call ``self.save_m2m()`` after ``note.save()`` when the model has many-to-many fields.
 
-Custom get_initial Escape Hatch
+Custom get_initial escape hatch
 -------------------------------
 
 Define ``get_initial`` only when the lookup the page needs cannot be expressed by ``instance_from_url``, for example a tenant-scoped query.
@@ -247,24 +249,26 @@ Define ``get_initial`` only when the lookup the page needs cannot be expressed b
    from django.shortcuts import get_object_or_404
    from notes.access import get_active_tenant
 
+   from next.urls import DUrl
+
    class NoteEditForm(next.forms.ModelForm):
        class Meta:
            model = Note
            fields = ["title", "body"]
 
        @classmethod
-       def get_initial(cls, request: HttpRequest, id: int | None = None):
+       def get_initial(cls, request: HttpRequest, note_id: DUrl["id", int]):
            tenant = get_active_tenant(request)
-           if tenant is None or id is None:
+           if tenant is None or note_id is None:
                return {}
-           return get_object_or_404(Note, pk=id, tenant=tenant)
+           return get_object_or_404(Note, pk=note_id, tenant=tenant)
 
 The ``get_active_tenant`` helper reads the tenant the middleware attached to the request, so the lookup stays scoped to the active tenant.
 Declare ``get_initial`` as a ``classmethod`` with a DI-friendly signature.
 The framework resolves ``request`` and captured URL parameters as keyword arguments.
 Return a model instance to bind an existing row for editing, or a dict to seed an unbound form.
 
-Validation Failure
+Validation failure
 ------------------
 
 A failing validation re-renders the origin page with the bound form in scope.
@@ -274,7 +278,7 @@ The framework does not call ``save()`` when validation fails.
 ``on_valid`` runs only after ``self.is_valid()`` returns ``True``.
 See :doc:`validation-rerender` for the re-render pipeline.
 
-System Checks
+System checks
 -------------
 
 Two checks guard ``Meta.instance_from_url``.
@@ -286,7 +290,7 @@ Correct the field name, or use the dict form to map the URL kwarg to the real mo
 ``next.E049`` fires when ``instance_from_url`` is set on a class that is not a ModelForm.
 The key only loads model instances, so move the declaration onto a ``next.forms.ModelForm`` subclass.
 
-See Also
+See also
 --------
 
 .. seealso::

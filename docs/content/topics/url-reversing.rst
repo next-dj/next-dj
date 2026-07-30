@@ -1,6 +1,6 @@
 .. _topics-url-reversing:
 
-URL Reversing
+URL reversing
 =============
 
 next.dj generates a URL name for every file-routed page.
@@ -53,7 +53,7 @@ The default ``page_{name}`` yields ``next:page_posts_slug``.
 Changing ``URL_NAME_TEMPLATE`` changes the name ``page_reverse`` resolves against without any call-site edits.
 See :doc:`file-router` for the setting and the segment-naming rules.
 
-Namespace Override
+Namespace override
 ~~~~~~~~~~~~~~~~~~
 
 The default namespace is ``next``, configured through ``next.urls.manager.app_name``.
@@ -82,13 +82,13 @@ The ``/admin/`` prefix comes from the ``path("admin/", ...)`` mount, not from th
 
 Passing a ``namespace`` that no Django mount registers raises ``NoReverseMatch``.
 
-When to Use page_reverse Instead of reverse
+When to use page_reverse instead of reverse
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``django.urls.reverse("next:page_posts_slug", kwargs={"slug": "hello"})`` and ``page_reverse("posts/[slug]", slug="hello")`` are equivalent.
 Use ``page_reverse`` when the call site references the directory tree, ``reverse`` when the call site already has the URL name in a variable.
 
-The Lazy Variant
+The lazy variant
 ~~~~~~~~~~~~~~~~
 
 ``page_reverse_lazy`` takes the same arguments and defers the resolution until the value is first coerced to ``str``.
@@ -137,7 +137,7 @@ The helper takes a URL string and adds, replaces, or removes query parameters.
 ``with_query`` preserves blank-valued keys such as ``flag=`` because it parses the existing query with blank values kept.
 Pass the key explicitly to change or drop it.
 
-Multi Value Keys
+Multi value keys
 ~~~~~~~~~~~~~~~~
 
 Passing a list or tuple repeats the key in the output.
@@ -175,10 +175,10 @@ Compose both helpers when the base URL needs both reversal and query parameters.
 The ``None`` value drops the key entirely.
 This is convenient for building pagination links where the current filter may or may not be set.
 
-Common Patterns
+Common patterns
 ---------------
 
-Redirect After Action
+Redirect after action
 ~~~~~~~~~~~~~~~~~~~~~
 
 An action handler can return an ``HttpResponseRedirect`` to a reversed page URL.
@@ -200,7 +200,7 @@ An action handler can return an ``HttpResponseRedirect`` to a reversed page URL.
            self.save()
            return HttpResponseRedirect(page_reverse())
 
-Building Links in Components
+Building links in components
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 A component can compute a URL through ``@component.context``.
@@ -254,7 +254,7 @@ Use ``pytest-django`` or call ``django.setup()`` once, then assert against the p
    def test_page_reverse_empty() -> None:
        assert page_reverse() == "/"
 
-Reading the Query String Back
+Reading the query string back
 -----------------------------
 
 The helpers on this page write query strings.
@@ -268,7 +268,7 @@ They flow through ``DUrl`` or plain URL kwargs as described in :doc:`dependency-
 
 See :doc:`/content/howto/read-query-parameters` for the full typed-query walkthrough.
 
-See Also
+See also
 --------
 
 .. seealso::

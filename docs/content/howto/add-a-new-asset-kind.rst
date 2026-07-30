@@ -1,6 +1,6 @@
 .. _howto-asset-kind:
 
-Add a New Asset Kind
+Add a new asset kind
 ====================
 
 Problem
@@ -47,13 +47,13 @@ Ship the file.
 
 Discovery picks up ``component.jsx`` because ``component`` is a registered stem and ``.jsx`` is now a registered extension.
 
-Emit the Asset
+Emit the asset
 ~~~~~~~~~~~~~~
 
 The kind sits in the ``scripts`` slot, so ``{% collect_scripts %}`` in the layout emits the tag.
 No template change is needed.
 
-Custom Renderer
+Custom renderer
 ~~~~~~~~~~~~~~~
 
 When the new kind needs a tag shape that the bundled methods do not produce, add a renderer method on a custom backend.
@@ -103,7 +103,7 @@ A script tag points at the JSX file.
 Run ``uv run python manage.py check``.
 The walkthrough registration reports no warnings, and the custom-renderer variant reports ``next.W074`` for the ``jsx`` kind.
 
-See Also
+See also
 --------
 
 .. seealso::

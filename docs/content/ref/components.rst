@@ -1,9 +1,9 @@
 .. _ref-components:
 
-Components Reference
+Components reference
 ====================
 
-Module Summary
+Module summary
 --------------
 
 ``next.components`` exposes the component discovery, registration, and rendering API.
@@ -11,9 +11,9 @@ The names in this reference are grouped by their intended audience.
 
 .. note::
 
-   The Application Imports, Framework Extension, and Internal Infrastructure tiers follow the public-surface rules in :ref:`faq-safe-symbols`.
+   The Application imports, Framework extension, and Internal infrastructure tiers follow the public-surface rules in :ref:`faq-safe-symbols`.
 
-Application Imports
+Application imports
 -------------------
 
 These are the names project code uses day-to-day.
@@ -27,7 +27,8 @@ These are the names project code uses day-to-day.
 .. autodata:: next.components.context
    :no-value:
 
-   The ``@component.context`` decorator, bound from ``ComponentContextManager.context``. Registers a context function inside a ``component.py``.
+   The ``@component.context`` decorator, bound from ``ComponentContextManager.context``.
+   It registers a context function inside a ``component.py``.
 
 .. autofunction:: next.components.get_component
 
@@ -43,7 +44,7 @@ Manager
 
 .. autodata:: next.components.components_manager
 
-Framework Extension
+Framework extension
 -------------------
 
 These names are used when writing a custom component backend or a custom renderer.
@@ -61,7 +62,7 @@ Backends
 
 The URL router calls this during the page-tree walk and application code does not invoke it directly.
 
-Context Pipeline
+Context pipeline
 ~~~~~~~~~~~~~~~~
 
 .. autoclass:: next.components.ComponentContextManager
@@ -91,12 +92,12 @@ Renderers
 ``ComponentsManager`` wires a single ``ComponentTemplateLoader`` into its render pipeline.
 The loader is fixed and not pluggable, so a custom backend reads component template bodies through this class rather than substituting its own.
 
-Internal Infrastructure
+Internal infrastructure
 -----------------------
 
 These classes are implementation details.
 They are exported for testing and advanced instrumentation.
-Prefer the Application Imports tier unless you are building framework tooling.
+Prefer the Application imports tier unless you are building framework tooling.
 
 .. autoclass:: next.components.ComponentInfo
    :members:
@@ -125,7 +126,7 @@ The duplicate-name check groups by ``(scope_root, name)`` and ignores ``scope_re
 
 .. autofunction:: next.components.get_component_paths_for_watch
 
-Test Doubles
+Test doubles
 ~~~~~~~~~~~~
 
 ``DummyBackend`` and ``BoomBackend`` are minimal ``ComponentsBackend`` implementations kept in this module so that dotted-path resolution in tests works through the standard loader.
@@ -169,7 +170,7 @@ The module ``next.components.signals`` exposes four ``django.dispatch.Signal`` i
      - ``ComponentsManager``
      - ``info`` (``ComponentInfo``), ``template_path`` (``Path`` or ``None``)
 
-See Also
+See also
 --------
 
 .. seealso::

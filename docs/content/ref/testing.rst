@@ -1,9 +1,9 @@
 .. _ref-testing:
 
-Testing Reference
+Testing reference
 =================
 
-Module Summary
+Module summary
 --------------
 
 ``next.testing`` exposes a test client, partial envelope decoding, signal recorder, registry isolation, action helpers, HTML utilities, rendering helpers, loaders, patching helpers, and dependency context builders.
@@ -14,7 +14,8 @@ Public API
 Client
 ~~~~~~
 
-``NextClient`` extends Django's test client with form-action shortcuts and the partial-request helpers ``get_zones``, ``envelope_of``, and ``PartialEnvelope`` for end to end HTTP tests.
+``NextClient`` extends Django's test client with form-action shortcuts and ``get_zones`` for end to end HTTP tests.
+The module also ships ``envelope_of`` and ``PartialEnvelope`` for decoding patch responses.
 
 .. automodule:: next.testing.client
    :members:
@@ -60,7 +61,7 @@ Loaders
 .. automodule:: next.testing.loaders
    :members:
 
-HTML Utilities
+HTML utilities
 ~~~~~~~~~~~~~~
 
 ``find_anchor``, ``assert_has_class``, and ``assert_missing_class`` inspect rendered HTML fragments.
@@ -84,7 +85,7 @@ Dependencies
 .. automodule:: next.testing.deps
    :members:
 
-See Also
+See also
 --------
 
 .. seealso::

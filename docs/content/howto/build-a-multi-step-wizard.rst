@@ -1,6 +1,6 @@
 .. _howto-multi-step-wizard:
 
-Build a Multi-Step Wizard
+Build a multi-step wizard
 =========================
 
 Problem
@@ -18,7 +18,7 @@ Implement ``done`` to create the row from the merged cleaned data.
 Walkthrough
 -----------
 
-Declare the Steps and Wizard
+Declare the steps and wizard
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Each data step is an ordinary ``ModelForm`` over the target model, and the final step only confirms the merged request.
@@ -68,13 +68,13 @@ Every step form subclasses ``django.forms`` directly because a step is not a sta
 A step built on a ``next.forms`` base would register as its own form action, whose default ``on_valid`` saves a partial row outside the wizard flow, unless it sets ``Meta.abstract = True``.
 :doc:`/content/topics/forms/wizard` covers the registration, scope, and ``Meta.steps`` semantics in depth.
 
-Route Through the Step Segment
+Route through the step segment
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The page directory is ``request/[step]/``, so the route captures a ``step`` kwarg that the wizard reads to pick the current step and swaps when it advances.
 See :doc:`/content/topics/forms/wizard` for the routing and back-navigation rules.
 
-Render the Wizard
+Render the wizard
 ~~~~~~~~~~~~~~~~~~
 
 The ``{% form %}`` tag publishes ``form`` for the current step and ``wizard`` for navigation.
@@ -93,7 +93,7 @@ A valid step saves its draft and advances, the final step calls ``done``, and an
 Per-step drafts persist through the configured wizard backend (see :doc:`/content/topics/forms/wizard-backend`).
 A back link or a progress indicator builds on ``wizard.goto`` and ``wizard.step_names``, see the wizard template API in :doc:`/content/topics/forms/wizard`.
 
-Finalise the Wizard
+Finalise the wizard
 ~~~~~~~~~~~~~~~~~~~~
 
 ``done`` receives the merged cleaned data of every step, so for ModelForm steps over one model the dict maps straight onto the constructor.
@@ -133,7 +133,7 @@ The dispatcher resolves it against the URLconf, the ``[step]`` segment yields th
 Each ``post_step`` targets one step through its ``origin`` path.
 The final step's submission triggers ``done`` and the row appears.
 
-See Also
+See also
 --------
 
 .. seealso::

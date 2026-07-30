@@ -1,6 +1,6 @@
 .. _topics-partial-rendering-framework-islands:
 
-Framework Islands
+Framework islands
 =================
 
 A framework island is a Vue or React root mounted into one element of an otherwise server-rendered page.
@@ -15,7 +15,7 @@ The six lines below are the adapter.
    :local:
    :depth: 1
 
-The Mount and Unmount Pair
+The mount and unmount pair
 --------------------------
 
 ``next:mounted`` fires on every node a patch touches, after the operations apply.
@@ -26,7 +26,7 @@ Mount through :ref:`Next.partial.onMount <topics-partial-rendering-co-located-js
 The registry runs its callback over the matching elements present at load and over every matching element a later patch inserts, descendants included.
 Unmount through ``next:removed``, walking the detached subtree for islands, because the event fires on the detached root rather than on each descendant.
 
-A React Island
+A React island
 --------------
 
 .. code-block:: javascript
@@ -63,7 +63,7 @@ The ``roots.has(el)`` guard keeps the mount idempotent, because ``onMount`` re-r
 The ``next:removed`` handler walks the subtree because a morph that removes the zone containing the chart fires the event on the zone, not on the chart inside it.
 Matching the node itself and its descendants covers both the island-as-root and the island-inside-a-removed-zone cases.
 
-A Vue Island
+A Vue island
 ------------
 
 .. code-block:: javascript
@@ -96,7 +96,7 @@ A Vue Island
      }
    });
 
-Preserving the Island Through a Morph
+Preserving the island through a morph
 -------------------------------------
 
 A morph of the surrounding zone walks into the island and reconciles its DOM against the server markup, which fights the framework for ownership of that subtree.
@@ -111,7 +111,7 @@ With an id the child walk pairs it by hard match, without one it pairs by positi
 For a node the runtime should reconcile in some cases and not others, the per-node ``next:morph-element`` event carries a veto.
 A listener that calls ``preventDefault`` on it skips the morph of that node and its subtree, which lets a framework apply its own diff while the runtime stays out of the way.
 
-Two Kinds of Atomicity
+Two kinds of atomicity
 ----------------------
 
 The runtime treats two markers as morph boundaries, and they differ.
@@ -127,18 +127,20 @@ A server re-render that ships a stale attribute on a custom element overwrites t
 Use ``data-next-keep`` for an island whose attributes the framework drives after mount.
 Lean on the built-in custom-element atomicity only when the server attributes and the framework attributes never disagree, for example a web component the server seeds once and never re-authors.
 
-The Island Needs Stable Identity
+The island needs stable identity
 --------------------------------
 
 An island must carry a stable ``data-next-key`` or ``id``, or ``data-next-keep``, on its own root.
 Without one the morph pairs it by position, and a keyless re-sort of its siblings reuses a different node for it.
 
-The cost is a silent lost mount.
-A morph that drops the old island node fires ``next:removed`` on it, so the unmount runs, but the node the morph inserts in another position is not in the touched set, so ``next:mounted`` never fires for it and the mount never runs.
-The island unmounts and never comes back.
+The cost is churn and lost state.
+A morph that drops the old island node fires ``next:removed`` on it and the unmount runs.
+The replacement node is revived only by the ``onMount`` registry pass over the morphed zone, so the island remounts from scratch and its client state is gone.
+An adapter bound to the raw ``next:mounted`` event never sees the replacement at all.
+A keyless re-sort can also soft-match the island root to a different row, binding the mounted framework root to the wrong data.
 A stable key pins the island to its data so the morph reuses the same node, and ``data-next-keep`` pins it by leaving it untouched.
 
-See Also
+See also
 --------
 
 .. seealso::

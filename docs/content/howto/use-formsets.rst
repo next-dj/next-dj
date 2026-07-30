@@ -1,6 +1,6 @@
 .. _howto-formsets:
 
-Use Formsets
+Use formsets
 ============
 
 Problem
@@ -37,7 +37,7 @@ Define the row form and the formset.
 Without it, subclassing ``ModelForm`` would register ``NoteRowForm`` as the standalone action ``note_row_form`` through ``__init_subclass__``.
 That is a live endpoint that saves a single row through the default ``on_valid``, even though only the formset action is intended.
 The flag suppresses that registration, and ``formset_factory`` still builds the formset from the abstract class as usual.
-See :ref:`Preventing Registration <topics-forms-actions-abstract>` for the ``Meta.abstract`` semantics.
+See :ref:`Preventing registration <topics-forms-actions-abstract>` for the ``Meta.abstract`` semantics.
 
 Register the action.
 
@@ -90,7 +90,7 @@ Render the formset.
 Always render ``{{ form.management_form }}`` before the row loop.
 ``can_delete=True`` adds the ``DELETE`` checkbox to every row, and the handler skips the rows the user marked, so the template renders it alongside the fields.
 
-Clean Up Empty Rows
+Clean up empty rows
 -------------------
 
 A formset with ``extra=3`` ships three blank rows.
@@ -125,7 +125,7 @@ Submit the formset with two filled rows and one blank row.
 The handler saves the two filled rows and skips the blank one.
 A row that fails validation re-renders with errors on that row only.
 
-See Also
+See also
 --------
 
 .. seealso::

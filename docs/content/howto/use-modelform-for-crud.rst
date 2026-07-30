@@ -18,7 +18,7 @@ The same class drives the create page, where the kwarg is absent and the form re
 Walkthrough
 -----------
 
-Declare the Form Once
+Declare the form once
 ~~~~~~~~~~~~~~~~~~~~~
 
 The class lives outside ``page.py``, so it registers with shared scope.
@@ -40,7 +40,7 @@ Autodiscovery imports ``notes/forms.py`` on startup, so neither page module impo
 A copy declared in each ``page.py`` would be page-scoped instead, keeping the shared action name but giving every per-file registration its own action URL.
 See :doc:`/content/topics/forms/modelforms` for that distinction and :doc:`/content/topics/forms/actions` for the scope rules.
 
-Edit Page
+Edit page
 ~~~~~~~~~
 
 The edit page lives under a route that captures the lookup field.
@@ -66,7 +66,7 @@ See :ref:`topics-forms-actions-success` for both options.
 The ``{% form %}`` tag resolves the action by name, opens the ``<form>`` element, injects the CSRF token, and publishes ``form`` inside the block.
 It also emits a hidden ``_next_form_origin`` field with the page URL, so the dispatcher recovers the captured ``slug`` by resolving that path and the submission re-attaches to the same row.
 
-Create Page
+Create page
 ~~~~~~~~~~~
 
 The create page renders the same form on a route with no captured kwarg.
@@ -84,7 +84,7 @@ The create page renders the same form on a route with no captured kwarg.
 With no ``slug`` in the URL, ``get_initial`` returns an empty dict and the form renders fresh.
 ``self.save()`` then inserts a new row.
 
-URL names follow the ``page_{path}`` convention where path segments are joined with underscores and captured-parameter brackets are dropped.
+URL names follow the ``page_{name}`` convention where path segments are joined with underscores and captured-parameter brackets are dropped.
 See :doc:`/content/topics/file-router` for the full naming rules.
 
 Verification
@@ -119,7 +119,7 @@ Resolving the edit-page path yields the ``slug`` kwarg, ``instance_from_url`` lo
 
 The recovered kwargs come through the URL converters of the resolved route, so a ``[int:id]`` kwarg arrives as an integer on both the initial render and the re-render, while a slug stays a string.
 
-See Also
+See also
 --------
 
 .. seealso::

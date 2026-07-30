@@ -1,6 +1,6 @@
 .. _internals-static-pipeline:
 
-Static Pipeline
+Static pipeline
 ===============
 
 This page covers how the static subsystem discovers assets, collects them per request, deduplicates them, and emits the final HTML through the configured backend.
@@ -15,7 +15,7 @@ Overview
 The static pipeline runs entirely per request.
 ``AssetDiscovery`` walks the page and component trees on each render, builds ``StaticAsset`` records, and feeds them to the request ``StaticCollector``.
 
-Discovery and Injection
+Discovery and injection
 -----------------------
 
 .. mermaid::
@@ -31,7 +31,7 @@ Discovery and Injection
        Backend --> Tags["Render link or script tags"]
        Tags --> HTML["Final HTML"]
 
-Collector Slots
+Collector slots
 ---------------
 
 The collector keeps assets in named slots, one per registered slot, each backed by a placeholder token in templates.
@@ -46,7 +46,7 @@ Each slot matches the ``collector slot`` term in :doc:`/content/misc/glossary`.
        Finalize --> Emit["collect tag for each slot"]
        Emit --> Injected["html_injected"]
 
-Runtime Script Injection
+Runtime script injection
 ------------------------
 
 Under the ``AUTO`` script injection policy the static manager wraps the rendered page with the ``next.min.js`` runtime through ``NextScriptBuilder``.
@@ -99,7 +99,7 @@ Modules
 ``next.static.defaults``.
    ``register_defaults`` registers the built in ``css``, ``js``, and ``module`` kinds and the ``styles`` and ``scripts`` slots.
 
-Asset Kinds
+Asset kinds
 -----------
 
 Each kind maps an extension to a placeholder slot and a backend renderer method.
@@ -127,7 +127,7 @@ The pipeline fires four signals.
 
 A standalone zone render runs the same discovery but ships the collected assets in the patch envelope, so ``collector_finalized`` and ``html_injected`` fire only on full-page renders.
 
-Extension Points
+Extension points
 ----------------
 
 - Subclass ``StaticFilesBackend`` to change the rendered output.
@@ -136,7 +136,7 @@ Extension Points
 - Call ``default_stems.register`` in ``AppConfig.ready`` to recognise a new filename.
 - Subscribe to ``collector_finalized`` to inspect the collected set.
 
-See Also
+See also
 --------
 
 .. seealso::

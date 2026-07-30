@@ -11,21 +11,21 @@ The boundaries below follow from that shape, and each one names where the model 
    :local:
    :depth: 1
 
-Zones Render Synchronously
+Zones render synchronously
 --------------------------
 
 A zone renders standalone over the full page context in one synchronous pass.
 There is no server-side suspense flush, so a slow zone holds the response rather than streaming a placeholder and a later patch.
 A ``lazy=`` zone defers its first render behind a placeholder, but the deferral is a separate client-driven round trip, not a server-held stream.
 
-Real Time Is Server-Sent Events Only
+Real time is server-sent events only
 ------------------------------------
 
 The streaming transport is Server-Sent Events, one direction from server to client, see :doc:`sse`.
 There is no WebSocket transport, so client-to-server push over a persistent socket is outside the current model.
 A client that needs to send state changes uses the same forms and actions every page already has.
 
-Polling Zones Are Client-Timed
+Polling zones are client-timed
 ------------------------------
 
 ``poll=`` is a client timer, not a server push.
@@ -33,14 +33,14 @@ The runtime re-GETs the zone on the interval while the tab is visible, a hidden 
 A change the server wants to announce the moment it happens is a stream's job, not a poll's.
 See the poll section of :doc:`zones`.
 
-One Active Backend
+One active backend
 ------------------
 
 ``PARTIAL_BACKENDS`` activates its first entry and ignores the rest.
 Multi-backend selection is not supported, and a list with more than one entry earns the ``next.W071`` warning at ``manage.py check``.
 A different wire format is a subclass of ``PartialProtocolBackend`` installed as the single entry, see :doc:`extending`.
 
-Scripts in Patch HTML Never Run
+Scripts in patch HTML never run
 -------------------------------
 
 A zone's co-located assets ship on a standalone render, inline bodies and URLs alike, through the envelope's asset manifest.
@@ -52,18 +52,19 @@ What never runs is a ``<script>`` inside the patch HTML itself, which the applie
 Every asset executes once per page lifetime, so behaviour binds through the mount idioms rather than a load-time scan.
 See :doc:`co-located-js` and :doc:`/content/topics/static-assets/asset-kinds`.
 
-Patch-Inserted Assets Carry a Fixed Attribute Set
+Patch-inserted assets carry a fixed attribute set
 -------------------------------------------------
 
 A full page render emits an asset through the backend tag templates, so ``css_tag``, ``js_tag``, and ``module_tag`` decide which attributes the element carries.
 A patch has no server-rendered tag, so the runtime builds the element itself from a fixed set of attributes.
-A stylesheet gets ``rel``, ``href``, and the page nonce, a script or a module gets ``type``, ``async``, and the page nonce.
+A stylesheet gets ``rel``, ``href``, and the page nonce.
+A script gets the page nonce, a module additionally ``type="module"``, and both are pinned non-async so insertion order is execution order.
 An attribute a project adds to its tag templates, such as ``media``, ``integrity``, ``crossorigin``, or ``defer``, therefore reaches the browser on a full render and not on a patch.
 Subresource Integrity in particular does not apply to a patch-inserted asset, so a deployment that relies on it treats the assets a patch brings as outside that guarantee.
 An asset the full render already emitted stays in the runtime's loaded registry and is never re-inserted, so the gap covers only assets that arrive for the first time through an envelope.
 See :doc:`/content/security/static-assets` for the backend-side SRI recipe and :doc:`/content/topics/static-assets/backends` for the tag templates.
 
-See Also
+See also
 --------
 
 .. seealso::

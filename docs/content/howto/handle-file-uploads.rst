@@ -1,6 +1,6 @@
 .. _howto-file-uploads:
 
-Handle File Uploads
+Handle file uploads
 ===================
 
 Problem
@@ -143,7 +143,7 @@ Without a resolvable origin the invalid submission is rejected with HTTP 400, se
        assert response.status_code == 200
        assert b"This field is required" in response.content
 
-See Also
+See also
 --------
 
 .. seealso::

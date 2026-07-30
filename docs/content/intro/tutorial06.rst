@@ -1,6 +1,6 @@
 .. _intro-tutorial06:
 
-Live Updates with Partial Rendering
+Live updates with partial rendering
 ===================================
 
 Goal
@@ -19,12 +19,12 @@ The Notes application creates, edits, and deletes notes through registered actio
 The layout from :doc:`tutorial03` already pulls ``{% collect_scripts %}`` into the bottom of ``<body>``, and the static pipeline injects the client runtime through that tag.
 There is nothing new to install.
 
-Partial rendering layers on top of the ``POST`` then ``303`` then ``GET`` flow the framework already serves, covered in depth in :doc:`/content/topics/partial-rendering/index`.
+Partial rendering layers on top of the ``POST``, redirect, ``GET`` flow the framework already serves, covered in depth in :doc:`/content/topics/partial-rendering/index`.
 
 Walkthrough
 -----------
 
-Wrap the Note List in a Zone
+Wrap the note list in a zone
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 A ``{% zone %}`` block marks a slice of a template the server can re-render on its own.
@@ -49,7 +49,7 @@ Each ``data-next-key`` keeps a row stable when the list re-renders, so the morph
 Reload ``/`` and confirm the list looks unchanged.
 The zone is invisible until something targets it.
 
-Filter the List as You Type
+Filter the list as you type
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Add a search box above the list.
@@ -105,6 +105,8 @@ Update ``notes/pages/page.py`` so the ``notes`` context honours ``q``, and publi
 Both callables read ``request.GET`` the same way, so the zone fetch and the full page agree on the filter.
 The ``query`` context only feeds the input value, and the ``notes`` context drives the list.
 See :doc:`/content/topics/context` for how a page publishes named values.
+The hand-parsed ``request.GET`` keeps the example explicit.
+The ``DQuery`` marker from ``next.urls`` reads the same query parameter declaratively, see :doc:`/content/topics/dependency-injection`.
 
 There is no handler and no JavaScript.
 Typing ``gro`` debounces, then sends one zone ``GET``.
@@ -141,11 +143,12 @@ A new keystroke aborts an in-flight request, and a stale response that arrives a
 Without the runtime the same form is a plain ``GET`` that reloads the whole page with the filtered list.
 The provider reads ``request.GET`` either way, so the zone fetch reuses the exact query parsing the full page uses.
 
-Create a Note in Place
+Create a note in place
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 The create form from :doc:`tutorial04` already posts through a registered action.
 Teach its handler to answer a partial request with a patch instead of a redirect.
+Update the ``CreateNoteForm`` class in ``notes/forms.py`` and merge the new imports, keeping ``DeleteNoteForm`` and its imports in place.
 
 .. code-block:: python
    :caption: notes/forms.py, the create form
@@ -189,7 +192,7 @@ The morph keeps the caret in the title field, so a visitor can add several notes
 Submit a note with a title and watch it appear at the top of the list with no reload.
 Submit with an empty title and the form re-renders its error in place, the list untouched.
 
-How It Degrades
+How it degrades
 ~~~~~~~~~~~~~~~
 
 Turn JavaScript off and exercise the same page.
@@ -217,7 +220,7 @@ Filtering re-renders one zone as the visitor types, creating a note refreshes th
 No new models, no new URLs, and no client code.
 The behaviour rides the action dispatch and the file router the application already had.
 
-Common Pitfalls
+Common pitfalls
 ---------------
 
 The filter reloads the whole page instead of swapping the list.
@@ -233,7 +236,7 @@ The new note appears twice for a moment.
 
 See :doc:`/content/faq/troubleshooting` for the full catalog of errors and fixes.
 
-Next Steps
+Next steps
 ----------
 
 The Notes application is complete and live.

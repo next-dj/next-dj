@@ -1,6 +1,6 @@
 .. _intro:
 
-Getting Started
+Getting started
 ===============
 
 This section gets you from zero to a running next.dj project.
@@ -16,7 +16,7 @@ The six tutorial parts build a small Notes application from there.
 :doc:`install`
    Install the package, register it in Django, and serve a single page.
 
-.. rubric:: Build the Notes App
+.. rubric:: Build the Notes app
 
 :doc:`tutorial01`
    Create the Notes application, model the data, and serve the index page.

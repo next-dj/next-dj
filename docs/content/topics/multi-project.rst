@@ -1,6 +1,6 @@
 .. _topics-multi-project:
 
-Multi-Project Setup
+Multi-project setup
 ===================
 
 A multi project setup hosts several Django projects from one repository.
@@ -11,7 +11,7 @@ This page covers the directory shape, the ``DIRS`` configuration, the shared com
    :local:
    :depth: 2
 
-When to Use Multi Project Layout
+When to use multi project layout
 --------------------------------
 
 Use this layout when more than one project needs to share components, layouts, and static assets without duplicating code.
@@ -21,7 +21,7 @@ For recipes focused on components only, see :doc:`/content/howto/share-component
 
 Reach for the single project layout in :doc:`project-layout` when only one Django project lives in the repository.
 
-Directory Shape
+Directory shape
 ---------------
 
 A typical multi project repository looks like this.
@@ -66,7 +66,7 @@ Two pieces stand out.
 - ``_shared/`` holds components and static files that are common to every project.
 - Each project under ``projects/`` has its own ``config/`` and its own ``chrome/`` directory.
 
-DIRS Configuration
+DIRS configuration
 ------------------
 
 Each project points at the shared directory through ``DIRS``.
@@ -105,7 +105,7 @@ The component backend reads from the shared components folder.
 Each project picks its own ``COMPONENTS_DIR`` and its own ``PAGES_DIR``.
 Different projects can use different names without affecting one another.
 
-Static Files
+Static files
 ------------
 
 The shared directory ships static files alongside components.
@@ -121,7 +121,7 @@ The shared directory ships static files alongside components.
 The Django static files finder picks up files from both directories.
 The static collector emits co-located CSS and JS sitting next to any component, page, or layout in either tree.
 
-Shared Components Convention
+Shared components convention
 ----------------------------
 
 Shared components live inside ``_shared/_components/``.
@@ -132,7 +132,7 @@ The framework does not consult ``COMPONENTS_DIR`` when it scans the ``DIRS`` roo
 The shared components folder ships UI primitives such as buttons, cards, dialogs, and form widgets.
 Each project consumes them through ``{% component "name" %}`` without redeclaring anything.
 
-Per Project Components
+Per project components
 ----------------------
 
 A project can ship project-specific components alongside the shared kit.
@@ -160,7 +160,7 @@ When two ``DIRS`` roots score equally the resolver breaks the tie first by compo
 Roots are scanned in ``DIRS`` order, so an entry placed earlier in the list shadows a same-named component from a later entry.
 Prefer distinct names for project-specific components over relying on this ordering.
 
-Hot Reload
+Hot reload
 ----------
 
 Every directory listed in a component backend ``DIRS`` contributes its own ``**/component.py`` watch spec to the :doc:`autoreloader </content/internals/autoreload>`.
@@ -170,29 +170,29 @@ A change to a ``component.py`` inside ``_shared/_components/`` restarts only the
 
 The ``components_registered`` signal includes the full set after each reload so long-lived processes can refresh their caches.
 
-Common Variations
+Common variations
 -----------------
 
-Repository Wide Layout
+Repository wide layout
 ~~~~~~~~~~~~~~~~~~~~~~
 
 Put a single layout in ``_shared/chrome/`` and add the path to the ``PAGE_BACKENDS`` ``DIRS`` of every project.
 Every project then renders inside the same shell.
 
-Per Tenant Project
+Per tenant project
 ~~~~~~~~~~~~~~~~~~
 
 Run one project per tenant from the same repository.
 Each project ships its own settings, chrome, and applications.
 The shared components folder keeps the design consistent across tenants.
 
-Domain Specific Components
+Domain specific components
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Add a ``_internal/`` shared folder for components that should only be visible to a subset of projects.
 Reference it from the appropriate projects through ``DIRS``.
 
-See Also
+See also
 --------
 
 .. seealso::

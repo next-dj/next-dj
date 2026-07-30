@@ -1,9 +1,9 @@
 .. _ref-static:
 
-Static Reference
+Static reference
 ================
 
-Module Summary
+Module summary
 --------------
 
 ``next.static`` exposes the asset discovery, the request-scoped collector, and the backend chain.
@@ -58,7 +58,7 @@ See :doc:`/content/topics/static-assets/js-context` for the runtime script optio
 The init payload reserves the ``$csrf`` and ``$dev`` keys for the framework, so an automatically injected payload drops a project key of either name before it reaches ``window.Next.context``.
 See :doc:`/content/topics/static-assets/js-context` for the ownership rule and the ``next.W075`` check that reports a collision.
 
-JS Context Serializer
+JS context serializer
 ~~~~~~~~~~~~~~~~~~~~~
 
 .. automodule:: next.static.serializers
@@ -70,7 +70,7 @@ Defaults
 .. automodule:: next.static.defaults
    :members:
 
-Staticfiles Finder
+Staticfiles finder
 ~~~~~~~~~~~~~~~~~~
 
 .. automodule:: next.static.finders
@@ -92,7 +92,7 @@ Signals
 
 See :doc:`signals` and :doc:`/content/topics/static-assets/signals` for the static signals (``asset_registered``, ``collector_finalized``, ``html_injected``, ``backend_loaded``).
 
-See Also
+See also
 --------
 
 .. seealso::

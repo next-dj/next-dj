@@ -10,7 +10,7 @@ Each section below states what its mechanism replaces and where to register it.
    :local:
    :depth: 2
 
-The Five Mechanisms
+The five mechanisms
 -------------------
 
 Backend.
@@ -132,7 +132,7 @@ Call ``default_stems.register(...)`` from ``AppConfig.ready`` so the new stem is
        def ready(self) -> None:
            default_stems.register("component", "theme")
 
-Autoreload Watch Specs
+Autoreload watch specs
 ~~~~~~~~~~~~~~~~~~~~~~
 
 The development reloader watches the page and component trees by default.
@@ -165,7 +165,7 @@ Duplicate ``(path, glob)`` pairs are dropped, so registering the same spec twice
 Subscribe to that signal to observe or audit the resolved spec set.
 See :doc:`/content/internals/autoreload` for the full watcher pipeline.
 
-Protocols and Abstract Base Classes
+Protocols and abstract base classes
 -----------------------------------
 
 A protocol is a structural contract.
@@ -223,7 +223,7 @@ Connect a receiver to react to a framework event.
 The signal catalog lives in :doc:`signals`.
 The patterns are uniform across the framework.
 
-Choosing Between Mechanisms
+Choosing between mechanisms
 ---------------------------
 
 Picking the right mechanism saves work.
@@ -238,15 +238,15 @@ Use the entries below as a quick map.
 - **Change how URLs land in HTML.** Customise a static backend.
 - **Vary URLs by request.** Use a request-aware static backend.
 - **Inspect every rendered page.** Subscribe to the ``page_rendered`` signal.
-- **Watch extra directories during development.** Call ``register_autoreload_watch_spec``. See *Autoreload Watch Specs* above.
+- **Watch extra directories during development.** Call ``register_autoreload_watch_spec``. See *Autoreload watch specs* above.
 
-Worked Examples
+Worked examples
 ---------------
 
 The repository ``examples/`` tree ships complete projects for every major extension mechanism.
 :doc:`/content/misc/examples` lists each folder, a one-line focus, links to GitHub, and the sections of this manual that explain the same techniques.
 
-See Also
+See also
 --------
 
 .. seealso::

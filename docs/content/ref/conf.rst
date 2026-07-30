@@ -1,9 +1,9 @@
 .. _ref-conf:
 
-Configuration Reference
+Configuration reference
 =======================
 
-Module Summary
+Module summary
 --------------
 
 ``next.conf`` merges user ``NEXT_FRAMEWORK`` settings with framework defaults.
@@ -12,7 +12,7 @@ It exposes the merged-settings object, the import helpers, the ``extend_default_
 Public API
 ----------
 
-Settings Class
+Settings class
 ~~~~~~~~~~~~~~
 
 .. automodule:: next.conf.settings
@@ -30,7 +30,7 @@ Helpers
 .. automodule:: next.conf.helpers
    :members:
 
-Import Utilities
+Import utilities
 ~~~~~~~~~~~~~~~~
 
 .. autofunction:: next.conf.imports.import_class_cached
@@ -47,7 +47,7 @@ Signals
 
 See :doc:`signals` for the ``settings_reloaded`` signal.
 
-See Also
+See also
 --------
 
 .. seealso::

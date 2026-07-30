@@ -1,6 +1,6 @@
 .. _topics-forms-wizard-backend:
 
-Wizard Backend
+Wizard backend
 ==============
 
 A wizard backend persists per-step draft data between requests.
@@ -12,7 +12,7 @@ This page covers the ``FormWizardBackend`` contract, the bundled ``SessionFormWi
    :local:
    :depth: 2
 
-The Backend Contract
+The backend contract
 --------------------
 
 ``next.forms.FormWizardBackend`` is an abstract base class with three methods.
@@ -32,7 +32,7 @@ Backends treat the id as an opaque string.
 A backend subclasses ``FormWizardBackend`` and implements all three methods.
 The wizard reads and writes through this contract alone, so the backend choice is invisible to the wizard class.
 
-The Session Backend
+The session backend
 -------------------
 
 ``next.forms.SessionFormWizardBackend`` is the default backend.
@@ -47,7 +47,7 @@ Drafts grow the session with each saved step.
 A database-backed or cache-backed session absorbs that growth, while the signed-cookie session engine carries the whole session in the cookie and runs into its size limit quickly.
 Prefer the cache backend for a wizard with large drafts when the project uses cookie-backed sessions.
 
-The Value Codec
+The value codec
 ~~~~~~~~~~~~~~~
 
 Sessions serialise to JSON, and a step's ``cleaned_data`` routinely holds values JSON cannot carry.
@@ -67,7 +67,7 @@ A value the codec does not recognise raises ``ImproperlyConfigured`` naming the 
 The error suggests the fix.
 Configure ``CacheFormWizardBackend`` or a custom ``FormWizardBackend`` for cleaned data that does not fit JSON.
 
-The Cache Backend
+The cache backend
 -----------------
 
 ``next.forms.CacheFormWizardBackend`` is the bundled alternative.
@@ -97,7 +97,7 @@ For an anonymous visitor the backend creates a session on the first saved step, 
 A draft started before login stays under the pre-login key unless the login flow rotates the session, in which case the visitor loses the draft.
 Start a wizard after login, or carry the draft across the rotation, when continuity matters for anonymous starts.
 
-Trust and Tamperability
+Trust and tamperability
 -----------------------
 
 .. warning::
@@ -108,7 +108,7 @@ Trust and Tamperability
 
    For a sensitive flow, use a signed or encrypted backend so a tampered draft is rejected, and re-check cross-step invariants inside ``done`` rather than trusting the merged dict.
 
-Sensitive Data in Drafts
+Sensitive data in drafts
 ------------------------
 
 .. warning::
@@ -121,7 +121,7 @@ Sensitive Data in Drafts
    The wizard calls ``clear`` after a successful ``done``, so a draft that never completes is what lingers.
    See :doc:`/content/deployment/checklist` for the production review.
 
-Draft Expiry Mid-Wizard
+Draft expiry mid-wizard
 -----------------------
 
 A draft can vanish between two steps when the session ends, when the cache backend's ``TIMEOUT`` is short, or when the cache evicts under pressure.
@@ -168,7 +168,7 @@ Switch to the cache backend to point drafts at a dedicated cache alias and short
 
 The ``next.E051`` system check fires when the dict is malformed, names a backend that cannot be imported, or names a class that is not a ``FormWizardBackend`` subclass.
 
-Writing a Custom Backend
+Writing a custom backend
 ------------------------
 
 A custom backend subclasses ``FormWizardBackend`` and implements the three methods.
@@ -219,16 +219,15 @@ Point ``FORM_WIZARD_BACKEND["BACKEND"]`` at the class to use it.
        },
    }
 
-The framework instantiates the backend lazily on first use and caches the instance, so the constructor runs once per process.
-A signed-cookie store or an external draft service follows the same shape, reading its own options from ``OPTIONS``.
-The framework reads ``FORM_WIZARD_BACKEND`` on first use, caches the result, and resets the cache when settings reload.
+The framework reads ``FORM_WIZARD_BACKEND`` on first use, caches the instance for the process, and resets the cache when settings reload, so the constructor runs once.
 The test isolation helper :func:`next.testing.reset_form_registration_state` resets it between cases.
+A signed-cookie store or an external draft service follows the same shape, reading its own options from ``OPTIONS``.
 
 .. note::
 
    The lazy instance is internal and application code never touches it directly.
 
-See Also
+See also
 --------
 
 .. seealso::

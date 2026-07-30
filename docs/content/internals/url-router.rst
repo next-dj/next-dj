@@ -1,6 +1,6 @@
 .. _internals-url-router:
 
-URL Router
+URL router
 ==========
 
 This page covers how the file router scans the filesystem, builds URL patterns, and reloads at runtime.
@@ -61,7 +61,7 @@ Modules
 ``next.urls.reverse``.
    ``page_reverse``, ``page_reverse_lazy``, and ``with_query`` helpers.
 
-URL Name Computation
+URL name computation
 --------------------
 
 Names follow ``next:page_<segments>`` where the segments come from the directory path.
@@ -76,7 +76,7 @@ The default ``page_{name}`` produces the names listed in :doc:`/content/topics/f
 The name computation collapses ``/``, brackets, ``:``, ``-``, and ``_`` into a single underscore, so distinct routes such as ``foo-bar`` and ``foo_bar`` can produce the same name.
 The ``check_reverse_name_collisions`` system check walks every page tree of every router, computes the reverse name of each route through the same parser, and fails with ``next.E039`` when two distinct routes collapse to one name, listing the conflicting paths.
 
-Resolution Algorithm
+Resolution algorithm
 --------------------
 
 ``include("next.urls")`` mounts a single ``TrieURLResolver`` that wraps the lazy router and form-action pattern sequence.
@@ -103,7 +103,7 @@ A 404 goes through the fallback, so its ``tried`` is identical to the linear sca
 Setting ``URL_RESOLVER`` in ``NEXT_FRAMEWORK`` to ``"django.urls.resolvers.URLResolver"`` replaces the trie resolver with the stock Django class and routes every call through the plain linear scan.
 The resolver is rebuilt on settings reload, so the swap takes effect without a restart.
 
-Reload Mechanics
+Reload mechanics
 ----------------
 
 ``router_manager.reload()`` does four things in order.
@@ -116,7 +116,7 @@ Reload Mechanics
 The next request observes the new patterns without a process restart.
 Long lived processes such as websocket subscribers listen for the signal to refresh cached URL references.
 
-Multiple Backends
+Multiple backends
 -----------------
 
 The settings list accepts more than one backend.
@@ -128,7 +128,7 @@ The comparison is string equality after bracket conversion, so semantic overlap 
 The same collection pass owns the duplicate parameter report, failing with ``next.E028`` and listing every conflicting name in one message, and reports a router whose collection raises as ``next.E016``.
 ``check_reverse_name_collisions`` reuses the collection but drops its errors, so ``next.E016`` and ``next.E028`` never appear twice.
 
-Extension Points
+Extension points
 ----------------
 
 - Subclass ``RouterBackend`` to feed the resolver from a different source, or subclass ``FileRouterBackend`` to add patterns or augment naming on the file-based backend.
@@ -137,7 +137,7 @@ Extension Points
   It fires once per discovered pattern with ``sender=FileRouterBackend`` and the ``url_path`` and ``file_path`` keyword arguments.
   See :doc:`/content/ref/signals`.
 
-See Also
+See also
 --------
 
 .. seealso::

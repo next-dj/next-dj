@@ -204,7 +204,7 @@ Terms used throughout the next.dj documentation.
       A named slice of a page template wrapped in ``{% zone %}``.
       The server re-renders the slice standalone, and patches address it by its name.
 
-See Also
+See also
 --------
 
 .. seealso::

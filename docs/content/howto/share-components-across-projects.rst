@@ -1,6 +1,6 @@
 .. _howto-share-components-across-projects:
 
-Share Components Across Projects
+Share components across projects
 ================================
 
 Problem
@@ -66,7 +66,7 @@ Add the shared directory to each project.
 Repeat the same block in ``projects/site/config/settings.py``.
 Each project now sees ``button``, ``card``, and every other component in the shared folder.
 
-Use the Components
+Use the components
 ~~~~~~~~~~~~~~~~~~
 
 .. code-block:: jinja
@@ -76,7 +76,7 @@ Use the Components
 
 The framework resolves the component by name through the component visibility resolver.
 
-Per Project Overrides
+Per project overrides
 ~~~~~~~~~~~~~~~~~~~~~
 
 A project can override a shared component by placing a component with the same name in its own components root.
@@ -89,7 +89,7 @@ A project can override a shared component by placing a component with the same n
 The project-local version wins because the visibility resolver scores the project's page-tree root and a global ``DIRS`` root equally, then breaks the tie in favour of the page-tree component.
 A page-tree component shadows a same-name ``DIRS`` component at equal score, so the project's own copy overrides the shared one regardless of which root was registered first.
 
-Static Files
+Static files
 ~~~~~~~~~~~~
 
 Add the shared static directory to ``STATICFILES_DIRS`` if the components ship CSS or images outside the co-located stems.
@@ -108,7 +108,7 @@ Verification
 Run each project independently with ``uv run python manage.py runserver`` from inside the project directory.
 Confirm that the shared component renders in both projects.
 
-See Also
+See also
 --------
 
 .. seealso::

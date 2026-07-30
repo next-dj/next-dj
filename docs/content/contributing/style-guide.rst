@@ -1,6 +1,6 @@
 .. _contributing-style-guide:
 
-Documentation Style Guide
+Documentation style guide
 =========================
 
 Every documentation page follows the rules on this page.
@@ -10,7 +10,7 @@ Reviewers cite this guide during pull request review.
    :local:
    :depth: 2
 
-Language and Tone
+Language and tone
 -----------------
 
 The documentation is written in English.
@@ -31,7 +31,7 @@ Forbidden in running prose.
 Allowed everywhere.
    These characters belong in code, paths, RST role syntax, headings, frontmatter, and inside list items that name two parallel items.
 
-ASCII Art and Pipes
+ASCII art and pipes
 -------------------
 
 ASCII art is forbidden in running prose.
@@ -62,10 +62,12 @@ Headings
 
 RST underlines use ``=``, ``-``, ``~``, ``^``.
 One H1 per file.
-Title Case for every heading.
+Sentence case for every heading.
+Capitalize the first word, proper nouns (Django, Python, Sphinx, Vite), and acronyms (URL, DI, CSRF).
+Code identifiers in headings keep their exact spelling.
 A heading never ends with punctuation.
 
-Code Blocks
+Code blocks
 -----------
 
 Use ``.. code-block:: <language>`` with an explicit language.
@@ -83,7 +85,7 @@ Forbidden inside code blocks meant to be runnable.
    ``...`` ellipses.
    Shell prompts (``$``, ``>>>``) except in transcript blocks.
 
-Cross References
+Cross references
 ----------------
 
 Use ``:doc:`` for whole page links.
@@ -94,7 +96,7 @@ Admonitions
 -----------
 
 Do not use ``.. versionadded::`` or ``.. versionchanged::`` in user-facing documentation.
-Release history belongs in the project changelog, not in the manual.
+Release history belongs in the release notes of each pull request, not in the manual.
 This matches the version policy in :doc:`writing-documentation`.
 
 Allowed types.
@@ -105,7 +107,7 @@ Allowed types.
 
 Each admonition holds one paragraph.
 
-Inline Code
+Inline code
 -----------
 
 Double back ticks for code, paths, configuration keys, and signal names.
@@ -116,13 +118,13 @@ Lists
 Each list item is a complete sentence ending in a period.
 Items in one list share grammar (all noun phrases, all verb phrases, all complete sentences).
 
-Page Templates
+Page templates
 --------------
 
 Read :doc:`writing-documentation` for the section specific templates.
 Templates apply consistently inside each section.
 
-Pull Request Checklist
+Pull request checklist
 ----------------------
 
 A documentation pull request lands when.
@@ -144,7 +146,7 @@ Running prose paragraphs avoid em dashes and semicolons, the same as RST prose.
 Semicolons do not join independent clauses in any context.
 Each independent clause begins a new sentence.
 
-See Also
+See also
 --------
 
 .. seealso::

@@ -1,6 +1,6 @@
 .. _topics-forms-field-components:
 
-Field Components
+Field components
 ================
 
 Changing an input's classes or accessibility markup across a project usually means editing every form, or overriding Django's project-wide ``FORM_RENDERER`` and its widget templates.
@@ -64,7 +64,7 @@ The constructor accepts a keyword-only ``attrs`` dict for persistent HTML attrib
 The ``attrs`` dict is merged Django-style through :meth:`~django.forms.Widget.build_attrs`, the same as on any Django widget, and render-time attributes win on a collision.
 Every other keyword argument is a component prop spread to the top level of the component context.
 
-The Context Contract
+The context contract
 --------------------
 
 When a field renders, the component template receives the values the bound field produced.
@@ -120,7 +120,7 @@ The widget writes them last, so they always win over a same-named entry from ``a
      class="flex h-10 w-full rounded-md border px-3 py-2 text-sm"
    />
 
-Scope and Registration
+Scope and registration
 ----------------------
 
 A ``ComponentWidget`` resolves its component the same way the ``{% component %}`` tag does, walking outward from the page's location.
@@ -149,7 +149,7 @@ The ``next.W054`` system check warns at startup when a ``ComponentWidget`` refer
 It is a warning rather than an error because the component may come from an app imported later in the boot sequence.
 A reference that still fails to resolve at render time raises ``RuntimeError``.
 
-Before and After
+Before and after
 ----------------
 
 Without ``ComponentWidget``, a form file carries a per-file ``INPUT_CLASS`` string and wraps it in Django widgets.
@@ -181,7 +181,7 @@ Every form that wants the same look copies the constant.
 The Tailwind classes now live once in the shared ``component.djx``.
 The ``INPUT_CLASS`` constant disappears from the form file, and a styling change happens in one place.
 
-When Not To Use It
+When not to use it
 ------------------
 
 Reach for a plain Django widget when it is simpler.
@@ -202,7 +202,7 @@ The ``next.W055`` system check warns at startup for the first two cases, where t
 The widget renders through next.dj's component runtime and bypasses Django's form renderer, so the project's ``FORM_RENDERER`` theming does not apply, and widget introspection through ``subwidgets`` or a ``BoundWidget`` does not reflect the rendered output.
 This is the intended contract, since the component is itself the rendering and theming layer.
 
-See Also
+See also
 --------
 
 .. seealso::

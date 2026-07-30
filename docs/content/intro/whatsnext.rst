@@ -1,12 +1,10 @@
 .. _intro-whatsnext:
 
-What to Read Next
+What to read next
 =================
 
 The tutorial covers the core flow.
 After :doc:`tutorial06`, read the topics, then the how-to guides, then the reference, then the internals when you need depth beyond the Notes walkthrough.
-
-The hubs below replace long subsystem-by-subsystem lists.
 
 - :doc:`/content/topics/index` explains each subsystem.
 - :doc:`/content/howto/index` answers task-shaped questions.
@@ -15,10 +13,10 @@ The hubs below replace long subsystem-by-subsystem lists.
 - :doc:`/content/deployment/index` and :doc:`/content/security/index` cover operations.
 - :doc:`/content/misc/examples` catalogues the repository ``examples/`` projects with links and doc cross-references.
 
-Learning Paths
+Learning paths
 --------------
 
-First Full-Stack App
+First full-stack app
 ~~~~~~~~~~~~~~~~~~~~
 
 1. :doc:`install`
@@ -30,7 +28,7 @@ First Full-Stack App
 7. :doc:`/content/topics/static-assets/index`
 8. :doc:`/content/deployment/checklist`
 
-Customize the Pipeline
+Customize the pipeline
 ~~~~~~~~~~~~~~~~~~~~~~
 
 1. :doc:`/content/topics/extending`
@@ -42,7 +40,7 @@ Customize the Pipeline
 7. :doc:`/content/howto/add-a-custom-template-loader`
 8. :doc:`/content/howto/observe-framework-signals`
 
-Multi-Tenant or Multi-Project Setup
+Multi-tenant or multi-project setup
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 1. :doc:`/content/topics/multi-project`

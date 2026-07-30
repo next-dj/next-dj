@@ -1,6 +1,6 @@
 .. _howto-stream-live-updates-with-sse:
 
-Stream Live Updates With SSE
+Stream live updates with SSE
 ============================
 
 Problem
@@ -25,7 +25,7 @@ For the WSGI and ASGI contract, the echo suppression, and why the fan-out uses `
 Walkthrough
 -----------
 
-Build the Broker
+Build the broker
 ~~~~~~~~~~~~~~~~
 
 The broker keeps one :class:`threading.Condition` and one monotonic revision counter per poll.
@@ -90,7 +90,7 @@ A :class:`threading.Event` with ``clear()`` would drop events under fan-out, bec
 A wake timeout loops without yielding.
 A sync source under WSGI sends no keepalive on its own, a documented limitation of the stream, so an idle keepalive is the source's job if a deployment needs one.
 
-Stream From a Page Module
+Stream from a page module
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Place a page module at the ``stream/`` route and return a ``PatchEventStream`` from ``render``.
@@ -128,7 +128,7 @@ The pairing is a contract.
 An async source requires ASGI and a sync source requires WSGI.
 A mismatch raises :exc:`~django.core.exceptions.ImproperlyConfigured` rather than silently hanging the stream.
 
-Fan Out From the Vote Signal
+Fan out from the vote signal
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The vote handler runs the atomic ``UPDATE`` and returns its result.
@@ -165,7 +165,7 @@ The signal carries the bound form after validation and the request, so the recei
 
 Threading the mutation's ``X-Next-Request-Id`` to ``publish`` lets the stream echo it, so the voter's own tab drops the fan-out and applies only the morph from its own POST response.
 
-Connect From the Browser
+Connect from the browser
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The vote page wraps its results in a zone and connects the stream with a ``data-next-sse`` element.
@@ -195,7 +195,7 @@ Peek at the stream from a second terminal while a server runs.
 The ``-N`` flag disables curl output buffering so frames appear as the server flushes them.
 Vote in the browser and a ``next-patches`` event arrives within milliseconds, with every open tab re-fetching its zone at the same time.
 
-See Also
+See also
 --------
 
 .. seealso::

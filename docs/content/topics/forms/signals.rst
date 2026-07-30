@@ -1,6 +1,6 @@
 .. _topics-forms-signals:
 
-Form Signals
+Form signals
 ============
 
 The forms subsystem emits ``action_registered``, ``action_dispatched``, ``form_validation_failed``, ``wizard_step_submitted``, ``wizard_completed``, and ``form_access_denied`` from ``next.forms.signals``.
@@ -16,7 +16,7 @@ Read what you need from it inside the receiver and do not retain the object past
    :local:
    :depth: 2
 
-Connecting Receivers
+Connecting receivers
 --------------------
 
 Receivers live in a module that Django does not import on its own.
@@ -44,7 +44,7 @@ The sender is the backend class.
 
 The payload carries ``action_name``, ``uid``, ``form_class``, ``wizard_class``, ``file_path``, ``scope``, and ``handler``.
 Exactly one of ``handler``, ``form_class``, or ``wizard_class`` identifies the registered target, except the ``@action(form_class=...)`` path which supplies a handler and a form factory together.
-``form_class`` is the form class for a class-bound registration, a factory callable for a dynamic formset action, or ``None`` otherwise.
+``form_class`` is the form class for a class-bound registration, a factory callable for any dynamic ``form_class`` registration, or ``None`` otherwise.
 ``wizard_class`` is the ``FormWizard`` subclass for a wizard registration, ``None`` otherwise.
 ``file_path`` is the absolute path to the file where the class or function was declared.
 ``scope`` is ``"page"`` for anchor-file declarations (``page.py``, ``component.py``) and ``"shared"`` for all other files.
@@ -84,13 +84,7 @@ A step advance runs no handler and reports ``duration_ms`` as ``0.0``, and the f
 The sender is ``FormActionDispatch``.
 
 The payload carries ``action_name``, ``uid``, ``request``, ``form``, ``url_kwargs``, ``duration_ms``, ``response_status``, and ``dep_cache``.
-
-``uid``.
-   The registry identity of the action, matching the dispatch URL and the ``data-next-action`` attribute, or ``None`` for a backend without meta.
-
-``request``.
-   The live ``HttpRequest``.
-   Do not retain it past the receiver call.
+``uid`` and ``request`` follow the shared contract described at the top of this page.
 
 ``form``.
    The bound form after the handler returns normally and the response has been coerced, or ``None`` for a handler-only action registered without a ``form_class``.
@@ -259,9 +253,10 @@ The dispatcher builds the payload and sends the signal only when at least one re
            request.user,
        )
 
-A receiver runs inside the dispatch, so keep it cheap and do not retain the request past the call.
+A receiver runs inside the dispatch, so keep it cheap.
+``uid`` and ``request`` follow the shared contract described at the top of this page.
 
-See Also
+See also
 --------
 
 .. seealso::

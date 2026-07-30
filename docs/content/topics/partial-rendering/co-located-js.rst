@@ -1,6 +1,6 @@
 .. _topics-partial-rendering-co-located-js:
 
-Co-located JavaScript Under Partial Updates
+Co-located JavaScript under partial updates
 ===========================================
 
 A morph replaces DOM nodes.
@@ -8,7 +8,8 @@ A node that arrives in a patch was not in the document when the page loaded, and
 Co-located JavaScript has to survive that, and the rule is to attach behaviour to something that outlives the morph rather than to the markup itself.
 
 Each asset runs exactly once per page lifetime, a URL deduped by its address resolved against the document base, query included and fragment ignored, and an inline body by its content.
-The registry behind that promise is built from the document while it parses, so an asset a third party inserts after parsing ends stays outside it and a later manifest naming the same URL or the same inline body inserts it a second time.
+The registry behind that promise is built from the document while it parses.
+An asset a third party inserts after parsing ends stays outside it, so a later manifest naming the same URL or the same inline body inserts it a second time.
 A module loaded for the first zone that needs it is not re-run when a later patch brings more of the same markup.
 A module that wires itself up at load time finds the markup that exists at load time and nothing later.
 Use one of the three idioms below.
@@ -17,7 +18,7 @@ Use one of the three idioms below.
    :local:
    :depth: 1
 
-Delegate on the Document
+Delegate on the document
 ------------------------
 
 Bind one listener on ``document`` and match the target inside the handler.
@@ -52,13 +53,14 @@ The event bubbles, so a single document listener that checks ``event.target`` ca
 This is the idiom for behaviour that owns one element and needs to run when that element appears.
 
 ``next:mounted`` fires on the touched nodes of a patch, the roots an op replaces or morphs and the rows a merge brings, not on every descendant of a morphed zone.
-A deeply nested element that the morph reconciles in place is not a touched node, so ``event.target`` is the touched root above it and ``event.target.matches("[data-chart]")`` never matches the inner element.
+A deeply nested element that the morph reconciles in place is not a touched node.
+``event.target`` is the touched root above it, so ``event.target.matches("[data-chart]")`` never matches the inner element.
 For an element that lands deep inside a morphed subtree reach for ``Next.partial.onMount``, which scans the inserted subtree with ``querySelectorAll`` and runs for every match, descendants included.
 
 The ``next:mounted`` event lives only on ``document.addEventListener``.
 It never reaches the ``Next.on`` bus, so ``Next.on("next:mounted")`` is a silent no-op, as are ``Next.on("next:removed")``, ``Next.on("next:morph-element")``, and ``Next.on("next:morph-attribute")``.
 
-Register With Next.partial.onMount
+Register with Next.partial.onMount
 ----------------------------------
 
 ``Next.partial.onMount(selector, callback)`` is a re-executable registry.
@@ -78,7 +80,7 @@ The callback also re-runs for a matching element the morph reconciled in place, 
 Guard the setup with a data flag or a ``WeakSet`` so a second run over the same element does nothing.
 Reach for this when a module wired itself on ``DOMContentLoaded`` before and needs the same per-element setup to keep working under partial updates.
 
-The Anti-Pattern
+The anti-pattern
 ----------------
 
 Scanning the DOM at module load is the trap.
@@ -102,7 +104,7 @@ The search catalogue's minimum-length hint and the wiki's markdown preview both 
 With the runtime's dev mode on, that is with Django ``DEBUG``, the runtime prints a ``console.warn`` for every ``<script>`` it neutralises out of a patch.
 That surfaces a widget which died silently rather than letting it fail in quiet.
 
-Scripts in Patches Never Run
+Scripts in patches never run
 ----------------------------
 
 A ``<script>`` inside patch HTML is never executed by any insertion path.
@@ -113,13 +115,15 @@ See :doc:`/content/security/csp-and-nonce` for how this interacts with a Content
 
 What the applier neutralises is the script inside the patch markup itself.
 The zone's co-located assets travel separately, in the envelope's asset manifest, and those do load.
-A stylesheet, a classic script, or a module URL the page has not seen is inserted, and so is an inline body it has not seen whose kind wraps it in the element the verb builds, each once per page lifetime.
-The runtime inserts an asset by the verb the server derived from the kind's renderer, so a custom kind registered with ``render_link_tag``, ``render_script_tag``, or ``render_module_tag`` arrives the same way the built-in kinds do.
+A stylesheet, a classic script, or a module URL the page has not seen is inserted, each once per page lifetime.
+An inline body it has not seen is inserted the same way when its kind wraps it in the element the verb builds.
+The runtime inserts an asset by the verb the server derived from the kind's renderer.
+A custom kind registered with ``render_link_tag``, ``render_script_tag``, or ``render_module_tag`` therefore arrives the same way the built-in kinds do.
 A kind registered with a custom renderer carries no verb and is skipped, which the ``next.W074`` check reports at ``manage.py check``.
 Behaviour co-located with a zone therefore arrives on a standalone zone render.
 It must still use the three idioms above because of the once-per-page execution, not because a delivery channel is missing.
 
-See Also
+See also
 --------
 
 .. seealso::

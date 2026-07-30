@@ -1,6 +1,6 @@
 .. _howto-resolve-feature-flags-with-di:
 
-Resolve Feature Flags With DI
+Resolve feature flags with DI
 =============================
 
 Problem
@@ -229,7 +229,7 @@ A second context function that also asks for ``DFlag[Flag]`` triggers the provid
 ``get_cached_flag`` shares Django's :class:`~django.core.cache.backends.locmem.LocMemCache` entry, so the lookup is served from process memory rather than the database.
 The framework's per-resolution cache only memoises ``Depends("name")`` callables, so identity across calls comes from the LocMem cache the helper builds.
 
-See Also
+See also
 --------
 
 .. seealso::

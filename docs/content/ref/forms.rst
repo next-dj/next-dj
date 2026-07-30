@@ -1,18 +1,18 @@
 .. _ref-forms:
 
-Forms Reference
+Forms reference
 ===============
 
-Module Summary
+Module summary
 --------------
 
 ``next.forms`` exposes form base classes, the ``@action`` decorator,
 formset helpers, frozen field and form specs,
 and a curated set of commonly used Django form fields and widgets.
 Any public ``django.forms`` name is also importable from ``next.forms``,
-see `Fields and Widgets`_ for the contract.
+see `Fields and widgets`_ for the contract.
 
-API Tiers
+API tiers
 ---------
 
 The forms surface splits into tiers that describe the intended audience for each name.
@@ -94,7 +94,7 @@ When ``registry_empty`` is true the message also explains that no actions are re
 .. autoexception:: next.forms.FormActionNotFoundError
    :members:
 
-Form Base Classes
+Form base classes
 ~~~~~~~~~~~~~~~~~
 
 ``check_permissions`` and ``has_object_permission`` are the opt-in dynamic permission hooks.
@@ -113,7 +113,7 @@ See :ref:`topics-forms-actions-dynamic-guards` for the authoring contract and th
 .. autoclass:: next.forms.BaseModelForm
    :members: get_initial, get_success_message, on_valid, check_permissions, has_object_permission
 
-Form Wizard
+Form wizard
 ~~~~~~~~~~~
 
 ``FormWizard`` routes a sequence of step forms across requests.
@@ -142,8 +142,11 @@ has nothing to fall back to.
 
 .. autoclass:: next.backends.SingleBackendManager
    :members:
+   :no-index:
 
-Fields and Widgets
+The canonical entry for the class lives in :doc:`backends`.
+
+Fields and widgets
 ~~~~~~~~~~~~~~~~~~
 
 The framework re-exports a curated set of commonly used Django form fields and widgets through
@@ -243,7 +246,7 @@ The rendered HTML flows through the static-assets pipeline, so co-located CSS an
 .. automodule:: next.forms.rendering
    :members: render_form_page_with_errors
 
-Registration Diagnostics
+Registration diagnostics
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``RegistrationDiagnostics`` buffers registration problems for the forms system checks, exposed as the module-level ``registration_diagnostics`` instance.
@@ -254,7 +257,7 @@ The test isolation helper :func:`next.testing.reset_form_registration_state` cle
 .. automodule:: next.forms.diagnostics
    :members:
 
-Action URL Helpers
+Action URL helpers
 ~~~~~~~~~~~~~~~~~~
 
 ``reverse_form_action`` resolves the dispatch URL for an action UID under either URL wiring,
@@ -262,12 +265,14 @@ the namespaced ``next:form_action`` route or the bare ``form_action`` route.
 It lives in ``next.forms.uid`` and is not re-exported at the package level.
 ``ORIGIN_FIELD_NAME`` is the wire name of the hidden origin field every rendered form carries, ``"_next_form_origin"``.
 ``validated_origin_path`` accepts a posted origin value only as a same-site path.
+``redirect_to_origin`` builds the success redirect back to the page named by the posted origin field, falling back to ``fallback`` when the field is absent or off-site.
+It is re-exported from ``next.forms``.
 ``FORM_ORIGIN_OVERRIDE_KEY`` names the render-context key whose value overrides the origin of a rendered form, which the partial shaping layer sets to the next step URL on a wizard advance.
 
 .. automodule:: next.forms.uid
    :members:
 
-Origin Resolution
+Origin resolution
 ~~~~~~~~~~~~~~~~~
 
 ``OriginMatch``, ``resolve_origin``, ``resolve_url_to_match``, and ``resolve_url_to_page`` are re-exported from ``next.forms``.
@@ -278,7 +283,7 @@ Origin Resolution
 .. automodule:: next.forms.origin
    :members: OriginMatch, resolve_origin, resolve_url_to_match, resolve_url_to_page
 
-Formset Helpers
+Formset helpers
 ~~~~~~~~~~~~~~~
 
 The Django factories ``formset_factory``, ``modelformset_factory``, and ``inlineformset_factory`` re-export through ``next.forms`` unchanged.
@@ -287,7 +292,7 @@ The Django factories ``formset_factory``, ``modelformset_factory``, and ``inline
 .. automodule:: next.forms.formsets
    :members:
 
-Frozen Specs
+Frozen specs
 ~~~~~~~~~~~~
 
 .. automodule:: next.forms.serializers
@@ -300,7 +305,7 @@ See :doc:`signals` and :doc:`/content/topics/forms/signals` for the form signals
 (``action_registered``, ``action_dispatched``, ``form_validation_failed``,
 ``wizard_step_submitted``, ``wizard_completed``, ``form_access_denied``).
 
-See Also
+See also
 --------
 
 .. seealso::

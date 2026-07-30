@@ -1,6 +1,6 @@
 .. _topics-static-asset-kinds:
 
-Asset Kinds
+Asset kinds
 ===========
 
 An asset kind binds a file extension to a placeholder slot and to a backend renderer method.
@@ -10,7 +10,7 @@ The framework ships three kinds and lets projects register more.
    :local:
    :depth: 2
 
-Built In Kinds
+Built in kinds
 --------------
 
 ``register_defaults`` registers three kinds at startup through ``next.static.default_kinds``.
@@ -39,7 +39,7 @@ Built In Kinds
 The static subsystem does not privilege CSS or JS in core code.
 The three built in kinds register through the same public API that a project uses for a new kind.
 
-The Registry
+The registry
 ------------
 
 The kind registry is ``next.static.default_kinds``, an instance of ``KindRegistry``.
@@ -64,7 +64,7 @@ A kind registration is keyed by the ``kind`` identifier and carries four pieces 
    The optional HTML wrapper element for an inline body, such as ``"style"`` or ``"script"``.
    It defaults to verbatim, which wraps nothing and emits the inline body as written.
 
-Registering a Kind
+Registering a kind
 ------------------
 
 Register kinds in ``AppConfig.ready`` so the kind exists before the first request.
@@ -91,7 +91,7 @@ The ``register`` call also accepts an optional ``inline_tag`` keyword, the HTML 
 A repeated call with identical parameters is idempotent.
 A repeated call with different parameters raises ``ValueError``.
 
-Renderer Methods
+Renderer methods
 ----------------
 
 The ``renderer`` value is a method name on the static backend.
@@ -125,7 +125,7 @@ A custom kind reuses one of these methods, or a custom backend can add a new met
 The backend is registered through ``STATIC_BACKENDS``, see :doc:`backends`.
 The renderer choice also decides whether the kind loads on a partial render, see the next section.
 
-Renderers and Partial Rendering
+Renderers and partial rendering
 -------------------------------
 
 A full page render inserts an asset through its backend renderer method, which returns the HTML tag.
@@ -160,11 +160,12 @@ A URL-form asset takes the verb of its renderer.
 An inline body keeps that verb only when the kind wraps it in the element the runtime builds, ``style`` for the ``link`` verb and ``script`` for the ``script`` verb.
 The ``module`` verb builds a typed ``<script type="module">`` that no ``inline_tag`` names, so an inline body under ``render_module_tag`` carries no verb, and neither does the inline body of a kind registered without an ``inline_tag``.
 Such a body reaches the browser on a full page render, which emits it verbatim, and is skipped on a partial render, so the two renders agree on the element that holds it.
-A kind whose ``inline_tag`` names a different element than its renderer's verb builds keeps its URL form on a patch and leaves its inline bodies to the full render, which the ``next.W076`` check reports.
+When a kind's ``inline_tag`` names an element different from the one its renderer's verb builds, its URL form still travels in a patch while its inline bodies stay on the full render.
+The ``next.W076`` check reports such a kind.
 
 The rule the two sides follow reads in three parts.
 The server derives the verb from the renderer registered for the kind and writes it into the entry.
-A URL-form entry that reaches the client with no ``load`` field falls back to the verb implied by the name of a built-in kind, ``link`` for ``css``, ``script`` for ``js``, and ``module`` for ``module``, so an envelope authored before the field existed still loads.
+A URL-form entry that reaches the client with no ``load`` field falls back to the verb implied by the name of a built-in kind, ``link`` for ``css``, ``script`` for ``js``, and ``module`` for ``module``.
 An entry carrying an inline body takes no such fallback, and without an explicit ``load`` field it is dropped rather than wrapped in an element the full render would not build.
 
 A kind registered with a custom renderer, such as the ``render_babel_tag`` example, carries no verb.
@@ -172,14 +173,14 @@ Its assets render on a full page render and are skipped on a partial render, bec
 The ``next.W074`` system check reports every such kind at ``manage.py check``.
 Register the kind with one of the three bundled renderers when its assets must also arrive through a patch envelope.
 
-Placeholder Slots
+Placeholder slots
 -----------------
 
 A slot is the location where the static manager injects rendered tags.
 The slot registry is ``next.static.default_placeholders``.
 The framework registers two slots, ``styles`` and ``scripts``, each with an HTML comment token.
 
-The Placeholder Registry
+The placeholder registry
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``default_placeholders`` is an instance of ``PlaceholderRegistry``, exported from ``next.static`` alongside the ``PlaceholderSlot`` record.
@@ -207,8 +208,9 @@ Register a new slot when a kind should inject somewhere other than the standard 
            )
 
 The layout must contain the slot token, or a template tag that emits it, for the manager to find a place to inject.
+A module-level list named after the slot, such as ``preload = [...]`` in ``page.py``, registers external URLs into it, see :ref:`topics-static-module-lists`.
 
-Module Kind
+Module kind
 -----------
 
 The ``module`` kind renders ``<script type="module" src="...">`` through ``render_module_tag``.
@@ -218,25 +220,25 @@ The ``module`` kind carries no ``inline_tag``, so it renders an inline body verb
 An inline body of such a kind carries no insertion verb, so it arrives on a full page render only, while the URL form of the same kind still loads through a patch envelope.
 The two renders agree on that split, because the client drops an inline entry that carries no verb instead of guessing one from the kind name.
 
-System Checks
+System checks
 -------------
 
 The static system checks ``next.W030``, ``next.W031``, and ``next.E036`` through ``next.E038`` validate the backend configuration.
 The ``next.W042`` check validates the ``JS_CONTEXT_SERIALIZER`` setting.
 The ``next.W074`` check walks the registered kinds and warns about each one whose renderer carries no client insertion verb.
 The ``next.W076`` check walks the same kinds and warns about each one whose ``inline_tag`` is not the element its renderer's verb builds, so its URL form travels in a patch envelope while its inline bodies do not.
-Both checks read the registry of the running process, so a kind no registration backs is outside their reach.
+Both checks read the registry of the running process, so a kind that was never registered is outside their reach.
 The ``next.W075`` check covers the init-payload keys the framework reserves rather than the kinds, see :doc:`js-context`.
 No check validates the shape of a registration, because a bad call to ``default_kinds.register`` raises ``ValueError`` during ``AppConfig.ready``.
 Because Django runs ``ready`` for every management command and during ASGI or WSGI worker boot, the exception aborts whatever process is starting up, not only ``manage.py check``.
 
-Common Patterns
+Common patterns
 ---------------
 
 Custom asset kinds drive worked projects, including the ``kanban`` example with a ``.jsx`` kind and the ``live-polls`` example with a Vue single file component kind.
 See :doc:`/content/misc/examples` for the runnable projects and their walkthroughs.
 
-See Also
+See also
 --------
 
 .. seealso::

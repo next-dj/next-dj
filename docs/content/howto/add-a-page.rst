@@ -1,6 +1,6 @@
 .. _howto-add-a-page:
 
-Add a Page
+Add a page
 ==========
 
 Problem
@@ -74,7 +74,7 @@ Run system checks.
 The output reports no errors.
 Adding a second body source to the same directory reports the ``next.W043`` warning.
 
-See Also
+See also
 --------
 
 .. seealso::

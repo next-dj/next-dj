@@ -1,6 +1,6 @@
 .. _howto-scope-requests-per-tenant:
 
-Scope Requests Per Tenant
+Scope requests per tenant
 =========================
 
 Problem
@@ -20,7 +20,7 @@ See :doc:`/content/misc/examples`.
 Walkthrough
 -----------
 
-Resolve The Tenant In Middleware
+Resolve the tenant in middleware
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The middleware parses the ``X-Tenant`` header, looks up the matching row, and attaches it to ``request.tenant``.
@@ -65,7 +65,7 @@ Register it last in ``MIDDLEWARE`` so it runs after sessions and authentication.
        "notes.middleware.TenantMiddleware",
    ]
 
-Read The Tenant Through One Helper
+Read the tenant through one helper
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Every consumer reads the tenant through a single accessor instead of touching ``request.tenant`` directly.
@@ -78,7 +78,7 @@ On error pages where the middleware short-circuited, the attribute is absent and
        """Return the tenant attached to `request` by `TenantMiddleware`."""
        return getattr(request, "tenant", None)
 
-Inject The Tenant Into Pages
+Inject the tenant into pages
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 A ``DDependencyBase`` marker plus a ``RegisteredParameterProvider`` lets page and action callables ask for the tenant by type.
@@ -141,7 +141,7 @@ Keep real annotations in these modules, because the resolver compares parameter 
        """Return every note that belongs to the active tenant."""
        return list(Note.objects.filter(tenant=active_tenant))
 
-Lift The Tenant To Every Descendant Page
+Lift the tenant to every descendant page
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 A ``@context(..., inherit_context=True)`` callable on the workspace root publishes the tenant once, and every nested page reads it without re-resolving.
@@ -158,7 +158,7 @@ A ``@context(..., inherit_context=True)`` callable on the workspace root publish
        """Expose the active tenant under `tenant` to every workspace page."""
        return active_tenant
 
-Theme The Chrome With A Context Processor
+Theme the chrome with a context processor
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 A context processor turns the tenant's color into a CSS variable for every template.
@@ -198,7 +198,7 @@ List it in the page backend ``OPTIONS`` so the file router runs it.
        ],
    }
 
-Prefix Asset URLs Per Tenant
+Prefix asset URLs per tenant
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Scope the static backend the same way.
@@ -206,7 +206,7 @@ Subclass ``StaticFilesBackend`` and override the renderer methods.
 Read the tenant from the ``request`` keyword argument that the static manager passes to every renderer, then prepend the tenant slug to each collected URL.
 Register the subclass in ``STATIC_BACKENDS``.
 
-See :doc:`write-a-static-backend` under *Tenant URL Prefix* for the full implementation.
+See :doc:`write-a-static-backend` under *Tenant URL prefix* for the full implementation.
 
 Verification
 ------------
@@ -223,7 +223,7 @@ The Acme response lists only Acme notes.
 The Globex response lists only Globex notes.
 A request with no header returns ``400``.
 
-See Also
+See also
 --------
 
 .. seealso::

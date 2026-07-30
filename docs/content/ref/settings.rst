@@ -3,7 +3,7 @@
 Settings
 ========
 
-Module Summary
+Module summary
 --------------
 
 This page lists every key inside ``NEXT_FRAMEWORK`` with its framework default and a short description.
@@ -11,7 +11,7 @@ Set ``NEXT_FRAMEWORK`` in ``settings.py`` to override any of these values.
 
 For production-specific recommendations (which values to change and why), see :doc:`/content/deployment/settings`.
 
-Key Naming
+Key naming
 ----------
 
 Keys inside ``NEXT_FRAMEWORK`` carry no ``DEFAULT_`` prefix.
@@ -20,7 +20,8 @@ A plural ``*_BACKENDS`` key holds an ordered list of sources the manager consult
 ``PARTIAL_BACKENDS`` is the exception.
 Partial rendering uses a single protocol backend, so only the first entry runs.
 A singular ``*_BACKEND`` key holds the one engine for a concern.
-A subsystem prefix (``PAGE_``, ``COMPONENT_``, ``STATIC_``, ``FORM_``, ``URL_``, ``TEMPLATE_``, ``JS_``) groups related keys.
+A subsystem prefix (``PAGE_``, ``COMPONENT_``, ``STATIC_``, ``FORM_``, ``URL_``, ``TEMPLATE_``, ``JS_``, ``PARTIAL_``) groups related keys.
+``NEXT_JS_OPTIONS`` stands outside the prefix scheme and configures the bundled client runtime.
 
 Backends
 --------
@@ -89,7 +90,7 @@ Default value.
 
 The first static backend's ``OPTIONS`` dict accepts ``JS_CONTEXT_POLICY``, a dotted path to a conflict-resolution class.
 The static manager applies the policy when two context functions publish the same key for serialisation.
-See :doc:`/content/topics/static-assets/js-context` under *Key Conflict Policy* for the available policies and an example.
+See :doc:`/content/topics/static-assets/js-context` under *Key conflict policy* for the available policies and an example.
 
 The same ``OPTIONS`` dict accepts ``DEDUP_STRATEGY``, a dotted path to a dedup strategy class the collector instantiates once per request to drop assets several components register more than once.
 See :doc:`/content/topics/static-assets/deduplication` for the bundled strategies and the custom-strategy protocol.
@@ -235,7 +236,7 @@ Default value.
 
 Loaders are consulted in order, first match wins.
 
-JavaScript Context
+JavaScript context
 ------------------
 
 NEXT_JS_OPTIONS
@@ -263,7 +264,7 @@ A value that does not resolve to a usable serializer triggers the ``next.W042`` 
 At render time such a value raises ``ImportError`` or ``TypeError`` on first use, so fix the dotted path rather than rely on a fallback.
 The built-in ``JsonJsContextSerializer`` steps in only when the setting is unset.
 
-See :doc:`static` under *JS Context Serializer* for the protocol and the bundled serializers.
+See :doc:`static` under *JS context serializer* for the protocol and the bundled serializers.
 
 Strictness
 ----------
@@ -290,7 +291,7 @@ Components discovered through ``_components`` directories beside page files are 
 Default value ``False``.
 See :doc:`/content/deployment/settings` for production defaults and :doc:`/content/topics/testing` for the ``eager_load_components`` helper.
 
-Patching Defaults
+Patching defaults
 -----------------
 
 Use ``next.conf.extend_default_backend`` to patch one key of a default backend entry without copying the whole default.
@@ -323,7 +324,7 @@ It raises ``IndexError`` when ``index`` is out of range for the default list.
 
 See :doc:`conf` for the helper API and :doc:`/content/howto/extend-a-default-backend` for the recipe.
 
-See Also
+See also
 --------
 
 .. seealso::

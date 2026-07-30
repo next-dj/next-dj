@@ -1,6 +1,6 @@
 .. _internals-request-lifecycle:
 
-Request Lifecycle
+Request lifecycle
 =================
 
 This page traces an HTTP request from the Django entry point through next.dj to the rendered response.
@@ -34,9 +34,9 @@ Pipeline
        StaticBody --> ZoneIntent
        ZoneIntent -- "zone request" --> ZoneResp["Zone response"]
        ZoneResp --> Response
-       ZoneIntent -- "full page" --> ContextCtx["Run context functions"]
-       ContextCtx --> LayoutChain["Compose layout chain"]
-       LayoutChain --> CollectAssets["Static collector"]
+       ZoneIntent -- "full page" --> LayoutChain["Compose layout chain"]
+       LayoutChain --> ContextCtx["Run context functions"]
+       ContextCtx --> CollectAssets["Static collector"]
        CollectAssets --> InjectTags["Emit collected tags"]
        InjectTags --> Response(["HTTP response"])
        FormDispatch --> Validation{"Form valid"}
@@ -44,16 +44,16 @@ Pipeline
        Handler --> Response
        Validation -- no --> Loader
 
-Implementation Notes
+Implementation notes
 --------------------
 
-Django Middleware
+Django middleware
 ~~~~~~~~~~~~~~~~~
 
 Django middleware runs first.
 Authentication, sessions, CSRF, common middleware, and any project specific middleware all see the request before the framework does.
 
-URL Resolver
+URL resolver
 ~~~~~~~~~~~~
 
 The framework registers its URL patterns through ``include("next.urls")`` in ``config/urls.py``, which mounts the framework's ``TrieURLResolver``.
@@ -61,7 +61,7 @@ The resolver narrows the request path to a few candidate patterns and matches th
 A file routed match dispatches to the page view.
 A match on ``/_next/form/<str:uid>/`` dispatches to the form dispatcher instead.
 
-Page View
+Page view
 ~~~~~~~~~
 
 The page view loads the page module and resolves the body source first.
@@ -71,35 +71,35 @@ When the body comes from the ``template`` attribute or a ``template.djx`` file t
 After the body is in hand the view builds the render context and runs every ``@context`` function in order.
 Captured URL kwargs from the matched route are seeded into the context dict before any ``@context`` function runs.
 
-Zone Requests
+Zone requests
 ~~~~~~~~~~~~~
 
 After the body source resolves, the view inspects the request for a partial intent.
 A request that targets named zones receives a zone response instead of the full page render.
 See :doc:`/content/topics/partial-rendering/how-it-works` for the zone request wire format and the patch envelope.
 
-Layout Chain
+Layout chain
 ~~~~~~~~~~~~
 
 The framework collects every ancestor ``layout.djx`` walking upward from the page directory through every ancestor, bounded at 64 levels.
 Each layout substitutes the wrapped content into its ``{% block template %}`` placeholder.
 The innermost layout wraps the page body, the outermost layout wraps everything.
 
-Static Collector
+Static collector
 ~~~~~~~~~~~~~~~~
 
 The collector accumulates assets touched during the render.
 Components contribute when they render through ``{% component %}``.
 The collector finalises before the template tags emit their slot.
 
-Tag Injection
+Tag injection
 ~~~~~~~~~~~~~
 
 ``{% collect_styles %}`` and ``{% collect_scripts %}`` emit placeholder tokens during template rendering.
 After the layout chain finishes, the static manager replaces every placeholder token with the rendered tags accumulated by the request-scoped ``StaticCollector``.
 The framework injects the ``Next`` JS context script before any other script in the page.
 
-Form Submission Path
+Form submission path
 --------------------
 
 A form submission enters at ``/_next/form/<str:uid>/``.
@@ -109,15 +109,15 @@ On invalid form the dispatcher loads the origin page and re-renders it through t
 
 The dependency cache is reused across the failure path so context functions and providers run at most once per request.
 
-Extension Points
+Extension points
 ----------------
 
 - Add an entry to ``MIDDLEWARE`` to intercept the request before next.dj sees it.
-- Subscribe to ``page_rendered`` to inspect the final HTML.
+- Subscribe to ``page_rendered`` to observe render duration, asset counts, and the context keys of each response.
 - Subclass ``StaticBackend`` to change how the collector renders.
 - Subclass ``RouterBackend`` to feed the resolver from a different source.
 
-See Also
+See also
 --------
 
 .. seealso::

@@ -1,6 +1,6 @@
 .. _topics-forms-backends:
 
-Action Backends
+Action backends
 ===============
 
 A form action backend stores registered actions, generates their URL patterns, and dispatches submissions to handlers.
@@ -32,7 +32,7 @@ The default value registers one backend.
 Most projects never change this.
 A custom backend is the right tool when every dispatch needs an extra step such as audit logging or rate limiting.
 
-How Backends Are Instantiated
+How backends are instantiated
 -----------------------------
 
 ``FormActionManager`` builds one backend instance per entry in ``FORM_ACTION_BACKENDS``, through the same loading helper every backend family shares.
@@ -68,7 +68,7 @@ A backend that reads an option declares a constructor and pulls ``OPTIONS`` out 
 
 Always forward ``config`` to ``super().__init__`` so the registry is set up.
 
-The Backend Contract
+The backend contract
 --------------------
 
 A backend subclasses ``next.forms.FormActionBackend``, an abstract base class with four abstract methods.
@@ -95,7 +95,7 @@ The base class also offers four optional override points.
 - ``render_invalid_page``
 - ``shape_response``
 
-``get_meta`` and Multi-Backend Routing
+``get_meta`` and multi-backend routing
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``get_meta(action_name, page_path=None)`` returns the stored ``ActionMeta`` for a name, or ``None`` when this backend does not own it.
@@ -115,7 +115,7 @@ That form renders without ``data-next-action`` and without a bound form instance
 Return a truthy meta for owned names to restore the attribute, the bound form, and the uid.
 A backend that defers entirely to ``RegistryFormActionBackend`` need not override ``get_meta``.
 
-``iter_actions`` and the System Checks
+``iter_actions`` and the system checks
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``iter_actions()`` yields the ``ActionMeta`` of every action the backend owns.
@@ -123,7 +123,7 @@ The base implementation yields nothing, and ``RegistryFormActionBackend`` yields
 The forms system checks that inspect registered actions, the wizard checks including ``next.E054``, the component-widget checks, the guard check, and the message check, walk every configured backend through this hook, so a backend that stores its own actions should implement it, or those actions stay invisible to ``manage.py check``.
 A subclass of ``RegistryFormActionBackend`` inherits a working implementation.
 
-Shaping the Response
+Shaping the response
 ~~~~~~~~~~~~~~~~~~~~
 
 Every outcome of the dispatch pipeline leaves through exactly one call to the backend's ``shape_response(request, outcome)``.
@@ -158,7 +158,7 @@ Override ``render_invalid_page`` when only the page HTML changes.
 The default envelope calls it on the invalid branch with the bound failing form, and again on the ``None``-result success re-render described above with ``form=None``.
 Override ``shape_response`` when the envelope itself changes, such as a different status code, extra headers, or a response other than a redirect on a wizard advance.
 
-Building a Backend From Scratch
+Building a backend from scratch
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Most backends subclass ``RegistryFormActionBackend``.
@@ -224,7 +224,7 @@ The public method ``clear_registry()`` drops every registered action and resets 
 It exists for test isolation, so a test session that registers overlapping action names can start from an empty registry.
 Production code never calls it.
 
-Writing a Custom Backend
+Writing a custom backend
 ------------------------
 
 The most common customisation overrides ``dispatch`` to wrap the standard dispatch with extra work.
@@ -254,7 +254,7 @@ See :doc:`/content/howto/write-a-form-action-backend` for the guarded pattern th
 A ``dispatch`` override that needs to know which page initiated the submission reads the validated origin from the pipeline rather than parsing POST fields.
 On the invalid branch the ``ActionOutcome`` passed to ``shape_response`` carries the resolved ``page_path`` and ``origin``, and a custom redirect target keyed off the origin page is one such use.
 
-Registering a Custom Backend
+Registering a custom backend
 ----------------------------
 
 List the dotted path in ``FORM_ACTION_BACKENDS``.
@@ -284,12 +284,11 @@ A custom ``dispatch`` that drives the pipeline by hand reuses one static helper 
 ``ensure_http_response(response, request=None, action_name=None, backend=None)``.
    Coerces a handler return value into an ``HttpResponse``.
    A string becomes a body, an object with a ``url`` becomes a redirect, and ``None`` re-renders the origin page when ``request``, ``action_name``, and ``backend`` are passed, otherwise it returns a 204.
-   The ``None`` re-render follows the behaviour under `Shaping the Response`_, through ``backend.render_invalid_page`` and never re-entering ``shape_response``.
+   The ``None`` re-render follows the behaviour under `Shaping the response`_, through ``backend.render_invalid_page`` and never re-entering ``shape_response``.
 
-Every outcome of the standard pipeline funnels into exactly one call to the backend hook ``shape_response(request, outcome)`` described under `Shaping the Response`_.
-A layer that must reshape responses globally overrides that one hook instead of patching each dispatch branch.
+Every outcome funnels into the single ``shape_response`` call described under `Shaping the response`_, so a layer that must reshape responses globally overrides that one hook.
 
-Backend vs Signal
+Backend vs signal
 -----------------
 
 An override runs inside the dispatch and can change or block the response.
@@ -315,14 +314,15 @@ Testing
 Tests that register actions through ``@action`` must drop the global registry between cases so action names from one test do not leak into the next.
 Call :func:`next.testing.reset_form_actions` from a pytest fixture or a ``setUp`` method.
 The helper invokes the manager's private ``_reload_config()``, which rebuilds the backend list from the current ``NEXT_FRAMEWORK["FORM_ACTION_BACKENDS"]`` setting and discards any actions registered against the previous backend instances.
-The rebuild also marks the manager as loaded, so a configuration that yields no backend is read once instead of on every later call.
+The rebuild marks the manager as loaded when at least one backend loads or the entry list is empty.
+A configuration whose entries all fail stays unloaded and is reread on the next access, as described above.
 
 A test that registers extra actions on a live ``RegistryFormActionBackend`` takes a snapshot first and restores it afterwards.
 ``backend.snapshot()`` returns a ``RegistryBackendSnapshot``, an immutable copy of the three registry maps, and ``backend.restore(snapshot)`` puts the registry back exactly as it was, without reaching into the backend's private state.
 
 See :doc:`/content/topics/testing` for the surrounding helpers and fixtures.
 
-System Checks
+System checks
 -------------
 
 The framework validates the backend configuration at startup.
@@ -332,21 +332,21 @@ The framework validates the backend configuration at startup.
 
 Run ``uv run python manage.py check`` after editing the backend list.
 
-Common Patterns
+Common patterns
 ---------------
 
-Audit Log
+Audit log
 ~~~~~~~~~
 
 Subclass ``RegistryFormActionBackend`` and override ``dispatch`` to write an audit row.
 See ``examples/audit-forms``.
 
-Rate Limiting
+Rate limiting
 ~~~~~~~~~~~~~
 
 Override ``dispatch`` to check a rate limit before calling ``super().dispatch`` and return an ``HttpResponse`` with status 429 when the limit is exceeded.
 
-Custom Invalid-Page HTML
+Custom invalid-page HTML
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 Override ``render_invalid_page`` to return custom HTML for the validation error path.
@@ -359,7 +359,7 @@ The bundled ``RegistryFormActionBackend`` re-renders the origin page through the
 When no action meta or template body is found, it falls back to rendering the form with its ``<p>`` layout template.
 Override ``render_invalid_page`` to replace this behaviour entirely.
 
-See Also
+See also
 --------
 
 .. seealso::

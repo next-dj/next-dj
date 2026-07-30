@@ -1,6 +1,6 @@
 .. _topics:
 
-Topic Guides
+Topic guides
 ============
 
 Topic guides cover one subsystem at a time.
@@ -14,7 +14,7 @@ Read the topic that matches the part you are touching, then jump to the referenc
 :doc:`url-reversing`
    ``page_reverse`` and ``with_query`` helpers.
 
-.. rubric:: Pages, Layouts, and Components
+.. rubric:: Pages, layouts, and components
 
 :doc:`pages`
    Page modules, body sources, render functions, template loaders.
@@ -28,7 +28,7 @@ Read the topic that matches the part you are touching, then jump to the referenc
 :doc:`components`
    Simple and composite components, props, slots, co-located assets.
 
-.. rubric:: Forms and Static Assets
+.. rubric:: Forms and static assets
 
 :doc:`forms/index`
    Actions, templates, modelforms, field components, formsets, multi-step wizards, dispatch internals, signals.
@@ -39,7 +39,7 @@ Read the topic that matches the part you are touching, then jump to the referenc
 :doc:`partial-rendering/index`
    Zones, patches, forms, the modal wizard, lazy zones, co-located JavaScript, and the SSE bridge.
 
-.. rubric:: Cross-Cutting Concerns
+.. rubric:: Cross-cutting concerns
 
 :doc:`dependency-injection`
    Markers, providers, the resolver, request scoped cache.
@@ -53,7 +53,7 @@ Read the topic that matches the part you are touching, then jump to the referenc
 :doc:`extending`
    Five extension mechanisms across the framework.
 
-.. rubric:: Project Layout
+.. rubric:: Project layout
 
 :doc:`project-layout`
    Recommended single project tree and settings.

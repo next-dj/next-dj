@@ -1,6 +1,6 @@
 .. _topics-forms-templates:
 
-Form Templates
+Form templates
 ==============
 
 The ``{% form "name" %}`` block tag renders a ``<form>`` element, injects the CSRF token, and publishes the form instance inside the block body.
@@ -9,7 +9,7 @@ The ``{% form "name" %}`` block tag renders a ``<form>`` element, injects the CS
    :local:
    :depth: 2
 
-The Form Tag
+The form tag
 ------------
 
 .. code-block:: jinja
@@ -23,7 +23,7 @@ The Form Tag
 
 The first argument is the action name as a quoted string or a context variable that resolves to a string.
 An opening tag without the action name raises ``TemplateSyntaxError`` at parse time.
-Optional ``key="value"`` arguments after the name render as HTML attributes on the ``<form>`` element (see `HTML Attributes`_ below), except for the reserved partial param names (see `Partial Attributes`_ below).
+Optional ``key="value"`` arguments after the name render as HTML attributes on the ``<form>`` element (see `HTML attributes`_ below), except for the reserved partial param names (see `Partial attributes`_ below).
 
 The tag does the following.
 
@@ -46,7 +46,7 @@ The tag asks the form instance through ``is_multipart()``, so a ``FileField`` re
 
 A name that is not in the registry raises ``FormActionNotFoundError`` at render time.
 
-HTML Attributes
+HTML attributes
 ---------------
 
 Every other ``key="value"`` argument after the action name lands on the ``<form>`` element, after the framework attributes.
@@ -64,7 +64,7 @@ An explicit ``enctype="..."`` argument suppresses the automatic multipart value,
 The ``action`` and ``method`` attributes belong to the tag, as does every attribute starting with ``data-next-``, and passing any of them raises ``TemplateSyntaxError`` at parse time.
 ``data-next-*`` is the single framework namespace in rendered markup, so user attributes never collide with framework ones.
 
-Partial Attributes
+Partial attributes
 ------------------
 
 Five argument names are reserved for partial rendering and never land as raw HTML attributes.
@@ -104,14 +104,14 @@ Pass each as a ``key="value"`` argument like any other, and the value resolves a
      {{ form.query }}
    {% endform %}
 
-Scope Resolution
+Scope resolution
 ----------------
 
 When the template renders inside a page, the tag first looks for a page-scoped registration whose file matches the current ``page.py``.
 If no page-scoped match exists the tag falls back to the first registration of that name and accepts it only when its scope is shared.
 This means a page-local ``NoteForm`` takes precedence over a shared ``NoteForm`` with the same derived name.
 
-The ``form`` Variable
+The ``form`` variable
 ---------------------
 
 Inside the block body the variable ``form`` holds the form instance.
@@ -127,7 +127,7 @@ Form-less action.
    When the action is a plain function registered with ``@action`` (no form class), ``form`` resolves to ``None``.
    The block body should not attempt to render field widgets in this case.
 
-Captured URL Parameters
+Captured URL parameters
 -----------------------
 
 The tag does not need any extra argument to forward URL parameters.
@@ -145,7 +145,7 @@ The dispatcher resolves the posted ``_next_form_origin`` against the URLconf and
 A form rendered under ``/notes/42/`` posts ``_next_form_origin`` set to that path, and resolving it yields ``note_id=42`` as an ``int``.
 The handler receives the value through ``DUrl["note_id", int]``, typed identically on the canonical GET and on the re-render.
 
-Multiple Forms on One Page
+Multiple forms on one page
 --------------------------
 
 Each ``{% form %}`` call references a different action name.
@@ -167,7 +167,7 @@ The dispatcher routes submissions by URL alone, so the forms do not interfere.
 ``delete_note`` is a form-less action.
 The second block has no ``{{ form }}`` usage because ``form`` is ``None``.
 
-Rendering Field Errors
+Rendering field errors
 ----------------------
 
 Errors live on the bound form.
@@ -226,7 +226,7 @@ An unknown action name raises ``FormActionNotFoundError`` at render time, the sa
 
 .. _topics-forms-templates-handwritten-views:
 
-Forms in Hand-Written Views
+Forms in hand-written views
 ---------------------------
 
 A ``{% form %}`` tag also works inside a template rendered by an ordinary Django view, outside the file router.
@@ -250,22 +250,22 @@ The file may be a real page module or a synthesised location next to a ``templat
 
    feedback.next_page_path = Path(__file__).parent / "feedback" / "page.py"
 
-Common Patterns
+Common patterns
 ---------------
 
-Form in a Component
+Form in a component
 ~~~~~~~~~~~~~~~~~~~
 
 A component template hosts ``{% form %}`` exactly like a page template.
 The framework injects ``current_page_module_path`` from the surrounding page, so the action lookup scopes to the correct page.
 
-Form in a Layout
+Form in a layout
 ~~~~~~~~~~~~~~~~
 
 Layouts receive ``current_page_module_path`` from the page they wrap.
 A login form placed in the root layout posts the wrapped page's path as its origin, so a validation failure re-renders the original page.
 
-Render-Time Failures
+Render-time failures
 --------------------
 
 The tag raises ``ImproperlyConfigured`` when ``request`` is absent from the template context.
@@ -273,7 +273,7 @@ Add ``django.template.context_processors.request`` to ``TEMPLATES[*].OPTIONS.con
 
 The ``next.E019`` system check, described in :doc:`/content/security/csrf-and-forms`, catches the missing context processor before a request reaches the tag.
 
-See Also
+See also
 --------
 
 .. seealso::

@@ -1,6 +1,6 @@
 .. _deployment-settings:
 
-Production Settings
+Production settings
 ===================
 
 This page lists recommended ``NEXT_FRAMEWORK`` values for production.
@@ -11,7 +11,7 @@ Each snippet below sets one key on an existing ``NEXT_FRAMEWORK`` dict.
 Declare ``NEXT_FRAMEWORK = {}`` once before the first override, or merge the keys into a single literal as shown under :ref:`combining-keys`.
 Keys left unset keep their framework default because the framework merges :doc:`/content/ref/settings` defaults under the user dict.
 
-Strict Context
+Strict context
 --------------
 
 .. code-block:: python
@@ -23,7 +23,7 @@ Strict Context
 Use ``STRICT_CONTEXT: True`` in production so a misconfigured context processor fails loudly.
 See :ref:`ref-settings` for behaviour and exception types.
 
-Eager Component Loading
+Eager component loading
 -----------------------
 
 .. code-block:: python
@@ -38,7 +38,7 @@ With the default ``False``, every ``component.py`` is imported during startup, s
 With ``True``, a ``component.py`` is imported on the first render that resolves the component rather than during startup.
 See :ref:`ref-settings` and :doc:`/content/topics/testing` for lazy behaviour and testing helpers.
 
-Static Backend
+Static backend
 --------------
 
 .. code-block:: python
@@ -51,7 +51,7 @@ Static Backend
 Point at a CDN aware backend in production.
 The default ``StaticFilesBackend`` is appropriate for single host deployments where the same process serves both HTML and static files.
 
-JS Context Serializer
+JS context serializer
 ---------------------
 
 .. code-block:: python
@@ -68,7 +68,7 @@ Set the serializer when context values include types beyond the standard JSON se
    Install it separately (``pip install pydantic``) before enabling this serializer.
    If ``pydantic`` is not installed, the first render that serializes context raises ``ImportError``.
 
-Page Backends With Context Processors
+Page backends with context processors
 -------------------------------------
 
 .. code-block:: python
@@ -87,7 +87,7 @@ Page Backends With Context Processors
 Use ``extend_default_backend`` to patch the default page backend entry with production context processors.
 The ``OPTIONS`` dict is merged, so the other default keys survive.
 
-Form Action Backend
+Form action backend
 -------------------
 
 .. code-block:: python
@@ -102,7 +102,7 @@ See :doc:`/content/howto/write-a-form-action-backend`.
 
 .. _combining-keys:
 
-Combining Keys
+Combining keys
 --------------
 
 When several recommendations apply at once, merge them into a single ``NEXT_FRAMEWORK`` literal.
@@ -134,13 +134,13 @@ When several recommendations apply at once, merge them into a single ``NEXT_FRAM
 Keep only the keys the deployment changes.
 The framework supplies the default for every key left out, so there is no need to duplicate the full default structures documented on :doc:`/content/ref/settings`.
 
-Runtime Script Overrides
+Runtime script overrides
 ------------------------
 
 Strict content security policies sometimes need nonces or manual ordering for the bundled ``next.min.js`` shell.
 ``NEXT_FRAMEWORK["NEXT_JS_OPTIONS"]`` accepts template overrides and ``ScriptInjectionPolicy`` values described on :ref:`ref-settings` and in :doc:`/content/topics/static-assets/js-context`.
 
-See Also
+See also
 --------
 
 .. seealso::

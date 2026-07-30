@@ -1,9 +1,9 @@
 .. _ref-deps:
 
-Dependency Injection Reference
+Dependency injection reference
 ==============================
 
-Module Summary
+Module summary
 --------------
 
 ``next.deps`` exposes the resolver, the parameter providers, the dependency cache, and the public markers used in annotations.
@@ -67,7 +67,7 @@ Checks
 
 The dependency injection layer registers no Django system checks.
 
-See Also
+See also
 --------
 
 .. seealso::

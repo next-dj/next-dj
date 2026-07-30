@@ -1,6 +1,6 @@
 .. _howto-customize-error-pages:
 
-Customize 404 and 500 Pages
+Customize 404 and 500 pages
 ===========================
 
 Problem
@@ -20,7 +20,7 @@ The file router include stays unchanged.
 Walkthrough
 -----------
 
-Turn Off Debug
+Turn off debug
 ~~~~~~~~~~~~~~
 
 Custom error pages render only when ``DEBUG`` is off.
@@ -33,7 +33,7 @@ With ``DEBUG`` on, Django shows its own traceback page instead.
 
    ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
 
-Add the Error Templates
+Add the error templates
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 Django looks for ``404.html`` and ``500.html`` at the root of a configured template directory.
@@ -76,7 +76,7 @@ A ``500.html`` template renders with an empty context because the failure may ha
      </body>
    </html>
 
-Point the Handlers at a View
+Point the handlers at a view
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 For full control, name a :doc:`custom error handler <django:topics/http/views>` in the root URLconf.
@@ -110,7 +110,7 @@ A ``handler500`` view receives only the request.
        """Render the branded 500 page."""
        return render(request, "500.html", status=500)
 
-Raise Http404 From a Page
+Raise http404 from a page
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 A ``render`` function or a ``@context`` callable can raise :exc:`~django.http.Http404` when a record is missing.
@@ -144,7 +144,7 @@ Run the server with ``DEBUG`` off and request a route that does not exist.
 Visiting an unknown path returns the branded ``404`` page with status ``404``.
 A view that raises an unhandled exception returns the branded ``500`` page with status ``500``.
 
-See Also
+See also
 --------
 
 .. seealso::

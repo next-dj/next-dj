@@ -1,6 +1,6 @@
 .. _howto-observe-framework-signals:
 
-Observe Framework Signals
+Observe framework signals
 =========================
 
 Problem
@@ -22,7 +22,7 @@ Use :doc:`/content/topics/signals` when you need the full catalog with payload t
 Walkthrough
 -----------
 
-Wire One Receiver Per Signal Group
+Wire one receiver per signal group
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Keep handlers thin.
@@ -85,7 +85,7 @@ It fires only when a dynamic permission hook denies a request, never on the stat
 See :ref:`topics-forms-signals-form-access-denied` for the full contract.
 The ``request`` value is the live ``HttpRequest`` of the dispatch, so a receiver reads it synchronously and never stores it past the call.
 
-Cover the Static Pipeline
+Cover the static pipeline
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The static subsystem emits ``asset_registered``, ``backend_loaded``, ``collector_finalized``, and ``html_injected``.
@@ -122,7 +122,7 @@ The ``html_injected`` payload carries ``injected_bytes``, which is useful as a p
    def on_static_backend_loaded(**kwargs) -> None:
        incr("static", "backend_loaded")
 
-Cover the Router
+Cover the router
 ~~~~~~~~~~~~~~~~
 
 The URL subsystem emits ``route_registered`` for each route discovered during a file router scan and ``router_reloaded`` for each rebuild.
@@ -144,7 +144,7 @@ The URL subsystem emits ``route_registered`` for each route discovered during a 
    def on_router_reloaded(**kwargs) -> None:
        incr("urls", "router_reloaded")
 
-Connect Receivers at Startup
+Connect receivers at startup
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Import the receivers module from ``AppConfig.ready`` so the ``@receiver`` decorators run once at startup.
@@ -168,7 +168,7 @@ The ``pages.rendered``, ``components.rendered``, and ``forms.action_dispatched``
 
 In a test, assert the same wiring with ``SignalRecorder`` from ``next.testing``, which records every framework signal without a production backend.
 
-See Also
+See also
 --------
 
 .. seealso::

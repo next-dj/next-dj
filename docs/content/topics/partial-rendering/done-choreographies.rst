@@ -1,6 +1,6 @@
 .. _topics-partial-rendering-done-choreographies:
 
-Wizard Done Choreographies
+Wizard done choreographies
 ==========================
 
 A wizard inside a modal finishes on its last step.
@@ -15,7 +15,7 @@ The two choreographies differ only in what ``done`` returns and how the list get
    :local:
    :depth: 1
 
-Accept and Re-GET
+Accept and re-GET
 -----------------
 
 The default.
@@ -25,15 +25,18 @@ The wizard does not know the list exists.
 .. code-block:: python
    :caption: request/[step]/page.py
 
-   def done(self, request: HttpRequest, cleaned_data: dict[str, Any]) -> HttpResponse:
-       """Create the access request and close the layer with a result."""
-       access_request = AccessRequest.objects.create(**cleaned_data)
-       return (
-           Patches(request)
-           .layer_close(result={"id": access_request.pk})
-           .toast("Request created", variant="success")
-           .response(fallback=f"/request/{access_request.pk}/audit/")
-       )
+   class AccessRequestWizard(FormWizard):
+       def done(
+           self, request: HttpRequest, cleaned_data: dict[str, Any]
+       ) -> HttpResponse:
+           """Create the access request and close the layer with a result."""
+           access_request = AccessRequest.objects.create(**cleaned_data)
+           return (
+               Patches(request)
+               .layer_close(result={"id": access_request.pk})
+               .toast("Request created", variant="success")
+               .response(fallback=f"/request/{access_request.pk}/audit/")
+           )
 
 The last step answers with a close and a toast.
 
@@ -65,7 +68,7 @@ It sits on any page without a change, and ``data-next-accepted`` moves with the 
 This is the cycle of a redirect with reloaded props.
 The cost is one extra GET after the modal closes.
 
-Server OOB Through Page Addressing
+Server OOB through page addressing
 ----------------------------------
 
 The canonical server-driven done choreography.
@@ -83,19 +86,26 @@ The builder takes ``page=`` and ``url_kwargs=`` alongside ``zone=``, and the req
    from next.partial import resolve_partial_origin
 
 
-   def done(self, request: HttpRequest, cleaned_data: dict[str, Any]) -> HttpResponse:
-       """Create the access request and patch the host page list in one response."""
-       access_request = AccessRequest.objects.create(**cleaned_data)
-       origin = resolve_partial_origin(request)
-       if origin is None or origin.page_path is None:
-           raise Http404
-       return (
-           Patches(request)
-           .layer_close(result={"id": access_request.pk})
-           .morph(zone="request-list", page=origin.page_path, url_kwargs=origin.url_kwargs)
-           .toast("Request created", variant="success")
-           .response(fallback=f"/request/{access_request.pk}/audit/")
-       )
+   class AccessRequestWizard(FormWizard):
+       def done(
+           self, request: HttpRequest, cleaned_data: dict[str, Any]
+       ) -> HttpResponse:
+           """Create the access request and patch the host page list in one response."""
+           access_request = AccessRequest.objects.create(**cleaned_data)
+           origin = resolve_partial_origin(request)
+           if origin is None or origin.page_path is None:
+               raise Http404
+           return (
+               Patches(request)
+               .layer_close(result={"id": access_request.pk})
+               .morph(
+                   zone="request-list",
+                   page=origin.page_path,
+                   url_kwargs=origin.url_kwargs,
+               )
+               .toast("Request created", variant="success")
+               .response(fallback=f"/request/{access_request.pk}/audit/")
+           )
 
 The last step answers with all three operations in one envelope.
 
@@ -119,7 +129,7 @@ A denial surfaces as ``ForeignPageNotAuthorizedError`` rather than an empty morp
 This is the cycle of an out-of-band swap.
 One round trip closes everything at once.
 
-The Comparison
+The comparison
 --------------
 
 .. list-table::
@@ -156,7 +166,7 @@ The deciding argument is not the round trip but the authorization and the decoup
 The re-GET keeps the list's rights where they live, in the list's view, and leaves the wizard portable.
 Reach for server OOB when the one extra GET is genuinely visible and the wizard is dedicated to one host page.
 
-See Also
+See also
 --------
 
 .. seealso::

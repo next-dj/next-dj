@@ -1,6 +1,6 @@
 .. _internals-component-pipeline:
 
-Component Pipeline
+Component pipeline
 ==================
 
 This page covers how the components backend discovers component folders, loads their Python modules, resolves their context, and renders the final HTML fragment.
@@ -77,7 +77,7 @@ Modules
 ``next.components.watch``.
    Watch specs exposed to the autoreloader.
 
-Resolution Order
+Resolution order
 ----------------
 
 A component reference resolves through the visibility resolver.
@@ -96,7 +96,7 @@ Across backends, the order of entries in ``COMPONENT_BACKENDS`` decides which ba
 Two components in the same scope with the same name are reported by ``next.E020``.
 ``next.E034`` reports one component name used at the root route scope of more than one page tree.
 
-Filter Expression Props
+Filter expression props
 -----------------------
 
 The ``{% component %}`` template tag accepts dynamic props through Django ``FilterExpression``.
@@ -105,13 +105,14 @@ A prop like ``title="Hello"`` stays a literal string.
 
 The renderer parses the props into a dict and forwards both the literal values and the surrounding scope into the component template.
 
-Component Context Resolution
+Component context resolution
 ----------------------------
 
 Each ``@component.context("key")`` function runs once per component render.
 When a component's ``component.py`` fails to import, the renderer falls back to plain template rendering and the ``@component.context`` callables in that module do not run.
 On the template render path the resolver shares the request-scoped dependency cache through ``get_request_dep_cache``.
-DI parameters resolved earlier in the request are reused inside the component callables.
+Named ``Depends("name")`` values resolved earlier in the dispatch are reused inside the component callables.
+Provider-resolved parameters are recomputed per call.
 Page context values reach the component through the template scope, not through the DI cache.
 A component whose ``component.py`` defines a ``render`` function uses a fresh ``DependencyCache`` for that call instead of the shared request cache.
 The surrounding template scope (props and page context variables) is still forwarded to the resolver as DI parameters.
@@ -127,14 +128,14 @@ The pipeline fires four signals.
 - ``component_backend_loaded`` once per backend instance, sent by the backend class with ``config`` and ``instance``.
 - ``component_rendered`` after each render, carrying the ``ComponentInfo`` and its ``template_path``.
 
-Extension Points
+Extension points
 ----------------
 
 - Subclass ``ComponentsBackend`` to serve components from another source.
 - Subclass ``ComponentRenderStrategy`` for non standard rendering, for example a JSX bridge.
 - Subscribe to ``components_registered`` to keep caches in sync with the registry.
 
-See Also
+See also
 --------
 
 .. seealso::

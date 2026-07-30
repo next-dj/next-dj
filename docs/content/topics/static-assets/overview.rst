@@ -1,6 +1,6 @@
 .. _topics-static-overview:
 
-Static Assets Overview
+Static assets overview
 ======================
 
 The static pipeline finds CSS, JS, and module files that live next to pages and components.
@@ -11,7 +11,7 @@ This page covers the four moving pieces of the pipeline and traces a single asse
    :local:
    :depth: 2
 
-The Pipeline
+The pipeline
 ------------
 
 Four parts make up the pipeline.
@@ -52,7 +52,7 @@ StaticAsset
 A URL asset carries a non-empty ``url`` and a ``None`` ``inline``.
 An inline asset carries an empty ``url`` and a non-empty ``inline`` body.
 
-Asset Kinds
+Asset kinds
 -----------
 
 A kind binds a file extension to a placeholder slot and a backend renderer method.
@@ -83,20 +83,20 @@ The kind registry is ``next.static.default_kinds``.
 Projects register additional kinds through ``default_kinds.register``.
 See :doc:`asset-kinds` for the registration recipe.
 
-A Single Asset From Disk to HTML
+A single asset from disk to HTML
 --------------------------------
 
 A file named ``component.css`` next to ``component.djx`` reaches the browser in one pass.
 Discovery records it as a ``css`` ``StaticAsset`` because ``component`` is a registered stem and ``.css`` is the ``css`` kind extension.
 A render that uses the component adds the asset to the collector, which deduplicates it.
 After the page renders, the static manager replaces the ``styles`` slot token emitted by ``{% collect_styles %}`` with the link tags produced by ``render_link_tag`` on the active backend.
-``render_link_tag`` resolves the on-disk path to a public URL through Django staticfiles, so manifest hashing and CDN settings apply to the emitted tag.
+``register_file`` resolves the on-disk path to a public URL through Django staticfiles during discovery, so manifest hashing and CDN settings apply to the URL that ``render_link_tag`` formats into the tag.
 
 The same flow applies to ``component.js`` (kind ``js``, classic script) and ``component.mjs`` (kind ``module``, ECMAScript module), which both land in the ``scripts`` slot emitted by ``{% collect_scripts %}``.
 The extension picks the kind, so a file named ``component.js`` never renders through ``render_module_tag``.
 :doc:`/content/internals/static-pipeline` traces the pipeline step by step.
 
-Stems and Owners
+Stems and owners
 ----------------
 
 Discovery recognises files by stem.
@@ -123,19 +123,19 @@ The stem registry is ``default_stems``, which lives at ``next.static.discovery``
 Projects register extra stems through ``default_stems.register``.
 See :doc:`custom-stems`.
 
-Where Assets Live
+Where assets live
 -----------------
 
 :doc:`co-located-files` shows the directory layout where co-located assets sit next to pages, layouts, and components.
 
-Hot Reload
+Hot reload
 ----------
 
-The collector re-probes co-located files on every request, so a saved or added ``component.css`` or ``component.js`` is picked up on the next page load without a process restart.
+Discovery re-probes co-located files on every request, so a saved or added ``component.css`` or ``component.js`` is picked up on the next page load without a process restart.
 Module-level ``styles`` and ``scripts`` lists are read when the module imports, so an edit to one takes effect after a ``page.py`` change restarts the dev server.
-See the Hot Reload section of :doc:`/content/topics/components` for the full reload contract across ``page.py``, ``component.py``, and ``.djx`` changes.
+See the Hot reload section of :doc:`/content/topics/components` for the full reload contract across ``page.py``, ``component.py``, and ``.djx`` changes.
 
-Production Build
+Production build
 ----------------
 
 In production, ``collectstatic`` copies every registered asset into ``STATIC_ROOT`` under the ``next/`` namespace.
@@ -143,12 +143,12 @@ The framework hooks into the staticfiles finders through ``NextStaticFilesFinder
 
 See :doc:`/content/deployment/static-files` for production guidance.
 
-Public API Touchpoints
+Public API touchpoints
 ----------------------
 
 :doc:`/content/ref/static` is the full reference for the pipeline's public names.
 
-See Also
+See also
 --------
 
 .. seealso::

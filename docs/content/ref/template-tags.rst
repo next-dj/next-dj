@@ -1,9 +1,9 @@
 .. _ref-template-tags:
 
-Template Tags
+Template tags
 =============
 
-Module Summary
+Module summary
 --------------
 
 The framework registers its template tags as Django builtins through ``next.apps.templates.install``.
@@ -101,18 +101,18 @@ Components
    Block form.
    Marks a slot location inside a component template, with a fallback body used when the caller omits the slot.
 
-Multiline Tag Bodies
+Multiline tag bodies
 ~~~~~~~~~~~~~~~~~~~~
 
 The framework reinstalls Django's template tag pattern with the ``re.DOTALL`` flag so a single ``{% ... %}`` token may span several lines.
 That allows readable block components and slots when the inner markup is long.
 
-.. caution::
+.. warning::
 
    This changes template parsing for **every** template the process loads, not only DJX files.
    If you rely on Django's stock behaviour where a newline inside ``{% ... %}`` ends the tag, adjust those templates before adopting next.dj.
 
-Static Pipeline
+Static pipeline
 ---------------
 
 .. describe:: {% collect_styles %}
@@ -145,7 +145,7 @@ Static Pipeline
    Inline JS block.
    The body is rendered with the template context and deduplicated by content.
 
-Partial Rendering
+Partial rendering
 -----------------
 
 .. describe:: {% zone "<name>" tag="<element>" lazy="<trigger>" poll="<interval>" %}...{% placeholder %}...{% endzone %}
@@ -189,7 +189,7 @@ Layouts
    A ``layout.djx`` without this block raises ``next.W001`` during ``manage.py check``, since the page body would have nowhere to render.
    Nested layouts each carry their own ``{% block template %}`` and compose from innermost to outermost.
 
-Tag Loading
+Tag loading
 -----------
 
 .. autofunction:: next.apps.templates.install
@@ -198,7 +198,7 @@ Tag Loading
 The framework calls ``install`` during ``AppConfig.ready``.
 Project code does not need to load the tag libraries manually.
 
-See Also
+See also
 --------
 
 .. seealso::

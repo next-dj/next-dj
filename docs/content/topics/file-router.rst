@@ -1,6 +1,6 @@
 .. _topics-file-router:
 
-File Router
+File router
 ===========
 
 The file router scans your project for ``page.py`` and ``template.djx`` files and generates Django URL patterns from the directory tree.
@@ -23,7 +23,7 @@ Adding a directory adds a URL.
 Renaming a directory renames the URL and its computed URL name.
 Removing a directory removes the URL.
 
-Route Shapes
+Route shapes
 ------------
 
 The router recognises four directory shapes.
@@ -62,7 +62,7 @@ The following layout shows the four shapes together.
        [[suffix]]/
          page.py                   /api/<path:suffix>/
 
-Captured Parameters
+Captured parameters
 -------------------
 
 The bracket syntax accepts every Django path converter.
@@ -118,7 +118,7 @@ Name your directories without hyphens when you want the parameter name and the d
 ``DUrl[int]`` reads the captured segment whose name matches the parameter, so ``post_id`` resolves the ``[int:post_id]`` segment and the marker coerces it to ``int``.
 See :doc:`dependency-injection` for the full set of ``DUrl`` forms and the coercion table.
 
-Virtual Routes
+Virtual routes
 --------------
 
 A directory that contains a ``template.djx`` without a ``page.py`` still becomes a URL.
@@ -140,7 +140,7 @@ A virtual route can still receive layout wrapping from any ancestor ``layout.djx
 Every view the router generates, virtual routes included, carries a ``next_page_path`` attribute naming the page source.
 The form dispatcher reads it when it resolves a posted origin back to the page that should re-render after a validation failure, see :doc:`/content/topics/forms/validation-rerender`.
 
-URL Names
+URL names
 ---------
 
 Every page receives a URL name in the ``next`` namespace.
@@ -187,10 +187,10 @@ The placeholder ``{name}`` must appear in the template so each page still gets a
 Reverse them through the standard ``{% url %}`` tag or with ``page_reverse``.
 See :doc:`url-reversing` for the Python side.
 
-Page Roots
+Page roots
 ----------
 
-The router resolves routes from two sources, in the same way ``staticfiles`` resolves static files.
+The router resolves routes from app directories and project directories, in the same way ``staticfiles`` resolves static files, with one fallback shape.
 
 App directories.
    When ``APP_DIRS`` is ``True`` the router scans each installed application for a directory named ``PAGES_DIR``.
@@ -253,7 +253,7 @@ The comparison is string equality after bracket conversion, so semantic overlap 
 The ``OPTIONS`` block accepts a list of Django context processor paths.
 Each processor contributes values to every template that the router renders.
 
-DIRS Entry Types
+DIRS entry types
 ~~~~~~~~~~~~~~~~
 
 Each entry in ``DIRS`` is classified by ``next.utils.classify_dirs_entries`` before the router uses it.
@@ -285,7 +285,7 @@ Segment entry.
 In the example above, any directory named ``_drafts`` under any application's page root is silently skipped.
 No URL is registered for it and the file walk does not descend into it.
 
-Components Folder Skipping
+Components folder skipping
 --------------------------
 
 The router shares its file walk with the components backend.
@@ -293,7 +293,7 @@ The name set in the first ``COMPONENT_BACKENDS`` entry under ``COMPONENTS_DIR`` 
 The default is ``_components``.
 Only that exact name is skipped, not every directory that starts with an underscore.
 
-Multiple Backends
+Multiple backends
 -----------------
 
 The settings list accepts more than one backend.
@@ -326,7 +326,7 @@ Resolution preserves the concatenated list order.
 The first match wins.
 Both backends emit the same signals and follow the same naming rules.
 
-Resolution Performance
+Resolution performance
 ----------------------
 
 URL resolution scales with the depth of the request path, not with the number of registered pages.
@@ -335,29 +335,29 @@ The final match runs through standard Django pattern resolution, so converters a
 Setting ``URL_RESOLVER`` in ``NEXT_FRAMEWORK`` to ``"django.urls.resolvers.URLResolver"`` restores the plain linear scan.
 See :doc:`/content/internals/url-router` for the algorithm and :doc:`/content/ref/settings` for the setting.
 
-Common Patterns
+Common patterns
 ---------------
 
-Single Page Application Root
+Single page application root
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 A single ``routes/page.py`` registers the empty path ``/``.
 The router treats it as the default URL for the project.
 
-Static Content Section
+Static content section
 ~~~~~~~~~~~~~~~~~~~~~~
 
 Use virtual routes for marketing pages and legal copy.
 The directory holds only a ``template.djx``, no Python required.
 
-Per Project Page Tree
+Per project page tree
 ~~~~~~~~~~~~~~~~~~~~~
 
 Place a layout and one ``page.py`` under ``chrome/`` and add ``chrome`` to ``DIRS``.
 The result is a project-level shell that wraps every application page.
 See :doc:`multi-project` for the full pattern.
 
-Hot Reload
+Hot reload
 ----------
 
 A backend that reads from a database or other dynamic source needs to rebuild its pattern list when the data changes.
@@ -368,7 +368,7 @@ A burst of model writes that each triggers a reload can dominate that request.
 Receivers should debounce or batch invocations when one logical change triggers many model signals at once.
 See :doc:`/content/howto/reload-routes-from-code` for the model-signal receiver that triggers the reload.
 
-System Checks
+System checks
 -------------
 
 The router contributes Django system checks that validate the configuration at startup.
@@ -385,7 +385,7 @@ The router contributes Django system checks that validate the configuration at s
 Run them through ``uv run python manage.py check``.
 A clean exit confirms that every page resolves and every name is unique.
 
-Extension Points
+Extension points
 ----------------
 
 Three surfaces let you replace or augment the router.
@@ -397,7 +397,7 @@ Three surfaces let you replace or augment the router.
 Subclass ``FileRouterBackend`` to add additional patterns or augment URL names without writing a backend from scratch.
 See :doc:`extending` for a worked example.
 
-Database Driven Routes
+Database driven routes
 ----------------------
 
 A hybrid backend combines file routes with routes built from database rows.
@@ -407,7 +407,7 @@ Register the backend in ``PAGE_BACKENDS`` and call ``router_manager.reload()`` f
 
 See :doc:`/content/howto/write-a-router-backend` for the full worked recipe.
 
-See Also
+See also
 --------
 
 .. seealso::

@@ -1,14 +1,14 @@
 .. _topics-forms-serializers:
 
-Frozen Form Specs
+Frozen form specs
 =================
 
-The forms subsystem ships frozen dataclass descriptors that describe a form, a formset, or a single field as immutable, comparable descriptors.
+The forms subsystem ships frozen dataclass specs that describe a form, a formset, or a single field as plain immutable data.
 This module (``next.forms.serializers``) is unrelated to JSON serializers for :doc:`the browser context object </content/topics/static-assets/js-context>`.
 Those live under ``next.static``.
 
-Each descriptor is a frozen dataclass, so it is immutable and supports value equality.
-This makes a descriptor safe to cache or compare across renders.
+Each descriptor is a frozen dataclass, so it is immutable once built.
+Its ``__eq__`` compares the Django-bound members ``FieldSpec.bound`` and ``FormsetSpec.management_form`` by identity, so compare specs on their plain-data attributes as `Snapshot diffing`_ shows.
 
 .. contents::
    :local:
@@ -43,7 +43,7 @@ FormSpec.
 
 Use these specs when you need to inspect a form structure from Python or to render in a custom template engine.
 
-Building a Spec
+Building a spec
 ----------------
 
 The module provides three constructor helpers.
@@ -62,6 +62,7 @@ The module provides three constructor helpers.
 
 The second argument of ``form_spec`` is a Django admin style ``fieldsets`` sequence of ``(label, options)`` pairs.
 Each ``options`` mapping carries a ``fields`` list and an optional ``description``.
+A field the fieldsets never name is omitted from the resulting ``FormSpec`` entirely, matching the Django admin contract, so list every field you want rendered.
 Each helper returns a frozen instance ready to pass into a template.
 
 ``field_spec`` accepts an ``is_extra`` keyword argument that defaults to ``False``.
@@ -70,7 +71,7 @@ The flag describes the row's origin, not whether the user filled it in.
 ``formset_spec`` computes ``is_extra`` per row and propagates it to every ``FieldSpec`` and ``FormsetRowSpec`` it builds, so a template can tell an extra row apart from an instance-backed one and style or hide it accordingly.
 A standalone ``field_spec`` call leaves ``is_extra`` at ``False`` unless the caller passes the argument.
 
-Using a Spec in Templates
+Using a spec in templates
 -------------------------
 
 Specs are designed to render in any template engine because they expose stable, immutable attributes.
@@ -98,7 +99,7 @@ Use them when the standard ``{% form %}`` tag does not match the layout you want
 A custom renderer can read the same fields from Python.
 The dataclass exposes a fixed set of attributes.
 
-Non-Django Engine Notes
+Non-Django engine notes
 -----------------------
 
 Two spec members are Django objects, not plain data.
@@ -115,7 +116,7 @@ A renderer running outside Django templates handles them explicitly.
 Treat both members as opaque HTML producers in a non-Django engine.
 The rest of every spec is plain immutable data safe to project to JSON or pass to any template language.
 
-Field Kinds
+Field kinds
 -----------
 
 Each field carries a ``FieldKind`` literal that classifies the widget.
@@ -142,7 +143,7 @@ Admin ``RelatedFieldWidgetWrapper`` widgets are unwrapped to their inner widget 
 The framework classifies the widget once when constructing the spec.
 Custom renderers can branch on ``kind`` without re instantiating the widget.
 
-Spec vs Bound Form
+Spec vs bound form
 ------------------
 
 Specs are descriptors, not replacements.
@@ -154,17 +155,17 @@ A template can choose either path.
 
 Pick the spec when the rendering engine cannot consume Django bound fields directly.
 
-Common Patterns
+Common patterns
 ---------------
 
-Render a Form in a Different Engine
+Render a form in a different engine
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Use the spec to ship form structure to a Jinja2 macro or a JSON consumer.
 Each spec is a frozen dataclass, so a custom renderer can read its fields directly or build its own plain-dict projection.
 A bare Django ``Form`` is not JSON-encodable, so a form destined for ``@context(..., serialize=True)`` (see :doc:`/content/topics/static-assets/js-context`) must travel as a ``FormSpec`` (or a custom projection) rather than as the form instance itself.
 
-Snapshot Diffing
+Snapshot diffing
 ~~~~~~~~~~~~~~~~
 
 The dataclass ``__eq__`` does not detect structural drift on its own because ``FieldSpec.bound`` carries a Django ``BoundField`` without value equality.
@@ -179,12 +180,12 @@ Compare on stable attributes instead.
    added = set(field_names(new_spec)) - set(field_names(old_spec))
    removed = set(field_names(old_spec)) - set(field_names(new_spec))
 
-System Integration
+System integration
 ~~~~~~~~~~~~~~~~~~
 
 Use ``form_spec`` to render a form inside another rendering layer such as the Django admin while keeping dispatch on next.dj.
 
-See Also
+See also
 --------
 
 .. seealso::

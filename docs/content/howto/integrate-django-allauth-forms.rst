@@ -1,6 +1,6 @@
 .. _howto-allauth:
 
-Integrate django-allauth Forms
+Integrate django-allauth forms
 ==============================
 
 Problem
@@ -62,7 +62,7 @@ Beyond the allauth system checks, it publishes the current request through ``all
 ``allauth.urls`` must stay mounted even when no allauth view is linked directly.
 The reset email reverses ``account_reset_password_from_key``, and mandatory email verification redirects to ``/accounts/confirm-email/``, so both flows break without the URLconf entry.
 
-Login Through a Factory
+Login through a factory
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 The recommended pattern is a factory plus a handler.
@@ -95,7 +95,7 @@ The ``init_kwargs`` reach both the POST constructor and the GET render, so the d
 Wrong credentials answer with HTTP 200, ``X-Next-Form: invalid``, the allauth error message, and the entered login preserved.
 Valid credentials answer with the allauth redirect to ``LOGIN_REDIRECT_URL`` and an authenticated session.
 
-Signup and the ``{"initial": {}}`` Idiom
+Signup and the ``{"initial": {}}`` idiom
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``SignupForm`` takes no ``request`` kwarg, but the factory must still return non-empty ``init_kwargs``.
@@ -124,7 +124,7 @@ The neutral ``{"initial": {}}`` keeps construction on the factory path, the same
 
 ``try_save`` returns an early response when allauth intervenes, for example the enumeration-prevention flow, and the handler passes it through unchanged.
 
-Password Reset
+Password reset
 ~~~~~~~~~~~~~~
 
 ``ResetPasswordForm.save`` sends the email and returns the address string rather than a response, so the handler answers with its own redirect.
@@ -145,7 +145,7 @@ Password Reset
        form.save(request)
        return HttpResponseRedirect("/password-reset/sent/")
 
-Alternative: a Thin Subclass
+Alternative: a thin subclass
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 A subclass keeps the next-forms style with auto-registration and ``on_valid``.
@@ -187,7 +187,7 @@ The GET render works without the line, the crash fires only on submit.
    No origin re-render, no ``X-Next-Form`` header, and no visible errors.
    Register the form through ``form_class`` so the dispatcher owns the invalid path.
 
-Sharp Edges
+Sharp edges
 ~~~~~~~~~~~
 
 Rate limits need a cache.
@@ -239,7 +239,7 @@ Verification
        assert resp["Location"] == "/welcome/"
        assert client.session.get("_auth_user_id") == str(user.pk)
 
-See Also
+See also
 --------
 
 .. seealso::

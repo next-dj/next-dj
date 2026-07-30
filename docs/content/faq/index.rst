@@ -1,6 +1,6 @@
 .. _faq:
 
-Frequently Asked Questions
+Frequently asked questions
 ==========================
 
 The FAQ section answers common questions in three buckets.

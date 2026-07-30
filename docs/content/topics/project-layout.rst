@@ -1,6 +1,6 @@
 .. _topics-project-layout:
 
-Project Layout
+Project layout
 ==============
 
 This page covers the directory layout that next.dj expects for a single Django project.
@@ -11,7 +11,7 @@ For projects with several applications or a shared UI kit, read :doc:`multi-proj
    :local:
    :depth: 2
 
-Recommended Tree
+Recommended tree
 ----------------
 
 The Notes project from the tutorial demonstrates the full layout.
@@ -70,7 +70,7 @@ Three things are special about this tree.
 - ``_components/`` lives at the application root. Every directory below it becomes a reusable component.
 - ``static/`` keeps project-wide assets that are not co-located with a page or a component.
 
-Configuration Touchpoints
+Configuration touchpoints
 -------------------------
 
 Three settings keys point at the directories above.
@@ -91,6 +91,7 @@ Three settings keys point at the directories above.
        "COMPONENT_BACKENDS": [
            {
                "BACKEND": "next.components.FileComponentsBackend",
+               "DIRS": [],
                "COMPONENTS_DIR": "_components",
            }
        ],
@@ -101,7 +102,7 @@ Three settings keys point at the directories above.
 The names are convention.
 You can choose anything that fits your domain.
 
-Settings Helpers
+Settings helpers
 ----------------
 
 When you need to override a single key inside ``PAGE_BACKENDS`` without rewriting the entire list, use ``extend_default_backend``.
@@ -140,7 +141,7 @@ A dict override illustrates the one-level-deep merge.
 The default backend ships ``OPTIONS`` carrying only the ``context_processors`` key.
 The override merges into that dict one level deep, so any key the override omits keeps its default value while the supplied ``context_processors`` list replaces the empty default.
 
-Per Project Page DIRS
+Per project page DIRS
 ---------------------
 
 A project that hosts a global layout or a project-wide page tree adds an entry to ``DIRS``.
@@ -177,7 +178,7 @@ The root ``conftest.py`` holds pytest collection settings, while ``tests/conftes
 A per application ``tests/`` directory works for projects with several applications.
 See :doc:`multi-project` for the layered layout.
 
-Static Files
+Static files
 ------------
 
 Project-wide assets that are not owned by a page or a component live under ``static/``.
@@ -189,35 +190,35 @@ Migrations
 next.dj does not touch migrations.
 Run ``uv run python manage.py makemigrations`` and ``uv run python manage.py migrate`` exactly as in a regular Django project.
 
-Custom Management Commands
+Custom management commands
 --------------------------
 
 Place commands inside ``notes/management/commands/``.
 The framework does not require any special wiring beyond what Django already documents.
 
-Common Variations
+Common variations
 -----------------
 
-Single Application Mode
+Single application mode
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 A small project lives entirely inside one application.
 The tree above is the typical shape.
 
-Project Layout With Chrome
+Project layout with chrome
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Add a ``chrome/`` directory at the project root and reference it through ``DIRS``.
 The chrome holds a project-wide layout and possibly a few project-level pages such as ``/login`` or ``/health``.
 
-Per Domain Trees
+Per domain trees
 ~~~~~~~~~~~~~~~~
 
 Define two backends in ``PAGE_BACKENDS``.
 Each backend walks a different directory.
 The first matching URL pattern wins, so the order matters.
 
-See Also
+See also
 --------
 
 .. seealso::

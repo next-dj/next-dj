@@ -1,9 +1,9 @@
 .. _topics-static-assets:
 
-Static Assets
+Static assets
 =============
 
-The static pipeline discovers co-located CSS, JS, and module files, deduplicates them across requests, and injects them into HTML.
+The static pipeline discovers co-located CSS, JS, and module files, deduplicates them within a request, and injects them into HTML.
 
 .. rubric:: Concepts
 

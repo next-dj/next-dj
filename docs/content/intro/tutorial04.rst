@@ -1,6 +1,6 @@
 .. _intro-tutorial04:
 
-Forms and Actions
+Forms and actions
 =================
 
 Goal
@@ -20,7 +20,7 @@ Action handlers resolve ``request``, the form, and URL segments through the same
 Walkthrough
 -----------
 
-Declare the Note Forms
+Declare the note forms
 ~~~~~~~~~~~~~~~~~~~~~~
 
 Forms in next.dj are Django forms with one extra base class.
@@ -55,7 +55,7 @@ See the :term:`origin page` glossary entry.
 ``next.forms`` re-exports the common Django form fields and widgets used in this tutorial, so ``BooleanField`` and the rest are importable from one place.
 Import other fields directly from :mod:`django.forms` when you need them.
 
-Register Context for the Index Page
+Register context for the index page
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The index page publishes context values.
@@ -88,7 +88,7 @@ The ``inherit_context=True`` flag on the three layout-scope callables stays from
 No manual import in ``page.py`` is needed.
 See :doc:`/content/topics/forms/overview` for scope rules and autodiscovery.
 
-Render the Create Form
+Render the create form
 ~~~~~~~~~~~~~~~~~~~~~~
 
 Add the form to the index template.
@@ -130,7 +130,7 @@ The ``form`` variable inside the block is the unbound form on a GET and the boun
 
 Reload ``/``, submit the form with a title, and confirm that the index lists a new note.
 
-Edit a Note
+Edit a note
 ~~~~~~~~~~~
 
 Create a new page at ``notes/pages/notes/[id]/edit/``.
@@ -201,7 +201,7 @@ Add a link from the detail page.
      </p>
    </article>
 
-Delete a Note
+Delete a note
 ~~~~~~~~~~~~~
 
 Delete uses the same dispatch but does not need its own page because a single button can post directly to the action from the detail template.
@@ -227,7 +227,8 @@ The rendered form carries several hidden inputs from different sources.
 ``confirm`` is a real field on ``DeleteNoteForm``, so the template posts it explicitly.
 The ``{% form %}`` tag emits the framework fields itself.
 ``csrfmiddlewaretoken`` carries the CSRF token and ``_next_form_origin`` records the page URL, such as ``/notes/7/``.
-The dispatcher resolves that path against the URLconf, which recovers the captured ``id`` through the URL converter, so the action handler resolves ``DUrl["id", int]`` without any extra argument on the tag.
+The dispatcher resolves that path against the URLconf, which recovers the captured ``id`` through the URL converter.
+The action handler therefore resolves ``DUrl["id", int]`` without any extra argument on the tag.
 Add the delete handler to the detail page.
 ``DeleteNoteForm`` is declared in ``notes/forms.py`` and registers automatically at startup via autodiscovery.
 The detail ``page.py`` only needs to add its own context.
@@ -274,11 +275,11 @@ The complete file now looks like this.
 
 Submit the delete button on a note and the detail page redirects to the index, which no longer lists that note.
 
-How Re-render Works
+How re-render works
 ~~~~~~~~~~~~~~~~~~~
 
 A failing validation re-renders the origin page rather than producing an error page.
-The framework keeps a per-request cache that memoises ``Depends("name")`` callables across the initial render and any subsequent re-render in the same request, and the re-render reads from it instead of recomputing.
+The framework keeps a per-request cache that memoises dependency-injected values between the initial dispatch and the re-render, so the re-render reads from it instead of recomputing.
 See :doc:`/content/topics/dependency-injection` for the full cache model.
 It runs the same context functions, so the surrounding page content stays consistent.
 See :doc:`/content/topics/forms/validation-rerender` for the full re-render contract.
@@ -320,7 +321,7 @@ The Notes application is functionally complete.
 Users can create, view, edit, and delete notes.
 Every action goes through a typed action handler that receives the validated form and any DI markers it asks for.
 
-Common Pitfalls
+Common pitfalls
 ---------------
 
 Action fires but the page reloads with an empty form.
@@ -328,7 +329,7 @@ Action fires but the page reloads with an empty form.
    A handler that returns ``None`` renders the page again from scratch.
 
 CSRF token missing.
-   ``{% form "..." %}`` injects the token automatically, but only on POST forms.
+   ``{% form "..." %}`` injects the token automatically.
    Plain ``<form method="post">`` markup without the tag still needs ``{% csrf_token %}``.
 
 Edit form does not show the existing data.
@@ -337,7 +338,7 @@ Edit form does not show the existing data.
 
 See :doc:`/content/faq/troubleshooting` for the full catalog of errors and fixes.
 
-Next Steps
+Next steps
 ----------
 
 The application works end to end.

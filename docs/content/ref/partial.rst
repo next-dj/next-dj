@@ -1,16 +1,17 @@
 .. _ref-partial:
 
-Partial Rendering Reference
-===========================
+next.partial API reference
+==========================
 
-Module Summary
+Module summary
 --------------
 
 ``next.partial`` exposes the server side of partial rendering.
-The surface covers the ``Patches`` builder that authors a patch envelope, the response and stream classes that carry it, the zone-render and origin helpers, the custom-verb registration hook, and the protocol backend that serialises the wire format.
+The surface covers the ``Patches`` builder that authors a patch envelope, the response and stream classes that carry it, and the zone-render and origin helpers.
+It also covers the custom-verb registration hook and the protocol backend that serialises the wire format.
 The wire protocol, the ``data-next-*`` attributes, and the client runtime live in the topic section, see :doc:`/content/topics/partial-rendering/reference`.
 
-API Tiers
+API tiers
 ---------
 
 The surface splits into tiers that describe the intended audience for each name.
@@ -55,7 +56,7 @@ Internal hooks.
 Public API
 ----------
 
-Detecting a Partial Request
+Detecting a partial request
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``is_partial_request`` returns ``True`` when the request carries the ``X-Next-Request``
@@ -76,7 +77,7 @@ context provider reads to skip an expensive query on a full render.
 .. autoclass:: next.partial.headers.MergeMode
    :members:
 
-Building Patches
+Building patches
 ~~~~~~~~~~~~~~~~~
 
 ``Patches`` is the request-bound builder.
@@ -103,11 +104,12 @@ builder assembles, surfaced for a custom backend that serialises the wire format
 .. autoclass:: next.partial.FormMeta
    :members:
 
-Custom Verbs
+Custom verbs
 ~~~~~~~~~~~~
 
-``register_patch_op`` registers a custom verb name on the server, which clears the
-``next.E066`` check and earns the generic ``Patches.op`` channel.
+``register_patch_op`` registers a custom verb name on the server, validated by the
+``next.E066`` check, and earns the generic ``Patches.op`` channel.
+An unregistered name fails at runtime with ``UnknownPatchOpError``.
 The client supplies the handler through ``Next.partial.defineOp``.
 See :doc:`/content/topics/partial-rendering/extending` for the end-to-end recipe.
 
@@ -131,7 +133,7 @@ reached through ``next.partial.registry``.
 
 .. autofunction:: next.partial.registry.zones_of
 
-Origin and Authorisation
+Origin and authorisation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``resolve_partial_origin`` is a thin helper that reads the host page that owns a zone out
@@ -159,7 +161,7 @@ or the ``next.W068`` check warns that the runtime receives a full page instead.
 
 .. autofunction:: next.partial.shape_partial
 
-SSE Stream
+SSE stream
 ~~~~~~~~~~
 
 ``PatchEventStream`` is a :class:`~django.http.StreamingHttpResponse` that serialises each
@@ -171,7 +173,7 @@ See :doc:`/content/topics/partial-rendering/sse` for the WSGI and ASGI contract.
 .. autoclass:: next.partial.PatchEventStream
    :members:
 
-Protocol Backend
+Protocol backend
 ~~~~~~~~~~~~~~~~~
 
 ``PartialProtocolBackend`` owns the patch wire format and is the first entry of
@@ -241,15 +243,15 @@ See :doc:`signals` and :doc:`/content/topics/signals` for the partial signals
 (``zone_registered``, ``zone_rendered``, ``patch_op_registered``, ``field_validated``,
 ``sse_stream_opened``, ``sse_stream_closed``).
 
-System Checks
+System checks
 -------------
 
 See :doc:`system-checks` for the zone-placement, template-compile, custom-verb, and
 backend-configuration checks
-(``next.E060`` through ``next.E066``, ``next.E072``, ``next.E073``,
+(``next.E060`` through ``next.E067``, ``next.E072``, ``next.E073``,
 ``next.W067`` through ``next.W071``).
 
-See Also
+See also
 --------
 
 .. seealso::

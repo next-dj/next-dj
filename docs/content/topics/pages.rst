@@ -16,7 +16,7 @@ Overview
 The smallest page is a folder that contains a ``page.py`` and a sibling ``template.djx``.
 A page module declares context functions, action handlers, and optional ``render`` or ``template`` attributes, and any number of ancestor ``layout.djx`` files wrap the resulting body.
 
-Body Sources
+Body sources
 ------------
 
 A page module can supply its body through these sources.
@@ -39,11 +39,11 @@ A page directory may instead host only a sibling ``layout.djx``.
 That directory has no body source, and the layout chain renders with an empty body slot.
 See *Layout-only directories* under :doc:`layouts` for the wrapping rules, and note that :ref:`next.E012 <ref-system-checks>` does not fire when a sibling ``layout.djx`` is present.
 
-See *Render Order* below for the per-request sequence and the ``render`` short-circuit.
+See *Render order* below for the per-request sequence and the ``render`` short-circuit.
 Processor ordering and ``STRICT_CONTEXT`` behaviour are documented in :doc:`context` and :ref:`ref-settings`.
-Multiple body sources trigger :ref:`next.W043 <ref-system-checks>`, see *Priority Resolution*.
+Multiple body sources trigger :ref:`next.W043 <ref-system-checks>`, see *Priority resolution*.
 
-Render Order
+Render order
 ------------
 
 The body source runs before the template context is built.
@@ -53,16 +53,16 @@ This is the authoritative ordering for the page render path.
    A ``render`` function is called first with its :doc:`DI-resolved <dependency-injection>` arguments.
    When ``render`` returns an :class:`~django.http.HttpResponseBase` the response is sent verbatim and the remaining steps are skipped, so layouts and the static pipeline do not run.
    A ``template`` attribute or a template file supplies the body string directly.
-2. The ``@context`` callables are collected and run to build the template variable namespace.
-3. The body is composed through the ancestor layouts and rendered with that namespace.
+2. The body is composed through the ancestor layouts.
+3. The ``@context`` callables are collected and run, and the composed template renders with that namespace.
 
 A ``render`` function therefore cannot read a value that a ``@context`` callable would publish, because the callables have not run yet.
 
 A partial-zone request takes a different path.
-When the request targets named zones, the view returns a zone response before step 3, so the full page render does not run.
+When the request targets named zones, the view returns a zone response before step 2, so the full page render does not run.
 See :doc:`/content/topics/partial-rendering/zones` for the zone-morph request.
 
-The ``render`` Function
+The ``render`` function
 -----------------------
 
 The ``render`` function takes any DI-resolved parameters the resolver can fill.
@@ -93,7 +93,7 @@ Anything else.
 
 Exceptions raised inside ``render`` propagate to the Django request stack unchanged.
 
-The ``template`` Attribute
+The ``template`` attribute
 --------------------------
 
 Assign a string to the module-level ``template`` attribute when the body is small enough to live next to the Python code.
@@ -109,7 +109,7 @@ Use it for trivial pages where a separate template file would be noise.
 
 The ``template`` attribute has a matching ``PythonTemplateLoader``, documented in :doc:`/content/ref/pages`.
 
-Template Files
+Template files
 --------------
 
 A ``template.djx`` sibling is the default source.
@@ -127,7 +127,7 @@ The file contains the body without any HTML envelope.
 The layout chain wraps this body with the ancestor ``layout.djx`` files.
 See :doc:`layouts` for the full composition rules.
 
-Context Functions
+Context functions
 -----------------
 
 A ``@context`` decorator publishes one or more values into the template scope.
@@ -155,16 +155,29 @@ Unkeyed dict.
    Useful when several values share a dependency you only want to resolve once.
    The unkeyed form must return a mapping, and a return annotation that is not a mapping type reports :ref:`next.E029 <ref-system-checks>`.
 
+   .. code-block:: python
+      :caption: unkeyed dict
+
+      from next import context
+      from notes.models import Post
+
+      @context
+      def post_context(post: Post) -> dict[str, object]:
+          return {
+              "post": post,
+              "comments": post.comment_set.all(),
+          }
+
 The ``inherit_context=True`` flag works on both the keyed and the unkeyed-dict shapes.
 It publishes the value to every descendant page rather than to the declaring page alone.
 See :doc:`context` for that flag and the other ways to vary the decorator.
 
-Including Values in the JS Context
+Including values in the JS context
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Pass ``serialize=True`` to include the return value in ``window.Next.context`` on the client side.
 The value must be JSON-encodable by the active serializer.
-See :ref:`Serialization for the Browser <topics-context-serialization>` for the accepted shapes and common pitfalls.
+See :ref:`Serialization for the browser <topics-context-serialization>` for the accepted shapes and common pitfalls.
 Pass ``serializer=`` with a ``JsContextSerializer`` instance to use a per-key serializer for that value instead of the global ``JS_CONTEXT_SERIALIZER`` setting.
 
 .. code-block:: python
@@ -176,19 +189,7 @@ Pass ``serializer=`` with a ``JsContextSerializer`` instance to use a per-key se
    def featured_payload() -> dict:
        return {"id": 1, "title": "Hello"}
 
-.. code-block:: python
-   :caption: unkeyed dict
-
-   from next import context
-
-   @context
-   def post_context(post: Post) -> dict[str, object]:
-       return {
-           "post": post,
-           "comments": post.comment_set.all(),
-       }
-
-Custom Template Loaders
+Custom template loaders
 -----------------------
 
 The sibling ``template.djx`` loader is one implementation of the ``next.pages.loaders.TemplateLoader`` contract.
@@ -233,12 +234,13 @@ Include ``DjxTemplateLoader`` explicitly when you still want sibling ``template.
 ``next.pages.page.register_template(file_path, template_str)`` seeds the composed-template cache that ``composed_template_for`` reads.
 That cache serves direct ``Page.render`` calls, including ``next.testing.render_page``, the form re-render after a validation failure, and standalone zone renders.
 A regular HTTP request for the page bypasses the cache and resolves the body from its disk source, so a registered string never serves the page at its URL.
+
 The method stores the supplied body verbatim, with no layout composition, so no ancestor ``layout.djx`` wraps it.
 Pre-compose the body through the layout chain before registering it when wrapping is required.
 See :doc:`/content/ref/pages` for the full ``Page`` surface.
 See :doc:`/content/howto/add-a-custom-template-loader` for the recipe-shaped walkthrough of a loader class.
 
-Loader Contract
+Loader contract
 ~~~~~~~~~~~~~~~~~
 
 A loader sets one class attribute, implements two required methods, and may override one optional method.
@@ -253,7 +255,8 @@ A loader sets one class attribute, implements two required methods, and may over
 
 ``load_template(file_path)``.
    Returns the body string or ``None`` for the same ``page.py`` path.
-   The framework treats ``None`` as "did not match" and tries the next loader.
+   Once ``can_load`` has claimed the page, a ``None`` result yields an empty body.
+   The next loader is consulted only when ``can_load`` itself returns ``False``.
 
 ``source_path(file_path)``.
    Optional.
@@ -261,7 +264,7 @@ A loader sets one class attribute, implements two required methods, and may over
    Edits to that file invalidate the composed template on the next request.
    The default returns ``None`` for non-file-based loaders.
 
-Priority Resolution
+Priority resolution
 -------------------
 
 When more than one body source applies the framework picks the highest priority one and emits a warning for the redundancy.
@@ -285,10 +288,10 @@ The template loaders have no fixed numbering between them.
 When a page directory declares more than one body source, :ref:`next.W043 <ref-system-checks>` reports it.
 The highest-priority source is used and the others are never consulted.
 
-Common Patterns
+Common patterns
 ---------------
 
-Pure Redirect Page
+Pure redirect page
 ~~~~~~~~~~~~~~~~~~
 
 A page that always redirects elsewhere uses a ``render`` function that returns ``HttpResponseRedirect``.
@@ -302,7 +305,7 @@ A page that always redirects elsewhere uses a ``render`` function that returns `
    def render(request) -> HttpResponseRedirect:
        return HttpResponseRedirect(page_reverse("auth/login"))
 
-JSON Endpoint
+JSON endpoint
 ~~~~~~~~~~~~~
 
 Return ``JsonResponse`` from ``render`` for a JSON endpoint that still benefits from URL naming.
@@ -315,7 +318,7 @@ Return ``JsonResponse`` from ``render`` for a JSON endpoint that still benefits 
    def render(request) -> JsonResponse:
        return JsonResponse({"status": "ok"})
 
-Streaming Response
+Streaming response
 ~~~~~~~~~~~~~~~~~~
 
 Reach for ``StreamingHttpResponse`` when the body is produced incrementally, such as Server Sent Events or a large export.
@@ -347,7 +350,7 @@ A synchronous generator works under WSGI and the development server.
 An ASGI deployment can yield from an async generator instead.
 See ``examples/live-polls`` for a worked SSE broker.
 
-Markdown Blog Post
+Markdown blog post
 ~~~~~~~~~~~~~~~~~~
 
 Register a ``MarkdownTemplateLoader`` in ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`` and drop a ``template.md`` next to ``page.py`` instead of a ``template.djx``.
@@ -360,9 +363,9 @@ Wrap untrusted prose in ``{% verbatim %}`` blocks inside the loader, or escape t
 
 .. seealso::
 
-   The *Custom Template Loaders* section above for the ``template.md`` loader, and ``examples/markdown-blog`` for a working setup.
+   The *Custom template loaders* section above for the ``template.md`` loader, and ``examples/markdown-blog`` for a working setup.
 
-System Checks
+System checks
 -------------
 
 The pages subsystem contributes Django system checks. The ``check_page_functions`` check inspects every ``page.py`` and reports the following.
@@ -374,9 +377,9 @@ The pages subsystem contributes Django system checks. The ``check_page_functions
    The page module defines a ``render`` attribute that is not callable.
 
 ``next.W043``.
-   More than one body source is declared in the same directory, see *Priority Resolution*.
+   More than one body source is declared in the same directory, see *Priority resolution*.
 
-The ``check_context_functions`` check inspects ``page.py`` files under one representative pages root per router for keyless ``@context`` callables.
+The ``check_context_functions`` check inspects ``page.py`` files under one representative page root per router for keyless ``@context`` callables.
 In a project with several page-bearing applications the remaining roots are not scanned, so ``next.E029`` surfaces only for pages under the scanned root.
 
 ``next.E029``.
@@ -384,7 +387,7 @@ In a project with several page-bearing applications the remaining roots are not 
 
 Run them through ``uv run python manage.py check``.
 
-See Also
+See also
 --------
 
 .. seealso::

@@ -1,17 +1,19 @@
 .. _topics-partial-rendering-zones:
 
-Zones Save Render and Traffic
+Zones save render and traffic
 =============================
 
 A zone is an optimisation, not required markup.
 Partial rendering works on pages with no zones at all.
 This page explains what a zone buys, what the default costs without one, and the rule for dynamic list rows.
+The wire always carries the ``assets`` and ``form`` keys, serialised as ``[]`` and ``null`` when empty.
+The JSON examples on this page omit them when they are empty.
 
 .. contents::
    :local:
    :depth: 1
 
-The Default Without a Zone
+The default without a zone
 --------------------------
 
 The default shape of an invalid form submission is an extract-morph.
@@ -38,7 +40,7 @@ The whole page renders even though one form is kept.
 The extract default costs no more than the no-runtime cycle, which re-renders the full page on every invalid submission.
 The runtime turns that same full render into a targeted DOM update for free.
 
-Adding a Zone
+Adding a zone
 -------------
 
 Wrapping the form in a ``{% zone %}`` and naming it on the tag trades the full render for a single-zone render.
@@ -70,18 +72,21 @@ The network payload shrinks from a page to a zone, and the server render shrinks
 Reach for a zone when a page is heavy, when a form sits among expensive siblings, or when the response size matters.
 Leave it off when the page is small and the extract default already does the job.
 
-Zone Assets on a Standalone Render
+Zone assets on a standalone render
 ----------------------------------
 
 A standalone zone render collects the co-located assets its body registers, component widgets included.
 The envelope carries them outward as an asset manifest, URL-form and inline alike.
-The client loads only what the page does not already have, inserting the link-verb assets before the operations apply and the script and module verbs after, and each asset executes once per page lifetime.
+The client loads only what the page does not already have, inserting the link-verb assets before the operations apply and the script and module verbs after.
+Each asset executes once per page lifetime.
 The verb comes from the renderer registered for the asset kind, so a kind registered with a custom renderer is skipped and reaches the browser only on a full render.
 An inline body keeps that verb only when the kind wraps it in the element the runtime builds, so a body of a kind that wraps it differently, or not at all, also stays with the full render.
-On a zone ``GET`` the envelope also ships the values of the page's ``serialize=True`` context providers, introduced in :doc:`/content/topics/context`, as a ``context`` patch, so ``Next.context`` stays in step with the re-rendered zone.
-See :doc:`co-located-js` for what once-per-page execution means for behaviour, :doc:`/content/topics/static-assets/asset-kinds` for the renderer that decides the verb, and :doc:`/content/topics/static-assets/index` for how the assets are discovered and bundled.
+On a zone ``GET`` the envelope also ships the values of the page's ``serialize=True`` context providers, introduced in :doc:`/content/topics/context`, as a ``context`` patch.
+``Next.context`` therefore stays in step with the re-rendered zone.
+See :doc:`co-located-js` for what once-per-page execution means for behaviour.
+See :doc:`/content/topics/static-assets/asset-kinds` for the renderer that decides the verb, and :doc:`/content/topics/static-assets/index` for how the assets are discovered and bundled.
 
-Poll a Zone on an Interval
+Poll a zone on an interval
 --------------------------
 
 A zone polls itself when the tag carries a ``poll=`` interval.
@@ -105,7 +110,7 @@ On its return to the foreground each zone refetches only when its own interval e
 A brief flicker between tabs therefore fetches nothing, and switching windows does not storm the server.
 A polling zone shows its body, so it cannot also be ``lazy=``, the two modes are exclusive and combining them is a compile error.
 
-The Wrapper Element
+The wrapper element
 -------------------
 
 A zone wraps its body in ``<div data-next-zone="name">`` by default.
@@ -132,7 +137,7 @@ Inside a ``<ul>``, a ``<select>``, or a ``<table>`` the parser would drop it, so
 
 The wrapper carries ``data-next-zone`` regardless of the tag, so the zone stays addressable.
 
-Key Your Dynamic List Rows
+Key your dynamic list rows
 --------------------------
 
 The morph engine matches old nodes to new ones to preserve identity, focus, and the caret.
@@ -177,7 +182,7 @@ It does not descend into a component template, so a form inside a ``{% component
 The remedy is the same either way.
 Thread a ``key=`` with a stable per-row value into the form, and the repeated morph lands on the submitted instance even when the form lives inside a looped component.
 
-Zone Rules the Checks Enforce
+Zone rules the checks enforce
 -----------------------------
 
 A few placements break a standalone zone render, and a system check catches each one before a request reaches it.
@@ -188,7 +193,7 @@ A ``lazy=`` zone needs a ``{% placeholder %}`` branch.
 A zone belongs to a page, not a component, so a ``{% zone %}`` in a component template is rejected.
 See :doc:`/content/ref/system-checks` for the full list and the check codes.
 
-See Also
+See also
 --------
 
 .. seealso::

@@ -1,6 +1,6 @@
 .. _internals-action-dispatch:
 
-Action Dispatch
+Action dispatch
 ===============
 
 This page covers the form dispatch pipeline.
@@ -114,7 +114,7 @@ Modules
 ``next.forms.formsets``.
    ``cleanup_extra_initial`` helper for blank extra rows.
 
-Access Guard
+Access guard
 ------------
 
 An action that declares ``login_required`` or ``permission_required`` carries an ``ActionGuard`` in its registry metadata under the ``guard`` key.
@@ -122,7 +122,7 @@ The shared pipeline enforces this static guard right after the method check, ahe
 An anonymous user receives a redirect to ``LOGIN_URL`` whose ``next`` is the validated posted origin, and an authenticated user missing a permission raises ``PermissionDenied``.
 Every backend that delegates to ``FormActionDispatch.dispatch`` inherits the enforcement.
 
-Dynamic Permission Hooks
+Dynamic permission hooks
 ------------------------
 
 Two opt-in hooks layer per-request permission decisions on top of the static guard, and unlike the static guard they intentionally run application code.
@@ -143,7 +143,7 @@ A wizard enforces ``check_permissions`` once per step POST before the step binds
 A wizard step binds without ``get_initial`` or ``Meta.instance_from_url``, so a ``ModelForm`` step reads an unbound ``self.instance`` in that hook, not the URL-addressed target the standalone path loads.
 The guide covers the authoring contract at :ref:`topics-forms-actions-dynamic-guards`.
 
-Validate-Only Short Circuit
+Validate-only short circuit
 ---------------------------
 
 A partial request whose intent carries validate fields short-circuits the pipeline on the already bound form.
@@ -152,7 +152,7 @@ The dispatcher answers with the validation envelope, the handler never runs, the
 A request without validate fields falls through to the normal submit path.
 See :doc:`/content/topics/partial-rendering/scenarios` for the client-side flow.
 
-Origin Resolution
+Origin resolution
 -----------------
 
 The hidden ``_next_form_origin`` field on every rendered form carries the URL path of the origin page.
@@ -178,7 +178,7 @@ Its ``dispatch`` method resolves the UID to an action and forwards the request t
 A project customises dispatch by subclassing ``RegistryFormActionBackend`` and overriding ``dispatch``.
 The override calls ``super().dispatch`` to keep the standard pipeline.
 
-Shared Dependency Cache
+Shared dependency cache
 -----------------------
 
 The dispatcher creates a fresh dependency cache on every POST and shares it across each stage of the dispatch.
@@ -214,7 +214,7 @@ All five request-time signals carry ``uid`` and ``request``.
 ``uid`` is the registry identity also stamped on the ``data-next-action`` markup attribute, ``None`` for a backend whose meta stores no uid.
 ``request`` is the live ``HttpRequest`` and receivers must not retain it past the call.
 
-Extension Points
+Extension points
 ----------------
 
 - Subclass ``RegistryFormActionBackend`` and override ``dispatch`` to wrap the standard pipeline.
@@ -224,7 +224,7 @@ Extension Points
 - Subscribe to ``action_dispatched`` for audit and cache invalidation.
 - Subscribe to ``form_validation_failed`` for alerting on failure rates.
 
-See Also
+See also
 --------
 
 .. seealso::

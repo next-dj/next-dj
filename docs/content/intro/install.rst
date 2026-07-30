@@ -11,12 +11,14 @@ Requirements
 
 - Python 3.12 or newer (3.12, 3.13, 3.14 tested).
 - Django 5.2 or newer (5.2, 6.0 supported).
+- Python 3.14 requires Django 6.0.
+  Django 5.2 supports Python 3.12 and 3.13.
 - An ASGI or WSGI server compatible with the Django version in use.
 
 next.dj extends Django.
 It does not replace the ORM, migrations, admin, or auth (:ref:`intro-overview-django-unchanged`).
 
-Install the Package
+Install the package
 -------------------
 
 Install the project package from PyPI.
@@ -31,7 +33,7 @@ Install the project package from PyPI.
 Some installers normalise dots to hyphens in wheel and cache paths.
 The import path is always ``next``.
 
-Create a Django Project
+Create a Django project
 -----------------------
 
 If you do not already have a Django project, scaffold one in an empty folder.
@@ -48,7 +50,7 @@ The same instructions work with any other names if you adapt the imports.
 Add next.dj to INSTALLED_APPS
 -----------------------------
 
-Open ``config/settings.py`` and register both ``next`` and your application in :doc:`INSTALLED_APPS <django:ref/applications>`.
+Open ``config/settings.py`` and register both ``next`` and your application in :doc:`INSTALLED_APPS <django:ref/settings>`.
 
 .. code-block:: python
    :caption: config/settings.py
@@ -105,7 +107,7 @@ A ``FileRouterBackend`` entry must carry an ``OPTIONS`` key, and ``manage.py che
 Keep ``django.template.context_processors.request`` in the ``OPTIONS`` of your ``TEMPLATES`` setting.
 A fresh ``django-admin startproject`` already includes it, and ``manage.py check`` reports ``next.E019`` if it is missing.
 
-Mount the Router
+Mount the router
 ----------------
 
 Forward all unmatched URLs to next.dj by replacing ``config/urls.py`` with the file below.
@@ -128,7 +130,7 @@ This replacement also removes the ``admin`` import that ``startproject`` generat
 URLs declared above the ``include`` keep working.
 Anything not matched by Django falls through to the file router, which resolves it against your ``pages/`` tree.
 
-Create Your First Page
+Create your first page
 ----------------------
 
 Create one page in the ``notes`` application to confirm the wiring.
@@ -155,7 +157,7 @@ Create one page in the ``notes`` application to confirm the wiring.
 The directory ``notes/pages/`` is the page root for the application.
 The ``page.py`` plus ``template.djx`` pair turns the empty path into a rendered URL.
 
-Run the Server
+Run the server
 --------------
 
 Apply Django migrations and start the development server.
@@ -169,7 +171,7 @@ A fresh ``startproject`` configures SQLite by default, so ``migrate`` creates th
 
 Open ``http://127.0.0.1:8000/`` and you should see the ``Notes`` heading.
 
-Verify the Install
+Verify the install
 ------------------
 
 Run the Django system checks once to confirm the configuration matches the framework expectations.
@@ -182,7 +184,7 @@ Run the Django system checks once to confirm the configuration matches the frame
 A clean check run prints ``System check identified no issues`` and exits with status zero.
 If a check fires, the message includes both the configuration key and the recommended fix.
 
-Next Steps
+Next steps
 ----------
 
 The environment is ready for the tutorial.
