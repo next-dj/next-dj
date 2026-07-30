@@ -58,6 +58,7 @@ E_ZONE_IN_IF: Final = "next.E063"
 E_LAZY_WITHOUT_PLACEHOLDER: Final = "next.E064"
 E_ZONE_IN_COMPONENT: Final = "next.E065"
 E_UNREGISTERED_OP: Final = "next.E066"
+E_BACKENDS_NOT_A_LIST: Final = "next.E067"
 E_COMPOSED_TEMPLATE_SYNTAX: Final = "next.E072"
 E_BACKEND_WITHOUT_PATH: Final = "next.E073"
 
@@ -67,6 +68,7 @@ W_MANIFEST_VERSION_NO_STORAGE: Final = "next.W069"
 W_FORM_IN_FOR_NO_KEY: Final = "next.W070"
 W_TOO_MANY_BACKENDS: Final = "next.W071"
 
+_PARTIAL_BACKENDS_KEY: Final = "PARTIAL_BACKENDS"
 _MIN_DUPLICATE_COUNT: Final = 2
 _FORM_TARGET_ATTR: Final = "data-next-target"
 _FORM_KEY_ATTR: Final = "data-next-key"
@@ -513,9 +515,35 @@ def check_form_backend_partial_aware(*args, **kwargs) -> list[CheckMessage]:
     return messages
 
 
+@register(NEXT)
+def check_partial_backends_is_a_list(*args, **kwargs) -> list[CheckMessage]:
+    """Error when `PARTIAL_BACKENDS` is not a list (`next.E067`).
+
+    The settings layer merges the key only when it holds a list, so a tuple
+    or a bare dict is dropped and the default protocol backend loads in its
+    place. Every other partial diagnostic reads the merged value, so nothing
+    else would report the drop.
+    """
+    raw = getattr(settings, "NEXT_FRAMEWORK", None)
+    if not isinstance(raw, dict):
+        return []
+    configs = raw.get(_PARTIAL_BACKENDS_KEY)
+    if configs is None or isinstance(configs, list):
+        return []
+    return [
+        Error(
+            f"NEXT_FRAMEWORK[{_PARTIAL_BACKENDS_KEY!r}] must be a list. The "
+            "value is ignored, so the default protocol backend loads instead "
+            "of the configured one.",
+            obj=settings,
+            id=E_BACKENDS_NOT_A_LIST,
+        )
+    ]
+
+
 def _partial_backend_configs() -> list[object]:
     """Return PARTIAL_BACKENDS as a list, tolerating any malformed shape."""
-    configs = getattr(next_framework_settings, "PARTIAL_BACKENDS", ())
+    configs = getattr(next_framework_settings, _PARTIAL_BACKENDS_KEY, ())
     if isinstance(configs, list | tuple):
         return list(configs)
     return []

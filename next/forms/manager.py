@@ -35,6 +35,8 @@ class FormActionManager:
         self._backends: list[FormActionBackend] = list(backends) if backends else []
         # An empty list is a legitimate load result, so only a flag knows.
         self._loaded: bool = bool(self._backends)
+        # Entries the last load tried, so an empty result can name its reason.
+        self._attempted: int = 0
 
     @override
     def __repr__(self) -> str:
@@ -55,7 +57,11 @@ class FormActionManager:
         self._version += 1
         # No default: an entry without BACKEND is a next.E044 misconfiguration.
         self._backends = load_backends(configs, base=FormActionBackend)
-        self._loaded = True
+        self._attempted = len(configs)
+        # Losing every entry is a broken config rather than a load result, so
+        # the next access rereads settings. A settings_reloaded receiver cannot
+        # do it instead, because dropping the backends drops their actions.
+        self._loaded = bool(self._backends) or not configs
 
     def _ensure_backends(self) -> None:
         if not self._loaded:
@@ -65,12 +71,21 @@ class FormActionManager:
         """Return the first backend or raise when none are configured."""
         self._ensure_backends()
         if not self._backends:
-            msg = (
-                "No form action backends configured. Add at least one entry to "
-                "NEXT_FRAMEWORK['FORM_ACTION_BACKENDS']."
-            )
-            raise ImproperlyConfigured(msg)
+            raise ImproperlyConfigured(self._no_backends_message())
         return self._backends[0]
+
+    def _no_backends_message(self) -> str:
+        """Tell an unconfigured family apart from one whose entries all failed."""
+        if self._attempted:
+            return (
+                f"None of the {self._attempted} entries in "
+                "NEXT_FRAMEWORK['FORM_ACTION_BACKENDS'] could be loaded. The "
+                "next.backends logger names why each one was skipped."
+            )
+        return (
+            "No form action backends configured. Add at least one entry to "
+            "NEXT_FRAMEWORK['FORM_ACTION_BACKENDS']."
+        )
 
     def register_action(self, registration: "ActionRegistration") -> None:
         """Forward registration to the first backend."""

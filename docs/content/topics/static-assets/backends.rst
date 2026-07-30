@@ -160,6 +160,7 @@ List the dotted path of the backend in ``STATIC_BACKENDS``.
 
 The manager builds the backend instance from the config dict through ``load_backends`` and emits the ``backend_loaded`` signal.
 An entry that names a class outside the ``StaticBackend`` family, or a path that cannot be imported, is logged and skipped, and the remaining entries still load.
+So is a backend that answers ``ImproperlyConfigured`` from its own ``__init__``, while any other exception a constructor raises is a bug in that backend and reaches the caller.
 When no entry survives, the manager seeds the built-in staticfiles backend so rendering always has one, and that seed announces itself through the same signal.
 
 Request Aware Output

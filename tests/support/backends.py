@@ -2,8 +2,10 @@ from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from typing import Any, ClassVar
 
+from django.core.exceptions import ImproperlyConfigured
 
-class KitBackend:
+
+class FakeBackend:
     """Base of the fake backend family the loader builds in these tests."""
 
     def __init__(self, config: Mapping[str, Any]) -> None:
@@ -11,11 +13,11 @@ class KitBackend:
         self.config = config
 
 
-class AlphaBackend(KitBackend):
+class AlphaBackend(FakeBackend):
     """A valid backend of the family."""
 
 
-class BetaBackend(KitBackend):
+class BetaBackend(FakeBackend):
     """A second valid backend, used to assert ordering and rebuilds."""
 
 
@@ -27,10 +29,12 @@ class ForeignBackend:
         self.config = config
 
 
-class RaisingBackend(KitBackend):
+class RaisingBackend(FakeBackend):
     """A backend whose construction fails with the error its entry names."""
 
     ERRORS: ClassVar[dict[str, type[Exception]]] = {
+        "config": ImproperlyConfigured,
+        "import": ImportError,
         "type": TypeError,
         "value": ValueError,
     }
@@ -41,7 +45,7 @@ class RaisingBackend(KitBackend):
         raise self.ERRORS[str(config["ERROR"])](msg)
 
 
-class CountingBackend(KitBackend):
+class CountingBackend(FakeBackend):
     """A backend counting how many times the family instantiated it."""
 
     instances: ClassVar[int] = 0
@@ -52,7 +56,7 @@ class CountingBackend(KitBackend):
         CountingBackend.instances += 1
 
 
-class AbstractKitBackend(ABC):
+class AbstractFakeBackend(ABC):
     """An abstract family root, like the contracts the real areas declare."""
 
     def __init__(self, config: Mapping[str, Any]) -> None:
@@ -64,7 +68,7 @@ class AbstractKitBackend(ABC):
         """Return whatever the family asks its members for."""
 
 
-class ConcreteKitBackend(AbstractKitBackend):
+class ConcreteFakeBackend(AbstractFakeBackend):
     """The instantiable member of the abstract family."""
 
     def run(self) -> str:
@@ -72,7 +76,7 @@ class ConcreteKitBackend(AbstractKitBackend):
         return "ok"
 
 
-def not_a_class(config: Mapping[str, Any]) -> KitBackend:
+def not_a_class(config: Mapping[str, Any]) -> FakeBackend:
     """Return a backend, so only the class check can reject this dotted path."""
     return AlphaBackend(config)
 
@@ -82,6 +86,6 @@ BETA = f"{__name__}.BetaBackend"
 FOREIGN = f"{__name__}.ForeignBackend"
 RAISING = f"{__name__}.RaisingBackend"
 COUNTING = f"{__name__}.CountingBackend"
-CONCRETE = f"{__name__}.ConcreteKitBackend"
+CONCRETE = f"{__name__}.ConcreteFakeBackend"
 NOT_A_CLASS = f"{__name__}.not_a_class"
 MISSING = f"{__name__}.NoSuchBackend"

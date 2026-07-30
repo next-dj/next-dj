@@ -45,6 +45,10 @@ The helper imports the ``BACKEND`` dotted path, checks the class against ``FormA
    backend = backend_class(config)
 
 An entry that names no importable ``FormActionBackend`` subclass is logged and skipped, so one broken entry costs its own backend and the rest of the list still loads.
+A backend that answers ``ImproperlyConfigured`` from its own ``__init__`` is skipped the same way, while any other exception a constructor raises is a bug in that backend and reaches the caller.
+
+When every entry fails, the manager keeps rereading the setting instead of caching an empty list, so a corrected dotted path takes effect on the next access.
+Asking such a manager for a backend raises ``ImproperlyConfigured`` naming how many entries were tried, and the ``next.backends`` logger holds the reason each one was skipped.
 
 The constructor therefore receives the full entry, not only ``OPTIONS``.
 ``RegistryFormActionBackend.__init__`` accepts the config and ignores it, which is why a subclass that reads no options needs no constructor at all.

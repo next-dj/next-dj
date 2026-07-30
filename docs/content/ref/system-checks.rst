@@ -296,6 +296,9 @@ Errors
    * - ``next.E066``
      - A custom patch op shadows a built-in verb or uses a name that is not a valid verb token.
      - ``next.partial.checks``
+   * - ``next.E067``
+     - ``NEXT_FRAMEWORK['PARTIAL_BACKENDS']`` is not a list, so the value is ignored and the default protocol backend loads in place of the configured one.
+     - ``next.partial.checks``
    * - ``next.E072``
      - A composed page template does not compile, so the syntax error would otherwise surface only as a 500 on the first request to the page.
      - ``next.partial.checks``

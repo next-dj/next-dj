@@ -871,14 +871,14 @@ class TestFormActionManagerReloadConfig:
         assert [type(backend) for backend in manager._backends] == [
             RegistryFormActionBackend
         ]
-        assert "error creating FormActionBackend from config" in caplog.text
+        assert "error resolving FormActionBackend from config" in caplog.text
 
 
 class TestFormActionManagerLoadedFlag:
-    """Settings are read once even when they yield no usable backend."""
+    """An empty settings list is cached, a list whose entries all failed is not."""
 
-    def test_unusable_configuration_loads_once(self, settings) -> None:
-        """A list nobody can load stays loaded, rather than retrying per call."""
+    def test_unusable_configuration_is_reread(self, settings) -> None:
+        """Entries that all fail keep the manager rereading settings."""
         settings.NEXT_FRAMEWORK = {
             "FORM_ACTION_BACKENDS": [{"BACKEND": "next.forms.NoSuchBackend"}]
         }
@@ -888,16 +888,43 @@ class TestFormActionManagerLoadedFlag:
         ) as load_backends_mock:
             assert manager.backends == ()
             assert manager.get_action_meta("missing") is None
-            with pytest.raises(ImproperlyConfigured):
-                manager.register_action(
-                    ActionRegistration(
-                        name="never_registered",
-                        file_path=_FAKE_FILE,
-                        scope="shared",
-                        handler=lambda: None,
-                    )
+        assert load_backends_mock.call_count == 2
+
+    def test_a_corrected_configuration_takes_effect(self, settings) -> None:
+        """A fixed dotted path loads on the next access, without a restart."""
+        settings.NEXT_FRAMEWORK = {
+            "FORM_ACTION_BACKENDS": [{"BACKEND": "next.forms.NoSuchBackend"}]
+        }
+        manager = FormActionManager()
+        assert manager.backends == ()
+
+        settings.NEXT_FRAMEWORK = {
+            "FORM_ACTION_BACKENDS": [
+                {"BACKEND": "next.forms.RegistryFormActionBackend"}
+            ]
+        }
+        assert [type(backend) for backend in manager.backends] == [
+            RegistryFormActionBackend
+        ]
+
+    def test_failed_entries_are_named_as_such(self, settings) -> None:
+        """The raised message counts the entries instead of claiming none exist."""
+        settings.NEXT_FRAMEWORK = {
+            "FORM_ACTION_BACKENDS": [
+                {"BACKEND": "next.forms.NoSuchBackend"},
+                {"BACKEND": "next.forms.AlsoMissing"},
+            ]
+        }
+        manager = FormActionManager()
+        with pytest.raises(ImproperlyConfigured, match="None of the 2 entries"):
+            manager.register_action(
+                ActionRegistration(
+                    name="never_registered",
+                    file_path=_FAKE_FILE,
+                    scope="shared",
+                    handler=lambda: None,
                 )
-        assert load_backends_mock.call_count == 1
+            )
 
     def test_empty_configuration_keeps_the_version_stable(self, settings) -> None:
         """No reload per call means the urlpatterns cache token stops churning."""

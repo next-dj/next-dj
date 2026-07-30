@@ -13,14 +13,6 @@ from next.conf import import_class_cached, next_framework_settings
 
 logger = logging.getLogger(__name__)
 
-# What importing the dotted path and calling the class can raise.
-_CONFIG_ERRORS: tuple[type[Exception], ...] = (
-    ImproperlyConfigured,
-    ImportError,
-    TypeError,
-    ValueError,
-)
-
 # A family root is a class, but an abstract one cannot pass as `type[T]`, so
 # it travels under its constructor signature and `_root_class` narrows it back.
 type BackendRoot[T] = Callable[..., T]
@@ -68,18 +60,25 @@ def load_backends[T](
     default: str | None = None,
     signal: Signal | None = None,
 ) -> list[T]:
-    """Instantiate every configured backend, skipping the entries that fail.
+    """Instantiate every configured backend, skipping the misconfigured entries.
 
-    One broken entry costs its own backend and nothing else, so a site
-    keeps serving with the backends that did load.
+    An entry is misconfigured when its dotted path does not resolve into
+    the family, or when the backend itself answers `ImproperlyConfigured`.
+    Such an entry costs its own backend and nothing else, so a site keeps
+    serving with the rest. Anything else a constructor raises is a bug in
+    that backend and reaches the caller.
     """
     name = _root_class(base).__name__
     backends: list[T] = []
     for config in configs:
         try:
             klass = resolve_backend_class(config, base=base, default=default)
+        except (ImproperlyConfigured, ImportError):
+            logger.exception("error resolving %s from config %s", name, config)
+            continue
+        try:
             instance = _instantiate_backend(klass, config)
-        except _CONFIG_ERRORS:
+        except ImproperlyConfigured:
             logger.exception("error creating %s from config %s", name, config)
             continue
         if signal is not None:

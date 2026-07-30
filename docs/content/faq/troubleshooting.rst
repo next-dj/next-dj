@@ -225,6 +225,13 @@ next.W071 Extra PARTIAL_BACKENDS Entries
 ``PARTIAL_BACKENDS`` lists more than one entry.
 Partial rendering activates only the first entry and ignores the rest, so remove the extra entries or merge their options into one.
 
+next.E067 PARTIAL_BACKENDS Is Not a List
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``PARTIAL_BACKENDS`` holds a tuple, a bare dict, or a dotted path rather than a list of config dicts.
+The framework merges the key only from a list, so the configured backend never loads and the default protocol backend serialises the wire format instead.
+Wrap the entry in a list.
+
 Dependency Injection
 --------------------
 

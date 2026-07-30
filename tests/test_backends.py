@@ -15,12 +15,12 @@ from tests.support.backends import (
     MISSING,
     NOT_A_CLASS,
     RAISING,
-    AbstractKitBackend,
+    AbstractFakeBackend,
     AlphaBackend,
     BetaBackend,
-    ConcreteKitBackend,
+    ConcreteFakeBackend,
     CountingBackend,
-    KitBackend,
+    FakeBackend,
 )
 
 
@@ -46,42 +46,42 @@ class _Recorder:
 
 def _manager(
     setting: str = _DICT_SETTING, default: str | None = None
-) -> SingleBackendManager[KitBackend]:
-    return SingleBackendManager(setting, base=KitBackend, default=default)
+) -> SingleBackendManager[FakeBackend]:
+    return SingleBackendManager(setting, base=FakeBackend, default=default)
 
 
 class TestResolveBackendClass:
     """The dotted path under BACKEND resolves to a class of the family."""
 
     def test_valid_entry_returns_the_named_class(self) -> None:
-        klass = resolve_backend_class({"BACKEND": ALPHA}, base=KitBackend)
+        klass = resolve_backend_class({"BACKEND": ALPHA}, base=FakeBackend)
         assert klass is AlphaBackend
 
     def test_missing_backend_without_default_is_improperly_configured(self) -> None:
         with pytest.raises(ImproperlyConfigured, match="under BACKEND"):
-            resolve_backend_class({"OPTIONS": {}}, base=KitBackend)
+            resolve_backend_class({"OPTIONS": {}}, base=FakeBackend)
 
     def test_empty_backend_is_improperly_configured(self) -> None:
         # an empty dotted path would otherwise reach the importer and fail
         # with a message about module paths rather than about the entry
         with pytest.raises(ImproperlyConfigured, match="under BACKEND"):
-            resolve_backend_class({"BACKEND": ""}, base=KitBackend)
+            resolve_backend_class({"BACKEND": ""}, base=FakeBackend)
 
     def test_missing_backend_falls_back_to_the_default(self) -> None:
-        klass = resolve_backend_class({}, base=KitBackend, default=BETA)
+        klass = resolve_backend_class({}, base=FakeBackend, default=BETA)
         assert klass is BetaBackend
 
     def test_explicit_backend_wins_over_the_default(self) -> None:
-        klass = resolve_backend_class({"BACKEND": ALPHA}, base=KitBackend, default=BETA)
+        klass = resolve_backend_class({"BACKEND": ALPHA}, base=FakeBackend, default=BETA)
         assert klass is AlphaBackend
 
     def test_class_outside_the_family_is_improperly_configured(self) -> None:
-        with pytest.raises(ImproperlyConfigured, match="is not a KitBackend subclass"):
-            resolve_backend_class({"BACKEND": FOREIGN}, base=KitBackend)
+        with pytest.raises(ImproperlyConfigured, match="is not a FakeBackend subclass"):
+            resolve_backend_class({"BACKEND": FOREIGN}, base=FakeBackend)
 
     def test_dotted_path_naming_a_function_is_improperly_configured(self) -> None:
-        with pytest.raises(ImproperlyConfigured, match="is not a KitBackend subclass"):
-            resolve_backend_class({"BACKEND": NOT_A_CLASS}, base=KitBackend)
+        with pytest.raises(ImproperlyConfigured, match="is not a FakeBackend subclass"):
+            resolve_backend_class({"BACKEND": NOT_A_CLASS}, base=FakeBackend)
 
 
 class TestLoadBackends:
@@ -89,55 +89,68 @@ class TestLoadBackends:
 
     def test_returns_instances_in_config_order(self) -> None:
         backends = load_backends(
-            [{"BACKEND": BETA}, {"BACKEND": ALPHA}], base=KitBackend
+            [{"BACKEND": BETA}, {"BACKEND": ALPHA}], base=FakeBackend
         )
         assert [type(backend) for backend in backends] == [BetaBackend, AlphaBackend]
 
     def test_instance_keeps_its_own_config_entry(self) -> None:
         entry = {"BACKEND": ALPHA, "OPTIONS": {"a": 1}}
-        (backend,) = load_backends([entry], base=KitBackend)
+        (backend,) = load_backends([entry], base=FakeBackend)
         assert backend.config == entry
 
     def test_entries_without_backend_use_the_default(self) -> None:
-        backends = load_backends([{}], base=KitBackend, default=ALPHA)
+        backends = load_backends([{}], base=FakeBackend, default=ALPHA)
         assert [type(backend) for backend in backends] == [AlphaBackend]
 
     def test_unimportable_entry_is_logged_and_skipped(self, caplog) -> None:
         with caplog.at_level(logging.ERROR, logger="next.backends"):
             backends = load_backends(
-                [{"BACKEND": MISSING}, {"BACKEND": ALPHA}], base=KitBackend
+                [{"BACKEND": MISSING}, {"BACKEND": ALPHA}], base=FakeBackend
             )
         assert [type(backend) for backend in backends] == [AlphaBackend]
-        assert "error creating KitBackend from config" in caplog.text
+        assert "error resolving FakeBackend from config" in caplog.text
 
     def test_entry_outside_the_family_is_logged_and_skipped(self, caplog) -> None:
         with caplog.at_level(logging.ERROR, logger="next.backends"):
             backends = load_backends(
-                [{"BACKEND": FOREIGN}, {"BACKEND": ALPHA}], base=KitBackend
+                [{"BACKEND": FOREIGN}, {"BACKEND": ALPHA}], base=FakeBackend
             )
         assert [type(backend) for backend in backends] == [AlphaBackend]
-        assert "error creating KitBackend from config" in caplog.text
+        assert "error resolving FakeBackend from config" in caplog.text
 
-    @pytest.mark.parametrize("kind", ["type", "value"])
-    def test_failing_construction_is_logged_and_skipped(self, kind, caplog) -> None:
+    def test_backend_reporting_bad_config_is_logged_and_skipped(self, caplog) -> None:
         with caplog.at_level(logging.ERROR, logger="next.backends"):
             backends = load_backends(
-                [{"BACKEND": RAISING, "ERROR": kind}, {"BACKEND": ALPHA}],
-                base=KitBackend,
+                [{"BACKEND": RAISING, "ERROR": "config"}, {"BACKEND": ALPHA}],
+                base=FakeBackend,
             )
         assert [type(backend) for backend in backends] == [AlphaBackend]
+        assert "error creating FakeBackend from config" in caplog.text
         assert "boom" in caplog.text
+
+    @pytest.mark.parametrize(
+        ("kind", "error"),
+        [("type", TypeError), ("value", ValueError), ("import", ImportError)],
+    )
+    def test_other_errors_from_construction_escape(self, kind, error) -> None:
+        # a constructor failing for anything but its own config is a bug,
+        # not an entry to skip
+        with pytest.raises(error, match="boom"):
+            load_backends(
+                [{"BACKEND": RAISING, "ERROR": kind}, {"BACKEND": ALPHA}],
+                base=FakeBackend,
+            )
 
     def test_unexpected_error_from_construction_escapes(self) -> None:
         with pytest.raises(KeyError):
-            load_backends([{"BACKEND": RAISING}], base=KitBackend)
+            load_backends([{"BACKEND": RAISING}], base=FakeBackend)
 
     def test_no_signal_sends_nothing(self) -> None:
         signal = Signal()
         recorder = _Recorder()
         signal.connect(recorder, weak=False)
 
-        load_backends([{"BACKEND": ALPHA}], base=KitBackend)
+        load_backends([{"BACKEND": ALPHA}], base=FakeBackend)
 
         assert recorder.calls == []
 
@@ -147,7 +160,7 @@ class TestLoadBackends:
         signal.connect(recorder, weak=False)
         entries = [{"BACKEND": ALPHA, "OPTIONS": {"a": 1}}, {"BACKEND": BETA}]
 
-        first, second = load_backends(entries, base=KitBackend, signal=signal)
+        first, second = load_backends(entries, base=FakeBackend, signal=signal)
 
         assert recorder.calls == [
             (AlphaBackend, entries[0], first),
@@ -160,7 +173,7 @@ class TestLoadBackends:
         signal.connect(recorder, weak=False)
         entry = {"BACKEND": ALPHA}
 
-        load_backends([entry], base=KitBackend, signal=signal)
+        load_backends([entry], base=FakeBackend, signal=signal)
 
         assert recorder.calls[0][1] == entry
         assert recorder.calls[0][1] is not entry
@@ -171,18 +184,18 @@ class TestLoadBackends:
         signal.connect(recorder, weak=False)
 
         with caplog.at_level(logging.ERROR, logger="next.backends"):
-            load_backends([{"BACKEND": MISSING}], base=KitBackend, signal=signal)
+            load_backends([{"BACKEND": MISSING}], base=FakeBackend, signal=signal)
 
         assert recorder.calls == []
 
     def test_empty_config_list_loads_nothing(self) -> None:
-        assert load_backends([], base=KitBackend) == []
+        assert load_backends([], base=FakeBackend) == []
 
     def test_each_entry_gets_its_own_instance(self) -> None:
         CountingBackend.instances = 0
 
         backends = load_backends(
-            [{"BACKEND": COUNTING}, {"BACKEND": COUNTING}], base=KitBackend
+            [{"BACKEND": COUNTING}, {"BACKEND": COUNTING}], base=FakeBackend
         )
 
         assert CountingBackend.instances == 2
@@ -193,26 +206,26 @@ class TestAbstractFamilyRoot:
     """An abstract root serves as the family base, as the real areas declare it."""
 
     def test_resolve_returns_the_concrete_member(self) -> None:
-        klass = resolve_backend_class({"BACKEND": CONCRETE}, base=AbstractKitBackend)
-        assert klass is ConcreteKitBackend
+        klass = resolve_backend_class({"BACKEND": CONCRETE}, base=AbstractFakeBackend)
+        assert klass is ConcreteFakeBackend
 
     def test_resolve_names_the_abstract_root_in_its_messages(self) -> None:
         with pytest.raises(
-            ImproperlyConfigured, match="is not a AbstractKitBackend subclass"
+            ImproperlyConfigured, match="is not a AbstractFakeBackend subclass"
         ):
-            resolve_backend_class({"BACKEND": ALPHA}, base=AbstractKitBackend)
+            resolve_backend_class({"BACKEND": ALPHA}, base=AbstractFakeBackend)
 
     def test_load_builds_an_instance_of_the_concrete_member(self) -> None:
-        (backend,) = load_backends([{"BACKEND": CONCRETE}], base=AbstractKitBackend)
+        (backend,) = load_backends([{"BACKEND": CONCRETE}], base=AbstractFakeBackend)
 
-        assert type(backend) is ConcreteKitBackend
+        assert type(backend) is ConcreteFakeBackend
         assert backend.run() == "ok"
 
     def test_load_names_the_abstract_root_in_its_log(self, caplog) -> None:
         with caplog.at_level(logging.ERROR, logger="next.backends"):
-            assert load_backends([{"BACKEND": MISSING}], base=AbstractKitBackend) == []
+            assert load_backends([{"BACKEND": MISSING}], base=AbstractFakeBackend) == []
 
-        assert "error creating AbstractKitBackend from config" in caplog.text
+        assert "error resolving AbstractFakeBackend from config" in caplog.text
 
 
 class TestConfigSelection:
@@ -273,7 +286,7 @@ class TestFailuresPropagate:
     def test_backend_outside_the_family_escapes(self) -> None:
         with (
             override_settings(NEXT_FRAMEWORK={_DICT_SETTING: {"BACKEND": FOREIGN}}),
-            pytest.raises(ImproperlyConfigured, match="is not a KitBackend subclass"),
+            pytest.raises(ImproperlyConfigured, match="is not a FakeBackend subclass"),
         ):
             _manager().get()
 

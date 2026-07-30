@@ -160,6 +160,7 @@ PARTIAL_BACKENDS
 List of partial protocol backend configurations.
 The first entry is active and owns the patch wire format that partial rendering serialises over HTTP and Server-Sent Events.
 Entries after the first are ignored, and ``manage.py check`` reports them with ``next.W071``.
+The value has to be a list, since any other shape is dropped in favour of the default and ``manage.py check`` reports it with ``next.E067``.
 
 Default value.
 
