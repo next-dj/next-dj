@@ -1,6 +1,6 @@
 .. _howto-custom-stem:
 
-Add a Custom Stem
+Add a custom stem
 =================
 
 Problem
@@ -45,7 +45,7 @@ Ship a file with the new stem.
 
 Discovery now records ``page.css`` as a ``css`` asset owned by the page, because ``page`` is a registered stem under the ``template`` role and ``.css`` is the extension of the ``css`` kind.
 
-Stem and Kind Pairing
+Stem and kind pairing
 ~~~~~~~~~~~~~~~~~~~~~
 
 A new stem participates in every registered kind.
@@ -68,7 +68,7 @@ The finder maps a template-directory asset to ``next/<logical_name><suffix>``.
 The logical name is the template directory relative to its page root, and a root template has the logical name ``index``.
 The stem does not appear in the static path, so ``page.css`` next to the root ``template.djx`` resolves under ``next/index.css``.
 
-See Also
+See also
 --------
 
 .. seealso::

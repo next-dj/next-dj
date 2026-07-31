@@ -1,6 +1,6 @@
 .. _topics-forms-overview:
 
-Forms Overview
+Forms overview
 ==============
 
 A Django form usually costs a URL entry, a view, manual CSRF handling, and a redirect-on-success per action before it accepts a single POST.
@@ -12,7 +12,7 @@ No decorator, no manual registry call, and no URL wiring is required.
    :local:
    :depth: 2
 
-Auto-Registration
+Auto-registration
 -----------------
 
 Every subclass of ``next.forms.BaseForm`` or ``next.forms.BaseModelForm`` registers itself through the ``__init_subclass__`` hook the moment Python executes the ``class`` statement.
@@ -40,7 +40,7 @@ The framework also records which file the class was declared in and uses that to
            self.save()
            return redirect_to_origin(request)
 
-Why a Stable URL
+Why a stable URL
 ----------------
 
 The framework hashes the action's scope key and name into a single POST endpoint at ``/_next/form/<uid>/``.
@@ -56,13 +56,15 @@ A form declared in any other file is shared, carries a project-wide name, and is
 .. code-block:: python
    :caption: app/forms.py — auto-registered as ``contact_form`` (shared)
 
+   from django.http import HttpRequest
+
    import next.forms
    from next.forms import redirect_to_origin
 
    class ContactForm(next.forms.Form):
        email = next.forms.EmailField()
 
-       def on_valid(self, request):
+       def on_valid(self, request: HttpRequest):
            send_email(self.cleaned_data["email"])
            return redirect_to_origin(request)
 
@@ -76,15 +78,18 @@ Autodiscover
 It imports the ``forms`` submodule of every installed app so shared forms declared in ``app/forms.py`` register before the first request arrives.
 Set ``NEXT_FRAMEWORK["FORM_AUTODISCOVER"] = False`` to disable the automatic import.
 
-Handling Submissions
+Handling submissions
 --------------------
 
 Override ``on_valid`` to run code after the form passes validation.
-The method receives at least ``request`` and may declare any parameter the dependency injector knows how to resolve.
+The framework injects the current request only into a parameter annotated ``HttpRequest``, an unannotated ``request`` parameter resolves to ``None``.
+The method may declare any other parameter the dependency injector knows how to resolve.
 
 .. code-block:: python
 
-   def on_valid(self, request):
+   from django.http import HttpRequest
+
+   def on_valid(self, request: HttpRequest):
        self.save()
        return redirect_to_origin(request)
 
@@ -99,24 +104,27 @@ Declare it as a ``classmethod`` with the same DI-friendly signature.
 
 .. code-block:: python
 
+   from django.http import HttpRequest
+
    @classmethod
-   def get_initial(cls, request, note_id: int | None = None):
+   def get_initial(cls, request: HttpRequest, note_id: int | None = None):
        if note_id is None:
            return {}
        return Note.objects.get(pk=note_id)
 
 The framework calls ``get_initial`` through the dependency injector, never application code.
-``request`` is supplied automatically, a parameter named after a URL segment is filled from the URL, and the rest resolve through providers.
+The framework supplies ``request`` to any parameter annotated ``HttpRequest``, an unannotated ``request`` parameter resolves to ``None``.
+A parameter named after a URL segment is filled from the URL, and the rest resolve through providers.
 See :doc:`actions` for the full signature rules.
 
-Shared Dependency Cache
+Shared dependency cache
 -----------------------
 
 ``get_initial``, the handler, and the re-render share one per-request dependency cache.
 An expensive provider such as a tenant lookup or a permission check runs once per request, even when validation fails and the page re-renders.
 See :doc:`validation-rerender` for the cache mechanics and the access path.
 
-Form-Less Actions
+Form-less actions
 -----------------
 
 Use ``@action`` to register a plain function when no form fields are needed.
@@ -139,7 +147,7 @@ A bare ``@action`` registers the function under its own name.
 
 The template tag works the same way, but ``form`` is ``None`` inside the block because there is no form class.
 
-Template Usage
+Template usage
 --------------
 
 The ``{% form "name" %}`` block tag renders the ``<form>`` element, injects the CSRF token, and publishes ``form`` inside the block body.
@@ -155,7 +163,7 @@ The ``{% form "name" %}`` block tag renders the ``<form>`` element, injects the 
 
 See :doc:`templates` for the full tag reference.
 
-See Also
+See also
 --------
 
 .. seealso::

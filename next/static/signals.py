@@ -23,9 +23,9 @@ are `html_before`, `html_after`, `collector`, `placeholders_replaced`,
 `injected_bytes`, and `request`. The `request` argument carries the
 active `HttpRequest` or None.
 
-The `backend_loaded` signal fires after the static factory
-instantiates a backend. The sender is the backend class. The keyword
-arguments are `config` and `instance`.
+The `backend_loaded` signal fires after the shared backend loader
+instantiates a static backend. The sender is the backend class. The
+keyword arguments are `config` and `instance`.
 """
 
 from django.dispatch import Signal

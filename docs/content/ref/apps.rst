@@ -1,9 +1,9 @@
 .. _ref-apps:
 
-Apps Reference
+Apps reference
 ==============
 
-Module Summary
+Module summary
 --------------
 
 ``next.apps`` contains the Django ``AppConfig`` and the helpers that the framework runs at application startup.
@@ -29,13 +29,13 @@ Public API
 The installer submodules below are called exclusively from ``NextFrameworkConfig.ready`` and are not part of the project-level public API.
 They are documented here for framework contributors and for projects that instrument startup behaviour.
 
-Template Tag Registration
+Template tag registration
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. automodule:: next.apps.templates
    :members:
 
-Staticfiles Integration
+Staticfiles integration
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. automodule:: next.apps.staticfiles
@@ -43,7 +43,7 @@ Staticfiles Integration
 
 ``staticfiles.install()`` calls ``next.static.register_defaults`` to register the built-in ``css``, ``js``, and ``module`` kinds and the ``styles`` and ``scripts`` slots.
 
-Autoreload Installer
+Autoreload installer
 ~~~~~~~~~~~~~~~~~~~~
 
 .. automodule:: next.apps.autoreload
@@ -51,9 +51,10 @@ Autoreload Installer
 
 ``install()`` swaps Django's ``StatReloader`` for ``NextStatReloader`` and connects the ``autoreload_started`` signal so the framework's watch specs are registered at dev-server startup.
 ``uninstall()`` restores the original ``StatReloader`` subclass.
-Test suites that call ``ready()`` multiple times use it to avoid double-patching.
+Test suites that patched the reloader through ``ready()`` call it to put the original class back.
+Repeated ``ready()`` calls need no such cleanup because ``install()`` itself is idempotent.
 
-Components Installer
+Components installer
 ~~~~~~~~~~~~~~~~~~~~
 
 .. automodule:: next.apps.components
@@ -63,7 +64,7 @@ Components Installer
 Unless ``LAZY_COMPONENT_MODULES`` is true it also imports every discovered ``component.py``.
 See :doc:`/content/internals/component-pipeline` for the discovery and load sequence.
 
-See Also
+See also
 --------
 
 .. seealso::

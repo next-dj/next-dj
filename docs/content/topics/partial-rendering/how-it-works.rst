@@ -1,6 +1,6 @@
 .. _topics-partial-rendering-how-it-works:
 
-How a Partial Request Flows
+How a partial request flows
 ===========================
 
 A partial update is one request and one response laid over the ordinary page cycle.
@@ -11,7 +11,7 @@ This page follows one update end to end.
    :local:
    :depth: 1
 
-The Page and Its Zones
+The page and its zones
 ----------------------
 
 A directory maps to a URL and a ``page.py`` turns a segment into a page, rendered through a ``.djx`` template.
@@ -19,7 +19,7 @@ A ``{% zone %}`` block marks a slice of that template the server can re-render o
 A zone is an optimisation rather than required markup.
 The server can address a page region without one, and a zone names the region so the response carries only the slice instead of the whole document.
 
-The Request
+The request
 -----------
 
 An interaction issues a partial request instead of a full navigation.
@@ -27,7 +27,7 @@ A form submit, an auto-submitting filter, a paginating link, a lazy zone scrolli
 The request carries the ``X-Next-Request`` switch the server reads to choose a partial response over a full page.
 It also carries an ``Accept`` naming the patch media type at the content-negotiation level and further ``X-Next-*`` headers that name the zone, the origin page, and the asset version.
 
-The Envelope
+The envelope
 ------------
 
 The server shapes a patch envelope and serialises it through the configured ``PARTIAL_BACKENDS`` backend.
@@ -35,7 +35,7 @@ The envelope carries a version, an ordered list of operations, an asset manifest
 The server authors every operation and every address.
 A selector or a swap strategy never crosses the wire, so the client cannot be asked to do anything the server did not name.
 
-The Apply
+The apply
 ---------
 
 The client narrows the envelope and runs each operation against the addressed zone.
@@ -49,21 +49,21 @@ A reused node keeps its own state, scroll position included, because it never le
 The morph engine protects a focused input and a dirty field from the server value, leaves a ``data-next-keep`` node untouched, and treats a custom element or a shadow root as atomic.
 After the operations apply, ``next:mounted`` fires on every touched node, and before any node detaches ``next:removed`` fires on it, the pair a framework island binds to.
 
-The Surfaces Around the Apply
+The surfaces around the apply
 -----------------------------
 
 A modal opens through the layer stack, which pushes the honest URL of the modal body so the modal is shareable and a refresh resolves the URL as its own standalone page, and Back closes the top layer.
 A Server-Sent Events stream feeds the same apply pipeline, suppressing the echo of the client's own mutation and revalidating its zones on returning visibility.
 A lazy zone and a trigger pull their own follow-up request through the same wire.
 
-Degrading Without JavaScript
+Degrading without JavaScript
 ----------------------------
 
 Every interaction degrades to a full page cycle when the runtime is absent.
 The runtime is an enhancement over the ``POST`` then ``303`` then ``GET`` flow the framework already serves.
 A page that works without it keeps working with it and gains the partial behaviour for free.
 
-See Also
+See also
 --------
 
 .. seealso::

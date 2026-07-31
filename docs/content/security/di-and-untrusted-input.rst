@@ -1,6 +1,6 @@
-.. _security-di-untrusted:
+.. _security-di-and-untrusted-input:
 
-DI and Untrusted Input
+DI and untrusted input
 ======================
 
 The dependency resolver injects values from URL parameters, query strings, form bodies, and named providers.
@@ -10,7 +10,7 @@ This page covers the safety rules that apply to each source and the patterns tha
    :local:
    :depth: 2
 
-Untrusted by Default
+Untrusted by default
 --------------------
 
 Every value the resolver injects starts as untrusted input.
@@ -27,7 +27,7 @@ Never interpolate into queries.
    Use the :doc:`ORM <django:topics/db/queries>` and parameter substitution.
    :doc:`Raw SQL <django:topics/db/sql>` needs ``cursor.execute(sql, params)``.
 
-URL Parameters
+URL parameters
 --------------
 
 ``DUrl[T]`` coerces the captured value to ``T`` for ``int``, ``float``, ``bool``, ``UUID``, ``Decimal``, ``date``, and ``datetime``.
@@ -55,7 +55,7 @@ The same scoping rule applies to the ModelForm ``Meta.instance_from_url`` key.
 Its default ``get_initial`` runs an unscoped ``get_object_or_404(model, slug=<value>)``, so a form that edits a per-user row must override ``get_initial`` with a scoped query such as ``get_object_or_404(Note, slug=slug, owner=request.user)``.
 See :doc:`/content/topics/forms/modelforms` for the full pattern.
 
-URL Kwargs on a POST
+URL kwargs on a POST
 --------------------
 
 A form POST targets the dispatch endpoint, not the page URL, so the page's captured kwargs are not in the request path.
@@ -67,7 +67,7 @@ They are the mechanism behind the ``instance_from_url`` insecure direct object r
 
 Validate or scope every lookup that reads a URL kwarg, whether the value arrived in the live path or through the posted origin.
 
-Query Strings
+Query strings
 -------------
 
 ``DQuery[T]`` coerces the value to ``T`` for the same scalar set as ``DUrl``.
@@ -89,7 +89,7 @@ Validate the resulting values against business rules.
 
 The example clamps the page number to a reasonable range to prevent denial of service through huge offsets.
 
-Form Bodies
+Form bodies
 -----------
 
 Form actions validate through Django form ``clean`` methods.
@@ -107,7 +107,7 @@ Whitelist fields.
 The ``cleaned_data`` rule covers the form fields, not the extra parameters DI injects into ``on_valid``.
 A ``DUrl`` parameter or a URL kwarg argument on ``on_valid`` originates from the same untrusted path and posted origin described above, so validate or scope it the same way before using it in a lookup.
 
-Custom Validators
+Custom validators
 -----------------
 
 Add a custom validator when the type alone is not enough.
@@ -123,7 +123,7 @@ Add a custom validator when the type alone is not enough.
 
 Apply the validator on the form field or on a custom DI provider.
 
-Custom Providers
+Custom providers
 ----------------
 
 A custom provider that reads from external state (database, cache, HTTP) must validate inputs before the lookup.
@@ -190,7 +190,7 @@ Log every dispatched action through ``action_dispatched``.
 Log every failed validation through ``form_validation_failed``.
 Logs make it possible to spot mass scraping, credential stuffing, and other automated abuse.
 
-See Also
+See also
 --------
 
 .. seealso::

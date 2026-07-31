@@ -23,7 +23,7 @@ Layouts compose through string substitution, not through Django template inherit
 There is no ``{% extends %}`` directive and no parent template identifier.
 The composition is purely structural, driven by directory placement.
 
-Layout Discovery
+Layout discovery
 ----------------
 
 The framework walks every ancestor directory upward from the page directory, bounded at 64 levels.
@@ -51,7 +51,7 @@ The innermost wraps the page body.
 The middle layout wraps the result.
 The outermost layout wraps the result again.
 
-Layout-Only Directories
+Layout-only directories
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 A page directory that contains a sibling ``layout.djx`` but no body source still renders.
@@ -59,7 +59,7 @@ The body slot is the empty string and the layout chain composes around it.
 Use this shape for landing routes whose whole markup belongs in the layout shell.
 :ref:`next.E012 <ref-system-checks>` does not fire in this case.
 
-Layout Template Contract
+Layout template contract
 ------------------------
 
 Every layout must contain a ``{% block template %}`` placeholder where the body of the wrapped content is substituted.
@@ -84,15 +84,15 @@ The closing tag can be written either way.
      </body>
    </html>
 
-Without the placeholder that layout emits its own markup and discards the wrapped content, so the page body and every inner layout below the broken layer vanish from the output without an error.
+Without the placeholder that layout is skipped during composition, so its own markup vanishes from the output while the page body and every inner layout still render, with no error raised.
 The ``check_layout_templates`` system check emits ``next.W001`` for a ``layout.djx`` sitting next to a discovered page when it lacks a ``{% block template %}`` block.
-The check scans one representative pages root per router, so in a project with several page-bearing applications ``next.W001`` surfaces only for layouts under the scanned root.
+The check scans one representative page root per router, so in a project with several page-bearing applications ``next.W001`` surfaces only for layouts under the scanned root.
 A layout in an intermediate segment directory without a sibling page is not covered, so ``uv run python manage.py check`` does not catch every broken layout.
 
 Layouts can declare layout-level CSS and JS through the static collector tags shown above.
 The tags also live in inner layouts when you want a section-scoped style sheet.
 
-Publishing Context From a Layout Segment
+Publishing context from a layout segment
 -----------------------------------------
 
 A segment directory that contains a ``layout.djx`` can also have a sibling ``page.py``.
@@ -117,10 +117,10 @@ The ``inherit_context=True`` flag publishes the value to every descendant page, 
 Context functions in a segment ``page.py`` take dependencies the same way any page does.
 The resolver shares its cache across the entire layout chain and the leaf page, so a value resolved at an ancestor segment is not recomputed further down.
 
-Nested Layout Patterns
+Nested layout patterns
 ----------------------
 
-Section Layout
+Section layout
 ~~~~~~~~~~~~~~
 
 Add a layout inside a section to share a sub navigation across every page under that section.
@@ -136,7 +136,7 @@ Add a layout inside a section to share a sub navigation across every page under 
      {% block template %}{% endblock template %}
    </section>
 
-Empty Pass Through
+Empty pass through
 ~~~~~~~~~~~~~~~~~~
 
 Sometimes a directory needs a visual-only layout boundary for context but no extra HTML.
@@ -149,13 +149,13 @@ Use an empty layout that contains only the placeholder.
 
 A sibling ``page.py`` in the same directory can publish inherited context for every page under ``/api/`` without that layout injecting any visible markup.
 
-Section Specific Static Assets
+Section specific static assets
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Co-locate ``layout.css`` next to ``layout.djx`` to ship styles that apply only to pages under that directory.
 The static collector emits the file only when a request reaches a page below that layout.
 
-Multiple Backends and Layout Roots
+Multiple backends and layout roots
 ----------------------------------
 
 Two backends that scan different directories produce two separate layout chains.
@@ -190,48 +190,48 @@ A layout in a shared ancestor directory, such as the ``notes`` package directory
 Root layouts collected from ``DIRS`` are also global.
 The framework gathers them from every ``PAGE_BACKENDS`` entry and appends them to the chain of every page, regardless of which backend discovered the page.
 
-Project Level Root Layout
+Project level root layout
 -------------------------
 
 Place a root layout outside of any application by adding a project directory to ``DIRS`` so a single ``layout.djx`` wraps every page across every installed app.
 See :doc:`multi-project` for the full settings example and the layered-projects pattern.
 
-Cross Cutting Behaviour
+Cross cutting behaviour
 -----------------------
 
-Context Processors
+Context processors
 ~~~~~~~~~~~~~~~~~~
 
 Context processors are applied after every ``@context`` callable finishes but before any template (including the layout chain) renders.
 They contribute variables that every layout and every page template can use.
 Because they run last, a processor that returns the same key as a ``@context`` function overwrites that value.
 Processor-to-processor duplicates are resolved by dotted path, keeping the first occurrence.
-See :doc:`context` under *Resolution Order* for the full merge order and the **first** ``TEMPLATES`` entry rule.
+See :doc:`context` under *Resolution order* for the full merge order and the **first** ``TEMPLATES`` entry rule.
 A processor that raises ``TypeError``, ``ValueError``, ``AttributeError``, or ``KeyError`` is logged and swallowed by default.
 Set ``STRICT_CONTEXT = True`` to re-raise those exceptions instead.
 Any other exception type propagates regardless of the setting.
 Semantics live in :ref:`ref-settings`.
 
-Static Collector
+Static collector
 ~~~~~~~~~~~~~~~~
 
 The static collector runs once per request.
 Both layouts and the page contribute to the same collection slot.
 A ``{% collect_styles %}`` tag inside an inner layout still emits every collected stylesheet, not only the ones declared in that layout.
 
-Page Rendered Signal
+Page rendered signal
 ~~~~~~~~~~~~~~~~~~~~
 
 The ``page_rendered`` signal fires once per request after the layout chain produces the final HTML.
 Subscribe to observe rendering duration, the number of collected styles and scripts, and the keys present in the template scope.
 See :doc:`signals` for the full payload.
 
-Common Pitfalls
+Common pitfalls
 ---------------
 
-Layout renders but page body is missing.
+Layout markup is missing from the output.
    A ``{% block template %}`` placeholder is required, closed with either ``{% endblock %}`` or ``{% endblock template %}``.
-   Without it the framework still renders the layout but the page content is dropped.
+   Without it the framework drops that layout from the chain and renders the page body without its wrapper.
 
 Inherited context not visible to a sub-page.
    The ``inherit_context=True`` flag is required on the ancestor ``page.py`` that declares the value.
@@ -241,7 +241,7 @@ Two roots produce one composed page.
    A page composes its layout chain from its own ancestor directories.
    A page lives under exactly one backend, even when the file path is also reachable from another backend.
 
-See Also
+See also
 --------
 
 .. seealso::

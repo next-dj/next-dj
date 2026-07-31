@@ -1,6 +1,6 @@
 .. _topics-static-signals:
 
-Static Signals
+Static signals
 ==============
 
 The static pipeline emits ``asset_registered``, ``collector_finalized``, ``html_injected``, and ``backend_loaded`` from ``next.static.signals``.
@@ -8,7 +8,11 @@ The static pipeline emits ``asset_registered``, ``collector_finalized``, ``html_
 Import either from ``next.static.signals`` or from the aggregator ``next.signals``.
 Import receiver modules from ``AppConfig.ready`` so receivers exist before the first request.
 
-Signals and Payloads
+.. contents::
+   :local:
+   :depth: 2
+
+Signals and payloads
 --------------------
 
 asset_registered
@@ -86,7 +90,7 @@ The sender is the static manager.
 backend_loaded
 ~~~~~~~~~~~~~~
 
-Fires after the static factory instantiates a backend.
+Fires after the static manager instantiates a configured backend.
 The sender is the backend class.
 The payload carries ``config`` and ``instance``.
 
@@ -101,7 +105,7 @@ Pipeline placement
 
 See :doc:`/content/internals/static-pipeline` for where each signal fires relative to discovery and HTML injection.
 
-See Also
+See also
 --------
 
 .. seealso::

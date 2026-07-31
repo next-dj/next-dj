@@ -1,6 +1,6 @@
 .. _howto-form-backend:
 
-Write a Form Action Backend
+Write a form action backend
 ===========================
 
 Problem
@@ -59,7 +59,7 @@ Register the backend.
 
 The custom backend replaces ``RegistryFormActionBackend`` because it already inherits every default behaviour.
 
-Block a Dispatch
+Block a dispatch
 ~~~~~~~~~~~~~~~~
 
 Return an ``HttpResponse`` before calling ``super().dispatch`` to short circuit.
@@ -79,7 +79,7 @@ Return an ``HttpResponse`` before calling ``super().dispatch`` to short circuit.
        def _over_limit(self, request) -> bool:
            return False
 
-Read an Option
+Read an option
 ~~~~~~~~~~~~~~
 
 A backend reads its own settings from the ``OPTIONS`` dict of its config entry.
@@ -111,7 +111,7 @@ The factory passes the whole config entry to the constructor, so declare ``__ini
 
 Forward ``config`` to ``super().__init__`` so the registry is set up before you read any option.
 
-Change the Invalid Envelope
+Change the invalid envelope
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The default backend answers an invalid submission with HTTP 200, the re-rendered origin page, and the ``X-Next-Form``/``X-Next-Action`` headers.
@@ -142,7 +142,7 @@ See :doc:`/content/topics/forms/backends` for the two customisation layers and t
    ``FormActionBackend.shape_response`` routes partial requests through the patch-envelope shaping first, so this override restamps patch envelopes too.
    Gate the status change on ``not is_partial_request(request)`` from ``next.partial`` to keep the partial wire contract at 200.
 
-Surface Actions to the System Checks
+Surface actions to the system checks
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The forms system checks collect action metadata from every configured backend through ``iter_actions()``, which yields one ``ActionMeta`` per stored action.
@@ -186,7 +186,7 @@ Run the system checks.
 A misconfigured ``FORM_ACTION_BACKENDS`` entry fires ``next.E044``.
 A backend class that does not subclass ``FormActionBackend`` fires ``next.E045``.
 
-See Also
+See also
 --------
 
 .. seealso::

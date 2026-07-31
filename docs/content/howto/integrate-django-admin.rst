@@ -1,6 +1,6 @@
 .. _howto-django-admin:
 
-Integrate Django Admin
+Integrate Django admin
 ======================
 
 Problem
@@ -56,7 +56,7 @@ A project that split its settings places this in ``config/settings/base.py`` ins
        "notes",
    ]
 
-Register Models
+Register models
 ~~~~~~~~~~~~~~~
 
 Standard Django admin registration applies.
@@ -71,7 +71,7 @@ Standard Django admin registration applies.
    class NoteAdmin(admin.ModelAdmin):
        list_display = ("title", "created_at")
 
-Link to Admin From the Site
+Link to admin from the site
 ---------------------------
 
 Use ``reverse`` from inside the file router.
@@ -86,7 +86,7 @@ Use ``reverse`` from inside the file router.
    def admin_url() -> str:
        return reverse("admin:notes_note_changelist")
 
-Use Frozen Form Specs Inside Admin
+Use frozen form specs inside admin
 ----------------------------------
 
 When the admin renders a custom form, ``next.forms.form_spec`` produces a frozen descriptor that admin templates can render without touching the standard Django widgets.
@@ -107,7 +107,7 @@ Run migrations and create a superuser.
 Start the server and visit ``/admin/``.
 The admin renders, the existing next.dj routes continue to work, and there is no overlap between the two URL spaces.
 
-See Also
+See also
 --------
 
 .. seealso::

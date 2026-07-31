@@ -1,6 +1,6 @@
 .. _topics-partial-rendering:
 
-Partial Rendering
+Partial rendering
 =================
 
 Partial rendering updates a slice of a page instead of reloading the whole document.
@@ -13,7 +13,7 @@ Every interaction in this section degrades to a full page cycle when JavaScript 
 Read :doc:`scenarios` first.
 It walks seven concrete tasks from markup to handler, and the rest of the section deepens one concern at a time.
 
-.. rubric:: The Tutorial
+.. rubric:: The tutorial
 
 :doc:`scenarios`
    Seven scenarios from task to markup to handler, from neighbouring forms and inline

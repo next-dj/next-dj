@@ -17,7 +17,7 @@ Use ``with_query`` to add, replace, or remove query string parameters.
 Walkthrough
 -----------
 
-Reverse a Static Page
+Reverse a static page
 ~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
@@ -29,7 +29,7 @@ Reverse a Static Page
    url = page_reverse("blog")       # "/blog/"
    url = page_reverse("about/team") # "/about/team/"
 
-Reverse a Captured Page
+Reverse a captured page
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
@@ -46,7 +46,7 @@ Reverse a Captured Page
 The path template uses the same bracket syntax that the file router uses.
 The parameter name in the template matches the keyword argument.
 
-Add Query Parameters
+Add query parameters
 ~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
@@ -60,7 +60,7 @@ Add Query Parameters
 Pass ``None`` to remove a key.
 Pass a list or tuple to repeat a key in the output.
 
-Use Inside an Action Handler
+Use inside an action handler
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
@@ -80,7 +80,7 @@ Use Inside an Action Handler
            note = self.save()
            return HttpResponseRedirect(page_reverse("notes/[id]", id=note.id))
 
-Use Inside a Component
+Use inside a component
 ~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
@@ -109,7 +109,7 @@ Print the URL from a Django shell.
 
 The shell prints ``/notes/1/``.
 
-See Also
+See also
 --------
 
 .. seealso::

@@ -1,4 +1,5 @@
 import copy
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -22,16 +23,32 @@ from next.forms import (
     RegistryFormActionBackend,
 )
 from next.forms.backends import (
-    FormActionFactory,
     RegistryBackendSnapshot,
     file_to_dotted_module,
     scope_key_for,
 )
-from next.forms.manager import FormActionManager, form_action_manager
+from next.forms.manager import (
+    FormActionManager,
+    form_action_manager,
+    resolve_component_anchor,
+)
 
 
 _FAKE_FILE = "/fake/myapp/forms.py"
 _FAKE_FILE_PAGE = "/fake/myapp/page.py"
+
+
+def _register_action(
+    backend: RegistryFormActionBackend,
+    name: str,
+    file_path: str = _FAKE_FILE,
+    scope: str = "shared",
+) -> None:
+    backend.register_action(
+        ActionRegistration(
+            name=name, file_path=file_path, scope=scope, handler=lambda: None
+        )
+    )
 
 
 class TestFormActionNotFoundError:
@@ -503,22 +520,12 @@ class TestRegistryFormActionBackend:
 class TestNameIndexScopeFilter:
     """The name-index fallback honours registration scope for page lookups."""
 
-    @staticmethod
-    def _register(
-        backend: RegistryFormActionBackend, name: str, file_path: str, scope: str
-    ) -> None:
-        backend.register_action(
-            ActionRegistration(
-                name=name, file_path=file_path, scope=scope, handler=lambda: None
-            )
-        )
-
     def test_page_scoped_action_invisible_from_another_page(self, tmp_path) -> None:
         """A page-scoped name never resolves through another page's lookup."""
         backend = RegistryFormActionBackend()
         page_a = str(tmp_path / "a" / "page.py")
         page_b = str(tmp_path / "b" / "page.py")
-        self._register(backend, "note_form", page_a, "page")
+        _register_action(backend, "note_form", page_a, "page")
         assert backend.get_meta("note_form", page_b) is None
         with pytest.raises(
             FormActionNotFoundError, match="Unknown form action"
@@ -531,7 +538,7 @@ class TestNameIndexScopeFilter:
         """A shared-scope name resolves through any page's lookup."""
         backend = RegistryFormActionBackend()
         page_b = str(tmp_path / "b" / "page.py")
-        self._register(backend, "shared_form", _FAKE_FILE, "shared")
+        _register_action(backend, "shared_form")
         meta = backend.get_meta("shared_form", page_b)
         assert meta is not None
         assert meta["scope"] == "shared"
@@ -542,7 +549,7 @@ class TestNameIndexScopeFilter:
         """A lookup without page_path keeps the unfiltered name-index fallback."""
         backend = RegistryFormActionBackend()
         page_a = str(tmp_path / "a" / "page.py")
-        self._register(backend, "note_form", page_a, "page")
+        _register_action(backend, "note_form", page_a, "page")
         meta = backend.get_meta("note_form")
         assert meta is not None
         assert meta["scope"] == "page"
@@ -552,7 +559,7 @@ class TestNameIndexScopeFilter:
         """The declaring page hits the exact registry key, no fallback needed."""
         backend = RegistryFormActionBackend()
         page_a = str(tmp_path / "a" / "page.py")
-        self._register(backend, "note_form", page_a, "page")
+        _register_action(backend, "note_form", page_a, "page")
         meta = backend.get_meta("note_form", page_a)
         assert meta is not None
         assert meta["scope"] == "page"
@@ -560,16 +567,40 @@ class TestNameIndexScopeFilter:
         assert "_next/form/" in url
 
 
+class TestResolveComponentAnchor:
+    """resolve_component_anchor accepts only an exact page-scoped anchor hit."""
+
+    def test_exact_component_hit_returns_the_meta(self, tmp_path) -> None:
+        """A page-scoped registration under component.py is an anchor hit."""
+        comp = str(tmp_path / "widget" / "component.py")
+        _register_action(
+            form_action_manager.default_backend, "anchor_component_action", comp, "page"
+        )
+        meta = resolve_component_anchor("anchor_component_action", comp)
+        assert meta is not None
+        assert meta["scope"] == "page"
+        assert meta is form_action_manager.get_action_meta(
+            "anchor_component_action", page_path=comp
+        )
+
+    def test_shared_fallback_is_not_an_anchor_hit(self, tmp_path) -> None:
+        """A shared registration reachable by fallback still returns None."""
+        comp = str(tmp_path / "widget" / "component.py")
+        _register_action(form_action_manager.default_backend, "anchor_shared_action")
+        assert (
+            form_action_manager.get_action_meta("anchor_shared_action", page_path=comp)
+            is not None
+        )
+        assert resolve_component_anchor("anchor_shared_action", comp) is None
+
+    def test_unknown_name_returns_none(self, tmp_path) -> None:
+        """A name without any registration yields no anchor meta."""
+        comp = str(tmp_path / "widget" / "component.py")
+        assert resolve_component_anchor("anchor_missing_action", comp) is None
+
+
 class TestUnknownActionSuggestions:
     """Lookup failures carry close-match suggestions from the registry."""
-
-    @staticmethod
-    def _register(backend: RegistryFormActionBackend, name: str) -> None:
-        backend.register_action(
-            ActionRegistration(
-                name=name, file_path=_FAKE_FILE, scope="shared", handler=lambda: None
-            )
-        )
 
     @pytest.mark.parametrize(
         ("lookup_name", "expected_suggestions", "message_tail"),
@@ -593,7 +624,7 @@ class TestUnknownActionSuggestions:
     ) -> None:
         """The lookup error carries close matches and renders them last."""
         backend = RegistryFormActionBackend()
-        self._register(backend, "delete_note")
+        _register_action(backend, "delete_note")
         with pytest.raises(FormActionNotFoundError) as excinfo:
             backend.get_action_url(lookup_name)
         assert excinfo.value.suggestions == expected_suggestions
@@ -603,9 +634,9 @@ class TestUnknownActionSuggestions:
         """The manager merges backend suggestions without duplicates."""
         first = RegistryFormActionBackend()
         second = RegistryFormActionBackend()
-        self._register(first, "delete_note")
-        self._register(second, "delete_note")
-        self._register(second, "delete_card")
+        _register_action(first, "delete_note")
+        _register_action(second, "delete_note")
+        _register_action(second, "delete_card")
         manager = FormActionManager(backends=[first, second])
         with pytest.raises(FormActionNotFoundError) as excinfo:
             manager.get_action_url("delete_not")
@@ -615,14 +646,6 @@ class TestUnknownActionSuggestions:
 
 class TestEmptyRegistryDiagnosis:
     """Lookup failures on an empty registry explain the autodiscover miss."""
-
-    @staticmethod
-    def _register(backend: RegistryFormActionBackend, name: str) -> None:
-        backend.register_action(
-            ActionRegistration(
-                name=name, file_path=_FAKE_FILE, scope="shared", handler=lambda: None
-            )
-        )
 
     def test_backend_empty_registry_mentions_autodiscover(self) -> None:
         """An empty backend names the import miss instead of a bare typo message."""
@@ -636,7 +659,7 @@ class TestEmptyRegistryDiagnosis:
     def test_backend_with_actions_skips_the_diagnosis(self) -> None:
         """A populated backend reports a plain unknown-action failure."""
         backend = RegistryFormActionBackend()
-        self._register(backend, "delete_note")
+        _register_action(backend, "delete_note")
         with pytest.raises(FormActionNotFoundError) as excinfo:
             backend.get_action_url("zzzzzz")
         assert excinfo.value.registry_empty is False
@@ -654,7 +677,7 @@ class TestEmptyRegistryDiagnosis:
         """One populated backend is enough to drop the empty-registry hint."""
         first = RegistryFormActionBackend()
         second = RegistryFormActionBackend()
-        self._register(second, "delete_note")
+        _register_action(second, "delete_note")
         manager = FormActionManager(backends=[first, second])
         with pytest.raises(FormActionNotFoundError) as excinfo:
             manager.get_action_url("zzzzzz")
@@ -847,42 +870,120 @@ class TestFormActionManagerReloadConfig:
         assert len(manager._backends) == 1
         assert isinstance(manager._backends[0], RegistryFormActionBackend)
 
-    def test_factory_failure_is_logged_and_skipped(self, settings, caplog) -> None:
-        """If a backend constructor raises ImproperlyConfigured, the entry is skipped and logged."""
+    @pytest.mark.parametrize(
+        "broken",
+        [
+            pytest.param({"OPTIONS": {}}, id="missing-backend"),
+            pytest.param({"BACKEND": "next.forms.NoSuchBackend"}, id="unimportable"),
+            pytest.param({"BACKEND": "next.forms.ActionOutcome"}, id="outside-family"),
+        ],
+    )
+    def test_broken_entry_is_logged_and_the_rest_of_the_list_loads(
+        self, settings, caplog, broken
+    ) -> None:
+        """A broken entry costs its own backend and nothing else."""
+        settings.NEXT_FRAMEWORK = {
+            "FORM_ACTION_BACKENDS": [
+                broken,
+                {"BACKEND": "next.forms.RegistryFormActionBackend"},
+            ]
+        }
+        manager = FormActionManager()
+        with caplog.at_level(logging.ERROR, logger="next.backends"):
+            manager._reload_config()
+        assert [type(backend) for backend in manager._backends] == [
+            RegistryFormActionBackend
+        ]
+        assert "error resolving FormActionBackend from config" in caplog.text
+
+
+class TestFormActionManagerLoadedFlag:
+    """An empty settings list is cached, a list whose entries all failed is not."""
+
+    def test_unusable_configuration_is_reread(self, settings) -> None:
+        """Entries that all fail keep the manager rereading settings."""
+        settings.NEXT_FRAMEWORK = {
+            "FORM_ACTION_BACKENDS": [{"BACKEND": "next.forms.NoSuchBackend"}]
+        }
+        manager = FormActionManager()
+        with patch(
+            "next.forms.manager.load_backends", return_value=[]
+        ) as load_backends_mock:
+            assert manager.backends == ()
+            with pytest.raises(ImproperlyConfigured, match="None of the 1 entries"):
+                manager.get_action_meta("missing")
+        assert load_backends_mock.call_count == 2
+
+    def test_a_corrected_configuration_takes_effect(self, settings) -> None:
+        """A fixed dotted path loads on the next access, without a restart."""
+        settings.NEXT_FRAMEWORK = {
+            "FORM_ACTION_BACKENDS": [{"BACKEND": "next.forms.NoSuchBackend"}]
+        }
+        manager = FormActionManager()
+        assert manager.backends == ()
+
         settings.NEXT_FRAMEWORK = {
             "FORM_ACTION_BACKENDS": [
                 {"BACKEND": "next.forms.RegistryFormActionBackend"}
             ]
         }
+        assert [type(backend) for backend in manager.backends] == [
+            RegistryFormActionBackend
+        ]
 
-        def boom(_config: dict) -> None:
-            msg = "boom"
-            raise ImproperlyConfigured(msg)
+    def test_failed_entries_are_named_as_such(self, settings) -> None:
+        """The raised message counts the entries instead of claiming none exist."""
+        settings.NEXT_FRAMEWORK = {
+            "FORM_ACTION_BACKENDS": [
+                {"BACKEND": "next.forms.NoSuchBackend"},
+                {"BACKEND": "next.forms.AlsoMissing"},
+            ]
+        }
+        manager = FormActionManager()
+        with pytest.raises(ImproperlyConfigured, match="None of the 2 entries"):
+            manager.register_action(
+                ActionRegistration(
+                    name="never_registered",
+                    file_path=_FAKE_FILE,
+                    scope="shared",
+                    handler=lambda: None,
+                )
+            )
 
-        with patch.object(FormActionFactory, "create_backend", side_effect=boom):
-            manager = FormActionManager()
-            with caplog.at_level("ERROR"):
-                manager._reload_config()
-        assert manager._backends == []
-        assert any(
-            "Error creating form-action backend" in r.message for r in caplog.records
-        )
+    def test_empty_configuration_keeps_the_version_stable(self, settings) -> None:
+        """No reload per call means the urlpatterns cache token stops churning."""
+        settings.NEXT_FRAMEWORK = {"FORM_ACTION_BACKENDS": []}
+        manager = FormActionManager()
+        assert manager.backends == ()
+        version = manager._version
+        assert manager.backends == ()
+        with pytest.raises(ImproperlyConfigured, match="No form action backends"):
+            manager.get_action_meta("missing")
+        assert manager._version == version
 
+    def test_lookups_name_the_failed_entries(self, settings) -> None:
+        """A lookup blames the unloadable config, not the caller's imports."""
+        settings.NEXT_FRAMEWORK = {
+            "FORM_ACTION_BACKENDS": [{"BACKEND": "next.forms.NoSuchBackend"}]
+        }
+        manager = FormActionManager()
+        with pytest.raises(ImproperlyConfigured, match="None of the 1 entries"):
+            manager.get_action_url("vote")
+        with pytest.raises(ImproperlyConfigured, match="None of the 1 entries"):
+            manager.require_action_meta("vote")
 
-class TestFormActionFactory:
-    """`FormActionFactory.create_backend` resolves dotted paths to backends."""
-
-    def test_explicit_backend_path(self) -> None:
-        """Explicit `BACKEND` path is honoured."""
-        backend = FormActionFactory.create_backend(
-            {"BACKEND": "next.forms.RegistryFormActionBackend"}
-        )
-        assert isinstance(backend, RegistryFormActionBackend)
-
-    def test_missing_backend_key_raises_keyerror(self) -> None:
-        """Configuration without `BACKEND` is the system-check's responsibility."""
-        with pytest.raises(KeyError):
-            FormActionFactory.create_backend({})
+    def test_explicit_backends_are_not_replaced_by_settings(self, settings) -> None:
+        """A manager built with backends never reads the settings list."""
+        settings.NEXT_FRAMEWORK = {
+            "FORM_ACTION_BACKENDS": [
+                {"BACKEND": "next.forms.RegistryFormActionBackend"}
+            ]
+        }
+        explicit = _MinimalBackend()
+        manager = FormActionManager(backends=[explicit])
+        with patch("next.forms.manager.load_backends") as load_backends_mock:
+            assert manager.backends == (explicit,)
+        load_backends_mock.assert_not_called()
 
 
 class TestGetActionUrlNoReverseMatchFallback:

@@ -1,6 +1,6 @@
 .. _topics-forms-validation-rerender:
 
-Validation and Re-render
+Validation and re-render
 ========================
 
 When a submission fails validation, users keep what they typed and you write no re-render code.
@@ -14,7 +14,7 @@ This page explains the validation and re-render flow end to end.
 
 .. _topics-forms-validation-rerender-origin:
 
-The Origin Page
+The origin page
 ---------------
 
 Every rendered ``{% form %}`` tag emits a hidden ``_next_form_origin`` field that carries the URL path of the page that rendered the form, such as ``/notes/42/``.
@@ -37,7 +37,7 @@ A directory that has only a ``template.djx`` and no ``page.py`` is a virtual rou
 The router stamps the synthesised ``page.py`` location on the virtual route's view as well, so its origin resolves like any other page.
 On validation failure the re-render composes the body from the template loader exactly as the initial render did, with no page module involved.
 
-The Render Pipeline
+The render pipeline
 -------------------
 
 A request to ``/_next/form/<uid>/`` follows a fixed pipeline.
@@ -51,7 +51,7 @@ A request to ``/_next/form/<uid>/`` follows a fixed pipeline.
 The pipeline stays inside the same request.
 A failing form does not redirect, the user stays on the same URL.
 
-One Response Funnel
+One response funnel
 -------------------
 
 Every outcome of the pipeline leaves through one funnel.
@@ -65,7 +65,7 @@ The status and the headers are behaviour of the default backend, not a guarantee
 A request carrying the partial-runtime headers receives the same outcome as a patch envelope instead of the full page, see :doc:`/content/topics/partial-rendering/how-it-works`.
 See :doc:`backends` for the override signature and the bundled implementation.
 
-What Survives Re-render
+What survives re-render
 -----------------------
 
 One thing carries over from the initial render.
@@ -84,7 +84,7 @@ Dependency cache.
 The frozen ``FormSpec`` descriptors in :doc:`serializers` are a separate user-facing tool.
 The dispatcher does not attach a ``FormSpec`` to the request on its own.
 
-What Restarts on Re-render
+What restarts on re-render
 --------------------------
 
 Other parts of the render restart from scratch.
@@ -100,7 +100,7 @@ Layout chain.
 Static collector.
    The collector restarts so the rendered HTML contains the right set of asset links.
 
-The Bound Form Variable
+The bound form variable
 -----------------------
 
 On the re-rendered page the variable ``form`` is the bound form with errors.
@@ -109,7 +109,7 @@ The template can render error messages inline with each field.
 On re-render the dispatcher always supplies the bound failing form under the action-named context key so the user sees the input that triggered the failure.
 ``get_initial`` still runs on the POST bind to seed the form's ``initial``, but the submitted values win in the rendered fields.
 
-Multiple Forms on the Same Page
+Multiple forms on the same page
 -------------------------------
 
 A page that hosts several actions only re-renders the failing form.
@@ -118,7 +118,7 @@ Other forms render as unbound, with their original ``@context("...")`` values in
 This works because every action has its own UID and only one URL fires the re-render.
 The dispatcher does not rerun the validation of any other form.
 
-Influencing the Re-render
+Influencing the re-render
 -------------------------
 
 One hook lets a page customise the form before it reaches the template.
@@ -129,7 +129,7 @@ The ``get_initial`` hook.
    On the re-render the submitted POST values win over the seeded initial, so the user sees what they typed.
    The one path that skips ``get_initial`` on POST is a ``form_class`` factory that returns a ``(FormClass, init_kwargs)`` tuple, see :doc:`actions`.
 
-Redirecting Back to the Origin
+Redirecting back to the origin
 ------------------------------
 
 A handler that succeeds usually returns an ``HttpResponseRedirect``.
@@ -154,7 +154,7 @@ It accepts the value only when it is a string that starts with a single ``/``.
 A protocol-relative input beginning with ``//`` is rejected, which blocks open-redirect input.
 When the field is absent or fails validation the helper redirects to ``fallback`` instead.
 
-One Field, Two Roles
+One field, two roles
 ~~~~~~~~~~~~~~~~~~~~
 
 The single hidden ``_next_form_origin`` field serves both directions of the round trip.
@@ -167,7 +167,7 @@ Success-redirect path.
 
 A failing form never redirects, the re-render stays on the dispatch URL.
 
-Server Side Effects Before Validation
+Server side effects before validation
 -------------------------------------
 
 Side effects belong inside the handler, after ``form.is_valid()`` returns true.
@@ -195,7 +195,7 @@ Two signals fire during the validation pipeline.
 
 See :doc:`signals` for the full list and payload shapes.
 
-Edge Cases
+Edge cases
 ----------
 
 - A missing or unresolvable ``_next_form_origin`` field returns HTTP 400 on the invalid branch.
@@ -217,28 +217,28 @@ Edge Cases
 - Text, select, checkbox, and textarea widgets keep their raw submitted values because the dispatcher binds the failing form to ``request.POST``.
   Password widgets clear unless ``render_value=True``.
 
-Common Patterns
+Common patterns
 ---------------
 
-Inline Errors
+Inline errors
 ~~~~~~~~~~~~~
 
 Render ``{{ form.field.errors }}`` next to each input.
 The re-render shows the previous value and the error in one place.
 
-Cross Field Validation
+Cross field validation
 ~~~~~~~~~~~~~~~~~~~~~~
 
 Use Django ``clean`` and ``clean_<field>`` methods on the form class.
 The dispatcher treats these failures the same as field validation failures.
 
-Audit Trail
+Audit trail
 ~~~~~~~~~~~
 
 Subscribe to ``form_validation_failed`` to log every rejected attempt.
 The signal fires once per failed submission so log volume scales with failure rate, not request rate.
 
-See Also
+See also
 --------
 
 .. seealso::

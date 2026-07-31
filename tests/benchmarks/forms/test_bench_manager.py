@@ -39,14 +39,9 @@ class TestBenchEnsureBackends:
 
     @pytest.mark.benchmark(group="forms.manager")
     def test_reload_config_cold(self, benchmark) -> None:
-        """Dropping the backends forces a full reload from settings."""
+        """A reload rereads settings and rebuilds every configured backend."""
         manager = FormActionManager()
-
-        def run() -> None:
-            manager._backends = []
-            manager._reload_config()
-
-        benchmark(run)
+        benchmark(manager._reload_config)
 
 
 class TestBenchRegisterThroughManager:

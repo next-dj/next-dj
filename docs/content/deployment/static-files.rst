@@ -1,6 +1,6 @@
 .. _deployment-static-files:
 
-Static Files in Production
+Static files in production
 ==========================
 
 This page covers how to serve next.dj static assets in production.
@@ -18,7 +18,7 @@ The finder exposes every co-located asset to Django's :doc:`standard staticfiles
 ``NextFrameworkConfig.ready`` appends it to ``STATICFILES_FINDERS`` automatically, so no manual configuration is required.
 Production deployments use :doc:`collectstatic <django:ref/contrib/staticfiles>` exactly as they would for any other Django project.
 
-Verify the Finder
+Verify the finder
 ~~~~~~~~~~~~~~~~~
 
 To confirm the finder is active, run the command below with a path that matches a component the project actually ships.
@@ -30,7 +30,7 @@ To confirm the finder is active, run the command below with a path that matches 
 
 If the file is not found, check that ``next`` is in ``INSTALLED_APPS`` and that the component named in the path exists.
 
-Build Step
+Build step
 ----------
 
 Run ``collectstatic`` during the deployment build.
@@ -59,7 +59,7 @@ Stable hashes make long lived browser cache lifetimes safe.
 
 Configure the web server or the CDN to honour long ``Cache-Control`` headers on the static origin.
 
-Manifest Storage
+Manifest storage
 ----------------
 
 For projects that use Django ``ManifestStaticFilesStorage`` the framework cooperates without extra configuration.
@@ -98,7 +98,7 @@ Use a CDN aware backend to point asset URLs at a CDN host.
 
 Register the backend in ``STATIC_BACKENDS`` and configure the CDN to pull from the static origin.
 
-Pre Compressed Files
+Pre compressed files
 --------------------
 
 For Brotli or gzip support, generate the compressed files during the build.
@@ -112,19 +112,19 @@ For Brotli or gzip support, generate the compressed files during the build.
 The ``./staticfiles`` path stands for the directory configured as ``STATIC_ROOT``.
 Configure the web server or CDN to serve the pre compressed copies based on the ``Accept-Encoding`` header.
 
-Service Workers
+Service workers
 ---------------
 
 A service worker that caches assets must invalidate when the content hash changes.
 Read the rendered URL and key the cache on the full path, which already carries the content hash in the filename.
 
-System Checks
+System checks
 -------------
 
 Run ``uv run python manage.py check --deploy`` before shipping.
 The Django deployment checks cover ``STATIC_ROOT`` and ``STATIC_URL``, and the framework static checks validate that the static backend chain is well formed.
 
-See Also
+See also
 --------
 
 .. seealso::

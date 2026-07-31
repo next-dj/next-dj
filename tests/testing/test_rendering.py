@@ -1,9 +1,10 @@
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from django.test import RequestFactory
 
-from next.components import FileComponentsBackend, components_manager
+from next.components import ComponentInfo, FileComponentsBackend, components_manager
 from next.pages.manager import page
 from next.testing.rendering import render_component_by_name, render_page
 
@@ -47,18 +48,56 @@ class TestRenderComponentByName:
 
         config = {"DIRS": [str(root)], "COMPONENTS_DIR": "_components"}
         backend = FileComponentsBackend(config)
-        previous = list(components_manager._backends)
-        components_manager._backends.clear()
-        components_manager._backends.append(backend)
+        previous = components_manager._backends
+        previously_loaded = components_manager._loaded
+        components_manager._backends = [backend]
+        components_manager._loaded = True
         try:
             html = render_component_by_name(
                 "greeter", at=tmp_path / "page.djx", context={"name": "World"}
             )
         finally:
-            components_manager._backends.clear()
-            components_manager._backends.extend(previous)
+            components_manager._backends = previous
+            components_manager._loaded = previously_loaded
         assert "<b>World</b>" in html
 
     def test_accepts_str_anchor(self, tmp_path: Path) -> None:
         with pytest.raises(LookupError):
             render_component_by_name("nope", at=str(tmp_path / "page.djx"))
+
+    @staticmethod
+    def _info(tmp_path: Path, module_path: Path | None) -> ComponentInfo:
+        (tmp_path / "widget.djx").write_text("[{{ current_component_module_path }}]")
+        return ComponentInfo(
+            name="widget",
+            scope_root=tmp_path,
+            scope_relative="",
+            template_path=tmp_path / "widget.djx",
+            module_path=module_path,
+            is_simple=True,
+        )
+
+    def test_sets_component_module_path_from_info(self, tmp_path: Path) -> None:
+        module_path = tmp_path / "widget" / "component.py"
+        info = self._info(tmp_path, module_path)
+        with patch.object(components_manager, "get_component", return_value=info):
+            html = render_component_by_name("widget", at=tmp_path / "page.djx")
+        assert f"[{module_path}]" in html
+
+    def test_module_less_component_sets_none(self, tmp_path: Path) -> None:
+        info = self._info(tmp_path, None)
+        with patch.object(components_manager, "get_component", return_value=info):
+            html = render_component_by_name("widget", at=tmp_path / "page.djx")
+        assert "[None]" in html
+
+    def test_renderer_stamp_overrides_caller_value(self, tmp_path: Path) -> None:
+        module_path = tmp_path / "widget" / "component.py"
+        info = self._info(tmp_path, module_path)
+        with patch.object(components_manager, "get_component", return_value=info):
+            html = render_component_by_name(
+                "widget",
+                at=tmp_path / "page.djx",
+                context={"current_component_module_path": "caller-anchor"},
+            )
+        assert f"[{module_path}]" in html
+        assert "caller-anchor" not in html

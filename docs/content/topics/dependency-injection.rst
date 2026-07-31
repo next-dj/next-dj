@@ -1,6 +1,6 @@
 .. _topics-dependency-injection:
 
-Dependency Injection
+Dependency injection
 ====================
 
 The dependency resolver inspects the signature of every callable that the framework invokes and fills each parameter from a registered provider.
@@ -20,7 +20,7 @@ The form dispatch resolves the form-class factory, ``get_initial``, ``@action`` 
 Every call site shares one provider list and one set of markers.
 Custom providers and tests can import ``resolver`` from ``next.deps`` and call ``resolver.resolve_dependencies``.
 
-Built In Providers
+Built in providers
 ------------------
 
 The framework discovers a fixed list of providers and instantiates them on first use.
@@ -61,7 +61,7 @@ It runs before the ``DQuery`` provider, so a ``DQuery`` parameter that shares a 
    .. code-block:: python
       :caption: shadowing a same-named URL kwarg
 
-      # routes/shop/[category]/layout page.py
+      # routes/shop/[category]/page.py
       @context("category", inherit_context=True)
       def category() -> str:
           return "books"
@@ -98,7 +98,8 @@ A Django converter that pre-coerced the segment, such as ``[uuid:id]`` producing
 A failed parse falls back to the raw captured value rather than raising.
 ``bool`` treats ``"1"``, ``"true"``, and ``"yes"`` as ``True`` and everything else as ``False``.
 ``date`` and ``datetime`` parse the ISO 8601 forms accepted by :meth:`date.fromisoformat <datetime.date.fromisoformat>` and :meth:`datetime.fromisoformat <datetime.datetime.fromisoformat>`.
-For wildcard ``[[name]]`` segments the captured value is the matched path string. Annotate as ``DUrl[str]`` or leave it unannotated.
+For wildcard ``[[name]]`` segments the captured value is the matched path string.
+Annotate as ``DUrl[str]`` or leave it unannotated.
 
 The marker has three forms.
 
@@ -123,11 +124,11 @@ Hyphens in directory names are normalised to underscores in the kwarg, so a ``[m
 .. note::
 
    A ``DUrl[T]`` annotation is not the same thing as a Django URL converter label.
-   See :ref:`Converter Segments <topics-di-converter-segments>` below.
+   See :ref:`Converter segments <topics-di-converter-segments>` below.
 
 .. _topics-di-converter-segments:
 
-Converter Segments
+Converter segments
 ^^^^^^^^^^^^^^^^^^
 
 ``[slug:name]`` and ``[uuid:name]`` in directory names are Django URL converter labels that control routing and validation.
@@ -200,7 +201,7 @@ The provider returns the parameter default when the key is absent.
 ``DQuery`` accepts the same scalar set as ``DUrl``, namely ``str``, ``int``, ``bool``, ``float``, ``UUID``, ``Decimal``, ``date``, and ``datetime``, plus ``list[T]`` for any of those scalars.
 A value that fails to parse falls back to the raw query string rather than raising.
 
-Context Markers
+Context markers
 ---------------
 
 Two markers fill parameters from distinct data sources.
@@ -245,7 +246,7 @@ See :doc:`/content/internals/di-resolver` for the cycle and cache mechanics.
    ) -> str:
        return f"Hello {user_name}, theme is {theme}."
 
-Registering Named Dependencies
+Registering named dependencies
 ------------------------------
 
 Use ``resolver.dependency`` to register a callable that any handler can ask for through ``Depends("name")``.
@@ -262,7 +263,7 @@ Use ``resolver.dependency`` to register a callable that any handler can ask for 
 Import the module that defines the dependency from ``AppConfig.ready`` so the decorator runs before the first request.
 The registered callable can take any provider-resolved parameters because it is itself dispatched through the resolver.
 
-Diagnosing a Dependency Cycle
+Diagnosing a dependency cycle
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 A named dependency may itself ask for other named dependencies through ``Depends``.
@@ -313,7 +314,7 @@ Here ``settings`` does not need ``profile`` at all, so the fix is to drop that p
 
 When both dependencies genuinely need shared data, move that data into a third dependency and have both depend on it.
 
-Writing a Custom Provider
+Writing a custom provider
 -------------------------
 
 For data sources that do not fit the built ins, register a parameter provider.
@@ -379,7 +380,7 @@ The nine built-in providers occupy the range ``10`` (named dependency) through `
 ``FormProvider`` and ``CleanedDataProvider`` share priority ``40``.
 Set ``priority`` on the subclass when the new provider has to claim a parameter the built-ins would otherwise match, for example a value below ``60`` for an annotation that should outrank ``DUrl``.
 
-Resolution Cache
+Resolution cache
 ----------------
 
 Each resolution pass wraps a per-render dependency cache in a fresh ``DependencyCache``.
@@ -401,9 +402,10 @@ The function returns ``None`` outside a form dispatch, so callers handle the mis
 .. code-block:: python
    :caption: reading the cache
 
+   from django.http import HttpRequest
    from next.deps import get_request_dep_cache
 
-   def render(request) -> str:
+   def render(request: HttpRequest) -> str:
        cache = get_request_dep_cache(request)
        if cache is None:
            return "No form dispatch cache on this request."
@@ -413,7 +415,7 @@ The constant ``REQUEST_DEP_CACHE_ATTR`` names the request attribute that holds t
 
 More recipes for diagnosing missing markers and CSRF or dispatch errors live in :doc:`/content/faq/troubleshooting`.
 
-Avoid ``from __future__ import annotations`` in DI Modules
+Avoid ``from __future__ import annotations`` in DI modules
 ----------------------------------------------------------
 
 The resolver inspects real annotations, not strings.
@@ -427,16 +429,16 @@ Do not use future annotations in modules with DI parameters.
 
 Keep DI types runtime importable.
    Most providers compare annotations through ``typing.get_origin``, which returns ``None`` for string annotations and never imports the target type.
-   The ``HttpRequest`` provider does call ``typing.get_type_hints`` on the wrapped callable as a fallback, and that call evaluates string annotations.
+   The ``HttpRequest`` provider evaluates annotations through ``typing.get_type_hints`` first and falls back to the raw annotation, and the ``get_type_hints`` call evaluates string annotations.
    Types hidden behind ``if TYPE_CHECKING`` are not visible to either path, so keep DI-touching annotations on classes that import at module top level.
 
-Resolver Lifecycle
+Resolver lifecycle
 ------------------
 
 The resolver builds its provider registry on first use and reuses it, so register custom providers from ``AppConfig.ready``.
 See :doc:`/content/internals/di-resolver` for the full lifecycle.
 
-See Also
+See also
 --------
 
 .. seealso::

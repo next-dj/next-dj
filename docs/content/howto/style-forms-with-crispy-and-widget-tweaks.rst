@@ -1,6 +1,6 @@
 .. _howto-crispy-widget-tweaks:
 
-Style Forms With crispy-forms and widget-tweaks
+Style forms with crispy-forms and widget-tweaks
 ===============================================
 
 Problem
@@ -19,7 +19,7 @@ Verified with django-crispy-forms 2.5 and later plus the crispy-bootstrap5 templ
 Walkthrough
 -----------
 
-Install the Packages
+Install the packages
 ~~~~~~~~~~~~~~~~~~~~
 
 Add the apps and pick a template pack.
@@ -37,7 +37,7 @@ Add the apps and pick a template pack.
    CRISPY_ALLOWED_TEMPLATE_PACKS = "bootstrap5"
    CRISPY_TEMPLATE_PACK = "bootstrap5"
 
-Render Through the ``|crispy`` Filter
+Render through the ``|crispy`` filter
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The filter is the zero-configuration path.
@@ -69,7 +69,7 @@ It renders the fields with the template pack's markup and never emits a ``<form>
 
 The output carries the Bootstrap 5 markup (``div_id_*`` wrappers, ``form-control`` classes) with exactly one ``<form>`` element and exactly one CSRF token, both owned by the tag.
 
-Render Through the ``{% crispy %}`` Tag
+Render through the ``{% crispy %}`` tag
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The ``{% crispy %}`` tag drives the layout from a ``FormHelper``, and a helper defaults to rendering its own ``<form>`` element and its own CSRF node.
@@ -117,7 +117,7 @@ Both helper lines are required, and they cover two different leaks.
 Define the helper as a ``@property`` rather than assigning it in ``__init__``.
 The constructor of a registered form participates in the dispatch pipeline, and the property keeps its signature untouched and adds no per-instance state.
 
-Restyle Single Fields With widget-tweaks
+Restyle single fields with widget-tweaks
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 When the markup is hand-written and only the widget attributes need adjusting, the widget-tweaks filters apply to the pushed ``form`` variable directly.
@@ -132,7 +132,7 @@ When the markup is hand-written and only the widget attributes need adjusting, t
      <button type="submit">Send</button>
    {% endform %}
 
-Validation Re-Render
+Validation re-render
 ~~~~~~~~~~~~~~~~~~~~
 
 An invalid submission re-renders the origin page with the bound failing form in place of ``form``, see :doc:`/content/topics/forms/validation-rerender`.
@@ -148,7 +148,7 @@ The output contains exactly one ``<form>`` element and exactly one ``csrfmiddlew
 Submit an invalid value.
 The page re-renders with the crispy error markup, and the entered values stay in the fields.
 
-See Also
+See also
 --------
 
 .. seealso::

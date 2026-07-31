@@ -1,12 +1,12 @@
 .. _ref:
 
-API Reference
+API reference
 =============
 
 Module by module reference for the next.dj public API.
 Each page lists the public surface plus configuration and signal entries that belong to the subsystem.
 
-.. rubric:: Top-Level API
+.. rubric:: Top-level API
 
 The ``next`` package itself exports five curated names, the ones that page modules, component modules, and form handlers use most often.
 Import them from the package root with ``from next import Depends, action, component, context, page``.
@@ -88,6 +88,9 @@ Reading ``page``, ``context``, ``component``, or ``action`` loads a much larger 
 :doc:`utils`
    ``next.utils`` for small helpers that the framework uses internally.
 
+:doc:`backends`
+   ``next.backends`` for the shared loading of settings-driven backend families.
+
 .. rubric:: Configuration
 
 :doc:`settings`
@@ -96,7 +99,7 @@ Reading ``page``, ``context``, ``component``, or ``action`` loads a much larger 
 :doc:`system-checks`
    Django system checks that the framework contributes.
 
-.. rubric:: Templates and Decorators
+.. rubric:: Templates and decorators
 
 :doc:`template-tags`
    Every template tag registered by ``next.dj``.
@@ -121,6 +124,7 @@ Reading ``page``, ``context``, ``component``, or ``action`` loads a much larger 
    testing
    apps
    utils
+   backends
    settings
    system-checks
    template-tags

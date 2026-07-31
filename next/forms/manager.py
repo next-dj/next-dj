@@ -1,14 +1,13 @@
 """Manager for form action backends and routing."""
 
-import logging
 import types
-from typing import TYPE_CHECKING, Any, cast, override
+from typing import TYPE_CHECKING, override
 
 from django.core.exceptions import ImproperlyConfigured
 
-from next.conf import next_framework_settings
+from next.backends import backend_entries, load_backends
 
-from .backends import FormActionFactory, FormActionNotFoundError
+from .backends import FormActionBackend, FormActionNotFoundError
 from .dispatch import _form_action_context_callable
 from .origin import _url_kwargs_for_request
 
@@ -19,10 +18,7 @@ if TYPE_CHECKING:
     from django.http import HttpRequest
     from django.urls import URLPattern
 
-    from .backends import ActionMeta, ActionRegistration, FormActionBackend
-
-
-logger = logging.getLogger(__name__)
+    from .backends import ActionMeta, ActionRegistration
 
 
 class FormActionManager:
@@ -36,6 +32,8 @@ class FormActionManager:
     def __init__(self, backends: "list[FormActionBackend] | None" = None) -> None:
         """Initialise with explicit backends or defer loading to settings."""
         self._backends: list[FormActionBackend] = list(backends) if backends else []
+        # An empty list is a legitimate load result, so only a flag knows.
+        self._loaded: bool = bool(self._backends)
 
     @override
     def __repr__(self) -> str:
@@ -49,35 +47,43 @@ class FormActionManager:
             yield from backend.generate_urls()
 
     def _reload_config(self) -> None:
+        configs = backend_entries("FORM_ACTION_BACKENDS")
         self._version += 1
-        self._backends = []
-        configs = cast(
-            "list[Any]", getattr(next_framework_settings, "FORM_ACTION_BACKENDS", [])
-        )
-        for config in configs:
-            if not isinstance(config, dict):
-                continue
-            try:
-                self._backends.append(FormActionFactory.create_backend(config))
-            except ImproperlyConfigured:
-                logger.exception(
-                    "Error creating form-action backend from config %s", config
-                )
+        # No default: an entry without BACKEND is a next.E044 misconfiguration.
+        self._backends = load_backends(configs, base=FormActionBackend)
+        # Losing every entry is a broken config rather than a load result, so
+        # the next access rereads settings. A settings_reloaded receiver cannot
+        # do it instead, because dropping the backends drops their actions.
+        self._loaded = bool(self._backends) or not configs
 
     def _ensure_backends(self) -> None:
-        if not self._backends:
+        if not self._loaded:
             self._reload_config()
+
+    def _require_backends(self) -> None:
+        """Load the backends and refuse a lookup that has none to consult."""
+        self._ensure_backends()
+        if not self._backends:
+            raise ImproperlyConfigured(self._no_backends_message())
 
     def _first_backend(self) -> "FormActionBackend":
         """Return the first backend or raise when none are configured."""
-        self._ensure_backends()
-        if not self._backends:
-            msg = (
-                "No form action backends configured. Add at least one entry to "
-                "NEXT_FRAMEWORK['FORM_ACTION_BACKENDS']."
-            )
-            raise ImproperlyConfigured(msg)
+        self._require_backends()
         return self._backends[0]
+
+    def _no_backends_message(self) -> str:
+        """Tell an unconfigured family apart from one whose entries all failed."""
+        attempted = len(backend_entries("FORM_ACTION_BACKENDS"))
+        if attempted:
+            return (
+                f"None of the {attempted} entries in "
+                "NEXT_FRAMEWORK['FORM_ACTION_BACKENDS'] could be loaded. The "
+                "next.backends logger names why each one was skipped."
+            )
+        return (
+            "No form action backends configured. Add at least one entry to "
+            "NEXT_FRAMEWORK['FORM_ACTION_BACKENDS']."
+        )
 
     def register_action(self, registration: "ActionRegistration") -> None:
         """Forward registration to the first backend."""
@@ -94,7 +100,7 @@ class FormActionManager:
 
     def get_action_url(self, action_name: str, *, page_path: str | None = None) -> str:
         """Return the reverse URL from the first backend that knows `action_name`."""
-        self._ensure_backends()
+        self._require_backends()
         if len(self._backends) == 1:
             return self._backends[0].get_action_url(action_name, page_path=page_path)
         caught: list[FormActionNotFoundError] = []
@@ -114,7 +120,7 @@ class FormActionManager:
         self, action_name: str, *, page_path: str | None = None
     ) -> "ActionMeta | None":
         """Return the action meta from the first backend that knows the name."""
-        self._ensure_backends()
+        self._require_backends()
         for backend in self._backends:
             meta = backend.get_meta(action_name, page_path)
             if meta is not None:
@@ -156,6 +162,20 @@ class FormActionManager:
 form_action_manager = FormActionManager()
 
 
+def resolve_component_anchor(
+    action_name: str, component_path: str
+) -> "ActionMeta | None":
+    """Return the action meta registered exactly under the component anchor.
+
+    An exact anchor hit carries page scope, which tells it apart from the
+    path-independent shared fallback a scoped lookup may return.
+    """
+    meta = form_action_manager.get_action_meta(action_name, page_path=component_path)
+    if meta is not None and meta.get("scope") == "page":
+        return meta
+    return None
+
+
 def build_form_namespace_for_action(
     action_name: str, request: "HttpRequest", page_path: str | None = None
 ) -> types.SimpleNamespace | None:
@@ -185,4 +205,5 @@ __all__ = [
     "FormActionManager",
     "build_form_namespace_for_action",
     "form_action_manager",
+    "resolve_component_anchor",
 ]

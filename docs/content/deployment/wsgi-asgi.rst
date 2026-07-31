@@ -9,7 +9,7 @@ This page covers the choice between WSGI and ASGI, the configuration each requir
    :local:
    :depth: 2
 
-Which to Choose
+Which to choose
 ---------------
 
 WSGI is the default and suits most projects.
@@ -25,7 +25,7 @@ ASGI is the right choice when the project uses any of these features.
 Both servers run the same next.dj pipeline.
 The difference lies in how Django dispatches the request.
 
-WSGI Configuration
+WSGI configuration
 ------------------
 
 A standard ``config/wsgi.py`` works without modification.
@@ -40,7 +40,7 @@ See Django's :doc:`WSGI deployment guide <django:howto/deployment/wsgi/index>`.
    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
    application = get_wsgi_application()
 
-A project that split its settings into a package defaults this to ``config.settings.prod`` for the deployed process.
+A project that split its settings into a package keeps the ``config.settings.dev`` default here and exports ``DJANGO_SETTINGS_MODULE=config.settings.prod`` for the deployed process.
 See :doc:`/content/howto/split-settings-per-environment`.
 
 Run with a production WSGI server such as ``gunicorn`` or ``uwsgi``.
@@ -53,7 +53,7 @@ Run with a production WSGI server such as ``gunicorn`` or ``uwsgi``.
 The example passes ``--workers 4``.
 Start from a heuristic such as ``(2 * num_cores) + 1`` and tune against the measured concurrency and request duration.
 
-ASGI Configuration
+ASGI configuration
 ------------------
 
 A standard ``config/asgi.py`` works without modification.
@@ -68,7 +68,7 @@ See Django's :doc:`ASGI deployment guide <django:howto/deployment/asgi/index>`.
    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
    application = get_asgi_application()
 
-A project that split its settings into a package defaults this to ``config.settings.prod`` for the deployed process.
+A project that split its settings into a package keeps the ``config.settings.dev`` default here and exports ``DJANGO_SETTINGS_MODULE=config.settings.prod`` for the deployed process.
 See :doc:`/content/howto/split-settings-per-environment`.
 
 Run with an ASGI server such as ``daphne`` or ``uvicorn``.
@@ -78,7 +78,7 @@ Run with an ASGI server such as ``daphne`` or ``uvicorn``.
 
    uv run uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --workers 4
 
-Worker Sizing
+Worker sizing
 -------------
 
 WSGI workers are blocking.
@@ -90,14 +90,14 @@ A single worker handles many concurrent SSE or websocket connections.
 A patch stream (see :doc:`/content/topics/partial-rendering/sse`) holds its connection open until the source ends or the client disconnects, which outlives any reasonable sync worker timeout.
 Serve those streams from ASGI workers rather than raising the WSGI worker timeout.
 
-Reverse Proxy
+Reverse proxy
 -------------
 
 Place a reverse proxy in front of either server for TLS termination and connection handling.
 The most common choice is ``nginx`` or ``caddy``.
 The next.dj pipeline does not require any special configuration on the proxy beyond standard Django requirements.
 
-Health Checks
+Health checks
 -------------
 
 Add a health check page that returns ``200`` quickly.
@@ -113,7 +113,7 @@ A pure ``render`` function avoids the layout chain and the static collector.
 
 Configure the load balancer or container orchestrator to hit ``/healthz/`` for liveness.
 
-Concurrency Notes
+Concurrency notes
 -----------------
 
 Form dispatch reuses the request scoped dependency cache so a re-render after validation failure is cheap.
@@ -123,7 +123,7 @@ The router manager and the components registry are process scoped.
 Hot reload through ``router_manager.reload`` updates the running worker.
 A multi worker deployment must trigger the reload from every worker or restart the process group.
 
-See Also
+See also
 --------
 
 .. seealso::

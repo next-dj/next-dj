@@ -1,6 +1,6 @@
 .. _security-static-assets:
 
-Static Asset Security
+Static asset security
 =====================
 
 This page covers the security properties of the static pipeline including origin control, content hashing, integrity attributes, and CSP nonces.
@@ -9,7 +9,7 @@ This page covers the security properties of the static pipeline including origin
    :local:
    :depth: 2
 
-Origin Control
+Origin control
 --------------
 
 The static pipeline only serves files that the discovery scanner registered.
@@ -20,7 +20,7 @@ Add the directory whitelist to the backend and reject every path that falls outs
 
 An empty ``STATIC_BACKENDS`` falls back to the bundled ``StaticFilesBackend``, and ``manage.py check`` reports ``next.W030`` so the missing chain stays visible.
 
-Content Hash
+Content hash
 ------------
 
 The default ``StaticFilesBackend`` resolves asset URLs through Django staticfiles.
@@ -118,9 +118,9 @@ Co-located JS
 
 Component JS files run in the global browser context.
 Avoid using component scripts for sensitive operations such as form submission with secret tokens.
-Keep auth state in cookies and HTTP only attributes.
+Keep auth state in cookies flagged ``HttpOnly`` so component scripts cannot read it.
 
-Inline Init Payload
+Inline init payload
 -------------------
 
 The runtime injects serialised JS context through an inline ``<script>`` that calls ``Next._init``.
@@ -128,14 +128,14 @@ The framework escapes ``<``, ``>``, ``&``, U+2028, and U+2029 in that payload, s
 The remaining risk is visibility, since serialised values appear in the page source, not tag breakout.
 Never mark a secret ``serialize=True``.
 
-Cross Origin Resource Sharing
+Cross origin resource sharing
 -----------------------------
 
 CORS is a Django middleware concern.
 The framework does not add CORS headers on its own.
 Configure ``django-cors-headers`` or an equivalent middleware when the static origin serves cross site requests.
 
-Common Pitfalls
+Common pitfalls
 ---------------
 
 Inline script without nonce under strict CSP.
@@ -143,14 +143,14 @@ Inline script without nonce under strict CSP.
    Add the nonce attribute or move the script into a co-located file.
 
 Mixed content on a CDN host.
-   A ``http://`` page that loads a ``https://`` CDN asset triggers mixed content warnings.
-   Serve the HTML over HTTPS in production.
+   A ``https://`` page that loads a ``http://`` CDN asset triggers mixed content blocking.
+   Serve the CDN assets over HTTPS in production.
 
 Long lived service worker.
    A service worker that caches by path keeps stale assets when the hash changes.
    Key the cache on the full URL, which already carries the content hash in the filename.
 
-See Also
+See also
 --------
 
 .. seealso::

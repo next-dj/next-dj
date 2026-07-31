@@ -1,6 +1,6 @@
 .. _howto-write-a-router-backend:
 
-Write a Router Backend
+Write a router backend
 ======================
 
 Problem
@@ -53,7 +53,7 @@ Its only contract is ``generate_urls``, which returns the patterns the backend c
 The call to ``super().generate_urls()`` keeps every file route intact.
 The subclass only adds patterns.
 
-Reuse the File Route View
+Reuse the file route view
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The database URLs do not need their own view.
@@ -63,19 +63,21 @@ Locate that catchall :doc:`URLPattern <django:ref/urls>` by its reverse name and
 .. code-block:: python
    :caption: wiki/backends.py
 
-   def _find_catchall(self, urls: list[URLPattern | URLResolver]) -> URLPattern | None:
-       """Locate the file pattern that handles every article slug."""
-       target = next_framework_settings.URL_NAME_TEMPLATE.format(name="wiki_slug")
-       for url in urls:
-           if isinstance(url, URLPattern) and getattr(url, "name", None) == target:
-               return url
-       return None
+       def _find_catchall(
+           self, urls: list[URLPattern | URLResolver]
+       ) -> URLPattern | None:
+           """Locate the file pattern that handles every article slug."""
+           target = next_framework_settings.URL_NAME_TEMPLATE.format(name="wiki_slug")
+           for url in urls:
+               if isinstance(url, URLPattern) and getattr(url, "name", None) == target:
+                   return url
+           return None
 
 The reverse name follows ``URL_NAME_TEMPLATE``, which defaults to ``page_{name}``.
 A dynamic segment named ``[slug]`` yields the route name ``wiki_slug``.
 A typed segment such as ``[int:slug]`` would instead yield ``wiki_int_slug`` because the converter token survives into the name.
 
-Append One Pattern Per Row
+Append one pattern per row
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Read the slugs from the model and build a :func:`django.urls.path` for each.
@@ -85,28 +87,30 @@ Catch ``django.db.utils.DatabaseError`` because the backend can run before migra
 .. code-block:: python
    :caption: wiki/backends.py
 
-   def _build_article_aliases(self, view: Callable[..., object]) -> list[URLPattern]:
-       """Materialise one named URL per existing article slug."""
-       article_model = django_apps.get_model("wiki", "Article")
-       try:
-           slugs = list(article_model.objects.values_list("slug", flat=True))
-       except DatabaseError:
-           return []
-       return [
-           path(
-               f"{PUBLIC_PREFIX}/{slug}/",
-               view,
-               kwargs={"slug": slug},
-               name=f"wiki_article_{slug}",
-           )
-           for slug in slugs
-       ]
+       def _build_article_aliases(
+           self, view: Callable[..., object]
+       ) -> list[URLPattern]:
+           """Materialise one named URL per existing article slug."""
+           article_model = django_apps.get_model("wiki", "Article")
+           try:
+               slugs = list(article_model.objects.values_list("slug", flat=True))
+           except DatabaseError:
+               return []
+           return [
+               path(
+                   f"{PUBLIC_PREFIX}/{slug}/",
+                   view,
+                   kwargs={"slug": slug},
+                   name=f"wiki_article_{slug}",
+               )
+               for slug in slugs
+           ]
 
 Each alias gets a unique reverse name of ``wiki_article_<slug>`` so templates can call :func:`~django.urls.reverse` per article.
 Patterns mounted through ``include("next.urls")`` carry the ``next`` application namespace, so the lookup is ``reverse("next:wiki_article_<slug>")``.
 Names a custom backend registers land in the same ``next`` namespace.
 
-Register the Backend
+Register the backend
 ~~~~~~~~~~~~~~~~~~~~~
 
 List the dotted path of the subclass under ``PAGE_BACKENDS``.
@@ -131,7 +135,7 @@ List the dotted path of the subclass under ``PAGE_BACKENDS``.
        ],
    }
 
-Reload When the Table Changes
+Reload when the table changes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``generate_urls`` runs once per router build, so a new row stays invisible until the router rebuilds.
@@ -161,7 +165,7 @@ The next request resolves ``/wiki/<slug>/`` and ``reverse("next:wiki_article_<sl
 
 Run ``uv run python manage.py check`` and confirm the backend is registered.
 
-See Also
+See also
 --------
 
 .. seealso::

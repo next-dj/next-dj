@@ -1,6 +1,6 @@
 .. _howto:
 
-How-To Guides
+How-to guides
 =============
 
 How-to guides answer task-shaped questions.

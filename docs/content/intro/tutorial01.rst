@@ -1,6 +1,6 @@
 .. _intro-tutorial01:
 
-Building the First Page
+Building the first page
 =======================
 
 Goal
@@ -20,7 +20,7 @@ If ``/`` does not respond, revisit :doc:`install`.
 Walkthrough
 -----------
 
-Model the Note
+Model the note
 ~~~~~~~~~~~~~~
 
 Create a single :doc:`Django model <django:topics/db/models>` that represents a note.
@@ -55,7 +55,7 @@ Apply the :doc:`migration <django:topics/migrations>` and seed two rows so the i
    Note.objects.create(title='Second note', body='Pages are directories.')
    PY
 
-Add the Index Page
+Add the index page
 ~~~~~~~~~~~~~~~~~~
 
 The file router treats the ``notes/pages/`` directory as the page root for the application.
@@ -100,7 +100,7 @@ Create the template.
 The framework composes the body of ``template.djx`` with any ancestor ``layout.djx``.
 You do not have a layout yet, so the page renders standalone.
 
-Run the Server
+Run the server
 ~~~~~~~~~~~~~~
 
 Start the development server.
@@ -113,7 +113,7 @@ Start the development server.
 Visit ``http://127.0.0.1:8000/`` and you should see the two seeded notes.
 The development server restarts itself on every Python edit, so reloading the browser page shows the change without a manual restart.
 
-Trace the URL Name
+Trace the URL name
 ~~~~~~~~~~~~~~~~~~
 
 Every file-routed page receives a stable URL name in the ``next`` namespace.
@@ -131,7 +131,7 @@ Open a Django shell and reverse it to confirm.
 The shell prints ``/``.
 You will use these names from templates through the standard ``{% url %}`` tag.
 
-Inspect Through System Checks
+Inspect through system checks
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 next.dj contributes Django system checks for the page configuration.
@@ -163,7 +163,7 @@ At the end of this part the project layout looks like this.
 The index page lists notes from the database.
 The URL ``/`` responds with HTML and the URL name ``next:page_`` reverses cleanly.
 
-Common Pitfalls
+Common pitfalls
 ---------------
 
 Page module is not discovered.
@@ -177,7 +177,7 @@ ImportError for ``Note``.
    The ``notes`` app must be installed and migrated.
    Re-run ``uv run python manage.py migrate``.
 
-Next Steps
+Next steps
 ----------
 
 You have a page that renders dynamic data.

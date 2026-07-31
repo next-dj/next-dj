@@ -1,15 +1,15 @@
 .. _ref-system-checks:
 
-System Checks
+System checks
 =============
 
-Module Summary
+Module summary
 --------------
 
 next.dj contributes Django system checks for every subsystem.
 Run them through ``uv run python manage.py check`` and the framework reports configuration mistakes with a code and a hint.
 
-Check Registration
+Check registration
 ------------------
 
 ``next.checks.register_all`` runs during ``AppConfig.ready``.
@@ -24,7 +24,12 @@ Every next.dj check carries the ``next`` tag.
 Run ``uv run python manage.py check --tag next`` to execute only the framework checks and skip the built-in Django and third-party ones.
 Checks that also concern templates or URL patterns keep their :doc:`Django tags <django:ref/checks>` (``templates``, ``urls``) alongside ``next``, so filtering by those tags still reaches them.
 
-Shared Helpers
+``next.checks.reset_check_caches`` drops every per-run check cache so the next run rebuilds from the current sources.
+The cached state covers the router and components managers, the composed-pages memo, the collected URL patterns, the page module memo, and the context registry.
+Most of these caches also clear on ``settings_reloaded``, which a ``NEXT_FRAMEWORK`` change through ``override_settings`` triggers.
+Tests and scripts that invoke checks directly and mutate the page or component tree in place call ``reset_check_caches`` explicitly, since the caches otherwise freeze the scanned state for the lifetime of the process.
+
+Shared helpers
 ~~~~~~~~~~~~~~
 
 ``next.checks.common`` holds helpers reused across subsystem check modules.
@@ -33,7 +38,7 @@ It is imported indirectly by those modules rather than by ``register_all``.
 .. automodule:: next.checks.common
    :members:
 
-Subsystem Checks
+Subsystem checks
 ----------------
 
 Pages
@@ -66,7 +71,7 @@ Static
 .. automodule:: next.static.checks
    :members:
 
-Partial Rendering
+Partial rendering
 ~~~~~~~~~~~~~~~~~
 
 .. automodule:: next.partial.checks
@@ -84,7 +89,7 @@ Configuration
 .. automodule:: next.conf.checks
    :members:
 
-Dependency Injection
+Dependency injection
 ~~~~~~~~~~~~~~~~~~~~
 
 The dependency injection layer does not contribute Django system checks.
@@ -96,10 +101,10 @@ There is no ``next.ENNN`` code for a missing provider or a bad marker graph.
    Unresolved parameters become ``None``, and cycles raise ``DependencyCycleError``.
    Troubleshooting lives in :doc:`/content/topics/dependency-injection` and :doc:`/content/faq/troubleshooting`.
 
-Check Code Reference
+Check code reference
 --------------------
 
-The codes follow the :doc:`Django convention <django:ref/checks>` ``next.X<NN>`` where ``X`` is ``E`` for errors and ``W`` for warnings.
+The codes follow the :doc:`Django convention <django:ref/checks>` ``next.X<NNN>`` where ``X`` is ``E`` for errors and ``W`` for warnings.
 
 Errors
 ~~~~~~
@@ -207,7 +212,7 @@ Errors
      - A component backend entry is missing a required key.
      - ``next.components.checks``
    * - ``next.E032``
-     - A component backend ``BACKEND`` or ``DIRS`` value has the wrong type.
+     - A component backend ``BACKEND`` or ``DIRS`` value has the wrong type, or ``BACKEND`` does not import as a ``ComponentsBackend`` subclass.
      - ``next.components.checks``
    * - ``next.E033``
      - ``COMPONENT_BACKENDS`` is empty.
@@ -296,11 +301,14 @@ Errors
    * - ``next.E066``
      - A custom patch op shadows a built-in verb or uses a name that is not a valid verb token.
      - ``next.partial.checks``
+   * - ``next.E067``
+     - ``NEXT_FRAMEWORK['PARTIAL_BACKENDS']`` is not a list, so the value is ignored and the default protocol backend loads in place of the configured one.
+     - ``next.partial.checks``
    * - ``next.E072``
      - A composed page template does not compile, so the syntax error would otherwise surface only as a 500 on the first request to the page.
      - ``next.partial.checks``
    * - ``next.E073``
-     - A ``PARTIAL_BACKENDS`` entry has no ``BACKEND`` key, so the factory would refuse it with ``ImproperlyConfigured`` on the first partial request.
+     - A ``PARTIAL_BACKENDS`` entry has no ``BACKEND`` key, so the entry would fall back to the default protocol backend and the intended wire format would never load.
      - ``next.partial.checks``
    * - ``next.E074``
      - A ``@context`` registration binds to a file no page render collects.
@@ -407,10 +415,10 @@ Warnings
 
 .. note::
 
-   Codes are assigned per check and are not contiguous. Inspect the source of each
-   subsystem module above for the exact message text and trigger conditions.
+   Codes are assigned per check and are not contiguous.
+   Inspect the source of each subsystem module above for the exact message text and trigger conditions.
 
-See Also
+See also
 --------
 
 .. seealso::

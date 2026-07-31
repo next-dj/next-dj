@@ -523,6 +523,29 @@ class TestBackendNamesPathCheck:
             assert checks.check_partial_backend_names_a_path() == []
 
 
+class TestBackendsShapeCheck:
+    """`next.E067` fires when PARTIAL_BACKENDS holds anything but a list."""
+
+    @pytest.mark.parametrize(
+        "configs",
+        [(_BACKEND_DICT,), _BACKEND_DICT, "next.partial.PartialProtocolBackend"],
+        ids=["tuple", "bare_dict", "dotted_path"],
+    )
+    def test_non_list_value_errors(self, configs: object) -> None:
+        with override_settings(NEXT_FRAMEWORK={"PARTIAL_BACKENDS": configs}):
+            ids = [m.id for m in checks.check_partial_backends_is_a_list()]
+        assert ids == [checks.E_BACKENDS_NOT_A_LIST]
+
+    @pytest.mark.parametrize(
+        "framework",
+        [{"PARTIAL_BACKENDS": [_BACKEND_DICT]}, {"PARTIAL_BACKENDS": []}, {}, "broken"],
+        ids=["list_entry", "empty_list", "key_absent", "settings_not_a_dict"],
+    )
+    def test_list_or_absent_value_is_silent(self, framework: object) -> None:
+        with override_settings(NEXT_FRAMEWORK=framework):
+            assert checks.check_partial_backends_is_a_list() == []
+
+
 class TestChecksSilentOnValidComposite:
     """A page with well-formed zones triggers none of the zone checks."""
 

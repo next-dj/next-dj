@@ -1,6 +1,6 @@
 .. _howto-build-a-custom-asset-backend:
 
-Resolve Asset URLs Through a Custom Backend
+Resolve asset URLs through a custom backend
 ===========================================
 
 Pick this page when the asset URL must come from an external source such as a Vite manifest.
@@ -83,6 +83,7 @@ Read the Vite manifest
 A production build writes hashed filenames into ``dist/.vite/manifest.json``.
 The backend reads that file once, caches it, and looks up the built output.
 A missing manifest logs one warning and falls back to staticfiles so the dev workflow stays unblocked.
+Add these methods to ``ViteManifestBackend``.
 
 .. code-block:: python
    :caption: kanban/backends.py
@@ -126,7 +127,7 @@ A missing manifest logs one warning and falls back to staticfiles so the dev wor
 ``_manifest_key`` builds the lookup key relative to ``VITE_ROOT`` and falls back to the bare filename.
 URL resolution delegates to ``staticfiles_storage`` so manifest storage, S3 storage, and CDN settings still apply to the hashed output.
 
-Register the Kind
+Register the kind
 ~~~~~~~~~~~~~~~~~
 
 Register the ``jsx`` kind in ``AppConfig.ready``.
@@ -158,7 +159,7 @@ The ``scripts`` slot means ``{% collect_scripts %}`` in the layout emits the tag
 The manager looks the renderer up on the active backend with ``getattr`` per asset.
 A subclass that needs a tag shape the bundled methods do not produce can add its own renderer method and name it here.
 
-Register the Backend
+Register the backend
 ~~~~~~~~~~~~~~~~~~~~
 
 List the subclass in ``STATIC_BACKENDS``.
@@ -182,7 +183,7 @@ Every key under ``OPTIONS`` reaches the backend through the ``config`` property.
        ],
    }
 
-Ship the Asset
+Ship the asset
 ~~~~~~~~~~~~~~
 
 Drop a ``component.jsx`` file next to the ``component.py`` it belongs to.
@@ -227,7 +228,7 @@ In production, add an explicit entry.
        },
    }
 
-See Also
+See also
 --------
 
 .. seealso::

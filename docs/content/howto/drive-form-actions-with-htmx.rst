@@ -1,6 +1,6 @@
 .. _howto-htmx:
 
-Drive Form Actions With htmx
+Drive form actions with htmx
 ============================
 
 Problem
@@ -22,7 +22,7 @@ The dispatcher answers an invalid submission with the complete origin page, not 
 Walkthrough
 -----------
 
-Boost the Form
+Boost the form
 ~~~~~~~~~~~~~~
 
 A boosted form submits to its own ``action`` attribute over AJAX, and the tag has already pointed ``action`` at the dispatch endpoint.
@@ -47,7 +47,7 @@ Invalid submission.
 Valid submission.
    The handler answers with a redirect, the request machinery follows it before htmx sees the response, and the selected fragment of the destination page lands in the target.
 
-Post Explicitly With ``{% action_url %}``
+Post explicitly with ``{% action_url %}``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The ``{% action_url %}`` tag returns the dispatch endpoint for an action name, resolved with the same page scoping as ``{% form %}``.
@@ -68,7 +68,7 @@ htmx serialises the form on submit, so the hidden ``csrfmiddlewaretoken`` and ``
 Keep ``hx-post`` on the ``<form>`` element for that reason.
 An ``hx-post`` on an element outside the form would post without those fields and the dispatcher could not validate or re-render.
 
-Address the Form From Scripts
+Address the form from scripts
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The opening tag carries ``data-next-action`` with the action UID, the registry identity that also names the dispatch URL.
@@ -79,7 +79,7 @@ Client-side code selects the form through that attribute instead of parsing the 
 
    const form = document.querySelector('form[data-next-action]');
 
-Distinguish Re-Render From Redirect
+Distinguish re-render from redirect
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 An invalid submission answers with the headers ``X-Next-Form: invalid`` and ``X-Next-Action: <uid>``.
@@ -99,7 +99,7 @@ An htmx event listener reads the headers to tell the two outcomes apart.
      });
    </script>
 
-Branch on ``request.htmx`` With django-htmx
+Branch on ``request.htmx`` with django-htmx
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The django-htmx middleware coexists with the dispatcher and annotates every request, so ``on_valid`` and action handlers branch on ``request.htmx``.
@@ -153,7 +153,7 @@ A ``NextClient`` test asserts the server side of the same flow.
        assert resp["X-Next-Form"] == "invalid"
        assert 'value="Ada"' in resp.content.decode()
 
-See Also
+See also
 --------
 
 .. seealso::

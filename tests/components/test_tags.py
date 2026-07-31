@@ -541,6 +541,92 @@ class TestComponentTag:
             Template("{% load components %}{% /component %}")
 
 
+class TestComponentAnchorContext:
+    """The component tag pins current_component_module_path for its own body."""
+
+    def test_component_with_module_exposes_its_module_path(
+        self, tmp_path: Path
+    ) -> None:
+        """A component backed by component.py sees its own module path."""
+        (tmp_path / "widget.djx").write_text(
+            "<b>{{ current_component_module_path }}</b>"
+        )
+        module_path = tmp_path / "widget" / "component.py"
+        info = ComponentInfo(
+            name="widget",
+            scope_root=tmp_path,
+            scope_relative="",
+            template_path=tmp_path / "widget.djx",
+            module_path=module_path,
+            is_simple=True,
+        )
+        with patch.object(components_manager, "get_component", return_value=info):
+            t = Template('{% load components %}{% component "widget" %}')
+            result = t.render(
+                Context({"current_template_path": str(tmp_path / "t.djx")})
+            )
+        assert str(module_path) in result
+
+    def test_nested_component_without_module_sees_none(self, tmp_path: Path) -> None:
+        """An inner component never inherits the outer component's anchor."""
+        outer_module = tmp_path / "outer" / "component.py"
+        (tmp_path / "outer.djx").write_text(
+            'outer:{{ current_component_module_path }}|{% component "inner" %}'
+        )
+        (tmp_path / "inner.djx").write_text(
+            "inner:[{{ current_component_module_path }}]"
+        )
+
+        def fake_get(name: str, _: Path) -> ComponentInfo | None:
+            module_paths = {"outer": outer_module, "inner": None}
+            return ComponentInfo(
+                name=name,
+                scope_root=tmp_path,
+                scope_relative="",
+                template_path=tmp_path / f"{name}.djx",
+                module_path=module_paths[name],
+                is_simple=True,
+            )
+
+        with patch.object(components_manager, "get_component", side_effect=fake_get):
+            t = Template('{% load components %}{% component "outer" %}')
+            result = t.render(
+                Context({"current_template_path": str(tmp_path / "page.djx")})
+            )
+        assert f"outer:{outer_module}" in result
+        assert "inner:[None]" in result
+
+    def test_slot_body_and_children_keep_caller_anchor(self, tmp_path: Path) -> None:
+        """Slot bodies and free children render in the caller's context."""
+        module_path = tmp_path / "box" / "component.py"
+        (tmp_path / "box.djx").write_text(
+            '<div data-anchor="{{ current_component_module_path }}">'
+            "{{ slot_head }}|{{ children }}</div>"
+        )
+        info = ComponentInfo(
+            name="box",
+            scope_root=tmp_path,
+            scope_relative="",
+            template_path=tmp_path / "box.djx",
+            module_path=module_path,
+            is_simple=True,
+        )
+        with patch.object(components_manager, "get_component", return_value=info):
+            t = Template(
+                "{% load components %}"
+                '{% #component "box" %}'
+                '{% #slot "head" %}S[{{ current_component_module_path }}]{% /slot %}'
+                "C[{{ current_component_module_path }}]"
+                "{% /component %}"
+            )
+            result = t.render(
+                Context({"current_template_path": str(tmp_path / "page.djx")})
+            )
+        assert f'data-anchor="{module_path}"' in result
+        assert "S[]" in result
+        assert "C[]" in result
+
+
 class TestSlotTag:
     """Tests for ``{% #slot %}``, ``{% /slot %}``, and short ``{% slot %}``."""
 

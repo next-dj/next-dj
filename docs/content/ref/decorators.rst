@@ -1,9 +1,9 @@
 .. _ref-decorators:
 
-Decorators and Markers
+Decorators and markers
 ======================
 
-Module Summary
+Module summary
 --------------
 
 This page lists every public decorator and dependency marker that the framework exposes.
@@ -24,7 +24,7 @@ Called as ``@context("greeting")`` it receives a key string and binds the functi
 Pass ``inherit_context=True`` to publish the value to every descendant page.
 Pass ``serialize=True`` to expose the return value to the browser under ``window.Next.context``.
 The value must be JSON-encodable by the active serializer.
-See :ref:`Serialization for the Browser <topics-context-serialization>` for the contract.
+See :ref:`Serialization for the browser <topics-context-serialization>` for the contract.
 Pass ``serializer=`` to route that key through a custom ``JsContextSerializer``.
 
 @component.context
@@ -37,7 +37,7 @@ The first positional argument is ``func_or_key``.
 Called bare as ``@component.context`` it merges the function's returned dict into the component template scope.
 Called as ``@component.context("greeting")`` it binds the function's return value to that key.
 Pass ``serialize=True`` to include the return value in ``window.Next.context``.
-The value must be JSON-encodable by the active serializer, the same contract documented under :ref:`Serialization for the Browser <topics-context-serialization>`.
+The value must be JSON-encodable by the active serializer, the same contract documented under :ref:`Serialization for the browser <topics-context-serialization>`.
 Pass ``serializer=`` to route that key through a custom ``JsContextSerializer``.
 
 @action
@@ -61,7 +61,7 @@ Pass ``login_required=True`` or ``permission_required=`` to guard the dispatch e
 Applying ``@action`` to a class registers no action and returns the class unchanged.
 The misuse is recorded and reported as the ``next.E053`` system check by ``manage.py check``.
 
-Dependency Markers
+Dependency markers
 ------------------
 
 Depends
@@ -139,7 +139,7 @@ RegisteredParameterProvider
 Base class for custom parameter providers.
 Implement ``can_handle`` and ``resolve`` to plug a custom data source into the resolver.
 
-See Also
+See also
 --------
 
 .. seealso::

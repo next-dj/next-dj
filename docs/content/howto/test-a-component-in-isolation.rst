@@ -1,6 +1,6 @@
 .. _howto-test-a-component-in-isolation:
 
-Test a Component in Isolation
+Test a component in isolation
 =============================
 
 Problem
@@ -17,7 +17,7 @@ It resolves a component by name as seen from a given template path, renders it w
 Walkthrough
 -----------
 
-Load the Components
+Load the components
 ~~~~~~~~~~~~~~~~~~~
 
 Component discovery is a side effect, so import the components before a test resolves one.
@@ -38,7 +38,7 @@ Component folders inside a page tree register during the URL router walk instead
 A suite whose other tests issue ``NextClient`` requests has already triggered the walk.
 A suite that renders components without any HTTP triggers it by reversing one route in the same fixture, for example with ``page_reverse()`` from ``next.urls``.
 
-Render the Component
+Render the component
 ~~~~~~~~~~~~~~~~~~~~
 
 ``render_component_by_name`` takes the component name and the ``at`` path the component is referenced from.
@@ -61,7 +61,7 @@ The ``context`` mapping fills the values the component template reads.
 
 The helper raises ``LookupError`` when no visible component matches the name from the ``at`` path.
 
-Assert on the Markup
+Assert on the markup
 ~~~~~~~~~~~~~~~~~~~~
 
 The return value is a plain string, so any HTML assertion works.
@@ -89,7 +89,7 @@ The ``assert_has_class`` and ``find_anchor`` helpers from ``next.testing`` keep 
        anchor = find_anchor(html, href="/notes/1/", text="Quick start")
        assert 'href="/notes/1/"' in anchor
 
-Pass a Request When the Component Needs One
+Pass a request when the component needs one
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 When a component callable reads the request, build one with :class:`~django.test.RequestFactory` and pass it through the ``request`` keyword.
@@ -124,7 +124,7 @@ Run the component tests.
 Every test passes.
 Each component rendered on its own, with no page or route involved.
 
-See Also
+See also
 --------
 
 .. seealso::

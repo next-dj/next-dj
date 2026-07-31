@@ -17,7 +17,7 @@ Components compose freely.
 A page template can call a component, a component template can call another component, and a layout can call any component that is in scope.
 The :ref:`components-folder-discovery` section below covers how the default ``FileComponentsBackend`` finds them.
 
-Component Shapes
+Component shapes
 ----------------
 
 The backend recognises two shapes.
@@ -57,11 +57,12 @@ Composite components add Python logic when the template needs computed values th
 
 .. _components-folder-discovery:
 
-Component Folder Discovery
+Component folder discovery
 --------------------------
 
-Each entry in ``COMPONENT_BACKENDS`` carries its own ``COMPONENTS_DIR`` name, defaulting to ``_components``.
-The components backend treats every directory with that name as a component namespace.
+The URL router reads the component folder name from the ``COMPONENTS_DIR`` key of the first ``COMPONENT_BACKENDS`` entry and treats every directory with that name as a component namespace.
+``FileComponentsBackend`` itself never reads the key.
+The key is required in every entry, an entry that omits it is reported by the ``next.E031`` system check, and only the value of the first entry takes effect.
 
 When the URL router walks the page trees it skips directories that match a configured ``COMPONENTS_DIR``, so component folders never become URL segments.
 
@@ -103,7 +104,7 @@ Custom backends.
        ]
    }
 
-Component Scope
+Component scope
 ---------------
 
 Components are resolved through a scope tree.
@@ -118,11 +119,12 @@ Local scope.
 Global scope.
    Components in directories listed under ``DIRS`` are visible from every template, regardless of tree.
 
-Two components with the same name are valid when their scope roots differ, for example one in a page tree and one in a ``DIRS`` root, or one in each of two page trees.
+Two components with the same name are valid when their scope roots differ, for example one in a page tree and one in a ``DIRS`` root.
+One name in each of two page trees is valid only when at least one of them lives below the tree root, since one name at the root route scope of two trees is rejected by ``next.E034``.
 Within one tree the name must be unique regardless of nesting depth.
-The same-scope name clash is reported by a system check, covered in the `System Checks`_ section below.
+The same-scope name clash is reported by a system check, covered in the `System checks`_ section below.
 
-Calling a Component
+Calling a component
 -------------------
 
 Use the ``{% component %}`` tag.
@@ -134,7 +136,7 @@ Remaining arguments are ``key=value`` props.
 
    {% component "card" title="Hello" %}
 
-Void Form
+Void form
 ~~~~~~~~~
 
 The tag has no closing form when the component does not take slots.
@@ -146,7 +148,7 @@ Use the block form covered under :ref:`components-multiline-tags` when the compo
 
    {% component "button" text="Save" variant="default" %}
 
-Block Form
+Block form
 ~~~~~~~~~~
 
 Prepend a hash sign to open a block.
@@ -163,7 +165,7 @@ Pair it with the matching close tag.
 
 The block form lets the component template substitute child content through slots.
 
-Free Children
+Free children
 ~~~~~~~~~~~~~
 
 Child markup placed inside a ``{% #component %}`` block without a wrapping ``{% #slot %}`` reaches the component template under the ``children`` context variable.
@@ -180,13 +182,13 @@ The ``card`` template renders this content wherever it places ``{{ children }}``
 
 .. _components-multiline-tags:
 
-Multiline Tags
+Multiline tags
 ~~~~~~~~~~~~~~
 
 Both the void form and the block form accept line breaks inside the tag body, which is useful when a component takes many props.
 The framework enables ``re.DOTALL`` for Django's tag lexer at startup, so tag bodies wrap across lines in every template type.
 
-.. caution::
+.. warning::
 
    This changes template parsing for **every** template the process loads, not only DJX files.
    If you rely on Django's stock behaviour where a newline inside ``{% ... %}`` ends the tag, adjust those templates before adopting next.dj.
@@ -242,7 +244,7 @@ Template expression.
 A quoted string prop is always passed as an unescaped plain string.
 The component template autoescapes it through ``{{ prop }}``, so pass ``prop=value|safe`` or an already-safe variable when the component must receive raw HTML.
 
-Variable Forwarding
+Variable forwarding
 ~~~~~~~~~~~~~~~~~~~
 
 A component receives every variable that is in scope at the call site.
@@ -290,10 +292,10 @@ A caller-supplied slot replaces the component's ``{% #set_slot %}`` fallback bod
 When the caller omits the slot the fallback renders.
 
 Both the void ``{% slot "name" %}`` and the block ``{% #slot %}`` forms are supported on the caller side, mirroring the void and block split shown for ``{% component %}``.
-The void form suits a slot whose value comes from a prop or is left empty.
+The void caller slot marks the slot explicitly empty and suppresses the ``{% #set_slot %}`` fallback body.
 Caller slot content reaches the component scope under the ``slot_<name>`` key.
 
-Component Context
+Component context
 -----------------
 
 A ``component.py`` next to ``component.djx`` runs Python code for the component.
@@ -333,14 +335,14 @@ The framework resolves parameters from the surrounding template scope, from URL 
 
 Pass ``serialize=True`` and optionally ``serializer=`` to include the return value in ``window.Next.context``.
 The behaviour is identical to ``@context`` on a page module, so the value must be JSON-encodable by the active serializer.
-See :doc:`static-assets/js-context` for the serialization options and :ref:`Serialization for the Browser <topics-context-serialization>` for the encodability contract.
+See :doc:`static-assets/js-context` for the serialization options and :ref:`Serialization for the browser <topics-context-serialization>` for the encodability contract.
 
 An unkeyed ``@component.context`` returning a dict serializes each key of that dict separately.
 A ``serializer=`` on such an unkeyed callable applies to every key of the returned dict.
 A keyed ``@component.context`` serializes its return value under the given key.
 An unkeyed callable that returns anything other than a mapping is silently dropped from the template scope.
 
-Co-located Static Assets
+Co-located static assets
 ------------------------
 
 A component folder can ship its own CSS, JS, and ECMAScript modules.
@@ -363,7 +365,7 @@ The static collector picks up each asset by stem.
 The collector emits each asset exactly once per request, even when multiple components reference the same file.
 See :doc:`static-assets/deduplication` for the dedup rules.
 
-Module Loading
+Module loading
 --------------
 
 By default the framework imports every ``component.py`` from each ``DIRS`` root during component backend setup.
@@ -378,6 +380,7 @@ They are available regardless of ``LAZY_COMPONENT_MODULES``.
 
 The ``LAZY_COMPONENT_MODULES`` flag gates the ``DIRS`` bulk import only.
 When the flag is set the framework skips that step and imports a ``component.py`` on first resolve instead.
+A composite component whose template body lives in the module-level ``component`` string is still imported during discovery, because the scanner must read that attribute.
 See :ref:`ref-settings` for the exact behaviour.
 
 .. code-block:: python
@@ -387,7 +390,7 @@ See :ref:`ref-settings` for the exact behaviour.
        "LAZY_COMPONENT_MODULES": True,
    }
 
-The Render Function
+The render function
 -------------------
 
 A composite component can define a ``render`` function in ``component.py`` that returns the component body as a string in place of the template.
@@ -420,14 +423,14 @@ Invoke the guard from a page template and forward the flag from the surrounding 
 
 See ``examples/feature-flags`` for a feature guard built this way.
 
-Hot Reload
+Hot reload
 ----------
 
 The development server reloads when a ``component.py`` changes inside a watched component folder.
 The watched folders are the ``DIRS`` roots configured on a backend and the page-tree component folders the URL router walks.
 Template-only edits to ``.djx`` files are reflected on the next request without a process restart.
 
-Lifecycle Signals
+Lifecycle signals
 -----------------
 
 The framework emits four signals during the component lifecycle.
@@ -446,15 +449,15 @@ The framework emits four signals during the component lifecycle.
      - ``ComponentRegistry``
      - ``infos``
    * - ``component_backend_loaded``
-     - ``ComponentsManager``
-     - ``backend``, ``config``
+     - The component backend class
+     - ``config``, ``instance``
    * - ``component_rendered``
      - ``ComponentsManager``
      - ``info``, ``template_path``
 
 See :doc:`/content/ref/signals` for the full signal catalog.
 
-System Checks
+System checks
 -------------
 
 The components subsystem contributes Django system checks.
@@ -465,11 +468,13 @@ The components subsystem contributes Django system checks.
   Use ``@component.context`` from ``next.components`` instead.
 - ``next.E034`` reports one component name used at the root route scope of more than one page tree.
   Rename one of the colliding components or move it to a different scope root.
+- ``next.E075`` reports a ``@component.context`` registration bound to a file no component render collects.
+  Decorate callables defined in the ``component.py`` itself.
 
 Run them with ``uv run python manage.py check``.
 The full catalog lives in :doc:`/content/ref/system-checks`.
 
-Common Patterns
+Common patterns
 ---------------
 
 Three patterns build on the sections above.
@@ -478,7 +483,7 @@ Three patterns build on the sections above.
 - Add a ``component.py`` when the template needs values computed from the surrounding context, see :doc:`/content/howto/build-a-composite-component`.
 - Ship a folder of reusable components under a ``DIRS`` root for a shared UI kit, see :doc:`multi-project` and :doc:`/content/misc/examples`.
 
-See Also
+See also
 --------
 
 .. seealso::

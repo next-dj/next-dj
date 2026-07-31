@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import TYPE_CHECKING
 from unittest import mock
 
@@ -84,11 +85,85 @@ class TestReloadConfig:
             manager._reload_config()
         assert isinstance(manager.default_backend, StaticFilesBackend)
 
+    def test_class_outside_the_family_is_logged_and_skipped(self, caplog) -> None:
+        manager = StaticManager()
+        with (
+            caplog.at_level(logging.ERROR, logger="next.backends"),
+            override_settings(
+                NEXT_FRAMEWORK={
+                    "STATIC_BACKENDS": [
+                        {"BACKEND": "builtins.dict"},
+                        {"BACKEND": "next.static.StaticFilesBackend"},
+                    ]
+                }
+            ),
+        ):
+            manager._reload_config()
+        assert len(manager) == 1
+        assert "is not a StaticBackend subclass" in caplog.text
+
+    def test_entry_without_backend_uses_the_default_class(self) -> None:
+        manager = StaticManager()
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "STATIC_BACKENDS": [{"OPTIONS": {"css_tag": '<link href="{url}">'}}]
+            }
+        ):
+            manager._reload_config()
+        backend = manager.default_backend
+        assert isinstance(backend, StaticFilesBackend)
+        assert backend.render_link_tag("x") == '<link href="x">'
+
+    def test_non_dict_entries_are_ignored(self) -> None:
+        manager = StaticManager()
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "STATIC_BACKENDS": [
+                    "nope",
+                    {"BACKEND": "next.static.StaticFilesBackend"},
+                ]
+            }
+        ):
+            manager._reload_config()
+        assert len(manager) == 1
+
     def test_empty_backends_seeds_default(self) -> None:
         manager = StaticManager()
         with override_settings(NEXT_FRAMEWORK={"STATIC_BACKENDS": []}):
             manager._reload_config()
         assert len(manager) == 1
+
+
+class TestBackendsLoadedOnce:
+    """Settings are read once, whatever the load leaves behind."""
+
+    def test_empty_settings_do_not_reload_on_every_access(self) -> None:
+        manager = StaticManager()
+        with override_settings(NEXT_FRAMEWORK={"STATIC_BACKENDS": []}):
+            manager._ensure_backends()
+            with mock.patch.object(
+                StaticManager, "_reload_config", autospec=True
+            ) as reload_mock:
+                manager._ensure_backends()
+                len(manager)
+        reload_mock.assert_not_called()
+
+    def test_unusable_settings_do_not_reload_on_every_access(self) -> None:
+        manager = StaticManager()
+        with override_settings(
+            NEXT_FRAMEWORK={"STATIC_BACKENDS": [{"BACKEND": "builtins.dict"}]}
+        ):
+            manager._ensure_backends()
+            seeded = manager.default_backend
+            manager._ensure_backends()
+        assert manager.default_backend is seeded
+
+    def test_a_caller_emptying_the_list_does_not_trigger_a_reload(self) -> None:
+        manager = StaticManager()
+        manager._ensure_backends()
+        manager._backends.clear()
+        manager._ensure_backends()
+        assert manager._backends == []
 
 
 class TestInjectStyles:

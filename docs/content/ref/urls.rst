@@ -1,9 +1,9 @@
 .. _ref-urls:
 
-URLs Reference
+URLs reference
 ==============
 
-Module Summary
+Module summary
 --------------
 
 ``next.urls`` exposes the router backends ``RouterBackend`` and ``FileRouterBackend``.
@@ -33,11 +33,13 @@ Manager
 Code that reads ``next.urls.urlpatterns`` directly observes that one-element list, not the individual page patterns.
 The wrapped sequence caches the concatenated pattern list against a pair of version counters, one owned by ``RouterManager`` and one by the form-action manager.
 ``router_manager.reload()`` bumps the router counter, and registering or clearing form actions through ``form_action_manager`` bumps the forms counter, so the next access rebuilds the list exactly when something changed.
+
 The counters are read after the pattern build, because expanding page modules can register form actions mid-build, so the cache stays valid for the post-registration state.
 A registration that bypasses the manager and writes into a backend directly is not tracked by the counters and does not appear in the cached list.
 The backends themselves are cached by ``router_manager`` and are only rebuilt when ``router_manager.reload()`` runs or when ``PAGE_BACKENDS`` changes.
 A page added on disk after that first collection needs ``router_manager.reload()``, which rebuilds the backends and clears the Django resolver cache.
 Within a backend both the per-application pattern lists and the patterns from the roots configured in ``DIRS`` are memoised after the first scan, and a settings reload recreates the backend with fresh caches.
+
 Reverse-name population iterates the wrapped sequence with ``reversed()``, which it answers through an explicit ``__reversed__`` that builds the pattern list once per pass.
 ``RouterManager`` owns the active backend list, and the ``router_manager`` singleton exposes ``reload()`` to rebuild it.
 ``reload()`` logs and skips a backend entry whose construction raises ``ValueError``, ``TypeError``, ``KeyError``, or ``ImportError``.
@@ -54,6 +56,7 @@ A route without parameters hits a dictionary keyed by the full route string, and
 The candidates are then tried with the standard ``pattern.resolve()`` in their original list order, so overlapping routes keep Django's first-match-wins semantics and converters behave as in plain Django.
 A miss falls back to the inherited linear scan, which raises the canonical ``Resolver404`` with a complete ``tried`` list and also covers patterns the trie cannot index, such as ones built with :func:`~django.urls.re_path`.
 On a successful match ``ResolverMatch.tried`` lists only the candidates that were actually tried, not every pattern preceding the winner.
+
 The internal route index is versioned by the same counters as the pattern concat, so a router reload or a late form-action registration rebuilds it before the next resolution.
 The ``URL_RESOLVER`` setting names the resolver class, so pointing it at ``django.urls.resolvers.URLResolver`` or a custom subclass replaces the trie dispatch.
 See :doc:`/content/internals/url-router` for the algorithm walk-through.
@@ -78,7 +81,7 @@ Dispatcher
 .. automodule:: next.urls.dispatcher
    :members:
 
-Reverse Helpers
+Reverse helpers
 ~~~~~~~~~~~~~~~
 
 .. autofunction:: next.urls.reverse.page_reverse
@@ -99,7 +102,7 @@ Markers
 .. automodule:: next.urls.markers
    :members:
 
-Parameter Providers
+Parameter providers
 ~~~~~~~~~~~~~~~~~~~
 
 The following provider classes are registered with the ``next.deps`` resolver at startup.
@@ -199,7 +202,7 @@ Checks
    :members:
    :no-index:
 
-See Also
+See also
 --------
 
 .. seealso::

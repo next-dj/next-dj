@@ -2,13 +2,11 @@ import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 from django.test import override_settings
 
 import next.components as next_components_mod
 from next.components import (
     ComponentInfo,
-    ComponentsFactory,
     ComponentsManager,
     DummyBackend,
     FileComponentsBackend,
@@ -19,6 +17,12 @@ from next.components import (
 from tests.support import (
     next_framework_settings_component_backends_list as _next_framework_settings_component_backends_list,
 )
+
+
+def _install(manager: ComponentsManager, *backends: object) -> None:
+    """Put ready-made backends on a manager as a finished load."""
+    manager._backends = list(backends)
+    manager._loaded = True
 
 
 class TestComponentsModuleExports:
@@ -270,49 +274,66 @@ class TestFileComponentsBackend:
         assert backend.loaded_module_paths() == ()
 
 
-class TestComponentsFactory:
-    """Tests for ComponentsFactory."""
+class TestFileBackendFromConfig:
+    """A merged `COMPONENT_BACKENDS` entry configures the file backend."""
 
-    def test_create_backend_file_default(self) -> None:
-        """Create FileComponentsBackend with merged-style keys."""
-        config = {
-            "BACKEND": "next.components.FileComponentsBackend",
-            "DIRS": [],
-            "COMPONENTS_DIR": "_components",
-        }
-        backend = ComponentsFactory.create_backend(config)
-        assert isinstance(backend, FileComponentsBackend)
+    def test_empty_dirs_yield_no_extra_roots(self) -> None:
+        """Nothing to scan beyond the page trees when ``DIRS`` is empty."""
+        backend = FileComponentsBackend(
+            {
+                "BACKEND": "next.components.FileComponentsBackend",
+                "DIRS": [],
+                "COMPONENTS_DIR": "_components",
+            }
+        )
         assert backend._extra_component_roots == []
 
-    def test_create_backend_file_ignores_the_components_dir_name(self) -> None:
+    def test_the_components_dir_name_is_not_a_root(self) -> None:
         """``COMPONENTS_DIR`` names a router skip folder and never reaches the backend."""
-        config = {
-            "BACKEND": "next.components.FileComponentsBackend",
-            "DIRS": [str(Path(__file__).parent)],
-            "COMPONENTS_DIR": "components",
-        }
-        backend = ComponentsFactory.create_backend(config)
-        assert isinstance(backend, FileComponentsBackend)
+        backend = FileComponentsBackend(
+            {
+                "BACKEND": "next.components.FileComponentsBackend",
+                "DIRS": [str(Path(__file__).parent)],
+                "COMPONENTS_DIR": "components",
+            }
+        )
         assert backend._extra_component_roots == [Path(__file__).parent]
 
-    def test_create_backend_unknown_raises(self) -> None:
-        """Unknown backend class path raises ImportError."""
-        with pytest.raises(ImportError):
-            ComponentsFactory.create_backend(
-                {"BACKEND": "next.components.UnknownBackend"}
-            )
 
+class TestComponentsManagerLoading:
+    """`ComponentsManager` branches around the shared backend loader."""
 
-class TestComponentsFactoryManager:
-    """ComponentsFactory import path and ComponentsManager branches."""
-
-    def test_create_backend_imports_class_and_passes_config(self) -> None:
-        """Backend is loaded by dotted path and receives the full config dict."""
-        b = ComponentsFactory.create_backend(
-            {"BACKEND": "next.components.DummyBackend", "OPTIONS": {"marker": 7}}
+    def test_entry_without_backend_falls_back_to_the_file_backend(self) -> None:
+        """An entry naming no ``BACKEND`` still gets the filesystem source."""
+        mgr = ComponentsManager()
+        mock_ns = _next_framework_settings_component_backends_list(
+            [{"DIRS": [], "COMPONENTS_DIR": "_components"}]
         )
-        assert isinstance(b, DummyBackend)
-        assert b.config["OPTIONS"]["marker"] == 7
+        with patch("next.backends.next_framework_settings", mock_ns):
+            mgr._reload_config()
+        assert [type(backend) for backend in mgr._backends] == [FileComponentsBackend]
+
+    def test_backend_receives_its_own_config_entry(self) -> None:
+        """The whole entry is handed to the backend constructor."""
+        mgr = ComponentsManager()
+        mock_ns = _next_framework_settings_component_backends_list(
+            [{"BACKEND": "next.components.DummyBackend", "OPTIONS": {"marker": 7}}]
+        )
+        with patch("next.backends.next_framework_settings", mock_ns):
+            mgr._reload_config()
+        backend = mgr._backends[0]
+        assert isinstance(backend, DummyBackend)
+        assert backend.config["OPTIONS"]["marker"] == 7
+
+    def test_entry_outside_the_family_is_skipped(self) -> None:
+        """A class that is no ``ComponentsBackend`` never joins the list."""
+        mgr = ComponentsManager()
+        mock_ns = _next_framework_settings_component_backends_list(
+            [{"BACKEND": "builtins.dict"}]
+        )
+        with patch("next.backends.next_framework_settings", mock_ns):
+            mgr._reload_config()
+        assert mgr._backends == []
 
     def test_dummy_backend_lookups_are_empty(self) -> None:
         """DummyBackend does not resolve names and reports no visible components."""
@@ -324,7 +345,7 @@ class TestComponentsFactoryManager:
         """If ``COMPONENT_BACKENDS`` is not a list, return early. Non-dict entries are skipped."""
         mgr = ComponentsManager()
         mock_ns = _next_framework_settings_component_backends_list("bad")
-        with patch("next.components.manager.next_framework_settings", mock_ns):
+        with patch("next.backends.next_framework_settings", mock_ns):
             mgr._reload_config()
             assert mgr._backends == []
 
@@ -339,25 +360,9 @@ class TestComponentsFactoryManager:
                 },
             ]
         )
-        with patch("next.components.manager.next_framework_settings", mock_ns2):
+        with patch("next.backends.next_framework_settings", mock_ns2):
             mgr2._reload_config()
             assert len(mgr2._backends) >= 1
-
-    def test_manager_swallows_backend_init_exception(self) -> None:
-        """An exception from ``create_backend`` is logged. The backend is not appended."""
-        mgr = ComponentsManager()
-        mock_ns = _next_framework_settings_component_backends_list(
-            [
-                {
-                    "BACKEND": "next.components.BoomBackend",
-                    "DIRS": [],
-                    "COMPONENTS_DIR": "_components",
-                }
-            ]
-        )
-        with patch("next.components.manager.next_framework_settings", mock_ns):
-            mgr._reload_config()
-        assert mgr._backends == []
 
     def test_manager_collect_visible_first_backend_wins(self) -> None:
         """Same component name from two backends: first backend wins."""
@@ -368,7 +373,7 @@ class TestComponentsFactoryManager:
         b1.collect_visible_components.return_value = {"a": info1}
         b2 = MagicMock()
         b2.collect_visible_components.return_value = {"a": info2}
-        mgr._backends = [b1, b2]
+        _install(mgr, b1, b2)
         merged = mgr.collect_visible_components(Path("/t.djx"))
         assert merged["a"] is info1
 
@@ -377,7 +382,7 @@ class TestComponentsFactoryManager:
         mgr = ComponentsManager()
         b = MagicMock()
         b.get_component.return_value = None
-        mgr._backends = [b]
+        _install(mgr, b)
         assert mgr.get_component("x", Path("/p")) is None
 
     def test_manager_get_component_returns_first_hit(self) -> None:
@@ -388,7 +393,7 @@ class TestComponentsFactoryManager:
         b1.get_component.return_value = None
         b2 = MagicMock()
         b2.get_component.return_value = hit
-        mgr._backends = [b1, b2]
+        _install(mgr, b1, b2)
         assert mgr.get_component("n", Path("/t")) is hit
 
 

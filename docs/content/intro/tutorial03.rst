@@ -1,12 +1,13 @@
 .. _intro-tutorial03:
 
-Components and Static Assets
+Components and static assets
 ============================
 
 Goal
 ----
 
-By the end of this part the index page renders each note through a reusable component, the component ships its own CSS and JS, and both files load through the static collector without any manual ``<link>`` or ``<script>`` plumbing.
+By the end of this part the index page renders each note through a reusable component.
+The component ships its own CSS and JS, and both files load through the static collector without any manual ``<link>`` or ``<script>`` plumbing.
 
 Prerequisites
 -------------
@@ -18,7 +19,7 @@ The detail page at ``/notes/<id>/`` renders one note from the URL.
 Walkthrough
 -----------
 
-Create the Component Folder
+Create the component folder
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The :doc:`component </content/topics/components>` backend looks for component folders under the configured root.
@@ -42,7 +43,7 @@ Create the directory and a starter template.
 
 Components reference variables by name, so ``note`` resolves from the surrounding template context.
 
-Use the Component
+Use the component
 ~~~~~~~~~~~~~~~~~
 
 Replace the inline markup in the index template with a call to ``note_card``.
@@ -62,7 +63,7 @@ It resolves the component by name, runs any context functions declared in a ``co
 Reload ``/`` and confirm that the page still lists both notes.
 The HTML now uses an ``<article>`` per note instead of an ``<li>`` block.
 
-Add Co-located CSS
+Add co-located CSS
 ~~~~~~~~~~~~~~~~~~
 
 Place a CSS file next to ``component.djx`` and the :doc:`static pipeline </content/topics/static-assets/index>` picks it up automatically.
@@ -98,7 +99,7 @@ When a page renders a component that has co-located styles, the static collector
 Asset discovery picks up files co-located with the component folder.
 See :doc:`/content/topics/components` for the full component model.
 
-Wire the Collector Into the Layout
+Wire the collector into the layout
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tell the layout where to emit the collected style and script tags.
@@ -130,7 +131,7 @@ Each asset is deduplicated by its URL, so the same file referenced from two comp
 
 Reload ``/`` and confirm that the served HTML now contains a ``<link>`` to ``note_card/component.css``.
 
-Add Co-located JavaScript
+Add co-located JavaScript
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Co-located scripts work the same way.
@@ -155,7 +156,7 @@ Add a small enhancement that toggles a class when the note title is clicked.
 
 The collector emits one ``<script>`` tag for the file at the location of ``{% collect_scripts %}``.
 
-Composite Components With Component Context
+Composite components with component context
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 A component that pairs a template with a ``component.py`` is a composite component.
@@ -221,7 +222,7 @@ The index lists notes through the ``note_card`` component.
 The component carries its own template, Python context, CSS, and JS.
 The layout pulls both ``{% collect_styles %}`` and ``{% collect_scripts %}`` from the static pipeline.
 
-Common Pitfalls
+Common pitfalls
 ---------------
 
 Component renders nothing or is not found.
@@ -242,7 +243,7 @@ Component context not resolved.
    The framework forwards the parent template scope into the component, so ``note`` must be in scope where ``{% component "note_card" %}`` is called.
    Inside a ``{% for note in notes %}`` block the variable is in scope, outside the loop it is not.
 
-Next Steps
+Next steps
 ----------
 
 The notes are visible but not editable.

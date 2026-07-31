@@ -1,6 +1,6 @@
 .. _howto-reload-routes:
 
-Reload Routes From Code
+Reload routes from code
 =======================
 
 Problem
@@ -52,7 +52,7 @@ Import the receivers module from ``AppConfig.ready`` so the decorators run at st
 Each call rebuilds the backend list from the current ``NEXT_FRAMEWORK`` configuration, clears Django's URL caches, and emits ``router_reloaded``.
 Receivers should tolerate being invoked more than once when several writes batch into one task.
 
-Observe the Reload
+Observe the reload
 ------------------
 
 Long lived processes that cache URL references can listen to ``router_reloaded``.
@@ -72,7 +72,7 @@ Verification
 
 Add a row to the underlying table and confirm that the next request resolves the new URL without restarting the server.
 
-See Also
+See also
 --------
 
 .. seealso::

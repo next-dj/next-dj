@@ -1,6 +1,6 @@
 .. _topics-partial-rendering-reference:
 
-Partial Rendering Reference
+Partial rendering reference
 ===========================
 
 The patch verbs, the request and response headers, the ``data-next-*`` attributes, and the ``PARTIAL_BACKENDS`` settings, in tables.
@@ -10,7 +10,7 @@ For the narrative behind any of these, read the scenario that uses it in :doc:`s
    :local:
    :depth: 1
 
-Patch Verbs
+Patch verbs
 -----------
 
 A patch is one addressed DOM operation with a verb, an optional target, optional HTML, and verb-specific extras.
@@ -88,8 +88,14 @@ The envelope around the list always carries the ``assets`` and ``form`` keys, se
      - A full client navigation to a server-authored href. ``external=True`` skips same-host validation, see :ref:`security-overview`.
      - none
 
+A target carries exactly one address key, and the client resolves ``zone``, then ``form``, then ``field``, then ``css``.
+``zone`` names a ``data-next-zone`` wrapper and ``form`` names an action uid.
+``field`` is a ``[uid, name]`` pair addressing one named input of a form by its uid.
+``css`` is a raw selector, the escape hatch a bare layer shell relies on.
+
 A verb beyond this set is registered on both sides.
-``register_patch_op("confetti")`` on the server clears the ``next.E066`` check and earns the generic ``op()`` channel on the builder.
+``register_patch_op("confetti")`` on the server registers the name, which the ``next.E066`` check validates at ``manage.py check``, and earns the generic ``op()`` channel on the builder.
+An unregistered name fails at runtime with ``UnknownPatchOpError``.
 ``Next.partial.defineOp("confetti", handler)`` on the client supplies the handler.
 See :doc:`extending` for the end-to-end recipe, the ``context`` and ``event`` seams, and the custom-verb exceptions.
 
@@ -97,10 +103,11 @@ An event name that starts with ``partial:`` or ``next:``, or equals ``ready`` or
 ``Patches.event()`` rejects such a name with ``ReservedEventNameError``, symmetric to ``op()`` rejecting a built-in verb on the generic channel, so an application cannot forge a lifecycle event.
 
 The ``$csrf`` and ``$dev`` keys of the init payload are reserved the same way.
-``Patches.context()`` rejects either name with ``ReservedContextKeyError``, and the js-context delta of a zone render drops them before it becomes a ``context`` op, so the ``$`` namespace belongs to the framework on a patch exactly as it does on a full render.
+``Patches.context()`` rejects either name with ``ReservedContextKeyError``, and the js-context delta of a zone render drops them before it becomes a ``context`` op.
+The ``$`` namespace therefore belongs to the framework on a patch exactly as it does on a full render.
 A full render drops a page or component key of either name from the payload whether or not it has a framework value to write there, so no patch has a registered value to update.
 
-Asset Manifest
+Asset manifest
 --------------
 
 The ``assets`` key of an envelope lists the co-located assets the rendered targets registered.
@@ -124,20 +131,24 @@ Each entry carries ``kind`` and ``url`` always, plus ``inline`` and ``load`` whe
      - The body of an inline asset, absent on a URL-form asset.
    * - ``load``
      - ``link``, ``script``, or ``module``
-     - The insertion verb, derived from the renderer registered for the kind. Absent when that renderer is a custom backend method, and absent on an inline body whose kind does not wrap it in the element the verb builds.
+     - The insertion verb, derived from the renderer registered for the kind.
+       Absent when that renderer is a custom backend method, and absent on an
+       inline body whose kind does not wrap it in the element the verb builds.
 
 The runtime inserts an asset by its verb rather than by its kind, so a custom kind registered with one of the three built-in renderers loads like the built-in kind that shares it.
 The verb of an entry resolves in three steps.
 A ``load`` field the server wrote wins.
-A URL-form entry without that field falls back to the verb the name of a built-in kind implies, ``link`` for ``css``, ``script`` for ``js``, and ``module`` for ``module``, so an envelope authored before the field existed still loads.
-An entry carrying an inline body takes no such fallback, because the server spells the verb only when the kind wraps the body in the element the runtime builds, so a body with no explicit ``load`` is dropped at the boundary rather than executed in an element a full page render prints verbatim.
+A URL-form entry without that field falls back to the verb the name of a built-in kind implies, ``link`` for ``css``, ``script`` for ``js``, and ``module`` for ``module``.
+An envelope from a backend that spells no ``load`` field therefore still loads.
+An entry carrying an inline body takes no such fallback, because the server spells the verb only when the kind wraps the body in the element the runtime builds.
+A body with no explicit ``load`` is therefore dropped at the boundary rather than executed in an element a full page render prints verbatim.
 
 An entry that resolves to no verb is skipped.
 The ``next.W074`` check reports a registered kind whose renderer implies no verb, and ``next.W076`` a registered kind whose inline bodies lose the verb its URL form keeps.
 Both checks walk the kinds registered in the running process, so an entry naming a kind no registration backs is skipped with no check to announce it.
 See :doc:`/content/topics/static-assets/asset-kinds` for the renderer-to-verb mapping.
 
-Request Headers
+Request headers
 ---------------
 
 Client to server.
@@ -178,7 +189,7 @@ All values are ASCII, and zone names are ASCII slugs.
      - Every unsafe method
      - The name comes from ``CSRF_HEADER_NAME``, the token from the runtime payload, the cookie is never read.
 
-Response Headers
+Response headers
 ----------------
 
 Server to client.
@@ -206,7 +217,7 @@ Server to client.
      - An invalid form
      - The uid of the failed action.
 
-Status Codes
+Status codes
 ------------
 
 .. list-table::
@@ -234,7 +245,10 @@ Status Codes
    * - 404
      - An unknown form uid, the existing behaviour.
    * - 409
-     - A version mismatch on a safe method, with an empty body. The runtime fully visits the current URL. A mutation always runs, and a version mismatch surfaces in the envelope version, which the client reads to reload once into a full client visit.
+     - A version mismatch on a safe method, with an empty body. The runtime
+       fully visits the current URL. A mutation always runs, and a version
+       mismatch surfaces in the envelope version, which the client reads to
+       reload once into a full client visit.
    * - 5xx
      - No envelope. The runtime swaps nothing and fires ``partial:error``.
 
@@ -314,8 +328,10 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from its par
      - A container
      - Subscribe to a patch stream at the URL.
    * - ``data-next-busy``
-     - Initiator and target
-     - The busy gate, written by the runtime alongside ``aria-busy="true"``.
+     - Layer opener, layer zone container
+     - Written during a layer open on the opener link and the layer's zone
+       container, alongside ``aria-busy="true"``. The submit double-click guard
+       is the per-uid mutation lock, not this attribute.
    * - ``data-next-dialog``
      - Runtime ``<dialog>``
      - Set by the runtime on every layer dialog, the styling hook for the modal shell.
@@ -326,13 +342,13 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from its par
      - Runtime toast item
      - One toast, the value is the variant, the styling hook for a single notification.
 
-Lifecycle Events
+Lifecycle events
 ----------------
 
 The runtime fires events on three channels, the element, the document, and the ``Next.on`` bus.
 The ``next:*`` node events fire on the element as a bubbling ``CustomEvent`` caught with ``addEventListener``.
 The apply-stage ``partial:*`` events and ``next:toast`` fire on the document and the ``Next.on`` bus.
-A ``partial:error`` of kind ``asset``, raised when a co-located stylesheet fails to load or its version mismatches, reaches only the bus.
+A ``partial:error`` of kind ``asset``, raised when a co-located stylesheet fails to load or when the asset version still mismatches after the reload, reaches only the bus.
 ``ready``, ``context-updated``, ``partial:before-request``, and the fetch-stage ``partial:error`` reach only the bus.
 The ``next:mounted``, ``next:removed``, and ``next:morph-*`` node events live only on ``document.addEventListener`` and never reach the bus, so ``Next.on("next:mounted")`` is a silent no-op.
 
@@ -412,7 +428,7 @@ The ``next:mounted``, ``next:removed``, and ``next:morph-*`` node events live on
 The mount and morph events run during the patch apply, so a framework island can take over a node by vetoing its morph and managing its own subtree.
 The mounted and removed pair brackets the node's life inside the document, the symmetry an adapter relies on to mount and unmount a root.
 
-Client Runtime
+Client runtime
 --------------
 
 The runtime exposes ``window.Next`` once the bundle loads.
@@ -436,6 +452,10 @@ The surface is small, and every entry mirrors a seam the runtime already uses in
      - A re-executable mount registry. The callback runs over the matching elements at load and over every matching element a later patch inserts.
    * - ``Next.partial.parseHook(contentType, hook)``
      - Register a parser that turns a foreign content type into an envelope before the apply pipeline, so a third party can emulate another wire format.
+   * - ``Next.partial.apply(raw)``
+     - Parse and apply a wire envelope directly, the entry a parse hook or a test feeds.
+   * - ``Next.partial.fetch(request)``
+     - Send one partial request through the wire's queues and locks.
    * - ``Next.partial.layers``
      - The layer stack for driving modals from script: ``open(opener, href, zone)``, ``close(detail)``, and ``size()``.
    * - ``Next.partial.sse``
@@ -453,7 +473,7 @@ An ``ops`` or ``assets`` value that is not an array is dropped whole and earns i
 An asset whose insertion verb the envelope boundary cannot resolve is a ``console.debug`` skip naming its kind, because a kind with a custom renderer is a normal configuration rather than damage.
 A production page carries no ``$dev`` key, so it carries neither the measurements nor any of the console lines.
 
-Intercepting Modals
+Intercepting modals
 -------------------
 
 A ``data-next-layer`` link opens a modal over the current view and pushes the honest URL of the modal body.
@@ -470,7 +490,7 @@ The same gate protects every click-driven trigger, so a prompt fronts a layer op
 
 .. _partial-server-layers:
 
-Server-Initiated Layers
+Server-initiated layers
 -----------------------
 
 ``Patches.layer_open`` opens a layer from a handler, the server counterpart of the ``data-next-layer`` opener.
@@ -513,7 +533,7 @@ The href is validated same-site like every navigation sink, a cross-site value r
 
 The client ``data-next-layer="record"`` opener and the server ``layer_open(href, zone)`` do the same work, both load a page zone into a layer.
 
-Foreign-Zone Authorisation
+Foreign-zone authorisation
 --------------------------
 
 A modal body and a page-addressed zone ride ``X-Next-Origin`` so the server resolves the host page that owns the zone.
@@ -568,7 +588,7 @@ The rest are ignored, multi-backend selection is not supported, and a list with 
 
 See :doc:`/content/ref/settings` for every key inside ``NEXT_FRAMEWORK``.
 
-Styling Layers and Toasts
+Styling layers and toasts
 -------------------------
 
 The runtime creates a bare ``<dialog data-next-dialog>`` for every layer and a ``<div data-next-toasts>`` container for toasts.
@@ -619,7 +639,7 @@ With Tailwind Play CDN ``@apply`` is available inside a ``<style type="text/tail
 
 The ``next.dj`` examples use both patterns through the shared ``_shared/static/shared/css/base.css`` file.
 
-See Also
+See also
 --------
 
 .. seealso::

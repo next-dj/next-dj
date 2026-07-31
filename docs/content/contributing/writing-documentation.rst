@@ -1,6 +1,6 @@
 .. _contributing-writing-documentation:
 
-Writing Documentation
+Writing documentation
 =====================
 
 This page describes how to write new documentation pages for next.dj and how to review pull requests that touch the docs.
@@ -9,7 +9,7 @@ This page describes how to write new documentation pages for next.dj and how to 
    :local:
    :depth: 2
 
-Where Pages Live
+Where pages live
 ----------------
 
 The documentation tree lives under ``docs/content/``.
@@ -42,7 +42,7 @@ The layout follows the Django convention.
    * - ``contributing/``
      - Contribution workflow and writing guidance.
 
-Picking the Right Section
+Picking the right section
 -------------------------
 
 Use this decision tree when you are unsure where a new page belongs.
@@ -64,31 +64,31 @@ I am explaining how a subsystem works inside.
 
 If still in doubt, ask in a draft pull request.
 
-Page Templates
+Page templates
 --------------
 
 Each section uses a consistent template.
 
 Tutorial.
-   Goal, Prerequisites, Walkthrough, Checkpoint, Next Steps.
+   Goal, Prerequisites, Walkthrough, Checkpoint, Next steps.
 
 Topic.
-   Overview, Concepts, Usage, Common Patterns, See Also.
+   Overview, Concepts, Usage, Common patterns, See also.
    Starts with a leading paragraph and ``.. contents:: :local:``.
 
 How-To.
-   Problem, Solution, Walkthrough, Verification, See Also.
+   Problem, Solution, Walkthrough, Verification, See also.
    Aim for under 150 lines.
    Multi-part integrations (streaming, admin shell, cross-cutting security) may exceed that when splitting the flow would hurt verification steps.
 
 Reference.
-   Module Summary, Public API, Configuration, Signals, See Also.
+   Module summary, Public API, Configuration, Signals, See also.
    Body is generated through ``autodoc`` directives.
 
 Internals.
-   Overview, Pipeline (with a mermaid diagram), Implementation Notes, Extension Points, See Also.
+   Overview, Pipeline (with a mermaid diagram), Implementation notes, Extension points, See also.
 
-One Canonical Source Per Fact
+One canonical source per fact
 ------------------------------
 
 Each technical fact has one canonical home in the documentation tree.
@@ -103,13 +103,13 @@ Checklist for settings and system checks.
    This prevents the divergence where ``ref/`` and ``deployment/`` describe the same flag with different meanings.
    When you add or change a ``next.*.checks`` error or warning id, update the tables in ``ref/system-checks.rst`` in the same change.
 
-Version Numbers and Compatibility Notes
+Version numbers and compatibility notes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Do not mention the framework's current version number in user-facing pages.
 Do not include backward-compatibility notes, migration guidance, or phrases like "as of version X" or "this was changed in Y".
 The documentation describes how the framework works now.
-Historical context belongs in the changelog, not in the docs.
+Release history belongs in the release notes of each pull request, not in the manual.
 Do not use Sphinx ``.. versionadded::`` or ``.. versionchanged::`` directives in user-facing pages.
 They duplicate the same problem under a different syntax.
 
@@ -120,7 +120,7 @@ The *Requirements* section of :doc:`/content/intro/install` documents supported 
 On other pages link back with a short sentence such as "Use a supported Python and Django release (see :doc:`/content/intro/install`)" instead of copying the bullet list.
 Fragmented matrices drift out of sync with ``pyproject.toml`` and CI.
 
-Examples and Code Blocks
+Examples and code blocks
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 Keep filenames aligned with the Notes tutorial unless the page names another sample project.
@@ -129,7 +129,7 @@ Paste runnable snippets when practical.
 
 Prefer adapting excerpts from ``examples/`` over speculative shortcuts.
 
-Style Rules
+Style rules
 -----------
 
 Read :doc:`style-guide` before writing.
@@ -153,13 +153,13 @@ A typical change goes through three steps.
 A green build is a hard precondition for merge.
 Local builds reveal anchor and cross reference issues quickly.
 
-System Checks
+System checks
 -------------
 
 Run ``uv run python manage.py check`` after every change that affects the API surface or the system checks.
 The output makes sure that no contributed check broke during development.
 
-Linting the Docs
+Linting the docs
 ----------------
 
 The project uses ``doc8`` for RST style.
@@ -171,13 +171,13 @@ The project uses ``doc8`` for RST style.
 
 The linter catches trailing whitespace, lines that exceed 200 characters, and inconsistent indentation.
 
-Translation Notes
+Translation notes
 -----------------
 
 The documentation is written in English.
 Translations are not part of the project at this time.
 
-Coverage Map
+Coverage map
 ------------
 
 When you change ``next/`` code, check whether the corresponding documentation needs updating.
@@ -245,7 +245,7 @@ Cross references
 
 Prefer absolute paths from the manual root (for example ``:doc:`/content/topics/pages```) in new prose so links remain valid if a page moves between toctrees.
 
-See Also
+See also
 --------
 
 .. seealso::

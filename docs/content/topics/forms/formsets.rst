@@ -21,7 +21,7 @@ The ``form`` value in the handler is the bound formset, not an individual form.
 The ``next.forms.Form`` and ``next.forms.ModelForm`` base classes apply to each row form inside the formset.
 Use Django's standard :doc:`factory functions <django:topics/forms/formsets>` to build the formset class.
 
-Registering a Formset Action
+Registering a formset action
 ----------------------------
 
 Pass the formset class as ``form_class``.
@@ -43,7 +43,7 @@ Pass the formset class as ``form_class``.
 
 Mark the row form ``abstract``.
 Without the flag, ``__init_subclass__`` registers ``NoteRowForm`` as a standalone single-row save action next to the formset action.
-``formset_factory`` accepts the abstract class as usual, see :ref:`Preventing Registration <topics-forms-actions-abstract>`.
+``formset_factory`` accepts the abstract class as usual, see :ref:`Preventing registration <topics-forms-actions-abstract>`.
 
 .. code-block:: python
    :caption: notes/pages/notes/bulk/page.py
@@ -70,9 +70,9 @@ The ``init_kwargs`` reach the formset constructor, and a non-empty dict makes th
 An empty dict routes back into ``get_initial``, so keep ``init_kwargs`` non-empty, even when the only entry is a ``prefix`` or the neutral ``{"initial": {}}``.
 See :doc:`/content/howto/use-formsets` for the recipe built on this rule.
 
-The ``page_{path}`` URL name follows the file-router naming convention, see :doc:`/content/topics/file-router`.
+The ``page_{name}`` URL name follows the file-router naming convention, see :doc:`/content/topics/file-router`.
 
-Rendering the Formset
+Rendering the formset
 ---------------------
 
 Use the standard ``{% form %}`` tag.
@@ -131,7 +131,7 @@ Build the formset inside a ``@context`` callable named after the action and retu
 The helper is idempotent.
 Call it once after constructing the formset.
 
-Edit Existing Rows
+Edit existing rows
 ------------------
 
 Use ``modelformset_factory`` for editing several existing instances.
@@ -179,13 +179,13 @@ Use ``modelformset_factory`` for editing several existing instances.
 The ``@context("edit_all_notes")`` callable publishes a bound formset under the action-named key the ``{% form %}`` tag reads.
 The handler receives the same formset for save.
 
-Validation Failure
+Validation failure
 ------------------
 
 A failing validation re-renders the origin page with the bound formset in scope.
 Field errors render on each row through ``row.errors`` and non field errors render through ``form.non_form_errors``.
 
-Validating an Inline Formset
+Validating an inline formset
 ----------------------------
 
 A parent form that owns an inline formset attaches the formset on construction and validates it inside ``clean``.
@@ -247,21 +247,21 @@ The parent form is ``abstract`` because it dispatches only through the ``update_
 
 The parent page re-renders with both the parent and the row errors in scope on validation failure.
 
-Common Patterns
+Common patterns
 ---------------
 
-Add Form Button
+Add form button
 ~~~~~~~~~~~~~~~
 
 Pair the formset with client side JS that clones the empty extra row.
 The framework processes whatever the management form reports.
 
-Partial Save
+Partial save
 ~~~~~~~~~~~~
 
 Save only the valid rows by iterating the formset and skipping rows whose ``cleaned_data`` is empty or carries a truthy ``DELETE``.
 
-See Also
+See also
 --------
 
 .. seealso::

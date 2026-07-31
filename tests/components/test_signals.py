@@ -7,7 +7,7 @@ import pytest
 from django.dispatch import Signal
 
 from next.components import ComponentInfo, render_component
-from next.components.backends import ComponentsBackend, ComponentsFactory
+from next.components.backends import DummyBackend
 from next.components.manager import ComponentsManager
 from next.components.registry import ComponentRegistry
 from next.components.signals import (
@@ -159,7 +159,9 @@ class TestComponentBackendLoadedSignal:
             sender=object, config={"BACKEND": "next.components.FileComponentsBackend"}
         )
         assert len(capture_component_backend_loaded) == 1
-        assert "config" in capture_component_backend_loaded[0]
+        assert capture_component_backend_loaded[0]["config"] == {
+            "BACKEND": "next.components.FileComponentsBackend"
+        }
 
     def test_sender_is_preserved(
         self, capture_component_backend_loaded: list[dict[str, Any]]
@@ -176,39 +178,76 @@ class TestComponentBackendLoadedSignal:
         self, capture_component_backend_loaded: list[dict[str, Any]]
     ) -> None:
         """`ComponentsManager._reload_config` fires once per built backend."""
-        sentinel: ComponentsBackend = ComponentsFactory.create_backend(
-            {"BACKEND": "next.components.DummyBackend", "COMPONENTS_DIR": "_widgets"}
-        )
-
-        class _StubFactory:
-            calls = 0
-
-            @classmethod
-            def create_backend(cls, _config: dict[str, Any]) -> ComponentsBackend:
-                cls.calls += 1
-                return sentinel
-
         manager = ComponentsManager()
         configs = [
             {"BACKEND": "next.components.DummyBackend", "COMPONENTS_DIR": "a"},
             {"BACKEND": "next.components.DummyBackend", "COMPONENTS_DIR": "b"},
         ]
 
-        with (
-            patch("next.components.manager.next_framework_settings") as fake_settings,
-            patch.object(
-                ComponentsFactory, "create_backend", _StubFactory.create_backend
-            ),
-        ):
+        with patch("next.backends.next_framework_settings") as fake_settings:
             fake_settings.COMPONENT_BACKENDS = configs
             manager._reload_config()
 
         assert len(capture_component_backend_loaded) == 2
-        senders = {ev["sender"] for ev in capture_component_backend_loaded}
-        assert senders == {ComponentsManager}
         captured_configs = [ev["config"] for ev in capture_component_backend_loaded]
         assert captured_configs == configs
-        assert all(ev["backend"] is sentinel for ev in capture_component_backend_loaded)
+
+    def test_sender_is_the_backend_class(
+        self, capture_component_backend_loaded: list[dict[str, Any]]
+    ) -> None:
+        """The class is the sender, so receivers can filter on it."""
+        manager = ComponentsManager()
+        with patch("next.backends.next_framework_settings") as fake_settings:
+            fake_settings.COMPONENT_BACKENDS = [
+                {"BACKEND": "next.components.DummyBackend"}
+            ]
+            manager._reload_config()
+
+        senders = {ev["sender"] for ev in capture_component_backend_loaded}
+        assert senders == {DummyBackend}
+
+    def test_instance_carries_the_loaded_backend(
+        self, capture_component_backend_loaded: list[dict[str, Any]]
+    ) -> None:
+        """``instance`` is the backend the manager kept, under its new name."""
+        manager = ComponentsManager()
+        with patch("next.backends.next_framework_settings") as fake_settings:
+            fake_settings.COMPONENT_BACKENDS = [
+                {"BACKEND": "next.components.DummyBackend"}
+            ]
+            manager._reload_config()
+
+        event = capture_component_backend_loaded[0]
+        assert event["instance"] is manager._backends[0]
+        assert "backend" not in event
+
+    def test_config_is_a_copy_of_the_entry(
+        self, capture_component_backend_loaded: list[dict[str, Any]]
+    ) -> None:
+        """A receiver mutating ``config`` cannot corrupt the settings entry."""
+        entry = {"BACKEND": "next.components.DummyBackend"}
+        manager = ComponentsManager()
+        with patch("next.backends.next_framework_settings") as fake_settings:
+            fake_settings.COMPONENT_BACKENDS = [entry]
+            manager._reload_config()
+
+        captured = capture_component_backend_loaded[0]["config"]
+        assert captured == entry
+        assert captured is not entry
+
+    def test_skipped_entry_sends_nothing(
+        self, capture_component_backend_loaded: list[dict[str, Any]]
+    ) -> None:
+        """An entry that never loads emits no event."""
+        manager = ComponentsManager()
+        with patch("next.backends.next_framework_settings") as fake_settings:
+            fake_settings.COMPONENT_BACKENDS = [
+                {"BACKEND": "next.components.NoSuchBackend"}
+            ]
+            manager._reload_config()
+
+        assert capture_component_backend_loaded == []
+        assert manager._backends == []
 
 
 class TestComponentRenderedSignal:

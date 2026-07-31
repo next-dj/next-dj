@@ -1,6 +1,6 @@
 .. _topics-static-backends:
 
-Static Backends
+Static backends
 ===============
 
 A static backend resolves an asset file to a public URL and renders the link, script, and module tags.
@@ -11,7 +11,7 @@ A custom backend rewrites URLs, adds attributes, or points at a CDN.
    :local:
    :depth: 2
 
-Backend Contract
+Backend contract
 ----------------
 
 A backend subclasses ``next.static.StaticBackend``, an abstract base class.
@@ -20,7 +20,7 @@ The constructor receives the full backend entry from ``STATIC_BACKENDS``, a dict
 The only abstract method is ``register_file``.
 
 .. code-block:: python
-   :caption: register_file contract
+   :caption: next/static/backends.py
 
    def register_file(
        self,
@@ -42,7 +42,7 @@ A custom backend that wants a soft fail for an unresolvable asset should raise `
 Renderer methods are not abstract.
 A backend adds the renderer methods that its registered kinds reference, see :doc:`asset-kinds`.
 
-The Default Backend
+The default backend
 -------------------
 
 ``StaticFilesBackend`` resolves assets through Django staticfiles.
@@ -62,7 +62,7 @@ The backend ships three renderer methods.
 Each method takes the URL and an optional ``request`` keyword.
 The default backend ignores ``request``.
 
-Configuring the Default Backend
+Configuring the default backend
 --------------------------------
 
 ``StaticFilesBackend`` reads three option keys for the rendered tag markup.
@@ -96,7 +96,7 @@ Configuring the Default Backend
 Bake attributes such as ``crossorigin``, ``defer``, or ``integrity`` directly into the format string.
 This covers most customisation without a subclass.
 
-Dedup and JS Context Options
+Dedup and JS context options
 ----------------------------
 
 The first entry of ``STATIC_BACKENDS`` owns the pipeline-level options.
@@ -129,7 +129,7 @@ The same keys on a second or third backend are ignored, so place the configured 
        ]
    }
 
-Writing a Custom Backend
+Writing a custom backend
 ------------------------
 
 Subclass ``StaticFilesBackend`` to keep the staticfiles resolution and change only the rendered markup.
@@ -141,7 +141,7 @@ For a complete Subresource Integrity implementation that also computes the ``int
 
 Subclass the abstract ``StaticBackend`` directly only when the project resolves assets from a source other than Django staticfiles, such as a build manifest.
 
-Registering a Backend
+Registering a backend
 ---------------------
 
 List the dotted path of the backend in ``STATIC_BACKENDS``.
@@ -158,9 +158,13 @@ List the dotted path of the backend in ``STATIC_BACKENDS``.
        ]
    }
 
-The ``StaticsFactory`` builds the backend instance from the config dict and emits the ``backend_loaded`` signal.
+The manager builds the backend instance from the config dict through ``load_backends`` and emits the ``backend_loaded`` signal.
+An entry that names a class outside the ``StaticBackend`` family, or a path that cannot be imported, is logged and skipped, and the remaining entries still load.
+A backend that raises ``ImproperlyConfigured`` from its own ``__init__`` is skipped the same way.
+Any other exception a constructor raises is a bug in that backend and reaches the caller.
+When no entry survives, the manager seeds the built-in staticfiles backend so rendering always has one, and that seed announces itself through the same signal.
 
-Request Aware Output
+Request aware output
 --------------------
 
 Every renderer method accepts a ``request`` keyword.
@@ -182,10 +186,10 @@ See the `multi-tenant example <https://github.com/next-dj/next-dj/tree/main/exam
 Signals
 -------
 
-The ``backend_loaded`` signal fires once per backend when the factory builds it.
+The ``backend_loaded`` signal fires once per configured backend when the manager builds it.
 The payload carries ``sender`` as the backend class, ``config`` as the config dict, and ``instance`` as the backend instance.
 
-System Checks
+System checks
 -------------
 
 The static checks validate the backend configuration at startup.
@@ -195,10 +199,10 @@ The full list of static check codes lives in :doc:`/content/ref/system-checks`.
 The ``next.W031`` check validates the ``css_tag`` and ``js_tag`` templates.
 The ``module_tag`` template is not checked, so verify it contains ``{url}`` yourself.
 
-Common Patterns
+Common patterns
 ---------------
 
-Cache Busting
+Cache busting
 ~~~~~~~~~~~~~
 
 Use the default backend with ``ManifestStaticFilesStorage``.
@@ -209,12 +213,12 @@ Subresource Integrity
 
 Subclass ``StaticFilesBackend`` and override ``render_link_tag`` and ``render_script_tag`` to add an ``integrity`` attribute.
 
-Per-Tenant CDN
+Per-tenant CDN
 ~~~~~~~~~~~~~~
 
 Use a request aware backend that reads the tenant from the request and chooses a CDN host.
 
-See Also
+See also
 --------
 
 .. seealso::

@@ -1,17 +1,19 @@
 .. _topics-partial-rendering-scenarios:
 
-Partial Rendering by Scenario
+Partial rendering by scenario
 =============================
 
 This page is a tutorial, not a reference.
 Each scenario starts from a task, shows the markup and the handler that satisfy it, and ends with the wire traffic so the behaviour is observable.
 Every scenario degrades to a full page cycle without the runtime.
+The wire always carries the ``assets`` and ``form`` keys, serialised as ``[]`` and ``null`` when empty.
+The JSON examples on this page omit them when they are empty.
 
 .. contents::
    :local:
    :depth: 1
 
-Three Neighbouring Forms
+Three neighbouring forms
 ------------------------
 
 A board settings page carries three independent forms, one to rename the board, one to add a column, one to archive the board.
@@ -73,7 +75,7 @@ The response is a 200 carrying the existing invalid-form headers and a patch env
 
 Without the runtime the same submission returns the full page with errors, the current behaviour byte for byte.
 
-Inline Validation on Blur
+Inline validation on blur
 -------------------------
 
 A wizard step carries an email field.
@@ -132,7 +134,7 @@ A uniqueness validator never becomes an enumeration oracle for an unauthorised r
 
 Without the runtime nothing happens on blur and validation runs on submit, the current behaviour.
 
-An Auto-Submitting Filter
+An auto-submitting filter
 -------------------------
 
 A product catalogue is filtered by a panel form over search, brands, price, and sort.
@@ -200,7 +202,7 @@ Each ``data-next-key`` on a row keeps the morph stable as the list changes.
 
 Without the runtime nothing happens until the Apply button submits a plain GET that reloads the page.
 
-Pagination and Infinite Scroll
+Pagination and infinite scroll
 ------------------------------
 
 The same catalogue appends its next page of results to the list when the user scrolls to the end, with no reload and no duplicate rows.
@@ -272,7 +274,7 @@ Dropping the ``data-next-lazy="revealed"`` attribute leaves the same link click-
 
 Without the runtime the sentinel is a plain link and the click navigates to ``?page=2`` through the existing pagination component.
 
-A Live Stream
+A live stream
 -------------
 
 A poll page shows live results to every open tab.
@@ -281,7 +283,7 @@ The same patch envelope rides Server-Sent Events, the fan-out carries no foreign
 The stream page is a neighbour of the vote page and uses the page render escape hatch.
 
 .. code-block:: python
-   :caption: polls/[int:id]/stream/page.py
+   :caption: polls/screens/polls/[int:id]/stream/page.py
 
    from collections.abc import Iterator
 
@@ -353,7 +355,7 @@ See :doc:`sse` for the WSGI and ASGI contract behind the stream.
 
 Without the runtime the page is current at load time and a refresh is a manual reload.
 
-A Modal Wizard That Refreshes a List
+A modal wizard that refreshes a list
 ------------------------------------
 
 A home page carries a Start a new request button and a list of recent requests.
@@ -436,15 +438,18 @@ The default ``done`` closes the layer with a result and asks the opening link to
 .. code-block:: python
    :caption: request/[step]/page.py
 
-   def done(self, request: HttpRequest, cleaned_data: dict[str, Any]) -> HttpResponse:
-       """Create the access request and close the layer with a result."""
-       access_request = AccessRequest.objects.create(**cleaned_data)
-       return (
-           Patches(request)
-           .layer_close(result={"id": access_request.pk})
-           .toast("Request created", variant="success")
-           .response(fallback=f"/request/{access_request.pk}/audit/")
-       )
+   class AccessRequestWizard(FormWizard):
+       def done(
+           self, request: HttpRequest, cleaned_data: dict[str, Any]
+       ) -> HttpResponse:
+           """Create the access request and close the layer with a result."""
+           access_request = AccessRequest.objects.create(**cleaned_data)
+           return (
+               Patches(request)
+               .layer_close(result={"id": access_request.pk})
+               .toast("Request created", variant="success")
+               .response(fallback=f"/request/{access_request.pk}/audit/")
+           )
 
 The last step answers with a close and a toast.
 
@@ -472,7 +477,7 @@ The runtime closes the layer, fires accept, and by ``data-next-accepted="request
 The wizard never knows about the list, the list never knows about the wizard, and the opening link binds them.
 Without the runtime the button navigates to the full step page, steps advance with a 302 between step pages, and the last step redirects to the ``fallback`` audit page.
 
-Lazy Zones
+Lazy zones
 ----------
 
 A heavy audit table does not need to render on the first page paint.
@@ -500,6 +505,10 @@ Guard the expensive data with ``zone_requested`` so the query runs only when the
 .. code-block:: python
    :caption: admin/audit/page.py
 
+   from audit.models import AuditEntry
+   from django.http import HttpRequest
+
+   from next import context
    from next.partial import zone_requested
 
 
@@ -541,7 +550,7 @@ CSS loads before the morph, JS after, so the table cannot arrive without behavio
 
 Critical content must not be marked lazy, because the placeholder is all a no-JavaScript client ever sees.
 
-See Also
+See also
 --------
 
 .. seealso::

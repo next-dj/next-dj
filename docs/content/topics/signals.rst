@@ -11,7 +11,7 @@ This page lists every signal, its payload, and the typical patterns for receiver
    :local:
    :depth: 2
 
-Import Surface
+Import surface
 --------------
 
 Every signal lives in the subpackage that emits it.
@@ -33,10 +33,8 @@ Use the aggregator when a single module subscribes to events from several subsys
 Catalog
 -------
 
-Every signal the framework emits is listed below with the subsystem that
-emits it and the moment it fires. :doc:`/content/ref/signals` holds the
-canonical payload table, the ``sender`` value and the keyword arguments for
-each signal.
+Every signal the framework emits is listed below with the subsystem that emits it and the moment it fires.
+:doc:`/content/ref/signals` holds the canonical payload table, the ``sender`` value and the keyword arguments for each signal.
 
 .. list-table::
    :header-rows: 1
@@ -131,10 +129,9 @@ each signal.
      - After the settings layer drops its caches.
 
 The forms and static signals have dedicated topic pages with worked receiver examples, see :doc:`/content/topics/forms/signals` and :doc:`/content/topics/static-assets/signals`.
-The partial-rendering stream signals appear in context in
-:doc:`/content/topics/partial-rendering/sse`.
+The partial-rendering stream signals appear in context in :doc:`/content/topics/partial-rendering/sse`.
 
-Receiver Patterns
+Receiver patterns
 -----------------
 
 Connect once at startup.
@@ -168,7 +165,7 @@ Use ``django.dispatch.receiver`` to connect a callable to a signal.
    def log_dispatch(sender, **kwargs) -> None:
        logger.info("action dispatched: %s", kwargs["action_name"])
 
-Multiple Receivers
+Multiple receivers
 ~~~~~~~~~~~~~~~~~~
 
 Several receivers can connect to the same signal.
@@ -193,7 +190,7 @@ The same ``dispatch_uid`` passed to ``connect`` can be supplied to ``disconnect`
 
 The ``SignalRecorder`` from ``next.testing.signals`` disconnects its receivers on context-manager exit, or when ``stop()`` is called explicitly.
 
-Test Helpers
+Test helpers
 ------------
 
 The ``SignalRecorder`` from ``next.testing.signals`` captures events for assertions.
@@ -217,12 +214,12 @@ Each captured event is a ``SignalEvent`` with ``signal``, ``sender``, and ``kwar
 
 See :doc:`/content/topics/testing` for the full testing surface.
 
-Common Patterns
+Common patterns
 ---------------
 
 :doc:`/content/howto/observe-framework-signals` walks through the audit trail, cache invalidation, hot reload, and observability patterns with production-sized receiver code.
 
-See Also
+See also
 --------
 
 .. seealso::

@@ -1,6 +1,6 @@
 .. _deployment-checklist:
 
-Deployment Checklist
+Deployment checklist
 ====================
 
 Use this checklist before pushing a next.dj project to production.
@@ -9,7 +9,7 @@ Use this checklist before pushing a next.dj project to production.
    :local:
    :depth: 2
 
-Django Settings
+Django settings
 ---------------
 
 - ``DEBUG`` is ``False``.
@@ -27,25 +27,25 @@ Run the standard :doc:`Django deployment check <django:howto/deployment/checklis
 
 Resolve every warning before deploying.
 
-next.dj Settings
+next.dj settings
 ----------------
 
 Tune ``NEXT_FRAMEWORK`` using :doc:`settings` (production-oriented commentary and patterns).
 Canonical semantics for each key live in :doc:`/content/ref/settings`.
 
-Wizard Drafts
+Wizard drafts
 -------------
 
 Review these when the project ships a ``FormWizard``.
 
 - The default ``SessionFormWizardBackend`` shares drafts wherever the session engine does, so confirm the session store is durable and shared across workers.
 - When using ``CacheFormWizardBackend``, point it at a cache shared across workers, not local memory, and set a short ``TIMEOUT`` for drafts, especially when a step collects personal data.
-- Use a signed or encrypted backend for sensitive flows, and re-check invariants in ``done``.
+- Use a signed or encrypted backend for sensitive flows.
 - Validate cross-step invariants in ``done`` so a stale draft value fails with a friendly message, not an integrity error.
 
 See :doc:`/content/topics/forms/wizard-backend` for the backend trade-offs.
 
-Static Files
+Static files
 ------------
 
 - Run ``uv run python manage.py collectstatic`` during the build.
@@ -79,7 +79,7 @@ Monitoring
 - Track ``router_reloaded`` if the project mounts a dynamic router.
 - Forward ``sse_stream_opened``, ``sse_stream_closed``, and ``zone_rendered`` when the project uses partial rendering.
 
-System Checks
+System checks
 -------------
 
 Run the framework system checks as part of CI and as part of the deployment script.
@@ -91,7 +91,7 @@ Run the framework system checks as part of CI and as part of the deployment scri
 
 A clean exit is required for the deployment to proceed.
 
-Smoke Tests
+Smoke tests
 -----------
 
 Hit at least three URLs after the deploy.
@@ -102,7 +102,7 @@ Hit at least three URLs after the deploy.
 
 The smoke tests confirm that the file router is mounted, the database is reachable, and the dispatcher resolves URLs.
 
-See Also
+See also
 --------
 
 .. seealso::

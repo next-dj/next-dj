@@ -1,6 +1,6 @@
 .. _howto-test-actions:
 
-Test a Page With Actions
+Test a page with actions
 ========================
 
 Problem
@@ -62,7 +62,7 @@ Write the test.
 
 ``NextClient`` does not enforce CSRF by default, matching Django's test client, so the POST needs no token.
 
-Test the Failure Path
+Test the failure path
 ~~~~~~~~~~~~~~~~~~~~~
 
 A failing validation re-renders the origin page, so the test names the origin.
@@ -90,7 +90,7 @@ Without a resolvable origin the invalid branch cannot re-render and answers HTTP
        response = NextClient().post_action("create_note", {"title": ""})
        assert response.status_code == 400
 
-Render the Page Without HTTP
+Render the page without HTTP
 ----------------------------
 
 For tests that focus on template output, render the page directly.
@@ -120,7 +120,7 @@ Run the suite.
 Every test passes.
 The dispatch ran through the signal, the model row exists, the failure path stayed on the origin page.
 
-See Also
+See also
 --------
 
 .. seealso::

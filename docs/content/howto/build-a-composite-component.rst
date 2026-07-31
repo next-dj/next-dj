@@ -1,6 +1,6 @@
 .. _howto-composite-component:
 
-Build a Composite Component
+Build a composite component
 ===========================
 
 Problem
@@ -56,7 +56,7 @@ The function reads its own ``subtitle`` prop through dependency injection and re
    }
    .info-card__head { margin-bottom: 0.5rem; }
 
-Use the Component
+Use the component
 ~~~~~~~~~~~~~~~~~
 
 Call the component in block form and fill the slot.
@@ -78,7 +78,7 @@ Verification
 Open the page and confirm the card renders with the slot content.
 View the HTML source and confirm a ``<link>`` to ``info_card/component.css`` appears in ``<head>``.
 
-See Also
+See also
 --------
 
 .. seealso::

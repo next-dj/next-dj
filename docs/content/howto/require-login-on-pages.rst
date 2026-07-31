@@ -1,6 +1,6 @@
 .. _howto-require-login-on-pages:
 
-Require Login on File-Routed Pages
+Require login on file-routed pages
 ==================================
 
 Problem
@@ -19,7 +19,7 @@ A page or component callable that needs the user reads it back through the reque
 Walkthrough
 -----------
 
-Write the Guard Middleware
+Write the guard middleware
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The middleware lets the login page and static assets through, and redirects every other anonymous request to the login URL with a ``next`` parameter.
@@ -62,7 +62,7 @@ See :doc:`/content/topics/url-reversing` for the full reversing surface.
        "notes.middleware.LoginRequiredMiddleware",
    ]
 
-Wire the Login Route
+Wire the login route
 ~~~~~~~~~~~~~~~~~~~~~
 
 Mount Django's :doc:`auth views <django:topics/auth/default>` before the file router include so ``/login/`` resolves before the router claims the path.
@@ -79,7 +79,7 @@ Mount Django's :doc:`auth views <django:topics/auth/default>` before the file ro
        path("", include("next.urls")),
    ]
 
-Read the User in a Page
+Read the user in a page
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 Past the guard every request carries an authenticated user.
@@ -96,7 +96,7 @@ A ``@context`` callable asks for the request by annotation and reads ``request.u
        """Return a greeting for the signed-in user."""
        return f"Signed in as {request.user.get_username()}"
 
-Guard One Page Without Middleware
+Guard one page without middleware
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 When only a few pages need protection, skip the middleware and raise :exc:`~django.core.exceptions.PermissionDenied` from the page itself.
@@ -119,7 +119,7 @@ A branded 403 page needs a ``403.html`` template or a ``handler403`` in the root
            raise PermissionDenied
        return list(request.user.note_set.all())
 
-Guard Form Actions
+Guard form actions
 ~~~~~~~~~~~~~~~~~~
 
 Form actions dispatch at ``/_next/form/<uid>/``, outside the page URL space.
@@ -160,7 +160,7 @@ Start the server and request a protected page while signed out.
 Visiting ``/notes/`` while anonymous redirects to ``/login/?next=/notes/``.
 After signing in the same path renders the page and the greeting names the user.
 
-See Also
+See also
 --------
 
 .. seealso::

@@ -16,19 +16,19 @@ wrapper when `NEXT_FRAMEWORK` changes.
 from __future__ import annotations
 
 import contextlib
-import logging
 from typing import TYPE_CHECKING, Any, cast
 
 from django.conf import settings
 from django.contrib.staticfiles.storage import staticfiles_storage
 from django.utils.functional import LazyObject, empty
 
+from next.backends import backend_entries, load_backends
 from next.conf import import_class_cached, next_framework_settings
 from next.conf.signals import settings_reloaded
 from next.pages.watch import get_pages_directories_for_watch
 
 from .assets import default_kinds
-from .backends import StaticBackend, StaticFilesBackend, StaticsFactory
+from .backends import StaticBackend
 from .collector import HEAD_CLOSE, StaticCollector, default_placeholders
 from .discovery import AssetDiscovery, PathResolver
 from .scripts import (
@@ -40,7 +40,7 @@ from .scripts import (
     ScriptInjectionPolicy,
     csrf_payload_for,
 )
-from .signals import collector_finalized, html_injected
+from .signals import backend_loaded, collector_finalized, html_injected
 
 
 if TYPE_CHECKING:
@@ -56,10 +56,9 @@ if TYPE_CHECKING:
     from .scripts import NextScriptBuilder as NextScriptBuilderType
 
 
-logger = logging.getLogger(__name__)
-
-
 _RUNTIME_SLOT_NAME = "scripts"
+
+_DEFAULT_BACKEND_PATH = "next.static.StaticFilesBackend"
 
 
 class StaticManager:
@@ -74,6 +73,9 @@ class StaticManager:
     def __init__(self) -> None:
         """Initialise empty backend and discovery caches, loaded lazily."""
         self._backends: list[StaticBackend] = []
+        # The reload always seeds at least one backend, so the flag only
+        # gates the lazy first load and the settings-reload invalidation.
+        self._loaded: bool = False
         self._discovery: AssetDiscovery | None = None
         self._cached_page_roots: tuple[Path, ...] | None = None
         self._script_builder: NextScriptBuilderType | None = None
@@ -254,41 +256,38 @@ class StaticManager:
         return cast("str", renderer(asset.url, request=request))
 
     def _ensure_backends(self) -> None:
-        if not self._backends:
+        if not self._loaded:
             self._reload_config()
 
     def _reload_config(self) -> None:
         """Rebuild the backend list from merged framework settings.
 
-        Only `ImportError`, `TypeError`, and `ValueError` from a single
-        backend entry are swallowed. Other exceptions propagate so bugs
-        in user backends surface loudly.
+        An entry that fails to load costs only itself, the remaining
+        entries still build. A list that ends up empty is seeded with the
+        staticfiles backend so rendering always has one.
         """
-        self._backends.clear()
         self._discovery = None
         self._cached_page_roots = None
         self._script_builder = None
         self._dedup_factory = None
         self._js_policy_factory = None
-        configs = next_framework_settings.STATIC_BACKENDS
-        if not isinstance(configs, list):  # pragma: no cover
-            configs = []
-        for config in configs:
-            if not isinstance(config, dict):  # pragma: no cover
-                continue
-            try:
-                backend = StaticsFactory.create_backend(config)
-            except (ImportError, TypeError, ValueError):
-                logger.exception("Error creating static backend from config %s", config)
-                continue
-            self._backends.append(backend)
-        if not self._backends:
-            self._backends.append(StaticFilesBackend())
+        self._backends = load_backends(
+            backend_entries("STATIC_BACKENDS"),
+            base=StaticBackend,
+            default=_DEFAULT_BACKEND_PATH,
+            signal=backend_loaded,
+        ) or load_backends(
+            [{}],
+            base=StaticBackend,
+            default=_DEFAULT_BACKEND_PATH,
+            signal=backend_loaded,
+        )
+        self._loaded = True
         self._resolve_collector_strategies()
 
     def _resolve_collector_strategies(self) -> None:
         """Read dedup and js-context policy dotted paths from the first backend."""
-        options = dict(self.default_backend.config.get("OPTIONS") or {})
+        options = dict(self._backends[0].config.get("OPTIONS") or {})
         dedup_path = options.get("DEDUP_STRATEGY")
         policy_path = options.get("JS_CONTEXT_POLICY")
         self._dedup_factory = (

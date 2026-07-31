@@ -1,6 +1,6 @@
 .. _howto-internationalize-routes:
 
-Internationalize Routes
+Internationalize routes
 =======================
 
 Problem
@@ -18,7 +18,7 @@ Add :class:`~django.middleware.locale.LocaleMiddleware` so the prefix sets the a
 Walkthrough
 -----------
 
-Enable i18n in Settings
+Enable i18n in settings
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 Turn on :doc:`translation <django:topics/i18n/translation>`, list the offered languages, and point at a locale directory.
@@ -37,7 +37,7 @@ Turn on :doc:`translation <django:topics/i18n/translation>`, list the offered la
 
    LOCALE_PATHS = [BASE_DIR / "locale"]
 
-Add the Locale Middleware
+Add the locale middleware
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Place :class:`~django.middleware.locale.LocaleMiddleware` after the session middleware and before :class:`~django.middleware.common.CommonMiddleware`.
@@ -57,7 +57,7 @@ It reads the URL prefix and sets the active language for the request.
        "django.middleware.clickjacking.XFrameOptionsMiddleware",
    ]
 
-Mount the Router Under a Language Prefix
+Mount the router under a language prefix
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Wrap the file router include in :func:`~django.conf.urls.i18n.i18n_patterns`.
@@ -75,7 +75,7 @@ Every routed URL now resolves under ``/en/`` and ``/de/``, and the prefix-free U
 
 Keep URLs that must not carry a prefix, such as a health check, in a plain ``urlpatterns`` list outside the ``i18n_patterns`` call.
 
-Translate In-Page Text
+Translate in-page text
 ~~~~~~~~~~~~~~~~~~~~~~
 
 Mark template strings with the standard Django i18n tags.
@@ -104,7 +104,7 @@ A ``@context`` callable returns the already-translated string.
        """Return the localized page heading."""
        return _("Featured products")
 
-Compile the Catalogs
+Compile the catalogs
 ~~~~~~~~~~~~~~~~~~~~
 
 Extract the marked strings and compile the binary catalogs.
@@ -134,7 +134,7 @@ Once the router include is wrapped in ``i18n_patterns``, ``page_reverse`` return
 URL names are unchanged.
 ``page_reverse`` reverses the same ``next:page_<segments>`` name, and ``i18n_patterns`` applies the active prefix at resolve time.
 
-See Also
+See also
 --------
 
 .. seealso::

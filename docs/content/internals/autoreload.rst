@@ -30,7 +30,7 @@ Pipeline
        Diff -- changed --> Notify[notify_file_changed]
        Notify --> ProcessRestart
 
-Startup Integration
+Startup integration
 -------------------
 
 The pipeline is wired by ``next.apps.autoreload.install()``, which ``NextFrameworkConfig.ready`` calls at application startup.
@@ -55,7 +55,9 @@ Installer
 
 ``next.apps.autoreload``.
    ``install()`` swaps ``StatReloader`` and connects the watch signal.
-   ``uninstall()`` restores the previous reloader. Test suites that call ``AppConfig.ready`` multiple times use it to avoid double-patching.
+   ``uninstall()`` restores the previous reloader.
+   Test suites that patched the reloader through ``AppConfig.ready`` call it to put the original class back.
+   Repeated ``ready`` calls need no such cleanup because ``install()`` itself is idempotent.
 
 Runtime
 ~~~~~~~
@@ -71,9 +73,9 @@ Runtime
    ``get_framework_filesystem_roots_for_linking`` returns the canonical page and component directory roots for build tooling.
 
 ``next.server.signals``.
-   ``watch_specs_ready`` fires once after ``iter_all_autoreload_watch_specs`` finishes building the spec list.
+   ``watch_specs_ready`` fires on every call to ``iter_all_autoreload_watch_specs`` after the spec list is built.
 
-Watch Specs
+Watch specs
 -----------
 
 A watch spec is a tuple of a root path and one glob pattern.
@@ -90,7 +92,7 @@ Only Python entrypoints are watched.
 ``iter_all_autoreload_watch_specs`` appends the specs registered through ``register_autoreload_watch_spec``.
 It deduplicates the combined list by resolved path and glob, then emits ``watch_specs_ready`` with the final list.
 
-Reload Decisions
+Reload decisions
 ----------------
 
 Two kinds of changes trigger a reload.
@@ -113,13 +115,12 @@ A saved edit shows up on the next request without a process restart.
 Signals
 -------
 
-The autoreload pipeline fires ``watch_specs_ready`` after the watch-spec aggregation completes.
+The autoreload pipeline fires ``watch_specs_ready`` on every call to ``iter_all_autoreload_watch_specs`` after the watch-spec aggregation completes.
 The sender is the ``iter_all_autoreload_watch_specs`` function itself, so a receiver connected with ``sender=iter_all_autoreload_watch_specs`` fires only for that aggregation.
 
 Receivers subscribe to ``watch_specs_ready`` to log or assert on the resolved spec set.
-Registration goes through ``register_autoreload_watch_spec``.
 
-Extension Points
+Extension points
 ----------------
 
 - Register extra ``(path, glob)`` pairs from ``AppConfig.ready`` through ``register_autoreload_watch_spec``.
@@ -129,27 +130,10 @@ Extension Points
 Registering extra watch directories
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Packages that generate templates or routes outside the usual page trees can register additional ``(path, glob)`` pairs without forking the framework.
+Packages that generate templates or routes outside the usual page trees register additional ``(path, glob)`` pairs by calling ``register_autoreload_watch_spec`` inside ``AppConfig.ready``, as the worked example in :ref:`topics-extending` shows.
+Registered pairs merge into the list returned by ``iter_all_autoreload_watch_specs`` and receive the same deduplication pass as built-in specs.
 
-Call ``register_autoreload_watch_spec`` from ``next.server`` inside ``AppConfig.ready``.
-
-.. code-block:: python
-   :caption: myapp/apps.py
-
-   from pathlib import Path
-   from django.apps import AppConfig
-   from next.server import register_autoreload_watch_spec
-
-   class MyAppConfig(AppConfig):
-       name = "myapp"
-
-       def ready(self) -> None:
-           register_autoreload_watch_spec(Path("/var/cache/myapp/templates"), "**/*.djx")
-
-Pairs merge into the list returned by ``iter_all_autoreload_watch_specs`` and receive the same deduplication pass as built-in specs.
-Subscribe to ``watch_specs_ready`` if you need to assert on the effective list during development.
-
-See Also
+See also
 --------
 
 .. seealso::

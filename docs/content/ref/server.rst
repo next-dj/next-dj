@@ -1,9 +1,9 @@
 .. _ref-server:
 
-Server Reference
+Server reference
 ================
 
-Module Summary
+Module summary
 --------------
 
 ``next.server`` exposes the autoreload watcher, the watch-spec helpers, and the filesystem roots used by the development server.
@@ -61,7 +61,7 @@ The single payload argument is ``specs``, the deduplicated ``(path, glob)`` list
 
 See :doc:`signals` for the signal index.
 
-See Also
+See also
 --------
 
 .. seealso::

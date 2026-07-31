@@ -1,6 +1,6 @@
 .. _internals-page-discovery:
 
-Page Discovery
+Page discovery
 ==============
 
 This page covers how the framework discovers pages from the filesystem, registers them, evaluates context, and composes the final body with the ancestor layout chain.
@@ -59,20 +59,20 @@ Modules
 ``next.pages.watch``.
    Returns the watch specs that the autoreloader uses to track page directories.
 
-Render Path
+Render path
 -----------
 
 1. The view loads the page module through the mtime-keyed module memo, reading from disk only when the file changed.
 2. The body source produces the page body string.
 3. The framework composes the ancestor layout chain, the innermost layout wrapping the page body first and each outer layout wrapping the result.
    Each layout substitutes the wrapped content into ``{% block template %}{% endblock template %}``.
-4. ``Page.build_render_context`` assembles the template scope, see `Context Resolution`_ below.
+4. ``Page.build_render_context`` assembles the template scope, see `Context resolution`_ below.
 5. The composed template string renders against the assembled scope.
 6. The static manager replaces the ``{% collect_styles %}`` and ``{% collect_scripts %}`` placeholder tokens with the rendered tags accumulated by the request-scoped ``StaticCollector``.
 
 When the body source is a ``render`` function that returns an ``HttpResponseBase``, the response is returned verbatim and steps 3 through 6 do not run.
 
-Composed-Template Cache
+Composed-template cache
 -----------------------
 
 ``Page`` keeps two parallel dicts that short-circuit layout composition for the callers of ``composed_template_for``.
@@ -88,7 +88,7 @@ The canonical full-page path never consults the cache and recomposes the body an
 On each cache read ``_is_template_stale`` compares the current mtimes against the snapshot.
 A change to any contributing file evicts the entry, the composition step rebuilds the template string, and the new snapshot is stored.
 
-Layout Composition
+Layout composition
 ------------------
 
 The framework reads each ancestor ``layout.djx`` from disk and replaces its ``{% block template %}{% endblock template %}`` region with the wrapped content.
@@ -97,13 +97,13 @@ Composition is string substitution, not Django template inheritance, so no page 
 
 The user-facing rules for layout discovery, the placeholder contract, and layout-level context live in :doc:`/content/topics/layouts`.
 
-Body Source Priority
+Body source priority
 --------------------
 
 ``Page._resolve_page_body`` and ``_load_static_body`` in ``next.pages.manager`` pick the highest priority body source.
 See :doc:`/content/topics/pages` for the full priority order and the ``next.W043`` conflict warning.
 
-Context Resolution
+Context resolution
 ------------------
 
 ``Page.build_render_context`` assembles the template scope in this order.
@@ -129,14 +129,14 @@ A cache that spans the page and its components exists only on the form-dispatch 
 The canonical description is in :doc:`/content/topics/context`.
 This page focuses on which module performs each step.
 
-Extension Points
+Extension points
 ----------------
 
 - Register a new template loader in ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]``.
 - Subclass ``Page`` to add metadata for rendering tools.
 - Add a context processor for global template variables.
 
-See Also
+See also
 --------
 
 .. seealso::

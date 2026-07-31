@@ -1,6 +1,6 @@
 .. _topics-static-js-context:
 
-JavaScript Context
+JavaScript context
 ==================
 
 next.dj ships a ``Next`` object to the browser that holds context values marked for serialisation.
@@ -10,13 +10,13 @@ This page covers how to opt a context value in, how to choose a serializer, and 
    :local:
    :depth: 2
 
-The Next Object
+The next object
 ---------------
 
 The static manager injects a runtime script that defines ``window.Next`` before the collected scripts run.
 Context values opted into serialisation land under ``window.Next.context``.
 
-Opting In
+Opting in
 ---------
 
 Pass ``serialize=True`` on the ``@context`` decorator, or on ``@component.context`` in a component.
@@ -26,7 +26,7 @@ Keys without the flag stay server-side only.
 
 A value the active serializer cannot encode raises ``TypeError`` during rendering, when the collector registers it.
 The error names the offending key.
-See :ref:`Serialization for the Browser <topics-context-serialization>` for the accepted shapes and the common materialisation patterns.
+See :ref:`Serialization for the browser <topics-context-serialization>` for the accepted shapes and the common materialisation patterns.
 
 .. note::
 
@@ -51,7 +51,7 @@ The framework ships two implementations.
    Requires the ``pydantic`` package.
    The class raises ``ImportError`` at construction when ``pydantic`` is not installed.
 
-Project-Wide Serializer
+Project-wide serializer
 -----------------------
 
 Set ``NEXT_FRAMEWORK["JS_CONTEXT_SERIALIZER"]`` to the dotted path of a serializer class.
@@ -66,7 +66,7 @@ Set ``NEXT_FRAMEWORK["JS_CONTEXT_SERIALIZER"]`` to the dotted path of a serializ
 ``resolve_serializer`` reads the setting on every call.
 When the key is absent or set to an empty string the framework uses ``JsonJsContextSerializer``.
 
-System Check
+System check
 ~~~~~~~~~~~~
 
 The ``next.W042`` system check validates ``JS_CONTEXT_SERIALIZER`` at startup.
@@ -80,14 +80,14 @@ It warns under any of five conditions.
 
 The check is skipped when the key is absent or set to an empty string.
 
-Per-Key Serializer
+Per-key serializer
 ------------------
 
 Pass ``serializer=`` on a single ``@context`` decorator to route one key through a custom serializer.
 The override applies only to that key.
 
 .. code-block:: python
-   :caption: per key serializer
+   :caption: notes/pages/page.py
 
    from next import context
    from next.static import PydanticJsContextSerializer
@@ -107,7 +107,7 @@ The ``serializer=`` parameter takes an already-instantiated object.
    Creating an instance at module level raises ``ImportError`` on startup when pydantic is not installed.
    Use the ``JS_CONTEXT_SERIALIZER`` setting for a process-wide override that keeps the import lazy.
 
-Writing a Serializer
+Writing a serializer
 --------------------
 
 A serializer is any class with a ``dumps`` method.
@@ -132,7 +132,7 @@ A serializer is any class with a ``dumps`` method.
 Point ``JS_CONTEXT_SERIALIZER`` at the dotted path of the class.
 The framework instantiates it through ``resolve_serializer``.
 
-Key Conflict Policy
+Key conflict policy
 -------------------
 
 Two context functions can mark the same key for serialisation.
@@ -170,7 +170,7 @@ Configure the policy through the first static backend ``OPTIONS``.
    }
 
 The configured policy fires anywhere the same key reaches the collector twice, including page-to-component, component-to-component, page-to-layout, and any contributor that calls ``StaticCollector.add_js_context`` directly.
-Two ``@context`` decorators on the same page that register the same key always resolve first-wins, regardless of ``JS_CONTEXT_POLICY``.
+Two ``@context`` decorators on the same page that register the same key resolve last-wins, because the second registration replaces the first in the page registry before ``JS_CONTEXT_POLICY`` ever sees the key.
 Pick distinct keys when both registrations live in the same module.
 The framework owns the ``$``-prefixed keys of the init payload, ``$csrf`` and ``$dev``, and claims them once the policy has already run.
 A project key of either name is dropped from the collected context on every automatically injected payload, whichever way the project registered it, together with the pre-encoded fragment and the per-key serializer that key recorded.
@@ -183,7 +183,7 @@ A keyless ``serialize=True`` provider spreads the keys of the dict it returns at
 A partial render honours the same ownership.
 ``Patches.context()`` refuses ``$csrf`` and ``$dev`` with ``ReservedContextKeyError``, and the js-context delta of a zone render drops them before it becomes a ``context`` patch, so no patch updates either key.
 
-Writing a Policy
+Writing a policy
 ----------------
 
 A custom policy implements the ``JsContextPolicy`` protocol from ``next.static.collector``.
@@ -209,7 +209,7 @@ The protocol has one method, ``merge(existing, key, value)``, which returns the 
 
 Point ``JS_CONTEXT_POLICY`` in the first static backend ``OPTIONS`` at the dotted path of the class.
 
-Reading on the Client
+Reading on the client
 ---------------------
 
 Register the key server-side with ``serialize=True``.
@@ -237,7 +237,7 @@ Co-located JS and inline scripts then read the value under ``window.Next.context
 The runtime script defines ``window.Next`` before the collected scripts run.
 The runtime script is always the first tag in the ``scripts`` slot, ahead of every co-located, module-list, and ``{% use_script %}`` asset, so any of those may safely read ``window.Next``.
 
-Client Event API
+Client event API
 ~~~~~~~~~~~~~~~~~
 
 The ``Next`` object exposes an event API alongside ``window.Next.context``.
@@ -281,7 +281,7 @@ A plugin is any function that takes the ``Next`` object, so it can subscribe to 
      value: () => next.context.note_count ?? 0,
    }));
 
-Runtime Script Options
+Runtime script options
 ----------------------
 
 The setting ``NEXT_FRAMEWORK["NEXT_JS_OPTIONS"]`` is a dict that configures the runtime script builder.
@@ -331,7 +331,7 @@ Accepted string values for ``policy`` are ``"auto"``, ``"disabled"``, and ``"man
    Any co-located JavaScript or inline script that reads ``window.Next.context`` will fail at runtime.
    Review every ``component.js`` and inline script before switching away from ``AUTO``.
 
-Runtime Script Templates
+Runtime script templates
 ------------------------
 
 The ``NEXT_JS_OPTIONS`` dict also accepts ``preload_template``, ``script_tag_template``, and ``init_template`` keys.
@@ -354,7 +354,7 @@ The templates are formatted with Python ``str.format``, not Django templates.
 A literal ``{`` or ``}`` inside the template body collides with the formatter and must be doubled to ``{{`` or ``}}`` to survive ``str.format``.
 For per-request values such as CSP nonces, use a custom static backend instead.
 
-See Also
+See also
 --------
 
 .. seealso::

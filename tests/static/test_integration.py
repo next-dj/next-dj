@@ -38,6 +38,7 @@ class _ManagerWithRoots(StaticManager):
 def wired_manager() -> StaticManager:
     manager = StaticManager()
     manager._backends = [StaticFilesBackend()]
+    manager._loaded = True
     return manager
 
 
@@ -66,6 +67,7 @@ class TestFullRenderPipeline:
 
         manager = _ManagerWithRoots((tmp_path.resolve(),))
         manager._backends = [StaticFilesBackend()]
+        manager._loaded = True
         manager.discover_page_assets(page_path, collector)
         out = manager.inject(HTML_SHELL, collector, page_path=page_path)
 

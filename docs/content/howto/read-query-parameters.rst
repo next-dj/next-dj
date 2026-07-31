@@ -1,6 +1,6 @@
 .. _howto-read-query-parameters:
 
-Read Query Parameters
+Read query parameters
 =====================
 
 Problem
@@ -19,7 +19,7 @@ The framework reads :attr:`request.GET <django:django.http.HttpRequest.GET>`, co
 Walkthrough
 -----------
 
-Read a Single Parameter
+Read a single parameter
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 Declare the parameter with a type and a default.
@@ -47,7 +47,7 @@ The default is used when the key is absent from the query string.
 A request to ``/?show=8`` injects ``show=8`` as an ``int``.
 A request to ``/`` injects the default ``3``.
 
-Type Coercion
+Type coercion
 ~~~~~~~~~~~~~
 
 The annotation drives coercion of the raw query string.
@@ -90,7 +90,7 @@ The annotation drives coercion of the raw query string.
 A scalar parameter that is absent from the query string receives the declared default, or ``None`` when no default is given.
 A ``DQuery[list[T]]`` parameter that is absent in all three wire formats returns the declared default, or an empty list when no default is given.
 
-Read Several Typed Parameters
+Read several typed parameters
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 A single callable can mix scalar and list parameters.
@@ -111,9 +111,9 @@ Each annotation drives its own coercion.
    ) -> dict:
        return {"q": q, "page": page, "in_stock": in_stock, "brands": list(brand)}
 
-List elements follow the same three wire formats described above under *Type Coercion*.
+List elements follow the same three wire formats described above under *Type coercion*.
 
-Build a Typed Snapshot With a Provider
+Build a typed snapshot with a provider
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 When several callables need the same filter set, parse it once into a frozen dataclass.
@@ -141,7 +141,7 @@ When several callables need the same filter set, parse it once into a frozen dat
            sort=g.get("sort") or "newest",
        )
 
-Render the Form
+Render the form
 ~~~~~~~~~~~~~~~~
 
 Search is idempotent, so the filter form uses ``method="get"`` and posts back to the same page.
@@ -163,7 +163,7 @@ Reserve ``@action`` for POST side effects such as creating or deleting rows.
      {% component "button" type="submit" text="Apply filters" variant="default" %}
    </form>
 
-Share the Snapshot Across a Layout Chain
+Share the snapshot across a layout chain
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Register a resolved value with ``inherit_context=True`` so nested pages receive the same instance through DI.
@@ -214,7 +214,7 @@ Open the listing page with a faceted query string and confirm the response refle
 Visiting ``/catalog/?q=iphone&brand=Acme&brand=Globex&in_stock=1&page=2`` filters by search term, two brands, and stock, on the second page.
 The bracket form ``?brand[]=Acme&brand[]=Globex`` and the comma form ``?brand=Acme,Globex`` produce the same listing.
 
-See Also
+See also
 --------
 
 .. seealso::

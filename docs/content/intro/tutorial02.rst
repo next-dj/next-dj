@@ -1,6 +1,6 @@
 .. _intro-tutorial02:
 
-Adding Layouts and Context
+Adding layouts and context
 ==========================
 
 Goal
@@ -18,11 +18,11 @@ The index page at ``/`` lists two seeded notes from the database.
 Walkthrough
 -----------
 
-Add a Root Layout
+Add a root layout
 ~~~~~~~~~~~~~~~~~
 
 A ``layout.djx`` placed in any directory wraps every page below it.
-For the Notes application the most common layout sits next to the page tree at ``notes/pages/layout.djx``.
+For the Notes application the most common layout sits at the root of the page tree, ``notes/pages/layout.djx``.
 
 .. code-block:: jinja
    :caption: notes/pages/layout.djx
@@ -66,7 +66,7 @@ Remove the now redundant HTML envelope from ``notes/pages/template.djx`` and kee
 
 Refresh ``http://127.0.0.1:8000/`` to confirm that the layout renders the title and the list now uses anchor tags.
 
-Share Site Context
+Share site context
 ~~~~~~~~~~~~~~~~~~
 
 The layout references ``site_name`` and ``tagline``, but no page module produces them yet.
@@ -91,7 +91,7 @@ Pass ``inherit_context=True`` so every descendant page can read the value too.
 Passing ``inherit_context=True`` publishes the value to every descendant page as well.
 Without that flag the layout would still render but pages further down the tree would not see them.
 
-Add the Detail Page
+Add the detail page
 ~~~~~~~~~~~~~~~~~~~
 
 Create a new directory ``notes/pages/notes/[id]/``.
@@ -135,7 +135,7 @@ Add the matching template.
 Click a note from the index and confirm that the detail page renders the captured note.
 The URL name ``next:page_notes_id`` reverses with a single keyword argument ``id`` and is generated from the directory shape.
 
-Trace the Layout Stack
+Trace the layout stack
 ~~~~~~~~~~~~~~~~~~~~~~
 
 The detail page renders inside the same root layout because every ancestor ``layout.djx`` wraps every descendant page.
@@ -155,7 +155,7 @@ Reload ``/notes/1/`` and you should see both layouts at once.
 The root layout wraps the inner layout which wraps the detail template.
 Composition works by folding each descendant body into the parent ``{% block template %}`` placeholder, so adding ancestor layouts never requires changes to the inner templates.
 
-Use Counts Across Pages
+Use counts across pages
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 Add a small bit of inherited context that the layout reads on every page.
@@ -169,6 +169,7 @@ Append the ``note_count`` function to the existing ``notes/pages/page.py`` and a
        return Note.objects.count()
 
 Reference the count in the layout.
+Update the ``<header>`` block inside ``notes/pages/layout.djx``, leaving the rest of the file unchanged.
 
 .. code-block:: jinja
    :caption: notes/pages/layout.djx
@@ -202,7 +203,7 @@ The index links to each note.
 The detail page renders a single note pulled from the URL.
 Inherited context flows from the root ``page.py`` down to every page.
 
-Common Pitfalls
+Common pitfalls
 ---------------
 
 A layout's markup does not appear on the page.
@@ -220,7 +221,7 @@ Inherited context not available in a descendant.
 
 See :doc:`/content/faq/troubleshooting` for the full catalog of errors and fixes.
 
-Next Steps
+Next steps
 ----------
 
 Pages are still inline HTML.

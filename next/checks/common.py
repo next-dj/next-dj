@@ -11,6 +11,7 @@ from django.apps import apps
 from django.conf import settings
 from django.core.checks import CheckMessage, Error
 
+from next.conf.imports import import_class_cached
 from next.conf.signals import settings_reloaded
 
 
@@ -47,6 +48,19 @@ def registration_file_errors(
     errors = _cross_file_errors(subject, records)
     errors.extend(_dead_file_errors(subject, registrations, _names_by_file(records)))
     return errors
+
+
+def import_backend_class(dotted_path: str) -> type[Any]:
+    """Import a dotted backend path, folding any import-time failure into ImportError.
+
+    A backend module runs arbitrary code at import, and a check that lets it
+    raise takes the whole run down instead of reporting one error.
+    """
+    try:
+        return import_class_cached(dotted_path)
+    except Exception as exc:
+        msg = f"{dotted_path} raised {type(exc).__name__}: {exc}"
+        raise ImportError(msg) from exc
 
 
 def _names_by_file(records: list[tuple[Path, Path, str]]) -> dict[Path, set[str]]:
@@ -264,6 +278,7 @@ __all__ = [
     "get_first_root_pages_path",
     "get_pages_directory",
     "get_router_manager",
+    "import_backend_class",
     "iter_scanned_page_pairs",
     "reset_components_manager_cache",
     "reset_router_manager_cache",

@@ -1,6 +1,6 @@
 .. _misc:
 
-Meta and Miscellany
+Meta and miscellany
 ===================
 
 This section collects material that supports the rest of the documentation without belonging to a single subsystem.

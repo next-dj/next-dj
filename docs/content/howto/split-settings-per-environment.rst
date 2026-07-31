@@ -1,6 +1,6 @@
 .. _howto-split-settings-per-environment:
 
-Split Settings per Environment
+Split settings per environment
 ==============================
 
 Problem
@@ -19,7 +19,7 @@ The ``DJANGO_SETTINGS_MODULE`` environment variable selects one per process.
 Walkthrough
 -----------
 
-Create the Settings Package
+Create the settings package
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Delete ``config/settings.py`` and create a ``config/settings/`` directory with an empty ``__init__.py``.
@@ -37,7 +37,7 @@ Place ``base.py``, ``dev.py``, and ``prod.py`` beside it.
      urls.py
      wsgi.py
 
-Define the Shared Base
+Define the shared base
 ~~~~~~~~~~~~~~~~~~~~~~
 
 ``base.py`` holds every value common to all environments.
@@ -72,7 +72,7 @@ Define ``NEXT_FRAMEWORK`` here in full so the framework configuration has one so
        ],
    }
 
-Override for Development
+Override for development
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``dev.py`` imports everything from ``base`` with a star import, then overrides the values that differ.
@@ -98,7 +98,7 @@ Development keeps the framework defaults, so ``dev.py`` leaves ``NEXT_FRAMEWORK`
 The default ``STRICT_CONTEXT`` value ``False`` keeps local rendering alive when a context processor fails.
 The copy-and-patch pattern for a per-environment key is shown in the production module below.
 
-Override for Production
+Override for production
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 ``prod.py`` follows the same shape.
@@ -125,7 +125,7 @@ A flat key such as ``STRICT_CONTEXT`` is copied and reassigned as shown here.
 For nested backend lists use ``extend_default_backend`` or ``copy.deepcopy``.
 See :doc:`extend-a-default-backend` for the backend-list case.
 
-Select a Module per Process
+Select a module per process
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``manage.py`` and ``wsgi.py`` read ``DJANGO_SETTINGS_MODULE`` from the environment.
@@ -161,7 +161,7 @@ Both runs report no errors.
 The development run has ``DEBUG`` on and the production run has it off.
 The production run carries the ``STRICT_CONTEXT`` override, the development run keeps the default.
 
-See Also
+See also
 --------
 
 .. seealso::

@@ -1,27 +1,24 @@
 .. _ref-signals:
 
-Signals Reference
+Signals reference
 =================
 
-Module Summary
+Module summary
 --------------
 
 ``next.signals`` is an aggregator that re-exports every framework signal.
 Importing a signal from ``next.signals`` is equivalent to importing it from its subpackage.
 
-Signal Catalog
+Signal catalog
 --------------
 
-Every signal below is a Django ``Signal``. The ``sender`` column lists the value
-passed to ``Signal.send``. Receivers connected with a matching ``sender`` only
-fire for that sender.
+Every signal below is a Django ``Signal``.
+The ``sender`` column lists the value passed to ``Signal.send``.
+Receivers connected with a matching ``sender`` only fire for that sender.
 
-The dispatch-time form signals (``action_dispatched``, ``form_validation_failed``,
-``wizard_step_submitted``, ``wizard_completed``, ``form_access_denied``) share two keyword arguments.
-``uid`` is the registry identity of the action, the value the dispatch URL and the
-``data-next-action`` markup attribute carry, or ``None`` when a custom backend stores
-no uid in its meta. ``request`` is the live ``HttpRequest`` being dispatched and must
-not be retained past the receiver call.
+The dispatch-time form signals (``action_dispatched``, ``form_validation_failed``, ``wizard_step_submitted``, ``wizard_completed``, ``form_access_denied``) share two keyword arguments.
+``uid`` is the registry identity of the action, the value the dispatch URL and the ``data-next-action`` markup attribute carry, or ``None`` when a custom backend stores no uid in its meta.
+``request`` is the live ``HttpRequest`` being dispatched and must not be retained past the receiver call.
 
 .. list-table::
    :header-rows: 1
@@ -60,8 +57,8 @@ not be retained past the receiver call.
        A standalone zone render does not fire this signal.
        ``request`` may be ``None`` outside a request.
    * - ``component_backend_loaded``
-     - ``ComponentsManager``
-     - ``backend``, ``config``
+     - The component backend class
+     - ``config``, ``instance``
      - After a component backend is created from its configuration entry.
    * - ``component_registered``
      - ``ComponentRegistry``
@@ -158,7 +155,7 @@ not be retained past the receiver call.
      - ``zone_name``, ``page_path``, ``request``, ``duration_ms``
      - After a zone body renders for a partial request. ``duration_ms`` times the zone render.
 
-Subpackage Signals
+Subpackage signals
 ------------------
 
 The aggregator ``next.signals`` forwards from the modules below.
@@ -193,7 +190,7 @@ Static
 .. automodule:: next.static.signals
    :members:
 
-Partial Rendering
+Partial rendering
 ~~~~~~~~~~~~~~~~~
 
 .. automodule:: next.partial.signals
@@ -217,7 +214,7 @@ Configuration
 .. automodule:: next.conf.signals
    :members:
 
-See Also
+See also
 --------
 
 .. seealso::

@@ -1,18 +1,16 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
-from django.test import override_settings
 
-from next.static import StaticBackend, StaticFilesBackend, StaticsFactory
+import next.static
+from next.static import StaticBackend, StaticFilesBackend
 from next.static.backends import StaticBackend as _StaticBackendDirect
-from next.static.signals import backend_loaded
 
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
     from pathlib import Path
 
     from django.http import HttpRequest
@@ -178,86 +176,11 @@ class TestStaticFilesBackendRegisterFile:
             backend.register_file(tmp_path / "x.css", "x", "css")
 
 
-class TestStaticsFactoryCreateBackend:
-    """StaticsFactory.create_backend instantiates backends from dict config."""
-
-    def test_uses_default_backend_when_missing(self) -> None:
-        backend = StaticsFactory.create_backend({})
-        assert isinstance(backend, StaticFilesBackend)
-
-    def test_instantiates_named_backend(self) -> None:
-        backend = StaticsFactory.create_backend(
-            {"BACKEND": "next.static.StaticFilesBackend"}
-        )
-        assert isinstance(backend, StaticFilesBackend)
-
-    def test_passes_full_config_to_backend(self) -> None:
-        config: Mapping[str, Any] = {
-            "BACKEND": "next.static.StaticFilesBackend",
-            "OPTIONS": {"css_tag": '<link href="{url}">'},
-        }
-        backend = StaticsFactory.create_backend(config)
-        assert backend.config == config
-        assert backend.render_link_tag("x") == '<link href="x">'
-
-    def test_rejects_non_subclass(self) -> None:
-        with pytest.raises(TypeError, match="not a StaticBackend subclass"):
-            StaticsFactory.create_backend({"BACKEND": "builtins.dict"})
-
-    def test_rejects_missing_import_path(self) -> None:
-        with pytest.raises(ImportError):
-            StaticsFactory.create_backend(
-                {"BACKEND": "next.static.does_not_exist.Backend"}
-            )
-
-    def test_fires_backend_loaded_signal(self) -> None:
-        received: list[dict[str, Any]] = []
-
-        def _listener(sender: object, **kwargs) -> None:
-            received.append({"sender": sender, **kwargs})
-
-        backend_loaded.connect(_listener)
-        try:
-            backend = StaticsFactory.create_backend(
-                {"BACKEND": "next.static.StaticFilesBackend", "OPTIONS": {}}
-            )
-        finally:
-            backend_loaded.disconnect(_listener)
-
-        assert len(received) == 1
-        assert received[0]["sender"] is StaticFilesBackend
-        assert received[0]["instance"] is backend
-        assert received[0]["config"] == {
-            "BACKEND": "next.static.StaticFilesBackend",
-            "OPTIONS": {},
-        }
-
-
 class TestStaticBackendReexport:
     """Public re-export from next.static matches the direct import."""
 
     def test_same_object(self) -> None:
         assert StaticBackend is _StaticBackendDirect
 
-
-class TestStaticsFactoryWithSettingsOverride:
-    """Factory respects NEXT_FRAMEWORK['STATIC_BACKENDS'] at construction."""
-
-    def test_build_from_settings_config(self) -> None:
-        with override_settings(
-            NEXT_FRAMEWORK={
-                "STATIC_BACKENDS": [
-                    {
-                        "BACKEND": "next.static.StaticFilesBackend",
-                        "OPTIONS": {"css_tag": '<link integrity href="{url}">'},
-                    }
-                ]
-            }
-        ):
-            backend = StaticsFactory.create_backend(
-                {
-                    "BACKEND": "next.static.StaticFilesBackend",
-                    "OPTIONS": {"css_tag": '<link integrity href="{url}">'},
-                }
-            )
-        assert backend.render_link_tag("x") == '<link integrity href="x">'
+    def test_factory_is_gone_from_the_public_surface(self) -> None:
+        assert not hasattr(next.static, "StaticsFactory")

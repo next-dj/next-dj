@@ -1,6 +1,6 @@
-.. _security-csrf-forms:
+.. _security-csrf-and-forms:
 
-CSRF and Forms
+CSRF and forms
 ==============
 
 This page covers how CSRF protection works through the next.dj dispatch path and what to do for forms that bypass the standard ``{% form %}`` tag.
@@ -9,7 +9,7 @@ This page covers how CSRF protection works through the next.dj dispatch path and
    :local:
    :depth: 2
 
-Standard Path
+Standard path
 -------------
 
 The ``{% form %}`` tag emits a CSRF token automatically.
@@ -22,7 +22,7 @@ The tag also depends on ``request`` existing in the template context so Django c
 If ``manage.py check`` reports a missing ``request`` context processor, add ``django.template.context_processors.request`` to the ``OPTIONS.context_processors`` list of your Django ``TEMPLATES`` entry.
 An equivalent processor that supplies ``request`` works as well, so layouts receive ``request``.
 
-Origin Validation
+Origin validation
 -----------------
 
 The framework adds a second hidden field named ``_next_form_origin``.
@@ -40,7 +40,7 @@ On the success path the same field feeds ``redirect_to_origin`` without URLconf 
 A missing or off-site value never blocks a successful dispatch, ``redirect_to_origin`` falls back to ``/``.
 Handlers can call ``redirect_to_origin`` from ``next.forms`` to redirect back to the page that rendered the form.
 
-Manual Forms
+Manual forms
 ------------
 
 The ``{% form %}`` tag is the supported way to render a form.
@@ -52,7 +52,7 @@ When a hand crafted form is unavoidable, render the tag once and copy the genera
 A fully manual form sets ``_next_form_origin`` to ``{{ request.path }}``, the same value the tag emits.
 A form rendered by a hand-written view outside the file router additionally needs the ``next_page_path`` attribute on that view before the error re-render works, see :ref:`topics-forms-templates-handwritten-views`.
 
-GET Forms
+GET forms
 ---------
 
 GET forms do not need CSRF protection.
@@ -75,7 +75,7 @@ Use ``DQuery[str]`` in the page context to read the value.
    The two status codes let the action surface be probed without a token.
    This is intended, the 405 reveals only that a uid is registered and no handler runs on a GET, so do not place secrets in action uids.
 
-AJAX Submissions
+AJAX submissions
 ----------------
 
 JavaScript that posts to the dispatch URL must supply the CSRF token, in the ``X-CSRFToken`` header or the ``csrfmiddlewaretoken`` body field, and the ``_next_form_origin`` value in the request body.
@@ -108,7 +108,7 @@ This works because every ``{% form %}`` block emits the ``_next_form_origin`` hi
 To post without a rendered form, use ``window.location.pathname``.
 The origin is the URL path of the current page, so no server-published value is needed.
 
-Wizard Steps
+Wizard steps
 ------------
 
 A wizard step POST is stricter than a plain form POST about the origin field.
@@ -118,7 +118,7 @@ For a wizard step the dispatcher requires a resolvable origin before any validat
 The ``{% form %}`` tag emits the field on every render, so a tag-rendered wizard needs nothing extra.
 A hand-crafted wizard POST or an AJAX wizard submission must include the ``_next_form_origin`` field with the current page path.
 
-Cross Origin Requests
+Cross origin requests
 ---------------------
 
 Add the public origin to ``CSRF_TRUSTED_ORIGINS`` for cross subdomain or cross origin submissions.
@@ -134,7 +134,7 @@ Add the public origin to ``CSRF_TRUSTED_ORIGINS`` for cross subdomain or cross o
 The framework does not relax CSRF policy.
 The trusted origins list comes directly from Django.
 
-Cookie Settings
+Cookie settings
 ---------------
 
 Use these cookie flags in production.
@@ -148,7 +148,7 @@ Use these cookie flags in production.
 
 Keep ``CSRF_COOKIE_HTTPONLY`` false so that AJAX requests can read the token.
 
-Common Pitfalls
+Common pitfalls
 ---------------
 
 Form post without ``_next_form_origin``.
@@ -174,7 +174,7 @@ Different origin without ``CSRF_TRUSTED_ORIGINS``.
    The middleware returns 403.
    Add every origin that posts to the project.
 
-See Also
+See also
 --------
 
 .. seealso::

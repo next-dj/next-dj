@@ -7,7 +7,7 @@ This section covers production deployment of a next.dj project.
 The pages assume an existing Django project that runs locally.
 They walk through the checklist, the static file pipeline, the server choice, and the recommended settings.
 
-.. rubric:: Preparing a Release
+.. rubric:: Preparing a release
 
 :doc:`checklist`
    Pre-flight checklist before shipping.
@@ -15,7 +15,7 @@ They walk through the checklist, the static file pipeline, the server choice, an
 :doc:`settings`
    Production-tuned values for ``NEXT_FRAMEWORK``.
 
-.. rubric:: Pipeline and Server
+.. rubric:: Pipeline and server
 
 :doc:`static-files`
    How ``collectstatic`` and the static pipeline behave in production.

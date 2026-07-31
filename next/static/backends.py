@@ -12,10 +12,9 @@ methods are concrete on the default backend and selected per asset by
 adding more named methods such as `render_babel_script_tag` and
 registering kinds that point to them.
 
-A small factory builds backend instances from
-`NEXT_FRAMEWORK['STATIC_BACKENDS']` entries. The factory also
-emits the `backend_loaded` signal so user code may react to backend
-construction.
+Instances are built from `NEXT_FRAMEWORK['STATIC_BACKENDS']` entries by
+the static manager, which emits the `backend_loaded` signal for each one
+so user code may react to backend construction.
 """
 
 from __future__ import annotations
@@ -25,10 +24,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, override
 
 from django.contrib.staticfiles.storage import staticfiles_storage
 
-from next.conf import import_class_cached
-
 from .assets import StaticNamespace
-from .signals import backend_loaded
 
 
 if TYPE_CHECKING:
@@ -165,29 +161,3 @@ class StaticFilesBackend(StaticBackend):
         """
         del request
         return self._module_tag.format(url=url)
-
-
-class StaticsFactory:
-    """Build static backend instances from configuration dicts."""
-
-    DEFAULT_BACKEND: ClassVar[str] = "next.static.StaticFilesBackend"
-
-    @classmethod
-    def create_backend(cls, config: Mapping[str, Any]) -> StaticBackend:
-        """Instantiate the backend class named by `config['BACKEND']`.
-
-        Raises `TypeError` when the configured class is not a subclass
-        of `StaticBackend`.
-        """
-        backend_path = config.get("BACKEND", cls.DEFAULT_BACKEND)
-        backend_class = import_class_cached(backend_path)
-        if not isinstance(backend_class, type) or not issubclass(
-            backend_class, StaticBackend
-        ):
-            msg = f"Backend {backend_path!r} is not a StaticBackend subclass"
-            raise TypeError(msg)
-        instance: StaticBackend = backend_class(config)
-        backend_loaded.send(
-            sender=backend_class, config=dict(config), instance=instance
-        )
-        return instance

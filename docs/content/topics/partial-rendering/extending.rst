@@ -1,6 +1,6 @@
 .. _topics-partial-rendering-extending:
 
-Extending the Protocol
+Extending the protocol
 ======================
 
 The protocol is closed by design.
@@ -12,30 +12,33 @@ A custom verb, a server-pushed context value, and a server-fired event each ride
    :local:
    :depth: 1
 
-A Custom Verb
+A custom verb
 -------------
 
 A verb beyond the built-in set is registered on both sides.
 The server registers the name and the client supplies the handler.
-A registered name clears the ``next.E066`` check and earns the generic ``op()`` channel on the builder, so the typed methods stay the only authors of the built-in verbs.
+A registered name earns the generic ``op()`` channel on the builder, so the typed methods stay the only authors of the built-in verbs.
+The ``next.E066`` check validates the registered names at ``manage.py check``, and an unregistered verb fails at runtime with ``UnknownPatchOpError``.
 
 Register the name once on the server.
 
 .. code-block:: python
    :caption: dashboard/page.py
 
-   from typing import Any
+   from dashboard.forms import GoalForm
+   from django.http import HttpRequest, HttpResponse
 
-   from django.http import HttpRequest
-
+   from next import action
+   from next.forms.markers import DForm
    from next.partial import Patches, register_patch_op
 
    register_patch_op("confetti")
 
 
-   def done(self, request: HttpRequest, cleaned_data: dict[str, Any]) -> Any:
+   @action("save_goal", form_class=GoalForm)
+   def save_goal(request: HttpRequest, form: DForm[GoalForm]) -> HttpResponse:
        """Save the goal and rain confetti on every watching tab."""
-       Goal.objects.create(**cleaned_data)
+       form.save()
        return Patches(request).op("confetti", count=80).toast("Goal reached").response()
 
 ``register_patch_op`` runs at import, so a page module or an app ``ready`` hook is a natural home.
@@ -58,7 +61,7 @@ Supply the handler on the client through a co-located asset.
 The handler receives the patch and an apply context.
 The patch carries the payload fields the server authored, here ``patch.count``.
 The context exposes ``dispatch`` for an event on the ``Next.on`` bus, ``mergeContext`` for a context merge, and ``root`` for the document.
-It also exposes ``dev`` for the runtime's dev mode, which follows Django ``DEBUG`` and is described in the Client Runtime section of :doc:`reference`.
+It also exposes ``dev`` for the runtime's dev mode, which follows Django ``DEBUG`` and is described in the Client runtime section of :doc:`reference`.
 Registering the handler at load time is safe, because ``defineOp`` records a handler rather than scanning the DOM.
 
 The envelope carries the custom verb beside the built-ins.
@@ -76,7 +79,7 @@ The envelope carries the custom verb beside the built-ins.
 
 Without the runtime the mutation falls back to the full ``POST`` then ``303`` then ``GET`` cycle and the custom verb never ships, so a custom verb is an enhancement, never the only path to a result.
 
-Pushing Context
+Pushing context
 ---------------
 
 The ``context`` verb merges named values into ``window.Next.context`` and fires ``context-updated``.
@@ -85,11 +88,9 @@ A value is pushed by the name of a registered ``serialize=True`` provider on the
 .. code-block:: python
    :caption: cart/page.py
 
-   from typing import Any
+   from django.http import HttpRequest, HttpResponse
 
-   from django.http import HttpRequest
-
-   from next import context
+   from next import action, context
    from next.partial import Patches
 
 
@@ -99,14 +100,16 @@ A value is pushed by the name of a registered ``serialize=True`` provider on the
        return Cart.for_request(request).count
 
 
-   def done(self, request: HttpRequest, cleaned_data: dict[str, Any]) -> Any:
+   @action("add_to_cart")
+   def add_to_cart(request: HttpRequest) -> HttpResponse:
        """Add the item and push the new cart count to the client."""
        cart = Cart.for_request(request)
-       cart.add(cleaned_data["sku"])
+       cart.add(request.POST["sku"])
        return Patches(request).context(cart_count=cart.count).response()
 
 A name that is not a ``serialize=True`` provider of the origin page raises ``UnknownContextNameError``, so the verb cannot smuggle an arbitrary value past the provider contract.
-The ``$csrf`` and ``$dev`` keys of the init payload raise ``ReservedContextKeyError`` whether or not the origin page registered them, symmetric to ``event()`` refusing a framework-owned event name, so the ``$`` namespace stays the framework's on a patch as it is on a full render.
+The ``$csrf`` and ``$dev`` keys of the init payload raise ``ReservedContextKeyError`` whether or not the origin page registered them, symmetric to ``event()`` refusing a framework-owned event name.
+The ``$`` namespace therefore stays the framework's on a patch as it is on a full render.
 A page that registers either name loses that value on the full render too, so no patch has anything to update, see :doc:`/content/topics/static-assets/js-context`.
 
 Read the merged value on the client through ``Next.context`` and react to the merge through ``context-updated``.
@@ -124,7 +127,7 @@ The event payload carries the whole merged store in ``context`` and the keys of 
 A stream source cannot build a ``context`` patch, because it has no page-render origin to read a provider value from.
 A stream that needs to push fresh context drives a ``refresh`` instead, and the re-fetched zone delivers the new context through its own render, see :doc:`sse`.
 
-Firing an Event
+Firing an event
 ---------------
 
 The ``event`` verb dispatches a ``CustomEvent`` on the document and the ``Next.on`` bus.
@@ -133,16 +136,18 @@ It is the seam for a server-authored signal that no morph expresses, a notificat
 .. code-block:: python
    :caption: orders/page.py
 
-   from typing import Any
+   from django.http import HttpRequest, HttpResponse
+   from orders.forms import OrderForm
 
-   from django.http import HttpRequest
-
+   from next import action
+   from next.forms.markers import DForm
    from next.partial import Patches
 
 
-   def done(self, request: HttpRequest, cleaned_data: dict[str, Any]) -> Any:
+   @action("place_order", form_class=OrderForm)
+   def place_order(request: HttpRequest, form: DForm[OrderForm]) -> HttpResponse:
        """Place the order and signal the analytics island."""
-       order = Order.objects.create(**cleaned_data)
+       order = form.save()
        return (
            Patches(request)
            .event("order-placed", {"id": order.pk, "total": str(order.total)})
@@ -162,7 +167,7 @@ Consume it with a delegated document listener or the ``Next.on`` bus.
 The ``toast`` verb is sugar over ``event`` with a built-in container, so a project that wants its own notification surface listens for ``next:toast`` and renders the toast itself.
 The item still lands in the built-in ``[data-next-toasts]`` tray, so such a project also hides the tray with CSS.
 
-One Active Backend
+One active backend
 ------------------
 
 The three seams above extend the envelope from inside.
@@ -173,7 +178,7 @@ A configuration with more than one entry earns the ``next.W071`` warning at ``ma
 An application that needs a different envelope shape subclasses ``PartialProtocolBackend``, serialises its own wire format, and makes the subclass the single entry of ``PARTIAL_BACKENDS``.
 See :doc:`/content/ref/partial` for the ``PartialProtocolBackend`` API.
 
-See Also
+See also
 --------
 
 .. seealso::

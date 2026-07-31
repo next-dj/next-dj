@@ -1,6 +1,6 @@
 .. _topics-forms-wizard:
 
-Form Wizards
+Form wizards
 ============
 
 A multi-step form across several requests usually means hand-rolling step routing, stashing partial data in the session, and re-wiring all of it to support the browser back button or a branch that skips a step.
@@ -13,7 +13,7 @@ The wizard handles step routing and back-navigation, supports conditional branch
    :local:
    :depth: 2
 
-Mental Model
+Mental model
 ------------
 
 One wizard is one registered action.
@@ -35,7 +35,7 @@ It is enforced per step POST, before the step form binds, so a denied step write
 A wizard has no object-level hook.
 See :ref:`topics-forms-actions-dynamic-guards` for the hook contract.
 
-Declaring Steps
+Declaring steps
 ---------------
 
 Declare the ordered steps under ``Meta.steps`` as a list of ``(name, FormClass)`` tuples.
@@ -82,10 +82,10 @@ Under the default settings the same files live in ``access/pages/request/[step]/
 
 Every step form subclasses ``django.forms`` directly.
 A step is not a standalone action, so a plain Django form has nothing to register and nothing to suppress.
-The wizard never runs ``get_initial`` or ``on_valid`` on a step, so a plain Django form is the canonical base, see `How Step Forms Differ From Standalone Forms`_.
+The wizard never runs ``get_initial`` or ``on_valid`` on a step, so a plain Django form is the canonical base, see `How step forms differ from standalone forms`_.
 A ``next.forms`` base can still serve as a step, but then it must set ``Meta.abstract = True``.
 Without the flag ``__init_subclass__`` registers the step as its own form action whose default ``on_valid`` saves a partial row, and the ``next.W057`` system check warns about the double role.
-See :ref:`Preventing Registration <topics-forms-actions-abstract>` for the ``Meta.abstract`` semantics.
+See :ref:`Preventing registration <topics-forms-actions-abstract>` for the ``Meta.abstract`` semantics.
 
 ``Meta.steps`` is required.
 An empty or missing list triggers the ``next.E050`` system check and the wizard is not usable.
@@ -100,7 +100,7 @@ It defaults to ``"step"``, so a route segment of ``[step]`` works with no furthe
 Per-step drafts persist through the configured ``FORM_WIZARD_BACKEND``, which the project sets once for every wizard.
 See :doc:`wizard-backend` for the backend contract and its options.
 
-The ``done`` Method
+The ``done`` method
 -------------------
 
 ``done`` runs once after the last step validates.
@@ -135,7 +135,7 @@ Last write wins is the deliberate design for a single linear flow.
 An idempotent ``done`` keeps the final write correct under retries, which is the case that matters.
 A flow that must serialise concurrent tabs needs a custom backend that locks or compares and swaps the stored bucket.
 
-``done`` Is Dependency-Injected
+``done`` is dependency-injected
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The dispatcher resolves ``done`` through the same injector as an action handler or ``on_valid``.
@@ -157,7 +157,7 @@ Beyond the reserved names, ``done`` declares markers and named dependencies like
 A wizard module falls under the DI annotation rule.
 Do not add ``from __future__ import annotations`` to a module whose ``done`` the resolver inspects, see :doc:`/content/topics/dependency-injection`.
 
-The ``done`` Return Value
+The ``done`` return value
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The return value of ``done`` follows the same coercion as an action handler.
@@ -175,7 +175,7 @@ The return value of ``done`` follows the same coercion as an action handler.
    The dispatcher coerces ``None`` into a success re-render of the origin page with status 200, so the stored drafts are cleared and ``wizard_completed`` fires.
    The user is left on the last step with no confirmation, so return an explicit redirect away from the wizard.
 
-How Step Forms Differ From Standalone Forms
+How step forms differ from standalone forms
 -------------------------------------------
 
 The wizard drives a step through a different path than a standalone form action, which is why a plain Django form is the canonical step base.
@@ -216,7 +216,7 @@ Inside the block the tag publishes two variables.
 ``form`` is the current step's form, unbound on a GET and prefilled from the saved draft when the step was visited before.
 ``wizard`` is the ``FormWizard`` instance, which exposes the navigation helpers below.
 
-Wizard Template API
+Wizard template API
 ~~~~~~~~~~~~~~~~~~~~
 
 The ``wizard`` variable carries the methods used to build progress indicators and navigation.
@@ -295,7 +295,7 @@ A progress bar reads the step status in Python and iterates the precomputed list
      {% endfor %}
    </nav>
 
-Routing and Back-Navigation
+Routing and back-navigation
 ---------------------------
 
 The wizard lives on a route that captures the step segment, such as ``request/[step]/``.
@@ -313,7 +313,7 @@ Back-navigation works through the same URL.
 Visiting an earlier step prefills its form from the saved draft, so the user sees the values they entered before.
 The current step is always resolved from the URL kwarg, which keeps the browser back button and bookmarked step URLs working.
 
-The ``form`` Variable Has Two Sources
+The ``form`` variable has two sources
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The ``form`` published inside the ``{% form %}`` block is built differently on a GET than on a validation failure.
@@ -324,7 +324,7 @@ The ``form`` published inside the ``{% form %}`` block is built differently on a
 The template variable is the same name in both cases.
 A template that renders ``{{ form.field.errors }}`` shows nothing on a clean GET and the validation errors on a re-render.
 
-Conditional Steps
+Conditional steps
 -----------------
 
 Override ``get_steps`` to choose the step list from the data gathered so far.
@@ -342,7 +342,7 @@ The hook reads the accumulated data through ``self.get_all_cleaned_data()`` and 
 When ``get_steps`` is not overridden it returns ``Meta.steps`` unchanged.
 The navigation helpers, the current-step resolution, and the final-step detection all read from ``get_steps``, so a conditional list flows through routing without extra wiring.
 
-Cross-Step Inputs
+Cross-step inputs
 -----------------
 
 Override ``get_form_kwargs`` to pass extra constructor arguments into a step form.
@@ -368,7 +368,7 @@ Both are sent with the wizard class as the sender, so a receiver connected with 
 An error response from ``done``, status 400 or above, skips ``wizard_completed`` and keeps the saved drafts for retry.
 See :doc:`signals` for the payloads and the receiver-wiring pattern.
 
-System Checks
+System checks
 -------------
 
 The ``next.E050`` and ``next.E051`` checks guard the steps declaration and the wizard backend configuration.
@@ -381,7 +381,7 @@ Add a ``[step]`` route segment or point ``Meta.url_param`` at the captured kwarg
 The static-step checks inspect ``Meta.steps`` only, a ``get_steps`` override is not visible to them.
 See :doc:`/content/ref/system-checks` for their conditions, and run ``uv run python manage.py check`` after editing a wizard or its backend.
 
-See Also
+See also
 --------
 
 .. seealso::

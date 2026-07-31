@@ -3,7 +3,8 @@
 Deduplication
 =============
 
-The collector emits each asset once per request even when several components reference the same file.
+The pipeline emits each asset once per request even when several components reference the same file.
+The collector's dedup strategy decides which registrations survive to injection.
 This page covers the bundled dedup strategies, how the collector applies them, and how to plug a custom strategy.
 
 .. contents::
@@ -34,7 +35,7 @@ The framework ships three strategies in ``next.static.collector``.
    Disables deduplication.
    Every registration yields a unique key, so every asset is emitted.
 
-Choosing a Strategy
+Choosing a strategy
 -------------------
 
 The collector takes the strategy through its constructor.
@@ -58,7 +59,7 @@ The ``DEDUP_STRATEGY`` value is the dotted path to a dedup strategy class.
 The manager instantiates it once per request when it builds the collector.
 When the key is absent the collector uses ``UrlDedup``.
 
-Inline Assets
+Inline assets
 -------------
 
 Inline ``{% #use_style %}`` and ``{% #use_script %}`` blocks participate in deduplication.
@@ -66,7 +67,7 @@ The strategy keys them by the rendered body, so two identical inline blocks coll
 Inline blocks always append.
 They never prepend.
 
-Writing a Custom Strategy
+Writing a custom strategy
 -------------------------
 
 A strategy implements the ``DedupStrategy`` protocol.
@@ -109,26 +110,26 @@ Point the backend ``OPTIONS`` at the new strategy.
 
 The strategy lives for one request, so it can hold per request state.
 
-Common Patterns
+Common patterns
 ---------------
 
-Shared Vendor File
+Shared vendor file
 ~~~~~~~~~~~~~~~~~~
 
 The default ``UrlDedup`` already collapses two references to the same vendor URL.
 No configuration is needed for the common case.
 
-Content Aware Dedup
+Content aware dedup
 ~~~~~~~~~~~~~~~~~~~
 
 Switch to ``HashContentDedup`` when the same content ships from two different paths and should emit once.
 
-Disable Dedup
+Disable dedup
 ~~~~~~~~~~~~~
 
 Switch to ``IdentityDedup`` for debugging, to confirm exactly which owners registered which assets.
 
-See Also
+See also
 --------
 
 .. seealso::

@@ -1,9 +1,9 @@
 .. _ref-template-tags:
 
-Template Tags
+Template tags
 =============
 
-Module Summary
+Module summary
 --------------
 
 The framework registers its template tags as Django builtins through ``next.apps.templates.install``.
@@ -50,15 +50,16 @@ Forms
 
    The tag requires ``request`` in the template context for the CSRF token.
    It also uses ``current_page_module_path`` when present to scope the action lookup to the origin page, which is how the file router renders it.
-   That context value is not strictly required.
-   When it is absent the action lookup falls back to the name index.
+   Inside a component's own template body ``current_component_module_path`` takes precedence, so a component-anchored action resolves before the page anchor.
+   Neither context value is strictly required.
+   When both are absent the action lookup falls back to the name index.
 
 .. describe:: {% action_url "<name>" %}
 
    Returns the dispatch endpoint URL for a registered action.
    The first argument is the action name, a quoted string or a context variable that resolves to a string.
-   The lookup uses the same page scoping as ``{% form %}``.
-   A page-scoped match for the rendering page wins over a shared one, read from ``current_page_module_path`` when present.
+   The lookup uses the same anchor scoping as ``{% form %}``.
+   A match for the component anchor wins over the page anchor, and either wins over a shared one.
 
    As a ``simple_tag`` it supports assignment, ``{% action_url "delete_note" as delete_url %}``.
 
@@ -101,18 +102,18 @@ Components
    Block form.
    Marks a slot location inside a component template, with a fallback body used when the caller omits the slot.
 
-Multiline Tag Bodies
+Multiline tag bodies
 ~~~~~~~~~~~~~~~~~~~~
 
 The framework reinstalls Django's template tag pattern with the ``re.DOTALL`` flag so a single ``{% ... %}`` token may span several lines.
 That allows readable block components and slots when the inner markup is long.
 
-.. caution::
+.. warning::
 
    This changes template parsing for **every** template the process loads, not only DJX files.
    If you rely on Django's stock behaviour where a newline inside ``{% ... %}`` ends the tag, adjust those templates before adopting next.dj.
 
-Static Pipeline
+Static pipeline
 ---------------
 
 .. describe:: {% collect_styles %}
@@ -145,7 +146,7 @@ Static Pipeline
    Inline JS block.
    The body is rendered with the template context and deduplicated by content.
 
-Partial Rendering
+Partial rendering
 -----------------
 
 .. describe:: {% zone "<name>" tag="<element>" lazy="<trigger>" poll="<interval>" %}...{% placeholder %}...{% endzone %}
@@ -189,7 +190,7 @@ Layouts
    A ``layout.djx`` without this block raises ``next.W001`` during ``manage.py check``, since the page body would have nowhere to render.
    Nested layouts each carry their own ``{% block template %}`` and compose from innermost to outermost.
 
-Tag Loading
+Tag loading
 -----------
 
 .. autofunction:: next.apps.templates.install
@@ -198,7 +199,7 @@ Tag Loading
 The framework calls ``install`` during ``AppConfig.ready``.
 Project code does not need to load the tag libraries manually.
 
-See Also
+See also
 --------
 
 .. seealso::

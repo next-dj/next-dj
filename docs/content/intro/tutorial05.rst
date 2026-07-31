@@ -1,6 +1,6 @@
 .. _intro-tutorial05:
 
-Testing and Autoreload
+Testing and autoreload
 ======================
 
 Goal
@@ -21,7 +21,7 @@ Keep that page open if you want the full helper catalog.
 Walkthrough
 -----------
 
-Install Test Dependencies
+Install test dependencies
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 next.dj ships the ``next.testing`` package, and its helpers work with Django ``TestCase``, stdlib ``unittest``, and pytest alike.
@@ -43,7 +43,7 @@ Add the pytest configuration.
    addopts = --tb=short
 
 Add a ``conftest.py`` at the project root.
-The conftest imports ``notes.forms`` and every ``page.py`` so actions register before the tests run.
+The conftest imports every ``page.py`` so the actions declared there register before the tests run.
 The ``PAGES_DIR`` path must match the actual app and page-root names, so a project that did not name its app ``notes`` adjusts the path accordingly.
 
 .. code-block:: python
@@ -51,23 +51,19 @@ The ``PAGES_DIR`` path must match the actual app and page-root names, so a proje
 
    from pathlib import Path
    import pytest
-   from notes import forms  # noqa: F401
-   from next.forms import autodiscover_forms
    from next.testing.loaders import eager_load_pages
 
    PAGES_DIR = Path(__file__).resolve().parent / "notes" / "pages"
 
    @pytest.fixture(autouse=True, scope="session")
    def _next_dj_registration():
-       autodiscover_forms()
        eager_load_pages(PAGES_DIR)
        yield
 
-Importing ``notes.forms`` at the top registers ``CreateNoteForm`` and ``DeleteNoteForm`` exactly as startup autodiscovery does.
-Form classes register through ``__init_subclass__`` when their module is first imported, so the registration survives for the whole session and re-importing a cached module does nothing.
-``autodiscover_forms`` covers any other app whose forms live in ``<app>/forms.py``.
+The forms in ``notes/forms.py`` need no conftest wiring.
+The ``next`` app runs form autodiscovery at startup, and pytest-django boots Django before any fixture runs, so ``CreateNoteForm`` and ``DeleteNoteForm`` are already registered.
 ``eager_load_pages`` walks ``notes/pages`` and imports every ``page.py``, which runs the page decorators.
-Both calls are idempotent, so the session-scoped fixture runs the registration once.
+The call is idempotent, so the session-scoped fixture runs the registration once.
 Database access uses the standard ``db`` fixture from pytest-django, no extra fixture is needed.
 
 .. note::
@@ -77,7 +73,7 @@ Database access uses the standard ``db`` fixture from pytest-django, no extra fi
    Re-importing ``notes/forms.py`` will not re-register them because Python caches the module, so the next ``post_action`` raises ``FormActionNotFoundError``.
    Reach for ``reset_registries()`` only in a test that deliberately swaps ``NEXT_FRAMEWORK`` backends, and re-register the affected forms inside that test.
 
-Write the First End-to-End Test
+Write the first end-to-end test
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Create ``tests/test_notes_e2e.py``.
@@ -118,7 +114,7 @@ Run the tests.
 
    uv run pytest
 
-Test the Create Action
+Test the create action
 ~~~~~~~~~~~~~~~~~~~~~~
 
 The framework gives each action a stable URL.
@@ -134,13 +130,13 @@ The framework gives each action a stable URL.
        response = client.post_action("create_note_form", {"title": "From test", "body": "body"})
        assert response.status_code == 302
        assert Note.objects.filter(title="From test").exists()
-       assert response["Location"] == "/"  # redirect_to_origin falls back to "/"
+       assert response["Location"] == "/"
 
 ``post_action`` looks the action name up through ``resolve_action_url`` and posts the data to the dispatch endpoint.
 The action name ``create_note_form`` is derived automatically from the class name ``CreateNoteForm``.
 The redirect target is ``"/"`` because ``on_valid`` calls ``redirect_to_origin``, which sends the visitor back to the page that rendered the form and falls back to ``"/"``.
 
-Capture Action Signals
+Capture action signals
 ~~~~~~~~~~~~~~~~~~~~~~
 
 Every successful dispatch fires the ``action_dispatched`` signal.
@@ -169,12 +165,13 @@ It accepts several signals at once and exposes ``first_for``, ``last_for``, and 
 Each captured event is a ``SignalEvent`` with ``signal``, ``sender``, and ``kwargs`` attributes.
 The ``action_dispatched`` payload carries ``action_name``, ``uid``, ``request``, ``form``, ``url_kwargs``, ``duration_ms``, ``response_status``, and ``dep_cache``.
 
-Test Validation Failure
+Test validation failure
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 A failed validation does not produce a redirect.
 The pipeline re-renders the origin page with the bound form and a non-zero error count.
 The test passes ``origin="/"``, which fills the hidden ``_next_form_origin`` field a browser submission carries, so the dispatcher knows which page to re-render.
+Append the failure test to ``tests/test_notes_actions.py``.
 
 .. code-block:: python
    :caption: tests/test_notes_actions.py
@@ -189,7 +186,7 @@ The response status is ``200`` because the index page rendered.
 This time the failing form replaces the unbound one in the template context.
 A failing POST without a resolvable ``origin`` returns HTTP 400 instead, because the dispatcher has no page to re-render.
 
-Use the Autoreloader
+Use the autoreloader
 ~~~~~~~~~~~~~~~~~~~~
 
 The development server already reloads on Python file changes.
@@ -228,7 +225,8 @@ Open ``http://127.0.0.1:8000/about/`` and confirm that the new page is served wi
 .. note::
 
    The framework emits ``action_dispatched`` after a successful handler run, recorded above through ``SignalRecorder``.
-   The autoreloader emits a companion ``router_reloaded`` signal each time the route set changes, so a test that wants to react to filesystem-driven route changes can subscribe to it the same way.
+   The router manager emits a companion ``router_reloaded`` signal each time it rebuilds its backends, for example on a settings reload.
+   A test that swaps ``NEXT_FRAMEWORK`` backends can subscribe to it the same way.
    See :doc:`/content/howto/observe-framework-signals` for the full subscriber pattern.
 
 Checkpoint
@@ -249,7 +247,7 @@ The project now has tests.
 The full test suite covers the index, the detail page, the create action, the create validation failure, and the ``action_dispatched`` signal.
 The development server reloads page and component changes without a manual restart.
 
-Common Pitfalls
+Common pitfalls
 ---------------
 
 ``post_action`` raises ``FormActionNotFoundError``.
@@ -265,7 +263,7 @@ Autoreloader does not pick up a change.
    Confirm that the changed file lives under one of the watched roots.
    The reloader watches ``page.py`` files under the page roots and ``component.py`` files under the component roots, so files elsewhere do not trigger a router reload.
 
-Next Steps
+Next steps
 ----------
 
 The Notes application works and is tested.

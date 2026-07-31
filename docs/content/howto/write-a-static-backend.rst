@@ -1,6 +1,6 @@
 .. _howto-static-backend:
 
-Customise Rendered Static Tags
+Customise rendered static tags
 ==============================
 
 Pick this page when the tag markup must change, for example to add ``crossorigin`` or load from a CDN host.
@@ -20,10 +20,10 @@ For URL rewriting, subclass ``StaticFilesBackend`` and override the renderer met
 Walkthrough
 -----------
 
-Attributes Through Options
+Attributes through options
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The simplest customisation needs no Python.
+This customisation needs no Python.
 Bake the attributes into the tag format strings.
 
 .. code-block:: python
@@ -44,7 +44,7 @@ Bake the attributes into the tag format strings.
 
 The format string must contain the ``{url}`` placeholder.
 
-Subclass for URL Rewriting
+Subclass for URL rewriting
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 When the URL itself must change, subclass ``StaticFilesBackend`` and override the renderer methods.
@@ -79,7 +79,7 @@ Register the backend.
        ]
    }
 
-Request Aware Output
+Request aware output
 ~~~~~~~~~~~~~~~~~~~~
 
 A renderer can read the request to vary its output per visitor.
@@ -96,7 +96,7 @@ A renderer can read the request to vary its output per visitor.
 
 The static manager passes the current request to every renderer call.
 
-Tenant URL Prefix
+Tenant URL prefix
 ~~~~~~~~~~~~~~~~~
 
 A common multi-tenant pattern is to prefix every collected URL with a tenant slug so static files are scoped per tenant.
@@ -148,7 +148,7 @@ Every ``<link>`` and ``<script>`` tag carries the new attributes or the CDN host
 
 Run ``uv run python manage.py check`` and confirm the backend is registered.
 
-See Also
+See also
 --------
 
 .. seealso::

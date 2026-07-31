@@ -1,6 +1,6 @@
 .. _topics-partial-rendering-sse:
 
-SSE Under WSGI and ASGI
+SSE under WSGI and ASGI
 =======================
 
 Server-Sent Events carry patch envelopes to every open tab.
@@ -11,7 +11,7 @@ This page covers the stream helper, the refresh fan-out, the echo suppression, a
    :local:
    :depth: 1
 
-The Stream Helper
+The stream helper
 -----------------
 
 ``PatchEventStream`` is a :class:`~django.http.StreamingHttpResponse` returned from a page's ``render`` escape hatch.
@@ -44,7 +44,7 @@ The page view authorises the subscriber, the same as any other page.
 Each ``Patches`` the source yields becomes one ``next-patches`` event, serialised by the active protocol backend, the same shape an HTTP response carries.
 A ``data-next-sse="/url/"`` element on the page opens the ``EventSource`` and routes each event into the same apply pipeline an HTTP response uses.
 
-The Refresh Fan-Out
+The refresh fan-out
 -------------------
 
 The recommended fan-out is the ``refresh`` verb.
@@ -67,7 +67,7 @@ A stream that needs to push fresh context drives a ``refresh``, and the re-fetch
 This is a documented limitation.
 The stream source addresses zones to refresh, not provider values to push directly.
 
-Echo Suppression
+Echo suppression
 ----------------
 
 The tab that triggered the change already has the fresh zone from its own response and must not apply the fan-out again.
@@ -123,7 +123,7 @@ The heartbeat period is ``SSE.HEARTBEAT_SECONDS`` in ``PARTIAL_BACKENDS``.
 To move a stream from sync to async, swap the broker's wake primitive for an async one and pass an async source to ``PatchEventStream``.
 The page module and the signal layer do not change.
 
-Stream Politeness
+Stream politeness
 -----------------
 
 ``PatchEventStream`` sets the politeness headers on construction so a proxy or ``GZipMiddleware`` does not eat the flush.
@@ -139,7 +139,7 @@ The set of tracked zones is bounded, so a long sleep cannot storm the server on 
 Events missed while paused are not lost, because ``refresh`` is idempotent.
 The re-fetch brings the current state regardless of how many fan-outs were missed.
 
-See Also
+See also
 --------
 
 .. seealso::

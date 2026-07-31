@@ -1,6 +1,6 @@
 .. _topics-static-custom-stems:
 
-Custom Stems
+Custom stems
 ============
 
 A stem is the filename without the extension.
@@ -11,7 +11,7 @@ This page covers how to register new stems so discovery picks up additional file
    :local:
    :depth: 2
 
-The Stem Registry
+The stem registry
 -----------------
 
 The stem registry is ``next.static.discovery.default_stems``, an instance of ``StemRegistry``.
@@ -37,7 +37,7 @@ It maps a role to a list of stems.
 A role can hold several stems.
 Discovery combines every stem of a role with every registered kind extension.
 
-When to Add a Stem
+When to add a stem
 ------------------
 
 Add a stem when a project ships an asset under a filename that the default stems do not cover.
@@ -45,7 +45,7 @@ Add a stem when a project ships an asset under a filename that the default stems
 - A ``page`` stem so that ``page.css`` is picked up alongside ``template.css``.
 - A ``vendor`` stem for third party assets inside a component folder.
 
-Registering a Stem
+Registering a stem
 ------------------
 
 Register stems in ``AppConfig.ready``.
@@ -74,13 +74,13 @@ A repeated registration of the same stem is a no op.
    Discovery probes only the three built-in roles, ``template``, ``layout``, and ``component``.
    Registering a stem under a new role name has no effect on asset collection.
 
-Stem and Kind Interaction
+Stem and kind interaction
 -------------------------
 
 A new stem participates in every registered kind, so a registration combines with every kind extension automatically.
 See :doc:`/content/howto/add-a-custom-stem` for a worked example, and :doc:`asset-kinds` for pairing a stem with a custom kind.
 
-Owner Resolution
+Owner resolution
 ----------------
 
 A stem does not change ownership.
@@ -89,20 +89,20 @@ A ``page.css`` next to ``template.djx`` is still owned by the page.
 
 The owner determines when the collector adds the asset.
 
-Common Patterns
+Common patterns
 ---------------
 
-Alternative Page Filename
+Alternative page filename
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Register a ``page`` stem under the ``template`` role so the page asset can be named ``page.css`` to match the ``page.py`` module.
 
-Vendor Assets per Component
+Vendor assets per component
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Register a ``vendor`` stem under the ``component`` role for third party files that ship next to the component that depends on them.
 
-See Also
+See also
 --------
 
 .. seealso::

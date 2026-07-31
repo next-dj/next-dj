@@ -9,7 +9,7 @@ It extends a regular Django project while leaving the ORM, admin, auth, and migr
 This page describes the mental model.
 Read it once before the tutorial, then refer back when the layout of a real project surprises you.
 
-What next.dj Adds
+What next.dj adds
 -----------------
 
 next.dj layers five things on top of a regular Django project.
@@ -41,7 +41,7 @@ Partial rendering.
 
 .. _intro-overview-django-unchanged:
 
-What next.dj Does Not Replace
+What next.dj does not replace
 -----------------------------
 
 The ORM, migrations, admin, auth, and middleware stay the same as in a stock Django project.
@@ -53,7 +53,7 @@ For the design principles behind that split, read :doc:`/content/misc/design-phi
 The nouns *page*, *layout*, *component*, *action*, and *context function* appear on every documentation page.
 :doc:`/content/misc/glossary` defines each one.
 
-A Minimal Project
+A minimal project
 -----------------
 
 Once installed, the smallest next.dj project is a ``page.py`` plus a ``template.djx`` under an app's ``pages/`` directory such as ``notes/pages/``.
@@ -61,12 +61,12 @@ It also needs the ``NEXT_FRAMEWORK`` block in ``config/settings.py`` and a one-l
 :doc:`install` shows the full three-file shape with each block spelled out.
 Every new directory under ``pages/`` then adds another page without touching the URL configuration.
 
-When to Read the Tutorial
+When to read the tutorial
 -------------------------
 
 If you have used Django before and want to feel the framework, jump to :doc:`tutorial01`.
 The six tutorial parts build a small Notes application that exercises every core subsystem.
-The first five wire up routing, layouts, components, forms, and editing, and the sixth makes the Notes index update in place with partial rendering.
+The first four wire up routing, layouts, components, and forms, the fifth adds tests and the development workflow, and the sixth makes the Notes index update in place with partial rendering.
 
 .. seealso::
 

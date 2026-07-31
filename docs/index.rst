@@ -9,7 +9,7 @@ next.dj
    toctrees below. Its body is intentionally not displayed.
 
 .. toctree::
-   :caption: Getting Started
+   :caption: Getting started
    :hidden:
    :maxdepth: 1
 
@@ -31,7 +31,7 @@ next.dj
    content/ref/index
 
 .. toctree::
-   :caption: Going Further
+   :caption: Going further
    :hidden:
    :maxdepth: 1
 
@@ -40,7 +40,7 @@ next.dj
    content/security/index
 
 .. toctree::
-   :caption: Help and Project
+   :caption: Help and project
    :hidden:
    :maxdepth: 1
 

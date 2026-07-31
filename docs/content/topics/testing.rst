@@ -10,7 +10,7 @@ This page covers the public surface of the module and the patterns for testing p
    :local:
    :depth: 2
 
-Choose the Right Helper
+Choose the right helper
 -----------------------
 
 ``next.testing`` groups its helpers into focused submodules.
@@ -83,7 +83,7 @@ You can import everything above from the ``next.testing`` package.
 Submodule imports stay valid when you prefer explicit paths.
 See :doc:`/content/ref/testing` for generated signatures.
 
-Boot the Suite
+Boot the suite
 --------------
 
 The ``next.testing`` helpers assume the app registry is populated before any helper is imported.
@@ -102,7 +102,7 @@ Pytest.
 Stdlib ``unittest``.
    Call ``django.setup()`` once before importing any ``next.testing`` helper, then run the suite with the standard runner.
 
-Registry State Between Tests
+Registry state between tests
 ----------------------------
 
 Action and component registrations are side effects of importing ``page.py`` and ``component.py`` modules.
@@ -143,7 +143,7 @@ Every project under ``examples/`` uses this scaffold.
    With the default ``LAZY_COMPONENT_MODULES = False``, all registrations are in place after ``AppConfig.ready``, so the extra call is unnecessary.
    See :ref:`ref-settings` for the full description of ``LAZY_COMPONENT_MODULES``.
 
-Resetting Registries
+Resetting registries
 ~~~~~~~~~~~~~~~~~~~~
 
 ``reset_registries()`` is an opt-in helper for tests that mutate ``NEXT_FRAMEWORK`` or the registries themselves.
@@ -180,7 +180,7 @@ Tests that write ``template.djx`` or ``page.py`` files to ``tmp_path`` register 
        reset_registries()
        reset_page_cache()
 
-Eager Page Loading
+Eager page loading
 ~~~~~~~~~~~~~~~~~~
 
 ``eager_load_pages(base_dir)`` imports every ``page.py`` under a given directory.
@@ -208,7 +208,7 @@ The client mirrors Django's ``Client`` API.
 ``get``, ``post``, ``put``, ``delete``, and ``patch`` all work.
 Pass ``follow=True`` to a request to follow redirects, exactly as with Django's ``Client``.
 
-Posting to Actions
+Posting to actions
 ~~~~~~~~~~~~~~~~~~
 
 ``NextClient.post_action`` resolves an action name to its URL and posts the data in one call.
@@ -237,7 +237,7 @@ A value already present in ``data`` under ``_next_form_origin`` wins over the ke
 Both methods resolve the name through ``resolve_action_url`` from ``next.testing.actions``.
 An unknown name raises ``FormActionNotFoundError`` from ``next.forms``.
 
-Partial Requests
+Partial requests
 ~~~~~~~~~~~~~~~~
 
 The client drives partial rendering without hand-built headers.
@@ -278,7 +278,7 @@ It raises when the response is not a patch envelope, so a navigation fallback ne
 ``PartialEnvelope`` exposes ``version``, ``ops``, and ``assets``, plus ``op_verbs``, ``targets``, ``zone_targets``, ``form_targets``, ``form_meta``, ``toasts``, and ``html_for_zone`` for asserting on the server contract without parsing HTML.
 See :doc:`/content/topics/partial-rendering/index` for the zone and patch model these helpers exercise.
 
-Render a Page
+Render a page
 -------------
 
 Use ``next.testing.rendering`` to render a page without an HTTP round trip.
@@ -312,7 +312,7 @@ Extra keyword arguments are forwarded to the underlying ``page.render`` call as 
        html = render_page("notes/pages/page.py", request)
        assert "Notes" in html
 
-Capture Signals
+Capture signals
 ---------------
 
 ``SignalRecorder`` subscribes to one or more signals on enter and unsubscribes on exit.
@@ -379,7 +379,7 @@ Two convenience wrappers cover the common multi-signal cases.
 
 ``capture_framework_signals()`` attaches to every name in ``next.signals.__all__``, which helps integration tests assert ordering without listing signals by hand.
 
-Action Helpers
+Action helpers
 --------------
 
 ``next.testing.actions`` exposes ``resolve_action_url`` and ``build_form_for``.
@@ -398,7 +398,7 @@ Both raise ``FormActionNotFoundError`` from ``next.forms`` for an unknown action
        form = build_form_for("create_note", {"title": "Direct", "body": ""})
        assert form.is_valid()
 
-HTML Utilities
+HTML utilities
 --------------
 
 ``next.testing.html`` provides assertions for inspecting rendered HTML fragments.
@@ -523,7 +523,7 @@ Implement the ``ParameterProvider`` protocol on a plain class for the stub, beca
            kwargs = resolve_call(count_notes)
        assert kwargs == {"limit": 7}
 
-Resolution Context Doubles
+Resolution context doubles
 --------------------------
 
 ``next.testing.deps.make_resolution_context`` builds a ``ResolutionContext`` for unit tests on providers.
@@ -542,7 +542,7 @@ Both accept the same loose keyword arguments, ``request``, ``form``, ``url_kwarg
 Pass ``resolve_call`` a callable whose annotated parameters a provider can fill, then assert on the returned mapping.
 Use these helpers for testing custom providers without booting the router.
 
-System Checks
+System checks
 -------------
 
 Pytest can run ``manage.py check`` as part of the suite.
@@ -555,7 +555,7 @@ Pytest can run ``manage.py check`` as part of the suite.
    def test_no_check_warnings() -> None:
        call_command("check", verbosity=0)
 
-See Also
+See also
 --------
 
 .. seealso::

@@ -1,6 +1,6 @@
 .. _howto-from-formtools:
 
-Move From django-formtools
+Move from django-formtools
 ==========================
 
 Problem
@@ -16,7 +16,7 @@ The step forms move unchanged, the wizard hooks keep the formtools vocabulary, a
 Declare the ordered steps under ``Meta.steps``, place the wizard on a route with a ``[step]`` segment, and move the finalising code into ``done``.
 :doc:`build-a-multi-step-wizard` walks through a complete wizard from scratch.
 
-Method Map
+Method map
 ----------
 
 The wizard API deliberately reuses the formtools names where the semantics match.
@@ -44,21 +44,21 @@ The wizard API deliberately reuses the formtools names where the semantics match
    * - ``storage_name`` with the session and cookie storages
      - The ``FORM_WIZARD_BACKEND`` setting with the session and cache backends.
    * - ``file_storage``
-     - No equivalent, see `Files in Steps`_.
+     - No equivalent, see `Files in steps`_.
    * - ``as_view()`` mounted in ``urlpatterns``
      - Auto-registration on subclassing, no URLconf entry.
 
-What Changes in Substance
+What changes in substance
 -------------------------
 
-No URL Plumbing
+No URL plumbing
 ~~~~~~~~~~~~~~~
 
 A ``WizardView`` is a class-based view mounted with ``as_view`` in ``urlpatterns``.
 A ``FormWizard`` registers itself the moment Python runs the ``class`` statement and lives on a routed page, where the ``[step]`` directory captures the current step.
 See :doc:`/content/topics/forms/wizard` for the registration and scope rules.
 
-Steps Live in the URL
+Steps live in the URL
 ~~~~~~~~~~~~~~~~~~~~~
 
 The base ``WizardView`` keeps the current step in storage behind a single URL, and only ``NamedUrlWizardView`` exposes it.
@@ -66,7 +66,7 @@ The ``FormWizard`` always resolves the current step from the URL segment, so boo
 There is no ``{{ wizard.management_form }}`` and no ``wizard_goto_step`` POST field.
 Navigation to an earlier step is a plain link to its URL, built with ``wizard.goto(step)``.
 
-``done`` Receives Data, Not Forms
+``done`` receives data, not forms
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 formtools revalidates every form at the end and passes the instances into ``done``.
@@ -74,13 +74,13 @@ The ``FormWizard`` persists each step's cleaned data through the backend as it v
 Per-step access goes through ``get_cleaned_data_for_step``.
 A field declared by two steps merges to the last stored value, and the ``next.W059`` system check warns about such collisions.
 
-Validation Re-Render Is Free
+Validation re-render is free
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 An invalid step re-renders the page with the bound failing form under the same ``form`` variable the template already uses.
 There is no per-step template selection and no ``{{ wizard.form }}`` indirection, the one ``{% form %}`` block covers every step.
 
-Files in Steps
+Files in steps
 ~~~~~~~~~~~~~~
 
 formtools supports uploads inside steps through ``file_storage``.
@@ -103,7 +103,7 @@ Run the system checks after the port.
 Then walk the flow once.
 Fill the first step, use the browser back button to confirm the draft reappears, and finish to confirm ``done`` runs exactly once.
 
-See Also
+See also
 --------
 
 .. seealso::

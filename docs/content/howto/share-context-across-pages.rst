@@ -1,6 +1,6 @@
 .. _howto-share-context-across-pages:
 
-Share Context Across Pages
+Share context across pages
 ==========================
 
 Problem
@@ -45,7 +45,7 @@ The value is injected into the shared context dict for that request, so both the
 
    <p>{{ note_count }} notes in total.</p>
 
-Limit Inheritance to a Subtree
+Limit inheritance to a subtree
 ------------------------------
 
 Drop the flag for values that should stay local to the current page only.
@@ -71,7 +71,7 @@ Verification
 Visit two pages under the directory that hosts the ``page.py`` and confirm the value renders on both.
 Visit a page outside that directory and confirm the value is undefined.
 
-See Also
+See also
 --------
 
 .. seealso::

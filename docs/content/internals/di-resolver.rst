@@ -1,6 +1,6 @@
 .. _internals-di-resolver:
 
-Dependency Resolver
+Dependency resolver
 ===================
 
 This page covers how the dependency resolver inspects a callable, picks providers, fills parameters, and caches results across a request.
@@ -60,7 +60,7 @@ Modules
 ``next.deps.markers``.
    ``Depends``, ``DDependencyBase``, and the ``DependsProvider`` that resolves ``Depends`` markers.
 
-Provider Order
+Provider order
 --------------
 
 The resolver iterates providers in ascending ``priority`` order.
@@ -79,16 +79,10 @@ Custom providers register through ``RegisteredParameterProvider``.
 A subclass that does not set ``priority`` inherits the default ``100``, so it is consulted after every built-in provider.
 The resolver sorts the registry by ``priority`` as the primary key and by subclass definition order as the stable tie-break.
 
-Depends Forms
+Depends forms
 -------------
 
-``DependsProvider`` handles a parameter whose default is a ``Depends`` marker.
-The ``dependency`` argument of ``Depends`` selects one of four forms.
-
-- ``Depends("name")``. The argument is a string. The resolver looks up the callable registered under that name and invokes it with its own parameters resolved.
-- ``Depends(callable)``. The argument is a callable. The resolver resolves the callable's own parameters and calls it as a factory.
-- ``Depends(value)``. The argument is any other object. That object is injected directly as a constant.
-- ``Depends()``. No argument. The marker falls back to the parameter name and resolves it as the named form.
+``DependsProvider`` handles a parameter whose default is a ``Depends`` marker, see :doc:`/content/topics/dependency-injection` for the four marker forms.
 
 ResolutionContext
 -----------------
@@ -115,14 +109,14 @@ An ordinary page request that does not pass through the form dispatcher never se
 
 Two consequences flow from the cache.
 
-Idempotent providers.
-   Custom providers must not depend on producing a fresh value between two invocations within the same request.
-   The cache holds the first result.
+Provider results are never cached.
+   The framework cache memoises only named ``Depends("name")`` values.
+   A provider that must return one value per request keeps its own request-scoped store.
 
 Shared across the dispatch.
    The dispatch cache attaches on every form-dispatch POST and is consumed on the validation-failure re-render to keep the second pass cheap.
 
-Cycle Detection
+Cycle detection
 ---------------
 
 ``DependencyCycleError`` is raised when a named dependency re-enters a name already being resolved, directly or through a longer ``Depends`` chain.
@@ -134,14 +128,14 @@ Signals
 ``provider_registered`` fires once per provider when the subclass enters the ``RegisteredParameterProvider`` registry.
 Subscribe to track custom providers across reloads.
 
-Extension Points
+Extension points
 ----------------
 
 - Subclass ``DDependencyBase`` to introduce a typed marker.
 - Subclass ``RegisteredParameterProvider`` to handle a custom marker or a custom annotation.
 - Use ``resolver.dependency("name")`` to register a callable for ``Depends("name")``.
 
-See Also
+See also
 --------
 
 .. seealso::

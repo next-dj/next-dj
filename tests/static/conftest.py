@@ -99,6 +99,7 @@ def make_discovery() -> Callable[..., tuple[AssetDiscovery, StaticManager]]:
     ) -> tuple[AssetDiscovery, StaticManager]:
         manager = StaticManager()
         manager._backends = [backend]
+        manager._loaded = True
         manager._cached_page_roots = page_roots
         return AssetDiscovery(manager), manager
 

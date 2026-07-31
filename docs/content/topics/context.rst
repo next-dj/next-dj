@@ -33,7 +33,7 @@ Component context.
    ``@component.context("key")`` in a ``component.py``.
    Resolves once per component instance during render.
 
-Framework-Provided Keys
+Framework-provided keys
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 Every rendered template starts with three keys populated.
@@ -49,18 +49,22 @@ The two path keys are seeded before any user-defined ``@context`` callable runs,
 ``current_page_module_path``.
    The absolute path of the ``page.py`` module being rendered.
 
+``current_component_module_path``.
+   The absolute path of the ``component.py`` beside the component template being rendered, or ``None`` for a component without one.
+   The ``{% component %}`` tag writes it for the component's own template body, so it never leaks into slot bodies rendered by the page.
+
 A user ``@context`` callable reads ``request`` through an ``HttpRequest`` annotation rather than by parameter name.
-The ``current_template_path`` and ``current_page_module_path`` keys live in the template scope for the ``{% form %}`` and ``{% component %}`` tags to consume.
+These path keys live in the template scope for the ``{% form %}`` and ``{% component %}`` tags to consume.
 They are not injected into a context callable by parameter name.
 
-The Decorator
+The decorator
 -------------
 
 The page-side ``@context`` decorator has two shapes.
 One is a keyed single value, the other is an unkeyed dict.
 The ``inherit_context`` flag and direct registration, covered after the two shapes, vary how a function is registered.
 
-Keyed Single Value
+Keyed single value
 ~~~~~~~~~~~~~~~~~~
 
 The most common shape.
@@ -78,7 +82,7 @@ The decorator takes a single key and the function returns the value.
 
 Templates reference the value as ``{{ notes }}``.
 
-Unkeyed Dict
+Unkeyed dict
 ~~~~~~~~~~~~
 
 Decorating a function with bare ``@context`` and returning a dict merges every key into the template scope.
@@ -98,7 +102,7 @@ Decorating a function with bare ``@context`` and returning a dict merges every k
 This shape runs the dependency once.
 Two separate ``@context("post")`` and ``@context("comments")`` would each hit the resolver and possibly the database twice.
 
-The inherit_context Flag
+The inherit_context flag
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``inherit_context=True`` makes a keyed value visible to every descendant route, not only to the page that declares it.
@@ -115,7 +119,7 @@ The inherit_context Flag
 Use this for header copy, brand colors, feature flags, and other shared values.
 Without the flag the value is only available when that exact ``page.py`` handles the request, and descendant routes cannot read it.
 
-Reusing a Shared Helper
+Reusing a shared helper
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 ``@context`` keys the registration on the file where the decorated function is declared, not on the file that runs the decorator.
@@ -141,7 +145,7 @@ The decorated object has to carry a declaring file of its own, which a function,
 A built-in such as ``datetime.now`` carries none, and decorating one raises ``TypeError`` at import time naming the object.
 Wrap it in a function declared in the page module instead.
 
-Reading Values Into a Context Function
+Reading values into a context function
 --------------------------------------
 
 A context function receives its parameters through the :doc:`dependency injector <dependency-injection>`.
@@ -184,7 +188,7 @@ The framework resolves ``load_note`` with its own ``note_id`` argument from the 
    Use it for values produced by shared dependency callables.
    See :doc:`dependency-injection`.
 
-Resolution Order
+Resolution order
 ----------------
 
 The framework computes the template scope in this order.
@@ -202,9 +206,9 @@ The framework computes the template scope in this order.
 
 A later step that uses the same key overrides earlier values.
 The full merged dict is shared across the entire ``layout.djx`` chain for that request, so all layout wrappers see the same final scope.
-The :doc:`layouts` page restates this from the layout side under *Context Processors*.
+The :doc:`layouts` page restates this from the layout side under *Context processors*.
 
-Inheritance Rules
+Inheritance rules
 -----------------
 
 Inherited context follows the filesystem route tree.
@@ -214,12 +218,12 @@ The framework walks up from the current ``page.py`` directory and runs every ``@
 - A ``page.py`` at ``notes/pages/admin/`` publishes inherited values only for pages under ``/admin/``.
 - A page at ``/admin/links/`` sees both layers because it sits below both directories.
 
-When two ancestor directories publish the same inherited key, the value from the outermost ancestor currently wins.
+When two ancestor directories publish the same inherited key, the value from the outermost ancestor wins.
 
 The current page can shadow an inherited value by declaring a context function with the same key.
 The page level value takes precedence, and every layout wrapper in the chain sees that value.
 
-Inherited Function That Names a URL Parameter
+Inherited function that names a URL parameter
 ---------------------------------------------
 
 When an inherited context function is keyed under the same name as a captured URL segment, the parameter it asks for changes type across runs.
@@ -239,11 +243,11 @@ Leave the parameter untyped and return early when it is already a model instance
            return category
        return Category.objects.get(slug=category)
 
-Declaring the parameter as ``str`` would break the descendant re-run.
+An annotation cannot be honest for both runs, because the second run on the declaring page receives the already resolved object, so leave the parameter untyped.
 
 .. _topics-context-serialization:
 
-Serialization for the Browser
+Serialization for the browser
 -----------------------------
 
 next.dj ships a ``window.Next`` object to the browser through the :doc:`static pipeline <static-assets/index>`.
@@ -265,7 +269,7 @@ The materialisation rule applies only to keys that travel to the client.
 See :doc:`static-assets/js-context` for serializers, duplicate-key policies, ``NEXT_JS_OPTIONS``, and reading values from co-located JS.
 See :doc:`/content/howto/override-the-js-context-serializer` for a guided recipe when the default JSON encoder is not enough.
 
-Component Context vs Page Context
+Component context vs page context
 ---------------------------------
 
 Component context and page context share the same decorator pattern but differ in scope.
@@ -283,7 +287,7 @@ Component context.
 A component context function can ask for any value that the template forwards, plus any value that the dependency injector knows how to produce.
 This includes the request, captured URL parameters, query strings, and custom providers.
 
-Signal When Context Registers
+Signal when context registers
 -----------------------------
 
 The framework fires ``context_registered`` after a ``@context`` callable in a ``page.py`` joins the registry.
@@ -293,10 +297,10 @@ Subscribe to it when an external system needs to track page context functions ac
 Folder discovery registers components through ``register_many``, which fires ``components_registered`` once per discovery batch with an ``infos`` tuple of ``ComponentInfo``.
 The singular ``component_registered`` fires only on a one-at-a-time ``register`` call.
 
-Common Patterns
+Common patterns
 ---------------
 
-Per Page Title
+Per page title
 ~~~~~~~~~~~~~~
 
 Publish the page title from each page.
@@ -319,13 +323,13 @@ Render it in the layout.
 
    <title>{{ page_title|default:"Notes" }}</title>
 
-Site Wide Configuration
+Site wide configuration
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 Publish branding and navigation from the root ``page.py`` with ``inherit_context=True``.
 Every page under that directory reads the values without redeclaring them.
 
-Filter Values From Query String
+Filter values from query string
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Combine a context function with the ``DQuery[T]`` marker to read filters from the URL.
@@ -340,12 +344,12 @@ Combine a context function with the ``DQuery[T]`` marker to read filters from th
    def active_tag(tag: DQuery[str] = "") -> str:
        return tag
 
-Shared Dependency
+Shared dependency
 ~~~~~~~~~~~~~~~~~
 
 When two context functions need the same expensive value, factor the dependency into a custom DI provider or use the unkeyed dict shape.
 
-System Checks
+System checks
 -------------
 
 The framework validates context functions through ``check_context_functions``.
@@ -353,7 +357,11 @@ A keyless ``@context`` callable with a non-dict return annotation reports ``next
 A keyless callable with no return annotation is accepted by the check and raises ``TypeError`` at render time if the value is not a mapping.
 Functions decorated with a key may return any value.
 
-See Also
+A ``page.py`` holds one keyless slot.
+Registering a second bare ``@context`` replaces the first, and ``next.E018`` reports the shadowed callable.
+Give each function a key or merge them.
+
+See also
 --------
 
 .. seealso::

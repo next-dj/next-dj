@@ -1,6 +1,6 @@
 .. _howto-custom-template-loader:
 
-Add a Custom Template Loader
+Add a custom template loader
 ============================
 
 Problem
@@ -68,7 +68,7 @@ Run ``uv run python manage.py check`` to validate import paths and loader subcla
 
 Request the page in the browser or through ``NextClient`` and confirm the Markdown body renders through your layout chain.
 
-See Also
+See also
 --------
 
 .. seealso::

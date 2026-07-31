@@ -1,6 +1,6 @@
 .. _howto-enforce-object-level-permissions:
 
-Enforce Object-Level Permissions
+Enforce object-level permissions
 =================================
 
 Problem
@@ -21,7 +21,7 @@ A ``False`` return denies with HTTP 403 and the row is never saved.
 Walkthrough
 -----------
 
-Load the Row From the URL
+Load the row from the URL
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The edit form loads its instance from a captured URL segment through ``Meta.instance_from_url``.
@@ -48,14 +48,14 @@ The default ``get_initial`` loads ``Note.objects.get(slug=<captured slug>)`` thr
 The dispatcher binds the form against that instance, then resolves ``has_object_permission``.
 At that point ``self.instance`` is the loaded ``Note``, so the hook compares its owner against the current user.
 
-Combine It With a Login Requirement
+Combine it with a login requirement
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The object-level hook compares ``request.user``, so the request needs an authenticated user.
 Pair the hook with the static ``Meta.login_required`` so an anonymous POST is redirected to the login page before the hook runs.
 
 .. code-block:: python
-   :caption: notes/pages/notes/edit/[slug]/page.py — with a login requirement
+   :caption: notes/pages/notes/edit/[slug]/page.py
 
    class NoteEditForm(next.forms.ModelForm):
        class Meta:
@@ -70,7 +70,7 @@ Pair the hook with the static ``Meta.login_required`` so an anonymous POST is re
 The static guard runs first and pre-database.
 An anonymous visitor is redirected before any application code runs, and the object-level hook only ever sees an authenticated user.
 
-Render the Form
+Render the form
 ~~~~~~~~~~~~~~~
 
 The template renders the form by name.
@@ -128,7 +128,7 @@ Django renders the denial as a bare HTTP 403 without re-rendering the origin, so
 A ``form_access_denied`` signal fires on the denial with ``layer="object"`` and ``reason="denied"``.
 Connect a receiver to audit refused edits, see :ref:`topics-forms-signals-form-access-denied`.
 
-See Also
+See also
 --------
 
 .. seealso::

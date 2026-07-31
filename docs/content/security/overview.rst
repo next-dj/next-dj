@@ -1,6 +1,6 @@
 .. _security-overview:
 
-Security Overview
+Security overview
 =================
 
 next.dj relies on Django's middleware stack and template engine for the bulk of its security guarantees.
@@ -10,7 +10,7 @@ This page lists the Django mechanisms that apply unchanged and the framework spe
    :local:
    :depth: 2
 
-Django Guarantees Used Unchanged
+Django guarantees used unchanged
 --------------------------------
 
 The framework does not bypass any standard :doc:`Django middleware <django:topics/http/middleware>`.
@@ -23,10 +23,10 @@ The framework does not bypass any standard :doc:`Django middleware <django:topic
 
 A standard ``MIDDLEWARE`` block in ``settings.py`` is therefore enough to inherit the full Django security baseline.
 
-Framework Specific Surfaces
+Framework specific surfaces
 ---------------------------
 
-The framework adds three surfaces that warrant attention.
+The framework adds four surfaces that warrant attention.
 
 File router input.
    Captured URL parameters and query values reach Python through the dependency resolver.
@@ -40,7 +40,11 @@ Co-located assets.
    Component and page level CSS and JS ship through the static collector.
    See :doc:`static-assets` for origins, hashes, and integrity.
 
-Common Threats
+Partial rendering endpoints.
+   Zone GET requests and the SSE stream answer partial clients.
+   See :doc:`/content/topics/partial-rendering/index` for the surface and `Access control`_ for the foreign-page rules.
+
+Common threats
 --------------
 
 CSRF.
@@ -66,19 +70,19 @@ Origin spoofing.
    The only page identity a form submission carries is the ``_next_form_origin`` URL path, which the dispatcher resolves through the URLconf with :func:`django.urls.resolve`.
    The client never supplies a filesystem path, so an error re-render can target only pages that are reachable through the routing table anyway.
    A value that does not resolve returns HTTP 400.
-   Substituting the origin of another routed page remains possible and is an authorization question, so guard mutating actions as described under `Access Control`_.
+   Substituting the origin of another routed page remains possible and is an authorization question, so guard mutating actions as described under `Access control`_.
 
 Open redirect.
    ``HttpResponseRedirect`` accepts any URL.
    Validate destinations before passing user input into a redirect target.
-   The partial ``redirect(href, external=True)`` patch is the same escape hatch on the client side, see `Server-Authored Redirects`_.
+   The partial ``redirect(href, external=True)`` patch is the same escape hatch on the client side, see `Server-authored redirects`_.
 
 Object-level authorization.
    A lookup keyed only on a URL value loads whatever row matches, regardless of who owns it.
    The ModelForm ``Meta.instance_from_url`` lookup is unscoped, so scope it to the user or tenant.
    See :doc:`/content/topics/forms/modelforms` for the ownership-scoped pattern and :doc:`di-and-untrusted-input` for the posted origin path that feeds the lookup.
 
-Server-Authored Redirects
+Server-authored redirects
 -------------------------
 
 A partial response can drive a full client navigation with the ``visit`` verb.
@@ -91,7 +95,7 @@ A user-supplied href behind ``external=True`` turns the page into an open redire
 The rule mirrors the plain ``HttpResponseRedirect`` case above.
 Validate or whitelist any destination that traces back to a request value before it reaches the patch.
 
-Access Control
+Access control
 --------------
 
 Form actions are unauthenticated by default.
@@ -111,7 +115,7 @@ The :ref:`howto-enforce-object-level-permissions` recipe shows the owner-only ed
 The out-of-band morph path enforces page-level access on its own.
 A ``morph(zone=..., page=...)`` onto a foreign page re-runs that page's authorization chain and raises ``ForeignPageNotAuthorizedError`` on a denial or ``DynamicForeignPageError`` for a dynamic body, see :doc:`/content/topics/partial-rendering/reference`.
 
-Production Hardening
+Production hardening
 --------------------
 
 A short list of production specific settings.
@@ -128,7 +132,7 @@ A short list of production specific settings.
 Run ``uv run python manage.py check --deploy`` and resolve every warning.
 See :doc:`/content/deployment/checklist` for the full pre-deploy review.
 
-System Checks
+System checks
 -------------
 
 The framework system checks cover configuration mistakes that affect security.
@@ -139,7 +143,7 @@ The framework system checks cover configuration mistakes that affect security.
 
 Run them with ``uv run python manage.py check``.
 
-See Also
+See also
 --------
 
 .. seealso::

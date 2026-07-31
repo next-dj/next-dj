@@ -1,6 +1,6 @@
 .. _security-reporting:
 
-Reporting a Vulnerability
+Reporting a vulnerability
 =========================
 
 This page covers how to report a security vulnerability in next.dj.
@@ -10,7 +10,7 @@ The disclosure process is private and the maintainers acknowledge every report.
    :local:
    :depth: 2
 
-Where to Report
+Where to report
 ---------------
 
 Use the private GitHub Security Advisory form at the project repository.
@@ -19,7 +19,7 @@ The form accepts an encrypted description and lets the maintainers coordinate a 
 Public issues and pull requests are not the right channel.
 A public report exposes users before a fix is available.
 
-What to Include
+What to include
 ---------------
 
 A complete report contains the following.
@@ -32,19 +32,19 @@ A complete report contains the following.
 
 A reproducible test case shortens the triage time considerably.
 
-What Happens Next
+What happens next
 -----------------
 
 The maintainers respond within five business days with an acknowledgement and an initial assessment.
 A fix is prepared and released once the assessment confirms the issue.
 A coordinated public disclosure happens after the fix is available.
 
-Reporter Credit
+Reporter credit
 ---------------
 
 The fix announcement credits the reporter unless the reporter prefers to remain anonymous.
 
-Out of Scope
+Out of scope
 ------------
 
 The following items are out of scope for the security advisory program.
@@ -54,7 +54,7 @@ The following items are out of scope for the security advisory program.
 - Self denial of service through an extremely large form payload.
 - Discoveries that depend on a fork or modified copy of the framework.
 
-See Also
+See also
 --------
 
 .. seealso::

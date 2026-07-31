@@ -1,18 +1,18 @@
 .. _ref-forms:
 
-Forms Reference
+Forms reference
 ===============
 
-Module Summary
+Module summary
 --------------
 
 ``next.forms`` exposes form base classes, the ``@action`` decorator,
 formset helpers, frozen field and form specs,
 and a curated set of commonly used Django form fields and widgets.
 Any public ``django.forms`` name is also importable from ``next.forms``,
-see `Fields and Widgets`_ for the contract.
+see `Fields and widgets`_ for the contract.
 
-API Tiers
+API tiers
 ---------
 
 The forms surface splits into tiers that describe the intended audience for each name.
@@ -44,10 +44,9 @@ Framework machinery.
    ``FormActionDispatch`` lives in ``next.forms.dispatch``.
    ``FormActionManager``, the ``form_action_manager`` instance, and
    ``build_form_namespace_for_action`` live in ``next.forms.manager``.
-   ``ActionMeta``, ``FormActionFactory``, ``file_to_dotted_module``, ``scope_key_for``,
+   ``ActionMeta``, ``file_to_dotted_module``, ``scope_key_for``,
    ``build_action_guard``, and ``record_possible_collision`` live in ``next.forms.backends``.
-   ``WizardBackendManager`` and the ``wizard_backend_manager`` instance live in
-   ``next.forms.wizard``.
+   The ``wizard_backend_manager`` instance lives in ``next.forms.wizard``.
    ``FormProvider`` and ``CleanedDataProvider`` live in ``next.forms.markers``.
    ``bind_component_widgets`` lives in ``next.forms.widgets``.
    ``render_form_page_with_errors`` lives in ``next.forms.rendering``.
@@ -95,7 +94,7 @@ When ``registry_empty`` is true the message also explains that no actions are re
 .. autoexception:: next.forms.FormActionNotFoundError
    :members:
 
-Form Base Classes
+Form base classes
 ~~~~~~~~~~~~~~~~~
 
 ``check_permissions`` and ``has_object_permission`` are the opt-in dynamic permission hooks.
@@ -114,7 +113,7 @@ See :ref:`topics-forms-actions-dynamic-guards` for the authoring contract and th
 .. autoclass:: next.forms.BaseModelForm
    :members: get_initial, get_success_message, on_valid, check_permissions, has_object_permission
 
-Form Wizard
+Form wizard
 ~~~~~~~~~~~
 
 ``FormWizard`` routes a sequence of step forms across requests.
@@ -134,14 +133,20 @@ See :doc:`/content/topics/forms/wizard` and :doc:`/content/topics/forms/wizard-b
 .. autoclass:: next.forms.CacheFormWizardBackend
    :members:
 
-``WizardBackendManager`` is the lazy holder for the single configured wizard backend,
-exposed as the ``wizard_backend_manager`` instance in ``next.forms.wizard``.
-It reads ``FORM_WIZARD_BACKEND`` on first use and caches the result.
+``wizard_backend_manager`` in ``next.forms.wizard`` is the lazy holder for the single
+configured wizard backend, a ``SingleBackendManager`` bound to ``FORM_WIZARD_BACKEND``.
+It reads the setting on first use and caches the result.
+A malformed entry, an unimportable path, or a class outside the ``FormWizardBackend``
+family raises ``ImproperlyConfigured`` out of ``get``, since a family with one backend
+has nothing to fall back to.
 
-.. autoclass:: next.forms.wizard.WizardBackendManager
+.. autoclass:: next.backends.SingleBackendManager
    :members:
+   :no-index:
 
-Fields and Widgets
+The canonical entry for the class lives in :doc:`backends`.
+
+Fields and widgets
 ~~~~~~~~~~~~~~~~~~
 
 The framework re-exports a curated set of commonly used Django form fields and widgets through
@@ -221,9 +226,8 @@ The target is one of ``handler``, ``form_class``, or ``wizard_class``, which let
 ``ActionGuard`` is the frozen access-requirement record built from ``Meta.login_required`` and ``Meta.permission_required`` or the matching ``@action`` keywords.
 It is stored under the ``guard`` key of ``ActionMeta`` and enforced by the dispatch pipeline before the form is built, so custom backends see the declared requirements without extra wiring.
 ``iter_actions`` yields every stored ``ActionMeta``, including its ``name`` key, which is how the forms system checks inspect any configured backend.
-``ActionMeta``, ``FormActionFactory``, and ``file_to_dotted_module`` import from ``next.forms.backends`` directly.
-``FormActionFactory`` instantiates one backend per ``FORM_ACTION_BACKENDS`` entry, passing the whole config dict to the backend constructor.
-``FormActionManager`` calls it, so application code rarely does.
+``ActionMeta`` and ``file_to_dotted_module`` import from ``next.forms.backends`` directly.
+``FormActionManager`` instantiates one backend per ``FORM_ACTION_BACKENDS`` entry, passing the whole config dict to the backend constructor.
 ``scope_key_for`` derives the registry scope key from a declaration file path and a scope, the same key that partitions actions and wizard storage.
 ``build_action_guard`` builds an ``ActionGuard`` from the declared ``login_required`` and ``permission_required`` values, or ``None`` when both are unset.
 ``record_possible_collision`` files a name collision into the registration diagnostics when a name is re-registered with a distinct handler, feeding the ``next.E041`` check.
@@ -242,7 +246,7 @@ The rendered HTML flows through the static-assets pipeline, so co-located CSS an
 .. automodule:: next.forms.rendering
    :members: render_form_page_with_errors
 
-Registration Diagnostics
+Registration diagnostics
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``RegistrationDiagnostics`` buffers registration problems for the forms system checks, exposed as the module-level ``registration_diagnostics`` instance.
@@ -253,7 +257,7 @@ The test isolation helper :func:`next.testing.reset_form_registration_state` cle
 .. automodule:: next.forms.diagnostics
    :members:
 
-Action URL Helpers
+Action URL helpers
 ~~~~~~~~~~~~~~~~~~
 
 ``reverse_form_action`` resolves the dispatch URL for an action UID under either URL wiring,
@@ -261,12 +265,14 @@ the namespaced ``next:form_action`` route or the bare ``form_action`` route.
 It lives in ``next.forms.uid`` and is not re-exported at the package level.
 ``ORIGIN_FIELD_NAME`` is the wire name of the hidden origin field every rendered form carries, ``"_next_form_origin"``.
 ``validated_origin_path`` accepts a posted origin value only as a same-site path.
+``redirect_to_origin`` builds the success redirect back to the page named by the posted origin field, falling back to ``fallback`` when the field is absent or off-site.
+It is re-exported from ``next.forms``.
 ``FORM_ORIGIN_OVERRIDE_KEY`` names the render-context key whose value overrides the origin of a rendered form, which the partial shaping layer sets to the next step URL on a wizard advance.
 
 .. automodule:: next.forms.uid
    :members:
 
-Origin Resolution
+Origin resolution
 ~~~~~~~~~~~~~~~~~
 
 ``OriginMatch``, ``resolve_origin``, ``resolve_url_to_match``, and ``resolve_url_to_page`` are re-exported from ``next.forms``.
@@ -277,7 +283,7 @@ Origin Resolution
 .. automodule:: next.forms.origin
    :members: OriginMatch, resolve_origin, resolve_url_to_match, resolve_url_to_page
 
-Formset Helpers
+Formset helpers
 ~~~~~~~~~~~~~~~
 
 The Django factories ``formset_factory``, ``modelformset_factory``, and ``inlineformset_factory`` re-export through ``next.forms`` unchanged.
@@ -286,7 +292,7 @@ The Django factories ``formset_factory``, ``modelformset_factory``, and ``inline
 .. automodule:: next.forms.formsets
    :members:
 
-Frozen Specs
+Frozen specs
 ~~~~~~~~~~~~
 
 .. automodule:: next.forms.serializers
@@ -299,7 +305,7 @@ See :doc:`signals` and :doc:`/content/topics/forms/signals` for the form signals
 (``action_registered``, ``action_dispatched``, ``form_validation_failed``,
 ``wizard_step_submitted``, ``wizard_completed``, ``form_access_denied``).
 
-See Also
+See also
 --------
 
 .. seealso::
