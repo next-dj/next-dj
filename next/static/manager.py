@@ -22,13 +22,13 @@ from django.conf import settings
 from django.contrib.staticfiles.storage import staticfiles_storage
 from django.utils.functional import LazyObject, empty
 
-from next.backends import load_backends
+from next.backends import backend_entries, load_backends
 from next.conf import import_class_cached, next_framework_settings
 from next.conf.signals import settings_reloaded
 from next.pages.watch import get_pages_directories_for_watch
 
 from .assets import default_kinds
-from .backends import StaticBackend, StaticFilesBackend
+from .backends import StaticBackend
 from .collector import HEAD_CLOSE, StaticCollector, default_placeholders
 from .discovery import AssetDiscovery, PathResolver
 from .scripts import (
@@ -73,7 +73,8 @@ class StaticManager:
     def __init__(self) -> None:
         """Initialise empty backend and discovery caches, loaded lazily."""
         self._backends: list[StaticBackend] = []
-        # An empty list is a legitimate load result, so only a flag knows.
+        # The reload always seeds at least one backend, so the flag only
+        # gates the lazy first load and the settings-reload invalidation.
         self._loaded: bool = False
         self._discovery: AssetDiscovery | None = None
         self._cached_page_roots: tuple[Path, ...] | None = None
@@ -270,21 +271,17 @@ class StaticManager:
         self._script_builder = None
         self._dedup_factory = None
         self._js_policy_factory = None
-        configs = next_framework_settings.STATIC_BACKENDS
-        if not isinstance(configs, list):  # pragma: no cover
-            configs = []
         self._backends = load_backends(
-            [config for config in configs if isinstance(config, dict)],
+            backend_entries("STATIC_BACKENDS"),
+            base=StaticBackend,
+            default=_DEFAULT_BACKEND_PATH,
+            signal=backend_loaded,
+        ) or load_backends(
+            [{}],
             base=StaticBackend,
             default=_DEFAULT_BACKEND_PATH,
             signal=backend_loaded,
         )
-        if not self._backends:
-            seed = StaticFilesBackend()
-            self._backends.append(seed)
-            backend_loaded.send(
-                sender=StaticFilesBackend, config=dict(seed.config), instance=seed
-            )
         self._loaded = True
         self._resolve_collector_strategies()
 

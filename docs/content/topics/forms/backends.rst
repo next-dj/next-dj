@@ -49,6 +49,7 @@ A backend that answers ``ImproperlyConfigured`` from its own ``__init__`` is ski
 
 When every entry fails, the manager keeps rereading the setting instead of caching an empty list, so a corrected dotted path takes effect on the next access.
 Asking such a manager for a backend raises ``ImproperlyConfigured`` naming how many entries were tried, and the ``next.backends`` logger holds the reason each one was skipped.
+The action lookups ``get_action_url``, ``get_action_meta``, and ``require_action_meta`` raise the same error rather than reporting an unknown action, so a load failure never reads as a missing ``@action`` import.
 
 The constructor therefore receives the full entry, not only ``OPTIONS``.
 ``RegistryFormActionBackend.__init__`` accepts the config and ignores it, which is why a subclass that reads no options needs no constructor at all.

@@ -13,11 +13,12 @@ from next.checks.common import (
     RegistrationSubject,
     errors_for_unknown_keys,
     get_components_manager,
+    import_backend_class,
     registration_file_errors,
 )
 from next.conf import next_framework_settings
 
-from .backends import FileComponentsBackend
+from .backends import ComponentsBackend, FileComponentsBackend
 from .context import component
 
 
@@ -44,6 +45,29 @@ _PAGE_CONTEXT_MODULES = frozenset({"next", "next.pages"})
 _PAGE_CONTEXT_OWNERS = frozenset({"next", "page", "next.page", "next.pages"})
 
 
+def _backend_class_errors(dotted: str, prefix: str) -> list[CheckMessage]:
+    """Import the dotted backend path and verify the family subclass."""
+    try:
+        klass = import_backend_class(dotted)
+    except ImportError as exc:
+        return [
+            Error(
+                f"{prefix}.BACKEND cannot be imported: {exc}.",
+                obj=settings,
+                id="next.E032",
+            )
+        ]
+    if not (isinstance(klass, type) and issubclass(klass, ComponentsBackend)):
+        return [
+            Error(
+                f"{prefix}.BACKEND is not a ComponentsBackend subclass.",
+                obj=settings,
+                id="next.E032",
+            )
+        ]
+    return []
+
+
 def _validate_single_component_backend(
     config: dict[str, object], index: int
 ) -> list[CheckMessage]:
@@ -56,10 +80,13 @@ def _validate_single_component_backend(
     ]
     if errors:
         return errors
-    if not isinstance(config["BACKEND"], str):
+    backend_path = config["BACKEND"]
+    if not isinstance(backend_path, str):
         errors.append(
             Error(f"{prefix}.BACKEND must be a string.", obj=settings, id="next.E032")
         )
+    else:
+        errors.extend(_backend_class_errors(backend_path, prefix))
     if not isinstance(config["DIRS"], list):
         errors.append(
             Error(f"{prefix}.DIRS must be a list.", obj=settings, id="next.E032")

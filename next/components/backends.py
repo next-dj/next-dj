@@ -127,7 +127,7 @@ class FileComponentsBackend(ComponentsBackend):
 
 
 class DummyBackend(ComponentsBackend):
-    """Test double that stores the factory `config` dict on `self`."""
+    """Test double that keeps its settings `config` entry on `self`."""
 
     def __init__(self, config: dict[str, Any]) -> None:
         """Keep `config` on `self` for assertions about wiring."""

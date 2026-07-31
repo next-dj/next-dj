@@ -50,15 +50,16 @@ Forms
 
    The tag requires ``request`` in the template context for the CSRF token.
    It also uses ``current_page_module_path`` when present to scope the action lookup to the origin page, which is how the file router renders it.
-   That context value is not strictly required.
-   When it is absent the action lookup falls back to the name index.
+   Inside a component's own template body ``current_component_module_path`` takes precedence, so a component-anchored action resolves before the page anchor.
+   Neither context value is strictly required.
+   When both are absent the action lookup falls back to the name index.
 
 .. describe:: {% action_url "<name>" %}
 
    Returns the dispatch endpoint URL for a registered action.
    The first argument is the action name, a quoted string or a context variable that resolves to a string.
-   The lookup uses the same page scoping as ``{% form %}``.
-   A page-scoped match for the rendering page wins over a shared one, read from ``current_page_module_path`` when present.
+   The lookup uses the same anchor scoping as ``{% form %}``.
+   A match for the component anchor wins over the page anchor, and either wins over a shared one.
 
    As a ``simple_tag`` it supports assignment, ``{% action_url "delete_note" as delete_url %}``.
 

@@ -13,8 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from django.core.exceptions import ImproperlyConfigured
 
-from next.backends import resolve_backend_class
-from next.conf import next_framework_settings
+from next.backends import backend_entries, resolve_backend_class
 
 from .backends import _DEFAULT_BACKEND_PATH, ComponentsBackend, FileComponentsBackend
 from .info import _paths_from_component_info
@@ -57,12 +56,7 @@ def _collect_component_paths_under_page_trees() -> set[Path]:
     from next.urls import RouterFactory  # noqa: PLC0415
 
     result: set[Path] = set()
-    page_configs = next_framework_settings.PAGE_BACKENDS
-    if not isinstance(page_configs, list):
-        return result
-    for config in page_configs:
-        if not isinstance(config, dict):
-            continue
+    for config in backend_entries("PAGE_BACKENDS"):
         try:
             backend = RouterFactory.create_backend(config)
         except Exception:
@@ -90,12 +84,7 @@ def _collect_component_paths_under_page_trees() -> set[Path]:
 def _collect_component_paths_from_backend_dirs() -> set[Path]:
     """Collect paths from component backend `DIRS` entries only."""
     result: set[Path] = set()
-    comp_configs = next_framework_settings.COMPONENT_BACKENDS
-    if not isinstance(comp_configs, list):
-        return result
-    for config in comp_configs:
-        if not isinstance(config, dict):
-            continue
+    for config in backend_entries("COMPONENT_BACKENDS"):
         try:
             klass = resolve_backend_class(
                 config, base=ComponentsBackend, default=_DEFAULT_BACKEND_PATH

@@ -58,6 +58,17 @@ def _render_template_string(template_str: str, context_dict: dict[str, Any]) -> 
     return Template(template_str).render(DjangoTemplateContext(context_dict))
 
 
+def _stamp_component_anchor(info: ComponentInfo, context_dict: dict[str, Any]) -> None:
+    """Overwrite the form-action anchor with this component's own module path.
+
+    Always written, so a component without a component.py never inherits
+    the anchor of an enclosing component or a caller-supplied value.
+    """
+    context_dict["current_component_module_path"] = (
+        str(info.module_path) if info.module_path is not None else None
+    )
+
+
 def _merge_csrf_context(
     context_dict: dict[str, Any], request: HttpRequest | None
 ) -> None:
@@ -148,6 +159,7 @@ class SimpleComponentRenderer:
         if template_str is None:
             return ""
         context_dict = dict(context_data)
+        _stamp_component_anchor(info, context_dict)
         if request is not None:
             context_dict.setdefault("request", request)
             _merge_csrf_context(context_dict, request)
@@ -222,6 +234,7 @@ class CompositeComponentRenderer:
             return ""
 
         context_dict = dict(context_data)
+        _stamp_component_anchor(info, context_dict)
         if request is not None:
             context_dict["request"] = request
             _merge_csrf_context(context_dict, request)
@@ -236,7 +249,9 @@ class CompositeComponentRenderer:
         template_str = self._template_loader.load(info)
         if template_str is None:
             return ""
-        return _render_template_string(template_str, dict(context_data))
+        context_dict = dict(context_data)
+        _stamp_component_anchor(info, context_dict)
+        return _render_template_string(template_str, context_dict)
 
 
 class ComponentRenderer:

@@ -8,7 +8,11 @@ from django.middleware.csrf import get_token
 from django.utils.html import format_html
 
 from next.forms.backends import FormActionNotFoundError
-from next.forms.manager import _build_form_namespace_from_meta, form_action_manager
+from next.forms.manager import (
+    _build_form_namespace_from_meta,
+    form_action_manager,
+    resolve_component_anchor,
+)
 from next.forms.uid import (
     FORM_ORIGIN_OVERRIDE_KEY,
     ORIGIN_FIELD_NAME,
@@ -37,6 +41,8 @@ if TYPE_CHECKING:
     from django import forms as django_forms
     from django.http import HttpRequest
     from django.template.base import FilterExpression
+
+    from next.forms.backends import ActionMeta
 
 
 register = template.Library()
@@ -81,6 +87,24 @@ def _page_path_from_context(context: template.Context) -> str | None:
     return str(raw_page) if raw_page else None
 
 
+def _component_path_from_context(context: template.Context) -> str | None:
+    """Return the current component module path stored in the render context."""
+    raw_component = context.get("current_component_module_path")
+    return str(raw_component) if raw_component else None
+
+
+def _anchor_lookup_from_context(
+    context: template.Context, action_name: str
+) -> "tuple[str | None, ActionMeta | None]":
+    """Return the lookup anchor, with the meta when the component anchor wins."""
+    component_path = _component_path_from_context(context)
+    if component_path is not None:
+        meta = resolve_component_anchor(action_name, component_path)
+        if meta is not None:
+            return component_path, meta
+    return _page_path_from_context(context), None
+
+
 @register.simple_tag(takes_context=True)
 def action_url(context: template.Context, action_name: str) -> str:
     """Return the endpoint URL for an action, page-scoped like `{% form %}`."""
@@ -92,9 +116,8 @@ def action_url(context: template.Context, action_name: str) -> str:
             "action name to pass it as a literal."
         )
         raise FormActionNotFoundError(msg)
-    return form_action_manager.get_action_url(
-        name, page_path=_page_path_from_context(context)
-    )
+    anchor, _meta = _anchor_lookup_from_context(context, name)
+    return form_action_manager.get_action_url(name, page_path=anchor)
 
 
 def _parse_form_attr(
@@ -229,12 +252,13 @@ class FormNode(template.Node):
             )
             raise FormActionNotFoundError(msg, name=token)
 
-        page_path = _page_path_from_context(context)
+        page_path, meta = _anchor_lookup_from_context(context, action_name)
 
         resolved_action_url = form_action_manager.get_action_url(
             action_name, page_path=page_path
         )
-        meta = form_action_manager.get_action_meta(action_name, page_path=page_path)
+        if meta is None:
+            meta = form_action_manager.get_action_meta(action_name, page_path=page_path)
 
         form_obj = context.get(action_name)
         if form_obj and hasattr(form_obj, "form"):

@@ -184,7 +184,7 @@ class TestComponentBackendLoadedSignal:
             {"BACKEND": "next.components.DummyBackend", "COMPONENTS_DIR": "b"},
         ]
 
-        with patch("next.components.manager.next_framework_settings") as fake_settings:
+        with patch("next.backends.next_framework_settings") as fake_settings:
             fake_settings.COMPONENT_BACKENDS = configs
             manager._reload_config()
 
@@ -197,7 +197,7 @@ class TestComponentBackendLoadedSignal:
     ) -> None:
         """The class is the sender, so receivers can filter on it."""
         manager = ComponentsManager()
-        with patch("next.components.manager.next_framework_settings") as fake_settings:
+        with patch("next.backends.next_framework_settings") as fake_settings:
             fake_settings.COMPONENT_BACKENDS = [
                 {"BACKEND": "next.components.DummyBackend"}
             ]
@@ -211,7 +211,7 @@ class TestComponentBackendLoadedSignal:
     ) -> None:
         """``instance`` is the backend the manager kept, under its new name."""
         manager = ComponentsManager()
-        with patch("next.components.manager.next_framework_settings") as fake_settings:
+        with patch("next.backends.next_framework_settings") as fake_settings:
             fake_settings.COMPONENT_BACKENDS = [
                 {"BACKEND": "next.components.DummyBackend"}
             ]
@@ -227,7 +227,7 @@ class TestComponentBackendLoadedSignal:
         """A receiver mutating ``config`` cannot corrupt the settings entry."""
         entry = {"BACKEND": "next.components.DummyBackend"}
         manager = ComponentsManager()
-        with patch("next.components.manager.next_framework_settings") as fake_settings:
+        with patch("next.backends.next_framework_settings") as fake_settings:
             fake_settings.COMPONENT_BACKENDS = [entry]
             manager._reload_config()
 
@@ -240,7 +240,7 @@ class TestComponentBackendLoadedSignal:
     ) -> None:
         """An entry that never loads emits no event."""
         manager = ComponentsManager()
-        with patch("next.components.manager.next_framework_settings") as fake_settings:
+        with patch("next.backends.next_framework_settings") as fake_settings:
             fake_settings.COMPONENT_BACKENDS = [
                 {"BACKEND": "next.components.NoSuchBackend"}
             ]

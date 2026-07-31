@@ -91,6 +91,12 @@ Override with ``Meta.scope``.
 Customise the set of anchor file names through ``NEXT_FRAMEWORK["FORM_ANCHOR_FILES"]``.
 The default set is ``["page.py", "component.py"]``.
 
+Lookup order in templates.
+   ``{% form %}`` and ``{% action_url %}`` resolve a name against the nearest anchor first.
+   Inside a component's own template the chain is the component's ``component.py``, then the enclosing page's ``page.py``, then the shared registry.
+   In a page or layout template the chain is the page's ``page.py``, then the shared registry.
+   Slot bodies and free children passed to a component render in the page context, so they resolve against the page anchor.
+
 The file is the one the ``class`` statement is written in, not the file that imports the class.
 A class built by a factory such as ``next.forms.modelform_factory`` is attributed to the module that calls the factory, not to the module that runs the underlying ``type()`` call.
 

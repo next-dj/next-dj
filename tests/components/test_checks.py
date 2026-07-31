@@ -2,18 +2,21 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from django.core.exceptions import ImproperlyConfigured
 
 from next.checks import (
     check_component_context_registration_files,
     check_component_py_no_pages_context,
     check_cross_root_component_name_conflicts,
     check_duplicate_component_names,
+    check_next_components_configuration,
     reset_check_caches,
 )
 from next.components import ComponentInfo, FileComponentsBackend
 from next.components.context import ComponentContextRegistry, component
 from tests.support import (
     importable_dir,
+    next_framework_settings_component_backends_list as _next_framework_settings_component_backends_list,
     next_framework_settings_for_checks_backends_value as _next_framework_settings_for_checks_backends_value,
     patch_checks_components_manager,
 )
@@ -36,6 +39,28 @@ class TestChecks:
         mock_ns = _next_framework_settings_for_checks_backends_value(None)
         with patch("next.components.checks.next_framework_settings", mock_ns):
             assert check_duplicate_component_names() == []
+
+    def test_backend_failing_at_import_is_reported(self) -> None:
+        """A backend module raising at import becomes next.E032, not a traceback."""
+        mock_ns = _next_framework_settings_component_backends_list(
+            [
+                {
+                    "BACKEND": "myapp.backends.Broken",
+                    "DIRS": [],
+                    "COMPONENTS_DIR": "_components",
+                }
+            ]
+        )
+        with (
+            patch("next.components.checks.next_framework_settings", mock_ns),
+            patch(
+                "next.checks.common.import_class_cached",
+                side_effect=ImproperlyConfigured("MYAPP_KEY is unset"),
+            ),
+        ):
+            errors = check_next_components_configuration()
+        assert [e.id for e in errors] == ["next.E032"]
+        assert "MYAPP_KEY is unset" in errors[0].msg
 
     def test_check_component_py_no_pages_context_empty_when_no_config(self) -> None:
         """check_component_py_no_pages_context returns [] when backends is not a list."""

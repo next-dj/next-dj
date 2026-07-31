@@ -275,7 +275,13 @@ class FormActionBackend(ABC):
     def get_meta(
         self, action_name: str, page_path: str | None = None
     ) -> "ActionMeta | None":
-        """Return optional per-action metadata for subclasses."""
+        """Return optional per-action metadata for subclasses.
+
+        A lookup with `page_path` returns the exact page-scoped meta for that
+        path or a shared-scoped fallback, never a page-scoped meta registered
+        under a different path. The template tags rely on this to tell an
+        exact anchor hit apart from the fallback.
+        """
         del action_name, page_path
         return None
 

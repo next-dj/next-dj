@@ -9,8 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
-from next.backends import load_backends
-from next.conf import next_framework_settings
+from next.backends import backend_entries, load_backends
 from next.conf.signals import settings_reloaded
 
 from .backends import _DEFAULT_BACKEND_PATH, ComponentsBackend
@@ -85,10 +84,8 @@ class ComponentsManager:
 
     def _reload_config(self) -> None:
         self._invalidate()
-        configs = next_framework_settings.COMPONENT_BACKENDS
-        entries = configs if isinstance(configs, list) else []
         self._backends = load_backends(
-            [config for config in entries if isinstance(config, dict)],
+            backend_entries("COMPONENT_BACKENDS"),
             base=ComponentsBackend,
             default=_DEFAULT_BACKEND_PATH,
             signal=component_backend_loaded,

@@ -5,7 +5,12 @@ from django.core.exceptions import ImproperlyConfigured
 from django.dispatch import Signal
 from django.test import override_settings
 
-from next.backends import SingleBackendManager, load_backends, resolve_backend_class
+from next.backends import (
+    SingleBackendManager,
+    backend_entries,
+    load_backends,
+    resolve_backend_class,
+)
 from tests.support.backends import (
     ALPHA,
     BETA,
@@ -72,7 +77,9 @@ class TestResolveBackendClass:
         assert klass is BetaBackend
 
     def test_explicit_backend_wins_over_the_default(self) -> None:
-        klass = resolve_backend_class({"BACKEND": ALPHA}, base=FakeBackend, default=BETA)
+        klass = resolve_backend_class(
+            {"BACKEND": ALPHA}, base=FakeBackend, default=BETA
+        )
         assert klass is AlphaBackend
 
     def test_class_outside_the_family_is_improperly_configured(self) -> None:
@@ -228,6 +235,28 @@ class TestAbstractFamilyRoot:
         assert "error resolving AbstractFakeBackend from config" in caplog.text
 
 
+class TestBackendEntries:
+    """backend_entries reads one list-valued settings key defensively."""
+
+    def test_returns_the_dict_entries(self) -> None:
+        entries = [{"BACKEND": ALPHA}, {"BACKEND": BETA}]
+        with override_settings(NEXT_FRAMEWORK={_LIST_SETTING: entries}):
+            assert backend_entries(_LIST_SETTING) == entries
+
+    def test_non_dict_entries_are_filtered(self) -> None:
+        with override_settings(
+            NEXT_FRAMEWORK={_LIST_SETTING: ["not-an-entry", {"BACKEND": ALPHA}, 42]}
+        ):
+            assert backend_entries(_LIST_SETTING) == [{"BACKEND": ALPHA}]
+
+    def test_non_list_value_returns_no_entries(self) -> None:
+        # FORM_WIZARD_BACKEND merges to a dict, never a list of entries.
+        assert backend_entries(_DICT_SETTING) == []
+
+    def test_missing_key_returns_no_entries(self) -> None:
+        assert backend_entries(_UNKNOWN_SETTING) == []
+
+
 class TestConfigSelection:
     """The bound settings key names one entry, whatever shape the family uses."""
 
@@ -276,10 +305,13 @@ class TestConfigSelection:
 class TestFailuresPropagate:
     """A single-backend family has no fallback, so a bad entry raises out of get()."""
 
-    def test_unimportable_backend_escapes(self) -> None:
+    def test_unimportable_backend_names_the_settings_key(self) -> None:
         with (
             override_settings(NEXT_FRAMEWORK={_DICT_SETTING: {"BACKEND": MISSING}}),
-            pytest.raises(ImportError),
+            pytest.raises(
+                ImproperlyConfigured,
+                match=rf"NEXT_FRAMEWORK\['{_DICT_SETTING}'\].*cannot be imported",
+            ),
         ):
             _manager().get()
 

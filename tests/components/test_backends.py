@@ -309,7 +309,7 @@ class TestComponentsManagerLoading:
         mock_ns = _next_framework_settings_component_backends_list(
             [{"DIRS": [], "COMPONENTS_DIR": "_components"}]
         )
-        with patch("next.components.manager.next_framework_settings", mock_ns):
+        with patch("next.backends.next_framework_settings", mock_ns):
             mgr._reload_config()
         assert [type(backend) for backend in mgr._backends] == [FileComponentsBackend]
 
@@ -319,7 +319,7 @@ class TestComponentsManagerLoading:
         mock_ns = _next_framework_settings_component_backends_list(
             [{"BACKEND": "next.components.DummyBackend", "OPTIONS": {"marker": 7}}]
         )
-        with patch("next.components.manager.next_framework_settings", mock_ns):
+        with patch("next.backends.next_framework_settings", mock_ns):
             mgr._reload_config()
         backend = mgr._backends[0]
         assert isinstance(backend, DummyBackend)
@@ -331,7 +331,7 @@ class TestComponentsManagerLoading:
         mock_ns = _next_framework_settings_component_backends_list(
             [{"BACKEND": "builtins.dict"}]
         )
-        with patch("next.components.manager.next_framework_settings", mock_ns):
+        with patch("next.backends.next_framework_settings", mock_ns):
             mgr._reload_config()
         assert mgr._backends == []
 
@@ -345,7 +345,7 @@ class TestComponentsManagerLoading:
         """If ``COMPONENT_BACKENDS`` is not a list, return early. Non-dict entries are skipped."""
         mgr = ComponentsManager()
         mock_ns = _next_framework_settings_component_backends_list("bad")
-        with patch("next.components.manager.next_framework_settings", mock_ns):
+        with patch("next.backends.next_framework_settings", mock_ns):
             mgr._reload_config()
             assert mgr._backends == []
 
@@ -360,7 +360,7 @@ class TestComponentsManagerLoading:
                 },
             ]
         )
-        with patch("next.components.manager.next_framework_settings", mock_ns2):
+        with patch("next.backends.next_framework_settings", mock_ns2):
             mgr2._reload_config()
             assert len(mgr2._backends) >= 1
 

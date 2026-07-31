@@ -49,8 +49,12 @@ The two path keys are seeded before any user-defined ``@context`` callable runs,
 ``current_page_module_path``.
    The absolute path of the ``page.py`` module being rendered.
 
+``current_component_module_path``.
+   The absolute path of the ``component.py`` beside the component template being rendered, or ``None`` for a component without one.
+   The ``{% component %}`` tag writes it for the component's own template body, so it never leaks into slot bodies rendered by the page.
+
 A user ``@context`` callable reads ``request`` through an ``HttpRequest`` annotation rather than by parameter name.
-The ``current_template_path`` and ``current_page_module_path`` keys live in the template scope for the ``{% form %}`` and ``{% component %}`` tags to consume.
+These path keys live in the template scope for the ``{% form %}`` and ``{% component %}`` tags to consume.
 They are not injected into a context callable by parameter name.
 
 The decorator

@@ -644,21 +644,21 @@ class TestFormTagFormsetRender:
         assert "</form>" in html
 
 
+def _register_page_action(name: str, file_path: str) -> None:
+    form_action_manager.default_backend.register_action(
+        ActionRegistration(
+            name=name, file_path=file_path, scope="page", handler=lambda: None
+        )
+    )
+
+
 class TestActionUrlTag:
     """{% action_url %} resolves page and shared scopes and rejects unknown names."""
-
-    @staticmethod
-    def _register_page_action(name: str, page_path: str) -> None:
-        form_action_manager.default_backend.register_action(
-            ActionRegistration(
-                name=name, file_path=page_path, scope="page", handler=lambda: None
-            )
-        )
 
     def test_resolves_page_scoped_action(self, form_engine, tmp_path) -> None:
         """The tag resolves a page-scoped action through the context page path."""
         page_path = str(tmp_path / "page.py")
-        self._register_page_action("tag_page_action", page_path)
+        _register_page_action("tag_page_action", page_path)
         out = form_engine.from_string('{% action_url "tag_page_action" %}').render(
             Context({"current_page_module_path": page_path})
         )
@@ -673,7 +673,7 @@ class TestActionUrlTag:
         """The tag honours the same scope filter as {% form %}."""
         page_a = str(tmp_path / "a" / "page.py")
         page_b = str(tmp_path / "b" / "page.py")
-        self._register_page_action("tag_scoped_action", page_a)
+        _register_page_action("tag_scoped_action", page_a)
         t = form_engine.from_string('{% action_url "tag_scoped_action" %}')
         with pytest.raises(FormActionNotFoundError, match="Unknown form action"):
             t.render(Context({"current_page_module_path": page_b}))
@@ -705,6 +705,131 @@ class TestActionUrlTag:
         t = form_engine.from_string("{% action_url save_note %}")
         with pytest.raises(FormActionNotFoundError, match="empty action name"):
             t.render(Context({}))
+
+
+class TestComponentAnchoredActions:
+    """Actions declared in component.py resolve inside the component's template."""
+
+    @staticmethod
+    def _paths(tmp_path) -> tuple[str, str]:
+        page = str(tmp_path / "page.py")
+        comp = str(tmp_path / "widget" / "component.py")
+        return page, comp
+
+    def test_action_url_resolves_component_anchored_action(
+        self, form_engine, tmp_path
+    ) -> None:
+        """The tag reaches a page-scoped action registered under component.py."""
+        page, comp = self._paths(tmp_path)
+        _register_page_action("widget_save", comp)
+        out = form_engine.from_string('{% action_url "widget_save" %}').render(
+            Context(
+                {
+                    "current_page_module_path": page,
+                    "current_component_module_path": comp,
+                }
+            )
+        )
+        assert out == form_action_manager.get_action_url("widget_save", page_path=comp)
+        assert "/_next/form/" in out
+
+    def test_form_tag_resolves_component_anchored_action(
+        self, form_engine, csrf_request, tmp_path
+    ) -> None:
+        """{% form %} renders with the uid of the component registration."""
+        page, comp = self._paths(tmp_path)
+        _register_page_action("widget_save", comp)
+        t = form_engine.from_string('{% form "widget_save" %}x{% endform %}')
+        html = t.render(
+            Context(
+                {
+                    "request": csrf_request,
+                    "current_page_module_path": page,
+                    "current_component_module_path": comp,
+                }
+            )
+        )
+        meta = form_action_manager.get_action_meta("widget_save", page_path=comp)
+        assert meta is not None
+        assert f'data-next-action="{meta["uid"]}"' in html
+        assert "</form>" in html
+
+    def test_page_anchored_action_resolves_inside_component_context(
+        self, form_engine, tmp_path
+    ) -> None:
+        """A component-tier miss falls back to the enclosing page anchor."""
+        page, comp = self._paths(tmp_path)
+        _register_page_action("widget_save", page)
+        out = form_engine.from_string('{% action_url "widget_save" %}').render(
+            Context(
+                {
+                    "current_page_module_path": page,
+                    "current_component_module_path": comp,
+                }
+            )
+        )
+        assert out == form_action_manager.get_action_url("widget_save", page_path=page)
+
+    def test_component_anchored_action_invisible_without_component_context(
+        self, form_engine, tmp_path
+    ) -> None:
+        """Without a component anchor the shared-only fallback still rejects it."""
+        page, comp = self._paths(tmp_path)
+        _register_page_action("widget_save", comp)
+        t = form_engine.from_string('{% action_url "widget_save" %}')
+        with pytest.raises(FormActionNotFoundError, match="Unknown form action"):
+            t.render(Context({"current_page_module_path": page}))
+
+    def test_form_tag_still_raises_without_component_context(
+        self, form_engine, csrf_request, tmp_path
+    ) -> None:
+        """{% form %} keeps the pre-fix failure for component-only registrations."""
+        page, comp = self._paths(tmp_path)
+        _register_page_action("widget_save", comp)
+        t = form_engine.from_string('{% form "widget_save" %}x{% endform %}')
+        with pytest.raises(FormActionNotFoundError, match="Unknown form action"):
+            t.render(
+                Context({"request": csrf_request, "current_page_module_path": page})
+            )
+
+    def test_component_registration_wins_inside_component_context(
+        self, form_engine, tmp_path
+    ) -> None:
+        """The same name under both anchors resolves to the component one."""
+        page, comp = self._paths(tmp_path)
+        _register_page_action("shadowed_save", comp)
+        _register_page_action("shadowed_save", page)
+        component_url = form_action_manager.get_action_url(
+            "shadowed_save", page_path=comp
+        )
+        page_url = form_action_manager.get_action_url("shadowed_save", page_path=page)
+        assert component_url != page_url
+        out = form_engine.from_string('{% action_url "shadowed_save" %}').render(
+            Context(
+                {
+                    "current_page_module_path": page,
+                    "current_component_module_path": comp,
+                }
+            )
+        )
+        assert out == component_url
+
+    def test_page_registration_wins_without_component_context(
+        self, form_engine, tmp_path
+    ) -> None:
+        """Without a component anchor the page registration keeps priority."""
+        page, comp = self._paths(tmp_path)
+        _register_page_action("shadowed_save", comp)
+        _register_page_action("shadowed_save", page)
+        out = form_engine.from_string('{% action_url "shadowed_save" %}').render(
+            Context({"current_page_module_path": page})
+        )
+        assert out == form_action_manager.get_action_url(
+            "shadowed_save", page_path=page
+        )
+        assert out != form_action_manager.get_action_url(
+            "shadowed_save", page_path=comp
+        )
 
 
 class TestFormTagMarkupIdentity:

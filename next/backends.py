@@ -53,6 +53,14 @@ def _instantiate_backend[T](klass: type[T], config: Mapping[str, Any]) -> T:
     return factory(config)
 
 
+def backend_entries(setting: str) -> list[dict[str, Any]]:
+    """Return the dict entries under one list-valued framework settings key."""
+    raw = getattr(next_framework_settings, setting, [])
+    if not isinstance(raw, list):
+        return []
+    return [entry for entry in raw if isinstance(entry, dict)]
+
+
 def load_backends[T](
     configs: Iterable[Mapping[str, Any]],
     *,
@@ -114,7 +122,16 @@ class SingleBackendManager[T]:
     @cached_property
     def _backend(self) -> T:
         config = self._select_config()
-        klass = resolve_backend_class(config, base=self._base, default=self._default)
+        try:
+            klass = resolve_backend_class(
+                config, base=self._base, default=self._default
+            )
+        except ImportError as exc:
+            msg = (
+                f"NEXT_FRAMEWORK[{self._setting!r}] names a backend that "
+                f"cannot be imported: {exc}"
+            )
+            raise ImproperlyConfigured(msg) from exc
         return _instantiate_backend(klass, config)
 
     def get(self) -> T:
@@ -134,6 +151,7 @@ class SingleBackendManager[T]:
 __all__ = [
     "BackendRoot",
     "SingleBackendManager",
+    "backend_entries",
     "load_backends",
     "resolve_backend_class",
 ]

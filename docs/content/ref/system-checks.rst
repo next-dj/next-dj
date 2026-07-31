@@ -212,7 +212,7 @@ Errors
      - A component backend entry is missing a required key.
      - ``next.components.checks``
    * - ``next.E032``
-     - A component backend ``BACKEND`` or ``DIRS`` value has the wrong type.
+     - A component backend ``BACKEND`` or ``DIRS`` value has the wrong type, or ``BACKEND`` does not import as a ``ComponentsBackend`` subclass.
      - ``next.components.checks``
    * - ``next.E033``
      - ``COMPONENT_BACKENDS`` is empty.

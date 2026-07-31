@@ -37,7 +37,7 @@ class TestComponentsManager:
     def test_get_component_empty_when_no_config(self) -> None:
         """When ``BACKENDS`` is empty, get_component returns None."""
         mock_ns = _next_framework_settings_component_backends_list([])
-        with patch("next.components.manager.next_framework_settings", mock_ns):
+        with patch("next.backends.next_framework_settings", mock_ns):
             manager = ComponentsManager()
             manager._reload_config()
             assert manager.get_component("card", Path("/tmp/t.djx")) is None
@@ -45,7 +45,7 @@ class TestComponentsManager:
     def test_collect_visible_components_merges_backends(self) -> None:
         """collect_visible_components merges from all backends, first wins."""
         mock_ns = _next_framework_settings_component_backends_list([])
-        with patch("next.components.manager.next_framework_settings", mock_ns):
+        with patch("next.backends.next_framework_settings", mock_ns):
             manager = ComponentsManager()
             manager._reload_config()
             assert manager.collect_visible_components(Path("/x")) == {}
@@ -55,7 +55,7 @@ class TestComponentsManager:
         mock_ns = _next_framework_settings_component_backends_list(
             [{"BACKEND": "next.components.NonexistentBackend", "OPTIONS": {}}]
         )
-        with patch("next.components.manager.next_framework_settings", mock_ns):
+        with patch("next.backends.next_framework_settings", mock_ns):
             manager = ComponentsManager()
             manager._reload_config()
             assert len(manager._backends) == 0
@@ -64,7 +64,7 @@ class TestComponentsManager:
         """Render pipeline uses ``ComponentTemplateLoader`` wrapping ``ModuleLoader``."""
         mgr = ComponentsManager()
         mock_ns = _next_framework_settings_component_backends_list([])
-        with patch("next.components.manager.next_framework_settings", mock_ns):
+        with patch("next.backends.next_framework_settings", mock_ns):
             mgr._reload_config()
         assert isinstance(mgr.template_loader, ComponentTemplateLoader)
         assert isinstance(mgr.component_renderer, ComponentRenderer)
@@ -78,7 +78,7 @@ class TestBackendsLoadedOnce:
         manager = ComponentsManager()
         mock_ns = _next_framework_settings_component_backends_list([])
         with (
-            patch("next.components.manager.next_framework_settings", mock_ns),
+            patch("next.backends.next_framework_settings", mock_ns),
             patch(
                 "next.components.manager.load_backends", return_value=[]
             ) as load_backends_mock,
@@ -95,7 +95,7 @@ class TestBackendsLoadedOnce:
             [{"BACKEND": "next.components.NoSuchBackend"}]
         )
         with (
-            patch("next.components.manager.next_framework_settings", mock_ns),
+            patch("next.backends.next_framework_settings", mock_ns),
             patch(
                 "next.components.manager.load_backends", return_value=[]
             ) as load_backends_mock,
@@ -110,7 +110,7 @@ class TestBackendsLoadedOnce:
         mock_ns = _next_framework_settings_component_backends_list(
             [{"BACKEND": "next.components.DummyBackend"}]
         )
-        with patch("next.components.manager.next_framework_settings", mock_ns):
+        with patch("next.backends.next_framework_settings", mock_ns):
             manager._ensure_backends()
             manager._backends.clear()
             manager._ensure_backends()
@@ -122,7 +122,7 @@ class TestBackendsLoadedOnce:
         mock_ns = _next_framework_settings_component_backends_list(
             [{"BACKEND": "next.components.DummyBackend"}]
         )
-        with patch("next.components.manager.next_framework_settings", mock_ns):
+        with patch("next.backends.next_framework_settings", mock_ns):
             manager._ensure_backends()
             first = manager._backends[0]
             manager._reload_config()
@@ -138,7 +138,7 @@ class TestEntryWithoutBackendKey:
         mock_ns = _next_framework_settings_component_backends_list(
             [{"DIRS": [], "COMPONENTS_DIR": "_components"}]
         )
-        with patch("next.components.manager.next_framework_settings", mock_ns):
+        with patch("next.backends.next_framework_settings", mock_ns):
             manager._ensure_backends()
         assert isinstance(manager._backends[0], FileComponentsBackend)
 
@@ -171,7 +171,7 @@ class TestBackendConstructionErrorsEscape:
             [{"BACKEND": "next.components.BoomBackend"}]
         )
         with (
-            patch("next.components.manager.next_framework_settings", mock_ns),
+            patch("next.backends.next_framework_settings", mock_ns),
             pytest.raises(RuntimeError, match="boom"),
         ):
             manager._ensure_backends()
@@ -186,7 +186,7 @@ class TestSettingsReloadedIsLazy:
         mock_ns = _next_framework_settings_component_backends_list(
             [{"BACKEND": "next.components.DummyBackend"}]
         )
-        with patch("next.components.manager.next_framework_settings", mock_ns):
+        with patch("next.backends.next_framework_settings", mock_ns):
             manager._ensure_backends()
             assert len(manager._backends) == 1
             with patch("next.components.manager.load_backends") as load_backends_mock:
@@ -202,7 +202,7 @@ class TestSettingsReloadedIsLazy:
         """Cached pipeline and router-walk bookkeeping go with the backends."""
         manager = ComponentsManager()
         mock_ns = _next_framework_settings_component_backends_list([])
-        with patch("next.components.manager.next_framework_settings", mock_ns):
+        with patch("next.backends.next_framework_settings", mock_ns):
             manager._ensure_backends()
             assert manager.template_loader is not None
             assert manager._claim_router_walk_folder(Path("/tmp")) is True
@@ -588,7 +588,7 @@ class TestGetComponentPathsForWatch:
         mock_nf = SimpleNamespace(
             PAGE_BACKENDS="not-a-list", COMPONENT_BACKENDS="not-a-list"
         )
-        with patch("next.components.watch.next_framework_settings", mock_nf):
+        with patch("next.backends.next_framework_settings", mock_nf):
             assert get_component_paths_for_watch() == set()
 
     def test_collects_composite_under_pages_tree(self, tmp_path: Path) -> None:

@@ -139,16 +139,14 @@ class TestBackendsLoadedOnce:
 
     def test_empty_settings_do_not_reload_on_every_access(self) -> None:
         manager = StaticManager()
-        with (
-            override_settings(NEXT_FRAMEWORK={"STATIC_BACKENDS": []}),
-            mock.patch(
-                "next.static.manager.load_backends", return_value=[]
-            ) as load_backends_mock,
-        ):
+        with override_settings(NEXT_FRAMEWORK={"STATIC_BACKENDS": []}):
             manager._ensure_backends()
-            manager._ensure_backends()
-            len(manager)
-        assert load_backends_mock.call_count == 1
+            with mock.patch.object(
+                StaticManager, "_reload_config", autospec=True
+            ) as reload_mock:
+                manager._ensure_backends()
+                len(manager)
+        reload_mock.assert_not_called()
 
     def test_unusable_settings_do_not_reload_on_every_access(self) -> None:
         manager = StaticManager()
