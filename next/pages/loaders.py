@@ -39,18 +39,97 @@ logger = logging.getLogger(__name__)
 _MAX_ANCESTOR_WALK_DEPTH = 64
 
 
+class PageModuleImportError(Exception):
+    """A `page.py` body raised while importing.
+
+    Covers any exception raised by the module body. ImportError,
+    SyntaxError, and AttributeError are common examples, not a closed
+    list. The original exception travels as `__cause__` and the
+    offending path as `file_path`.
+    """
+
+    def __init__(self, file_path: Path) -> None:
+        """Compose the message from the failing path."""
+        super().__init__(f"{file_path} failed to import")
+        self.file_path = file_path
+
+
+# Mutated only in place (clear, pop, setitem) and never rebound. The page
+# manager holds a direct alias for its cheap emptiness guard, so a rebind
+# here would silently detach that guard and disable fail-loud serving.
+_LAST_LOAD_ERROR: dict[Path, tuple[float, Exception]] = {}
+
+
+def _record_load_error(file_path: Path, exc: Exception, mtime: float | None) -> None:
+    """Remember the import failure keyed by the mtime taken before exec.
+
+    A `None` mtime means the file vanished before executing, so any
+    stale record is dropped instead of binding the failure to a file
+    that no longer exists.
+    """
+    if mtime is None:
+        _LAST_LOAD_ERROR.pop(file_path, None)
+        return
+    _LAST_LOAD_ERROR[file_path] = (mtime, exc)
+
+
+def last_load_error(file_path: Path) -> PageModuleImportError | None:
+    """Return the recorded import failure while `file_path` is unchanged on disk.
+
+    Every call wraps the stored cause in a fresh `PageModuleImportError`.
+    Re-raising one shared instance would append the raise chain to its
+    traceback on every request and pin each request's frame locals alive.
+    """
+    entry = _LAST_LOAD_ERROR.get(file_path)
+    if entry is None:
+        return None
+    try:
+        mtime = file_path.stat().st_mtime
+    except OSError:
+        return None
+    if mtime != entry[0]:
+        return None
+    error = PageModuleImportError(file_path)
+    error.__cause__ = entry[1]
+    return error
+
+
 def _load_python_module(file_path: Path) -> types.ModuleType | None:
-    """Load `file_path` as a module or return `None` on failure."""
+    """Load `file_path` as a module or return `None` on failure.
+
+    Any exception raised by the module body is recorded through
+    `_record_load_error` so callers can tell a broken `page.py` from a
+    legitimately absent module via `last_load_error`. ImportError,
+    SyntaxError, and AttributeError are common examples, not a closed
+    list.
+    """
     try:
         spec = importlib.util.spec_from_file_location("page_module", file_path)
         if not spec or not spec.loader:
             return None
         module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-    except (ImportError, AttributeError, OSError, SyntaxError) as e:
+    except OSError as e:
         logger.debug("Could not load module %s: %s", file_path, e)
         return None
+    # The mtime is taken before exec so a failure is recorded against the
+    # file that actually executed, not a rewrite landing mid-import.
+    try:
+        mtime: float | None = file_path.stat().st_mtime
+    except OSError:
+        mtime = None
+    try:
+        spec.loader.exec_module(module)
+    except Exception as exc:
+        if mtime is None:
+            # An unstatable file raises from exec too, and that is the
+            # legitimately absent case, not a broken module body.
+            logger.debug("Could not load module %s: %s", file_path, exc)
+        else:
+            logger.exception("Could not import page module %s", file_path)
+        _record_load_error(file_path, exc, mtime)
+        return None
     else:
+        _LAST_LOAD_ERROR.pop(file_path, None)
         return module
 
 
@@ -85,8 +164,13 @@ def reset_module_memo() -> None:
 
     The memo keys by mtime, so a rewrite that lands on the same tick would
     otherwise return a stale module. The check-cache reset clears this for
-    scripts that edit a `page.py` in place between runs.
+    scripts that edit a `page.py` in place between runs. Recorded import
+    failures follow the same lifecycle and are dropped alongside.
     """
+    # Errors go first so a concurrent load racing this reset can at worst
+    # leave a fresh memo entry behind, never a memoised failure without
+    # its recorded error.
+    _LAST_LOAD_ERROR.clear()
     _MODULE_MEMO.clear()
 
 

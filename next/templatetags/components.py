@@ -9,12 +9,15 @@ short void ``{% set_slot "name" %}`` when there is no default slot body.
 
 from __future__ import annotations
 
+import difflib
+import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast, override
+from typing import Any, Literal, cast, override
 
 from django import template
+from django.conf import settings
 from django.template import base as template_base
 from django.template.base import (
     FilterExpression,
@@ -26,12 +29,15 @@ from django.template.base import (
 )
 from django.utils.safestring import SafeString
 
-from next.components import get_component, render_component
+from next.components import collect_visible_components, get_component, render_component
+from next.conf import next_framework_settings
 from next.static import collect_component_assets
 
 
 # Allow line breaks inside ``{% ... %}`` (multiline tag bodies).
 template_base.tag_re = re.compile(template_base.tag_re.pattern, re.DOTALL)
+
+logger = logging.getLogger(__name__)
 
 register = template.Library()
 
@@ -57,6 +63,11 @@ _SLOT_MISSING: Any = object()
 
 def _strip_quotes(raw: str) -> str:
     return raw.strip("'\"").strip()
+
+
+def _comment_safe(text: str) -> str:
+    """Break `--` runs so `text` cannot terminate an HTML comment early."""
+    return text.replace("--", "- -")
 
 
 def _parse_props(
@@ -167,16 +178,70 @@ class ComponentNode(Node):
             return None
         return path.resolve()
 
+    def _close_match(self, path: Path) -> str | None:
+        """Return the closest visible component name for a did-you-mean hint.
+
+        The visibility map for `path` was just built by the failed
+        `get_component` lookup, so this read is a cache hit, not a rescan.
+        """
+        names = collect_visible_components(path)
+        matches = difflib.get_close_matches(self.name, sorted(names))
+        return matches[0] if matches else None
+
+    def _on_miss(
+        self,
+        reason: Literal["no-discovery-path", "not-found"],
+        path: Path | None,
+    ) -> str:
+        """Report the miss at the volume `STRICT_LOADING` and `DEBUG` select.
+
+        `path` is `None` only for the no-discovery-path reason, which has
+        no visibility scope to draw a did-you-mean hint from.
+        """
+        strict = next_framework_settings.STRICT_LOADING
+        if not strict and not settings.DEBUG:
+            if path is None:
+                logger.warning(
+                    "component '%s' skipped, no current_template_path in context",
+                    self.name,
+                )
+            else:
+                logger.warning("component '%s' not found from %s", self.name, path)
+            return ""
+        suggestion = self._close_match(path) if path is not None else None
+        hint = f", did you mean '{suggestion}'?" if suggestion else ""
+        if strict:
+            if path is None:
+                msg = (
+                    f"component '{self.name}' cannot be resolved because the "
+                    "template context has no current_template_path"
+                )
+            else:
+                msg = f"component '{self.name}' not found from {path}{hint}"
+            raise template.TemplateSyntaxError(msg)
+        if path is None:
+            return (
+                f"<!-- next: component '{_comment_safe(self.name)}' skipped, no "
+                f"current_template_path in context ({reason}) -->"
+            )
+        safe_hint = (
+            f", did you mean '{_comment_safe(suggestion)}'?" if suggestion else ""
+        )
+        return (
+            f"<!-- next: component '{_comment_safe(self.name)}' not found "
+            f"({reason}){safe_hint} -->"
+        )
+
     @override
     def render(self, context: template.Context) -> str:
         """Merge props, slots, and children, then render the component."""
         path = self._template_path_from_context(context)
         if path is None:
-            return ""
+            return self._on_miss("no-discovery-path", None)
 
         info = get_component(self.name, path)
         if info is None:
-            return ""
+            return self._on_miss("not-found", path)
 
         collect_component_assets(info, context.get("_static_collector"))
 

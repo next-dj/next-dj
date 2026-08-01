@@ -76,6 +76,26 @@ It still stats every source file behind the page to detect a change.
 Both layers are dropped together once a ``template.djx`` or ``layout.djx`` changes on disk.
 A page whose body comes from a module-level ``render()`` in ``page.py`` bypasses that cache and recomposes the layout chain on every request.
 
+Import failures
+~~~~~~~~~~~~~~~
+
+A ``page.py`` the loader cannot read, an ``OSError`` or a module spec that does not build, counts as a legitimately absent module and the page contributes no body without a log record.
+A ``page.py`` whose body raises any exception during execution is a broken module, and ``logger.exception`` records the traceback on every load attempt.
+``ImportError``, ``AttributeError``, and ``SyntaxError`` are common examples, not a closed list.
+On the request path the recorded failure re-raises as ``PageModuleImportError`` when ``settings.DEBUG`` or ``NEXT_FRAMEWORK["STRICT_LOADING"]`` is set.
+Under ``DEBUG`` the standard technical 500 page points at the failing line.
+Under ``STRICT_LOADING`` without ``DEBUG`` the client receives a generic 500 while the traceback stays in the server log.
+With both flags off the request answers 404, and the failure is visible only in the log record.
+The failure is scoped to the broken page.
+Sibling pages keep their URL patterns and keep serving in every mode, because the error surfaces at the view rather than while the urlconf is built.
+The recorded error is keyed by file mtime, so saving a fixed ``page.py`` clears it without a restart.
+``manage.py check`` reports the same failure as ``next.E017``, naming the exception type and message.
+
+.. autoclass:: next.pages.loaders.PageModuleImportError
+   :members:
+
+The message reads ``<path> failed to import``, and the original exception travels as ``__cause__``.
+
 Processors
 ~~~~~~~~~~
 

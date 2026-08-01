@@ -49,6 +49,7 @@ DEFAULTS: dict[str, Any] = {
     "TEMPLATE_LOADERS": ["next.pages.loaders.DjxTemplateLoader"],
     "NEXT_JS_OPTIONS": {},
     "STRICT_CONTEXT": False,
+    "STRICT_LOADING": False,
     "LAZY_COMPONENT_MODULES": False,
     "FORM_AUTODISCOVER": True,
     "FORM_ANCHOR_FILES": None,

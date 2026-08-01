@@ -27,7 +27,12 @@ from .context import (
     component,
     context,
 )
-from .facade import get_component, load_component_template, render_component
+from .facade import (
+    collect_visible_components,
+    get_component,
+    load_component_template,
+    render_component,
+)
 from .info import ComponentInfo
 from .loading import ModuleCache, ModuleLoader
 from .manager import ComponentsManager, components_manager
@@ -64,6 +69,7 @@ __all__ = [
     "ModuleLoader",
     "SimpleComponentRenderer",
     "checks",
+    "collect_visible_components",
     "component",
     "component_extra_roots_from_config",
     "components_manager",

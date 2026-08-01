@@ -281,6 +281,53 @@ When ``False``, the default, a failing processor is skipped so local development
 Default value ``False``.
 :doc:`/content/deployment/settings` explains when to turn this on in production.
 
+STRICT_LOADING
+~~~~~~~~~~~~~~
+
+When ``True``, a broken body source fails the request instead of degrading silently.
+A ``page.py`` that raised while importing re-raises the recorded ``PageModuleImportError`` on every request to that page.
+A ``{% component %}`` name that does not resolve raises ``TemplateSyntaxError`` with a did-you-mean hint.
+When ``False``, the default, the framework logs and keeps rendering.
+A broken ``page.py`` answers 404 while ``logger.exception`` records the full traceback, and a missed component renders as an empty string with a warning log.
+``settings.DEBUG`` raises the same page-load error without this flag, so the flag matters for a ``DEBUG=False`` deployment.
+In every mode the failure is scoped to the broken page, sibling pages keep serving.
+
+Default value ``False``.
+See :doc:`pages` for the page-load contract, :doc:`template-tags` for the component-miss outcomes, and :doc:`/content/deployment/settings` for the production recommendation.
+
+Loudness axes
+~~~~~~~~~~~~~
+
+Five independent switches decide how loudly a broken piece fails.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 26 40 34
+
+   * - Axis
+     - Covers
+     - When loud
+   * - ``settings.DEBUG``
+     - Django development mode as a whole
+     - A broken ``page.py`` raises with the standard technical 500 page, and a component miss renders a visible HTML comment.
+   * - ``STRICT_LOADING``
+     - ``page.py`` import failures and ``{% component %}`` misses
+     - Raises regardless of ``DEBUG``.
+   * - ``STRICT_CONTEXT``
+     - Django context processor exceptions
+     - Raises regardless of ``DEBUG``.
+   * - ``next.E076``
+     - Eight ``NEXT_FRAMEWORK`` keys whose mistyped value the settings merge silently drops, and a ``NEXT_FRAMEWORK`` that is not a dict at all
+     - Always, on ``manage.py check``.
+   * - ``next.W072``
+     - The four ``NEXT_FRAMEWORK`` bool keys, where ``bool()`` coercion can invert the intent
+     - Always, on ``manage.py check``, as a warning rather than an error.
+
+``DEBUG=True`` turned on temporarily, for serving static files or profiling, also changes the error semantics of pages.
+A broken ``page.py`` that answered 404 starts raising, so the switch flips more than the error page and the toolbar.
+The two configuration checks stay independent of every flag above, so ``manage.py check`` reports ``next.E076`` and ``next.W072`` in any combination of ``DEBUG`` and the strict flags.
+See :doc:`system-checks` for both check conditions.
+
 LAZY_COMPONENT_MODULES
 ~~~~~~~~~~~~~~~~~~~~~~~~
 

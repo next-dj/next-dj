@@ -165,7 +165,9 @@ Errors
      - An error was raised while collecting patterns from a router.
      - ``next.urls.checks``
    * - ``next.E017``
-     - A ``page.py`` raises while importing, so the framework skips the module silently.
+     - A ``page.py`` raises while importing.
+       The message names the recorded exception type and text, so an ``ImportError`` raised by the module body reads as such instead of masking as a missing body source.
+       The body-source checks ``next.E012``, ``next.E013``, and ``next.W043`` stay silent for that file, so the import failure surfaces once.
      - ``next.pages.checks``
    * - ``next.E018``
      - A ``page.py`` registers more than one keyless ``@context`` callable, and only the last one runs.
@@ -319,6 +321,12 @@ Errors
      - A ``@component.context`` registration binds to a file no component render collects.
        The rule and the fix match ``next.E074``.
      - ``next.components.checks``
+   * - ``next.E076``
+     - A ``NEXT_FRAMEWORK`` value has a type the settings merge silently drops in favour of the framework default.
+       The check covers ``PAGE_BACKENDS``, ``COMPONENT_BACKENDS``, ``STATIC_BACKENDS``, ``PARTIAL_BACKENDS``, and ``TEMPLATE_LOADERS`` as lists.
+       It also covers ``URL_NAME_TEMPLATE`` and ``URL_RESOLVER`` as strings and ``NEXT_JS_OPTIONS`` as a dict.
+       A ``NEXT_FRAMEWORK`` that is not a dict at all is reported under the same code, because the settings layer ignores a non-dict value entirely and uses the framework defaults.
+     - ``next.conf.checks``
 
 A code emitted by ``next.checks.common`` is produced by a shared helper that the listed subsystem check modules call.
 
@@ -397,6 +405,10 @@ Warnings
    * - ``next.W071``
      - ``PARTIAL_BACKENDS`` has more than one entry. Partial rendering uses a single protocol backend, so only the first entry runs and the rest are ignored.
      - ``next.partial.checks``
+   * - ``next.W072``
+     - A ``NEXT_FRAMEWORK`` bool key, ``STRICT_CONTEXT``, ``STRICT_LOADING``, ``LAZY_COMPONENT_MODULES``, or ``FORM_AUTODISCOVER``, holds a non-bool value.
+       The ``bool()`` coercion turns a falsy-looking string such as ``'False'`` into ``True``, so the written value can mean the opposite of the intent.
+     - ``next.conf.checks``
    * - ``next.W074``
      - A registered asset kind names a renderer outside ``render_link_tag``, ``render_script_tag``, and ``render_module_tag``, so it carries no client insertion verb.
        Assets of that kind reach the browser only on a full page render, never through a patch envelope.

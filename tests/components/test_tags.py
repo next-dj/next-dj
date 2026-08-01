@@ -1,12 +1,16 @@
+import difflib
+import logging
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from django.template import Context, Template
 from django.template.base import TemplateSyntaxError
+from django.test import override_settings
 from django.utils.safestring import SafeString
 
 from next.components import ComponentInfo, components_manager
+from next.conf import next_framework_settings
 from next.static import StaticCollector
 
 
@@ -789,3 +793,158 @@ class TestSetSlotTag:
         )
         result = t.render(Context({"slot_label": ""}))
         assert result == ""
+
+
+class TestComponentMissReporting:
+    """`_on_miss` volume matrix across STRICT_LOADING, DEBUG, and prod defaults."""
+
+    def _render(self, ctx: dict[str, object]) -> str:
+        t = Template('{% load components %}{% component "nvbar" %}')
+        return t.render(Context(ctx))
+
+    def _not_found_patches(self, visible: dict[str, None]):
+        # Patch the manager, not the facade, so the miss path runs through
+        # the real facade delegation the tag imports.
+        return (
+            patch.object(components_manager, "get_component", return_value=None),
+            patch.object(
+                components_manager, "collect_visible_components", return_value=visible
+            ),
+            patch("difflib.get_close_matches", wraps=difflib.get_close_matches),
+        )
+
+    def test_strict_not_found_raises_with_suggestion(self, tmp_path: Path) -> None:
+        missing, visible, spy_ctx = self._not_found_patches({"navbar": None})
+        with override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}):
+            next_framework_settings.reload()
+            with (
+                missing,
+                visible,
+                spy_ctx as spy,
+                pytest.raises(TemplateSyntaxError) as exc_info,
+            ):
+                self._render({"current_template_path": str(tmp_path / "t.djx")})
+        resolved = (tmp_path / "t.djx").resolve()
+        assert str(exc_info.value) == (
+            f"component 'nvbar' not found from {resolved}, did you mean 'navbar'?"
+        )
+        spy.assert_called_once()
+        assert spy.call_args.args == ("nvbar", ["navbar"])
+
+    def test_strict_not_found_without_candidates_has_no_hint(
+        self, tmp_path: Path
+    ) -> None:
+        missing, visible, spy_ctx = self._not_found_patches({})
+        with override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}):
+            next_framework_settings.reload()
+            with (
+                missing,
+                visible,
+                spy_ctx,
+                pytest.raises(TemplateSyntaxError) as exc_info,
+            ):
+                self._render({"current_template_path": str(tmp_path / "t.djx")})
+        resolved = (tmp_path / "t.djx").resolve()
+        assert str(exc_info.value) == f"component 'nvbar' not found from {resolved}"
+
+    def test_strict_no_discovery_path_names_missing_context(self) -> None:
+        with override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}):
+            next_framework_settings.reload()
+            with (
+                patch(
+                    "difflib.get_close_matches", wraps=difflib.get_close_matches
+                ) as spy,
+                pytest.raises(TemplateSyntaxError) as exc_info,
+            ):
+                self._render({})
+        assert str(exc_info.value) == (
+            "component 'nvbar' cannot be resolved because the template "
+            "context has no current_template_path"
+        )
+        spy.assert_not_called()
+
+    @override_settings(DEBUG=True)
+    def test_debug_not_found_renders_comment_with_suggestion(
+        self, tmp_path: Path
+    ) -> None:
+        missing, visible, spy_ctx = self._not_found_patches({"navbar": None})
+        with missing, visible, spy_ctx as spy:
+            result = self._render({"current_template_path": str(tmp_path / "t.djx")})
+        assert result == (
+            "<!-- next: component 'nvbar' not found (not-found), "
+            "did you mean 'navbar'? -->"
+        )
+        spy.assert_called_once()
+
+    @override_settings(DEBUG=True)
+    def test_debug_not_found_without_candidates_comment_has_no_hint(
+        self, tmp_path: Path
+    ) -> None:
+        missing, visible, spy_ctx = self._not_found_patches({})
+        with missing, visible, spy_ctx:
+            result = self._render({"current_template_path": str(tmp_path / "t.djx")})
+        assert result == "<!-- next: component 'nvbar' not found (not-found) -->"
+
+    @override_settings(DEBUG=True)
+    def test_debug_comment_sanitizes_double_dashes(self, tmp_path: Path) -> None:
+        # A name or hint holding `--` would close the HTML comment early.
+        t = Template('{% load components %}{% component "nv--bar" %}')
+        with (
+            patch.object(components_manager, "get_component", return_value=None),
+            patch.object(
+                components_manager,
+                "collect_visible_components",
+                return_value={"nav--bar": None},
+            ),
+        ):
+            result = t.render(
+                Context({"current_template_path": str(tmp_path / "t.djx")})
+            )
+        assert result == (
+            "<!-- next: component 'nv- -bar' not found (not-found), "
+            "did you mean 'nav- -bar'? -->"
+        )
+
+    @override_settings(DEBUG=True)
+    def test_debug_no_discovery_path_renders_skip_comment(self) -> None:
+        with patch(
+            "difflib.get_close_matches", wraps=difflib.get_close_matches
+        ) as spy:
+            result = self._render({})
+        assert result == (
+            "<!-- next: component 'nvbar' skipped, no "
+            "current_template_path in context (no-discovery-path) -->"
+        )
+        spy.assert_not_called()
+
+    def test_prod_not_found_warns_and_renders_empty(
+        self, tmp_path: Path, caplog
+    ) -> None:
+        missing, visible, spy_ctx = self._not_found_patches({"navbar": None})
+        with (
+            caplog.at_level(logging.WARNING, logger="next.templatetags.components"),
+            missing,
+            visible,
+            spy_ctx as spy,
+        ):
+            result = self._render({"current_template_path": str(tmp_path / "t.djx")})
+        assert result == ""
+        spy.assert_not_called()
+        resolved = (tmp_path / "t.djx").resolve()
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert [r.getMessage() for r in warnings] == [
+            f"component 'nvbar' not found from {resolved}"
+        ]
+
+    def test_prod_no_discovery_path_warns_and_renders_empty(self, caplog) -> None:
+        with (
+            caplog.at_level(logging.WARNING, logger="next.templatetags.components"),
+            patch("difflib.get_close_matches", wraps=difflib.get_close_matches) as spy,
+        ):
+            result = self._render({})
+        assert result == ""
+        spy.assert_not_called()
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert [r.getMessage() for r in warnings] == [
+            "component 'nvbar' skipped, no current_template_path in context"
+        ]

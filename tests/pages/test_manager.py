@@ -1,18 +1,23 @@
 import importlib.util
+import os
 import textwrap
+import traceback
 from pathlib import Path
 from unittest import mock
 from unittest.mock import patch
 
 import pytest
 from django.core.checks import Error
-from django.http import HttpRequest
+from django.http import Http404, HttpRequest
+from django.test import override_settings
 
 import next.pages.loaders as loaders_module
 from next.checks import _load_python_module
+from next.conf import next_framework_settings
 from next.pages import Page, context, page
 from next.pages.loaders import (
     LayoutTemplateLoader,
+    PageModuleImportError,
     TemplateLoader,
     _load_python_module_memo,
 )
@@ -979,6 +984,216 @@ class TestUnifiedViewBodyResolution:
         body = response.content.decode()
         assert "<html><body>" in body
         assert "</body></html>" in body
+
+
+_BROKEN_SYNTAX = "def render( invalid syntax {\n"
+_BROKEN_IMPORT = "import missing_dep_xyz\n"
+
+_broken_sources = pytest.mark.parametrize(
+    "broken_source",
+    [_BROKEN_SYNTAX, _BROKEN_IMPORT],
+    ids=["syntax_error", "import_error"],
+)
+
+
+class TestBrokenPageImportView:
+    """The routed view surfaces a recorded import failure per request."""
+
+    def _broken_pattern(
+        self, page_instance, tmp_path, url_parser, source: str = _BROKEN_SYNTAX
+    ):
+        page_dir = tmp_path / "sub"
+        page_dir.mkdir(exist_ok=True)
+        page_file = page_dir / "page.py"
+        page_file.write_text(source)
+        pattern = page_instance.create_url_pattern("broken", page_file, url_parser)
+        assert pattern is not None
+        return page_file, pattern
+
+    def test_broken_page_sibling_still_renders(
+        self, page_instance, tmp_path, url_parser
+    ) -> None:
+        """One broken page.py never takes down its sibling's pattern or render."""
+        broken_dir = tmp_path / "broken"
+        broken_dir.mkdir()
+        broken_file = broken_dir / "page.py"
+        broken_file.write_text("def render( invalid syntax {\n")
+
+        ok_dir = tmp_path / "ok"
+        ok_dir.mkdir()
+        ok_file = ok_dir / "page.py"
+        ok_file.write_text('template = "<p>ok body</p>"\n')
+
+        broken_pattern = page_instance.create_url_pattern(
+            "broken", broken_file, url_parser
+        )
+        ok_pattern = page_instance.create_url_pattern("ok", ok_file, url_parser)
+
+        assert broken_pattern is not None
+        assert ok_pattern is not None
+        response = ok_pattern.callback(_make_real_request())
+        assert response.status_code == 200
+        assert b"<p>ok body</p>" in response.content
+
+    @_broken_sources
+    def test_broken_page_raises_under_debug(
+        self, page_instance, tmp_path, url_parser, broken_source
+    ) -> None:
+        _page_file, pattern = self._broken_pattern(
+            page_instance, tmp_path, url_parser, broken_source
+        )
+        with override_settings(DEBUG=True), pytest.raises(PageModuleImportError):
+            pattern.callback(_make_real_request())
+
+    def test_broken_page_traceback_does_not_grow_across_requests(
+        self, page_instance, tmp_path, url_parser
+    ) -> None:
+        # Re-raising one stored instance would append the raise chain to its
+        # traceback on every request and pin request frame locals alive.
+        _page_file, pattern = self._broken_pattern(page_instance, tmp_path, url_parser)
+        with override_settings(DEBUG=True):
+            with pytest.raises(PageModuleImportError) as first:
+                pattern.callback(_make_real_request())
+            with pytest.raises(PageModuleImportError) as second:
+                pattern.callback(_make_real_request())
+
+        assert first.value is not second.value
+        first_depth = len(traceback.extract_tb(first.value.__traceback__))
+        second_depth = len(traceback.extract_tb(second.value.__traceback__))
+        assert first_depth == second_depth
+
+    def test_healthy_page_renders_under_debug_with_sibling_error_recorded(
+        self, page_instance, tmp_path, url_parser
+    ) -> None:
+        # A recorded failure for another page must not trip the error probe
+        # of a healthy view even when the volume flags are active.
+        _page_file, _pattern = self._broken_pattern(page_instance, tmp_path, url_parser)
+        ok_dir = tmp_path / "ok"
+        ok_dir.mkdir()
+        ok_file = ok_dir / "page.py"
+        ok_file.write_text('template = "<p>ok body</p>"\n')
+        ok_pattern = page_instance.create_url_pattern("ok", ok_file, url_parser)
+        assert ok_pattern is not None
+
+        with override_settings(DEBUG=True):
+            response = ok_pattern.callback(_make_real_request())
+
+        assert response.status_code == 200
+        assert b"<p>ok body</p>" in response.content
+
+    @_broken_sources
+    def test_broken_page_raises_under_strict_loading(
+        self, page_instance, tmp_path, url_parser, broken_source
+    ) -> None:
+        _page_file, pattern = self._broken_pattern(
+            page_instance, tmp_path, url_parser, broken_source
+        )
+        with override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}):
+            next_framework_settings.reload()
+            with pytest.raises(PageModuleImportError):
+                pattern.callback(_make_real_request())
+
+    @_broken_sources
+    def test_broken_page_returns_404_in_prod(
+        self, page_instance, tmp_path, url_parser, broken_source
+    ) -> None:
+        """With both flags off the broken page answers 404, never a sibling body."""
+        (tmp_path / "layout.djx").write_text(
+            "<html><body>{% block template %}{% endblock template %}</body></html>"
+        )
+        _page_file, pattern = self._broken_pattern(
+            page_instance, tmp_path, url_parser, broken_source
+        )
+
+        with pytest.raises(Http404):
+            pattern.callback(_make_real_request())
+
+    def test_broken_page_recovers_after_fix_without_restart(
+        self, page_instance, tmp_path, url_parser
+    ) -> None:
+        page_file, pattern = self._broken_pattern(page_instance, tmp_path, url_parser)
+        with pytest.raises(Http404):
+            pattern.callback(_make_real_request())
+
+        stamp = page_file.stat().st_mtime + 10
+        page_file.write_text('template = "<p>revived</p>"\n')
+        os.utime(page_file, (stamp, stamp))
+
+        response = pattern.callback(_make_real_request())
+        assert response.status_code == 200
+        assert b"<p>revived</p>" in response.content
+
+    def test_page_broken_after_build_raises_under_debug(
+        self, page_instance, tmp_path, url_parser
+    ) -> None:
+        page_dir = tmp_path / "sub"
+        page_dir.mkdir()
+        page_file = page_dir / "page.py"
+        page_file.write_text('template = "<p>ok</p>"\n')
+        pattern = page_instance.create_url_pattern("later", page_file, url_parser)
+        assert pattern is not None
+
+        stamp = page_file.stat().st_mtime + 10
+        page_file.write_text(_BROKEN_SYNTAX)
+        os.utime(page_file, (stamp, stamp))
+        # Another subsystem's reload records the failure, as static
+        # discovery or a checks pass would on a real deployment.
+        assert _load_python_module_memo(page_file) is None
+
+        with override_settings(DEBUG=True), pytest.raises(PageModuleImportError):
+            pattern.callback(_make_real_request())
+
+    def test_broken_page_requests_do_not_reexec_module(
+        self, page_instance, tmp_path, url_parser, monkeypatch
+    ) -> None:
+        real_load = loaders_module._load_python_module
+        calls: list[Path] = []
+
+        def counting(file_path: Path) -> object:
+            calls.append(file_path)
+            return real_load(file_path)
+
+        monkeypatch.setattr(loaders_module, "_load_python_module", counting)
+
+        page_file, pattern = self._broken_pattern(page_instance, tmp_path, url_parser)
+        # The pattern build probes once and every request answers 404 off
+        # the memo. Repeat requests must add no re-execution on the
+        # unchanged broken file.
+        with pytest.raises(Http404):
+            pattern.callback(_make_real_request())
+        first_pass = calls.count(page_file)
+        with pytest.raises(Http404):
+            pattern.callback(_make_real_request())
+
+        assert calls.count(page_file) == first_pass
+
+
+class TestAuthorizationOutcomeBrokenPage:
+    """`authorization_outcome` applies the view's guard to out-of-band morphs."""
+
+    def _broken_file(self, tmp_path) -> Path:
+        page_dir = tmp_path / "sub"
+        page_dir.mkdir()
+        page_file = page_dir / "page.py"
+        page_file.write_text(_BROKEN_SYNTAX)
+        return page_file
+
+    def test_raises_under_debug(self, page_instance, tmp_path) -> None:
+        page_file = self._broken_file(tmp_path)
+        with override_settings(DEBUG=True), pytest.raises(PageModuleImportError):
+            page_instance.authorization_outcome(page_file, _make_real_request())
+
+    def test_raises_under_strict_loading(self, page_instance, tmp_path) -> None:
+        page_file = self._broken_file(tmp_path)
+        with override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}):
+            next_framework_settings.reload()
+            with pytest.raises(PageModuleImportError):
+                page_instance.authorization_outcome(page_file, _make_real_request())
+
+    def test_returns_404_in_prod(self, page_instance, tmp_path) -> None:
+        page_file = self._broken_file(tmp_path)
+        with pytest.raises(Http404):
+            page_instance.authorization_outcome(page_file, _make_real_request())
 
 
 class TestLoadStaticBodyEdgeCases:

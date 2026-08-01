@@ -23,6 +23,19 @@ Strict context
 Use ``STRICT_CONTEXT: True`` in production so a misconfigured context processor fails loudly.
 See :ref:`ref-settings` for behaviour and exception types.
 
+Strict loading
+--------------
+
+.. code-block:: python
+   :caption: config/settings.py
+
+   NEXT_FRAMEWORK["STRICT_LOADING"] = True
+
+Use ``STRICT_LOADING: True`` in production so a ``page.py`` that fails to import or a ``{% component %}`` name that does not resolve fails the request instead of serving a silently degraded page.
+With ``DEBUG=False`` the client sees the generic 500 page, and the traceback appears only in the server log through ``logger.exception``.
+Without the flag a broken ``page.py`` answers a generic 404 and a missed component renders as an empty string, which monitoring rarely catches.
+See :ref:`ref-settings` for the loudness table across ``DEBUG`` and the strict flags.
+
 Eager component loading
 -----------------------
 
@@ -114,6 +127,7 @@ When several recommendations apply at once, merge them into a single ``NEXT_FRAM
 
    NEXT_FRAMEWORK = {
        "STRICT_CONTEXT": True,
+       "STRICT_LOADING": True,
        "LAZY_COMPONENT_MODULES": False,
        "STATIC_BACKENDS": [
            {"BACKEND": "notes.backends.CdnBackend", "OPTIONS": {}},

@@ -26,7 +26,12 @@ from next.checks.common import (
 from next.conf import import_class_cached, next_framework_settings
 from next.utils import callable_name
 
-from .loaders import TemplateLoader, _load_python_module_memo, build_registered_loaders
+from .loaders import (
+    TemplateLoader,
+    _load_python_module_memo,
+    build_registered_loaders,
+    last_load_error,
+)
 from .manager import page
 
 
@@ -343,6 +348,10 @@ def _check_page_functions_in_directory(
 
     for page_file in pages_path.rglob("page.py"):
         render_func = _load_render_function(page_file)
+        if last_load_error(page_file) is not None:
+            # A broken import surfaces once through next.E017, so the
+            # body-source checks stay silent for this file.
+            continue
         has_template = _has_template_or_djx(page_file)
         hard_error = False
 
@@ -419,8 +428,8 @@ def _check_body_source_conflicts(page_file: Path) -> CheckMessage | None:
 def _load_render_function(file_path: Path) -> object:
     """Return the `render` callable declared in a `page.py`, or `None`.
 
-    A syntactically broken `page.py` loads as `None` and yields `None`
-    here, so the caller still reports `next.E012`.
+    A broken `page.py` loads as `None` and yields `None` here. The caller
+    reads `last_load_error` and leaves the failure to `next.E017`.
     """
     module = _load_python_module_memo(file_path)
     if module is None:
@@ -569,16 +578,36 @@ def _iter_existing_scanned_pages(
                 yield page_path
 
 
+def _page_import_error_message(page_path: Path) -> str:
+    """Compose the `next.E017` text, naming the recorded failure when known."""
+    error = last_load_error(page_path)
+    if error is None:
+        return (
+            f"page.py at {page_path} could not be imported. Fix the syntax or "
+            "import error so the framework stops skipping the module silently."
+        )
+    cause = error.__cause__
+    return (
+        f"page.py at {page_path} failed to import "
+        f"({type(cause).__name__}: {cause}). A raising import in the module "
+        "body counts the same as a syntax error. Fix it so the framework "
+        "stops skipping the module silently."
+    )
+
+
 @register(Tags.templates, NEXT)
 def check_page_module_imports(*args, **kwargs) -> list[CheckMessage]:
-    """Report `page.py` files that raise while importing (`next.E017`)."""
+    """Report `page.py` files that raise while importing (`next.E017`).
+
+    The message carries the recorded cause, so an ImportError raised by
+    the module body is named as such instead of masking as a missing body.
+    """
     router_manager, init_errors = get_router_manager()
     if router_manager is None:
         return init_errors
     return [
         Error(
-            f"page.py at {page_path} could not be imported. Fix the syntax or "
-            "import error so the framework stops skipping the module silently.",
+            _page_import_error_message(page_path),
             obj=str(page_path),
             id="next.E017",
         )

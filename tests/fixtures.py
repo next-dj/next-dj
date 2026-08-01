@@ -9,7 +9,11 @@ from django.test import Client
 
 from next.conf import NextFrameworkSettings, next_framework_settings
 from next.pages import Page
-from next.pages.loaders import DjxTemplateLoader, PythonTemplateLoader
+from next.pages.loaders import (
+    DjxTemplateLoader,
+    PythonTemplateLoader,
+    reset_module_memo,
+)
 from next.pages.registry import PageContextRegistry
 from next.server import NextStatReloader
 from next.urls import URLPatternParser
@@ -41,6 +45,18 @@ def _reload_next_framework_settings_after_test() -> Generator[None, None, None]:
     """Reload the global ``next_framework_settings`` after each test (teardown only)."""
     yield
     next_framework_settings.reload()
+
+
+@pytest.fixture(autouse=True)
+def _reset_page_module_memo() -> Generator[None, None, None]:
+    """Reset the module memo and recorded import errors around each test.
+
+    A leaked ``_LAST_LOAD_ERROR`` entry would keep the unified view's
+    fast-path guard engaged for every later test in the session.
+    """
+    reset_module_memo()
+    yield
+    reset_module_memo()
 
 
 @pytest.fixture()

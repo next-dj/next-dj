@@ -228,10 +228,10 @@ class TestMissingPageContentChecks:
 
 
 class TestMemoAndBrokenPages:
-    """Memo reuse and the unchanged E012 masking of broken `page.py` files."""
+    """Memo reuse and the E017-only reporting of broken `page.py` files."""
 
-    def test_broken_page_still_reports_e012(self, tmp_path) -> None:
-        """A syntactically invalid page.py keeps masking as E012, not a parse code."""
+    def test_broken_page_reports_no_e012(self, tmp_path) -> None:
+        """A syntactically invalid page.py surfaces as E017 only, never E012."""
         page_file = tmp_path / "page.py"
         page_file.write_text("def render( invalid syntax {\n")
         loaders_module._MODULE_MEMO.pop(page_file, None)
@@ -241,7 +241,7 @@ class TestMemoAndBrokenPages:
         ):
             messages = check_page_functions(None)
         e012 = [m for m in messages if m.id == "next.E012"]
-        assert len(e012) == 1
+        assert e012 == []
 
     def test_valid_body_page_has_no_e012(self, tmp_path) -> None:
         """A page.py with a real render body raises no E012."""
@@ -807,6 +807,95 @@ class TestPageModuleImports:
         ):
             imports = check_page_module_imports(None)
         assert [m.id for m in imports] == ["next.E017"]
+
+    @override_settings(DEBUG=False)
+    def test_broken_page_reports_e017_with_cause_in_ci_mode(self, tmp_path) -> None:
+        """Both flags off (typical CI) still yields the enriched E017, no raise."""
+        s.reload()
+        assert s.STRICT_LOADING is False
+        page_file = tmp_path / "page.py"
+        page_file.write_text("def render( invalid syntax {\n")
+
+        with patch_checks_router_manager(
+            pages_directory=tmp_path, scan_routes=[("test", page_file)]
+        ):
+            messages = check_page_module_imports(None)
+
+        assert [m.id for m in messages] == ["next.E017"]
+        error = loaders_module.last_load_error(page_file)
+        assert error is not None
+        expected = (
+            f"page.py at {page_file} failed to import "
+            f"({type(error.__cause__).__name__}: {error.__cause__}). "
+            "A raising import in the module body counts the same as a "
+            "syntax error. Fix it so the framework stops skipping the "
+            "module silently."
+        )
+        assert messages[0].msg == expected
+
+    def test_import_error_page_reports_e017_not_e012(self, tmp_path) -> None:
+        """A failing import in the page body is named ImportError, not no-body E012."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text("import missing_dep_xyz\n")
+
+        with patch_checks_router_manager_with_routers(
+            routers=[_AppRouter(tmp_path, page_file)]
+        ):
+            body = check_page_functions(None)
+        assert [m for m in body if m.id == "next.E012"] == []
+
+        with patch_checks_router_manager(
+            pages_directory=tmp_path, scan_routes=[("test", page_file)]
+        ):
+            imports = check_page_module_imports(None)
+        assert [m.id for m in imports] == ["next.E017"]
+        assert "ModuleNotFoundError" in imports[0].msg
+        assert "missing_dep_xyz" in imports[0].msg
+
+    @pytest.mark.parametrize(
+        ("page_body", "cause_marker"),
+        [
+            ("def render( invalid syntax {\n", "SyntaxError"),
+            (
+                "import missing_dep_xyz\n",
+                "ModuleNotFoundError: No module named 'missing_dep_xyz'",
+            ),
+        ],
+        ids=["syntax_error", "module_not_found"],
+    )
+    def test_e017_message_distinguishes_causes(
+        self, tmp_path, page_body, cause_marker
+    ) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text(page_body)
+        with patch_checks_router_manager(
+            pages_directory=tmp_path, scan_routes=[("test", page_file)]
+        ):
+            messages = check_page_module_imports(None)
+        assert [m.id for m in messages] == ["next.E017"]
+        assert cause_marker in messages[0].msg
+
+    @pytest.mark.parametrize(
+        "page_body",
+        [
+            'template = "x"\nimport missing_dep_xyz\n',
+            "render = 42\nimport missing_dep_xyz\n",
+        ],
+        ids=["would_be_w043", "would_be_e013"],
+    )
+    def test_broken_import_skips_body_source_checks(self, tmp_path, page_body) -> None:
+        """E012, E013, and W043 stay silent when the import itself failed."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text(page_body)
+        (tmp_path / "template.djx").write_text("<p>ok</p>\n")
+
+        with patch_checks_router_manager_with_routers(
+            routers=[_AppRouter(tmp_path, page_file)]
+        ):
+            messages = check_page_functions(None)
+        assert [
+            m for m in messages if m.id in {"next.E012", "next.E013", "next.W043"}
+        ] == []
 
 
 class TestSingleKeylessContext:

@@ -51,7 +51,17 @@ next.E017 on a page.py that fails to import
 
 A ``page.py`` raised while importing, so the framework loads it as nothing.
 Its ``render``, ``template``, and ``@context`` declarations never take effect, and a sibling ``template.djx`` can otherwise hide the failure.
-Fix the syntax or import error named in the report so the module loads.
+The report names the exception type and message, so fix the named error and the module loads.
+At request time the same failure raises under ``DEBUG`` or ``STRICT_LOADING``, see :doc:`/content/ref/pages`.
+
+Page answers 404 although its files exist
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The ``page.py`` behind the URL raised while importing.
+With ``DEBUG`` and ``STRICT_LOADING`` both off the framework answers 404 for the broken page while ``logger.exception`` records the traceback.
+Read the server log for the ``Could not import page module`` record, or turn on ``DEBUG`` or ``NEXT_FRAMEWORK["STRICT_LOADING"]`` so the request raises with the real cause.
+``uv run python manage.py check`` reports the same failure as :ref:`next.E017 <ref-system-checks>`, naming the exception type and message.
+See :doc:`/content/ref/pages` for the full import-failure contract.
 
 next.E018 on multiple keyless context functions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -153,6 +163,13 @@ Component does not render
 
 Confirm that ``COMPONENTS_DIR`` is set on ``COMPONENT_BACKENDS``.
 Confirm that the component folder name matches the string argument to ``{% component %}``.
+
+Component renders as an empty string
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The name passed to ``{% component %}`` did not resolve from the rendering template, and with ``DEBUG`` and ``STRICT_LOADING`` both off the tag renders an empty string and logs a warning.
+Turn on ``NEXT_FRAMEWORK["STRICT_LOADING"]`` to raise ``TemplateSyntaxError`` with a did-you-mean hint, or ``DEBUG`` to render a visible HTML comment in place of the component.
+See :doc:`/content/ref/template-tags` for the three outcomes.
 
 Component prop does not resolve
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

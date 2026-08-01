@@ -16,7 +16,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast, overload
 
-from django.http import HttpRequest, HttpResponse
+from django.conf import settings
+from django.http import Http404, HttpRequest, HttpResponse
 from django.http.response import HttpResponseBase
 from django.template import Context as DjangoTemplateContext, Origin, Template
 from django.urls import URLPattern, path
@@ -27,9 +28,11 @@ from next.deps import DependencyResolver, resolver
 from next.utils import defining_file
 
 from .loaders import (
+    _LAST_LOAD_ERROR,
     LayoutTemplateLoader,
     _load_python_module_memo,
     build_registered_loaders,
+    last_load_error,
 )
 from .processors import _get_context_processors
 from .registry import PageContextRegistry
@@ -189,7 +192,7 @@ class Page:
 
         context_processors = _get_context_processors()
         if request and context_processors:
-            strict = bool(getattr(next_framework_settings, "STRICT_CONTEXT", False))
+            strict = next_framework_settings.STRICT_CONTEXT
             for processor in context_processors:
                 try:
                     processor_data = processor(request)
@@ -422,6 +425,14 @@ class Page:
         the foreign page's `render()` runs exactly once.
         """
         module = _load_python_module_memo(file_path)
+        error = last_load_error(file_path)
+        if error is not None:
+            # The same guard as the unified view, otherwise an out-of-band
+            # zone morph would render a broken page's template.djx past the
+            # guards its render() would have applied.
+            if settings.DEBUG or next_framework_settings.STRICT_LOADING:
+                raise error
+            raise Http404
         resolution = self._resolve_page_body(file_path, module, request, **kwargs)
         return resolution.http_response, resolution.dynamic
 
@@ -430,16 +441,44 @@ class Page:
         file_path: Path,
         _parameters: dict[str, str],
         module: types.ModuleType | None,
+        *,
+        broken_at_build: bool = False,
     ) -> Callable[..., HttpResponseBase]:
         """Return a view that resolves the body, composes layouts, and renders.
 
         The view carries `next_page_path` so the form dispatch can map a
         resolved origin URL back to the page source, including the
         synthesised `page.py` location of virtual `template.djx` pages.
+        `broken_at_build` marks a page whose import failed while the URL
+        pattern was built. Its view re-reads the module per request so a
+        fixed file comes back to life without a process restart, and it
+        answers 404 instead of serving the sibling template past the
+        guards a working `render()` would have applied.
         """
 
         def view(request: HttpRequest, **kwargs) -> HttpResponseBase:
-            resolution = self._resolve_page_body(file_path, module, request, **kwargs)
+            active_module = module
+            if broken_at_build:
+                # The memo re-reads by mtime and drops the recorded error
+                # once the file imports cleanly again.
+                active_module = _load_python_module_memo(file_path)
+                error = last_load_error(file_path)
+                if error is not None:
+                    if settings.DEBUG or next_framework_settings.STRICT_LOADING:
+                        raise error
+                    raise Http404
+            # The empty-dict guard keeps healthy deployments off the probe
+            # entirely, and checking the flags before `last_load_error` spares
+            # a flags-off production the per-request stat on a broken page.
+            elif _LAST_LOAD_ERROR and (
+                settings.DEBUG or next_framework_settings.STRICT_LOADING
+            ):
+                error = last_load_error(file_path)
+                if error is not None:
+                    raise error
+            resolution = self._resolve_page_body(
+                file_path, active_module, request, **kwargs
+            )
             if resolution.http_response is not None:
                 return resolution.http_response
             # next.partial imports next.pages, so the zone branch defers
@@ -515,13 +554,22 @@ class Page:
         parameters: dict[str, str],
         clean_name: str,
     ) -> URLPattern | None:
-        """Return the URL pattern for a real `page.py` that has any body source."""
+        """Return the URL pattern for a real `page.py` that has any body source.
+
+        A `page.py` whose import failed still gets a pattern so the view can
+        surface the recorded error per request without touching siblings.
+        """
         module = _load_python_module_memo(file_path)
+        broken_at_build = False
         if module is None:
+            if last_load_error(file_path) is None:
+                return None
+            broken_at_build = True
+        elif not self._page_has_body_source(file_path, module):
             return None
-        if not self._page_has_body_source(file_path, module):
-            return None
-        view = self._create_unified_view(file_path, parameters, module)
+        view = self._create_unified_view(
+            file_path, parameters, module, broken_at_build=broken_at_build
+        )
         return path(
             django_pattern,
             view,
