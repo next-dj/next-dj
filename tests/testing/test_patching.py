@@ -6,10 +6,10 @@ from django.conf import settings as django_settings
 from next.components.manager import components_manager
 from next.deps.providers import ParameterProvider
 from next.deps.resolver import resolver
-from next.forms import ActionRegistration
+from next.forms import ActionRegistration, FormActionNotFoundError
 from next.forms.manager import form_action_manager
 from next.static.collector import StaticCollector
-from next.static.manager import StaticManager, default_manager
+from next.static.manager import StaticManager, get_static_manager
 from next.testing.patching import (
     StaticCollectorProxy,
     override_component_backends,
@@ -53,25 +53,31 @@ class TestOverrideDependency:
     """`override_dependency` binds `Depends(name)` for the block."""
 
     def test_sets_and_restores(self) -> None:
-        resolver._dependency_callables.pop("x_value", None)
+        resolver.unregister_dependency("x_value")
         with override_dependency("x_value", 42):
-            assert resolver._dependency_callables["x_value"]() == 42
-        assert "x_value" not in resolver._dependency_callables
+            bound = resolver.get_dependency("x_value")
+            assert bound is not None
+            assert bound() == 42
+        assert resolver.get_dependency("x_value") is None
 
     def test_preserves_existing_binding(self) -> None:
-        resolver._dependency_callables["y_value"] = lambda: "orig"
+        resolver.register_dependency("y_value", lambda: "orig")
         try:
             with override_dependency("y_value", "temp"):
-                assert resolver._dependency_callables["y_value"]() == "temp"
-            assert resolver._dependency_callables["y_value"]() == "orig"
+                inside = resolver.get_dependency("y_value")
+                assert inside is not None
+                assert inside() == "temp"
+            after = resolver.get_dependency("y_value")
+            assert after is not None
+            assert after() == "orig"
         finally:
-            resolver._dependency_callables.pop("y_value", None)
+            resolver.unregister_dependency("y_value")
 
     def test_restores_on_exception(self) -> None:
-        resolver._dependency_callables.pop("z", None)
+        resolver.unregister_dependency("z")
         with pytest.raises(RuntimeError), override_dependency("z", 1):
             raise _BOOM
-        assert "z" not in resolver._dependency_callables
+        assert resolver.get_dependency("z") is None
 
 
 class _StubProvider(ParameterProvider):
@@ -82,25 +88,24 @@ class _StubProvider(ParameterProvider):
         return "STUB"
 
 
+def _takes_flag(flag: str = "") -> None:
+    return None
+
+
 class TestOverrideProvider:
     """`override_provider` prepends a provider for the block."""
 
     def test_wins_over_default(self) -> None:
         stub = _StubProvider()
         with override_provider(stub):
-
-            def fn(flag: str = "") -> None:
-                return None
-
-            ctx = resolver._providers[0]
-            assert ctx is stub
-        assert stub not in resolver._providers
+            assert resolver.resolve_dependencies(_takes_flag) == {"flag": "STUB"}
+        assert resolver.resolve_dependencies(_takes_flag) == {"flag": ""}
 
     def test_restores_on_exception(self) -> None:
         stub = _StubProvider()
         with pytest.raises(RuntimeError), override_provider(stub):
             raise _BOOM
-        assert stub not in resolver._providers
+        assert resolver.resolve_dependencies(_takes_flag) == {"flag": ""}
 
 
 class TestOverrideFormAction:
@@ -108,14 +113,14 @@ class TestOverrideFormAction:
 
     def test_registers_and_restores(self) -> None:
         backend = form_action_manager.default_backend
-        assert not any(name == "_pt_override" for _, name in backend._registry)  # type: ignore[attr-defined]
+        assert backend.get_meta("_pt_override") is None
 
         def handler() -> str:
             return "ok"
 
         with override_form_action("_pt_override", handler):
-            assert any(name == "_pt_override" for _, name in backend._registry)  # type: ignore[attr-defined]
-        assert not any(name == "_pt_override" for _, name in backend._registry)  # type: ignore[attr-defined]
+            assert backend.get_meta("_pt_override") is not None
+        assert backend.get_meta("_pt_override") is None
 
     def test_restores_after_exception(self) -> None:
         backend = form_action_manager.default_backend
@@ -125,14 +130,11 @@ class TestOverrideFormAction:
 
         with pytest.raises(RuntimeError), override_form_action("_pt_err", handler):
             raise _BOOM
-        assert not any(name == "_pt_err" for _, name in backend._registry)  # type: ignore[attr-defined]
+        assert backend.get_meta("_pt_err") is None
 
     def test_overrides_existing_action_and_restores_index(self, tmp_path) -> None:
         backend = form_action_manager.default_backend
-        snapshots = {
-            attr: dict(getattr(backend, attr))
-            for attr in ("_registry", "_uid_to_name", "_name_index", "_url_cache")
-        }
+        saved = backend.snapshot()
 
         def original() -> str:
             return "original"
@@ -161,15 +163,9 @@ class TestOverrideFormAction:
             after = backend.get_meta("_pt_existing")
             assert after is not None
             assert after["handler"] is original
-            assert backend._name_index["_pt_existing"] == (  # type: ignore[attr-defined]
-                "someapp.forms",
-                "_pt_existing",
-            )
+            assert after["file_path"] == str(forms_file)
         finally:
-            for attr, snapshot in snapshots.items():
-                mapping = getattr(backend, attr)
-                mapping.clear()
-                mapping.update(snapshot)
+            backend.restore(saved)
 
     def test_no_stale_index_entry_after_exit(self) -> None:
         backend = form_action_manager.default_backend
@@ -178,9 +174,10 @@ class TestOverrideFormAction:
             return "ok"
 
         with override_form_action("_pt_index_probe", handler):
-            assert "_pt_index_probe" in backend._name_index  # type: ignore[attr-defined]
-        assert "_pt_index_probe" not in backend._name_index  # type: ignore[attr-defined]
+            assert form_action_manager.get_action_url("_pt_index_probe")
         assert backend.get_meta("_pt_index_probe") is None
+        with pytest.raises(FormActionNotFoundError):
+            form_action_manager.get_action_url("_pt_index_probe")
 
 
 class TestOverrideComponentBackends:
@@ -195,18 +192,16 @@ class TestOverrideComponentBackends:
             "COMPONENTS_DIR": "_components",
         }
         with override_component_backends(config):
-            backends_inside = list(components_manager._backends)
-            assert len(backends_inside) == 1
+            assert len(components_manager.backends) == 1
         # After exit, settings_reloaded rebuilds from restored settings.
-        components_manager._ensure_backends()
+        assert components_manager.backends
 
 
 class TestPatchStaticCollector:
     """`patch_static_collector` swaps `create_collector` and restores it."""
 
     def test_replaces_factory_and_captures_collector(self) -> None:
-        _ = default_manager.create_collector
-        manager = default_manager._wrapped
+        manager = get_static_manager()
         with patch_static_collector(capture=True) as proxy:
             assert isinstance(proxy, StaticCollectorProxy)
             collector = manager.create_collector()
@@ -215,8 +210,7 @@ class TestPatchStaticCollector:
 
     def test_custom_factory(self) -> None:
         sentinel = StaticCollector()
-        _ = default_manager.create_collector
-        manager = default_manager._wrapped
+        manager = get_static_manager()
         with patch_static_collector(lambda: sentinel, capture=True) as proxy:
             out = manager.create_collector()
             assert out is sentinel
@@ -227,8 +221,7 @@ class TestPatchStaticCollector:
             assert proxy is None
 
     def test_restores_after_exception(self) -> None:
-        _ = default_manager.create_collector
-        manager = default_manager._wrapped
+        manager = get_static_manager()
         with pytest.raises(RuntimeError), patch_static_collector():
             raise _BOOM
         assert manager.create_collector.__func__ is StaticManager.create_collector

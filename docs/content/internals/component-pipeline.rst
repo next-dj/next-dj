@@ -65,6 +65,11 @@ Modules
 ``next.components.backends``.
    ``ComponentsBackend`` contract.
    ``FileComponentsBackend`` default implementation.
+   ``discover`` is the eager pass the app-ready hook calls on every backend, a no-op for one that resolves names on demand.
+   ``import_component_modules`` is the separate capability of executing those components' Python modules, which is why ``LAZY_COMPONENT_MODULES`` can populate the registry without running a single ``component.py``.
+   It returns the paths it imported, and a backend whose components carry no module returns an empty tuple.
+   ``register_walked_folder`` is the ownership hook the page-tree walk calls, and ``iter_components`` with ``global_component_roots`` is the enumeration the system checks read.
+   Each of the three has a default that declines, so a backend that resolves names on demand implements only the two abstract render methods.
 
 ``next.components.manager``.
    ``ComponentsManager`` orchestrates the backends, shares one render pipeline between them, and builds the list with the shared ``load_backends`` helper.
@@ -73,6 +78,8 @@ Modules
 
 ``next.components.checks``.
    The components system checks, including ``next.E020`` and ``next.E034``.
+   They read the per-run manager ``next.checks.common.get_components_manager`` builds, which registers the ``_components`` folders under the page trees itself instead of waiting for the router walk to reach them, so every check sees the same components whatever asked for the manager first.
+   The checks enumerate through ``ComponentsBackend.iter_components``, so a custom backend joins the reports by implementing that hook and stays out of them by leaving it alone.
 
 ``next.components.watch``.
    Watch specs exposed to the autoreloader.
@@ -93,8 +100,9 @@ Registration order operates inside a single ``FileComponentsBackend``.
 ``DIRS`` roots are scanned at app ready, before the URL router walk registers page-tree folders, but the origin dimension of the sort key makes the page-tree component win regardless of that order.
 Across backends, the order of entries in ``COMPONENT_BACKENDS`` decides which backend is consulted first.
 
-Two components in the same scope with the same name are reported by ``next.E020``.
-``next.E034`` reports one component name used at the root route scope of more than one page tree.
+Two components sharing a name under one ``(scope_root, scope_relative)`` pair are reported by ``next.E020``, because nothing in the sort key above tells them apart.
+``next.E034`` reports one name at the root scope of two roots the same template resolves against with neither taking precedence: two ``DIRS`` roots, which are visible everywhere, or one page tree nested inside another.
+A page tree and a ``DIRS`` root sharing a name are decided by the origin dimension of the sort key, so that pair is silent.
 
 Filter expression props
 -----------------------

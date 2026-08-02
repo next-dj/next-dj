@@ -22,8 +22,6 @@ from next.utils import (
     defining_file,
 )
 
-from .backends import FileComponentsBackend
-
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
@@ -202,10 +200,8 @@ def iter_serialized_component_context_keys() -> Iterator[tuple[Path, str]]:
     even under `LAZY_COMPONENT_MODULES`.
     """
     manager = get_components_manager()
-    for backend in manager._backends:
-        if not isinstance(backend, FileComponentsBackend):
-            continue
-        for module_path in backend.loaded_module_paths():
+    for backend in manager.backends:
+        for module_path in backend.import_component_modules():
             for entry in component.get_functions(module_path):
                 if entry.serialize and entry.key is not None:
                     yield module_path, entry.key

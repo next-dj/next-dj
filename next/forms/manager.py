@@ -21,13 +21,21 @@ if TYPE_CHECKING:
     from .backends import ActionMeta, ActionRegistration
 
 
+type ActionsSnapshot = tuple[tuple[FormActionBackend, object], ...]
+"""Per-backend opaque tokens, each paired with the backend that minted it."""
+
+
 class FormActionManager:
     """Holds one or more backends and yields their URL patterns."""
 
-    _version: int = 0
+    version: int = 0
     """Cache token for the lazy urlpatterns concat. Registrations that
     bypass the manager and hit a backend directly are not tracked, as
-    they were never supported."""
+    they were never supported.
+
+    Read it to key a cache of your own on the registered actions. It is a
+    plain attribute rather than a property because the lazy urlpatterns
+    concat reads it on every resolve."""
 
     def __init__(self, backends: "list[FormActionBackend] | None" = None) -> None:
         """Initialise with explicit backends or defer loading to settings."""
@@ -46,9 +54,15 @@ class FormActionManager:
         for backend in self._backends:
             yield from backend.generate_urls()
 
-    def _reload_config(self) -> None:
+    def reload(self) -> None:
+        """Rebuild the backends from the current `NEXT_FRAMEWORK` settings.
+
+        The actions registered against the old backends go with them, so a
+        caller that swaps `FORM_ACTION_BACKENDS` under a live manager lets
+        the forms register again afterwards.
+        """
         configs = backend_entries("FORM_ACTION_BACKENDS")
-        self._version += 1
+        self.version += 1
         # No default: an entry without BACKEND is a next.E044 misconfiguration.
         self._backends = load_backends(configs, base=FormActionBackend)
         # Losing every entry is a broken config rather than a load result, so
@@ -58,7 +72,7 @@ class FormActionManager:
 
     def _ensure_backends(self) -> None:
         if not self._loaded:
-            self._reload_config()
+            self.reload()
 
     def _require_backends(self) -> None:
         """Load the backends and refuse a lookup that has none to consult."""
@@ -88,15 +102,32 @@ class FormActionManager:
     def register_action(self, registration: "ActionRegistration") -> None:
         """Forward registration to the first backend."""
         self._first_backend().register_action(registration)
-        self._version += 1
+        self.version += 1
 
     def clear_registries(self) -> None:
-        """Clear every backend exposing `clear_registry`. For test isolation."""
-        self._version += 1
+        """Clear the action storage of every backend. For test isolation."""
+        self.version += 1
         for backend in self._backends:
-            clear = getattr(backend, "clear_registry", None)
-            if callable(clear):
-                clear()
+            backend.clear_registry()
+
+    def snapshot_actions(self) -> "ActionsSnapshot":
+        """Capture the actions of every backend for a later `restore_actions`.
+
+        Each token travels back to the backend that minted it, so a list that
+        changed in between restores the backends it still holds.
+        """
+        self._ensure_backends()
+        return tuple((backend, backend.snapshot()) for backend in self._backends)
+
+    def restore_actions(self, snapshot: "ActionsSnapshot") -> None:
+        """Put the captured actions back, moving `version` as a registration does.
+
+        A rollback changes what is registered, so a cache keyed on the token
+        has to see it exactly as it sees a registration.
+        """
+        for backend, state in snapshot:
+            backend.restore(state)
+        self.version += 1
 
     def get_action_url(self, action_name: str, *, page_path: str | None = None) -> str:
         """Return the reverse URL from the first backend that knows `action_name`."""

@@ -77,6 +77,9 @@ A backend subclasses ``next.forms.FormActionBackend``, an abstract base class wi
 ``register_action(registration)``.
    Records an action from the ``@action`` decorator, a class-bound form, or a ``FormWizard``.
    The single argument is an ``ActionRegistration`` carrying the ``name``, the declaration-site ``file_path``, the ``scope``, and the action target as one of ``handler``, ``form_class``, or ``wizard_class``.
+   A lookup that carries no page scope resolves a bare name to the first registration that used it.
+   A registration whose ``claims_name_binding`` is ``True`` takes that binding over instead, which is how :func:`next.testing.override_form_action` displaces the action it stands in for.
+   The flag defaults to ``False``, so every ordinary registration keeps the first-wins rule.
 
 ``get_action_url(action_name, *, page_path=None)``.
    Returns the reverse URL for an action name.
@@ -89,10 +92,13 @@ A backend subclasses ``next.forms.FormActionBackend``, an abstract base class wi
 ``dispatch(request, uid)``.
    Runs the handler for the given action UID and returns an ``HttpResponse``.
 
-The base class also offers four optional override points.
+The base class also offers seven optional override points.
 
 - ``get_meta``
 - ``iter_actions``
+- ``clear_registry``
+- ``snapshot``
+- ``restore``
 - ``render_invalid_page``
 - ``shape_response``
 
@@ -123,6 +129,25 @@ A backend that defers entirely to ``RegistryFormActionBackend`` need not overrid
 The base implementation yields nothing, and ``RegistryFormActionBackend`` yields its registry entries in registration order.
 The forms system checks that inspect registered actions, the wizard checks including ``next.E054``, the component-widget checks, the guard check, and the message check, walk every configured backend through this hook, so a backend that stores its own actions should implement it, or those actions stay invisible to ``manage.py check``.
 A subclass of ``RegistryFormActionBackend`` inherits a working implementation.
+
+``clear_registry`` and test isolation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``clear_registry()`` drops every action the backend stores.
+``FormActionManager.clear_registries`` calls it on each configured backend, which is what ``next.testing.reset_form_actions`` runs between tests.
+The base implementation does nothing, because a backend that answers each lookup from its source holds nothing to drop.
+Implement it in a backend that keeps its own store, or its actions survive an isolation reset and leak into the next test.
+
+``snapshot`` and ``restore``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``snapshot()`` returns an opaque token holding the actions the backend stores, and ``restore(token)`` puts them back.
+The token is never inspected by the framework, so a backend returns whatever suits its storage and receives its own object back.
+The base implementation returns ``None`` and ignores it again on restore, which is the right behaviour for a backend that keeps no state of its own.
+``RegistryFormActionBackend`` returns a ``RegistryBackendSnapshot``, an immutable copy of its three registry maps, and raises ``TypeError`` for a token it never handed out rather than restoring part of a state it cannot read.
+
+The pair is what lets a test register extra actions and roll them back afterwards, which is how :func:`next.testing.override_form_action` restores the registry when its block ends.
+It reaches the pair through ``form_action_manager.snapshot_actions()`` and ``restore_actions(token)``, which cover every configured backend rather than the first one and keep the ``version`` token in step.
 
 Shaping the response
 ~~~~~~~~~~~~~~~~~~~~
@@ -221,8 +246,7 @@ It keeps an in memory registry, builds dispatch URLs of the form ``/_next/form/<
 
 Subclass it to keep all of that behaviour and add your own step.
 
-The public method ``clear_registry()`` drops every registered action and resets the UID index.
-It exists for test isolation, so a test session that registers overlapping action names can start from an empty registry.
+Its ``clear_registry()`` drops every registered action and resets the UID index, so a test session that registers overlapping action names can start from an empty registry.
 Production code never calls it.
 
 Writing a custom backend
@@ -314,12 +338,14 @@ Testing
 
 Tests that register actions through ``@action`` must drop the global registry between cases so action names from one test do not leak into the next.
 Call :func:`next.testing.reset_form_actions` from a pytest fixture or a ``setUp`` method.
-The helper invokes the manager's private ``_reload_config()``, which rebuilds the backend list from the current ``NEXT_FRAMEWORK["FORM_ACTION_BACKENDS"]`` setting and discards any actions registered against the previous backend instances.
+The helper invokes the manager's ``reload()``, which rebuilds the backend list from the current ``NEXT_FRAMEWORK["FORM_ACTION_BACKENDS"]`` setting and discards any actions registered against the previous backend instances.
 The rebuild marks the manager as loaded when at least one backend loads or the entry list is empty.
 A configuration whose entries all fail stays unloaded and is reread on the next access, as described above.
 
-A test that registers extra actions on a live ``RegistryFormActionBackend`` takes a snapshot first and restores it afterwards.
-``backend.snapshot()`` returns a ``RegistryBackendSnapshot``, an immutable copy of the three registry maps, and ``backend.restore(snapshot)`` puts the registry back exactly as it was, without reaching into the backend's private state.
+A test that registers extra actions on a live registry takes a snapshot first and restores it afterwards.
+``form_action_manager.snapshot_actions()`` and ``form_action_manager.restore_actions(token)`` cover every configured backend and move the ``version`` token on the way back, so a cache keyed on it sees the rollback exactly as it sees a registration.
+They sit on the ``backend.snapshot()`` and ``backend.restore(token)`` contract members, which a backend of your own implements to be rolled back without reaching into its private state.
+Each token travels back to the backend that minted it, and a backend refuses a token it never handed out rather than applying half of it.
 
 See :doc:`/content/topics/testing` for the surrounding helpers and fixtures.
 

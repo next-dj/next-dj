@@ -11,6 +11,7 @@ from next.components import ComponentInfo, FileComponentsBackend
 from next.forms.backends import FormActionBackend, RegistryFormActionBackend
 from next.partial import checks
 from next.partial.registry import patch_op_registry, register_patch_op
+from tests.support import RootPagesRouter, patch_checks_router_manager_with_routers
 
 
 @pytest.fixture(autouse=True)
@@ -28,20 +29,16 @@ def _composed_pages(*pages: tuple[Path, str]) -> Iterator[None]:
     The global page instance compiles the body through its layout loader, so
     a zone tag in the body is discovered exactly as it is in production.
     """
-    routes: list[tuple[str, Path]] = []
-    root = pages[0][0].parent if pages else Path()
+    root = pages[0][0].parent.parent if pages else Path()
     for page_file, body in pages:
         page_file.write_text("x = 1")
         (page_file.parent / "template.djx").write_text(body)
-        routes.append((f"/{page_file.parent.name}/", page_file))
 
     manager = MagicMock()
-    router = MagicMock()
-    manager._backends = [router]
-    router._scan_pages_directory.return_value = routes
+    manager.backends = (MagicMock(),)
     with (
         patch("next.partial.checks.get_router_manager", return_value=(manager, [])),
-        patch("next.checks.common.get_pages_directory", return_value=root),
+        patch("next.checks.common.get_pages_directories", return_value=[root]),
     ):
         yield
 
@@ -272,7 +269,7 @@ def _component(template_path: Path | None) -> Generator[None, None, None]:
         )
     backend._loaded = True
     manager = MagicMock()
-    manager._backends = [backend]
+    manager.backends = (backend,)
 
     settings_ns = MagicMock()
     settings_ns.COMPONENT_BACKENDS = [
@@ -544,6 +541,25 @@ class TestBackendsShapeCheck:
     def test_list_or_absent_value_is_silent(self, framework: object) -> None:
         with override_settings(NEXT_FRAMEWORK=framework):
             assert checks.check_partial_backends_is_a_list() == []
+
+
+class TestThirdPartyBackendPagesReachTheZoneChecks:
+    """A backend that only reports its trees has its zones checked too."""
+
+    def test_duplicate_zone_names_in_a_reported_tree(self, tmp_path: Path) -> None:
+        page_file = _page_dir(tmp_path, "dup")
+        page_file.write_text("x = 1")
+        (page_file.parent / "template.djx").write_text(
+            '{% zone "side" %}<p>{{ a }}</p>{% endzone %}'
+            '{% zone "side" %}<p>{{ b }}</p>{% endzone %}'
+        )
+
+        with patch_checks_router_manager_with_routers(
+            routers=[RootPagesRouter([tmp_path])]
+        ):
+            ids = [m.id for m in checks.check_duplicate_zone_names()]
+
+        assert ids == [checks.E_DUPLICATE_ZONE]
 
 
 class TestChecksSilentOnValidComposite:

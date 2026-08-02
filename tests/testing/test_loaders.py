@@ -1,11 +1,9 @@
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import pytest
 from django.test import override_settings
 
-from next.components import components_manager
+from next.components import DummyBackend, components_manager
 from next.testing import (
     clear_loaded_dirs,
     eager_load_components,
@@ -91,19 +89,46 @@ class TestEagerLoadPages:
         assert len(loaded) == 1
 
 
-class TestEagerLoadComponents:
-    def test_invokes_ensure_loaded_on_every_backend(self, monkeypatch) -> None:
-        called: list[str] = []
+class _RecordingBackend(DummyBackend):
+    """Backend that answers both eager hooks and notes each call."""
 
-        b1 = SimpleNamespace(_ensure_loaded=lambda: called.append("b1"))
-        b2 = SimpleNamespace(_ensure_loaded=lambda: called.append("b2"))
-        manager = MagicMock()
-        manager._backends = [b1, b2]
-        manager._ensure_backends = lambda: called.append("ensure")
+    def __init__(self, label: str, calls: list[str]) -> None:
+        super().__init__({})
+        self._label = label
+        self._calls = calls
+
+    def discover(self) -> None:
+        self._calls.append(f"discover:{self._label}")
+
+    def import_component_modules(self) -> tuple[Path, ...]:
+        self._calls.append(f"import:{self._label}")
+        return ()
+
+
+class _StubManager:
+    """Components manager double exposing only the public backend list."""
+
+    def __init__(self, *backends: DummyBackend) -> None:
+        self._backends = backends
+        self.reads = 0
+
+    @property
+    def backends(self) -> tuple[DummyBackend, ...]:
+        self.reads += 1
+        return self._backends
+
+
+class TestEagerLoadComponents:
+    def test_calls_both_hooks_on_every_backend(self, monkeypatch) -> None:
+        calls: list[str] = []
+        manager = _StubManager(
+            _RecordingBackend("b1", calls), _RecordingBackend("b2", calls)
+        )
 
         monkeypatch.setattr(loaders, "components_manager", manager)
         eager_load_components()
-        assert called == ["ensure", "b1", "b2"]
+        assert calls == ["discover:b1", "import:b1", "discover:b2", "import:b2"]
+        assert manager.reads == 1
 
     def test_imports_component_py_when_lazy_modules_enabled(
         self, tmp_path: Path
@@ -118,17 +143,21 @@ class TestEagerLoadComponents:
                     "LAZY_COMPONENT_MODULES": True,
                 }
             ):
-                components_manager._reload_config()
+                components_manager.reload()
                 assert not marker.exists()
                 eager_load_components()
                 assert marker.read_text() == "loaded"
         finally:
-            components_manager._reload_config()
+            components_manager.reload()
 
-    def test_backend_without_ensure_loaded_is_skipped(self, monkeypatch) -> None:
-        bare = object()
-        manager = MagicMock()
-        manager._backends = [bare]
+    def test_a_backend_that_implements_neither_hook_keeps_working(
+        self, monkeypatch
+    ) -> None:
+        # A backend resolving names on demand owns no modules, so both
+        # hooks keep their inherited no-op behaviour.
+        backend = DummyBackend({})
+        manager = _StubManager(backend)
         monkeypatch.setattr(loaders, "components_manager", manager)
         eager_load_components()
-        manager._ensure_backends.assert_called_once()
+        assert backend.import_component_modules() == ()
+        assert backend.get_component("card", Path("t.djx")) is None

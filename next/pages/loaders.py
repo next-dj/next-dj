@@ -30,6 +30,7 @@ from next.utils import classify_dirs_entries, resolve_base_dir
 
 if TYPE_CHECKING:
     import types
+    from collections.abc import Iterable
     from pathlib import Path
 
 
@@ -54,10 +55,16 @@ class PageModuleImportError(Exception):
         self.file_path = file_path
 
 
-# Mutated only in place (clear, pop, setitem) and never rebound. The page
-# manager holds a direct alias for its cheap emptiness guard, so a rebind
-# here would silently detach that guard and disable fail-loud serving.
 _LAST_LOAD_ERROR: dict[Path, tuple[float, Exception]] = {}
+
+
+def has_load_errors() -> bool:
+    """Whether any `page.py` import failure is on record.
+
+    The per-request fail-loud probe asks this first, so a healthy deployment
+    pays one dict read instead of a `stat` per request.
+    """
+    return bool(_LAST_LOAD_ERROR)
 
 
 def _record_load_error(file_path: Path, exc: Exception, mtime: float | None) -> None:
@@ -76,9 +83,10 @@ def _record_load_error(file_path: Path, exc: Exception, mtime: float | None) -> 
 def last_load_error(file_path: Path) -> PageModuleImportError | None:
     """Return the recorded import failure while `file_path` is unchanged on disk.
 
-    Every call wraps the stored cause in a fresh `PageModuleImportError`.
-    Re-raising one shared instance would append the raise chain to its
-    traceback on every request and pin each request's frame locals alive.
+    A record the file has outlived is dropped here rather than left to arm
+    `has_load_errors` forever. Every call wraps the stored cause in a fresh
+    `PageModuleImportError`, because re-raising one shared instance would
+    grow its traceback per request and pin each request's frame locals.
     """
     entry = _LAST_LOAD_ERROR.get(file_path)
     if entry is None:
@@ -86,8 +94,13 @@ def last_load_error(file_path: Path) -> PageModuleImportError | None:
     try:
         mtime = file_path.stat().st_mtime
     except OSError:
+        # The file is gone, so nothing can import it again to clear this.
+        _LAST_LOAD_ERROR.pop(file_path, None)
         return None
     if mtime != entry[0]:
+        # A rewrite the memo has not executed yet, and the record belongs to
+        # the source that failed, not to what sits there now.
+        _LAST_LOAD_ERROR.pop(file_path, None)
         return None
     error = PageModuleImportError(file_path)
     error.__cause__ = entry[1]
@@ -97,11 +110,9 @@ def last_load_error(file_path: Path) -> PageModuleImportError | None:
 def _load_python_module(file_path: Path) -> types.ModuleType | None:
     """Load `file_path` as a module or return `None` on failure.
 
-    Any exception raised by the module body is recorded through
-    `_record_load_error` so callers can tell a broken `page.py` from a
-    legitimately absent module via `last_load_error`. ImportError,
-    SyntaxError, and AttributeError are common examples, not a closed
-    list.
+    Whatever the module body raises is recorded through `_record_load_error`,
+    so callers tell a broken `page.py` from an absent one via
+    `last_load_error`.
     """
     try:
         spec = importlib.util.spec_from_file_location("page_module", file_path)
@@ -162,10 +173,9 @@ def _load_python_module_memo(file_path: Path) -> types.ModuleType | None:
 def reset_module_memo() -> None:
     """Drop every memoised module so the next load re-executes from disk.
 
-    The memo keys by mtime, so a rewrite that lands on the same tick would
-    otherwise return a stale module. The check-cache reset clears this for
-    scripts that edit a `page.py` in place between runs. Recorded import
-    failures follow the same lifecycle and are dropped alongside.
+    The memo keys by mtime, so a rewrite landing on the same tick would
+    otherwise return a stale module. Recorded import failures share that
+    lifecycle and go with it.
     """
     # Errors go first so a concurrent load racing this reset can at worst
     # leave a fresh memo entry behind, never a memoised failure without
@@ -195,6 +205,22 @@ def _read_string_list(module: types.ModuleType, attr: str) -> list[str]:
     return [str(item) for item in value if isinstance(item, str) and item]
 
 
+def read_module_string_lists(
+    file_path: Path, attrs: Iterable[str]
+) -> dict[str, list[str]] | None:
+    """Return the named module-level string lists a page-tree module declares.
+
+    Answers `None` when the file does not execute as a module, which tells an
+    absent or broken module apart from one that declares none of the names.
+    Anything but a list or tuple of non-empty strings reads as an empty list,
+    so a caller never has to type-check what a user module bound to the name.
+    """
+    module = _load_python_module(file_path)
+    if module is None:
+        return None
+    return {attr: _read_string_list(module, attr) for attr in attrs}
+
+
 class TemplateLoader(ABC):
     """Pluggable source of template text for a `page.py` path.
 
@@ -221,7 +247,7 @@ class TemplateLoader(ABC):
         non-file-based loaders. Subclasses override when they back a
         sibling file.
         """
-        _ = file_path
+        del file_path
         return None
 
 

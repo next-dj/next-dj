@@ -206,6 +206,129 @@ class TestDependencyResolverAddProvider:
         assert result == {"x": 99}
 
 
+class TestDependencyResolverProviderOrder:
+    """`prepend_provider` and `remove_provider` bracket a temporary provider."""
+
+    def test_prepended_provider_wins_over_an_added_one(self) -> None:
+        """The provider placed in front answers before the one appended earlier."""
+        r = _minimal_resolver()
+
+        class FirstProvider(RegisteredParameterProvider):
+            def can_handle(self, param: inspect.Parameter, context: object) -> bool:
+                return param.name == "x"
+
+            def resolve(self, param: inspect.Parameter, context: object) -> object:
+                return "appended"
+
+        class SecondProvider(FirstProvider):
+            def resolve(self, param: inspect.Parameter, context: object) -> object:
+                return "prepended"
+
+        r.add_provider(FirstProvider())
+        winner = SecondProvider()
+        r.prepend_provider(winner)
+
+        def fn(x: str) -> None:
+            pass
+
+        assert r.resolve_dependencies(fn) == {"x": "prepended"}
+        r.remove_provider(winner)
+        assert r.resolve_dependencies(fn) == {"x": "appended"}
+
+    def test_removing_a_provider_that_was_never_added_is_silent(self) -> None:
+        """A double removal leaves the list alone instead of raising."""
+        r = _minimal_resolver()
+
+        class Stray(RegisteredParameterProvider):
+            def can_handle(self, param: inspect.Parameter, context: object) -> bool:
+                return False
+
+            def resolve(self, param: inspect.Parameter, context: object) -> object:
+                return None
+
+        r.remove_provider(Stray())
+
+
+class TestResolverDependencyBindings:
+    """`get_dependency` and `unregister_dependency` read and drop a binding."""
+
+    def test_get_returns_the_registered_callable(self) -> None:
+        r = _minimal_resolver()
+
+        def provide() -> str:
+            return "value"
+
+        r.register_dependency("thing", provide)
+        assert r.get_dependency("thing") is provide
+
+    def test_get_returns_none_for_an_unbound_name(self) -> None:
+        assert _minimal_resolver().get_dependency("nothing") is None
+
+    def test_unregister_drops_the_binding_and_tolerates_a_missing_one(self) -> None:
+        r = _minimal_resolver()
+        r.register_dependency("thing", lambda: "value")
+        r.unregister_dependency("thing")
+        r.unregister_dependency("thing")
+        assert r.get_dependency("thing") is None
+
+
+class TestResolverCurrentCallable:
+    """`current_callable` is how a provider asks what the resolve is for."""
+
+    def test_none_outside_a_resolve(self) -> None:
+        assert _minimal_resolver().current_callable() is None
+
+    def test_names_the_callable_being_resolved(self) -> None:
+        r = _minimal_resolver()
+        seen: list[object] = []
+
+        class Recorder(RegisteredParameterProvider):
+            def can_handle(self, param, context) -> bool:
+                seen.append(r.current_callable())
+                return False
+
+            def resolve(self, param, context) -> object:
+                raise NotImplementedError
+
+        r.add_provider(Recorder())
+
+        def handler(value: int = 1) -> int:
+            return value
+
+        r.resolve_dependencies(handler)
+        assert seen == [handler]
+
+    def test_a_nested_resolve_names_the_inner_callable(self) -> None:
+        r = _minimal_resolver()
+        seen: list[object] = []
+
+        def provide_theme() -> str:
+            return "dark"
+
+        r.register_dependency("theme", provide_theme)
+
+        class Recorder(RegisteredParameterProvider):
+            priority = 10
+
+            def can_handle(self, param, context) -> bool:
+                seen.append(r.current_callable())
+                return False
+
+            def resolve(self, param, context) -> object:
+                raise NotImplementedError
+
+        r.prepend_provider(Recorder())
+
+        def handler(theme: str = Depends("theme"), tail: int = 1) -> str:
+            return f"{theme}{tail}"
+
+        r.resolve_dependencies(handler)
+        # The `Depends` resolve nests, and `provide_theme` takes no parameter,
+        # so the outer handler is the only callable a `can_handle` sees.
+        assert seen == [handler, handler]
+        assert r.current_callable() is None
+
+
 class TestResolverRegister:
     """Tests for resolver.register decorator and method."""
 

@@ -14,6 +14,7 @@ from next.static.discovery import (
     StemRegistry,
     default_stems,
 )
+from next.urls import FileRouterBackend
 
 
 if TYPE_CHECKING:
@@ -50,6 +51,12 @@ class TestBackendProviderProtocol:
 
     def test_non_conforming_object_fails(self) -> None:
         assert not isinstance(object(), BackendProvider)
+
+    def test_a_router_backend_is_not_a_provider(self) -> None:
+        # Both contracts carry a `page_roots`, and they return different types.
+        # A structural match needs `default_backend` too, which no router has,
+        # so the shared name cannot make a router pass for a provider.
+        assert not isinstance(FileRouterBackend(app_dirs=False), BackendProvider)
 
 
 class TestStemRegistryDefaults:

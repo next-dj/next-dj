@@ -906,10 +906,24 @@ class TestComponentMissReporting:
         )
 
     @override_settings(DEBUG=True)
+    def test_debug_comment_sanitizes_odd_dash_runs(self, tmp_path: Path) -> None:
+        # Breaking whole pairs leaves the trailing dash of an odd run, which
+        # still closes the comment.
+        t = Template('{% load components %}{% component "nv--->x" %}')
+        with (
+            patch.object(components_manager, "get_component", return_value=None),
+            patch.object(
+                components_manager, "collect_visible_components", return_value={}
+            ),
+        ):
+            result = t.render(
+                Context({"current_template_path": str(tmp_path / "t.djx")})
+            )
+        assert result == "<!-- next: component 'nv- - ->x' not found (not-found) -->"
+
+    @override_settings(DEBUG=True)
     def test_debug_no_discovery_path_renders_skip_comment(self) -> None:
-        with patch(
-            "difflib.get_close_matches", wraps=difflib.get_close_matches
-        ) as spy:
+        with patch("difflib.get_close_matches", wraps=difflib.get_close_matches) as spy:
             result = self._render({})
         assert result == (
             "<!-- next: component 'nvbar' skipped, no "

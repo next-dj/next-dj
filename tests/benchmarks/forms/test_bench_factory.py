@@ -11,7 +11,7 @@ _REGISTRY_CONFIG = {"BACKEND": "next.forms.RegistryFormActionBackend"}
 
 
 def _build_backend() -> FormActionBackend:
-    """Resolve and instantiate one entry, what `_reload_config` does per config."""
+    """Resolve and instantiate one entry, what `reload` does per config."""
     klass = resolve_backend_class(_REGISTRY_CONFIG, base=FormActionBackend)
     return klass(_REGISTRY_CONFIG)
 

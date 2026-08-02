@@ -14,7 +14,7 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, cast, override
+from typing import Any, cast, override
 
 from django import template
 from django.conf import settings
@@ -55,6 +55,8 @@ _SHORT_SET_SLOT_EMPTY_NAME = "{% set_slot %} tag requires a quoted slot name"
 # Slot collection uses this key during parent ``{% #component %}`` body render
 _INTERNAL_CONTEXT_KEYS = frozenset({"_component_slots"})
 
+_DASH_BEFORE_DASH = re.compile(r"-(?=-)")
+
 # Sentinel distinguishing "slot key absent" from "slot present but empty".
 # An explicitly empty slot (``{% #slot "x" %}{% /slot %}``) renders nothing,
 # whereas a missing slot falls back to the ``{% #set_slot %}`` default body.
@@ -66,8 +68,12 @@ def _strip_quotes(raw: str) -> str:
 
 
 def _comment_safe(text: str) -> str:
-    """Break `--` runs so `text` cannot terminate an HTML comment early."""
-    return text.replace("--", "- -")
+    """Break every `--` run so `text` cannot terminate an HTML comment early.
+
+    Replacing whole pairs would leave an odd run closing the comment anyway,
+    so the space goes after each dash that another dash follows.
+    """
+    return _DASH_BEFORE_DASH.sub("- ", text)
 
 
 def _parse_props(
@@ -188,48 +194,46 @@ class ComponentNode(Node):
         matches = difflib.get_close_matches(self.name, sorted(names))
         return matches[0] if matches else None
 
-    def _on_miss(
-        self,
-        reason: Literal["no-discovery-path", "not-found"],
-        path: Path | None,
-    ) -> str:
-        """Report the miss at the volume `STRICT_LOADING` and `DEBUG` select.
+    def _report_loudly(self) -> bool:
+        """Whether `STRICT_LOADING` or `DEBUG` asks for more than a log line."""
+        return bool(next_framework_settings.STRICT_LOADING or settings.DEBUG)
 
-        `path` is `None` only for the no-discovery-path reason, which has
-        no visibility scope to draw a did-you-mean hint from.
+    def _on_missing_path(self) -> str:
+        """Report a render whose context carries no `current_template_path`.
+
+        The context names no template, so there is no visibility scope to
+        draw a did-you-mean hint from.
         """
-        strict = next_framework_settings.STRICT_LOADING
-        if not strict and not settings.DEBUG:
-            if path is None:
-                logger.warning(
-                    "component '%s' skipped, no current_template_path in context",
-                    self.name,
-                )
-            else:
-                logger.warning("component '%s' not found from %s", self.name, path)
-            return ""
-        suggestion = self._close_match(path) if path is not None else None
-        hint = f", did you mean '{suggestion}'?" if suggestion else ""
-        if strict:
-            if path is None:
-                msg = (
-                    f"component '{self.name}' cannot be resolved because the "
-                    "template context has no current_template_path"
-                )
-            else:
-                msg = f"component '{self.name}' not found from {path}{hint}"
-            raise template.TemplateSyntaxError(msg)
-        if path is None:
-            return (
-                f"<!-- next: component '{_comment_safe(self.name)}' skipped, no "
-                f"current_template_path in context ({reason}) -->"
+        if not self._report_loudly():
+            logger.warning(
+                "component '%s' skipped, no current_template_path in context", self.name
             )
-        safe_hint = (
-            f", did you mean '{_comment_safe(suggestion)}'?" if suggestion else ""
+            return ""
+        if next_framework_settings.STRICT_LOADING:
+            msg = (
+                f"component '{self.name}' cannot be resolved because the "
+                "template context has no current_template_path"
+            )
+            raise template.TemplateSyntaxError(msg)
+        return (
+            f"<!-- next: component '{_comment_safe(self.name)}' skipped, no "
+            "current_template_path in context (no-discovery-path) -->"
         )
+
+    def _on_not_found(self, path: Path) -> str:
+        """Report a name no component visible from `path` answers."""
+        if not self._report_loudly():
+            logger.warning("component '%s' not found from %s", self.name, path)
+            return ""
+        suggestion = self._close_match(path)
+        if next_framework_settings.STRICT_LOADING:
+            hint = f", did you mean '{suggestion}'?" if suggestion else ""
+            msg = f"component '{self.name}' not found from {path}{hint}"
+            raise template.TemplateSyntaxError(msg)
+        hint = f", did you mean '{_comment_safe(suggestion)}'?" if suggestion else ""
         return (
             f"<!-- next: component '{_comment_safe(self.name)}' not found "
-            f"({reason}){safe_hint} -->"
+            f"(not-found){hint} -->"
         )
 
     @override
@@ -237,11 +241,11 @@ class ComponentNode(Node):
         """Merge props, slots, and children, then render the component."""
         path = self._template_path_from_context(context)
         if path is None:
-            return self._on_miss("no-discovery-path", None)
+            return self._on_missing_path()
 
         info = get_component(self.name, path)
         if info is None:
-            return self._on_miss("not-found", path)
+            return self._on_not_found(path)
 
         collect_component_assets(info, context.get("_static_collector"))
 

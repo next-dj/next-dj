@@ -18,7 +18,6 @@ from .backends import (
     ComponentsBackend,
     DummyBackend,
     FileComponentsBackend,
-    register_components_folder_from_router_walk,
 )
 from .context import (
     ComponentContextManager,
@@ -35,7 +34,11 @@ from .facade import (
 )
 from .info import ComponentInfo
 from .loading import ModuleCache, ModuleLoader
-from .manager import ComponentsManager, components_manager
+from .manager import (
+    ComponentsManager,
+    components_manager,
+    register_components_folder_from_router_walk,
+)
 from .registry import ComponentRegistry, ComponentVisibilityResolver
 from .renderers import (
     ComponentRenderer,

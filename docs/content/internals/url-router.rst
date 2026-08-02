@@ -53,6 +53,8 @@ Modules
 ``next.urls.dispatcher``.
    ``FilesystemTreeDispatcher`` walks the pages directory tree and yields ``(url_path, page_file)`` pairs that the router turns into URL patterns.
    The module-level helper ``scan_pages_tree`` instantiates the dispatcher with the configured skip set and returns the same pairs as an iterator.
+   The walk itself is ``next.utils.walk_page_tree``, which sits below both this package and the checks layer because the system checks run the same walk over the trees a backend reports.
+   The dispatcher adds the one thing the checks do not want, a callback on each skipped directory that registers the component folders the router passes.
 
 ``next.urls.markers``.
    Hosts the ``DUrl`` and ``DQuery`` annotation markers, the four request/URL/query parameter providers, and the ``get_multi_values`` helper.

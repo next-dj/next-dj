@@ -4,11 +4,12 @@ import textwrap
 import traceback
 from pathlib import Path
 from unittest import mock
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from django.core.checks import Error
 from django.http import Http404, HttpRequest
+from django.template import Template
 from django.test import override_settings
 
 import next.pages.loaders as loaders_module
@@ -25,6 +26,7 @@ from next.pages.manager import iter_serialized_page_context_keys
 from next.pages.registry import PageContextRegistry
 from next.static import default_manager as static_default_manager
 from tests.support import (
+    MalformedRootsRouter,
     attribution,
     handler_declared_here,
     patch_checks_router_manager,
@@ -49,6 +51,36 @@ class TestPage:
 
         assert file_path in page_instance._template_registry
         assert page_instance._template_registry[file_path] == template_str
+
+    def test_clear_template_caches_recomposes_a_rewritten_page(
+        self, page_instance, tmp_path
+    ) -> None:
+        """The public drop makes the next compose read the file from disk again."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text("x = 1")
+        template = tmp_path / "template.djx"
+        template.write_text("<p>first</p>")
+        assert "first" in page_instance.composed_template_for(page_file).source
+
+        # Same mtime tick would otherwise hide the rewrite from the staleness check.
+        template.write_text("<p>second</p>")
+        os.utime(template, (0, 0))
+        page_instance.clear_template_caches()
+
+        assert "second" in page_instance.composed_template_for(page_file).source
+
+    def test_clear_template_caches_empties_every_cache(self, page_instance) -> None:
+        """One call drops the source, the compiled template, and the mtimes."""
+        file_path = Path("/test/path/page.py")
+        page_instance.register_template(file_path, "<p>x</p>")
+        page_instance._compiled_registry[file_path] = Template("<p>x</p>")
+        page_instance._template_source_mtimes[file_path] = {}
+
+        page_instance.clear_template_caches()
+
+        assert page_instance._template_registry == {}
+        assert page_instance._compiled_registry == {}
+        assert page_instance._template_source_mtimes == {}
 
     @pytest.mark.parametrize(
         ("decorator_type", "expected_key"),
@@ -1156,9 +1188,8 @@ class TestBrokenPageImportView:
         monkeypatch.setattr(loaders_module, "_load_python_module", counting)
 
         page_file, pattern = self._broken_pattern(page_instance, tmp_path, url_parser)
-        # The pattern build probes once and every request answers 404 off
-        # the memo. Repeat requests must add no re-execution on the
-        # unchanged broken file.
+        # The pattern build probes once and every later request answers 404
+        # off the memo, re-executing nothing.
         with pytest.raises(Http404):
             pattern.callback(_make_real_request())
         first_pass = calls.count(page_file)
@@ -1190,9 +1221,9 @@ class TestAuthorizationOutcomeBrokenPage:
             with pytest.raises(PageModuleImportError):
                 page_instance.authorization_outcome(page_file, _make_real_request())
 
-    def test_returns_404_in_prod(self, page_instance, tmp_path) -> None:
+    def test_raises_in_prod_instead_of_404(self, page_instance, tmp_path) -> None:
         page_file = self._broken_file(tmp_path)
-        with pytest.raises(Http404):
+        with pytest.raises(PageModuleImportError):
             page_instance.authorization_outcome(page_file, _make_real_request())
 
 
@@ -1366,15 +1397,46 @@ class TestSerializedPageContextKeys:
                 return 3
             """,
         )
-        with patch_checks_router_manager(
-            pages_directory=tmp_path,
-            scan_routes=[("first", page_file), ("second", page_file)],
+        with (
+            patch_checks_router_manager(pages_directory=tmp_path),
+            patch(
+                "next.checks.common.walk_page_tree",
+                return_value=[("first", page_file), ("second", page_file)],
+            ),
+        ):
+            found = list(iter_serialized_page_context_keys())
+        assert found == [(page_file, "unread")]
+
+    def test_symlinked_spelling_of_one_page_reports_its_key_once(
+        self, tmp_path
+    ) -> None:
+        real = tmp_path / "real"
+        real.mkdir()
+        page_file = self._write_page(
+            real,
+            """
+            from next.pages import page
+
+
+            @page.context("unread", serialize=True)
+            def unread():
+                return 3
+            """,
+        )
+        (tmp_path / "link").symlink_to(real, target_is_directory=True)
+        linked = tmp_path / "link" / "page.py"
+        with (
+            patch_checks_router_manager(pages_directory=tmp_path),
+            patch(
+                "next.checks.common.walk_page_tree",
+                return_value=[("real", page_file), ("link", linked)],
+            ),
         ):
             found = list(iter_serialized_page_context_keys())
         assert found == [(page_file, "unread")]
 
     def test_unserialized_and_keyless_contexts_are_skipped(self, tmp_path) -> None:
-        page_file = self._write_page(
+        self._write_page(
             tmp_path,
             """
             from next.pages import page
@@ -1390,21 +1452,25 @@ class TestSerializedPageContextKeys:
                 return {"$dev": True}
             """,
         )
-        with patch_checks_router_manager(
-            pages_directory=tmp_path, scan_routes=[("route", page_file)]
-        ):
+        with patch_checks_router_manager(pages_directory=tmp_path):
             assert list(iter_serialized_page_context_keys()) == []
 
     def test_virtual_page_path_is_skipped(self, tmp_path) -> None:
-        missing = tmp_path / "virtual" / "page.py"
-        with patch_checks_router_manager(
-            pages_directory=tmp_path, scan_routes=[("virtual", missing)]
-        ):
+        (tmp_path / "virtual").mkdir()
+        (tmp_path / "virtual" / "template.djx").write_text("<p>ok</p>\n")
+
+        with patch_checks_router_manager(pages_directory=tmp_path):
             assert list(iter_serialized_page_context_keys()) == []
 
     def test_unimportable_page_is_skipped(self, tmp_path) -> None:
-        page_file = self._write_page(tmp_path, "def broken(:\n")
-        with patch_checks_router_manager(
-            pages_directory=tmp_path, scan_routes=[("broken", page_file)]
-        ):
+        self._write_page(tmp_path, "def broken(:\n")
+        with patch_checks_router_manager(pages_directory=tmp_path):
+            assert list(iter_serialized_page_context_keys()) == []
+
+    def test_a_router_reporting_the_wrong_tree_shape_is_skipped(self, tmp_path) -> None:
+        # This runs on the render path, so a plugin handing back bare paths
+        # may not turn a page render into an AttributeError.
+        manager = MagicMock()
+        manager.backends = (MalformedRootsRouter([tmp_path]),)
+        with patch("next.pages.manager.get_router_manager", return_value=(manager, [])):
             assert list(iter_serialized_page_context_keys()) == []

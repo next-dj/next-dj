@@ -71,10 +71,10 @@ class TestBenchEnsureBackends:
         benchmark(manager._ensure_backends)
 
     @pytest.mark.benchmark(group="static.manager.load")
-    def test_reload_config_cold(self, benchmark) -> None:
+    def test_reload_cold(self, benchmark) -> None:
         """A reload rereads settings and rebuilds every configured backend."""
         manager = StaticManager()
-        benchmark(manager._reload_config)
+        benchmark(manager.reload)
 
 
 class TestBenchStaticManagerInject:

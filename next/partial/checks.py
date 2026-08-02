@@ -25,11 +25,11 @@ from django.template.defaulttags import ForNode, IfNode, WithNode
 
 from next.checks import NEXT
 from next.checks.common import (
+    first_visit,
     get_components_manager,
     get_router_manager,
     iter_scanned_page_pairs,
 )
-from next.components.backends import FileComponentsBackend
 from next.conf import import_class_cached, next_framework_settings
 from next.conf.signals import settings_reloaded
 from next.forms.backends import FormActionBackend
@@ -108,7 +108,7 @@ def _collect_composed_pages(
 ) -> "Iterator[tuple[Path, Template]]":
     """Walk every router's scanned pages, de-duplicating by resolved path."""
     seen: set[Path] = set()
-    for router in router_manager._backends:
+    for router in router_manager.backends:
         yield from _iter_router_pages(router, seen)
 
 
@@ -131,11 +131,7 @@ def _iter_router_pages(
 ) -> "Iterator[tuple[Path, Template]]":
     """Yield compiled composed templates for one router's scanned pages."""
     for _url_path, page_path in iter_scanned_page_pairs(router):
-        resolved = page_path.resolve()
-        if resolved in seen:
-            continue
-        seen.add(resolved)
-        if not page.has_template(page_path):
+        if not first_visit(page_path, seen) or not page.has_template(page_path):
             continue
         try:
             template = page.composed_template_for(page_path)
@@ -180,13 +176,9 @@ def check_composed_templates_compile(*args, **kwargs) -> list[CheckMessage]:
     if router_manager is None:
         return messages
     seen: set[Path] = set()
-    for router in router_manager._backends:
+    for router in router_manager.backends:
         for _url_path, page_path in iter_scanned_page_pairs(router):
-            resolved = page_path.resolve()
-            if resolved in seen:
-                continue
-            seen.add(resolved)
-            if not page.has_template(page_path):
+            if not first_visit(page_path, seen) or not page.has_template(page_path):
                 continue
             try:
                 page.composed_template_for(page_path)
@@ -409,11 +401,8 @@ def check_no_zone_in_component(*args, **kwargs) -> list[CheckMessage]:
     messages: list[CheckMessage] = []
     manager = get_components_manager()
     seen: set[Path] = set()
-    for backend in manager._backends:
-        if not isinstance(backend, FileComponentsBackend):
-            continue
-        backend._ensure_loaded()
-        for info in backend._registry:
+    for backend in manager.backends:
+        for info in backend.iter_components():
             template_path = info.template_path
             if template_path is None:
                 continue

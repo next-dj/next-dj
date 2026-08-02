@@ -27,6 +27,8 @@ from next.components.manager import _on_settings_reloaded
 from next.components.renderers import _inject_component_context, _merge_csrf_context
 from next.conf import next_framework_settings
 from tests.support import (
+    RaisingRootsRouter,
+    RootPagesRouter,
     next_framework_settings_component_backends_list as _next_framework_settings_component_backends_list,
 )
 
@@ -39,7 +41,7 @@ class TestComponentsManager:
         mock_ns = _next_framework_settings_component_backends_list([])
         with patch("next.backends.next_framework_settings", mock_ns):
             manager = ComponentsManager()
-            manager._reload_config()
+            manager.reload()
             assert manager.get_component("card", Path("/tmp/t.djx")) is None
 
     def test_collect_visible_components_merges_backends(self) -> None:
@@ -47,17 +49,17 @@ class TestComponentsManager:
         mock_ns = _next_framework_settings_component_backends_list([])
         with patch("next.backends.next_framework_settings", mock_ns):
             manager = ComponentsManager()
-            manager._reload_config()
+            manager.reload()
             assert manager.collect_visible_components(Path("/x")) == {}
 
-    def test_reload_config_swallows_backend_creation_error(self) -> None:
+    def test_reload_swallows_backend_creation_error(self) -> None:
         """An unimportable ``BACKEND`` is logged and costs only its own entry."""
         mock_ns = _next_framework_settings_component_backends_list(
             [{"BACKEND": "next.components.NonexistentBackend", "OPTIONS": {}}]
         )
         with patch("next.backends.next_framework_settings", mock_ns):
             manager = ComponentsManager()
-            manager._reload_config()
+            manager.reload()
             assert len(manager._backends) == 0
 
     def test_template_loader_built_with_default_module_loader(self) -> None:
@@ -65,7 +67,7 @@ class TestComponentsManager:
         mgr = ComponentsManager()
         mock_ns = _next_framework_settings_component_backends_list([])
         with patch("next.backends.next_framework_settings", mock_ns):
-            mgr._reload_config()
+            mgr.reload()
         assert isinstance(mgr.template_loader, ComponentTemplateLoader)
         assert isinstance(mgr.component_renderer, ComponentRenderer)
 
@@ -116,7 +118,7 @@ class TestBackendsLoadedOnce:
             manager._ensure_backends()
         assert manager._backends == []
 
-    def test_reload_config_reads_settings_again(self) -> None:
+    def test_reload_reads_settings_again(self) -> None:
         """The explicit reload is still eager, which test helpers rely on."""
         manager = ComponentsManager()
         mock_ns = _next_framework_settings_component_backends_list(
@@ -125,7 +127,7 @@ class TestBackendsLoadedOnce:
         with patch("next.backends.next_framework_settings", mock_ns):
             manager._ensure_backends()
             first = manager._backends[0]
-            manager._reload_config()
+            manager.reload()
         assert manager._backends[0] is not first
 
 
@@ -210,6 +212,38 @@ class TestSettingsReloadedIsLazy:
         assert manager._component_renderer is None
         assert manager._walk_registered_folders == set()
 
+    def test_reload_rebuilds_from_the_current_settings(self) -> None:
+        """The public entry point swaps the backends for the configured ones."""
+        manager = ComponentsManager()
+        dummy = _next_framework_settings_component_backends_list(
+            [{"BACKEND": "next.components.DummyBackend"}]
+        )
+        with patch("next.backends.next_framework_settings", dummy):
+            manager._ensure_backends()
+        assert isinstance(manager.backends[0], DummyBackend)
+
+        file_entry = _next_framework_settings_component_backends_list(
+            [{"BACKEND": "next.components.FileComponentsBackend", "DIRS": []}]
+        )
+        with patch("next.backends.next_framework_settings", file_entry):
+            manager.reload()
+
+        assert isinstance(manager.backends[0], FileComponentsBackend)
+
+    def test_reload_drops_the_render_pipeline_and_walk_claims(
+        self, tmp_path: Path
+    ) -> None:
+        """Rebuilding forgets which folders were claimed against the old backends."""
+        manager = ComponentsManager()
+        mock_ns = _next_framework_settings_component_backends_list([])
+        with patch("next.backends.next_framework_settings", mock_ns):
+            manager._ensure_backends()
+            loader = manager.template_loader
+            assert manager._claim_router_walk_folder(tmp_path) is True
+            manager.reload()
+            assert manager._walk_registered_folders == set()
+            assert manager.template_loader is not loader
+
     def test_receiver_invalidates_the_module_level_manager(self) -> None:
         """The wired receiver drops the shared manager state without a rebuild."""
         components_manager._ensure_backends()
@@ -246,6 +280,71 @@ class TestRegisterComponentsFolderFromRouterWalk:
         register_components_folder_from_router_walk(folder, tmp_path, "")
         assert len(list(backend._registry.get_all())) == 1
 
+    def test_the_first_claim_survives_a_cold_backend_load(self, tmp_path: Path) -> None:
+        # Loading the backends clears the claim set, so a claim taken before
+        # that load would be forgotten and the folder registered twice.
+        folder = tmp_path / "_components"
+        folder.mkdir()
+        (folder / "a.djx").write_text("a")
+        components_manager._invalidate()
+
+        register_components_folder_from_router_walk(folder, tmp_path, "")
+        register_components_folder_from_router_walk(folder, tmp_path, "")
+
+        registered = [
+            info.name
+            for backend in components_manager._backends
+            if isinstance(backend, FileComponentsBackend)
+            for info in backend._registry
+        ]
+        assert registered.count("a") == 1
+
+    def test_a_declining_backend_hands_the_folder_to_the_next_one(
+        self, tmp_path: Path, min_component_config: dict
+    ) -> None:
+        """A backend off the filesystem never takes a folder from a file backend."""
+        folder = tmp_path / "_components"
+        folder.mkdir()
+        (folder / "b.djx").write_text("b")
+        file_backend = FileComponentsBackend(dict(min_component_config))
+        manager = ComponentsManager()
+        manager._backends = [DummyBackend({}), file_backend]
+        manager._loaded = True
+
+        manager.register_router_walk_folder(folder, tmp_path, "")
+
+        assert [info.name for info in file_backend.iter_components()] == ["b"]
+
+    def test_only_the_first_claiming_backend_registers_the_folder(
+        self, tmp_path: Path, min_component_config: dict
+    ) -> None:
+        """The documented rule stands: one folder reaches one backend."""
+        folder = tmp_path / "_components"
+        folder.mkdir()
+        (folder / "c.djx").write_text("c")
+        first = FileComponentsBackend(dict(min_component_config))
+        second = FileComponentsBackend(dict(min_component_config))
+        manager = ComponentsManager()
+        manager._backends = [first, second]
+        manager._loaded = True
+
+        manager.register_router_walk_folder(folder, tmp_path, "")
+
+        assert [info.name for info in first.iter_components()] == ["c"]
+        assert list(second.iter_components()) == []
+
+    def test_a_folder_nobody_claims_is_still_claimed_once(self, tmp_path: Path) -> None:
+        """The dedup set records the folder even when no backend takes it."""
+        folder = tmp_path / "_components"
+        folder.mkdir()
+        manager = ComponentsManager()
+        manager._backends = [DummyBackend({})]
+        manager._loaded = True
+
+        manager.register_router_walk_folder(folder, tmp_path, "")
+
+        assert manager._walk_registered_folders == {folder.resolve()}
+
     def test_loads_component_py_when_composite_has_module(
         self, tmp_path: Path, installed_file_backend: FileComponentsBackend
     ) -> None:
@@ -262,10 +361,10 @@ class TestRegisterComponentsFolderFromRouterWalk:
         assert len(infos) == 1
         assert infos[0].module_path is not None
 
-    def test_import_all_component_modules_loads_each_module_path(
+    def test_import_component_modules_loads_each_module_path(
         self, tmp_path: Path, min_component_config: dict
     ) -> None:
-        """``import_all_component_modules`` executes ``module_loader.load`` per path."""
+        """``import_component_modules`` executes ``module_loader.load`` per path."""
         comp_py = tmp_path / "component.py"
         comp_py.write_text("# registered component module\n")
         djx = tmp_path / "c.djx"
@@ -280,7 +379,7 @@ class TestRegisterComponentsFolderFromRouterWalk:
         )
         backend = FileComponentsBackend(dict(min_component_config))
         backend._registry.register(info)
-        backend.import_all_component_modules()
+        assert backend.import_component_modules() == (comp_py,)
 
     def test_lazy_component_modules_skips_eager_load(
         self, tmp_path: Path, min_component_config: dict
@@ -836,21 +935,11 @@ class TestGetComponentPathsForWatch:
                 assert get_component_paths_for_watch() == set()
         next_framework_settings.reload()
 
-    def test_skips_non_filesystem_page_router(self, tmp_path: Path) -> None:
-        """Non-filesystem discovery routers do not run the pages-tree scan."""
-        pages_root = tmp_path / "pages"
-        pages_root.mkdir()
+    def test_survives_a_router_whose_tree_listing_raises(self, tmp_path: Path) -> None:
+        """`collectstatic` reaches this scan, so a raising router costs its paths only."""
         with override_settings(
             NEXT_FRAMEWORK={
-                "PAGE_BACKENDS": [
-                    {
-                        "BACKEND": "next.urls.FileRouterBackend",
-                        "PAGES_DIR": "pages",
-                        "APP_DIRS": False,
-                        "DIRS": [str(pages_root)],
-                        "OPTIONS": {},
-                    }
-                ],
+                "PAGE_BACKENDS": [{"BACKEND": "broken.Backend"}],
                 "COMPONENT_BACKENDS": [
                     {
                         "BACKEND": "next.components.FileComponentsBackend",
@@ -862,8 +951,34 @@ class TestGetComponentPathsForWatch:
         ):
             next_framework_settings.reload()
             with patch(
-                "next.urls.RouterFactory.is_filesystem_discovery_router",
-                return_value=False,
+                "next.urls.RouterFactory.create_backend",
+                return_value=RaisingRootsRouter(),
+            ):
+                assert get_component_paths_for_watch() == set()
+        next_framework_settings.reload()
+
+    def test_skips_router_without_a_components_folder(self, tmp_path: Path) -> None:
+        """A router that registers no component folder runs no pages-tree scan."""
+        pages_root = tmp_path / "pages"
+        comp_dir = pages_root / "_components" / "widget"
+        comp_dir.mkdir(parents=True)
+        (comp_dir / "component.djx").write_text("<span/>")
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "PAGE_BACKENDS": [{"BACKEND": "elsewhere.Backend"}],
+                "COMPONENT_BACKENDS": [
+                    {
+                        "BACKEND": "next.components.FileComponentsBackend",
+                        "DIRS": [],
+                        "COMPONENTS_DIR": "_components",
+                    }
+                ],
+            }
+        ):
+            next_framework_settings.reload()
+            with patch(
+                "next.urls.RouterFactory.create_backend",
+                return_value=RootPagesRouter([pages_root]),
             ):
                 assert get_component_paths_for_watch() == set()
         next_framework_settings.reload()

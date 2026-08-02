@@ -150,8 +150,8 @@ Resetting registries
 It reloads the form-action and component backends from the current settings.
 Two narrower helpers reset a single registry.
 
-- ``reset_components()`` reloads only the component backends.
-- ``reset_form_actions()`` reloads only the form-action backends.
+- ``reset_components()`` reloads only the component backends, through ``ComponentsManager.reload``.
+- ``reset_form_actions()`` reloads only the form-action backends, through ``FormActionManager.reload``.
 
 .. warning::
 
@@ -161,7 +161,7 @@ Two narrower helpers reset a single registry.
    Reserve it for tests that verify registry behaviour itself.
 
 A third helper, ``reset_page_cache()``, resets no registry.
-It drops the page template cache and is useful when a test rewrites template files on disk.
+It calls ``Page.clear_template_caches`` to drop the page template cache and is useful when a test rewrites template files on disk.
 
 For tests that probe registration itself, ``reset_form_registration_state()`` clears every form registry, the registration diagnostics buffer, and resets the wizard backend in one call.
 

@@ -174,10 +174,10 @@ class TestComponentBackendLoadedSignal:
         component_backend_loaded.send(sender=_Backend)
         assert capture_component_backend_loaded[0]["sender"] is _Backend
 
-    def test_manager_reload_config_emits_per_backend(
+    def test_manager_reload_emits_per_backend(
         self, capture_component_backend_loaded: list[dict[str, Any]]
     ) -> None:
-        """`ComponentsManager._reload_config` fires once per built backend."""
+        """`ComponentsManager.reload` fires once per built backend."""
         manager = ComponentsManager()
         configs = [
             {"BACKEND": "next.components.DummyBackend", "COMPONENTS_DIR": "a"},
@@ -186,7 +186,7 @@ class TestComponentBackendLoadedSignal:
 
         with patch("next.backends.next_framework_settings") as fake_settings:
             fake_settings.COMPONENT_BACKENDS = configs
-            manager._reload_config()
+            manager.reload()
 
         assert len(capture_component_backend_loaded) == 2
         captured_configs = [ev["config"] for ev in capture_component_backend_loaded]
@@ -201,7 +201,7 @@ class TestComponentBackendLoadedSignal:
             fake_settings.COMPONENT_BACKENDS = [
                 {"BACKEND": "next.components.DummyBackend"}
             ]
-            manager._reload_config()
+            manager.reload()
 
         senders = {ev["sender"] for ev in capture_component_backend_loaded}
         assert senders == {DummyBackend}
@@ -215,7 +215,7 @@ class TestComponentBackendLoadedSignal:
             fake_settings.COMPONENT_BACKENDS = [
                 {"BACKEND": "next.components.DummyBackend"}
             ]
-            manager._reload_config()
+            manager.reload()
 
         event = capture_component_backend_loaded[0]
         assert event["instance"] is manager._backends[0]
@@ -229,7 +229,7 @@ class TestComponentBackendLoadedSignal:
         manager = ComponentsManager()
         with patch("next.backends.next_framework_settings") as fake_settings:
             fake_settings.COMPONENT_BACKENDS = [entry]
-            manager._reload_config()
+            manager.reload()
 
         captured = capture_component_backend_loaded[0]["config"]
         assert captured == entry
@@ -244,7 +244,7 @@ class TestComponentBackendLoadedSignal:
             fake_settings.COMPONENT_BACKENDS = [
                 {"BACKEND": "next.components.NoSuchBackend"}
             ]
-            manager._reload_config()
+            manager.reload()
 
         assert capture_component_backend_loaded == []
         assert manager._backends == []

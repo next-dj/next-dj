@@ -5,6 +5,8 @@ purpose. They are wiring internals, and a caller that needs one imports
 it from the module that defines it.
 """
 
+from next.utils import PageRoot
+
 from . import checks, signals
 from .backends import FileRouterBackend, RouterBackend, RouterFactory
 from .manager import RouterManager, app_name, router_manager, urlpatterns
@@ -28,6 +30,7 @@ __all__ = [
     "DuplicateURLParameterError",
     "FileRouterBackend",
     "HttpRequestProvider",
+    "PageRoot",
     "QueryParamProvider",
     "RouterBackend",
     "RouterFactory",

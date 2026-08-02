@@ -67,6 +67,10 @@ A backend always implements the full contract.
 A custom backend usually subclasses the default so it inherits every default behaviour.
 ``PARTIAL_BACKENDS`` differs from the other backend lists in that only its first entry is active.
 
+Beyond the abstract methods, a base class carries optional hooks whose defaults decline.
+``ComponentsBackend`` is the widest of them: ``discover`` and ``import_component_modules`` populate and execute, ``register_walked_folder`` claims a components folder the page-tree walk found, and ``iter_components`` with ``global_component_roots`` let the system checks enumerate what the backend holds.
+Leaving a hook alone is a supported answer, and it keeps the backend out of the diagnostics that hook feeds.
+
 .. code-block:: python
    :caption: registering a custom backend
 

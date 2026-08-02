@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from unittest.mock import patch
 
 from django.conf import settings
 from django.test import override_settings
@@ -11,13 +12,32 @@ from django.utils.autoreload import (
 )
 
 from next.apps import autoreload as next_autoreload, components as next_components
-from next.components import FileComponentsBackend, components_manager
-from next.pages.watch import get_pages_directories_for_watch
+from next.components import DummyBackend, FileComponentsBackend, components_manager
 from next.server import NextStatReloader
+from next.urls import RouterFactory
+from tests.support import MalformedRootsRouter, RaisingRootsRouter, importable_dir
 
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+def _page_backend_entry(
+    *, dirs: list[str] | None = None, app_dirs: bool = False
+) -> dict[str, object]:
+    """One ``PAGE_BACKENDS`` entry for the file router."""
+    return {
+        "BACKEND": "next.urls.FileRouterBackend",
+        "PAGES_DIR": "pages",
+        "APP_DIRS": app_dirs,
+        "DIRS": list(dirs or []),
+        "OPTIONS": {},
+    }
+
+
+def _page_watch_paths(sender: object) -> list[Path]:
+    """Return the directories registered for the ``page.py`` glob."""
+    return [path for path, glob in sender.watch_calls if glob == "**/page.py"]
 
 
 def _component_backend_config(
@@ -40,21 +60,110 @@ class TestNextFrameworkConfig:
         """After app load, django.utils.autoreload.StatReloader is NextStatReloader."""
         assert autoreload.StatReloader is NextStatReloader
 
-    def test_autoreload_started_watches_each_pages_directory(
-        self, mock_autoreload_sender
+    def test_autoreload_started_watches_the_configured_pages_directory(
+        self, mock_autoreload_sender, tmp_path
     ) -> None:
-        """Sending autoreload_started runs watch_dir once per pages dir for page.py globs."""
-        autoreload_started.send(sender=mock_autoreload_sender)
-        pages_dirs = get_pages_directories_for_watch()
-        next_watch_calls = [
-            (p, g) for p, g in mock_autoreload_sender.watch_calls if g == "**/page.py"
-        ]
-        assert len(next_watch_calls) == len(pages_dirs)
-        for path in pages_dirs:
-            assert any(
-                p == path and g == "**/page.py"
-                for p, g in mock_autoreload_sender.watch_calls
-            )
+        """A ``DIRS`` root reaches ``watch_dir`` under the ``page.py`` glob."""
+        root = tmp_path / "shell"
+        root.mkdir()
+        with override_settings(
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": [_page_backend_entry(dirs=[str(root)])]}
+        ):
+            autoreload_started.send(sender=mock_autoreload_sender)
+
+        assert _page_watch_paths(mock_autoreload_sender) == [root.resolve()]
+
+    def test_autoreload_started_watches_an_app_pages_tree(
+        self, mock_autoreload_sender, tmp_path, settings
+    ) -> None:
+        """An installed app's tree reaches ``watch_dir`` when ``APP_DIRS`` is on."""
+        app_pages = tmp_path / "shop" / "pages"
+        app_pages.mkdir(parents=True)
+        (tmp_path / "shop" / "__init__.py").write_text("")
+        with importable_dir(tmp_path):
+            settings.INSTALLED_APPS = [*settings.INSTALLED_APPS, "shop"]
+            with override_settings(
+                NEXT_FRAMEWORK={"PAGE_BACKENDS": [_page_backend_entry(app_dirs=True)]}
+            ):
+                autoreload_started.send(sender=mock_autoreload_sender)
+
+        assert _page_watch_paths(mock_autoreload_sender) == [app_pages.resolve()]
+
+    def test_autoreload_started_leaves_an_unrouted_app_tree_alone(
+        self, mock_autoreload_sender, tmp_path, settings
+    ) -> None:
+        """Without ``APP_DIRS`` the app tree routes nothing, so it never reaches watch_dir."""
+        app_pages = tmp_path / "shop" / "pages"
+        app_pages.mkdir(parents=True)
+        (tmp_path / "shop" / "__init__.py").write_text("")
+        root = tmp_path / "shell"
+        root.mkdir()
+        with importable_dir(tmp_path):
+            settings.INSTALLED_APPS = [*settings.INSTALLED_APPS, "shop"]
+            with override_settings(
+                NEXT_FRAMEWORK={
+                    "PAGE_BACKENDS": [_page_backend_entry(dirs=[str(root)])]
+                }
+            ):
+                autoreload_started.send(sender=mock_autoreload_sender)
+
+        assert _page_watch_paths(mock_autoreload_sender) == [root.resolve()]
+
+    def test_autoreload_started_survives_a_malformed_router(
+        self, mock_autoreload_sender, tmp_path
+    ) -> None:
+        """`runserver` boots through a backend that answers the wrong shape."""
+        root = tmp_path / "shell"
+        root.mkdir()
+        build = RouterFactory.create_backend
+
+        def malformed_first(config: dict) -> object:
+            if config["BACKEND"] == "broken.Backend":
+                return MalformedRootsRouter([tmp_path / "unreported"])
+            return build(config)
+
+        with (
+            patch.object(RouterFactory, "create_backend", side_effect=malformed_first),
+            override_settings(
+                NEXT_FRAMEWORK={
+                    "PAGE_BACKENDS": [
+                        {"BACKEND": "broken.Backend"},
+                        _page_backend_entry(dirs=[str(root)]),
+                    ]
+                }
+            ),
+        ):
+            autoreload_started.send(sender=mock_autoreload_sender)
+
+        assert _page_watch_paths(mock_autoreload_sender) == [root.resolve()]
+
+    def test_autoreload_started_survives_a_router_that_raises(
+        self, mock_autoreload_sender, tmp_path
+    ) -> None:
+        """`runserver` boots through a third-party backend whose tree listing fails."""
+        root = tmp_path / "shell"
+        root.mkdir()
+        build = RouterFactory.create_backend
+
+        def broken_first(config: dict) -> object:
+            if config["BACKEND"] == "broken.Backend":
+                return RaisingRootsRouter()
+            return build(config)
+
+        with (
+            patch.object(RouterFactory, "create_backend", side_effect=broken_first),
+            override_settings(
+                NEXT_FRAMEWORK={
+                    "PAGE_BACKENDS": [
+                        {"BACKEND": "broken.Backend"},
+                        _page_backend_entry(dirs=[str(root)]),
+                    ]
+                }
+            ),
+        ):
+            autoreload_started.send(sender=mock_autoreload_sender)
+
+        assert _page_watch_paths(mock_autoreload_sender) == [root.resolve()]
 
     def test_autoreload_started_never_registers_djx_globs(
         self, mock_autoreload_sender
@@ -162,7 +271,18 @@ class TestComponentsInstall:
                 assert len(backend._registry) == 1
             assert marker.read_text() == "loaded"
         finally:
-            components_manager._reload_config()
+            components_manager.reload()
+
+    def test_install_asks_every_backend_through_the_contract(self) -> None:
+        # A backend resolving names on demand implements no eager pass, and the
+        # hook it inherits is a public one, not a private attribute probed for.
+        config = {"BACKEND": "next.components.DummyBackend"}
+        try:
+            with override_settings(NEXT_FRAMEWORK={"COMPONENT_BACKENDS": [config]}):
+                next_components.install()
+                assert isinstance(components_manager._backends[0], DummyBackend)
+        finally:
+            components_manager.reload()
 
     def test_install_lazy_discovers_without_importing(self, tmp_path: Path) -> None:
         """With ``LAZY_COMPONENT_MODULES`` ``install()`` discovers but defers imports."""
@@ -181,4 +301,4 @@ class TestComponentsInstall:
                 assert len(backend._registry) == 1
                 assert not marker.exists()
         finally:
-            components_manager._reload_config()
+            components_manager.reload()

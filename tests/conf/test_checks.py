@@ -75,7 +75,7 @@ class TestValueTypeErrors:
     def test_non_dict_setting_yields_error(self) -> None:
         with override_settings(NEXT_FRAMEWORK=42):  # type: ignore[arg-type]
             (message,) = check_next_framework_value_types()
-        assert message.id == "next.E076"
+        assert message.id == "next.E077"
         assert message.msg == (
             "NEXT_FRAMEWORK must be a dict, got 'int'. The settings layer "
             "ignores a non-dict value entirely and uses the framework "
@@ -96,10 +96,7 @@ class TestValueTypeErrors:
 class TestBoolCoercionWarnings:
     """`check_next_framework_value_types` flags non-bool flags as next.W072."""
 
-    @pytest.mark.parametrize(
-        "key",
-        sorted(NextFrameworkSettings._BOOL_KEYS),
-    )
+    @pytest.mark.parametrize("key", sorted(NextFrameworkSettings._BOOL_KEYS))
     def test_non_bool_flag_yields_warning(self, key: str) -> None:
         with override_settings(NEXT_FRAMEWORK={key: "False"}):
             messages = check_next_framework_value_types()
@@ -176,6 +173,16 @@ class TestSilencing:
             messages = check_next_framework_value_types()
             silenced = {m.id: m.is_silenced() for m in messages}
         assert silenced == {"next.E076": False, "next.W072": True}
+
+    def test_silencing_a_mistyped_key_leaves_the_whole_setting_reported(self) -> None:
+        """A project deaf to next.E076 still hears that NEXT_FRAMEWORK is ignored."""
+        with override_settings(
+            NEXT_FRAMEWORK="nonsense",  # type: ignore[arg-type]
+            SILENCED_SYSTEM_CHECKS=["next.E076"],
+        ):
+            (message,) = check_next_framework_value_types()
+        assert message.id == "next.E077"
+        assert message.is_silenced() is False
 
 
 class TestMessageWording:

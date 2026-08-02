@@ -14,9 +14,9 @@ def router():
 
 @pytest.fixture()
 def mock_settings():
-    """Patch ``settings`` in both ``urls`` and ``filesystem`` (``resolve_base_dir``)."""
+    """Patch the ``settings`` object ``resolve_base_dir`` reads."""
     mock = Mock()
-    with patch("next.urls.backends.settings", mock), patch("next.utils.settings", mock):
+    with patch("next.utils.settings", mock):
         yield mock
 
 

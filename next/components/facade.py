@@ -43,7 +43,7 @@ def render_component(
         component_rendered.send(
             sender=components_manager.__class__,
             info=info,
-            template_path=getattr(info, "template_path", None),
+            template_path=info.template_path,
         )
     return html
 

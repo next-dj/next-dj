@@ -84,6 +84,10 @@ class ComponentRegistry:
         """Return True when `path` was marked as a global root."""
         return path in self._root_roots
 
+    def global_roots(self) -> frozenset[Path]:
+        """Return every path marked as a global root, as an immutable set."""
+        return frozenset(self._root_roots)
+
     def clear(self) -> None:
         """Drop every registered component and reset tracked roots."""
         self._ordered.clear()

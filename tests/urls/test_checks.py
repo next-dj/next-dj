@@ -6,12 +6,17 @@ from django.core.checks import Error
 
 from next.checks import reset_check_caches
 from next.testing import override_next_settings
+from next.urls import FileRouterBackend, PageRoot, RouterBackend
 from next.urls.checks import (
     _collect_url_patterns,
     check_reverse_name_collisions,
     check_url_patterns,
 )
-from tests.support import patch_checks_router_manager_with_routers
+from tests.support import (
+    file_router_config_entry,
+    importable_dir,
+    patch_checks_router_manager_with_routers,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -37,39 +42,74 @@ def _write_virtual_page(tree: Path, route: str) -> Path:
     return template_file
 
 
-class _TreeRouter:
+class _TreeRouter(RouterBackend):
     """Minimal router stub exposing the multi-tree traversal surface."""
 
     def __init__(
         self,
         app_trees: dict[str, Path] | None = None,
         root_trees: list[Path] | None = None,
-        skip_dir_names: frozenset[str] = frozenset(),
+        components_folder: str | None = None,
     ) -> None:
-        """Store app and root pages trees plus the router skip set."""
+        """Store app and root pages trees plus the folder this backend skips."""
         self._app_trees = dict(app_trees or {})
         self._root_trees = list(root_trees or [])
-        self._skip_dir_names = skip_dir_names
-        self.app_dirs = bool(self._app_trees)
+        self._components_folder = components_folder
 
-    def _get_installed_apps(self) -> list[str]:
-        return list(self._app_trees)
+    def generate_urls(self) -> list:
+        """Contribute no patterns, the checks read the reported trees instead."""
+        return []
 
-    def _get_app_pages_path(self, app_name: str) -> Path:
-        return self._app_trees[app_name]
+    def components_folder_name(self) -> str | None:
+        """Name the folder the walk refuses to enter, or none at all."""
+        return self._components_folder
 
-    def _get_root_pages_paths(self) -> list[Path]:
-        return list(self._root_trees)
+    def page_roots(self) -> list[PageRoot]:
+        roots = [
+            PageRoot(path=tree, label=f"App '{name}'")
+            for name, tree in self._app_trees.items()
+        ]
+        roots.extend(
+            PageRoot(path=tree, label="Root" if index == 0 else f"Root ({tree})")
+            for index, tree in enumerate(self._root_trees)
+        )
+        return roots
 
 
-class _BrokenRouter:
+class _BrokenRouter(RouterBackend):
     """Router stub whose tree listing fails with OSError."""
 
-    app_dirs = False
+    def generate_urls(self) -> list:
+        """Contribute no patterns."""
+        return []
 
-    def _get_root_pages_paths(self) -> list[Path]:
+    def page_roots(self) -> list[PageRoot]:
         msg = "pages roots unavailable"
         raise OSError(msg)
+
+
+class TestDoublyMountedTree:
+    """A tree mounted as an app and through `DIRS` really is routed twice."""
+
+    def test_app_tree_also_in_dirs_reports_e015(self, tmp_path, settings) -> None:
+        """The duplicate route is named, because the router does register it twice."""
+        app = tmp_path / "shop"
+        (app / "__init__.py").parent.mkdir(parents=True)
+        (app / "__init__.py").write_text("")
+        _write_page(app / "pages", "hello")
+        router = FileRouterBackend(app_dirs=True, extra_root_paths=[app / "pages"])
+
+        with importable_dir(tmp_path):
+            settings.INSTALLED_APPS = [*settings.INSTALLED_APPS, "shop"]
+            with patch_checks_router_manager_with_routers(routers=[router]):
+                messages = check_url_patterns(None)
+            routes = [str(pattern.pattern) for pattern in router.generate_urls()]
+
+        assert routes == ["hello/", "hello/"]
+        e015 = [m for m in messages if m.id == "next.E015"]
+        assert len(e015) == 1
+        assert "App 'shop'" in e015[0].msg
+        assert "Root" in e015[0].msg
 
 
 class TestCheckUrlPatterns:
@@ -198,8 +238,8 @@ class TestCheckUrlPatterns:
 
         assert [m.id for m in messages] == ["next.E028"]
 
-    def test_components_dirs_are_skipped_via_router_skip_set(self, tmp_path) -> None:
-        """The router skip set keeps `_components` out of the pattern collection."""
+    def test_the_components_folder_a_backend_names_is_skipped(self, tmp_path) -> None:
+        """The folder a backend names through the contract leaves the collection."""
         tree_a = tmp_path / "tree_a"
         tree_b = tmp_path / "tree_b"
         _write_page(tree_a, "_components/widget")
@@ -209,10 +249,31 @@ class TestCheckUrlPatterns:
         with patch_checks_router_manager_with_routers(routers=[unskipped]):
             assert any(m.id == "next.E015" for m in check_url_patterns(None))
 
+        reset_check_caches()
         skipped = _TreeRouter(
-            root_trees=[tree_a, tree_b], skip_dir_names=frozenset({"_components"})
+            root_trees=[tree_a, tree_b], components_folder="_components"
         )
         with patch_checks_router_manager_with_routers(routers=[skipped]):
+            assert check_url_patterns(None) == []
+
+    def test_a_dirs_skip_name_leaves_the_collection(self, tmp_path) -> None:
+        """A `DIRS` entry naming no directory keeps that name out of the routes."""
+        tree_a = tmp_path / "tree_a"
+        tree_b = tmp_path / "tree_b"
+        _write_page(tree_a, "_drafts/wip")
+        _write_page(tree_b, "_drafts/wip")
+        router = _TreeRouter(root_trees=[tree_a, tree_b])
+
+        with patch_checks_router_manager_with_routers(routers=[router]):
+            assert any(m.id == "next.E015" for m in check_url_patterns(None))
+
+        reset_check_caches()
+        with (
+            override_next_settings(
+                PAGE_BACKENDS=[file_router_config_entry(dirs=["_drafts"])]
+            ),
+            patch_checks_router_manager_with_routers(routers=[router]),
+        ):
             assert check_url_patterns(None) == []
 
 
@@ -285,15 +346,17 @@ class TestCheckReverseNameCollisions:
 
         assert messages == [init_error]
 
-    def test_e016_comes_only_from_check_url_patterns(self) -> None:
-        """A collection OSError is one E016 from the path check, not the name one."""
+    def test_a_failing_tree_listing_leaves_the_url_checks_silent(self) -> None:
+        """A router that cannot list its trees contributes none, and raises nothing.
+
+        The finding itself is `next.E030` from the pages structure check, which
+        is the one place that names it, so the run reports it exactly once.
+        """
         with patch_checks_router_manager_with_routers(routers=[_BrokenRouter()]):
             path_messages = check_url_patterns(None)
             name_messages = check_reverse_name_collisions(None)
 
-        assert len(path_messages) == 1
-        assert path_messages[0].id == "next.E016"
-        assert "pages roots unavailable" in path_messages[0].msg
+        assert path_messages == []
         assert name_messages == []
 
 

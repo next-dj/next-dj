@@ -75,6 +75,16 @@ Composition results live on ``Page``, where ``composed_template_for`` stores the
 It still stats every source file behind the page to detect a change.
 Both layers are dropped together once a ``template.djx`` or ``layout.djx`` changes on disk.
 A page whose body comes from a module-level ``render()`` in ``page.py`` bypasses that cache and recomposes the layout chain on every request.
+``Page.clear_template_caches`` drops both layers and the mtime snapshots together, for a caller rewriting a page or a layout in place inside one process.
+
+Module reads
+~~~~~~~~~~~~
+
+``read_module_string_lists`` executes a page-tree module and returns the named module-level string lists it declares, or ``None`` when the file does not load.
+The static discovery layer reads the ``styles`` and ``scripts`` lists of a ``page.py`` or a ``component.py`` through it.
+Anything but a list or tuple of non-empty strings reads as an empty list, so the caller never type-checks what a user module bound to the name.
+
+.. autofunction:: next.pages.loaders.read_module_string_lists
 
 Import failures
 ~~~~~~~~~~~~~~~
@@ -86,6 +96,7 @@ On the request path the recorded failure re-raises as ``PageModuleImportError`` 
 Under ``DEBUG`` the standard technical 500 page points at the failing line.
 Under ``STRICT_LOADING`` without ``DEBUG`` the client receives a generic 500 while the traceback stays in the server log.
 With both flags off the request answers 404, and the failure is visible only in the log record.
+An out-of-band zone morph of a broken foreign page raises ``PageModuleImportError`` in every mode, because the request that a 404 would answer belongs to another URL.
 The failure is scoped to the broken page.
 Sibling pages keep their URL patterns and keep serving in every mode, because the error surfaces at the view rather than while the urlconf is built.
 The recorded error is keyed by file mtime, so saving a fixed ``page.py`` clears it without a restart.
@@ -108,7 +119,7 @@ System checks
 ``next.pages.checks`` registers the Django system checks for the pages subsystem.
 They run through ``uv run python manage.py check``.
 
-The module exports ten check callables.
+The module exports eleven check callables.
 
 - ``check_context_functions``.
 - ``check_context_processor_signature``.
@@ -120,6 +131,7 @@ The module exports ten check callables.
 - ``check_request_in_context``.
 - ``check_single_keyless_context``.
 - ``check_template_loaders``.
+- ``check_unrouted_working_directory_pages``.
 
 See :doc:`system-checks` for each check identifier, its condition, and the full autodoc of ``next.pages.checks``.
 

@@ -317,7 +317,10 @@ Five independent switches decide how loudly a broken piece fails.
      - Django context processor exceptions
      - Raises regardless of ``DEBUG``.
    * - ``next.E076``
-     - Eight ``NEXT_FRAMEWORK`` keys whose mistyped value the settings merge silently drops, and a ``NEXT_FRAMEWORK`` that is not a dict at all
+     - Eight ``NEXT_FRAMEWORK`` keys whose mistyped value the settings merge silently drops
+     - Always, on ``manage.py check``.
+   * - ``next.E077``
+     - A ``NEXT_FRAMEWORK`` that is not a dict at all, which the settings layer ignores entirely
      - Always, on ``manage.py check``.
    * - ``next.W072``
      - The four ``NEXT_FRAMEWORK`` bool keys, where ``bool()`` coercion can invert the intent
@@ -325,8 +328,8 @@ Five independent switches decide how loudly a broken piece fails.
 
 ``DEBUG=True`` turned on temporarily, for serving static files or profiling, also changes the error semantics of pages.
 A broken ``page.py`` that answered 404 starts raising, so the switch flips more than the error page and the toolbar.
-The two configuration checks stay independent of every flag above, so ``manage.py check`` reports ``next.E076`` and ``next.W072`` in any combination of ``DEBUG`` and the strict flags.
-See :doc:`system-checks` for both check conditions.
+The configuration checks stay independent of every flag above, so ``manage.py check`` reports ``next.E076``, ``next.E077``, and ``next.W072`` in any combination of ``DEBUG`` and the strict flags.
+See :doc:`system-checks` for each check condition.
 
 LAZY_COMPONENT_MODULES
 ~~~~~~~~~~~~~~~~~~~~~~~~

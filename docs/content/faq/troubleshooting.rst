@@ -155,8 +155,8 @@ Components
 next.E020 or next.E034 collision
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Two components share the same name in the same scope.
-Rename one or move one to a different page tree.
+Two components share a name where the resolver has no rule to pick a winner, either under one route scope or at the root scope of two roots one template resolves against.
+Rename one, or move one under a route scope so the deeper one wins where it applies.
 
 Component does not render
 ~~~~~~~~~~~~~~~~~~~~~~~~~

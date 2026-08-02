@@ -41,6 +41,7 @@ from .manager import (
     StaticManager,
     collect_component_assets,
     default_manager,
+    get_static_manager,
     reset_default_manager,
 )
 from .scripts import NextScriptBuilder, ScriptInjectionPolicy
@@ -72,6 +73,7 @@ __all__ = [
     "default_kinds",
     "default_manager",
     "default_placeholders",
+    "get_static_manager",
     "register_defaults",
     "reset_default_manager",
     "resolve_serializer",

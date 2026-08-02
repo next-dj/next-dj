@@ -29,6 +29,10 @@ Providers
 ``ParameterProvider`` is the minimal protocol the resolver consumes.
 ``RegisteredParameterProvider`` is the auto-registered base used by the built-in providers.
 Subclasses join the resolver's registry through ``__init_subclass__``, so the resolver instantiates them on first use without an explicit import.
+A subclass reaches the active resolver through the ``resolver`` class attribute, which is bound to the shared singleton.
+``resolver.current_callable()`` answers which callable the resolve is for, or ``None`` outside a resolve.
+A provider reads it when the parameter alone cannot decide, since ``inspect.Parameter`` carries the annotation as it was written while ``get_type_hints`` on the owning callable resolves a string one.
+``HttpRequestProvider`` uses exactly that to claim a ``request: "HttpRequest"`` parameter written under a deferred annotation.
 
 .. automodule:: next.deps.providers
    :members:

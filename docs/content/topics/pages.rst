@@ -379,8 +379,7 @@ The pages subsystem contributes Django system checks. The ``check_page_functions
 ``next.W043``.
    More than one body source is declared in the same directory, see *Priority resolution*.
 
-The ``check_context_functions`` check inspects ``page.py`` files under one representative page root per router for keyless ``@context`` callables.
-In a project with several page-bearing applications the remaining roots are not scanned, so ``next.E029`` surfaces only for pages under the scanned root.
+The ``check_context_functions`` check looks for keyless ``@context`` callables in the ``page.py`` files under every page root a router serves.
 
 ``next.E029``.
    A keyless ``@context`` callable has a return annotation that is not a mapping type.

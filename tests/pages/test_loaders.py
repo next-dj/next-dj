@@ -20,7 +20,9 @@ from next.pages.loaders import (
     _load_python_module,
     _load_python_module_memo,
     build_registered_loaders,
+    has_load_errors,
     last_load_error,
+    read_module_string_lists,
     reset_module_memo,
 )
 from next.pages.processors import _get_context_processors, _import_context_processor
@@ -1067,6 +1069,44 @@ class TestTemplateLoaderContract:
         assert Stub().source_path(tmp_path / "page.py") is None
 
 
+class TestReadModuleStringLists:
+    """`read_module_string_lists` is the narrow read the static area needs."""
+
+    def test_returns_one_list_per_requested_name(self, tmp_path: Path) -> None:
+        module_file = tmp_path / "page.py"
+        module_file.write_text('styles = ["a.css"]\nscripts = ["b.js", "c.js"]\n')
+        assert read_module_string_lists(module_file, ["styles", "scripts"]) == {
+            "styles": ["a.css"],
+            "scripts": ["b.js", "c.js"],
+        }
+
+    def test_an_unknown_name_reads_as_an_empty_list(self, tmp_path: Path) -> None:
+        module_file = tmp_path / "page.py"
+        module_file.write_text("x = 1\n")
+        assert read_module_string_lists(module_file, ["styles"]) == {"styles": []}
+
+    def test_a_non_sequence_and_its_junk_entries_are_dropped(
+        self, tmp_path: Path
+    ) -> None:
+        module_file = tmp_path / "page.py"
+        module_file.write_text('styles = "a.css"\nscripts = ["b.js", 3, ""]\n')
+        assert read_module_string_lists(module_file, ["styles", "scripts"]) == {
+            "styles": [],
+            "scripts": ["b.js"],
+        }
+
+    def test_a_module_that_does_not_load_answers_none(self, tmp_path: Path) -> None:
+        """`None` tells an absent or broken module apart from an empty one."""
+        assert read_module_string_lists(tmp_path / "missing.py", ["styles"]) is None
+
+    def test_no_names_asked_for_still_reports_the_module_loaded(
+        self, tmp_path: Path
+    ) -> None:
+        module_file = tmp_path / "page.py"
+        module_file.write_text("x = 1\n")
+        assert read_module_string_lists(module_file, []) == {}
+
+
 class TestBuildRegisteredLoaders:
     """`build_registered_loaders` reads `TEMPLATE_LOADERS` and caches."""
 
@@ -1318,6 +1358,20 @@ class TestPageModuleImportErrors:
 
         page_file.unlink()
         assert last_load_error(page_file) is None
+
+    def test_a_record_the_file_outlived_stops_arming_the_probe(self, tmp_path) -> None:
+        """A dead record is dropped, so the per-request gate goes quiet again."""
+        # The gate reads a process-wide store, so it answers for this file only
+        # once nothing else is on record.
+        reset_module_memo()
+        page_file = tmp_path / "page.py"
+        page_file.write_text("def render( invalid syntax {\n")
+        assert _load_python_module(page_file) is None
+        assert has_load_errors() is True
+
+        page_file.unlink()
+        assert last_load_error(page_file) is None
+        assert has_load_errors() is False
 
     def test_record_load_error_without_mtime_drops_entry(self, tmp_path) -> None:
         page_file = tmp_path / "page.py"

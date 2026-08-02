@@ -22,16 +22,16 @@ from django.http.response import HttpResponseBase
 from django.template import Context as DjangoTemplateContext, Origin, Template
 from django.urls import URLPattern, path
 
-from next.checks.common import get_router_manager, iter_scanned_page_pairs
+from next.checks.common import first_visit, get_router_manager, iter_scanned_page_pairs
 from next.conf import next_framework_settings
 from next.deps import DependencyResolver, resolver
 from next.utils import defining_file
 
 from .loaders import (
-    _LAST_LOAD_ERROR,
     LayoutTemplateLoader,
     _load_python_module_memo,
     build_registered_loaders,
+    has_load_errors,
     last_load_error,
 )
 from .processors import _get_context_processors
@@ -109,6 +109,17 @@ class Page:
         self._template_registry[file_path] = template_str
         self._compiled_registry.pop(file_path, None)
         template_loaded.send(sender=Page, file_path=file_path)
+
+    def clear_template_caches(self) -> None:
+        """Drop the composed source, the compiled templates, and the mtimes.
+
+        A caller that rewrites a page or a layout in place inside one process
+        needs this, because the composed source is memoised per page path and
+        the staleness check only reruns when a recorded mtime moves.
+        """
+        self._template_registry.clear()
+        self._compiled_registry.clear()
+        self._template_source_mtimes.clear()
 
     @overload
     def context[C: Callable[..., Any]](self, func_or_key: C, /) -> C: ...
@@ -412,27 +423,22 @@ class Page:
     def authorization_outcome(
         self, file_path: Path, request: HttpRequest, **kwargs
     ) -> tuple[HttpResponseBase | None, bool]:
-        """Re-run a page's body resolution once, reporting short-circuit and kind.
+        """Resolve a page body once, reporting its short-circuit and its kind.
 
-        The page module is loaded and its `render()` runs under the same
-        dependency injection as the unified view, so guards, denials, and
-        redirects fire exactly as they would on the page's own request. The
-        first element is a short-circuit `HttpResponseBase` such as a
-        redirect or a denial, or `None` when the body resolved to renderable
-        content. The boolean is True when the body came from a `render()`
-        string, which has no composed template to render a standalone zone
-        against. An out-of-band zone morph reads both from one resolution so
-        the foreign page's `render()` runs exactly once.
+        `render()` runs under the same dependency injection as the unified
+        view, so guards, denials, and redirects fire as they would on the
+        page's own request. An out-of-band zone morph reads the response and
+        the dynamic flag from this one resolution, so the foreign page's
+        `render()` runs exactly once.
         """
         module = _load_python_module_memo(file_path)
         error = last_load_error(file_path)
         if error is not None:
-            # The same guard as the unified view, otherwise an out-of-band
-            # zone morph would render a broken page's template.djx past the
-            # guards its render() would have applied.
-            if settings.DEBUG or next_framework_settings.STRICT_LOADING:
-                raise error
-            raise Http404
+            # Not Http404. The caller is assembling a patch envelope for
+            # another URL, so a 404 would answer that request instead of the
+            # morph. Falling through would render the sibling template.djx
+            # past the guards the broken render() would have applied.
+            raise error
         resolution = self._resolve_page_body(file_path, module, request, **kwargs)
         return resolution.http_response, resolution.dynamic
 
@@ -446,14 +452,11 @@ class Page:
     ) -> Callable[..., HttpResponseBase]:
         """Return a view that resolves the body, composes layouts, and renders.
 
-        The view carries `next_page_path` so the form dispatch can map a
-        resolved origin URL back to the page source, including the
-        synthesised `page.py` location of virtual `template.djx` pages.
-        `broken_at_build` marks a page whose import failed while the URL
-        pattern was built. Its view re-reads the module per request so a
-        fixed file comes back to life without a process restart, and it
-        answers 404 instead of serving the sibling template past the
-        guards a working `render()` would have applied.
+        The view carries `next_page_path` so the form dispatch maps a resolved
+        origin URL back to the page source. A page marked `broken_at_build`
+        re-reads its module per request, so a fixed file comes back without a
+        restart and a still-broken one never serves the sibling template past
+        the guards its `render()` would have applied.
         """
 
         def view(request: HttpRequest, **kwargs) -> HttpResponseBase:
@@ -467,10 +470,9 @@ class Page:
                     if settings.DEBUG or next_framework_settings.STRICT_LOADING:
                         raise error
                     raise Http404
-            # The empty-dict guard keeps healthy deployments off the probe
-            # entirely, and checking the flags before `last_load_error` spares
-            # a flags-off production the per-request stat on a broken page.
-            elif _LAST_LOAD_ERROR and (
+            # Both guards run before `last_load_error`, so a healthy site and
+            # a flags-off production never pay its per-request stat.
+            elif has_load_errors() and (
                 settings.DEBUG or next_framework_settings.STRICT_LOADING
             ):
                 error = last_load_error(file_path)
@@ -648,18 +650,18 @@ def iter_serialized_page_context_keys() -> Iterator[tuple[Path, str]]:
 
     A keyless `serialize=True` callable spreads the keys of the dict it
     returns at render time, so those keys exist only at runtime and never
-    travel through here.
+    travel through here. One page reached through two spellings yields its
+    keys once, under the spelling the registry keys on.
     """
     router_manager, _errors = get_router_manager()
     if router_manager is None:
         return
     registry = page._context_manager._context_registry
     seen: set[Path] = set()
-    for router in router_manager._backends:
+    for router in router_manager.backends:
         for _url_path, page_path in iter_scanned_page_pairs(router):
-            if page_path in seen:
+            if not first_visit(page_path, seen):
                 continue
-            seen.add(page_path)
             if not page_path.exists() or _load_python_module_memo(page_path) is None:
                 continue
             for key, entry in registry.get(page_path, {}).items():

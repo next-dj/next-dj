@@ -15,9 +15,9 @@ from django.test import override_settings
 
 from next.components.manager import components_manager
 from next.deps.resolver import resolver
-from next.forms.backends import ActionRegistration, file_to_dotted_module
+from next.forms.backends import ActionRegistration
 from next.forms.manager import form_action_manager
-from next.static.manager import default_manager
+from next.static.manager import get_static_manager
 
 
 if TYPE_CHECKING:
@@ -27,9 +27,6 @@ if TYPE_CHECKING:
 
     from next.deps.providers import ParameterProvider
     from next.static.collector import StaticCollector
-
-
-_MISSING: Any = object()
 
 
 @contextlib.contextmanager
@@ -54,15 +51,15 @@ def override_dependency(name: str, value: object) -> Iterator[None]:
 
     Any previous dependency registered under `name` is restored on exit.
     """
-    previous = resolver._dependency_callables.get(name, _MISSING)
-    resolver._dependency_callables[name] = lambda: value
+    previous = resolver.get_dependency(name)
+    resolver.register_dependency(name, lambda: value)
     try:
         yield
     finally:
-        if previous is _MISSING:
-            resolver._dependency_callables.pop(name, None)
+        if previous is None:
+            resolver.unregister_dependency(name)
         else:
-            resolver._dependency_callables[name] = previous
+            resolver.register_dependency(name, previous)
 
 
 @contextlib.contextmanager
@@ -72,13 +69,11 @@ def override_provider(provider: ParameterProvider) -> Iterator[None]:
     Placing the provider first means it wins over any auto-registered
     provider that would otherwise handle the same parameter.
     """
-    resolver._ensure_providers()
-    resolver._providers.insert(0, provider)
+    resolver.prepend_provider(provider)
     try:
         yield
     finally:
-        with contextlib.suppress(ValueError):
-            resolver._providers.remove(provider)
+        resolver.remove_provider(provider)
 
 
 @contextlib.contextmanager
@@ -95,11 +90,7 @@ def override_form_action(
     is snapshotted on entry and restored on exit, so previously
     registered actions with the same name survive.
     """
-    backend = form_action_manager.default_backend
-    snapshots = {
-        attr: dict(getattr(backend, attr, {}))
-        for attr in ("_registry", "_uid_to_name", "_name_index", "_url_cache")
-    }
+    saved = form_action_manager.snapshot_actions()
     form_action_manager.register_action(
         ActionRegistration(
             name=name,
@@ -107,19 +98,13 @@ def override_form_action(
             scope="shared",
             handler=handler,
             form_class=form_class,
+            claims_name_binding=True,
         )
     )
-    name_index = getattr(backend, "_name_index", None)
-    if name_index is not None:
-        name_index[name] = (file_to_dotted_module(__file__), name)
     try:
         yield
     finally:
-        for attr, snapshot in snapshots.items():
-            mapping = getattr(backend, attr, None)
-            if mapping is not None:
-                mapping.clear()
-                mapping.update(snapshot)
+        form_action_manager.restore_actions(saved)
 
 
 @contextlib.contextmanager
@@ -130,7 +115,9 @@ def override_component_backends(*configs: dict[str, Any]) -> Iterator[None]:
     rebuilds `components_manager`'s backends automatically.
     """
     with override_next_settings(COMPONENT_BACKENDS=list(configs)):
-        components_manager._ensure_backends()
+        # Reading the backends builds them now, so the block body sees the
+        # swapped list rather than the one a later render would rebuild.
+        _ = components_manager.backends
         yield
 
 
@@ -152,10 +139,7 @@ def patch_static_collector(
     `.collector` attribute is set on each call to the patched factory
     so tests can inspect emitted styles/scripts without parsing HTML.
     """
-    # Trigger lazy initialisation via an attribute access. Avoid
-    # `_setup()` because that rebuilds the wrapped manager from scratch.
-    _ = default_manager.create_collector
-    manager = default_manager._wrapped
+    manager = get_static_manager()
     original = manager.create_collector
     proxy = StaticCollectorProxy()
 

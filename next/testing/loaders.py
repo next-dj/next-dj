@@ -70,14 +70,11 @@ def clear_loaded_dirs() -> None:
 
 def eager_load_components() -> None:
     """Import every registered `component.py` so decorators register before tests."""
-    components_manager._ensure_backends()
-    for backend in components_manager._backends:
-        ensure = getattr(backend, "_ensure_loaded", None)
-        if callable(ensure):
-            ensure()
-        import_all = getattr(backend, "import_all_component_modules", None)
-        if callable(import_all):
-            import_all()
+    for backend in components_manager.backends:
+        backend.discover()
+        # Running the module top level is a capability of its own, not the
+        # populate-the-registry one `discover` names.
+        backend.import_component_modules()
 
 
 __all__ = ["clear_loaded_dirs", "eager_load_components", "eager_load_pages"]

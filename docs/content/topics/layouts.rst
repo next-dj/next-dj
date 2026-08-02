@@ -86,7 +86,7 @@ The closing tag can be written either way.
 
 Without the placeholder that layout is skipped during composition, so its own markup vanishes from the output while the page body and every inner layout still render, with no error raised.
 The ``check_layout_templates`` system check emits ``next.W001`` for a ``layout.djx`` sitting next to a discovered page when it lacks a ``{% block template %}`` block.
-The check scans one representative page root per router, so in a project with several page-bearing applications ``next.W001`` surfaces only for layouts under the scanned root.
+The check scans every page root each router serves, so ``next.W001`` surfaces for layouts under any page-bearing application, not only one of them.
 A layout in an intermediate segment directory without a sibling page is not covered, so ``uv run python manage.py check`` does not catch every broken layout.
 
 Layouts can declare layout-level CSS and JS through the static collector tags shown above.

@@ -103,9 +103,8 @@ class HttpRequestProvider(RegisteredParameterProvider):
         """Return True when the parameter expects `HttpRequest` and a request exists."""
         if context.request is None:
             return False
-        stack = self.resolver._resolve_call_stack
-        if stack:
-            func = stack[-1]
+        func = self.resolver.current_callable()
+        if func is not None:
             try:
                 hints = cached_type_hints(func)
                 if _is_http_request_annotation(hints.get(param.name)):

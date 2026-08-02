@@ -1,24 +1,18 @@
-"""Pluggable router backend contract, file router, and backend factory.
-
-The `RouterBackend` ABC defines the contract every router
-implementation must satisfy. `FileRouterBackend` is the built-in
-implementation that discovers `page.py` (and virtual `template.djx`)
-entries under app and optional root page trees. `RouterFactory` maps
-dotted backend paths to classes and instantiates them from
-`PAGE_BACKENDS` config dicts.
-"""
+"""Pluggable router backend contract, file router, and backend factory."""
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, override
 
-from django.conf import settings
+from django.apps import apps
+from django.core.exceptions import AppRegistryNotReady
 
 from next.conf import import_class_cached, next_framework_settings
 from next.pages import page
-from next.utils import classify_dirs_entries, resolve_base_dir
+from next.utils import PageRoot, classify_dirs_entries, resolve_base_dir
 
 from .dispatcher import FilesystemTreeDispatcher
 from .parser import default_url_parser
@@ -26,9 +20,44 @@ from .signals import route_registered
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Generator, Mapping
 
     from django.urls import URLPattern, URLResolver
+
+
+logger = logging.getLogger(__name__)
+
+# Django's own apps and the framework package hold no project pages, and the
+# framework ships a `next/pages` package that otherwise reads as a page tree.
+_NON_PAGE_APP_ROOTS = ("django", "next")
+
+
+def _is_framework_app(app_name: str) -> bool:
+    """Whether the dotted app name belongs to Django or to next itself."""
+    return any(
+        app_name == root or app_name.startswith(f"{root}.")
+        for root in _NON_PAGE_APP_ROOTS
+    )
+
+
+def _installed_app_directories() -> dict[str, Path]:
+    """Map each installed app's dotted name to its directory.
+
+    Read live on every call, because `INSTALLED_APPS` changes without the
+    settings reload that rebuilds a backend.
+    """
+    try:
+        configs = apps.get_app_configs()
+    except AppRegistryNotReady:
+        # Answering keeps a caller reached during app loading alive, but the
+        # answer reads as "this project has no app pages", so it is named.
+        logger.warning(
+            "the app registry was read before Django populated it, so no "
+            "application page tree is reported for this call. Move the read "
+            "into or after AppConfig.ready()."
+        )
+        return {}
+    return {config.name: Path(config.path) for config in configs}
 
 
 class RouterBackend(ABC):
@@ -37,6 +66,22 @@ class RouterBackend(ABC):
     @abstractmethod
     def generate_urls(self) -> list[URLPattern | URLResolver]:
         """Patterns contributed by this backend to the project URLconf."""
+
+    def page_roots(self) -> list[PageRoot]:
+        """Labelled page trees this backend routes, for system checks to walk.
+
+        A backend that routes from somewhere else reports none, which leaves it
+        out of every page-tree check and out of the development watcher.
+        """
+        return []
+
+    def components_folder_name(self) -> str | None:
+        """Folder name this backend registers components from while it walks.
+
+        A backend that registers no component folder answers None, and the
+        development watcher then watches no component glob under its trees.
+        """
+        return None
 
 
 def _narrow_file_router_options(options: dict[str, Any]) -> dict[str, Any]:
@@ -90,10 +135,15 @@ class FileRouterBackend(RouterBackend):
 
         self.options = _narrow_file_router_options(raw_opts)
         self._patterns_cache: dict[str, list[URLPattern | URLResolver]] = {}
-        self._app_pages_path_cache: dict[str, Path | None] = {}
+        self._app_pages_path_cache: dict[str, tuple[Path, Path | None]] = {}
         self._root_patterns_cache: list[URLPattern | URLResolver] | None = None
         self._root_pages_paths_cache: list[Path] | None = None
         self._url_parser = default_url_parser
+
+    @override
+    def components_folder_name(self) -> str | None:
+        """Return the folder name the tree walk registers components from."""
+        return self._components_folder_name
 
     @staticmethod
     def _resolve_components_folder_name() -> str:
@@ -151,17 +201,42 @@ class FileRouterBackend(RouterBackend):
     @override
     def generate_urls(self) -> list[URLPattern | URLResolver]:
         """Yield app routes first when `app_dirs` is set, then root `pages` dirs."""
+        urls = self._generate_app_urls() if self.app_dirs else []
+        urls.extend(self._generate_root_urls())
+        return urls
+
+    @override
+    def page_roots(self) -> list[PageRoot]:
+        """Report the app trees and root trees this router serves from.
+
+        The app reads share one registry snapshot, because a page-root listing
+        sits on the static finder and reloader paths.
+        """
+        roots: list[PageRoot] = []
         if self.app_dirs:
-            urls = self._generate_app_urls()
-            urls.extend(self._generate_root_urls())
-            return urls
-        return self._generate_root_urls()
+            directories = _installed_app_directories()
+            roots.extend(
+                PageRoot(path=app_path, label=f"App '{app_name}'")
+                for app_name in self._get_installed_apps(directories)
+                if (app_path := self._get_app_pages_path(app_name, directories))
+                is not None
+            )
+        roots.extend(
+            PageRoot(path=path, label="Root" if index == 0 else f"Root ({path})")
+            for index, path in enumerate(self._get_root_pages_paths())
+        )
+        return roots
 
     def _generate_app_urls(self) -> list[URLPattern | URLResolver]:
-        """Return patterns from each installed app's `pages_dir` tree."""
+        """Return patterns from each installed app's `pages_dir` tree.
+
+        One registry snapshot serves the whole pass, because reading it per
+        app name rebuilds the map per app.
+        """
+        directories = _installed_app_directories()
         urls: list[URLPattern | URLResolver] = []
-        for app_name in self._get_installed_apps():
-            if patterns := self._generate_urls_for_app(app_name):
+        for app_name in self._get_installed_apps(directories):
+            if patterns := self._generate_urls_for_app(app_name, directories):
                 urls.extend(patterns)
         return urls
 
@@ -178,27 +253,39 @@ class FileRouterBackend(RouterBackend):
             self._root_patterns_cache = urls
         return list(self._root_patterns_cache)
 
-    def _get_installed_apps(self) -> Generator[str, None, None]:
-        """Yield installed app names except django framework packages."""
-        for app in getattr(settings, "INSTALLED_APPS", []):
-            if not app.startswith("django."):
-                yield app
+    def _get_installed_apps(
+        self, directories: Mapping[str, Path]
+    ) -> Generator[str, None, None]:
+        """Yield the dotted name of every installed app that can hold pages.
 
-    def _get_app_pages_path(self, app_name: str) -> Path | None:
-        """Return `<app>/pages_dir` when that directory exists."""
-        if app_name in self._app_pages_path_cache:
-            return self._app_pages_path_cache[app_name]
-        try:
-            app_module = __import__(app_name, fromlist=[""])
-            if app_module.__file__ is None:
-                self._app_pages_path_cache[app_name] = None
-                return None
-            app_path = Path(app_module.__file__).parent
-            pages_path = app_path / self.pages_dir
-            result = pages_path if pages_path.exists() else None
-        except (ImportError, AttributeError):
-            result = None
-        self._app_pages_path_cache[app_name] = result
+        The registry snapshot comes from the caller that opened the pass, so
+        nothing below it reads the registry again.
+        """
+        for app_name in directories:
+            if not _is_framework_app(app_name):
+                yield app_name
+
+    def _get_app_pages_path(
+        self, app_name: str, directories: Mapping[str, Path]
+    ) -> Path | None:
+        """Return `<app>/pages_dir` when that directory exists.
+
+        The `exists()` answer is memoised per app directory, so an app that
+        moves is looked at again while a tree created after the first read
+        needs the fresh backend a settings reload builds.
+        """
+        app_path = directories.get(app_name)
+        if app_path is None:
+            return None
+        # The directory sits beside the answer rather than in the key, because
+        # this runs per static lookup and a `str` key hashes cheaper than a
+        # `Path` one.
+        cached = self._app_pages_path_cache.get(app_name)
+        if cached is not None and cached[0] == app_path:
+            return cached[1]
+        pages_path = app_path / self.pages_dir
+        result = pages_path if pages_path.exists() else None
+        self._app_pages_path_cache[app_name] = (app_path, result)
         return result
 
     def _get_root_pages_paths(self) -> list[Path]:
@@ -219,11 +306,13 @@ class FileRouterBackend(RouterBackend):
         self._root_pages_paths_cache = result
         return result
 
-    def _generate_urls_for_app(self, app_name: str) -> list[URLPattern | URLResolver]:
+    def _generate_urls_for_app(
+        self, app_name: str, directories: Mapping[str, Path]
+    ) -> list[URLPattern | URLResolver]:
         """Return cached patterns for one app, scanning on first use."""
         if app_name in self._patterns_cache:
             return self._patterns_cache[app_name]
-        if pages_path := self._get_app_pages_path(app_name):
+        if pages_path := self._get_app_pages_path(app_name, directories):
             patterns: list[URLPattern | URLResolver] = list(
                 self._generate_patterns_from_directory(pages_path)
             )
@@ -267,43 +356,6 @@ class RouterFactory:
     def register_backend(cls, name: str, backend_class: type[RouterBackend]) -> None:
         """Map a dotted backend path to a class for `create_backend`."""
         cls._backends[name] = backend_class
-
-    @classmethod
-    def is_filesystem_discovery_router_class(cls, router_class: object) -> bool:
-        """Return True if `router_class` implements the filesystem page-tree API."""
-        if not isinstance(router_class, type):
-            return False
-        if issubclass(router_class, FileRouterBackend):
-            return True
-        if not issubclass(router_class, RouterBackend):
-            return False
-        required = (
-            "generate_urls",
-            "_get_installed_apps",
-            "_get_app_pages_path",
-            "_get_root_pages_paths",
-        )
-        return all(hasattr(router_class, name) for name in required)
-
-    @classmethod
-    def is_filesystem_discovery_router(cls, obj: object) -> bool:
-        """Whether `obj` is a router instance that walks pages trees (duck typing)."""
-        if obj is None:
-            return False
-        return (
-            hasattr(obj, "pages_dir")
-            and hasattr(obj, "app_dirs")
-            and hasattr(obj, "options")
-            and hasattr(obj, "generate_urls")
-            and callable(getattr(obj, "generate_urls", None))
-            and hasattr(obj, "_get_installed_apps")
-            and callable(getattr(obj, "_get_installed_apps", None))
-            and hasattr(obj, "_get_app_pages_path")
-            and callable(getattr(obj, "_get_app_pages_path", None))
-            and hasattr(obj, "_get_root_pages_paths")
-            and callable(getattr(obj, "_get_root_pages_paths", None))
-            and hasattr(obj, "_skip_dir_names")
-        )
 
     @classmethod
     def create_backend(cls, config: dict[str, Any]) -> RouterBackend:

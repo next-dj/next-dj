@@ -151,10 +151,7 @@ def reloader_tick_scenario(request):
 
 
 @pytest.fixture()
-def checks_router_patch(request, tmp_path):
-    """Patch the checks router manager with the routes given as the indirect param."""
-    routes = request.param
-    with patch_checks_router_manager(
-        pages_directory=tmp_path, scan_routes=routes
-    ) as ctx:
+def checks_router_patch(tmp_path):
+    """Point the check seams at the page tree under `tmp_path`."""
+    with patch_checks_router_manager(pages_directory=tmp_path) as ctx:
         yield ctx

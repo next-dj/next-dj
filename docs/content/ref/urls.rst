@@ -7,6 +7,7 @@ Module summary
 --------------
 
 ``next.urls`` exposes the router backends ``RouterBackend`` and ``FileRouterBackend``.
+It re-exports ``PageRoot`` from :doc:`utils`, the labelled page tree a backend reports from ``page_roots`` for the system checks to walk and for the development watcher to observe.
 It also exposes the ``RouterFactory`` and ``RouterManager`` that build and own them.
 The ``URLPatternParser`` for bracket-segment parsing is part of the public surface.
 It also exposes the ``page_reverse``, ``page_reverse_lazy``, and ``with_query`` reverse helpers, the ``get_multi_values`` query reader, and the Django integration name ``app_name``.
@@ -44,6 +45,8 @@ Reverse-name population iterates the wrapped sequence with ``reversed()``, which
 ``RouterManager`` owns the active backend list, and the ``router_manager`` singleton exposes ``reload()`` to rebuild it.
 ``reload()`` logs and skips a backend entry whose construction raises ``ValueError``, ``TypeError``, ``KeyError``, or ``ImportError``.
 Any other exception from a custom backend propagates and stops startup.
+``backends`` reads the loaded list as a tuple without loading anything, which is how the system checks walk the routers they were handed.
+``version`` is the cache token the lazy urlpatterns concat keys on, bumped by every ``reload()``, and a caller that derives its own cache from the router set reads it for the same purpose.
 
 .. automodule:: next.urls.manager
    :members:

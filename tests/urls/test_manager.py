@@ -31,11 +31,11 @@ lazy_urlpatterns = urlpatterns[0].urlconf_name
 
 
 class _StubManager:
-    """Iterable manager stub carrying the `_version` cache token."""
+    """Iterable manager stub carrying the `version` cache token."""
 
     def __init__(self, items, version=0, on_iter=None) -> None:
         self.items = list(items)
-        self._version = version
+        self.version = version
         self.builds = 0
         self._on_iter = on_iter
 
@@ -57,6 +57,21 @@ class TestRouterManager:
     def test_repr(self, manager) -> None:
         """``repr`` shows router count."""
         assert repr(manager) == "<RouterManager backends=0>"
+
+    def test_backends_reports_the_loaded_list_in_order(self, manager) -> None:
+        """``backends`` is the public read the other areas key their walks on."""
+        first, second = Mock(), Mock()
+        manager._backends = [first, second]
+        assert manager.backends == (first, second)
+
+    def test_backends_loads_nothing_and_survives_mutation(self, manager) -> None:
+        """Reading is inert, and the returned tuple detaches from the live list."""
+        with patch.object(manager, "reload") as mock_reload:
+            snapshot = manager.backends
+            assert snapshot == ()
+            mock_reload.assert_not_called()
+        manager._backends.append(Mock())
+        assert snapshot == ()
 
     @pytest.mark.parametrize(
         ("router_count", "expected_len"), [(0, 0), (1, 1)], ids=["empty", "one_router"]
@@ -118,7 +133,7 @@ class TestRouterManager:
 
         assert manager[0] == router
 
-    def test_reload_config_clears_cache(self, manager) -> None:
+    def test_reload_clears_cache(self, manager) -> None:
         """Reload replaces cache and builds routers from default framework config."""
         manager._config_cache = ["some", "cached", "config"]
 
@@ -129,7 +144,7 @@ class TestRouterManager:
         assert len(manager._backends) == 1
         assert isinstance(manager._backends[0], FileRouterBackend)
 
-    def test_reload_config_with_exception(self, manager) -> None:
+    def test_reload_with_exception(self, manager) -> None:
         """Backend creation failure leaves routers empty but cache is still set."""
         with patch(
             "next.urls.RouterFactory.create_backend",
@@ -173,10 +188,10 @@ class TestRouterManager:
 
     def test_reload_bumps_version(self, manager) -> None:
         """Every reload increments the urlpatterns cache token."""
-        before = manager._version
+        before = manager.version
         manager.reload()
         manager.reload()
-        assert manager._version == before + 2
+        assert manager.version == before + 2
 
     def test_get_next_pages_config_uses_cache(self, manager) -> None:
         """Returns cached list when present."""
@@ -204,7 +219,7 @@ class TestGlobalInstances:
         assert router_manager is not None
         assert isinstance(router_manager, RouterManager)
 
-    def test_router_manager_reload_config_clears_cache(self) -> None:
+    def test_router_manager_reload_clears_cache(self) -> None:
         """Global manager reload refreshes config cache."""
         len(router_manager._backends)
         router_manager.reload()
@@ -302,10 +317,7 @@ class TestGlobalInstances:
         router = FileRouterBackend()
         mock_s = Mock()
         mock_s.BASE_DIR = None
-        with (
-            patch("next.urls.backends.settings", mock_s),
-            patch("next.utils.settings", mock_s),
-        ):
+        with patch("next.utils.settings", mock_s):
             urls = router._generate_root_urls()
             assert urls == []
 
@@ -326,11 +338,10 @@ class TestGlobalInstances:
         """generate_urls walks apps and collects patterns from existing pages paths."""
         router = FileRouterBackend()
 
-        mock_s = Mock()
-        mock_s.INSTALLED_APPS = ["testapp1", "testapp2"]
         with (
-            patch("next.urls.backends.settings", mock_s),
-            patch("next.utils.settings", mock_s),
+            patch.object(
+                router, "_get_installed_apps", return_value=["testapp1", "testapp2"]
+            ),
             patch.object(router, "_get_app_pages_path") as mock_get_path,
         ):
             mock_get_path.side_effect = [None, Path("/tmp/pages")]
@@ -550,7 +561,7 @@ class TestLazyUrlPatterns:
             assert list(lazy) == ["f1"]
             assert forms.builds == 1
             forms.items.append("f2")
-            forms._version += 1
+            forms.version += 1
             assert list(lazy) == ["f1", "f2"]
             assert forms.builds == 2
 
@@ -598,7 +609,7 @@ class TestLazyUrlPatterns:
 
         def register_during_expand() -> None:
             forms.items = ["f1", "f2"]
-            forms._version += 1
+            forms.version += 1
 
         router = _StubManager(["r1"], on_iter=register_during_expand)
         with (

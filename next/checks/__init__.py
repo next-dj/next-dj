@@ -44,6 +44,7 @@ if TYPE_CHECKING:
         check_request_in_context,
         check_single_keyless_context,
         check_template_loaders,
+        check_unrouted_working_directory_pages,
     )
     from next.pages.loaders import _load_python_module
     from next.static.checks import (
@@ -84,6 +85,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_request_in_context",
         "check_single_keyless_context",
         "check_template_loaders",
+        "check_unrouted_working_directory_pages",
     ),
     "next.pages.loaders": ("_load_python_module",),
     "next.static.checks": (
