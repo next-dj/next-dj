@@ -9,6 +9,8 @@ short void ``{% set_slot "name" %}`` when there is no default slot body.
 
 from __future__ import annotations
 
+import difflib
+import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,12 +28,15 @@ from django.template.base import (
 )
 from django.utils.safestring import SafeString
 
-from next.components import get_component, render_component
+from next.components import collect_visible_components, get_component, render_component
+from next.conf import fail_loudly, next_framework_settings
 from next.static import collect_component_assets
 
 
 # Allow line breaks inside ``{% ... %}`` (multiline tag bodies).
 template_base.tag_re = re.compile(template_base.tag_re.pattern, re.DOTALL)
+
+logger = logging.getLogger(__name__)
 
 register = template.Library()
 
@@ -49,6 +54,8 @@ _SHORT_SET_SLOT_EMPTY_NAME = "{% set_slot %} tag requires a quoted slot name"
 # Slot collection uses this key during parent ``{% #component %}`` body render
 _INTERNAL_CONTEXT_KEYS = frozenset({"_component_slots"})
 
+_DASH_BEFORE_DASH = re.compile(r"-(?=-)")
+
 # Sentinel distinguishing "slot key absent" from "slot present but empty".
 # An explicitly empty slot (``{% #slot "x" %}{% /slot %}``) renders nothing,
 # whereas a missing slot falls back to the ``{% #set_slot %}`` default body.
@@ -57,6 +64,15 @@ _SLOT_MISSING: Any = object()
 
 def _strip_quotes(raw: str) -> str:
     return raw.strip("'\"").strip()
+
+
+def _comment_safe(text: str) -> str:
+    """Break every `--` run so `text` cannot terminate an HTML comment early.
+
+    Replacing whole pairs would leave an odd run closing the comment anyway,
+    so the space goes after each dash that another dash follows.
+    """
+    return _DASH_BEFORE_DASH.sub("- ", text)
 
 
 def _parse_props(
@@ -167,16 +183,64 @@ class ComponentNode(Node):
             return None
         return path.resolve()
 
+    def _close_match(self, path: Path) -> str | None:
+        """Return the closest visible component name for a did-you-mean hint.
+
+        The visibility map for `path` was just built by the failed
+        `get_component` lookup, so this read is a cache hit, not a rescan.
+        """
+        names = collect_visible_components(path)
+        matches = difflib.get_close_matches(self.name, sorted(names))
+        return matches[0] if matches else None
+
+    def _on_missing_path(self) -> str:
+        """Report a render whose context carries no `current_template_path`.
+
+        The context names no template, so there is no visibility scope to
+        draw a did-you-mean hint from.
+        """
+        if not fail_loudly():
+            logger.warning(
+                "component '%s' skipped, no current_template_path in context", self.name
+            )
+            return ""
+        if next_framework_settings.STRICT_LOADING:
+            msg = (
+                f"component '{self.name}' cannot be resolved because the "
+                "template context has no current_template_path"
+            )
+            raise template.TemplateSyntaxError(msg)
+        return (
+            f"<!-- next: component '{_comment_safe(self.name)}' skipped, no "
+            "current_template_path in context (no-discovery-path) -->"
+        )
+
+    def _on_not_found(self, path: Path) -> str:
+        """Report a name no component visible from `path` answers."""
+        if not fail_loudly():
+            logger.warning("component '%s' not found from %s", self.name, path)
+            return ""
+        suggestion = self._close_match(path)
+        if next_framework_settings.STRICT_LOADING:
+            hint = f", did you mean '{suggestion}'?" if suggestion else ""
+            msg = f"component '{self.name}' not found from {path}{hint}"
+            raise template.TemplateSyntaxError(msg)
+        hint = f", did you mean '{_comment_safe(suggestion)}'?" if suggestion else ""
+        return (
+            f"<!-- next: component '{_comment_safe(self.name)}' not found "
+            f"(not-found){hint} -->"
+        )
+
     @override
     def render(self, context: template.Context) -> str:
         """Merge props, slots, and children, then render the component."""
         path = self._template_path_from_context(context)
         if path is None:
-            return ""
+            return self._on_missing_path()
 
         info = get_component(self.name, path)
         if info is None:
-            return ""
+            return self._on_not_found(path)
 
         collect_component_assets(info, context.get("_static_collector"))
 

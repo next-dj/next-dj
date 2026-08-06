@@ -7,10 +7,9 @@ completes. It also injects the `next.min.js` wiring unless the
 injection policy is `DISABLED`.
 
 The module-level `default_manager` is a lazy handle around a single
-static manager instance. Test code may replace the wrapped instance by
-assigning to `default_manager._wrapped` without mucking with
-module-level state. The settings-change hook in `next.conf` resets the
-wrapper when `NEXT_FRAMEWORK` changes.
+static manager instance, and `get_static_manager` hands out the instance
+it wraps. The settings-change hook in `next.conf` resets the wrapper when
+`NEXT_FRAMEWORK` changes.
 """
 
 from __future__ import annotations
@@ -257,14 +256,16 @@ class StaticManager:
 
     def _ensure_backends(self) -> None:
         if not self._loaded:
-            self._reload_config()
+            self.reload()
 
-    def _reload_config(self) -> None:
+    def reload(self) -> None:
         """Rebuild the backend list from merged framework settings.
 
         An entry that fails to load costs only itself, the remaining
         entries still build. A list that ends up empty is seeded with the
-        staticfiles backend so rendering always has one.
+        staticfiles backend so rendering always has one. A settings change
+        answers with `reset_default_manager` instead, which drops the
+        wrapped manager rather than reloading it in place.
         """
         self._discovery = None
         self._cached_page_roots = None
@@ -325,9 +326,9 @@ class StaticManager:
 class DefaultStaticManager(LazyObject):
     """Lazy handle that defers the construction of a static manager.
 
-    The wrapped manager is built on first access. Tests may replace it
-    by assigning to `_wrapped` directly. The settings-change hook in
-    `next.conf` resets the wrapper when `NEXT_FRAMEWORK` changes.
+    The wrapped manager is built on first access and `get_static_manager`
+    returns it. The settings-change hook in `next.conf` resets the wrapper
+    when `NEXT_FRAMEWORK` changes.
     """
 
     def _setup(self) -> None:
@@ -335,6 +336,19 @@ class DefaultStaticManager(LazyObject):
 
 
 default_manager: DefaultStaticManager = DefaultStaticManager()
+
+
+def get_static_manager() -> StaticManager:
+    """Return the live `StaticManager` behind the lazy default handle.
+
+    A caller that patches a method and puts the original back needs the
+    instance itself, so that a settings reload swapping the handle midway
+    cannot send the restore to a different manager.
+    """
+    # Reading an attribute runs the lazy setup. `_setup()` would replace a
+    # manager that is already built.
+    _ = default_manager.create_collector
+    return default_manager._wrapped
 
 
 def collect_component_assets(

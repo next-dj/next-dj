@@ -22,6 +22,11 @@ def get_component(name: str, template_path: Path) -> ComponentInfo | None:
     return components_manager.get_component(name, template_path)
 
 
+def collect_visible_components(template_path: Path) -> Mapping[str, ComponentInfo]:
+    """Delegate to `components_manager.collect_visible_components`."""
+    return components_manager.collect_visible_components(template_path)
+
+
 def load_component_template(info: ComponentInfo) -> str | None:
     """Return raw template text for `info`."""
     return components_manager.template_loader.load(info)
@@ -38,9 +43,14 @@ def render_component(
         component_rendered.send(
             sender=components_manager.__class__,
             info=info,
-            template_path=getattr(info, "template_path", None),
+            template_path=info.template_path,
         )
     return html
 
 
-__all__ = ["get_component", "load_component_template", "render_component"]
+__all__ = [
+    "collect_visible_components",
+    "get_component",
+    "load_component_template",
+    "render_component",
+]

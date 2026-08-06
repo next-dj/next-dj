@@ -329,12 +329,28 @@ def render(request, **kwargs):
 class TestPageCreateUrlPattern:
     """``_create_regular_page_pattern`` refusing pages it cannot serve."""
 
-    def test_create_regular_page_pattern_no_module(
+    def test_create_regular_page_pattern_broken_import_still_routes(
         self, page_instance, tmp_path
     ) -> None:
-        """A ``page.py`` that fails to import yields no pattern."""
+        """A ``page.py`` that fails to import still gets a fail-loud pattern."""
         page_file = tmp_path / "page.py"
         page_file.write_text("invalid python syntax {")
+
+        url_parser = URLPatternParser()
+        django_pattern, parameters = url_parser.parse_url_pattern("test")
+        clean_name = url_parser.prepare_url_name("test")
+
+        result = page_instance._create_regular_page_pattern(
+            page_file, django_pattern, parameters, clean_name
+        )
+        assert result is not None
+        assert result.callback.next_page_path == page_file
+
+    def test_create_regular_page_pattern_missing_module_yields_none(
+        self, page_instance, tmp_path
+    ) -> None:
+        """A ``page.py`` path with no loadable module and no error yields no pattern."""
+        page_file = tmp_path / "page.py"
 
         url_parser = URLPatternParser()
         django_pattern, parameters = url_parser.parse_url_pattern("test")

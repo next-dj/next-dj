@@ -61,7 +61,7 @@ Add the index page
 The file router treats the ``notes/pages/`` directory as the page root for the application.
 The directory that contains a ``page.py`` becomes a URL.
 ``notes/pages/page.py`` therefore answers the empty path ``/``.
-The router scans every application listed in ``INSTALLED_APPS`` for a ``pages/`` directory.
+The router scans each application in ``INSTALLED_APPS`` for a ``pages/`` directory, leaving out Django's own applications and ``next`` itself.
 
 Create the page module.
 A captioned code block holds the complete content of the named file unless the prose explicitly says to append to it.

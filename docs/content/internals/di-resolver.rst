@@ -134,6 +134,8 @@ Extension points
 - Subclass ``DDependencyBase`` to introduce a typed marker.
 - Subclass ``RegisteredParameterProvider`` to handle a custom marker or a custom annotation.
 - Use ``resolver.dependency("name")`` to register a callable for ``Depends("name")``.
+- Call ``resolver.current_callable()`` from a provider that has to answer for the whole call rather than for the parameter in isolation.
+  Resolving a named dependency nests one resolve inside another, so the innermost callable is the one returned.
 
 See also
 --------

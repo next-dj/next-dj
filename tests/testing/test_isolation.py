@@ -1,9 +1,11 @@
 from pathlib import Path
 
+from django.http import HttpRequest, HttpResponse
 from django.template import Template
 
 from next.components.manager import components_manager
 from next.forms import ActionRegistration, RegistryFormActionBackend
+from next.forms.backends import FormActionBackend
 from next.forms.diagnostics import registration_diagnostics
 from next.forms.manager import form_action_manager
 from next.pages.manager import page
@@ -53,10 +55,10 @@ class TestResetFormActions:
             form_action_manager.default_backend._registry.update(saved_registry)
             form_action_manager.default_backend._uid_to_name.update(saved_uids)
 
-    def test_clear_registries_skips_backends_without_method(self) -> None:
+    def test_clear_registries_accepts_a_stateless_backend(self) -> None:
         form_action_manager._ensure_backends()
         manager_backends = form_action_manager._backends
-        stub = _BackendWithoutClear()
+        stub = _StatelessBackend()
         form_action_manager._backends = [*manager_backends, stub]
         try:
             saved = dict(form_action_manager.default_backend._registry)
@@ -150,6 +152,15 @@ class TestResetPageCache:
         assert fp not in page._template_source_mtimes
 
 
-class _BackendWithoutClear:
+class _StatelessBackend(FormActionBackend):
+    def register_action(self, registration: ActionRegistration) -> None:
+        raise NotImplementedError
+
+    def get_action_url(self, action_name: str, *, page_path: str | None = None) -> str:
+        raise NotImplementedError
+
     def generate_urls(self) -> list:
         return []
+
+    def dispatch(self, request: HttpRequest, uid: str) -> HttpResponse:
+        raise NotImplementedError

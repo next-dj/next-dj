@@ -1,5 +1,7 @@
 import copy
 import logging
+from collections.abc import Callable
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -27,6 +29,7 @@ from next.forms.backends import (
     file_to_dotted_module,
     scope_key_for,
 )
+from next.forms.diagnostics import registration_diagnostics
 from next.forms.manager import (
     FormActionManager,
     form_action_manager,
@@ -854,8 +857,8 @@ class TestManagerBackendsAccessor:
         assert manager.backends == ()
 
 
-class TestFormActionManagerReloadConfig:
-    """`_reload_config` reads `FORM_ACTION_BACKENDS` defensively."""
+class TestFormActionManagerReload:
+    """`reload` reads `FORM_ACTION_BACKENDS` defensively."""
 
     def test_non_dict_entries_are_skipped(self, settings) -> None:
         """Non-dict entries inside the list are skipped without raising."""
@@ -866,7 +869,7 @@ class TestFormActionManagerReloadConfig:
             ]
         }
         manager = FormActionManager()
-        manager._reload_config()
+        manager.reload()
         assert len(manager._backends) == 1
         assert isinstance(manager._backends[0], RegistryFormActionBackend)
 
@@ -890,7 +893,7 @@ class TestFormActionManagerReloadConfig:
         }
         manager = FormActionManager()
         with caplog.at_level(logging.ERROR, logger="next.backends"):
-            manager._reload_config()
+            manager.reload()
         assert [type(backend) for backend in manager._backends] == [
             RegistryFormActionBackend
         ]
@@ -955,11 +958,11 @@ class TestFormActionManagerLoadedFlag:
         settings.NEXT_FRAMEWORK = {"FORM_ACTION_BACKENDS": []}
         manager = FormActionManager()
         assert manager.backends == ()
-        version = manager._version
+        version = manager.version
         assert manager.backends == ()
         with pytest.raises(ImproperlyConfigured, match="No form action backends"):
             manager.get_action_meta("missing")
-        assert manager._version == version
+        assert manager.version == version
 
     def test_lookups_name_the_failed_entries(self, settings) -> None:
         """A lookup blames the unloadable config, not the caller's imports."""
@@ -1081,30 +1084,31 @@ class TestManagerClearRegistries:
     """FormActionManager.clear_registries calls clear_registry on backends."""
 
     def test_clear_registries_calls_clear_registry(self) -> None:
-        """clear_registries invokes clear_registry on backends that have it."""
-        mock_backend = MagicMock()
-        mock_backend.clear_registry = MagicMock()
+        """clear_registries invokes clear_registry on every backend."""
+        mock_backend = MagicMock(spec=FormActionBackend)
 
         manager = FormActionManager(backends=[mock_backend])
         manager.clear_registries()
 
         mock_backend.clear_registry.assert_called_once()
 
-    def test_clear_registries_skips_backend_without_method(self) -> None:
-        """Backends without clear_registry are silently skipped."""
-        mock_backend = MagicMock(spec=[])
+    def test_clear_registries_accepts_a_stateless_backend(self) -> None:
+        """A backend keeping the contract default clears to a no-op."""
+        backend = _MinimalBackend()
 
-        manager = FormActionManager(backends=[mock_backend])
+        manager = FormActionManager(backends=[backend])
         manager.clear_registries()
+
+        assert backend.clear_registry() is None
 
 
 class TestFormActionManagerVersion:
-    """The `_version` cache token bumps on every registry mutation."""
+    """The `version` cache token bumps on every registry mutation."""
 
     def test_register_action_bumps_version(self) -> None:
         """register_action increments the version after forwarding."""
         manager = FormActionManager(backends=[RegistryFormActionBackend()])
-        before = manager._version
+        before = manager.version
         manager.register_action(
             ActionRegistration(
                 name="version_bump_action",
@@ -1113,26 +1117,64 @@ class TestFormActionManagerVersion:
                 handler=lambda: None,
             )
         )
-        assert manager._version == before + 1
+        assert manager.version == before + 1
 
     def test_clear_registries_bumps_version(self) -> None:
         """clear_registries increments the version."""
         manager = FormActionManager(backends=[RegistryFormActionBackend()])
-        before = manager._version
+        before = manager.version
         manager.clear_registries()
-        assert manager._version == before + 1
+        assert manager.version == before + 1
 
-    def test_reload_config_bumps_version(self, settings) -> None:
-        """_reload_config increments the version alongside the backend rebuild."""
+    def test_restore_actions_bumps_version(self) -> None:
+        """A rollback changes what is registered, so the token has to move."""
+        manager = FormActionManager(backends=[RegistryFormActionBackend()])
+        saved = manager.snapshot_actions()
+        before = manager.version
+
+        manager.restore_actions(saved)
+
+        assert manager.version == before + 1
+
+    def test_snapshot_actions_covers_every_backend(self) -> None:
+        """The rollback reaches the backends behind the first one too."""
+        first = RegistryFormActionBackend()
+        second = RegistryFormActionBackend()
+        manager = FormActionManager(backends=[first, second])
+        saved = manager.snapshot_actions()
+        _register(second, "late")
+        assert second.get_meta("late") is not None
+
+        manager.restore_actions(saved)
+
+        assert second.get_meta("late") is None
+
+    def test_reload_bumps_version(self, settings) -> None:
+        """Reloading increments the version alongside the backend rebuild."""
         settings.NEXT_FRAMEWORK = {
             "FORM_ACTION_BACKENDS": [
                 {"BACKEND": "next.forms.RegistryFormActionBackend"}
             ]
         }
         manager = FormActionManager()
-        before = manager._version
-        manager._reload_config()
-        assert manager._version == before + 1
+        before = manager.version
+        manager.reload()
+        assert manager.version == before + 1
+
+    def test_reload_rebuilds_from_the_current_settings(self, settings) -> None:
+        """The public entry point swaps the backends for the configured ones."""
+        manager = FormActionManager(backends=[RegistryFormActionBackend()])
+        first = manager.backends[0]
+        settings.NEXT_FRAMEWORK = {
+            "FORM_ACTION_BACKENDS": [
+                {"BACKEND": "next.forms.RegistryFormActionBackend"}
+            ]
+        }
+
+        manager.reload()
+
+        assert manager.backends[0] is not first
+        assert isinstance(manager.backends[0], RegistryFormActionBackend)
 
 
 class TestFileToDottedModule:
@@ -1252,3 +1294,104 @@ class TestRegistryBackendSnapshotRestore:
         _register(backend, "extra")
         backend.restore(saved)
         assert backend._url_cache == {}
+
+    def test_contract_default_hands_out_an_ignored_token(self) -> None:
+        """A backend keeping no state of its own snapshots and restores nothing."""
+        backend = _MinimalBackend()
+        token = backend.snapshot()
+        assert token is None
+        backend.restore(token)
+        assert backend.get_meta("anything") is None
+
+    def test_restore_refuses_a_token_from_another_backend(self) -> None:
+        """A foreign token is refused whole rather than applied in part."""
+        backend = RegistryFormActionBackend()
+        _register(backend, "kept")
+        with pytest.raises(TypeError, match="expects the token its own snapshot"):
+            backend.restore(_MinimalBackend().snapshot())
+        assert backend.get_meta("kept") is not None
+
+
+def _register_in_app(
+    backend: RegistryFormActionBackend,
+    tmp_path: Path,
+    app: str,
+    name: str,
+    handler: Callable[[], str],
+    *,
+    claims_name_binding: bool = False,
+) -> None:
+    """Register a shared action declared by `app`'s own forms module."""
+    app_dir = tmp_path / app
+    app_dir.mkdir()
+    (app_dir / "__init__.py").write_text("")
+    forms_file = app_dir / "forms.py"
+    forms_file.write_text("")
+    backend.register_action(
+        ActionRegistration(
+            name=name,
+            file_path=str(forms_file),
+            scope="shared",
+            handler=handler,
+            claims_name_binding=claims_name_binding,
+        )
+    )
+
+
+class TestNameBindingClaim:
+    """A bare name binds first-wins unless a registration claims it."""
+
+    def test_a_later_registration_leaves_the_binding_alone(self, tmp_path) -> None:
+        backend = RegistryFormActionBackend()
+        _register_in_app(backend, tmp_path, "appone", "contact", lambda: "first")
+        _register_in_app(backend, tmp_path, "apptwo", "contact", lambda: "second")
+        meta = backend.get_meta("contact")
+        assert meta is not None
+        assert meta["handler"]() == "first"
+
+    def test_a_claiming_registration_takes_the_binding_over(self, tmp_path) -> None:
+        backend = RegistryFormActionBackend()
+        _register_in_app(backend, tmp_path, "appone", "contact", lambda: "first")
+        _register_in_app(
+            backend,
+            tmp_path,
+            "apptwo",
+            "contact",
+            lambda: "second",
+            claims_name_binding=True,
+        )
+        meta = backend.get_meta("contact")
+        assert meta is not None
+        assert meta["handler"]() == "second"
+        assert backend.get_meta("contact", "/no/such/page.py") == meta
+
+    def test_a_claim_on_an_unbound_name_binds_it(self, tmp_path) -> None:
+        backend = RegistryFormActionBackend()
+        _register_in_app(
+            backend,
+            tmp_path,
+            "appone",
+            "contact",
+            lambda: "only",
+            claims_name_binding=True,
+        )
+        meta = backend.get_meta("contact")
+        assert meta is not None
+        assert meta["handler"]() == "only"
+
+    def test_a_claim_still_reports_the_shared_name_collision(self, tmp_path) -> None:
+        """Two shared actions under one name stay a collision, claimed or not."""
+        backend = RegistryFormActionBackend()
+        _register_in_app(backend, tmp_path, "appone", "contact", lambda: "first")
+        _register_in_app(
+            backend,
+            tmp_path,
+            "apptwo",
+            "contact",
+            lambda: "second",
+            claims_name_binding=True,
+        )
+        assert registration_diagnostics.shared_name_collisions["contact"] == {
+            "appone.forms",
+            "apptwo.forms",
+        }

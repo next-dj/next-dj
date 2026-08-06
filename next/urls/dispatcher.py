@@ -1,6 +1,6 @@
 """Walk filesystem page trees once to emit routes and register components.
 
-`FilesystemTreeDispatcher` performs a single depth-first walk per
+`FilesystemTreeDispatcher` runs the shared `walk_page_tree` once per
 page-tree root. It yields `(url_path, page_file)` pairs for every
 discovered `page.py` (plus virtual `template.djx`-only pages), and
 registers `_components` folders it encounters along the way.
@@ -8,18 +8,15 @@ registers `_components` folders it encounters along the way.
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING
 
 from next.components import register_components_folder_from_router_walk
+from next.utils import walk_page_tree
 
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Iterable
     from pathlib import Path
-
-
-logger = logging.getLogger(__name__)
 
 
 class FilesystemTreeDispatcher:
@@ -39,40 +36,13 @@ class FilesystemTreeDispatcher:
 
     def walk(self, pages_path: Path) -> Generator[tuple[str, Path], None, None]:
         """Yield `(url_path, page_file)`, where `url_path` is the route trail."""
-        yield from self._visit(pages_path, pages_path, "")
+        on_skipped = self._register_folder if self._register_components else None
+        yield from walk_page_tree(pages_path, self._skip_set, on_skipped_dir=on_skipped)
 
-    def _visit(
-        self, current_path: Path, tree_root: Path, url_path: str
-    ) -> Generator[tuple[str, Path], None, None]:
-        try:
-            items = list(current_path.iterdir())
-        except OSError as e:
-            logger.debug("Cannot list directory %s: %s", current_path, e)
-            return
-        has_page = False
-        has_template = False
-        for item in items:
-            if item.is_dir():
-                if item.name in self._skip_set:
-                    if (
-                        self._register_components
-                        and item.name == self._components_folder_name
-                    ):
-                        register_components_folder_from_router_walk(
-                            item, tree_root, url_path
-                        )
-                    continue
-                dir_name = item.name
-                new_url_path = f"{url_path}/{dir_name}" if url_path else dir_name
-                yield from self._visit(item, tree_root, new_url_path)
-            elif item.name == "page.py":
-                has_page = True
-                yield url_path, item
-            elif item.name == "template.djx":
-                has_template = True
-
-        if has_template and not has_page:
-            yield url_path, current_path / "page.py"
+    def _register_folder(self, folder: Path, tree_root: Path, url_path: str) -> None:
+        """Register a skipped folder when it is the components folder."""
+        if folder.name == self._components_folder_name:
+            register_components_folder_from_router_walk(folder, tree_root, url_path)
 
 
 def scan_pages_tree(

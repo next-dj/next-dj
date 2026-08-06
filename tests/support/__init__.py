@@ -42,6 +42,16 @@ from tests.support.patches import (
     patch_checks_router_manager,
     patch_checks_router_manager_with_routers,
 )
+from tests.support.routers import (
+    MalformedRootsRouter,
+    OddComponentsNameRouter,
+    OddSkipNamesRouter,
+    RaisingComponentsRouter,
+    RaisingRootsRouter,
+    RaisingSkipNamesRouter,
+    RootPagesRouter,
+    SkippingRouter,
+)
 from tests.support.scenarios import (
     TICK_SCENARIOS,
     route_watch_layer_patches,
@@ -63,6 +73,14 @@ __all__ = [
     "CoerceUrlValueCase",
     "CountingWizardBackend",
     "GuardedTenantForm",
+    "MalformedRootsRouter",
+    "OddComponentsNameRouter",
+    "OddSkipNamesRouter",
+    "RaisingComponentsRouter",
+    "RaisingRootsRouter",
+    "RaisingSkipNamesRouter",
+    "RootPagesRouter",
+    "SkippingRouter",
     "UrlByAnnotationResolveCase",
     "UrlKwargsResolveCase",
     "_ctx",

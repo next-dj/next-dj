@@ -1,9 +1,16 @@
-"""Filesystem path helpers and the declaration-site attribution they back."""
+"""Path helpers, the page-tree value object, and declaration-site attribution.
+
+Everything here sits below the subpackages that share it, so a value
+object two of them build travels through this module rather than closing
+an import cycle between them.
+"""
 
 from __future__ import annotations
 
 import functools
 import inspect
+import logging
+from dataclasses import dataclass
 from pathlib import Path
 from types import CodeType
 from typing import TYPE_CHECKING, Any, NamedTuple
@@ -12,7 +19,41 @@ from django.conf import settings
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Generator, Iterable
+
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class PageRoot:
+    """A page tree a router routes, with the label a report names it by."""
+
+    path: Path
+    label: str
+
+
+def page_roots_shape_error(source: str, roots: list[Any]) -> str | None:
+    """Return why `roots` is no list of page trees, or `None` when it is one.
+
+    Both readers of `page_roots` dereference `root.path`, so the rule they
+    refuse a third-party backend by lives here with the value object.
+    """
+    for root in roots:
+        if not isinstance(root, PageRoot):
+            return (
+                f"{source} reported {type(root).__name__} instead of a "
+                "next.urls.PageRoot page tree"
+            )
+        # Widened from the declared `Path`, because a dataclass validates no
+        # field and every reader dereferences the value as a path.
+        tree: object = root.path
+        if not isinstance(tree, Path):
+            return (
+                f"{source} reported a page tree whose path is "
+                f"{type(tree).__name__} instead of pathlib.Path"
+            )
+    return None
 
 
 def resolve_base_dir() -> Path | None:
@@ -73,6 +114,60 @@ def classify_dirs_entries(
             segments.add(value)
 
     return path_roots, frozenset(segments)
+
+
+def walk_page_tree(
+    tree_root: Path,
+    skip_dir_names: Iterable[str] = (),
+    *,
+    on_skipped_dir: Callable[[Path, Path, str], None] | None = None,
+) -> Generator[tuple[str, Path], None, None]:
+    """Yield `(url_path, page_file)` for every page under `tree_root`.
+
+    A directory holding a `template.djx` and no `page.py` yields the page file
+    it would have, because the router routes it as a virtual page.
+    `on_skipped_dir` receives every directory the walk refuses to enter, which
+    is how the router registers the component folders it passes.
+    """
+    yield from _visit_page_dir(
+        tree_root, tree_root, "", frozenset(skip_dir_names), on_skipped_dir
+    )
+
+
+def _visit_page_dir(
+    current_path: Path,
+    tree_root: Path,
+    url_path: str,
+    skip_dir_names: frozenset[str],
+    on_skipped_dir: Callable[[Path, Path, str], None] | None,
+) -> Generator[tuple[str, Path], None, None]:
+    """Yield the pages of one directory, then descend into its route children."""
+    try:
+        items = list(current_path.iterdir())
+    except OSError as e:
+        logger.debug("Cannot list directory %s: %s", current_path, e)
+        return
+    has_page = False
+    has_template = False
+    for item in items:
+        if item.is_dir():
+            if item.name in skip_dir_names:
+                if on_skipped_dir is not None:
+                    on_skipped_dir(item, tree_root, url_path)
+                continue
+            dir_name = item.name
+            new_url_path = f"{url_path}/{dir_name}" if url_path else dir_name
+            yield from _visit_page_dir(
+                item, tree_root, new_url_path, skip_dir_names, on_skipped_dir
+            )
+        elif item.name == "page.py":
+            has_page = True
+            yield url_path, item
+        elif item.name == "template.djx":
+            has_template = True
+
+    if has_template and not has_page:
+        yield url_path, current_path / "page.py"
 
 
 _CLASS_BODY_MEMBERS: tuple[str, ...] = ("__call__", "__init__")

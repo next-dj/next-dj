@@ -329,6 +329,39 @@ class TestNextFrameworkChecksUnknownKeys:
         assert any(e.id == "next.E035" for e in errors)
 
 
+class TestStrictLoadingSetting:
+    """STRICT_LOADING default, typed read, and bool coercion."""
+
+    def test_default_is_false(self) -> None:
+        assert NextFrameworkSettings.DEFAULTS["STRICT_LOADING"] is False
+        next_framework_settings.reload()
+        assert next_framework_settings.STRICT_LOADING is False
+
+    def test_is_a_bool_key(self) -> None:
+        assert "STRICT_LOADING" in NextFrameworkSettings.BOOL_KEYS
+
+    def test_typed_read_of_override(self) -> None:
+        with override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}):
+            next_framework_settings.reload()
+            assert next_framework_settings.STRICT_LOADING is True
+
+    @pytest.mark.parametrize(
+        "raw",
+        [1, 0, "", "False", [], None],
+        ids=["one", "zero", "empty_str", "false_str", "empty_list", "none"],
+    )
+    @pytest.mark.parametrize("key", ["STRICT_LOADING", "STRICT_CONTEXT"])
+    def test_coercion_matches_existing_bool_keys(
+        self,
+        fresh_next_framework_settings: NextFrameworkSettings,
+        key: str,
+        raw: object,
+    ) -> None:
+        """The merge coerces STRICT_LOADING with bool() like every bool key."""
+        merged = fresh_next_framework_settings._build_flat_merged({key: raw})
+        assert merged[key] is bool(raw)
+
+
 class TestPartialBackendsDefault:
     """The default PARTIAL_BACKENDS names the protocol backend with OPTIONS."""
 

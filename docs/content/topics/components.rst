@@ -70,7 +70,8 @@ The backend recognises three sources for components.
 
 App page trees.
    As the URL router walks each page tree it calls ``register_components_folder_from_router_walk`` once per ``COMPONENTS_DIR`` folder it encounters.
-   The helper registers that folder into the first ``FileComponentsBackend`` and deduplicates by resolved path, so a folder seen twice is registered only once.
+   The helper offers the folder to each configured backend in order through ``ComponentsBackend.register_walked_folder`` and stops at the first that claims it, and it deduplicates by resolved path, so a folder seen twice is registered only once.
+   ``FileComponentsBackend`` claims every folder it is offered, so the first file-sourced backend takes it.
    A folder named ``COMPONENTS_DIR`` under that tree is a components root for the application.
 
    .. note::
@@ -119,10 +120,10 @@ Local scope.
 Global scope.
    Components in directories listed under ``DIRS`` are visible from every template, regardless of tree.
 
-Two components with the same name are valid when their scope roots differ, for example one in a page tree and one in a ``DIRS`` root.
-One name in each of two page trees is valid only when at least one of them lives below the tree root, since one name at the root route scope of two trees is rejected by ``next.E034``.
-Within one tree the name must be unique regardless of nesting depth.
-The same-scope name clash is reported by a system check, covered in the `System checks`_ section below.
+Two components with the same name are valid when their scopes differ, for example one in a page tree and one in a ``DIRS`` root, or one at a tree root and one under a route below it.
+One name in each of two page trees is valid too, because neither tree is visible from the other.
+What is rejected is a name the resolver cannot decide: two components under one route scope (``next.E020``), or one name at the root scope of two ``DIRS`` roots, which are both visible everywhere (``next.E034``).
+Both clashes are reported by system checks, covered in the `System checks`_ section below.
 
 Calling a component
 -------------------
@@ -369,7 +370,7 @@ Module loading
 --------------
 
 By default the framework imports every ``component.py`` from each ``DIRS`` root during component backend setup.
-``import_all_component_modules`` walks only the ``DIRS``-derived registry entries present at setup time.
+``import_component_modules`` walks only the ``DIRS``-derived registry entries present at setup time and returns the paths it imported.
 The bulk import runs the side effects of ``@component.context`` so they are visible from the first request.
 A ``component.py`` may also register a form action by importing ``action`` from ``next.forms`` and applying ``@action``, which the same import makes visible.
 See :doc:`/content/topics/forms/actions` for the action decorator.
@@ -462,12 +463,12 @@ System checks
 
 The components subsystem contributes Django system checks.
 
-- ``next.E020`` reports two components with the same name in the same scope.
-  Rename one of the colliding components or move it to a different scope root.
+- ``next.E020`` reports two components with the same name under one route scope, where nothing tells them apart.
+  Rename one of the colliding components or move it under a route scope of its own.
 - ``next.E021`` reports a ``component.py`` that uses the page ``context`` decorator, whether it comes from ``next.pages`` or from the curated ``next`` root.
   Use ``@component.context`` from ``next.components`` instead.
-- ``next.E034`` reports one component name used at the root route scope of more than one page tree.
-  Rename one of the colliding components or move it to a different scope root.
+- ``next.E034`` reports one name at the root scope of two roots the same template resolves against with neither taking precedence.
+  Rename one of the colliding components or move it under a route scope.
 - ``next.E075`` reports a ``@component.context`` registration bound to a file no component render collects.
   Decorate callables defined in the ``component.py`` itself.
 

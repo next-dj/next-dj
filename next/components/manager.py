@@ -82,7 +82,13 @@ class ComponentsManager:
         self._walk_registered_folders.clear()
         self._loaded = False
 
-    def _reload_config(self) -> None:
+    def reload(self) -> None:
+        """Rebuild the backends from the current `NEXT_FRAMEWORK` settings.
+
+        The render pipeline and the router-walk claims go with the old
+        backends, so the next render resolves against the freshly configured
+        sources.
+        """
         self._invalidate()
         self._backends = load_backends(
             backend_entries("COMPONENT_BACKENDS"),
@@ -94,7 +100,13 @@ class ComponentsManager:
 
     def _ensure_backends(self) -> None:
         if not self._loaded:
-            self._reload_config()
+            self.reload()
+
+    @property
+    def backends(self) -> tuple[ComponentsBackend, ...]:
+        """Return the configured backends in consultation order."""
+        self._ensure_backends()
+        return tuple(self._backends)
 
     def _claim_router_walk_folder(self, folder: Path) -> bool:
         """Return True the first time a router-walk folder is claimed.
@@ -107,6 +119,24 @@ class ComponentsManager:
             return False
         self._walk_registered_folders.add(key)
         return True
+
+    def register_router_walk_folder(
+        self, folder: Path, pages_root: Path, scope_relative: str
+    ) -> None:
+        """Register components for one folder discovered during a page-tree walk.
+
+        The route trail the folder sits on becomes its scope, so the components
+        resolve only for templates under that part of the tree. The folder goes
+        to the first backend whose `register_walked_folder` claims it.
+        """
+        # Backends first, because loading them clears the claim set and a claim
+        # taken before that would be forgotten as soon as it was made.
+        self._ensure_backends()
+        if not self._claim_router_walk_folder(folder):
+            return
+        for backend in self._backends:
+            if backend.register_walked_folder(folder, pages_root, scope_relative):
+                return
 
     def get_component(self, name: str, template_path: Path) -> ComponentInfo | None:
         """Return the first non-`None` match from configured backends."""
@@ -133,6 +163,13 @@ class ComponentsManager:
 components_manager = ComponentsManager()
 
 
+def register_components_folder_from_router_walk(
+    folder: Path, pages_root: Path, scope_relative: str
+) -> None:
+    """Register components for one folder into the live components manager."""
+    components_manager.register_router_walk_folder(folder, pages_root, scope_relative)
+
+
 def _on_settings_reloaded(**kwargs) -> None:
     """Drop cached component backends when framework settings reload."""
     components_manager._invalidate()
@@ -141,4 +178,8 @@ def _on_settings_reloaded(**kwargs) -> None:
 settings_reloaded.connect(_on_settings_reloaded)
 
 
-__all__ = ["ComponentsManager", "components_manager"]
+__all__ = [
+    "ComponentsManager",
+    "components_manager",
+    "register_components_folder_from_router_walk",
+]

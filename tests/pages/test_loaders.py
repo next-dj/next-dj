@@ -1,3 +1,5 @@
+import logging
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Never
@@ -12,9 +14,16 @@ from next.conf import next_framework_settings
 from next.pages.loaders import (
     DjxTemplateLoader,
     LayoutTemplateLoader,
+    PageModuleImportError,
     PythonTemplateLoader,
     TemplateLoader,
+    _load_python_module,
+    _load_python_module_memo,
     build_registered_loaders,
+    has_load_errors,
+    last_load_error,
+    read_module_string_lists,
+    reset_module_memo,
 )
 from next.pages.processors import _get_context_processors, _import_context_processor
 from tests.support import default_page_router_config, file_router_config_entry
@@ -1060,6 +1069,44 @@ class TestTemplateLoaderContract:
         assert Stub().source_path(tmp_path / "page.py") is None
 
 
+class TestReadModuleStringLists:
+    """`read_module_string_lists` is the narrow read the static area needs."""
+
+    def test_returns_one_list_per_requested_name(self, tmp_path: Path) -> None:
+        module_file = tmp_path / "page.py"
+        module_file.write_text('styles = ["a.css"]\nscripts = ["b.js", "c.js"]\n')
+        assert read_module_string_lists(module_file, ["styles", "scripts"]) == {
+            "styles": ["a.css"],
+            "scripts": ["b.js", "c.js"],
+        }
+
+    def test_an_unknown_name_reads_as_an_empty_list(self, tmp_path: Path) -> None:
+        module_file = tmp_path / "page.py"
+        module_file.write_text("x = 1\n")
+        assert read_module_string_lists(module_file, ["styles"]) == {"styles": []}
+
+    def test_a_non_sequence_and_its_junk_entries_are_dropped(
+        self, tmp_path: Path
+    ) -> None:
+        module_file = tmp_path / "page.py"
+        module_file.write_text('styles = "a.css"\nscripts = ["b.js", 3, ""]\n')
+        assert read_module_string_lists(module_file, ["styles", "scripts"]) == {
+            "styles": [],
+            "scripts": ["b.js"],
+        }
+
+    def test_a_module_that_does_not_load_answers_none(self, tmp_path: Path) -> None:
+        """`None` tells an absent or broken module apart from an empty one."""
+        assert read_module_string_lists(tmp_path / "missing.py", ["styles"]) is None
+
+    def test_no_names_asked_for_still_reports_the_module_loaded(
+        self, tmp_path: Path
+    ) -> None:
+        module_file = tmp_path / "page.py"
+        module_file.write_text("x = 1\n")
+        assert read_module_string_lists(module_file, []) == {}
+
+
 class TestBuildRegisteredLoaders:
     """`build_registered_loaders` reads `TEMPLATE_LOADERS` and caches."""
 
@@ -1132,3 +1179,234 @@ class TestBuildRegisteredLoaders:
         self._reset_cache()
         loaders = build_registered_loaders()
         assert [type(loader) for loader in loaders] == [DjxTemplateLoader]
+
+
+def _loader_records(caplog, level: int) -> list[logging.LogRecord]:
+    return [
+        r
+        for r in caplog.records
+        if r.name == "next.pages.loaders" and r.levelno == level
+    ]
+
+
+class TestPageModuleImportErrors:
+    """`_load_python_module` records broken imports for `last_load_error`."""
+
+    def test_syntax_error_records_error_and_logs_exception(
+        self, tmp_path, caplog
+    ) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("def render( invalid syntax {\n")
+
+        with caplog.at_level(logging.DEBUG, logger="next.pages.loaders"):
+            result = _load_python_module(page_file)
+
+        assert result is None
+        assert len(_loader_records(caplog, logging.ERROR)) == 1
+        error = last_load_error(page_file)
+        assert isinstance(error, PageModuleImportError)
+        assert error.file_path == page_file
+        assert isinstance(error.__cause__, SyntaxError)
+        assert str(error) == f"{page_file} failed to import"
+
+    def test_missing_dependency_records_module_not_found_cause(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("import missing_dep_xyz\n")
+
+        assert _load_python_module(page_file) is None
+        error = last_load_error(page_file)
+        assert isinstance(error, PageModuleImportError)
+        assert type(error.__cause__) is ModuleNotFoundError
+        assert "missing_dep_xyz" in str(error.__cause__)
+
+    def test_attribute_error_in_module_body_is_recorded(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("import os\nos.definitely_missing_attribute\n")
+
+        assert _load_python_module(page_file) is None
+        error = last_load_error(page_file)
+        assert isinstance(error, PageModuleImportError)
+        assert isinstance(error.__cause__, AttributeError)
+
+    @pytest.mark.parametrize(
+        ("source", "cause_type"),
+        [
+            ("1 / 0\n", ZeroDivisionError),
+            ("undefined_name_xyz\n", NameError),
+            ('raise OSError("body io failure")\n', OSError),
+        ],
+        ids=["zero_division", "name_error", "os_error"],
+    )
+    def test_any_body_exception_is_recorded(
+        self, tmp_path, source: str, cause_type: type[Exception]
+    ) -> None:
+        # The exec boundary is not a closed exception list, so exotic body
+        # failures record instead of drowning as an absent module.
+        page_file = tmp_path / "page.py"
+        page_file.write_text(source)
+
+        assert _load_python_module(page_file) is None
+        error = last_load_error(page_file)
+        assert isinstance(error, PageModuleImportError)
+        assert isinstance(error.__cause__, cause_type)
+
+    def test_spec_creation_oserror_stays_quiet_on_debug_level(
+        self, tmp_path, monkeypatch, caplog
+    ) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("x = 1\n")
+
+        def raising(name: str, location: object) -> Never:
+            raise OSError(name)
+
+        monkeypatch.setattr(
+            loaders_module.importlib.util, "spec_from_file_location", raising
+        )
+        with caplog.at_level(logging.DEBUG, logger="next.pages.loaders"):
+            result = _load_python_module(page_file)
+
+        assert result is None
+        assert last_load_error(page_file) is None
+        assert _loader_records(caplog, logging.ERROR) == []
+        assert len(_loader_records(caplog, logging.DEBUG)) == 1
+
+    def test_nonexistent_file_stays_quiet_on_debug_level(
+        self, tmp_path, caplog
+    ) -> None:
+        missing = tmp_path / "page.py"
+
+        with caplog.at_level(logging.DEBUG, logger="next.pages.loaders"):
+            result = _load_python_module(missing)
+
+        assert result is None
+        assert last_load_error(missing) is None
+        assert _loader_records(caplog, logging.ERROR) == []
+        assert len(_loader_records(caplog, logging.DEBUG)) == 1
+
+    def test_successful_reload_after_fix_clears_error(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("def render( invalid syntax {\n")
+        assert _load_python_module_memo(page_file) is None
+        assert last_load_error(page_file) is not None
+
+        stamp = page_file.stat().st_mtime + 10
+        page_file.write_text('template = "fixed"\n')
+        os.utime(page_file, (stamp, stamp))
+
+        module = _load_python_module_memo(page_file)
+        assert module is not None
+        assert module.template == "fixed"
+        assert last_load_error(page_file) is None
+        assert page_file not in loaders_module._LAST_LOAD_ERROR
+
+    def test_memo_does_not_reexec_broken_module(
+        self, tmp_path, monkeypatch, caplog
+    ) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("def render( invalid syntax {\n")
+
+        real_load = loaders_module._load_python_module
+        calls: list[Path] = []
+
+        def counting(file_path: Path) -> object:
+            calls.append(file_path)
+            return real_load(file_path)
+
+        monkeypatch.setattr(loaders_module, "_load_python_module", counting)
+
+        with caplog.at_level(logging.ERROR, logger="next.pages.loaders"):
+            assert _load_python_module_memo(page_file) is None
+            assert _load_python_module_memo(page_file) is None
+
+        assert calls == [page_file]
+        assert len(_loader_records(caplog, logging.ERROR)) == 1
+        assert last_load_error(page_file) is not None
+
+    def test_memo_reexecutes_on_mtime_change_and_updates_error(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("def render( invalid syntax {\n")
+        assert _load_python_module_memo(page_file) is None
+        first = last_load_error(page_file)
+        assert isinstance(first.__cause__, SyntaxError)
+
+        stamp = page_file.stat().st_mtime + 10
+        page_file.write_text("import missing_dep_xyz\n")
+        os.utime(page_file, (stamp, stamp))
+
+        assert _load_python_module_memo(page_file) is None
+        second = last_load_error(page_file)
+        assert type(second.__cause__) is ModuleNotFoundError
+
+    def test_last_load_error_stale_mtime_returns_none(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("def render( invalid syntax {\n")
+        assert _load_python_module(page_file) is None
+        assert last_load_error(page_file) is not None
+
+        # The file is fixed on disk but the memo has not re-read it yet.
+        stamp = page_file.stat().st_mtime + 10
+        page_file.write_text('template = "fixed"\n')
+        os.utime(page_file, (stamp, stamp))
+
+        assert last_load_error(page_file) is None
+
+    def test_last_load_error_missing_file_returns_none(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("def render( invalid syntax {\n")
+        assert _load_python_module(page_file) is None
+        assert last_load_error(page_file) is not None
+
+        page_file.unlink()
+        assert last_load_error(page_file) is None
+
+    def test_a_record_the_file_outlived_stops_arming_the_probe(self, tmp_path) -> None:
+        """A dead record is dropped, so the per-request gate goes quiet again."""
+        # The gate reads a process-wide store, so it answers for this file only
+        # once nothing else is on record.
+        reset_module_memo()
+        page_file = tmp_path / "page.py"
+        page_file.write_text("def render( invalid syntax {\n")
+        assert _load_python_module(page_file) is None
+        assert has_load_errors() is True
+
+        page_file.unlink()
+        assert last_load_error(page_file) is None
+        assert has_load_errors() is False
+
+    def test_record_load_error_without_mtime_drops_entry(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("def render( invalid syntax {\n")
+        assert _load_python_module(page_file) is None
+        assert page_file in loaders_module._LAST_LOAD_ERROR
+
+        # A file that vanished before the pre-exec stat has no mtime and
+        # cannot keep a keyed entry.
+        loaders_module._record_load_error(page_file, ValueError("boom"), None)
+        assert page_file not in loaders_module._LAST_LOAD_ERROR
+
+    def test_reset_module_memo_clears_recorded_errors(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("def render( invalid syntax {\n")
+        assert _load_python_module_memo(page_file) is None
+        assert last_load_error(page_file) is not None
+
+        reset_module_memo()
+
+        assert loaders_module._LAST_LOAD_ERROR == {}
+        assert page_file not in loaders_module._MODULE_MEMO
+        assert last_load_error(page_file) is None
+
+    def test_last_load_error_returns_fresh_instance_per_call(self, tmp_path) -> None:
+        # A shared instance would grow its traceback on every re-raise, so
+        # each call must wrap the one recorded cause in a new error object.
+        page_file = tmp_path / "page.py"
+        page_file.write_text("def render( invalid syntax {\n")
+        assert _load_python_module(page_file) is None
+
+        first = last_load_error(page_file)
+        second = last_load_error(page_file)
+
+        assert isinstance(first, PageModuleImportError)
+        assert isinstance(second, PageModuleImportError)
+        assert first is not second
+        assert first.__cause__ is second.__cause__

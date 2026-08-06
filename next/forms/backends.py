@@ -251,6 +251,14 @@ class ActionRegistration:
     form_class: "type[django_forms.Form] | Callable[..., Any] | None" = None
     wizard_class: "type[FormWizard] | None" = None
     guard: ActionGuard | None = None
+    claims_name_binding: bool = False
+    """Whether this registration takes over lookups that carry no page scope.
+
+    Registrations are first-wins on a bare name, so an action declared later
+    under an already-registered name stays reachable only through its own
+    page scope. A registration that claims the binding rebinds the name to
+    itself instead, which is how a test override displaces the action it
+    stands in for."""
 
 
 class FormActionBackend(ABC):
@@ -258,7 +266,12 @@ class FormActionBackend(ABC):
 
     @abstractmethod
     def register_action(self, registration: ActionRegistration) -> None:
-        """Record an action from the decorator or __init_subclass__."""
+        """Record an action from the decorator or __init_subclass__.
+
+        Lookups without a page scope resolve a bare name to the first
+        registration that used it, unless a later one sets
+        `claims_name_binding` and takes the name over.
+        """
 
     @abstractmethod
     def get_action_url(self, action_name: str, *, page_path: str | None = None) -> str:
@@ -288,6 +301,27 @@ class FormActionBackend(ABC):
     def iter_actions(self) -> "Iterable[ActionMeta]":
         """Yield the metadata of every action this backend owns."""
         return ()
+
+    def clear_registry(self) -> None:
+        """Drop every action this backend stores, for test isolation.
+
+        A backend that keeps no state of its own, because it answers each
+        lookup from its source, has nothing to drop and leaves this alone.
+        """
+        return
+
+    def snapshot(self) -> object:
+        """Return an opaque token holding the actions this backend stores.
+
+        The token travels back into `restore` untouched, so a backend picks
+        whatever representation suits its storage. A backend that keeps no
+        state of its own returns None and ignores it again on restore.
+        """
+        return None
+
+    def restore(self, snapshot: object) -> None:
+        """Put back the actions captured by a token from `snapshot`."""
+        del snapshot
 
     def render_invalid_page(
         self,
@@ -350,6 +384,7 @@ class RegistryFormActionBackend(FormActionBackend):
         self._name_index: dict[str, tuple[str, str]] = {}
         self._url_cache: dict[tuple[str, str], str] = {}
 
+    @override
     def clear_registry(self) -> None:
         """Drop every registered action and reset the UID index. For test isolation.
 
@@ -361,6 +396,7 @@ class RegistryFormActionBackend(FormActionBackend):
         self._name_index = {}
         self._url_cache = {}
 
+    @override
     def snapshot(self) -> "RegistryBackendSnapshot":
         """Capture the registered actions so a later `restore` rolls them back.
 
@@ -374,8 +410,19 @@ class RegistryFormActionBackend(FormActionBackend):
             name_index=dict(self._name_index),
         )
 
-    def restore(self, snapshot: "RegistryBackendSnapshot") -> None:
-        """Restore the registered actions captured by `snapshot`."""
+    @override
+    def restore(self, snapshot: object) -> None:
+        """Restore the registered actions captured by `snapshot`.
+
+        The token is opaque in the contract, so a token this backend never
+        handed out is refused rather than half-applied.
+        """
+        if not isinstance(snapshot, RegistryBackendSnapshot):
+            msg = (
+                f"{type(self).__name__}.restore expects the token its own "
+                f"snapshot() returned, got {type(snapshot).__name__}."
+            )
+            raise TypeError(msg)
         self._registry = dict(snapshot.registry)
         self._uid_to_name = dict(snapshot.uid_to_name)
         self._name_index = dict(snapshot.name_index)
@@ -433,14 +480,18 @@ class RegistryFormActionBackend(FormActionBackend):
         if registration.guard is not None:
             meta["guard"] = registration.guard
         self._registry[key] = meta
-        first_key = self._name_index.setdefault(name, key)
+        if registration.claims_name_binding:
+            bound_key = self._name_index.get(name, key)
+            self._name_index[name] = key
+        else:
+            bound_key = self._name_index.setdefault(name, key)
         if (
             scope == "shared"
-            and first_key != key
-            and self._registry.get(first_key, {}).get("scope") == "shared"
+            and bound_key != key
+            and self._registry.get(bound_key, {}).get("scope") == "shared"
         ):
             registration_diagnostics.shared_name_collisions.setdefault(
-                name, {first_key[0]}
+                name, {bound_key[0]}
             ).add(scope_key)
         action_registered.send(
             sender=self.__class__,

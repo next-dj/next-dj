@@ -82,8 +82,20 @@ A watch spec is a tuple of a root path and one glob pattern.
 ``_iter_default_autoreload_watch_specs`` is an internal helper of ``next.server.watcher`` that builds the built-in set.
 User code calls ``iter_all_autoreload_watch_specs`` instead, which wraps the built-in set with the registered extra specs.
 
+The page roots are the trees every configured router reports through ``page_roots``, the trees it serves URLs from.
+A tree no router routes is not watched, because no edit under it can change a response.
+A backend that does not implement ``page_roots`` reports no tree and is therefore not watched at all.
+The system checks walk exactly that set and no tree beyond it.
+A ``pages`` directory beside the working directory that no router routes is neither watched nor walked, and ``next.W002`` names it instead.
+
+Every read of a router here is guarded, and the guard drops a value of the wrong type instead of passing it on.
+``runserver`` boots, ``collectstatic`` runs, and the staticfiles finder answers even when a backend raises from ``page_roots`` or ``components_folder_name``, and equally when it answers the wrong shape.
+The failure costs that backend its trees and nothing else.
+It is logged once per backend and subject rather than per tick, and again after a settings reload.
+
 - Each page root contributes a ``**/page.py`` spec.
-- Each page root paired with its components folder name contributes a ``**/<components-folder>/**/component.py`` spec, ``_components`` by default.
+- Each page root paired with the name its router returns from ``components_folder_name`` contributes a ``**/<components-folder>/**/component.py`` spec, ``_components`` by default.
+  A router that returns ``None`` there contributes no component spec.
 - Each extra component root from ``COMPONENT_BACKENDS`` contributes a ``**/component.py`` spec.
 
 Only Python entrypoints are watched.

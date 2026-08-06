@@ -12,11 +12,8 @@ def install() -> None:
     is set it also imports every `component.py` so decorators run before the
     first request.
     """
-    components_manager._ensure_backends()
-    for backend in components_manager._backends:
-        ensure_loaded = getattr(backend, "_ensure_loaded", None)
-        if callable(ensure_loaded):
-            ensure_loaded()
+    for backend in components_manager.backends:
+        backend.discover()
 
 
 __all__ = ["install"]

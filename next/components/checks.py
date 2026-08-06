@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import ast
+from dataclasses import dataclass
+from itertools import combinations
 from typing import TYPE_CHECKING
 
 from django.conf import settings
@@ -18,7 +20,7 @@ from next.checks.common import (
 )
 from next.conf import next_framework_settings
 
-from .backends import ComponentsBackend, FileComponentsBackend
+from .backends import ComponentsBackend
 from .context import component
 
 
@@ -152,30 +154,33 @@ def check_next_components_configuration(*args, **kwargs) -> list[CheckMessage]:
     return errors
 
 
+def _checked_backends() -> tuple[ComponentsBackend, ...]:
+    """Return the loaded backends of the components store the checks read."""
+    return get_components_manager().backends
+
+
 @register(NEXT)
 def check_duplicate_component_names(*args, **kwargs) -> list[CheckMessage]:
-    """Check that no two components share the same name within the same scope."""
+    """Check that no two components share a name within one route scope.
+
+    The scope is the pair the resolver scores on, so the same name under two
+    route trails of one tree is the documented override rather than a clash.
+    """
     errors: list[CheckMessage] = []
     configs = next_framework_settings.COMPONENT_BACKENDS
     if not isinstance(configs, list) or not configs:
         return errors
-    manager = get_components_manager()
-    for backend in manager._backends:
-        if not isinstance(backend, FileComponentsBackend):
-            continue
-        backend._ensure_loaded()
-        seen: dict[tuple[Path, str], list[tuple[str, str]]] = {}
+    for backend in _checked_backends():
+        seen: dict[tuple[Path, str, str], list[str]] = {}
 
-        for info in backend._registry:
-            key = (info.scope_root, info.name)
-            if key not in seen:
-                seen[key] = []
+        for info in backend.iter_components():
+            key = (info.scope_root, info.scope_relative or "", info.name)
             path_str = str(info.template_path or info.module_path or "")
-            seen[key].append((info.scope_relative, path_str))
+            seen.setdefault(key, []).append(path_str)
 
-        for (_scope_root, name), entries in seen.items():
-            if len(entries) > 1:
-                paths_str = ", ".join(p for _sr, p in entries if p)
+        for (_scope_root, _scope_relative, name), paths in seen.items():
+            if len(paths) > 1:
+                paths_str = ", ".join(p for p in paths if p)
                 errors.append(
                     Error(
                         f'Component name "{name}" is registered more than once '
@@ -187,41 +192,88 @@ def check_duplicate_component_names(*args, **kwargs) -> list[CheckMessage]:
     return errors
 
 
+@dataclass(frozen=True, slots=True)
+class _RootScopeEntry:
+    """One component registered at the root scope of a single component root."""
+
+    root: Path
+    path: str
+    everywhere: bool
+    """True for a `COMPONENT_BACKENDS` root, whose components resolve from
+    every template rather than only from below the root."""
+
+
+def _root_scope_entries(
+    backend: ComponentsBackend,
+) -> dict[str, dict[Path, _RootScopeEntry]]:
+    """Group the root-scope components of one backend by name, then by root."""
+    by_name: dict[str, dict[Path, _RootScopeEntry]] = {}
+    global_roots = frozenset(backend.global_component_roots())
+    for info in backend.iter_components():
+        if (info.scope_relative or "").strip():
+            continue
+        entry = _RootScopeEntry(
+            root=info.resolved_scope_root,
+            path=str(info.template_path or info.module_path or ""),
+            everywhere=info.scope_root in global_roots,
+        )
+        by_name.setdefault(info.name, {}).setdefault(entry.root, entry)
+    return by_name
+
+
+def _resolution_is_ordering(first: _RootScopeEntry, second: _RootScopeEntry) -> bool:
+    """Whether only registration order decides between two same-named components.
+
+    A `COMPONENT_BACKENDS` root and a page tree score alike, and the resolver
+    hands the page tree the win as a project-local override, so that pair is
+    decided by a rule rather than by order. Two roots of the same kind score
+    alike with nothing left to break the tie, but only where one template can
+    reach both, which for page trees means one tree sitting inside the other.
+    """
+    if first.everywhere != second.everywhere:
+        return False
+    if first.everywhere:
+        return True
+    return first.root.is_relative_to(second.root) or second.root.is_relative_to(
+        first.root
+    )
+
+
+def _order_decided_entries(
+    entries: dict[Path, _RootScopeEntry],
+) -> list[_RootScopeEntry]:
+    """Return the roots that share one name with no rule to pick between them."""
+    involved: dict[Path, _RootScopeEntry] = {}
+    for first, second in combinations(entries.values(), 2):
+        if _resolution_is_ordering(first, second):
+            involved[first.root] = first
+            involved[second.root] = second
+    return sorted(involved.values(), key=lambda entry: str(entry.root))
+
+
 @register(NEXT)
 def check_cross_root_component_name_conflicts(*args, **kwargs) -> list[CheckMessage]:
-    """Reject one component name in the root route scope on more than one page tree."""
+    """Reject a root-scope name that only registration order resolves."""
     errors: list[CheckMessage] = []
     configs = next_framework_settings.COMPONENT_BACKENDS
     if not isinstance(configs, list) or not configs:
         return errors
-    manager = get_components_manager()
-    for backend in manager._backends:
-        if not isinstance(backend, FileComponentsBackend):
-            continue
-        backend._ensure_loaded()
-        by_name: dict[str, dict[Path, str]] = {}
-        for info in backend._registry:
-            if (info.scope_relative or "").strip():
-                continue
-            root = info.resolved_scope_root
-            path_str = str(info.template_path or info.module_path or "")
-            roots_for_name = by_name.setdefault(info.name, {})
-            roots_for_name.setdefault(root, path_str)
-        for name, roots_map in sorted(by_name.items()):
-            if len(roots_map) <= 1:
+    for backend in _checked_backends():
+        for name, entries in sorted(_root_scope_entries(backend).items()):
+            ambiguous = _order_decided_entries(entries)
+            if not ambiguous:
                 continue
             details = ". ".join(
-                f"{root}: {path_str or '?'}"
-                for root, path_str in sorted(
-                    roots_map.items(), key=lambda item: str(item[0])
-                )
+                f"{entry.root}: {entry.path or '?'}" for entry in ambiguous
             )
             errors.append(
                 Error(
-                    f'Component name "{name}" uses the shared root namespace on more '
-                    f"than one page tree. Each distinct directory root in "
-                    f"NEXT_FRAMEWORK PAGE_BACKENDS DIRS must expose unique "
-                    f"names at the root route scope. Locations: {details}.",
+                    f'Component name "{name}" is registered at the root scope of '
+                    f"component roots the same template resolves against, and "
+                    f"neither takes precedence over the other, so only "
+                    f"registration order decides which one renders. Rename one "
+                    f"of them or move it under a route scope. Locations: "
+                    f"{details}.",
                     obj=settings,
                     id="next.E034",
                 )
@@ -250,10 +302,12 @@ def _component_py_uses_pages_context(file_path: Path) -> bool:
     except SyntaxError:
         return False
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module in _PAGE_CONTEXT_MODULES:
-            for alias in node.names:
-                if getattr(alias, "name", None) == "context":
-                    return True
+        if (
+            isinstance(node, ast.ImportFrom)
+            and node.module in _PAGE_CONTEXT_MODULES
+            and any(alias.name == "context" for alias in node.names)
+        ):
+            return True
         if (
             isinstance(node, ast.Attribute)
             and node.attr == "context"
@@ -270,13 +324,8 @@ def check_component_py_no_pages_context(*args, **kwargs) -> list[CheckMessage]:
     configs = next_framework_settings.COMPONENT_BACKENDS
     if not isinstance(configs, list) or not configs:
         return errors
-    manager = get_components_manager()
-    for backend in manager._backends:
-        if not isinstance(backend, FileComponentsBackend):
-            continue
-        backend._ensure_loaded()
-
-        for info in backend._registry:
+    for backend in _checked_backends():
+        for info in backend.iter_components():
             if info.module_path is None:
                 continue
             if not info.module_path.exists():
@@ -306,12 +355,10 @@ def check_component_context_registration_files(*args, **kwargs) -> list[CheckMes
     if not isinstance(configs, list) or not configs:
         return []
 
-    manager = get_components_manager()
-    for backend in manager._backends:
-        if isinstance(backend, FileComponentsBackend):
-            # Called for the import it performs, which is what runs the
-            # decorators this check then reads out of the registry.
-            backend.loaded_module_paths()
+    for backend in _checked_backends():
+        # Called for the import it performs, which is what runs the
+        # decorators this check then reads out of the registry.
+        backend.import_component_modules()
 
     return registration_file_errors(
         _COMPONENT_CONTEXT_SUBJECT,

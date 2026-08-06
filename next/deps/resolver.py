@@ -9,6 +9,7 @@ Providers register by simply importing their module, which runs the
 
 from __future__ import annotations
 
+import contextlib
 import inspect
 from typing import TYPE_CHECKING, Any, ClassVar, cast, get_type_hints
 
@@ -114,6 +115,14 @@ class DependencyResolver:
         self._dependency_callables[name] = callable_dep
         return callable_dep
 
+    def get_dependency(self, name: str) -> Callable[..., Any] | None:
+        """Return the callable bound to `name`, or None when nothing is bound."""
+        return self._dependency_callables.get(name)
+
+    def unregister_dependency(self, name: str) -> None:
+        """Drop the binding for `name`, tolerating a name that has none."""
+        self._dependency_callables.pop(name, None)
+
     def dependency(
         self, name: str
     ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
@@ -162,6 +171,20 @@ class DependencyResolver:
         """Append a provider after the existing list."""
         self._providers.append(provider)
 
+    def prepend_provider(self, provider: ParameterProvider) -> None:
+        """Put `provider` ahead of every other one, so it matches first.
+
+        The auto-registered providers load first, otherwise they would be
+        placed in front of the newcomer on their own first use.
+        """
+        self._ensure_providers()
+        self._providers.insert(0, provider)
+
+    def remove_provider(self, provider: ParameterProvider) -> None:
+        """Drop `provider` from the list, tolerating one that is not in it."""
+        with contextlib.suppress(ValueError):
+            self._providers.remove(provider)
+
     def register(
         self, provider: ParameterProvider | type[ParameterProvider]
     ) -> ParameterProvider | type[ParameterProvider]:
@@ -172,6 +195,17 @@ class DependencyResolver:
             return provider
         self.add_provider(provider)
         return provider
+
+    def current_callable(self) -> Callable[..., Any] | None:
+        """Return the callable being resolved, or `None` outside a resolve.
+
+        A provider reads it when the parameter alone cannot answer, because
+        `inspect.Parameter` carries the annotation as it was written while
+        `get_type_hints` on the owning callable resolves a string one.
+        Resolving a dependency nests, so the innermost callable is returned.
+        """
+        stack = self._resolve_call_stack
+        return stack[-1] if stack else None
 
     def resolve[T](
         self, func: Callable[..., T], context: ResolutionContext

@@ -9,7 +9,17 @@ from __future__ import annotations
 
 from . import checks, signals
 from .context import Context, ContextResult
+from .loaders import PageModuleImportError
 from .manager import Page, context, page
 
 
-__all__ = ["Context", "ContextResult", "Page", "checks", "context", "page", "signals"]
+__all__ = [
+    "Context",
+    "ContextResult",
+    "Page",
+    "PageModuleImportError",
+    "checks",
+    "context",
+    "page",
+    "signals",
+]

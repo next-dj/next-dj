@@ -196,6 +196,12 @@ App directories.
    When ``APP_DIRS`` is ``True`` the router scans each installed application for a directory named ``PAGES_DIR``.
    ``PAGES_DIR`` is required on every backend entry, and the ``next.E024`` system check fails when the key is missing.
    In the tutorial it is set to ``pages``, so the router scans ``notes/pages/``.
+   Applications are resolved through Django's application registry, so an ``INSTALLED_APPS`` entry written as an ``AppConfig`` path such as ``notes.apps.NotesConfig`` scans the same ``notes/pages/`` directory as the plain ``notes`` entry, and both are reported as ``App 'notes'``.
+   The scanned directory is the one the registry reports for the application, so an ``AppConfig`` that declares its own ``path`` moves the scan with it, and an application shipped as a namespace package is scanned like any other.
+   Django's own applications and ``next`` itself are never scanned, so the packages they ship cannot contribute routes.
+
+   A directory reachable both as an application tree and through ``DIRS`` is routed twice, once under each mount, which the ``next.E015`` system check reports as a URL pattern conflict.
+   The page checks report each file once, however many mounts reach it.
 
 Project directories.
    The ``DIRS`` list adds absolute or project-relative paths to the scan.

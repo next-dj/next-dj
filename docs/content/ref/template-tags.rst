@@ -102,6 +102,27 @@ Components
    Block form.
    Marks a slot location inside a component template, with a fallback body used when the caller omits the slot.
 
+Resolution misses
+~~~~~~~~~~~~~~~~~
+
+A ``{% component %}`` name that does not resolve has three outcomes, selected by ``NEXT_FRAMEWORK["STRICT_LOADING"]`` and ``settings.DEBUG``.
+
+With ``STRICT_LOADING`` the tag raises ``TemplateSyntaxError`` at render time, so a typo fails the page rather than being silently dropped.
+The message reads ``component 'card' not found from <path>, did you mean 'cards'?``, with the hint present when a close match exists among the component names visible to the rendering template.
+A template rendered without a ``current_template_path`` context value has no discovery scope to search.
+The strict message says so instead, ``component 'card' cannot be resolved because the template context has no current_template_path``.
+
+With ``DEBUG`` and without ``STRICT_LOADING`` the miss renders as a visible HTML comment in place of the component, ``<!-- next: component 'card' not found (not-found), did you mean 'cards'? -->``.
+The missing discovery scope renders as ``<!-- next: component 'card' skipped, no current_template_path in context (no-discovery-path) -->``.
+The page keeps rendering while the gap stays visible in the markup.
+
+With both off, the production default, the tag renders an empty string and logs a warning.
+The production path never runs the did-you-mean machinery.
+
+This is deliberately softer than the page-load contract described in :doc:`pages`.
+A broken ``page.py`` fails the whole request because the page is the unit of response.
+One missed component inside an otherwise healthy page degrades to a comment in development instead of taking the page down.
+
 Multiline tag bodies
 ~~~~~~~~~~~~~~~~~~~~
 

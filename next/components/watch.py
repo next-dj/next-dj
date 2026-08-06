@@ -1,19 +1,18 @@
-"""Read-only discovery of component filesystem paths for autoreload.
-
-`get_component_paths_for_watch` combines page-tree and backend `DIRS`
-scans so the dev reloader can register component files without
-mutating the manager state.
-"""
+"""Read-only discovery of component filesystem paths for autoreload."""
 
 from __future__ import annotations
 
-import itertools
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from django.core.exceptions import ImproperlyConfigured
 
 from next.backends import backend_entries, resolve_backend_class
+from next.pages.watch import (
+    components_folder_name_for_watch,
+    iter_page_backends_for_watch,
+    page_root_paths_for_watch,
+)
 
 from .backends import _DEFAULT_BACKEND_PATH, ComponentsBackend, FileComponentsBackend
 from .info import _paths_from_component_info
@@ -51,32 +50,13 @@ def _collect_paths_for_one_pages_root(
 
 def _collect_component_paths_under_page_trees() -> set[Path]:
     """Collect component paths from page backends without mutating registries."""
-    # next.urls imports next.components for its walk registration, so the router
-    # import is deferred here to break the next.components <-> next.urls cycle.
-    from next.urls import RouterFactory  # noqa: PLC0415
-
     result: set[Path] = set()
-    for config in backend_entries("PAGE_BACKENDS"):
-        try:
-            backend = RouterFactory.create_backend(config)
-        except Exception:
-            logger.exception(
-                "error creating page backend for component autoreload scan %s", config
-            )
+    for backend in iter_page_backends_for_watch():
+        comp_name = components_folder_name_for_watch(backend)
+        if comp_name is None:
             continue
-        if not RouterFactory.is_filesystem_discovery_router(backend):
-            continue
-        fs_backend: Any = backend
-        comp_name = str(fs_backend._components_folder_name)
         scanner = ComponentScanner()
-        for root in itertools.chain(
-            (p.resolve() for p in fs_backend._get_root_pages_paths()),
-            (
-                a.resolve()
-                for app_name in fs_backend._get_installed_apps()
-                if (a := fs_backend._get_app_pages_path(app_name))
-            ),
-        ):
+        for root in page_root_paths_for_watch(backend):
             result |= _collect_paths_for_one_pages_root(scanner, comp_name, root)
     return result
 
@@ -110,8 +90,7 @@ def _collect_component_paths_from_backend_dirs() -> set[Path]:
 def get_component_paths_for_watch() -> set[Path]:
     """Return filesystem paths that matter for the dev component reloader.
 
-    This performs a read-only scan. It does not mutate the components manager
-    or router registration state.
+    The scan mutates neither the components manager nor the router registry.
     """
     page_paths = _collect_component_paths_under_page_trees()
     extra_paths = _collect_component_paths_from_backend_dirs()

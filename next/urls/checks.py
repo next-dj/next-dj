@@ -9,7 +9,12 @@ from django.core.checks import CheckMessage, Error, Tags, register
 from django.utils.module_loading import import_string
 
 from next.checks import NEXT
-from next.checks.common import errors_for_unknown_keys, get_router_manager
+from next.checks.common import (
+    errors_for_unknown_keys,
+    get_page_roots,
+    get_router_manager,
+    page_tree_skip_names,
+)
 from next.conf import next_framework_settings
 from next.conf.signals import settings_reloaded
 
@@ -289,8 +294,6 @@ def check_next_pages_configuration(*args, **kwargs) -> list[CheckMessage]:
 @register(Tags.urls, NEXT)
 def check_url_patterns(*args, **kwargs) -> list[CheckMessage]:
     """Collect patterns from routers and flag duplicate Django path strings."""
-    warnings: list[CheckMessage] = []
-
     router_manager, init_errors = get_router_manager()
     if router_manager is None:
         return init_errors
@@ -298,13 +301,13 @@ def check_url_patterns(*args, **kwargs) -> list[CheckMessage]:
     all_patterns, errors = _collect_all_patterns(router_manager)
 
     try:
-        _check_url_conflicts(all_patterns, errors, warnings)
+        _check_url_conflicts(all_patterns, errors)
     except (ValueError, TypeError) as e:
         errors.append(
             Error(f"Error checking URL conflicts: {e}", obj=settings, id="next.E014")
         )
 
-    return errors + warnings
+    return errors
 
 
 @register(Tags.urls, NEXT)
@@ -351,9 +354,8 @@ def check_reverse_name_collisions(*args, **kwargs) -> list[CheckMessage]:
     return errors
 
 
-# One collection walk shared by the two URL checks in a run. The stored
-# manager is compared by identity, and holding a reference to it keeps it alive
-# so its `id` can never be reused by a later manager while the memo is live.
+# One collection walk shared by the two URL checks in a run. The memo holds the
+# manager itself rather than its `id`, so a later manager can never alias it.
 _COLLECTED_PATTERNS_CACHE: dict[
     str, tuple[RouterManager, list[_CollectedPattern], list[CheckMessage]] | None
 ] = {"value": None}
@@ -387,11 +389,9 @@ def _collect_all_patterns_uncached(
     all_patterns: list[_CollectedPattern] = []
     errors: list[CheckMessage] = []
 
-    for router in router_manager._backends:
+    for router in router_manager.backends:
         try:
-            if hasattr(router, "app_dirs") and router.app_dirs:
-                _collect_app_patterns(router, all_patterns, errors)
-            _collect_root_patterns(router, all_patterns, errors)
+            _collect_router_patterns(router, all_patterns, errors)
         except (AttributeError, OSError) as e:
             errors.append(
                 Error(
@@ -404,57 +404,23 @@ def _collect_all_patterns_uncached(
     return all_patterns, errors
 
 
-def _collect_app_patterns(
+def _collect_router_patterns(
     router: RouterBackend,
     all_patterns: list[_CollectedPattern],
     errors: list[CheckMessage],
 ) -> None:
-    """Append patterns discovered under each app's `pages_dir`."""
-    if not hasattr(router, "_get_installed_apps"):
-        return
-
-    file_router: FileRouterBackend = router  # type: ignore[assignment]
-
-    for app_name in file_router._get_installed_apps():
-        if not hasattr(file_router, "_get_app_pages_path"):
-            continue
-
-        pages_path = file_router._get_app_pages_path(app_name)
-        if not pages_path:
-            continue
-
-        patterns = _collect_url_patterns(
-            pages_path,
-            f"App '{app_name}'",
-            errors,
-            skip_dir_names=getattr(router, "_skip_dir_names", frozenset()),
+    """Append patterns from every page tree `router` reports."""
+    skip_dir_names = page_tree_skip_names(router)
+    for root in get_page_roots(router):
+        all_patterns.extend(
+            _collect_url_patterns(
+                root.path, root.label, errors, skip_dir_names=skip_dir_names
+            )
         )
-        all_patterns.extend(patterns)
-
-
-def _collect_root_patterns(
-    router: RouterBackend,
-    all_patterns: list[_CollectedPattern],
-    errors: list[CheckMessage],
-) -> None:
-    """Append patterns from each configured root pages directory."""
-    if not hasattr(router, "_get_root_pages_paths"):
-        return
-    for i, pages_path in enumerate(router._get_root_pages_paths()):
-        context = "Root" if i == 0 else f"Root ({pages_path})"
-        patterns = _collect_url_patterns(
-            pages_path,
-            context,
-            errors,
-            skip_dir_names=getattr(router, "_skip_dir_names", frozenset()),
-        )
-        all_patterns.extend(patterns)
 
 
 def _check_url_conflicts(
-    all_patterns: list[_CollectedPattern],
-    errors: list[CheckMessage],
-    _warnings: list[CheckMessage],
+    all_patterns: list[_CollectedPattern], errors: list[CheckMessage]
 ) -> None:
     """Report an error when the same Django path string comes from multiple sources."""
     pattern_dict: dict[str, list[str]] = {}

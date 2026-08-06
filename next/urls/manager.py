@@ -39,13 +39,27 @@ logger = logging.getLogger(__name__)
 class RouterManager:
     """Load `RouterBackend` instances from `NEXT_FRAMEWORK` and iterate them."""
 
-    _version: int = 0
-    """Cache token for the lazy urlpatterns concat, bumped by `reload()`."""
+    version: int = 0
+    """Cache token for the lazy urlpatterns concat, bumped by `reload()`.
+
+    Read it to key a cache of your own on the active backend list. It is a
+    plain attribute rather than a property because the lazy urlpatterns
+    concat reads it on every resolve."""
 
     def __init__(self) -> None:
         """Empty backend list until first iteration."""
         self._backends: list[RouterBackend] = []
         self._config_cache: list[dict[str, Any]] | None = None
+
+    @property
+    def backends(self) -> tuple[RouterBackend, ...]:
+        """Return the loaded backends in routing order.
+
+        Reading them loads nothing. Iterating the manager builds the list on
+        first use and `reload()` rebuilds it, so a caller that needs the
+        configured set asks after one of those.
+        """
+        return tuple(self._backends)
 
     @override
     def __repr__(self) -> str:
@@ -75,7 +89,7 @@ class RouterManager:
         list. The `router_reloaded` signal fires after the rebuild and
         the cache flush so receivers observe a consistent state.
         """
-        self._version += 1
+        self.version += 1
         self._config_cache = None
         self._backends.clear()
 
@@ -133,13 +147,13 @@ class _LazyUrlPatterns(Sequence["URLPattern | URLResolver"]):
 
     def version_token(self) -> tuple[int, int]:
         """Router and form-action versions keying caches derived from this."""
-        return (router_manager._version, form_action_manager._version)
+        return (router_manager.version, form_action_manager.version)
 
     def _patterns(self) -> list[URLPattern | URLResolver]:
         cache = self._cache
         if cache is not None and (cache[0], cache[1]) == (
-            router_manager._version,
-            form_action_manager._version,
+            router_manager.version,
+            form_action_manager.version,
         ):
             return cache[2]
         patterns: list[URLPattern | URLResolver] = [
@@ -148,7 +162,7 @@ class _LazyUrlPatterns(Sequence["URLPattern | URLResolver"]):
         ]
         # Versions are read after the build because expanding pages can
         # register form actions and bump the forms version mid-build.
-        self._cache = (router_manager._version, form_action_manager._version, patterns)
+        self._cache = (router_manager.version, form_action_manager.version, patterns)
         return patterns
 
     @override

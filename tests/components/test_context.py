@@ -520,7 +520,7 @@ class TestSerializedComponentContextKeys:
     def _keys(self, *backends: object) -> list[tuple[Path, str]]:
         """Enumerate serialized keys with a components manager over `backends`."""
         manager = MagicMock()
-        manager._backends = list(backends)
+        manager.backends = tuple(backends)
         with patch(
             "next.components.context.get_components_manager", return_value=manager
         ):

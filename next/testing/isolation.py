@@ -22,12 +22,12 @@ def reset_form_actions() -> None:
     `NEXT_FRAMEWORK["FORM_ACTION_BACKENDS"]` call this helper to
     discard the stale backend list and pick the new one up on next use.
     """
-    form_action_manager._reload_config()
+    form_action_manager.reload()
 
 
 def reset_components() -> None:
     """Drop cached component backends so the next render reloads them."""
-    components_manager._reload_config()
+    components_manager.reload()
 
 
 def reset_form_registration_state() -> None:
@@ -54,9 +54,7 @@ def reset_page_cache() -> None:
     on disk (for example in `tmp_path`), because `page.render` memoises
     composed template strings per file path.
     """
-    page._template_registry.clear()
-    page._compiled_registry.clear()
-    page._template_source_mtimes.clear()
+    page.clear_template_caches()
 
 
 __all__ = [

@@ -15,6 +15,7 @@ from next.static import (
     StaticFilesBackend,
     StaticManager,
     default_manager,
+    get_static_manager,
     reset_default_manager,
 )
 from next.static.collector import HEAD_CLOSE
@@ -56,13 +57,13 @@ class TestReloadConfig:
         manager = StaticManager()
         manager._ensure_backends()
         initial = manager.default_backend
-        manager._reload_config()
+        manager.reload()
         assert manager.default_backend is not initial
 
     def test_reload_clears_discovery_cache(self) -> None:
         manager = StaticManager()
         _ = manager.discovery
-        manager._reload_config()
+        manager.reload()
         assert manager._discovery is None
 
     def test_reload_clears_script_builder(self) -> None:
@@ -74,7 +75,7 @@ class TestReloadConfig:
         ):
             manager._next_script_builder()
         assert manager._script_builder is not None
-        manager._reload_config()
+        manager.reload()
         assert manager._script_builder is None
 
     def test_invalid_backend_falls_back(self) -> None:
@@ -82,7 +83,7 @@ class TestReloadConfig:
         with override_settings(
             NEXT_FRAMEWORK={"STATIC_BACKENDS": [{"BACKEND": "builtins.dict"}]}
         ):
-            manager._reload_config()
+            manager.reload()
         assert isinstance(manager.default_backend, StaticFilesBackend)
 
     def test_class_outside_the_family_is_logged_and_skipped(self, caplog) -> None:
@@ -98,7 +99,7 @@ class TestReloadConfig:
                 }
             ),
         ):
-            manager._reload_config()
+            manager.reload()
         assert len(manager) == 1
         assert "is not a StaticBackend subclass" in caplog.text
 
@@ -109,7 +110,7 @@ class TestReloadConfig:
                 "STATIC_BACKENDS": [{"OPTIONS": {"css_tag": '<link href="{url}">'}}]
             }
         ):
-            manager._reload_config()
+            manager.reload()
         backend = manager.default_backend
         assert isinstance(backend, StaticFilesBackend)
         assert backend.render_link_tag("x") == '<link href="x">'
@@ -124,13 +125,13 @@ class TestReloadConfig:
                 ]
             }
         ):
-            manager._reload_config()
+            manager.reload()
         assert len(manager) == 1
 
     def test_empty_backends_seeds_default(self) -> None:
         manager = StaticManager()
         with override_settings(NEXT_FRAMEWORK={"STATIC_BACKENDS": []}):
-            manager._reload_config()
+            manager.reload()
         assert len(manager) == 1
 
 
@@ -142,7 +143,7 @@ class TestBackendsLoadedOnce:
         with override_settings(NEXT_FRAMEWORK={"STATIC_BACKENDS": []}):
             manager._ensure_backends()
             with mock.patch.object(
-                StaticManager, "_reload_config", autospec=True
+                StaticManager, "reload", autospec=True
             ) as reload_mock:
                 manager._ensure_backends()
                 len(manager)
@@ -664,6 +665,16 @@ class TestDefaultManagerLazy:
         a = default_manager.default_backend
         b = default_manager.default_backend
         assert a is b
+
+    def test_get_static_manager_builds_and_returns_the_wrapped_instance(
+        self, reset_default: None
+    ) -> None:
+        """The accessor hands out the live manager, not the lazy handle."""
+        reset_default_manager()
+        manager = get_static_manager()
+        assert isinstance(manager, StaticManager)
+        assert manager is get_static_manager()
+        assert default_manager._wrapped is manager
 
 
 class TestSettingChangedReload:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from io import StringIO
 from typing import TYPE_CHECKING
 from unittest import mock
@@ -11,9 +12,11 @@ from django.test import override_settings
 
 from next.static import NextStaticFilesFinder
 from next.static.finders import _MappedSourceStorage, discover_colocated_static_assets
+from tests.support import MalformedRootsRouter
 
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
 
@@ -241,6 +244,54 @@ class TestMappedSourceStorage:
         src.write_text("")
         storage = _MappedSourceStorage({"next/a.css": src})
         assert storage.path("next/a.css") == str(src)
+
+
+class TestMalformedRouterSurvival:
+    """The static paths read routers through the guard, so a wrong shape is inert.
+
+    Nothing about the watch helpers is mocked here, so the real discovery is
+    what survives a backend answering bare paths instead of `PageRoot` entries.
+    """
+
+    @contextmanager
+    def _malformed_router(self, tree: Path) -> Iterator[None]:
+        with (
+            override_settings(
+                NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "broken.Backend"}]}
+            ),
+            mock.patch(
+                "next.urls.RouterFactory.create_backend",
+                return_value=MalformedRootsRouter([tree]),
+            ),
+        ):
+            yield
+
+    def test_find_answers_nothing_instead_of_raising(self, pages_tree: Path) -> None:
+        with self._malformed_router(pages_tree):
+            assert NextStaticFilesFinder().find("next/about.css") is None
+
+    def test_list_answers_nothing_instead_of_raising(self, pages_tree: Path) -> None:
+        with self._malformed_router(pages_tree):
+            assert list(NextStaticFilesFinder().list(None)) == []
+
+    def test_collectstatic_dry_run_survives(
+        self, pages_tree: Path, tmp_path: Path
+    ) -> None:
+        static_root = tmp_path / "static_root"
+        static_root.mkdir()
+
+        with (
+            override_settings(STATIC_ROOT=str(static_root)),
+            self._malformed_router(pages_tree),
+        ):
+            out = StringIO()
+            call_command(
+                "collectstatic", "--noinput", "--dry-run", "--ignore=*.py", stdout=out
+            )
+
+        # The run completes, and the malformed backend contributes none of the
+        # co-located assets sitting in the tree it failed to report.
+        assert "template.css" not in out.getvalue()
 
 
 class TestCollectstaticIntegration:

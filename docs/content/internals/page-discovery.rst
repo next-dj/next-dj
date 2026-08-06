@@ -88,6 +88,9 @@ The canonical full-page path never consults the cache and recomposes the body an
 On each cache read ``_is_template_stale`` compares the current mtimes against the snapshot.
 A change to any contributing file evicts the entry, the composition step rebuilds the template string, and the new snapshot is stored.
 
+``Page.clear_template_caches`` drops both dicts and the mtime snapshots in one call.
+A rewrite landing on the same mtime tick is invisible to the staleness check, which is why ``next.testing.reset_page_cache`` calls it between renders of a file rewritten in place.
+
 Layout composition
 ------------------
 

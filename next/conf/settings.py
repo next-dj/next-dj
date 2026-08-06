@@ -59,7 +59,7 @@ class NextFrameworkSettings:
             self._merged_cache = self._build_flat_merged(self._raw_user())
         return self._merged_cache
 
-    _LIST_KEYS: ClassVar[frozenset[str]] = frozenset(
+    LIST_KEYS: ClassVar[frozenset[str]] = frozenset(
         {
             "PAGE_BACKENDS",
             "COMPONENT_BACKENDS",
@@ -70,8 +70,13 @@ class NextFrameworkSettings:
             "FORM_ANCHOR_FILES",
         }
     )
-    _BOOL_KEYS: ClassVar[frozenset[str]] = frozenset(
-        {"STRICT_CONTEXT", "LAZY_COMPONENT_MODULES", "FORM_AUTODISCOVER"}
+    BOOL_KEYS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "STRICT_CONTEXT",
+            "STRICT_LOADING",
+            "LAZY_COMPONENT_MODULES",
+            "FORM_AUTODISCOVER",
+        }
     )
 
     def _build_flat_merged(self, user: dict[str, Any] | None) -> dict[str, Any]:
@@ -89,11 +94,11 @@ class NextFrameworkSettings:
                 merged = copy.deepcopy(self.DEFAULTS[key])
                 merged.update(copy.deepcopy(raw))
                 out[key] = merged
-            elif (key in self._LIST_KEYS and isinstance(raw, list)) or (
+            elif (key in self.LIST_KEYS and isinstance(raw, list)) or (
                 key == "NEXT_JS_OPTIONS" and isinstance(raw, dict)
             ):
                 out[key] = copy.deepcopy(raw)
-            elif key in self._BOOL_KEYS:
+            elif key in self.BOOL_KEYS:
                 out[key] = bool(raw)
             elif key == "JS_CONTEXT_SERIALIZER" and (
                 raw is None or isinstance(raw, str)
@@ -129,3 +134,12 @@ class NextFrameworkSettings:
 
 
 next_framework_settings: NextFrameworkSettings = NextFrameworkSettings()
+
+
+def fail_loudly() -> bool:
+    """Whether a load failure is raised at its caller rather than logged away.
+
+    Every fail-loud path reads this one predicate, so `STRICT_LOADING` and
+    `DEBUG` cannot drift apart between the page loader and the component tag.
+    """
+    return bool(next_framework_settings.STRICT_LOADING or settings.DEBUG)

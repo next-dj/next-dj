@@ -23,6 +23,7 @@ The dependency injection layer contributes no Django system checks.
 Every next.dj check carries the ``next`` tag.
 Run ``uv run python manage.py check --tag next`` to execute only the framework checks and skip the built-in Django and third-party ones.
 Checks that also concern templates or URL patterns keep their :doc:`Django tags <django:ref/checks>` (``templates``, ``urls``) alongside ``next``, so filtering by those tags still reaches them.
+A tagged run reports what a full run reports: every check that reads registrations discovers the files declaring them itself, rather than relying on a URL check having expanded the router first.
 
 ``next.checks.reset_check_caches`` drops every per-run check cache so the next run rebuilds from the current sources.
 The cached state covers the router and components managers, the composed-pages memo, the collected URL patterns, the page module memo, and the context registry.
@@ -165,7 +166,9 @@ Errors
      - An error was raised while collecting patterns from a router.
      - ``next.urls.checks``
    * - ``next.E017``
-     - A ``page.py`` raises while importing, so the framework skips the module silently.
+     - A ``page.py`` raises while importing.
+       The message names the recorded exception type and text, so an ``ImportError`` raised by the module body reads as such instead of masking as a missing body source.
+       The body-source checks ``next.E012``, ``next.E013``, and ``next.W043`` stay silent for that file, so the import failure surfaces once.
      - ``next.pages.checks``
    * - ``next.E018``
      - A ``page.py`` registers more than one keyless ``@context`` callable, and only the last one runs.
@@ -174,7 +177,7 @@ Errors
      - ``request`` is missing from the template context (required for ``{% form %}`` and CSRF).
      - ``next.pages.checks``
    * - ``next.E020``
-     - A component name is registered more than once within the same scope.
+     - A component name is registered more than once under one route scope, so nothing tells the two apart.
      - ``next.components.checks``
    * - ``next.E021``
      - A ``component.py`` reaches for the page ``context`` decorator instead of the component one, under any spelling: ``next.pages``, the ``next`` package root, or ``next.page.context``.
@@ -207,6 +210,9 @@ Errors
      - ``next.pages.checks``
    * - ``next.E030``
      - An error was raised while checking router pages.
+       A router whose ``page_roots`` raises, or answers something other than ``PageRoot`` entries, is named here once, with the exception text, and reports no tree to any other check.
+       The run continues, so a third-party backend that cannot reach its source costs its own trees instead of ending ``manage.py check`` with a traceback.
+       This is also the one place in the run that logs that traceback, so the message is not buried under a copy per check that asked.
      - ``next.pages.checks``
    * - ``next.E031``
      - A component backend entry is missing a required key.
@@ -218,7 +224,7 @@ Errors
      - ``COMPONENT_BACKENDS`` is empty.
      - ``next.components.checks``
    * - ``next.E034``
-     - A component name uses the shared root namespace on more than one page tree.
+     - A component name sits at the root scope of two roots the same template resolves against, with neither taking precedence.
      - ``next.components.checks``
    * - ``next.E035``
      - A configuration dict has unknown keys.
@@ -318,7 +324,18 @@ Errors
    * - ``next.E075``
      - A ``@component.context`` registration binds to a file no component render collects.
        The rule and the fix match ``next.E074``.
+       The check covers the configured component roots and the ``_components`` folders the page trees carry, which it discovers through the same walk the router uses.
      - ``next.components.checks``
+   * - ``next.E076``
+     - A ``NEXT_FRAMEWORK`` value has a type the settings merge silently drops in favour of the framework default.
+       The check covers ``PAGE_BACKENDS``, ``COMPONENT_BACKENDS``, ``STATIC_BACKENDS``, ``PARTIAL_BACKENDS``, and ``TEMPLATE_LOADERS`` as lists.
+       It also covers ``URL_NAME_TEMPLATE`` and ``URL_RESOLVER`` as strings and ``NEXT_JS_OPTIONS`` as a dict.
+     - ``next.conf.checks``
+   * - ``next.E077``
+     - ``NEXT_FRAMEWORK`` is not a dict, so the settings layer ignores it entirely and the project runs on the framework defaults.
+       It carries its own code rather than sharing ``next.E076``, so silencing the noise from one mistyped key never silences this one.
+       The per-key probes are skipped, because there is nothing to index into.
+     - ``next.conf.checks``
 
 A code emitted by ``next.checks.common`` is produced by a shared helper that the listed subsystem check modules call.
 
@@ -334,6 +351,11 @@ Warnings
      - Emitted by
    * - ``next.W001``
      - A ``layout.djx`` is missing the required ``{% block template %}``.
+     - ``next.pages.checks``
+   * - ``next.W002``
+     - A directory named by ``PAGES_DIR`` sits beside the working directory, holds pages, and no configured router routes it, so nothing under it is served.
+       Name the directory in ``PAGE_BACKENDS`` ``DIRS``, or turn that entry's ``APP_DIRS`` off, which routes ``BASE_DIR`` over ``PAGES_DIR`` when ``DIRS`` names no root.
+       The tree is not walked by the page checks, so its contents raise no ``next.E010``, ``next.E012``, or ``next.E017``. This one warning stands for all of them.
      - ``next.pages.checks``
    * - ``next.W030``
      - ``STATIC_BACKENDS`` is empty, so the framework falls back to ``StaticFilesBackend``.
@@ -397,6 +419,10 @@ Warnings
    * - ``next.W071``
      - ``PARTIAL_BACKENDS`` has more than one entry. Partial rendering uses a single protocol backend, so only the first entry runs and the rest are ignored.
      - ``next.partial.checks``
+   * - ``next.W072``
+     - A ``NEXT_FRAMEWORK`` bool key, ``STRICT_CONTEXT``, ``STRICT_LOADING``, ``LAZY_COMPONENT_MODULES``, or ``FORM_AUTODISCOVER``, holds a non-bool value.
+       The ``bool()`` coercion turns a falsy-looking string such as ``'False'`` into ``True``, so the written value can mean the opposite of the intent.
+     - ``next.conf.checks``
    * - ``next.W074``
      - A registered asset kind names a renderer outside ``render_link_tag``, ``render_script_tag``, and ``render_module_tag``, so it carries no client insertion verb.
        Assets of that kind reach the browser only on a full page render, never through a patch envelope.

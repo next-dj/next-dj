@@ -215,7 +215,7 @@ class TestFileComponentsBackend:
     def test_import_all_does_not_double_exec_module(
         self, tmp_path: Path, min_component_config: dict
     ) -> None:
-        """``import_all_component_modules`` does not exec ``component.py`` twice."""
+        """``import_component_modules`` does not exec ``component.py`` twice."""
         comp_dir = tmp_path / "card"
         comp_dir.mkdir()
         component_py = comp_dir / "component.py"
@@ -233,12 +233,12 @@ class TestFileComponentsBackend:
                 {**min_component_config, "DIRS": [str(tmp_path)]}
             )
             backend._ensure_loaded()
-            backend.import_all_component_modules()
+            backend.import_component_modules()
 
         reads_for_comp = [p for p in disk_reads if p == component_py]
         assert len(reads_for_comp) == 1
 
-    def test_loaded_module_paths_imports_lazy_modules(
+    def test_import_component_modules_imports_lazy_modules(
         self, tmp_path: Path, min_component_config: dict
     ) -> None:
         """Lazy discovery still imports every ``component.py`` on demand."""
@@ -258,12 +258,40 @@ class TestFileComponentsBackend:
             with patch.object(
                 backend._module_loader, "load", wraps=backend._module_loader.load
             ) as load_spy:
-                paths = backend.loaded_module_paths()
+                paths = backend.import_component_modules()
 
         assert paths == (comp_dir / "component.py",)
         assert load_spy.call_count == 1
 
-    def test_loaded_module_paths_ignores_module_less_components(
+    def test_discover_stays_lazy_while_the_import_hook_executes(
+        self, tmp_path: Path, min_component_config: dict
+    ) -> None:
+        """The two hooks stay apart: ``discover`` registers, the other imports."""
+        comp_dir = tmp_path / "split_c"
+        comp_dir.mkdir()
+        marker = tmp_path / "imported.txt"
+        (comp_dir / "component.py").write_text(
+            f"from pathlib import Path\nPath({str(marker)!r}).write_text('loaded')\n"
+        )
+        (comp_dir / "component.djx").write_text("<div/>")
+        config = {**min_component_config, "DIRS": [str(tmp_path)]}
+
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "COMPONENT_BACKENDS": [config],
+                "LAZY_COMPONENT_MODULES": True,
+            }
+        ):
+            backend = FileComponentsBackend(config)
+            backend.discover()
+            visible = backend.collect_visible_components(tmp_path / "page.djx")
+            assert "split_c" in visible
+            assert not marker.exists()
+
+            assert backend.import_component_modules() == (comp_dir / "component.py",)
+            assert marker.read_text() == "loaded"
+
+    def test_import_component_modules_ignores_module_less_components(
         self, tmp_path: Path, min_component_config: dict
     ) -> None:
         """A simple component carries no ``component.py`` and yields no path."""
@@ -271,7 +299,95 @@ class TestFileComponentsBackend:
         backend = FileComponentsBackend(
             {**min_component_config, "DIRS": [str(tmp_path)]}
         )
-        assert backend.loaded_module_paths() == ()
+        assert backend.import_component_modules() == ()
+
+    def test_a_backend_without_modules_inherits_the_no_op_import_hook(self) -> None:
+        """The contract default reports no modules rather than failing."""
+        assert DummyBackend({}).import_component_modules() == ()
+
+
+class TestWalkedFolderHook:
+    """`register_walked_folder` is how a backend claims a page-tree folder."""
+
+    def test_a_backend_off_the_filesystem_declines_the_folder(
+        self, tmp_path: Path
+    ) -> None:
+        """The contract default answers False so the walk moves on."""
+        assert DummyBackend({}).register_walked_folder(tmp_path, tmp_path, "") is False
+
+    def test_the_file_backend_claims_and_registers(
+        self, tmp_path: Path, min_component_config: dict
+    ) -> None:
+        """A claim registers the folder's components under the route trail."""
+        folder = tmp_path / "blog" / "_components"
+        folder.mkdir(parents=True)
+        (folder / "card.djx").write_text("<div/>")
+        backend = FileComponentsBackend({**min_component_config, "DIRS": []})
+
+        assert backend.register_walked_folder(folder, tmp_path, "blog") is True
+
+        infos = list(backend.iter_components())
+        assert [info.name for info in infos] == ["card"]
+        assert infos[0].scope_root == tmp_path
+        assert infos[0].scope_relative == "blog"
+
+    def test_a_claim_executes_the_component_module(
+        self, tmp_path: Path, min_component_config: dict
+    ) -> None:
+        """A composite component's ``component.py`` runs as it is registered."""
+        folder = tmp_path / "_components"
+        comp_dir = folder / "panel"
+        comp_dir.mkdir(parents=True)
+        (comp_dir / "component.djx").write_text("<div/>")
+        marker = tmp_path / "ran.txt"
+        (comp_dir / "component.py").write_text(
+            f"from pathlib import Path\nPath({str(marker)!r}).write_text('yes')\n"
+        )
+        backend = FileComponentsBackend({**min_component_config, "DIRS": []})
+
+        assert backend.register_walked_folder(folder, tmp_path, "") is True
+        assert marker.read_text() == "yes"
+
+
+class TestEnumerationHooks:
+    """`iter_components` and `global_component_roots` feed the system checks."""
+
+    def test_a_backend_without_a_list_enumerates_nothing(self) -> None:
+        """The contract default keeps an on-demand backend out of the checks."""
+        backend = DummyBackend({})
+        assert list(backend.iter_components()) == []
+        assert list(backend.global_component_roots()) == []
+
+    def test_the_file_backend_enumerates_after_scanning_itself(
+        self, tmp_path: Path, min_component_config: dict
+    ) -> None:
+        """Enumerating triggers the same lazy discovery a render would."""
+        (tmp_path / "card.djx").write_text("<div/>")
+        backend = FileComponentsBackend(
+            {**min_component_config, "DIRS": [str(tmp_path)]}
+        )
+        assert backend._loaded is False
+
+        assert [info.name for info in backend.iter_components()] == ["card"]
+        assert backend._loaded is True
+
+    def test_a_dirs_root_is_global_and_a_page_tree_is_not(
+        self, tmp_path: Path, min_component_config: dict
+    ) -> None:
+        """Only a configured root resolves its root-scope components everywhere."""
+        shared = tmp_path / "shared"
+        shared.mkdir()
+        (shared / "card.djx").write_text("<div/>")
+        tree = tmp_path / "pages"
+        folder = tree / "_components"
+        folder.mkdir(parents=True)
+        (folder / "panel.djx").write_text("<div/>")
+        backend = FileComponentsBackend({**min_component_config, "DIRS": [str(shared)]})
+        backend.register_walked_folder(folder, tree, "")
+
+        roots = frozenset(backend.global_component_roots())
+        assert roots == frozenset({shared})
+        assert tree not in roots
 
 
 class TestFileBackendFromConfig:
@@ -310,7 +426,7 @@ class TestComponentsManagerLoading:
             [{"DIRS": [], "COMPONENTS_DIR": "_components"}]
         )
         with patch("next.backends.next_framework_settings", mock_ns):
-            mgr._reload_config()
+            mgr.reload()
         assert [type(backend) for backend in mgr._backends] == [FileComponentsBackend]
 
     def test_backend_receives_its_own_config_entry(self) -> None:
@@ -320,7 +436,7 @@ class TestComponentsManagerLoading:
             [{"BACKEND": "next.components.DummyBackend", "OPTIONS": {"marker": 7}}]
         )
         with patch("next.backends.next_framework_settings", mock_ns):
-            mgr._reload_config()
+            mgr.reload()
         backend = mgr._backends[0]
         assert isinstance(backend, DummyBackend)
         assert backend.config["OPTIONS"]["marker"] == 7
@@ -332,7 +448,7 @@ class TestComponentsManagerLoading:
             [{"BACKEND": "builtins.dict"}]
         )
         with patch("next.backends.next_framework_settings", mock_ns):
-            mgr._reload_config()
+            mgr.reload()
         assert mgr._backends == []
 
     def test_dummy_backend_lookups_are_empty(self) -> None:
@@ -341,12 +457,16 @@ class TestComponentsManagerLoading:
         assert b.get_component("x", Path("/t.djx")) is None
         assert b.collect_visible_components(Path("/t.djx")) == {}
 
+    def test_a_backend_without_eager_discovery_answers_the_hook(self) -> None:
+        """`discover` is a no-op a backend resolving on demand can inherit."""
+        assert DummyBackend({}).discover() is None
+
     def test_manager_skips_non_list_config_and_non_dict_entries(self) -> None:
         """If ``COMPONENT_BACKENDS`` is not a list, return early. Non-dict entries are skipped."""
         mgr = ComponentsManager()
         mock_ns = _next_framework_settings_component_backends_list("bad")
         with patch("next.backends.next_framework_settings", mock_ns):
-            mgr._reload_config()
+            mgr.reload()
             assert mgr._backends == []
 
         mgr2 = ComponentsManager()
@@ -361,7 +481,7 @@ class TestComponentsManagerLoading:
             ]
         )
         with patch("next.backends.next_framework_settings", mock_ns2):
-            mgr2._reload_config()
+            mgr2.reload()
             assert len(mgr2._backends) >= 1
 
     def test_manager_collect_visible_first_backend_wins(self) -> None:

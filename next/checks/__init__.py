@@ -27,7 +27,10 @@ if TYPE_CHECKING:
         check_duplicate_component_names,
         check_next_components_configuration,
     )
-    from next.conf.checks import check_next_framework_unknown_top_level_keys
+    from next.conf.checks import (
+        check_next_framework_unknown_top_level_keys,
+        check_next_framework_value_types,
+    )
     from next.forms.checks import check_form_action_collisions
     from next.pages.checks import (
         _has_template_or_djx,
@@ -41,6 +44,7 @@ if TYPE_CHECKING:
         check_request_in_context,
         check_single_keyless_context,
         check_template_loaders,
+        check_unrouted_working_directory_pages,
     )
     from next.pages.loaders import _load_python_module
     from next.static.checks import (
@@ -64,7 +68,10 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_duplicate_component_names",
         "check_next_components_configuration",
     ),
-    "next.conf.checks": ("check_next_framework_unknown_top_level_keys",),
+    "next.conf.checks": (
+        "check_next_framework_unknown_top_level_keys",
+        "check_next_framework_value_types",
+    ),
     "next.forms.checks": ("check_form_action_collisions",),
     "next.pages.checks": (
         "_has_template_or_djx",
@@ -78,6 +85,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_request_in_context",
         "check_single_keyless_context",
         "check_template_loaders",
+        "check_unrouted_working_directory_pages",
     ),
     "next.pages.loaders": ("_load_python_module",),
     "next.static.checks": (

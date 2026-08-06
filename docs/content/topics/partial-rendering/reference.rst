@@ -539,6 +539,7 @@ Foreign-zone authorisation
 A modal body and a page-addressed zone ride ``X-Next-Origin`` so the server resolves the host page that owns the zone.
 The server authorises that origin before rendering a foreign page's zone, raising ``ForeignPageNotAuthorizedError`` when the origin may not render it.
 This keeps a page-addressed out-of-band render from reaching a zone the requester has no claim on.
+A foreign page whose module fails to import raises ``PageModuleImportError`` from the same authorisation step, rather than turning the in-flight request into a 404 and dropping the patches already queued for it.
 
 Settings
 --------

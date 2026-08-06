@@ -32,12 +32,17 @@ These are the names project code uses day-to-day.
 
 .. autofunction:: next.components.get_component
 
+.. autofunction:: next.components.collect_visible_components
+
 .. autofunction:: next.components.load_component_template
 
 .. autofunction:: next.components.render_component
 
 Manager
 ~~~~~~~
+
+``backends`` is the configured list in consultation order, and ``reload`` rebuilds it from the current ``NEXT_FRAMEWORK``.
+Framework settings changes rebuild the manager on their own, so ``reload`` is for a caller that swaps ``COMPONENT_BACKENDS`` some other way, which is what ``next.testing.reset_components`` does.
 
 .. autoclass:: next.components.ComponentsManager
    :members:
@@ -52,6 +57,10 @@ These names are used when writing a custom component backend or a custom rendere
 Backends
 ~~~~~~~~
 
+``ComponentsBackend.get_component`` and ``ComponentsBackend.collect_visible_components`` are the two abstract methods every backend implements, and the module-level helpers of the same name above delegate to them through the manager.
+The rest of the contract has defaults that decline, so a backend implements only what its source can answer.
+``discover`` is the eager population pass, ``import_component_modules`` executes the components' Python modules, ``register_walked_folder`` claims one components folder found during the page-tree walk, and ``iter_components`` with ``global_component_roots`` lets the system checks enumerate what the backend holds.
+
 .. autoclass:: next.components.ComponentsBackend
    :members:
 
@@ -61,6 +70,9 @@ Backends
 .. autofunction:: next.components.register_components_folder_from_router_walk
 
 The URL router calls this during the page-tree walk and application code does not invoke it directly.
+It registers into the live ``components_manager``, which claims the folder on first registration, so a repeated walk over the same folder finds nothing left to do.
+The manager offers the folder to each backend in configuration order and stops at the first whose ``register_walked_folder`` answers ``True``.
+The system checks perform the same registration through ``ComponentsManager.register_router_walk_folder`` on the manager they read, so a check run sees every page-tree component without waiting for a router walk and without writing into the live manager.
 
 Context pipeline
 ~~~~~~~~~~~~~~~~
@@ -102,7 +114,8 @@ Prefer the Application imports tier unless you are building framework tooling.
 .. autoclass:: next.components.ComponentInfo
    :members:
 
-The duplicate-name check groups by ``(scope_root, name)`` and ignores ``scope_relative``, so two same-named components anywhere in one tree collide under ``next.E020``.
+The duplicate-name check groups by ``(scope_root, scope_relative, name)``, the same pair the visibility resolver scores on, so only two components the resolver cannot tell apart collide under ``next.E020``.
+The same name under a deeper route trail of one tree is the documented override and stays silent.
 
 .. autoclass:: next.components.ContextFunction
    :members:

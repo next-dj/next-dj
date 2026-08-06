@@ -310,16 +310,15 @@ class AssetDiscovery:
             self._module_list_cache.move_to_end(cache_key)
             cached = self._module_list_cache[cache_key]
         else:
-            module = pages_loaders._load_python_module(module_path)
-            if module is None:
+            lists = pages_loaders.read_module_string_lists(
+                module_path, [slot.name for slot in default_placeholders]
+            )
+            if lists is None:
                 self._module_list_cache[cache_key] = {}
                 if len(self._module_list_cache) > _MODULE_LIST_CACHE_MAX_SIZE:
                     self._module_list_cache.popitem(last=False)
                 return
-            cached = {
-                slot.name: pages_loaders._read_string_list(module, slot.name)
-                for slot in default_placeholders
-            }
+            cached = lists
             self._module_list_cache[cache_key] = cached
             if len(self._module_list_cache) > _MODULE_LIST_CACHE_MAX_SIZE:
                 self._module_list_cache.popitem(last=False)

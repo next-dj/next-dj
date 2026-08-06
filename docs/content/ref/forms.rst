@@ -213,6 +213,8 @@ Manager
 ``build_form_namespace_for_action`` builds the ``{form, wizard}`` namespace the ``{% form %}`` tag consumes, for code rendering that namespace by hand outside the tag.
 All three import from ``next.forms.manager``.
 ``FormActionManager.require_action_meta`` returns the resolved ``ActionMeta`` or raises ``FormActionNotFoundError`` with close-match suggestions, for callers that cannot proceed without the meta.
+``reload`` rebuilds the backends from the current ``NEXT_FRAMEWORK``, dropping the actions registered against the old ones, which is what ``next.testing.reset_form_actions`` calls after a settings swap.
+``version`` is the cache token the lazy urlpatterns concat keys on, bumped by every registration, registry clear, and reload.
 
 .. automodule:: next.forms.manager
    :members:
@@ -221,8 +223,11 @@ Backends
 ~~~~~~~~
 
 ``ActionRegistration`` is the value object passed to ``register_action``.
-It carries the action ``name``, the declaration-site ``file_path``, the ``scope``, the optional access ``guard``, and the action target.
+It carries the action ``name``, the declaration-site ``file_path``, the ``scope``, the optional access ``guard``, the ``claims_name_binding`` flag, and the action target.
 The target is one of ``handler``, ``form_class``, or ``wizard_class``, which lets a single ``register_action`` call serve the ``@action`` decorator, a class-bound form, and a ``FormWizard``.
+``claims_name_binding`` defaults to ``False``, which keeps a bare name bound to the registration that claimed it first.
+Setting it rebinds the name to this registration, which is what a test override needs to displace an action that is already registered.
+``snapshot`` and ``restore`` round-trip an opaque state token so a caller can register extra actions and roll the backend back afterwards.
 ``ActionGuard`` is the frozen access-requirement record built from ``Meta.login_required`` and ``Meta.permission_required`` or the matching ``@action`` keywords.
 It is stored under the ``guard`` key of ``ActionMeta`` and enforced by the dispatch pipeline before the form is built, so custom backends see the declared requirements without extra wiring.
 ``iter_actions`` yields every stored ``ActionMeta``, including its ``name`` key, which is how the forms system checks inspect any configured backend.

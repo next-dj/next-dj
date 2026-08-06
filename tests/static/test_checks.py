@@ -382,9 +382,7 @@ class TestReservedJsContextKeyCheck:
             "    return 3\n"
         )
         loaders_module._MODULE_MEMO.pop(page_file, None)
-        with patch_checks_router_manager(
-            pages_directory=tmp_path, scan_routes=[("test", page_file)]
-        ):
+        with patch_checks_router_manager(pages_directory=tmp_path):
             messages = check_reserved_js_context_keys()
         assert _ids(messages) == ["next.W075"]
         assert "'$csrf'" in messages[0].msg
@@ -402,9 +400,7 @@ class TestReservedJsContextKeyCheck:
             "    return False\n"
         )
         loaders_module._MODULE_MEMO.pop(page_file, None)
-        with patch_checks_router_manager(
-            pages_directory=tmp_path, scan_routes=[("test", page_file)]
-        ):
+        with patch_checks_router_manager(pages_directory=tmp_path):
             messages = check_reserved_js_context_keys()
         assert _ids(messages) == ["next.W075"]
         assert f"'{key}'" in messages[0].msg
@@ -426,7 +422,7 @@ class TestReservedJsContextKeyCheck:
             {"DIRS": [str(tmp_path)], "COMPONENTS_DIR": "_components"}
         )
         manager = MagicMock()
-        manager._backends = [backend]
+        manager.backends = (backend,)
         with patch(
             "next.components.context.get_components_manager", return_value=manager
         ):
@@ -444,8 +440,6 @@ class TestReservedJsContextKeyCheck:
             '    return {"token": "app"}\n'
         )
         loaders_module._MODULE_MEMO.pop(page_file, None)
-        with patch_checks_router_manager(
-            pages_directory=tmp_path, scan_routes=[("test", page_file)]
-        ):
+        with patch_checks_router_manager(pages_directory=tmp_path):
             messages = check_reserved_js_context_keys()
         assert messages == []
