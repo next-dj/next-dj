@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import Any, cast, override
 
 from django import template
-from django.conf import settings
 from django.template import base as template_base
 from django.template.base import (
     FilterExpression,
@@ -30,7 +29,7 @@ from django.template.base import (
 from django.utils.safestring import SafeString
 
 from next.components import collect_visible_components, get_component, render_component
-from next.conf import next_framework_settings
+from next.conf import fail_loudly, next_framework_settings
 from next.static import collect_component_assets
 
 
@@ -194,17 +193,13 @@ class ComponentNode(Node):
         matches = difflib.get_close_matches(self.name, sorted(names))
         return matches[0] if matches else None
 
-    def _report_loudly(self) -> bool:
-        """Whether `STRICT_LOADING` or `DEBUG` asks for more than a log line."""
-        return bool(next_framework_settings.STRICT_LOADING or settings.DEBUG)
-
     def _on_missing_path(self) -> str:
         """Report a render whose context carries no `current_template_path`.
 
         The context names no template, so there is no visibility scope to
         draw a did-you-mean hint from.
         """
-        if not self._report_loudly():
+        if not fail_loudly():
             logger.warning(
                 "component '%s' skipped, no current_template_path in context", self.name
             )
@@ -222,7 +217,7 @@ class ComponentNode(Node):
 
     def _on_not_found(self, path: Path) -> str:
         """Report a name no component visible from `path` answers."""
-        if not self._report_loudly():
+        if not fail_loudly():
             logger.warning("component '%s' not found from %s", self.name, path)
             return ""
         suggestion = self._close_match(path)

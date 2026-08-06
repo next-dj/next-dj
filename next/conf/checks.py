@@ -33,7 +33,7 @@ def check_next_framework_unknown_top_level_keys(*args, **kwargs) -> list[CheckMe
 
 # These two carry their own raw per-key checks in next.forms, so probing them
 # here would report one key twice.
-_TYPED_LIST_KEYS: frozenset[str] = NextFrameworkSettings._LIST_KEYS - {
+_TYPED_LIST_KEYS: frozenset[str] = NextFrameworkSettings.LIST_KEYS - {
     "FORM_ACTION_BACKENDS",
     "FORM_ANCHOR_FILES",
 }
@@ -104,7 +104,7 @@ def _non_bool_warnings(raw: dict[str, Any]) -> list[CheckMessage]:
             obj=settings,
             id="next.W072",
         )
-        for key in sorted(NextFrameworkSettings._BOOL_KEYS)
+        for key in sorted(NextFrameworkSettings.BOOL_KEYS)
         if key in raw and not isinstance(raw[key], bool)
     ]
 

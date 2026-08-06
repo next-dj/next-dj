@@ -12,11 +12,7 @@ from next.urls.checks import (
     check_reverse_name_collisions,
     check_url_patterns,
 )
-from tests.support import (
-    file_router_config_entry,
-    importable_dir,
-    patch_checks_router_manager_with_routers,
-)
+from tests.support import importable_dir, patch_checks_router_manager_with_routers
 
 
 @pytest.fixture(autouse=True)
@@ -50,11 +46,13 @@ class _TreeRouter(RouterBackend):
         app_trees: dict[str, Path] | None = None,
         root_trees: list[Path] | None = None,
         components_folder: str | None = None,
+        skip_names: frozenset[str] | None = None,
     ) -> None:
-        """Store app and root pages trees plus the folder this backend skips."""
+        """Store app and root pages trees plus the names this backend refuses."""
         self._app_trees = dict(app_trees or {})
         self._root_trees = list(root_trees or [])
         self._components_folder = components_folder
+        self._skip_names = skip_names or frozenset()
 
     def generate_urls(self) -> list:
         """Contribute no patterns, the checks read the reported trees instead."""
@@ -63,6 +61,10 @@ class _TreeRouter(RouterBackend):
     def components_folder_name(self) -> str | None:
         """Name the folder the walk refuses to enter, or none at all."""
         return self._components_folder
+
+    def skip_dir_names(self) -> frozenset[str]:
+        """Name every other directory the walk refuses to enter."""
+        return self._skip_names
 
     def page_roots(self) -> list[PageRoot]:
         roots = [
@@ -256,8 +258,10 @@ class TestCheckUrlPatterns:
         with patch_checks_router_manager_with_routers(routers=[skipped]):
             assert check_url_patterns(None) == []
 
-    def test_a_dirs_skip_name_leaves_the_collection(self, tmp_path) -> None:
-        """A `DIRS` entry naming no directory keeps that name out of the routes."""
+    def test_a_skip_name_the_router_declares_leaves_the_collection(
+        self, tmp_path
+    ) -> None:
+        """A directory the router itself refuses keeps its pages out of the routes."""
         tree_a = tmp_path / "tree_a"
         tree_b = tmp_path / "tree_b"
         _write_page(tree_a, "_drafts/wip")
@@ -268,12 +272,10 @@ class TestCheckUrlPatterns:
             assert any(m.id == "next.E015" for m in check_url_patterns(None))
 
         reset_check_caches()
-        with (
-            override_next_settings(
-                PAGE_BACKENDS=[file_router_config_entry(dirs=["_drafts"])]
-            ),
-            patch_checks_router_manager_with_routers(routers=[router]),
-        ):
+        skipping = _TreeRouter(
+            root_trees=[tree_a, tree_b], skip_names=frozenset({"_drafts"})
+        )
+        with patch_checks_router_manager_with_routers(routers=[skipping]):
             assert check_url_patterns(None) == []
 
 

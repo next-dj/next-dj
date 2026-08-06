@@ -16,14 +16,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast, overload
 
-from django.conf import settings
 from django.http import Http404, HttpRequest, HttpResponse
 from django.http.response import HttpResponseBase
 from django.template import Context as DjangoTemplateContext, Origin, Template
 from django.urls import URLPattern, path
 
 from next.checks.common import first_visit, get_router_manager, iter_scanned_page_pairs
-from next.conf import next_framework_settings
+from next.conf import fail_loudly, next_framework_settings
 from next.deps import DependencyResolver, resolver
 from next.utils import defining_file
 
@@ -467,14 +466,12 @@ class Page:
                 active_module = _load_python_module_memo(file_path)
                 error = last_load_error(file_path)
                 if error is not None:
-                    if settings.DEBUG or next_framework_settings.STRICT_LOADING:
+                    if fail_loudly():
                         raise error
                     raise Http404
             # Both guards run before `last_load_error`, so a healthy site and
             # a flags-off production never pay its per-request stat.
-            elif has_load_errors() and (
-                settings.DEBUG or next_framework_settings.STRICT_LOADING
-            ):
+            elif has_load_errors() and fail_loudly():
                 error = last_load_error(file_path)
                 if error is not None:
                     raise error

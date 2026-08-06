@@ -69,3 +69,33 @@ class RaisingComponentsRouter(RootPagesRouter):
         """Fail where the watcher asks for the component glob."""
         msg = "components folder unavailable"
         raise RuntimeError(msg)
+
+
+class SkippingRouter(RootPagesRouter):
+    """Backend that refuses directory names of its own while walking its trees."""
+
+    def __init__(self, root_trees: list[Path], skip_names: frozenset[str]) -> None:
+        """Store the trees this backend serves and the names its walk refuses."""
+        super().__init__(root_trees)
+        self._skip_names = skip_names
+
+    def skip_dir_names(self) -> frozenset[str]:
+        """Answer the configured skip set."""
+        return self._skip_names
+
+
+class OddSkipNamesRouter(RootPagesRouter):
+    """Backend whose skip set is a bare string rather than a collection of names."""
+
+    def skip_dir_names(self) -> frozenset[str]:
+        """Answer a `str`, whose characters are no directory names."""
+        return "api"  # type: ignore[return-value]
+
+
+class RaisingSkipNamesRouter(RootPagesRouter):
+    """Backend that lists its trees but raises when asked what its walk refuses."""
+
+    def skip_dir_names(self) -> frozenset[str]:
+        """Fail where the checks ask for the skip set."""
+        msg = "skip names unavailable"
+        raise RuntimeError(msg)

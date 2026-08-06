@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -10,18 +11,12 @@ from django.conf import settings
 from django.core.checks import CheckMessage, Error
 
 from next.conf.imports import import_class_cached
-from next.conf.settings import next_framework_settings
 from next.conf.signals import settings_reloaded
-from next.utils import (
-    classify_dirs_entries,
-    page_roots_shape_error,
-    resolve_base_dir,
-    walk_page_tree,
-)
+from next.utils import page_roots_shape_error, walk_page_tree
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator
+    from collections.abc import Iterator
     from pathlib import Path
 
     from next.components.manager import ComponentsManager
@@ -177,13 +172,21 @@ class _ScannedTrees:
     component_folders: tuple[tuple[Path, Path, str], ...]
 
 
+@dataclass(frozen=True, slots=True)
+class _RouterContract:
+    """What one router answers about the walk of its own page trees."""
+
+    components_folder: str | None
+    skip_names: frozenset[str]
+
+
 # Keyed by identity, because a backend is free to compare equal to another on
 # configuration alone (`FileRouterBackend` does) and a subclass would then read
-# the base class's scan. `_CACHED_ROUTERS` pins each key for the run, so no
-# `id` is ever reused under a live entry.
+# what the base class answered. `_CACHED_ROUTERS` pins each key for the run, so
+# no `id` is ever reused under a live entry.
 _CACHED_ROUTERS: list[RouterBackend] = []
 _SCANNED_TREES_CACHE: dict[int, _ScannedTrees] = {}
-_COMPONENTS_FOLDER_CACHE: dict[int, str | None] = {}
+_ROUTER_CONTRACT_CACHE: dict[int, _RouterContract] = {}
 
 
 def _keep_alive(router: RouterBackend) -> int:
@@ -224,12 +227,12 @@ def get_router_manager() -> tuple[RouterManager | None, list[CheckMessage]]:
 def reset_router_manager_cache(**kwargs) -> None:
     """Drop the cached `RouterManager` and everything read off its routers.
 
-    The scans and the folder names belong to routers this manager owns, so
+    The scans and the contract answers belong to routers this manager owns, so
     they go with it.
     """
     _ROUTER_MANAGER_CACHE["value"] = None
     _SCANNED_TREES_CACHE.clear()
-    _COMPONENTS_FOLDER_CACHE.clear()
+    _ROUTER_CONTRACT_CACHE.clear()
     _CACHED_ROUTERS.clear()
 
 
@@ -361,55 +364,60 @@ def _read_components_folder_name(router: RouterBackend) -> str | None:
     return name if isinstance(name, str) else None
 
 
-def _components_folder_name(router: RouterBackend) -> str | None:
-    """Return the per-run folder name of `router`, reading it once.
+def _read_skip_dir_names(router: RouterBackend) -> frozenset[str]:
+    """Return the directory names `router` refuses, dropping anything but names.
 
-    Several checks ask for the same name, and a router that raises would
+    `skip_dir_names` is third-party code that can raise or answer the wrong
+    shape, and a check run survives both by refusing no directory rather than
+    by ending in a traceback.
+    """
+    try:
+        names: object = router.skip_dir_names()
+        if isinstance(names, str) or not isinstance(names, Iterable):
+            return frozenset()
+        return frozenset(name for name in names if isinstance(name, str))
+    except Exception:
+        logger.exception(
+            "%s failed to name the directories its walk refuses, so the check "
+            "walk enters every directory under its page trees",
+            type(router).__name__,
+        )
+        return frozenset()
+
+
+def _router_contract(router: RouterBackend) -> _RouterContract:
+    """Return the per-run reading of `router`'s walk contract, taking it once.
+
+    Several checks ask the same two questions, and a router that raises would
     otherwise write one traceback per asking check.
     """
     key = id(router)
-    if key not in _COMPONENTS_FOLDER_CACHE:
-        _COMPONENTS_FOLDER_CACHE[_keep_alive(router)] = _read_components_folder_name(
-            router
+    contract = _ROUTER_CONTRACT_CACHE.get(key)
+    if contract is None:
+        contract = _RouterContract(
+            components_folder=_read_components_folder_name(router),
+            skip_names=_read_skip_dir_names(router),
         )
-    return _COMPONENTS_FOLDER_CACHE[key]
-
-
-def _dirs_skip_segments() -> frozenset[str]:
-    """Return the skip names the `DIRS` of every `PAGE_BACKENDS` entry declare.
-
-    A `DIRS` entry naming no existing directory is a directory name the walk
-    refuses to enter, classified exactly as the file router classifies it.
-    """
-    configured = next_framework_settings.PAGE_BACKENDS
-    if not isinstance(configured, list):
-        return frozenset()
-    base_dir = resolve_base_dir()
-    segments: set[str] = set()
-    for entry in configured:
-        dirs = entry.get("DIRS") if isinstance(entry, dict) else None
-        if isinstance(dirs, list):
-            segments |= classify_dirs_entries(dirs, base_dir)[1]
-    return frozenset(segments)
+        _ROUTER_CONTRACT_CACHE[_keep_alive(router)] = contract
+    return contract
 
 
 def page_tree_skip_names(router: RouterBackend) -> frozenset[str]:
     """Return the directory names a walk of `router`'s page trees does not enter.
 
-    The components folder comes from the router contract and the rest from the
-    `DIRS` entries of `PAGE_BACKENDS`, the same two sources the file router
-    builds its own skip set from.
+    Both halves are that router's own answers, so the check walk refuses
+    exactly what the router refuses, never a name another `PAGE_BACKENDS`
+    entry declared for a tree this router does not serve.
     """
-    names = set(_dirs_skip_segments())
-    components_folder = _components_folder_name(router)
-    if components_folder is not None:
-        names.add(components_folder)
-    return frozenset(names)
+    contract = _router_contract(router)
+    if contract.components_folder is None:
+        return contract.skip_names
+    return contract.skip_names | {contract.components_folder}
 
 
 def _walk_page_trees(router: RouterBackend) -> _ScannedTrees:
     """Walk every tree `router` reports once, keeping both things checks read."""
-    components_folder = _components_folder_name(router)
+    components_folder = _router_contract(router).components_folder
     skip_names = page_tree_skip_names(router)
     folders: list[tuple[Path, Path, str]] = []
 

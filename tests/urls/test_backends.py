@@ -7,9 +7,14 @@ from django.core.exceptions import AppRegistryNotReady
 from django.test import RequestFactory
 
 from next.pages import page
+from next.testing import override_next_settings
 from next.urls import FileRouterBackend, PageRoot, RouterBackend, RouterFactory
 from next.urls.backends import _installed_app_directories, _is_framework_app
-from tests.support import file_router_backend_from_params, importable_dir
+from tests.support import (
+    file_router_backend_from_params,
+    file_router_config_entry,
+    importable_dir,
+)
 
 
 class TestRouterBackend:
@@ -506,6 +511,24 @@ class TestComponentsFolderName:
         router = FileRouterBackend(components_folder_name="widgets")
 
         assert router.components_folder_name() == "widgets"
+
+
+class TestSkipDirNames:
+    """``skip_dir_names`` reports the directories a backend's walk refuses."""
+
+    def test_base_backend_refuses_no_directory(self, custom_backend_class) -> None:
+        """A backend that walks no tree refuses no directory name."""
+        assert custom_backend_class().skip_dir_names() == frozenset()
+
+    def test_file_router_reports_the_set_its_own_walk_uses(self, tmp_path) -> None:
+        """The names the router answers are the names it hands its dispatcher."""
+        (tmp_path / "shell").mkdir()
+        entry = file_router_config_entry(pages_dir=tmp_path / "shell", dirs=["_drafts"])
+
+        with override_next_settings(PAGE_BACKENDS=[entry]):
+            router = RouterFactory.create_backend(entry)
+
+            assert router.skip_dir_names() == frozenset({"_components", "_drafts"})
 
 
 class TestInstalledAppSpellings:

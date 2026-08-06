@@ -338,7 +338,7 @@ class TestStrictLoadingSetting:
         assert next_framework_settings.STRICT_LOADING is False
 
     def test_is_a_bool_key(self) -> None:
-        assert "STRICT_LOADING" in NextFrameworkSettings._BOOL_KEYS
+        assert "STRICT_LOADING" in NextFrameworkSettings.BOOL_KEYS
 
     def test_typed_read_of_override(self) -> None:
         with override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}):

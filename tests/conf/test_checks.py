@@ -96,14 +96,14 @@ class TestValueTypeErrors:
 class TestBoolCoercionWarnings:
     """`check_next_framework_value_types` flags non-bool flags as next.W072."""
 
-    @pytest.mark.parametrize("key", sorted(NextFrameworkSettings._BOOL_KEYS))
+    @pytest.mark.parametrize("key", sorted(NextFrameworkSettings.BOOL_KEYS))
     def test_non_bool_flag_yields_warning(self, key: str) -> None:
         with override_settings(NEXT_FRAMEWORK={key: "False"}):
             messages = check_next_framework_value_types()
         assert [m.id for m in messages] == ["next.W072"]
         assert f"NEXT_FRAMEWORK[{key!r}]" in messages[0].msg
 
-    @pytest.mark.parametrize("key", sorted(NextFrameworkSettings._BOOL_KEYS))
+    @pytest.mark.parametrize("key", sorted(NextFrameworkSettings.BOOL_KEYS))
     @pytest.mark.parametrize("value", [True, False], ids=["true", "false"])
     def test_silent_on_strict_bool(self, key: str, value: object) -> None:
         with override_settings(NEXT_FRAMEWORK={key: value}):
@@ -123,13 +123,13 @@ class TestKeysWithDedicatedRawChecks:
     )
 
     def test_dedicated_keys_excluded_from_both_branches(self) -> None:
-        covered = set(_KEY_TYPES) | NextFrameworkSettings._BOOL_KEYS
+        covered = set(_KEY_TYPES) | NextFrameworkSettings.BOOL_KEYS
         assert not self.DEDICATED_KEYS & covered
 
     def test_every_default_key_has_exactly_one_owner(self) -> None:
         owners = (
             set(_KEY_TYPES),
-            set(NextFrameworkSettings._BOOL_KEYS),
+            set(NextFrameworkSettings.BOOL_KEYS),
             set(self.DEDICATED_KEYS),
         )
         for key in NextFrameworkSettings.DEFAULTS:

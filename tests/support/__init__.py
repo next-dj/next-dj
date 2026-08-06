@@ -45,9 +45,12 @@ from tests.support.patches import (
 from tests.support.routers import (
     MalformedRootsRouter,
     OddComponentsNameRouter,
+    OddSkipNamesRouter,
     RaisingComponentsRouter,
     RaisingRootsRouter,
+    RaisingSkipNamesRouter,
     RootPagesRouter,
+    SkippingRouter,
 )
 from tests.support.scenarios import (
     TICK_SCENARIOS,
@@ -72,9 +75,12 @@ __all__ = [
     "GuardedTenantForm",
     "MalformedRootsRouter",
     "OddComponentsNameRouter",
+    "OddSkipNamesRouter",
     "RaisingComponentsRouter",
     "RaisingRootsRouter",
+    "RaisingSkipNamesRouter",
     "RootPagesRouter",
+    "SkippingRouter",
     "UrlByAnnotationResolveCase",
     "UrlKwargsResolveCase",
     "_ctx",

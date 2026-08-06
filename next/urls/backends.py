@@ -83,6 +83,14 @@ class RouterBackend(ABC):
         """
         return None
 
+    def skip_dir_names(self) -> frozenset[str]:
+        """Directory names this backend's own walk of its trees refuses to enter.
+
+        The checks walk with the same set, so a directory this backend routes
+        nothing from is a directory they report nothing from either.
+        """
+        return frozenset()
+
 
 def _narrow_file_router_options(options: dict[str, Any]) -> dict[str, Any]:
     """Keep only keys consumed by `next.pages` (e.g. `context_processors`)."""
@@ -144,6 +152,11 @@ class FileRouterBackend(RouterBackend):
     def components_folder_name(self) -> str | None:
         """Return the folder name the tree walk registers components from."""
         return self._components_folder_name
+
+    @override
+    def skip_dir_names(self) -> frozenset[str]:
+        """Return the directory names this router's own tree walk refuses."""
+        return self._skip_dir_names
 
     @staticmethod
     def _resolve_components_folder_name() -> str:

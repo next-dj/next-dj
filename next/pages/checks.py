@@ -191,10 +191,10 @@ def _holds_a_page(directory: Path) -> bool:
 def check_unrouted_working_directory_pages(*args, **kwargs) -> list[CheckMessage]:
     """Warn when a pages tree beside the process is routed by nobody (`next.W002`).
 
-    A project that leaves `BASE_DIR` unset and lists no root in `DIRS` keeps
-    writing pages under a directory the router never reaches, and the pages are
-    never served. Nothing else reports that, because the checks walk the trees
-    the routers report and this one is not among them.
+    A project that lists no root in `DIRS` keeps writing pages under a directory
+    the router never reaches, and the pages are never served. Nothing else
+    reports that, because the checks walk the trees the routers report and this
+    one is not among them.
     """
     router_manager, _init_errors = get_router_manager()
     if router_manager is None:
@@ -207,9 +207,10 @@ def check_unrouted_working_directory_pages(*args, **kwargs) -> list[CheckMessage
     return [
         DjangoWarning(
             f"{directory} holds pages that no configured router routes, so "
-            "nothing under it is served. Set BASE_DIR in settings so the file "
-            "router resolves its root tree, or name the directory in "
-            "NEXT_FRAMEWORK['PAGE_BACKENDS'] DIRS.",
+            "nothing under it is served. Name the directory in "
+            "NEXT_FRAMEWORK['PAGE_BACKENDS'] DIRS, or set that entry's "
+            "APP_DIRS to False, which routes BASE_DIR / PAGES_DIR when DIRS "
+            "names no root.",
             obj=str(directory),
             id="next.W002",
         )

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
@@ -40,9 +41,11 @@ from next.urls.dispatcher import scan_pages_tree
 from next.utils import walk_page_tree
 from tests.support import (
     MalformedRootsRouter,
-    OddComponentsNameRouter,
+    OddSkipNamesRouter,
     RaisingComponentsRouter,
     RaisingRootsRouter,
+    RaisingSkipNamesRouter,
+    SkippingRouter,
     file_router_config_entry,
     patch_checks_router_manager_with_routers,
 )
@@ -50,7 +53,6 @@ from tests.support import (
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-    from pathlib import Path
 
 
 @pytest.fixture(autouse=True)
@@ -367,94 +369,87 @@ class TestPageRootsAreTheRoutersOwn:
 
 
 class TestPageTreeSkipNames:
-    """The skip set comes from the router contract and from `PAGE_BACKENDS`."""
+    """The skip set is the router's own, both halves read off its contract."""
 
-    def test_a_backend_naming_no_components_folder_skips_only_dirs_names(self) -> None:
-        with override_settings(
-            NEXT_FRAMEWORK={"PAGE_BACKENDS": [file_router_config_entry(dirs=["api"])]}
-        ):
-            next_framework_settings.reload()
-            assert page_tree_skip_names(_RootTreeRouter([])) == frozenset({"api"})
+    def test_a_backend_refusing_nothing_and_naming_no_folder_skips_nothing(
+        self,
+    ) -> None:
+        assert page_tree_skip_names(_RootTreeRouter([])) == frozenset()
 
-    def test_the_components_folder_of_the_backend_joins_the_skip_set(
+    def test_the_names_the_backend_refuses_are_the_skip_set(self) -> None:
+        router = SkippingRouter([], frozenset({"api", "_drafts"}))
+
+        assert page_tree_skip_names(router) == frozenset({"api", "_drafts"})
+
+    def test_the_components_folder_of_the_backend_joins_the_skip_set(self) -> None:
+        router = SkippingRouter([], frozenset({"api"}))
+
+        with patch.object(SkippingRouter, "components_folder_name", return_value="wid"):
+            assert page_tree_skip_names(router) == frozenset({"api", "wid"})
+
+    def test_the_dirs_of_another_backend_entry_name_no_skip_name_here(
         self, tmp_path: Path
     ) -> None:
-        router = FileRouterBackend(components_folder_name="widgets")
+        # A `blog` that one entry refuses is a route of the next entry's tree,
+        # so the skip set of a router may never gather what another declared.
+        tree = tmp_path / "site"
+        _write_page(tree, "blog")
+        entries = [
+            file_router_config_entry(dirs=["blog"]),
+            file_router_config_entry(pages_dir=tree),
+        ]
 
-        with override_settings(
-            NEXT_FRAMEWORK={
-                "PAGE_BACKENDS": [file_router_config_entry(pages_dir=tmp_path)]
-            }
-        ):
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": entries}):
             next_framework_settings.reload()
-            assert page_tree_skip_names(router) == frozenset({"widgets"})
+            router = RouterFactory.create_backend(entries[1])
+            routes = [url for url, _page in iter_scanned_page_pairs(router)]
 
-    def test_a_dirs_entry_naming_a_real_directory_is_a_root_not_a_skip_name(
+            assert "blog" not in page_tree_skip_names(router)
+
+        assert routes == ["blog"]
+
+    def test_a_raising_components_folder_name_costs_only_that_name(self) -> None:
+        router = SkippingRouter([], frozenset({"api"}))
+
+        with patch.object(
+            SkippingRouter,
+            "components_folder_name",
+            side_effect=RuntimeError("components folder unavailable"),
+        ):
+            assert page_tree_skip_names(router) == frozenset({"api"})
+
+    def test_a_malformed_components_folder_name_costs_only_that_name(self) -> None:
+        router = SkippingRouter([], frozenset({"api"}))
+
+        with patch.object(
+            SkippingRouter, "components_folder_name", return_value=Path("widgets")
+        ):
+            assert page_tree_skip_names(router) == frozenset({"api"})
+
+    def test_a_raising_skip_set_refuses_no_directory(self, tmp_path: Path) -> None:
+        _write_page(tmp_path, "blog")
+        router = RaisingSkipNamesRouter([tmp_path])
+
+        assert page_tree_skip_names(router) == frozenset()
+        assert [url for url, _page in iter_scanned_page_pairs(router)] == ["blog"]
+
+    def test_a_skip_set_answered_as_a_string_costs_no_skip_name(self) -> None:
+        # Iterating the string would refuse the directories `a`, `p` and `i`,
+        # which is no name the backend ever declared.
+        assert page_tree_skip_names(OddSkipNamesRouter([])) == frozenset()
+
+    def test_a_skip_set_holding_more_than_names_keeps_the_names(self) -> None:
+        router = SkippingRouter([], frozenset({"api"}))
+
+        with patch.object(
+            SkippingRouter, "skip_dir_names", return_value=["api", 7, None]
+        ):
+            assert page_tree_skip_names(router) == frozenset({"api"})
+
+    def test_a_raising_router_is_asked_for_its_contract_once_per_run(
         self, tmp_path: Path
     ) -> None:
-        # The classification is the router's own, so an existing directory is a
-        # page root and never a name the walk refuses.
-        (tmp_path / "shell").mkdir()
-        with override_settings(
-            NEXT_FRAMEWORK={
-                "PAGE_BACKENDS": [
-                    file_router_config_entry(dirs=[str(tmp_path / "shell")])
-                ]
-            }
-        ):
-            next_framework_settings.reload()
-            assert page_tree_skip_names(_RootTreeRouter([])) == frozenset()
-
-    def test_every_entry_contributes_its_skip_names(self) -> None:
-        # A name that is no route for one file router is no route for the
-        # project, so the walk refuses the union rather than picking an entry.
-        with override_settings(
-            NEXT_FRAMEWORK={
-                "PAGE_BACKENDS": [
-                    file_router_config_entry(dirs=["api"]),
-                    file_router_config_entry(dirs=["_drafts"]),
-                ]
-            }
-        ):
-            next_framework_settings.reload()
-            names = page_tree_skip_names(_RootTreeRouter([]))
-
-        assert names == frozenset({"api", "_drafts"})
-
-    def test_a_malformed_page_backends_setting_costs_no_skip_name(self) -> None:
-        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": "nonsense"}):
-            next_framework_settings.reload()
-            assert page_tree_skip_names(_RootTreeRouter([])) == frozenset()
-
-    def test_a_malformed_dirs_entry_costs_no_skip_name(self) -> None:
-        entry = file_router_config_entry()
-        entry["DIRS"] = "api"
-        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry, "nonsense"]}):
-            next_framework_settings.reload()
-            assert page_tree_skip_names(_RootTreeRouter([])) == frozenset()
-
-    def test_a_raising_components_folder_name_costs_only_its_skip_name(self) -> None:
-        with override_settings(
-            NEXT_FRAMEWORK={"PAGE_BACKENDS": [file_router_config_entry(dirs=["api"])]}
-        ):
-            next_framework_settings.reload()
-            names = page_tree_skip_names(RaisingComponentsRouter([]))
-
-        assert names == frozenset({"api"})
-
-    def test_a_malformed_components_folder_name_costs_only_its_skip_name(self) -> None:
-        with override_settings(
-            NEXT_FRAMEWORK={"PAGE_BACKENDS": [file_router_config_entry(dirs=["api"])]}
-        ):
-            next_framework_settings.reload()
-            names = page_tree_skip_names(OddComponentsNameRouter([]))
-
-        assert names == frozenset({"api"})
-
-    def test_a_raising_router_is_asked_for_its_folder_name_once_per_run(
-        self, tmp_path: Path
-    ) -> None:
-        # Three checks ask for the same name, and a failing router would
+        # Three checks ask the same questions, and a failing router would
         # otherwise write one traceback per asking check.
         router = RaisingComponentsRouter([tmp_path])
         with patch.object(
@@ -658,7 +653,7 @@ class TestPerRouterCachesKeyOnIdentity:
         assert plain == custom
 
         assert page_tree_skip_names(plain) == frozenset({"_components"})
-        assert page_tree_skip_names(custom) == frozenset({"_widgets"})
+        assert page_tree_skip_names(custom) == frozenset({"_components", "_widgets"})
 
     def test_a_config_equal_subclass_keeps_its_own_scan(self, tmp_path: Path) -> None:
         tree = tmp_path / "shell"

@@ -354,7 +354,7 @@ Warnings
      - ``next.pages.checks``
    * - ``next.W002``
      - A directory named by ``PAGES_DIR`` sits beside the working directory, holds pages, and no configured router routes it, so nothing under it is served.
-       Set ``BASE_DIR`` so the file router resolves its root tree, or name the directory in ``PAGE_BACKENDS`` ``DIRS``.
+       Name the directory in ``PAGE_BACKENDS`` ``DIRS``, or turn that entry's ``APP_DIRS`` off, which routes ``BASE_DIR`` over ``PAGES_DIR`` when ``DIRS`` names no root.
        The tree is not walked by the page checks, so its contents raise no ``next.E010``, ``next.E012``, or ``next.E017``. This one warning stands for all of them.
      - ``next.pages.checks``
    * - ``next.W030``
