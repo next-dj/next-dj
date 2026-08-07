@@ -49,7 +49,7 @@ NEXT_FRAMEWORK = {
             "BACKEND": "next.components.FileComponentsBackend",
             "DIRS": [str(SHARED_DIR / "_components")],
             "COMPONENTS_DIR": "_widgets",
-        },
+        }
     ],
 }
 ```

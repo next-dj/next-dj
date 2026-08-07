@@ -113,10 +113,7 @@ The directory walks the full feature surface of next.dj end to end. The framewor
 class PollsConfig(AppConfig):
     def ready(self) -> None:
         default_kinds.register(
-            "vue",
-            extension=".vue",
-            slot="scripts",
-            renderer="render_module_tag",
+            "vue", extension=".vue", slot="scripts", renderer="render_module_tag"
         )
         default_stems.register("template", "page")
 
@@ -191,11 +188,7 @@ The `action_dispatched` signal carries the bound form post-validation plus the r
 ```python
 @component.context("results", serialize=True)
 def results(poll: Poll) -> dict[str, object]:
-    return {
-        "poll_id": poll.pk,
-        "total_votes": ...,
-        "choices": [...],
-    }
+    return {"poll_id": poll.pk, "total_votes": ..., "choices": [...]}
 ```
 
 `serialize=True` injects this dict into `window.Next.context.results` at page load through the `_init` payload. Voting stays server-side through the `{% form %}` tag in the component template, so the payload carries no vote URL or CSRF token. `page.vue` registers a `Next.partial.onMount("[data-poll-chart]", ...)` handler that the runtime runs over the initial DOM and over the morphed zone after every `refresh`. Each pass reads the fresh per-choice counts from the `data-poll-chart-data` block the server embeds in the zone and pushes the snapshot into the Vue instance through its `applySnapshot` method, so the chart tracks the same `refresh` that re-renders the bars, across tabs. The visible bars live in a `data-next-keep` container the Vue app owns, so the zone morph never fights Vue for those nodes. `page.vue` also subscribes to `context-updated`, which the voter's own response fires through its `context` patch. The event payload carries `{ context, changed }`, so the listener acts only when `changed` includes `live_results` and pushes that snapshot straight into the live instance without re-reading the DOM. A delegated `next:removed` listener completes the island's life cycle, walking the detached subtree and calling `app.unmount()` for every chart it finds, so navigating away from the page never leaks a Vue root. The SSR bars in `component.djx` are the no-JavaScript fallback, so the page degrades to plain server-rendered bars when scripting is off.

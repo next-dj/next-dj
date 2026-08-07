@@ -32,7 +32,7 @@ class ModuleCache:
         self._maxsize = maxsize
         self._order: OrderedDict[Path, ModuleType | None] = OrderedDict()
 
-    def get(self, path: Path) -> ModuleType | None | object:
+    def get(self, path: Path) -> ModuleType | object | None:
         """Return the cached module, a cached `None`, or the miss sentinel."""
         if path not in self._order:
             return _CACHE_MISS

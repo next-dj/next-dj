@@ -434,7 +434,7 @@ def _resolve_form_class(
 
 
 def _normalize_handler_response(
-    raw: "HttpResponse | str | None | object",
+    raw: "HttpResponse | str | object | None",
 ) -> "HttpResponse | str | None":
     """Coerce handler output to a string, response, redirect, or `None`."""
     if raw is None or isinstance(raw, (HttpResponse, str)):

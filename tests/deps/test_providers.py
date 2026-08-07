@@ -95,21 +95,27 @@ class TestHttpRequestProvider:
         ("source", "expected"),
         [
             (
-                "from django.http import HttpRequest\n"
-                "def handler(request: HttpRequest):\n"
-                "    pass\n",
+                (
+                    "from django.http import HttpRequest\n"
+                    "def handler(request: HttpRequest):\n"
+                    "    pass\n"
+                ),
                 True,
             ),
             (
-                "from django.http import HttpRequest\n"
-                "def handler(request: HttpRequest | None = None):\n"
-                "    pass\n",
+                (
+                    "from django.http import HttpRequest\n"
+                    "def handler(request: HttpRequest | None = None):\n"
+                    "    pass\n"
+                ),
                 True,
             ),
             (
-                "from django.http import HttpRequest\n"
-                "def handler(request: HttpRequest | int = 0):\n"
-                "    pass\n",
+                (
+                    "from django.http import HttpRequest\n"
+                    "def handler(request: HttpRequest | int = 0):\n"
+                    "    pass\n"
+                ),
                 False,
             ),
         ],

@@ -82,9 +82,11 @@ class TestImportStaysDjangoFree:
             [
                 sys.executable,
                 "-c",
-                "import sys\n"
-                "import next\n"
-                "print(len([m for m in sys.modules if m.startswith('django')]))",
+                (
+                    "import sys\n"
+                    "import next\n"
+                    "print(len([m for m in sys.modules if m.startswith('django')]))"
+                ),
             ],
             capture_output=True,
             text=True,
