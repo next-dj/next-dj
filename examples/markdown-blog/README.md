@@ -32,20 +32,21 @@ Tailwind loads via the Play CDN in [`screens/layout.djx`](blog/screens/layout.dj
 
 ```python
 NEXT_FRAMEWORK = {
-    "PAGE_BACKENDS": [{
-        "BACKEND": "next.urls.FileRouterBackend",
-        "PAGES_DIR": "screens",
-        "OPTIONS": {
-            "context_processors": [
-                "django.template.context_processors.request",
-                "blog.context_processors.site_nav",
-            ],
-        },
-    }],
-    "COMPONENT_BACKENDS": [{
-        "BACKEND": "next.components.FileComponentsBackend",
-        "COMPONENTS_DIR": "_parts",
-    }],
+    "PAGE_BACKENDS": [
+        {
+            "BACKEND": "next.urls.FileRouterBackend",
+            "PAGES_DIR": "screens",
+            "OPTIONS": {
+                "context_processors": [
+                    "django.template.context_processors.request",
+                    "blog.context_processors.site_nav",
+                ]
+            },
+        }
+    ],
+    "COMPONENT_BACKENDS": [
+        {"BACKEND": "next.components.FileComponentsBackend", "COMPONENTS_DIR": "_parts"}
+    ],
     "TEMPLATE_LOADERS": [
         "blog.loaders.MarkdownTemplateLoader",
         "next.pages.loaders.DjxTemplateLoader",

@@ -108,10 +108,7 @@ Wired through `COMPONENT_BACKENDS` in [config/settings.py](config/settings.py).
 
 ```python
 default_kinds.register(
-    "jsx",
-    extension=".jsx",
-    slot="scripts",
-    renderer="render_babel_script_tag",
+    "jsx", extension=".jsx", slot="scripts", renderer="render_babel_script_tag"
 )
 ```
 
@@ -148,20 +145,16 @@ The global default produces flat JSON for every key reaching `window.Next.contex
     serialize=True,
     serializer=WrappedJsContextSerializer(),
 )
-def live_stats(window: str = "5m") -> dict[str, Any]:
-    ...
+def live_stats(window: str = "5m") -> dict[str, Any]: ...
 ```
 
 The second sits on a component-level callable in `_widgets/sparkline/component.py`:
 
 ```python
 @component.context(
-    "totals_chart",
-    serialize=True,
-    serializer=WrappedJsContextSerializer(),
+    "totals_chart", serialize=True, serializer=WrappedJsContextSerializer()
 )
-def totals_chart(totals: dict[str, int]) -> dict[str, Any]:
-    ...
+def totals_chart(totals: dict[str, int]) -> dict[str, Any]: ...
 ```
 
 The framework records each override at the static collector level. At inject time the rendered HTML carries `"live_stats":{"v":1,"data":{...}}` and `"totals_chart":{"v":1,"data":{...}}`, while the sibling `render_rates` key from `_widgets/render_chart/component.py` stays flat through the global default. Three demonstrations, one HTML response, no per-key code branching.

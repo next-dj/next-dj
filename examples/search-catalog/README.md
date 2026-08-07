@@ -48,13 +48,11 @@ Search is idempotent. A bookmark of `?q=iphone&brand=Acme&page=2` should reprodu
 from next import context
 from next.urls import DQuery
 
+
 @context("results")
 def search(
-    q: DQuery[str] = "",
-    page: DQuery[int] = 1,
-    brand: DQuery[list[str]] = (),
-):
-    ...
+    q: DQuery[str] = "", page: DQuery[int] = 1, brand: DQuery[list[str]] = ()
+): ...
 ```
 
 The list form accepts three wire formats. Plain repeated keys `?brand=a&brand=b` produced by `<form method="get">` win first. The qs-style bracket suffix `?brand[]=a&brand[]=b` emitted by axios is the second fallback. The comma-delimited form `?brand=a,b` produced by `qs.stringify` with the comma array format is the third fallback. Empty segments around commas are dropped.
@@ -73,7 +71,10 @@ class Filters:
     in_stock: bool = False
     sort: str = "newest"
 
+
 class DFilters(DDependencyBase["Filters"]): ...
+
+
 class DPage(DDependencyBase["PageRequest"]): ...
 ```
 

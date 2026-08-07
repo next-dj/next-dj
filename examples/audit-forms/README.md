@@ -67,9 +67,9 @@ The framework loads each entry lazily on first access: `FormActionManager` hands
 # access/backends.py
 class AuditedFormActionBackend(RegistryFormActionBackend):
     def dispatch(self, request, uid):
-        AuditEntry.objects.create(...)            # request_started
+        AuditEntry.objects.create(...)  # request_started
         response = super().dispatch(request, uid)
-        AuditEntry.objects.create(...)            # dispatched
+        AuditEntry.objects.create(...)  # dispatched
         return response
 ```
 
@@ -167,6 +167,7 @@ The expensive query is guarded by `zone_requested`, the idiom that makes the laz
 
 ```python
 from next.partial import zone_requested
+
 
 @context("entries")
 def entries(request: HttpRequest) -> list[AuditEntry] | None:

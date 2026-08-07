@@ -86,6 +86,7 @@ def handle_add(form, spec=Depends("admin_spec")):
         raise PermissionDenied
     return _persist(form, spec, change=False)
 
+
 @action("admin:change", form_class=admin_change_form_factory, login_required=True)
 def handle_change(form, spec=Depends("admin_spec")):
     if not spec.model_admin.has_change_permission(spec.request, spec.instance):
@@ -145,8 +146,14 @@ The [`admin_audit`](admin_audit/) Django app records every admin dispatch throug
 
 ```python
 @receiver(action_dispatched)
-def log_admin_action(action_name="", form=None, url_kwargs=None,
-                     response_status=0, dep_cache=None, **kwargs):
+def log_admin_action(
+    action_name="",
+    form=None,
+    url_kwargs=None,
+    response_status=0,
+    dep_cache=None,
+    **kwargs,
+):
     ...
     spec = (dep_cache or {}).get("admin_spec")
     user = None

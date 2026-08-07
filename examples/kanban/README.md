@@ -88,10 +88,7 @@ boards/board/[int:id]/
 class KanbanConfig(AppConfig):
     def ready(self) -> None:
         default_kinds.register(
-            "jsx",
-            extension=".jsx",
-            slot="scripts",
-            renderer="render_module_tag",
+            "jsx", extension=".jsx", slot="scripts", renderer="render_module_tag"
         )
         default_stems.register("template", "page")
 
@@ -127,7 +124,11 @@ def inject_vite_dev_assets(sender, **kwargs):
     origin = os.environ.get("VITE_ORIGIN", "http://localhost:5173")
     sender.add(StaticAsset(url="", kind="js", inline=preamble), prepend=True)
     sender.add(
-        StaticAsset(url="", kind="js", inline=f'<script type="module" src="{origin}/@vite/client"></script>'),
+        StaticAsset(
+            url="",
+            kind="js",
+            inline=f'<script type="module" src="{origin}/@vite/client"></script>',
+        ),
         prepend=True,
     )
 ```

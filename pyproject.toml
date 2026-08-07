@@ -194,6 +194,7 @@ exclude = [
 select = ["ALL"]
 ignore = [
     # Framework-specific ignores
+    "CPY",    # copyright notices at the top of files are not used here
     "SLF001", # private member access (framework code needs this)
     "ANN002", # missing type annotation for *args
     "ANN003", # missing type annotation for **kwargs
@@ -226,7 +227,7 @@ ignore = [
     "ARG001", "ARG002", "ARG003",
     "S101", "S105", "S106", "S108",
     "D100", "D101", "D102", "D103", "D104",
-    "PLR2004", "PLR0913",
+    "PLR2004", "PLR0913", "PLR0917",
     "E501", "FBT003",
 ]
 "**/migrations/**/*.py" = ["F401", "PLR0913"]

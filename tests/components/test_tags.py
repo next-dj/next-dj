@@ -196,9 +196,11 @@ class TestComponentTag:
             # slot body. The injected slot wins over the prop and over
             # the default body.
             (
-                '{% #component "card" description="prop value" %}'
-                '{% #slot "description" %}<b>injected</b>{% /slot %}'
-                "{% /component %}",
+                (
+                    '{% #component "card" description="prop value" %}'
+                    '{% #slot "description" %}<b>injected</b>{% /slot %}'
+                    "{% /component %}"
+                ),
                 "<b>injected</b>",
                 ("fallback", "prop value"),
             ),

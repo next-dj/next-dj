@@ -41,7 +41,7 @@ _WIZARD_LOAD_CACHE_ATTR: Final[str] = "_next_wizard_load_cache"
 _FORM_WIZARD_BACKEND_KEY: Final[str] = "FORM_WIZARD_BACKEND"
 
 type _JSONValue = (
-    None | bool | int | float | str | list[_JSONValue] | dict[str, _JSONValue]
+    bool | int | float | str | list[_JSONValue] | dict[str, _JSONValue] | None
 )
 
 

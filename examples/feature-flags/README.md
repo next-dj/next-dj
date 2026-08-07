@@ -50,14 +50,15 @@ The `admin_writes` flag gates the bulk-toggle action. Leave it off and the admin
 
 ```python
 NEXT_FRAMEWORK = {
-    "PAGE_BACKENDS": [{
-        "BACKEND": "next.urls.FileRouterBackend",
-        "PAGES_DIR": "panels",
-    }],
-    "COMPONENT_BACKENDS": [{
-        "BACKEND": "next.components.FileComponentsBackend",
-        "COMPONENTS_DIR": "_chunks",
-    }],
+    "PAGE_BACKENDS": [
+        {"BACKEND": "next.urls.FileRouterBackend", "PAGES_DIR": "panels"}
+    ],
+    "COMPONENT_BACKENDS": [
+        {
+            "BACKEND": "next.components.FileComponentsBackend",
+            "COMPONENTS_DIR": "_chunks",
+        }
+    ],
 }
 ```
 
@@ -162,8 +163,7 @@ Inside the admin `template.djx` the `for`-loop binds `flag` to each Flag row. `{
 ```python
 class BulkToggleForm(Form):
     enabled_names = forms.MultipleChoiceField(
-        required=False,
-        widget=forms.CheckboxSelectMultiple(attrs={"class": "hidden"}),
+        required=False, widget=forms.CheckboxSelectMultiple(attrs={"class": "hidden"})
     )
 
     class Meta:
@@ -231,9 +231,11 @@ A denial emits `next.signals.form_access_denied` with `action_name`, `uid`, `req
 def _invalidate_on_save(sender, instance, **kwargs):
     invalidate_flag(instance.name)
 
+
 @receiver(post_delete, sender=Flag)
 def _invalidate_on_delete(sender, instance, **kwargs):
     invalidate_flag(instance.name)
+
 
 @receiver(page_rendered)
 def _count_page_render(sender, file_path, **kwargs):

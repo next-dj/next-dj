@@ -33,15 +33,19 @@ Tailwind loads via the Play CDN in [`host/layout.djx`](host/layout.djx). No Node
 
 ```python
 NEXT_FRAMEWORK = {
-    "PAGE_BACKENDS": [{
-        "BACKEND": "next.urls.FileRouterBackend",
-        "APP_DIRS": True,
-        "PAGES_DIR": "routes",
-    }],
-    "COMPONENT_BACKENDS": [{
-        "BACKEND": "next.components.FileComponentsBackend",
-        "COMPONENTS_DIR": "_widgets",
-    }],
+    "PAGE_BACKENDS": [
+        {
+            "BACKEND": "next.urls.FileRouterBackend",
+            "APP_DIRS": True,
+            "PAGES_DIR": "routes",
+        }
+    ],
+    "COMPONENT_BACKENDS": [
+        {
+            "BACKEND": "next.components.FileComponentsBackend",
+            "COMPONENTS_DIR": "_widgets",
+        }
+    ],
 }
 ```
 
@@ -90,10 +94,7 @@ Renders as `{{ recent_links }}` in the template.
 # routes/admin/links/[slug]/page.py
 @context
 def link_context(link: DLink[Link]) -> dict[str, object]:
-    return {
-        "link": link,
-        "cache_key": f"{CLICK_PREFIX}{link.slug}",
-    }
+    return {"link": link, "cache_key": f"{CLICK_PREFIX}{link.slug}"}
 ```
 
 `@context("link")` + `@context("cache_key")` would each trigger the `DLink` provider and hit the database twice. The unkeyed form runs the dependency once, merges the dict into the template context.
@@ -103,6 +104,7 @@ def link_context(link: DLink[Link]) -> dict[str, object]:
 ```python
 # routes/admin/page.py
 from shortener.cache import pending_clicks
+
 
 @context("pending_clicks")
 def admin_pending_clicks() -> dict[str, int]:
