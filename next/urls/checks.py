@@ -46,7 +46,7 @@ _CollectedPattern = tuple[str, str, str, frozenset[str]]
 
 def _router_backend_path_is_valid(backend_path: str) -> bool:
     """Return True when `backend_path` names a registered or importable backend."""
-    if backend_path in RouterFactory._backends:
+    if RouterFactory.is_registered(backend_path):
         return True
     try:
         resolved = import_string(backend_path)

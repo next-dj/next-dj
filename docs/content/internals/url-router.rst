@@ -35,6 +35,7 @@ Modules
 
 ``next.urls.backends``.
    ``RouterBackend`` is the abstract contract.
+   Its concrete ``page_roots``, ``components_folder_name``, and ``skip_dir_names`` methods form the route introspection contract described below.
    ``FileRouterBackend`` implements file based routing.
    ``RouterFactory`` looks up backends by dotted path.
 
@@ -45,6 +46,7 @@ Modules
 
 ``next.urls.manager``.
    ``RouterManager`` builds the active pattern list, exposes ``reload``, and emits the ``router_reloaded`` signal.
+   Its ``backends`` property is the public read of the loaded backend tuple in routing order.
    The module-level ``urlpatterns`` is a list with one ``TrieURLResolver`` wrapping the lazy router and form-action pattern sequence.
 
 ``next.urls.resolver``.
@@ -129,6 +131,30 @@ If two routes convert to exactly the same Django path string the ``check_url_pat
 The comparison is string equality after bracket conversion, so semantic overlap between typed converters, such as ``posts/[int:id]`` next to ``posts/[id]``, is not reported.
 The same collection pass owns the duplicate parameter report, failing with ``next.E028`` and listing every conflicting name in one message, and reports a router whose collection raises as ``next.E016``.
 ``check_reverse_name_collisions`` reuses the collection but drops its errors, so ``next.E016`` and ``next.E028`` never appear twice.
+
+Route introspection
+-------------------
+
+Beside the abstract ``generate_urls``, ``RouterBackend`` carries three concrete route introspection methods.
+
+- ``page_roots()`` returns the labelled page trees the backend routes, as ``PageRoot`` entries.
+- ``components_folder_name()`` returns the folder name the backend registers components from, or ``None`` for a backend that registers none.
+- ``skip_dir_names()`` returns the directory names the backend's own walk refuses to enter.
+
+The three methods are a public contract in their own right.
+The system checks and the development watcher read only this contract and never touch a backend's private state.
+The checks walk the reported trees themselves with the reported skip set, and the watcher derives its watch specs from the same reads.
+
+The defaults are safe rather than participating.
+A backend that overrides none of the methods raises nowhere, but it reports an empty tree list, names no components folder, and skips nothing.
+Such a backend stays out of every page-tree check and out of the watcher, so overriding the methods is what opts a backend in.
+``FileRouterBackend`` overrides all three.
+
+``RouterManager.backends`` is the public read of the loaded backend list, a tuple in routing order.
+Reading the property builds nothing.
+The list appears after the first iteration of the manager or after ``reload()``, so a caller that needs the configured set asks after one of those.
+
+See :doc:`/content/howto/write-a-router-backend` for the contract from a backend author's side and :doc:`autoreload` for how the watcher consumes the reads.
 
 Extension points
 ----------------

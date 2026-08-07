@@ -857,8 +857,13 @@ class TestRouterFactory:
     def test_register_backend(self, custom_backend_class) -> None:
         """Registered name maps to the given class."""
         RouterFactory.register_backend("custom", custom_backend_class)
-        assert "custom" in RouterFactory._backends
+        assert RouterFactory.is_registered("custom")
         assert RouterFactory._backends["custom"] == custom_backend_class
+
+    def test_is_registered(self) -> None:
+        """Built-in backend name is registered, unknown names are not."""
+        assert RouterFactory.is_registered("next.urls.FileRouterBackend")
+        assert not RouterFactory.is_registered("app.routers.MissingBackend")
 
     @pytest.mark.parametrize(
         ("test_case", "config", "expected_type", "expected_attrs"),
