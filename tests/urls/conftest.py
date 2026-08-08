@@ -2,8 +2,21 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from next.urls import FileRouterBackend, RouterBackend, RouterManager
+from next.urls import FileRouterBackend, RouterBackend, RouterFactory, RouterManager
 from tests.support import named_temp_py
+
+
+@pytest.fixture(autouse=True)
+def _pristine_router_registry():
+    """Restore the process-global RouterFactory registry after each test.
+
+    Tests register backend classes into a ClassVar dict, so without a
+    snapshot the keys leak and poison run order.
+    """
+    snapshot = dict(RouterFactory._backends)
+    yield
+    RouterFactory._backends.clear()
+    RouterFactory._backends.update(snapshot)
 
 
 @pytest.fixture()

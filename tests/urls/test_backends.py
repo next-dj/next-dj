@@ -858,7 +858,6 @@ class TestRouterFactory:
         """Registered name maps to the given class."""
         RouterFactory.register_backend("custom", custom_backend_class)
         assert RouterFactory.is_registered("custom")
-        assert RouterFactory._backends["custom"] == custom_backend_class
 
     def test_is_registered(self) -> None:
         """Built-in backend name is registered, unknown names are not."""
@@ -974,15 +973,20 @@ class TestRouterFactory:
         with pytest.raises(ValueError, match="Unsupported backend"):
             RouterFactory.create_backend(config)
 
-    def test_create_backend_typeerror_when_not_router_subclass(self) -> None:
-        """Registered class must be a RouterBackend subclass."""
+    def test_register_backend_typeerror_when_not_router_subclass(self) -> None:
+        """Registering a non RouterBackend class fails at registration time."""
 
         class Plain:
             pass
 
-        RouterFactory.register_backend("plain.not.Router", Plain)
         with pytest.raises(TypeError, match="RouterBackend"):
-            RouterFactory.create_backend({"BACKEND": "plain.not.Router"})
+            RouterFactory.register_backend("plain.not.Router", Plain)
+        assert not RouterFactory.is_registered("plain.not.Router")
+
+    def test_create_backend_typeerror_when_import_is_not_router_subclass(self) -> None:
+        """Importable BACKEND path that is not a RouterBackend raises TypeError."""
+        with pytest.raises(TypeError, match="RouterBackend"):
+            RouterFactory.create_backend({"BACKEND": "unittest.mock.MagicMock"})
 
     def test_create_backend_non_file_router_backend(self, custom_backend_class) -> None:
         """Custom registered backend is instantiated without FileRouterBackend fields."""

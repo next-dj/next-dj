@@ -46,7 +46,6 @@ Modules
 
 ``next.urls.manager``.
    ``RouterManager`` builds the active pattern list, exposes ``reload``, and emits the ``router_reloaded`` signal.
-   Its ``backends`` property is the public read of the loaded backend tuple in routing order.
    The module-level ``urlpatterns`` is a list with one ``TrieURLResolver`` wrapping the lazy router and form-action pattern sequence.
 
 ``next.urls.resolver``.
@@ -135,26 +134,14 @@ The same collection pass owns the duplicate parameter report, failing with ``nex
 Route introspection
 -------------------
 
-Beside the abstract ``generate_urls``, ``RouterBackend`` carries three concrete route introspection methods.
+Beside the abstract ``generate_urls``, ``RouterBackend`` carries three concrete introspection methods, ``page_roots``, ``components_folder_name``, and ``skip_dir_names``.
+They are a public contract, the only thing the system checks and the development watcher read from a backend, and :doc:`/content/howto/write-a-router-backend` is the canonical description of each method and of the safe defaults that make overriding them the opt-in.
 
-- ``page_roots()`` returns the labelled page trees the backend routes, as ``PageRoot`` entries.
-- ``components_folder_name()`` returns the folder name the backend registers components from, or ``None`` for a backend that registers none.
-- ``skip_dir_names()`` returns the directory names the backend's own walk refuses to enter.
-
-The three methods are a public contract in their own right.
-The system checks and the development watcher read only this contract and never touch a backend's private state.
-The checks walk the reported trees themselves with the reported skip set, and the watcher derives its watch specs from the same reads.
-
-The defaults are safe rather than participating.
-A backend that overrides none of the methods raises nowhere, but it reports an empty tree list, names no components folder, and skips nothing.
-Such a backend stays out of every page-tree check and out of the watcher, so overriding the methods is what opts a backend in.
-``FileRouterBackend`` overrides all three.
+The checks walk the reported trees themselves, refusing the names ``skip_dir_names`` returns plus the folder ``components_folder_name`` names, while the watcher derives its watch specs from ``page_roots`` and ``components_folder_name`` alone, as :doc:`autoreload` describes.
 
 ``RouterManager.backends`` is the public read of the loaded backend list, a tuple in routing order.
-Reading the property builds nothing.
+Reading the property loads no backends.
 The list appears after the first iteration of the manager or after ``reload()``, so a caller that needs the configured set asks after one of those.
-
-See :doc:`/content/howto/write-a-router-backend` for the contract from a backend author's side and :doc:`autoreload` for how the watcher consumes the reads.
 
 Extension points
 ----------------
