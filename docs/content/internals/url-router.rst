@@ -35,6 +35,7 @@ Modules
 
 ``next.urls.backends``.
    ``RouterBackend`` is the abstract contract.
+   Its concrete ``page_roots``, ``components_folder_name``, and ``skip_dir_names`` methods form the route introspection contract described below.
    ``FileRouterBackend`` implements file based routing.
    ``RouterFactory`` looks up backends by dotted path.
 
@@ -129,6 +130,18 @@ If two routes convert to exactly the same Django path string the ``check_url_pat
 The comparison is string equality after bracket conversion, so semantic overlap between typed converters, such as ``posts/[int:id]`` next to ``posts/[id]``, is not reported.
 The same collection pass owns the duplicate parameter report, failing with ``next.E028`` and listing every conflicting name in one message, and reports a router whose collection raises as ``next.E016``.
 ``check_reverse_name_collisions`` reuses the collection but drops its errors, so ``next.E016`` and ``next.E028`` never appear twice.
+
+Route introspection
+-------------------
+
+Beside the abstract ``generate_urls``, ``RouterBackend`` carries three concrete introspection methods, ``page_roots``, ``components_folder_name``, and ``skip_dir_names``.
+They are a public contract, the only thing the system checks and the development watcher read from a backend, and :doc:`/content/howto/write-a-router-backend` is the canonical description of each method and of the safe defaults that make overriding them the opt-in.
+
+The checks walk the reported trees themselves, refusing the names ``skip_dir_names`` returns plus the folder ``components_folder_name`` names, while the watcher derives its watch specs from ``page_roots`` and ``components_folder_name`` alone, as :doc:`autoreload` describes.
+
+``RouterManager.backends`` is the public read of the loaded backend list, a tuple in routing order.
+Reading the property loads no backends.
+The list appears after the first iteration of the manager or after ``reload()``, so a caller that needs the configured set asks after one of those.
 
 Extension points
 ----------------

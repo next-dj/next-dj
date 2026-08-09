@@ -367,8 +367,25 @@ class RouterFactory:
 
     @classmethod
     def register_backend(cls, name: str, backend_class: type[RouterBackend]) -> None:
-        """Map a dotted backend path to a class for `create_backend`."""
-        cls._backends[name] = backend_class
+        """Map a dotted backend path to a class for `create_backend`.
+
+        Validates at registration so a bad class fails loudly here instead of
+        silently on the first `create_backend` during a router reload.
+        """
+        candidate: object = backend_class
+        if not isinstance(candidate, type) or not issubclass(candidate, RouterBackend):
+            msg = f"Backend {name!r} is not a RouterBackend subclass"
+            raise TypeError(msg)
+        cls._backends[name] = candidate
+
+    @classmethod
+    def is_registered(cls, name: str) -> bool:
+        """Report whether `name` maps to a registered backend class.
+
+        Contract-only seam for system checks so adjacent areas never read
+        the class registry directly.
+        """
+        return name in cls._backends
 
     @classmethod
     def create_backend(cls, config: dict[str, Any]) -> RouterBackend:
