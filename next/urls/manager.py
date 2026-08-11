@@ -47,38 +47,51 @@ class RouterManager:
     concat reads it on every resolve."""
 
     def __init__(self) -> None:
-        """Empty backend list until first iteration."""
+        """Empty backend list until the first load."""
         self._backends: list[RouterBackend] = []
         self._config_cache: list[dict[str, Any]] | None = None
+        self._loaded: bool = False
+
+    def _ensure_loaded(self) -> None:
+        """Build the backend list on the first read, whichever accessor asks."""
+        if not self._loaded:
+            self.reload()
 
     @property
     def backends(self) -> tuple[RouterBackend, ...]:
-        """Return the loaded backends in routing order.
+        """Return the loaded backends in routing order, loading on first read.
 
-        Reading them loads nothing. Iterating the manager builds the list on
-        first use and `reload()` rebuilds it, so a caller that needs the
-        configured set asks after one of those.
+        The returned tuple is a snapshot detached from the live list.
         """
+        self._ensure_loaded()
         return tuple(self._backends)
 
     @override
     def __repr__(self) -> str:
-        """Debug representation with backend count."""
-        return f"<{self.__class__.__name__} backends={len(self._backends)}>"
+        """Debug representation with backend count and load state.
+
+        It reports the raw state instead of loading, because a repr that
+        rebuilt routes and fired signals would be a trap under a debugger.
+        """
+        return (
+            f"<{self.__class__.__name__} backends={len(self._backends)} "
+            f"loaded={self._loaded}>"
+        )
 
     def __len__(self) -> int:
-        """Return the number of configured backends."""
+        """Return the number of configured backends, loading on first use."""
+        self._ensure_loaded()
         return len(self._backends)
 
     def __iter__(self) -> Generator[URLPattern | URLResolver, None, None]:
         """All patterns from each backend, loading config on first use."""
-        if not self._backends:
-            self.reload()
+        self._ensure_loaded()
         for backend in self._backends:
             yield from backend.generate_urls()
 
     def __getitem__(self, index: int) -> RouterBackend:
-        """Return the backend at the given index."""
+        """Return the backend at the given index, loading on first use."""
+        self._ensure_loaded()
         return self._backends[index]
 
     def reload(self) -> None:
@@ -100,6 +113,9 @@ class RouterManager:
             except (ValueError, TypeError, KeyError, ImportError):
                 logger.exception("error creating router from config %s", config)
 
+        # Marked loaded before the signal, so a receiver reading `backends`
+        # sees the rebuilt list instead of re-entering this method.
+        self._loaded = True
         clear_url_caches()
         router_reloaded.send(sender=type(self))
 

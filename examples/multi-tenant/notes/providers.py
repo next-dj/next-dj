@@ -1,7 +1,6 @@
 import inspect
 
-from next.deps import DDependencyBase, RegisteredParameterProvider
-from next.deps.context import ResolutionContext
+from next.deps import DDependencyBase, RegisteredParameterProvider, ResolutionContext
 from notes.access import get_active_tenant
 from notes.models import Tenant
 

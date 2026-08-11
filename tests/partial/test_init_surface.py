@@ -1,6 +1,8 @@
 import pytest
 
 import next.partial
+import next.partial.envelope
+import next.partial.errors
 import next.partial.headers
 import next.partial.origin
 import next.partial.patches
@@ -47,15 +49,15 @@ _DEMOTED = {
     "ZoneInfo": next.partial.registry,
     "zones_of": next.partial.registry,
     "REQUEST_ID": next.partial.headers,
-    "BuiltinPatchOpError": next.partial.patches,
-    "CrossSiteHrefError": next.partial.patches,
-    "DynamicForeignPageError": next.partial.patches,
-    "ReservedContextKeyError": next.partial.patches,
-    "ReservedEventNameError": next.partial.patches,
-    "ReservedPatchKeyError": next.partial.patches,
-    "UnknownContextNameError": next.partial.patches,
-    "UnknownDedupeError": next.partial.patches,
-    "UnknownPatchOpError": next.partial.patches,
+    "BuiltinPatchOpError": next.partial.errors,
+    "CrossSiteHrefError": next.partial.errors,
+    "DynamicForeignPageError": next.partial.errors,
+    "ReservedContextKeyError": next.partial.errors,
+    "ReservedEventNameError": next.partial.errors,
+    "ReservedPatchKeyError": next.partial.errors,
+    "UnknownContextNameError": next.partial.errors,
+    "UnknownDedupeError": next.partial.errors,
+    "UnknownPatchOpError": next.partial.errors,
 }
 
 
@@ -92,21 +94,21 @@ class TestDemotedNames:
 class TestFrozenImportPaths:
     """Value objects and public errors import from the aggregator facade.
 
-    These import paths are frozen against the 0.9 split of the god-module,
-    so the test pins them on `next.partial` rather than `next.partial.patches`.
+    The facade is the frozen import path, so the test pins the names on
+    `next.partial` rather than on the submodule that defines them.
     """
 
     def test_value_objects_import_from_facade(self) -> None:
-        assert Patch is next.partial.patches.Patch
-        assert Envelope is next.partial.patches.Envelope
-        assert Asset is next.partial.patches.Asset
-        assert FormMeta is next.partial.patches.FormMeta
+        assert Patch is next.partial.envelope.Patch
+        assert Envelope is next.partial.envelope.Envelope
+        assert Asset is next.partial.envelope.Asset
+        assert FormMeta is next.partial.envelope.FormMeta
         assert Patches is next.partial.patches.Patches
         assert PatchResponse is next.partial.patches.PatchResponse
 
     def test_public_errors_import_from_facade(self) -> None:
         assert (
             ForeignPageNotAuthorizedError
-            is next.partial.patches.ForeignPageNotAuthorizedError
+            is next.partial.errors.ForeignPageNotAuthorizedError
         )
         assert UnknownZoneError is not None

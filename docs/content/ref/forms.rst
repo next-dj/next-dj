@@ -41,7 +41,8 @@ Advanced.
 
 Framework machinery.
    The wiring lives on the owning submodules and is not re-exported at the package level.
-   ``FormActionDispatch`` lives in ``next.forms.dispatch``.
+   ``FormActionDispatch`` lives in ``next.forms.dispatch``, whose ``build``, ``permissions``,
+   ``responses``, and ``wizard`` submodules carry the pipeline bodies.
    ``FormActionManager``, the ``form_action_manager`` instance, and
    ``build_form_namespace_for_action`` live in ``next.forms.manager``.
    ``ActionMeta``, ``file_to_dotted_module``, ``scope_key_for``,
@@ -60,7 +61,7 @@ Framework machinery.
 
 Internal hooks.
    Underscore-prefixed helpers inside the submodules, such as the form-building functions in
-   ``next.forms.dispatch``, are implementation details.
+   ``next.forms.dispatch.build``, are implementation details.
    ``next.forms.__all__`` is the source of truth for the curated package surface and exports no
    underscore names.
    Do not import underscore names in application code.
@@ -194,16 +195,20 @@ The provider classes import from ``next.forms.markers`` directly.
 Dispatch
 ~~~~~~~~
 
-``FormActionDispatch``, ``ActionOutcome``, and ``ActionOutcomeKind`` are the public members of this module.
-``ActionOutcome`` and ``ActionOutcomeKind`` are re-exported from ``next.forms``, while ``FormActionDispatch`` imports from ``next.forms.dispatch`` directly.
+``FormActionDispatch`` is the only public member of ``next.forms.dispatch`` and is imported from that package directly.
+It runs the POST pipeline and is the sender every dispatch-time signal carries, while the pipeline bodies live in the four submodules of the package.
+``ActionOutcome`` and ``ActionOutcomeKind`` are the public members of ``next.forms.dispatch.responses`` and are re-exported from ``next.forms``.
 ``ActionOutcome`` is the frozen keyword-only dataclass a backend's ``shape_response`` hook receives, with ``ActionOutcomeKind`` as its ``kind`` discriminator.
 On ``INVALID`` outcomes the ``page_path`` and ``origin`` fields carry the resolved identity of the origin page.
 The ``page_path`` field holds the source location of its ``page.py`` and the ``origin`` field holds the validated origin URL path.
 ``FormActionDispatch.shape_response`` builds the default envelope for one outcome, and the backend hook delegates to it unless overridden.
-``ensure_http_response`` coerces a handler return value into an ``HttpResponse``, kept for custom backends that drive the pipeline by hand.
+``ensure_http_response`` coerces a handler return value into an ``HttpResponse`` for custom backends that drive the pipeline by hand, and is reachable as ``FormActionDispatch.ensure_http_response``.
 The underscore-prefixed helpers are internal hooks per the ``Internal hooks`` tier described above.
 
 .. automodule:: next.forms.dispatch
+   :members:
+
+.. automodule:: next.forms.dispatch.responses
    :members:
 
 Manager

@@ -35,7 +35,7 @@ Advanced.
    ``morph(page=)``.
    ``OriginSource`` lives in ``next.partial.origin``.
    ``ZoneInfo`` and ``zones_of`` live in ``next.partial.registry``.
-   The custom-verb exceptions live in ``next.partial.patches``.
+   The custom-verb exceptions live in ``next.partial.errors``.
    The ``signals`` and ``checks`` submodules carry the partial telemetry.
    Use these when writing a custom protocol backend, a wire-format plugin, or telemetry.
 
@@ -47,6 +47,8 @@ Framework machinery.
    ``ActionRef``, ``shape_validate``, and ``drain_messages`` live in ``next.partial.shaping``.
    ``PatchOpRegistry``, the ``patch_op_registry`` instance, and ``BUILTIN_OPS`` live in
    ``next.partial.registry``.
+   ``PartialShaperImpl``, the implementation the app binds into the ``next.ports`` slot at
+   startup, lives in ``next.partial.shaper``.
 
 Internal hooks.
    Underscore-prefixed helpers inside the submodules are implementation details.
@@ -198,7 +200,7 @@ have denied.
 one on the client.
 The remaining nine are rarely caught and stay out of the curated surface.
 They guard the custom-verb contract, the event-name, context-key, and dedupe vocabularies,
-and the foreign-page and href rules, and live in ``next.partial.patches``.
+and the foreign-page and href rules, and live in ``next.partial.errors``.
 
 .. autoexception:: next.partial.UnknownZoneError
    :members:
@@ -209,31 +211,31 @@ and the foreign-page and href rules, and live in ``next.partial.patches``.
 .. autoexception:: next.partial.LayerHrefWithoutZoneError
    :members:
 
-.. autoexception:: next.partial.patches.UnknownPatchOpError
+.. autoexception:: next.partial.errors.UnknownPatchOpError
    :members:
 
-.. autoexception:: next.partial.patches.BuiltinPatchOpError
+.. autoexception:: next.partial.errors.BuiltinPatchOpError
    :members:
 
-.. autoexception:: next.partial.patches.ReservedPatchKeyError
+.. autoexception:: next.partial.errors.ReservedPatchKeyError
    :members:
 
-.. autoexception:: next.partial.patches.UnknownContextNameError
+.. autoexception:: next.partial.errors.UnknownContextNameError
    :members:
 
-.. autoexception:: next.partial.patches.ReservedContextKeyError
+.. autoexception:: next.partial.errors.ReservedContextKeyError
    :members:
 
-.. autoexception:: next.partial.patches.ReservedEventNameError
+.. autoexception:: next.partial.errors.ReservedEventNameError
    :members:
 
-.. autoexception:: next.partial.patches.DynamicForeignPageError
+.. autoexception:: next.partial.errors.DynamicForeignPageError
    :members:
 
-.. autoexception:: next.partial.patches.UnknownDedupeError
+.. autoexception:: next.partial.errors.UnknownDedupeError
    :members:
 
-.. autoexception:: next.partial.patches.CrossSiteHrefError
+.. autoexception:: next.partial.errors.CrossSiteHrefError
    :members:
 
 Signals

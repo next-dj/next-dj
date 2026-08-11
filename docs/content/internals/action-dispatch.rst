@@ -85,6 +85,11 @@ Modules
 ``next.forms.dispatch``.
    ``FormActionDispatch`` runs the pipeline per request.
    Manages the bound form, the dependency cache reuse, and the response selection.
+   It is also the sender of ``form_access_denied``, ``action_dispatched``, and ``form_validation_failed``.
+
+``next.forms.dispatch.build``, ``next.forms.dispatch.permissions``, ``next.forms.dispatch.responses``, ``next.forms.dispatch.wizard``.
+   The pipeline bodies behind ``FormActionDispatch``, split by concern.
+   Form construction and hook invocation, guard and permission enforcement, outcome types and response coercion, and wizard step dispatch.
 
 ``next.forms.backends``.
    ``FormActionBackend`` abstract contract, ``RegistryFormActionBackend`` default implementation, and the ``FormActionNotFoundError`` exception.

@@ -1,12 +1,14 @@
-from collections.abc import Generator
+from collections.abc import Generator, Iterator
+from contextlib import contextmanager
 from typing import Any, ClassVar
 
 import pytest
 from django import forms as django_forms
 from django.dispatch import Signal
-from django.http import HttpRequest, HttpResponseRedirect
+from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, QueryDict
 
 from next.forms import ActionRegistration, Form, RegistryFormActionBackend
+from next.forms.dispatch import FormActionDispatch
 from next.forms.manager import form_action_manager
 from next.forms.signals import (
     action_dispatched,
@@ -597,3 +599,115 @@ class TestWizardSignalsWiring:
         assert len(capture_form_validation_failed) == 1
         assert capture_form_validation_failed[0]["action_name"] == "signal_wizard"
         assert capture_wizard_step_submitted == []
+
+
+class SenderProbeForm(Form):
+    """Form whose validation failure drives the sender regression checks."""
+
+    name = django_forms.CharField(max_length=100)
+
+
+class SenderDeniedForm(Form):
+    """Form whose view-level hook denies with a response, firing the audit signal."""
+
+    name = django_forms.CharField(max_length=100)
+
+    @classmethod
+    def check_permissions(cls) -> HttpResponse:
+        """Deny every caller with a ready-made response."""
+        return HttpResponse("denied", status=403)
+
+
+@contextmanager
+def _dispatch_receiver(signal: Signal) -> Iterator[list[dict[str, Any]]]:
+    """Connect a receiver filtered on the `FormActionDispatch` sender."""
+    events: list[dict[str, Any]] = []
+
+    def _listener(sender: object, **kwargs) -> None:
+        events.append({"sender": sender, **kwargs})
+
+    signal.connect(_listener, sender=FormActionDispatch)
+    try:
+        yield events
+    finally:
+        signal.disconnect(_listener, sender=FormActionDispatch)
+
+
+def _dispatch_probe(
+    backend: RegistryFormActionBackend, request: HttpRequest, name: str
+) -> HttpResponse:
+    meta = backend.get_meta(name)
+    assert meta is not None
+    return FormActionDispatch.dispatch(backend, request, name, meta)
+
+
+class TestDispatchSignalSender:
+    """Receivers filtering on `sender=FormActionDispatch` still get every signal.
+
+    The dispatch bodies live in the `dispatch_*` submodules, so the sender
+    identity is the contract keeping those receivers wired.
+    """
+
+    def test_action_dispatched_reaches_a_sender_filtered_receiver(
+        self, mock_http_request
+    ) -> None:
+        backend = RegistryFormActionBackend()
+
+        def handler() -> str:
+            return "ok"
+
+        backend.register_action(
+            ActionRegistration(
+                name="sender_handler",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=handler,
+            )
+        )
+        request = mock_http_request(method="POST", POST=QueryDict(mutable=True))
+        with _dispatch_receiver(action_dispatched) as events:
+            _dispatch_probe(backend, request, "sender_handler")
+        assert len(events) == 1
+        assert events[0]["sender"] is FormActionDispatch
+        assert events[0]["action_name"] == "sender_handler"
+
+    def test_form_validation_failed_reaches_a_sender_filtered_receiver(
+        self, mock_http_request
+    ) -> None:
+        backend = RegistryFormActionBackend()
+        backend.register_action(
+            ActionRegistration(
+                name="sender_invalid",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                form_class=SenderProbeForm,
+            )
+        )
+        request = mock_http_request(method="POST", POST=QueryDict(mutable=True))
+        with _dispatch_receiver(form_validation_failed) as events:
+            response = _dispatch_probe(backend, request, "sender_invalid")
+        assert response.status_code == 400
+        assert len(events) == 1
+        assert events[0]["sender"] is FormActionDispatch
+        assert events[0]["field_names"] == ("name",)
+
+    def test_form_access_denied_reaches_a_sender_filtered_receiver(
+        self, mock_http_request
+    ) -> None:
+        backend = RegistryFormActionBackend()
+        backend.register_action(
+            ActionRegistration(
+                name="sender_denied",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                form_class=SenderDeniedForm,
+            )
+        )
+        request = mock_http_request(method="POST", POST=QueryDict(mutable=True))
+        with _dispatch_receiver(form_access_denied) as events:
+            response = _dispatch_probe(backend, request, "sender_denied")
+        assert response.status_code == 403
+        assert len(events) == 1
+        assert events[0]["sender"] is FormActionDispatch
+        assert events[0]["layer"] == "view"
+        assert events[0]["reason"] == "response"

@@ -75,7 +75,8 @@ Components
 .. describe:: {% component "<name>" key="value" ... %}
 
    Void form.
-   Renders a component by name with the given literal string props.
+   Renders a component by name with the given props.
+   Each prop compiles into a template expression, so quoted strings, numbers, dotted lookups, and filter chains all resolve against the surrounding context.
 
 .. describe:: {% #component "<name>" %}...{% /component %}
 

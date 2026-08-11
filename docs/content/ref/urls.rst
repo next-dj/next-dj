@@ -45,7 +45,7 @@ Reverse-name population iterates the wrapped sequence with ``reversed()``, which
 ``RouterManager`` owns the active backend list, and the ``router_manager`` singleton exposes ``reload()`` to rebuild it.
 ``reload()`` logs and skips a backend entry whose construction raises ``ValueError``, ``TypeError``, ``KeyError``, or ``ImportError``.
 Any other exception from a custom backend propagates and stops startup.
-``backends`` reads the loaded list as a tuple without loading anything, which is how the system checks walk the routers they were handed.
+``backends`` returns the loaded list as a tuple and builds it from ``PAGE_BACKENDS`` on the first read, so the system checks reach the configured routers even before the first resolve.
 ``version`` is the cache token the lazy urlpatterns concat keys on, bumped by every ``reload()``, and a caller that derives its own cache from the router set reads it for the same purpose.
 
 .. automodule:: next.urls.manager

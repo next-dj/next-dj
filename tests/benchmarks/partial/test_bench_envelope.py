@@ -8,7 +8,7 @@ from django.test import RequestFactory
 
 from next.forms import Form
 from next.forms.backends import ActionRegistration, RegistryFormActionBackend
-from next.forms.dispatch import ActionOutcome, ActionOutcomeKind
+from next.forms.dispatch.responses import ActionOutcome, ActionOutcomeKind
 from next.forms.uid import ORIGIN_FIELD_NAME
 from next.partial import PartialProtocolBackend, Patches, shape_partial
 from next.partial.headers import REQUEST_FLAG

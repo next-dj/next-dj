@@ -15,10 +15,9 @@ from kanban.models import Board, Card, Column
 from kanban.providers import BoardProvider, CardProvider, DBoard, DCard
 from kanban.signals import inject_vite_dev_assets
 
+from next.deps import ResolutionContext
 from next.deps.cache import DependencyCache
-from next.deps.context import ResolutionContext
-from next.static.assets import StaticAsset
-from next.static.collector import StaticCollector
+from next.static import StaticAsset, StaticCollector
 
 
 pytestmark = pytest.mark.django_db

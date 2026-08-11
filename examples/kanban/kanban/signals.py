@@ -3,7 +3,7 @@ import base64
 from django.conf import settings
 
 from next.conf import next_framework_settings
-from next.static.assets import StaticAsset
+from next.static import StaticAsset
 from next.static.signals import collector_finalized
 
 

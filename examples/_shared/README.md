@@ -1,10 +1,10 @@
 # `examples/_shared` — UI kit for next.dj examples
 
-A shadcn-inspired component palette that every next.dj example pulls in through the regular component subsystem. **Not** part of the `next-dj` package — this is a worked example of how to set up a shared component root with the existing [components](../../docs/content/topics/components.rst) and [static-assets](../../docs/content/topics/static-assets/) systems. Copy it into your own project the same way the examples here do, or use it as a reference for building your own kit.
+A shadcn-inspired component palette that every next.dj example pulls in through the regular component subsystem. **Not** part of the `next-dj` package — this is a worked example of how to set up a shared component root with the [components](../../docs/content/topics/components.rst) and [static-assets](../../docs/content/topics/static-assets/) systems. Copy it into your own project the same way the examples here do, or use it as a reference for building your own kit.
 
 ## Why a shared kit
 
-Without one, every page tree tends to copypaste utility classes for buttons, cards, badges, tables, and form fields. The examples in this repo used to ship a different `max-w-*` per layout, four flavours of "muted text", and two ways to render an outline button. The shared kit replaces that with one Python-friendly `{% component %}` call per primitive and one set of CSS variables for the palette.
+Without one, every page tree copypastes utility classes for buttons, cards, badges, tables, and form fields, and each layout drifts into its own `max-w-*`, its own flavour of "muted text", and its own way to render an outline button. The shared kit collapses that into one Python-friendly `{% component %}` call per primitive and one set of CSS variables for the palette.
 
 ## Layout
 

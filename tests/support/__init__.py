@@ -42,6 +42,7 @@ from tests.support.patches import (
     patch_checks_router_manager,
     patch_checks_router_manager_with_routers,
 )
+from tests.support.ports import IntentOnlyShaper
 from tests.support.routers import (
     MalformedRootsRouter,
     OddComponentsNameRouter,
@@ -73,6 +74,7 @@ __all__ = [
     "CoerceUrlValueCase",
     "CountingWizardBackend",
     "GuardedTenantForm",
+    "IntentOnlyShaper",
     "MalformedRootsRouter",
     "OddComponentsNameRouter",
     "OddSkipNamesRouter",

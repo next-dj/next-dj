@@ -832,6 +832,26 @@ def check_template_loaders(*args, **kwargs) -> list[CheckMessage]:
     return messages
 
 
+def iter_serialized_page_context_keys() -> Iterator[tuple[Path, str]]:
+    """Yield the `page.py` path and key of every keyed `serialize=True` context.
+
+    A keyless `serialize=True` callable spreads the keys of the dict it
+    returns at render time, so those keys exist only at runtime and never
+    travel through here. One page reached through two spellings yields its
+    keys once, under the spelling the registry keys on.
+    """
+    router_manager, _errors = get_router_manager()
+    if router_manager is None:
+        return
+    registry = page._context_manager._context_registry
+    for page_path in _iter_existing_scanned_pages(router_manager, set()):
+        if _load_python_module_memo(page_path) is None:
+            continue
+        for key, entry in registry.get(page_path, {}).items():
+            if entry.serialize and key is not None:
+                yield page_path, key
+
+
 __all__ = [
     "check_context_functions",
     "check_context_processor_signature",
@@ -844,4 +864,5 @@ __all__ = [
     "check_single_keyless_context",
     "check_template_loaders",
     "check_unrouted_working_directory_pages",
+    "iter_serialized_page_context_keys",
 ]

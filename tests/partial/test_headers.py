@@ -123,6 +123,20 @@ class TestPartialIntentMemoised:
         assert len(first_call) == 1
 
 
+class TestNonPartialIntentShared:
+    """Non-partial requests share one immutable intent instead of building one."""
+
+    def test_two_plain_requests_get_the_same_object(self) -> None:
+        first = partial_intent(RequestFactory().get("/"))
+        second = partial_intent(RequestFactory().get("/other/"))
+        assert first is second
+
+    def test_partial_request_gets_its_own_object(self) -> None:
+        plain = partial_intent(RequestFactory().get("/"))
+        partial = partial_intent(_request_with_headers(**{"X-Next-Request": "1"}))
+        assert partial is not plain
+
+
 class TestVaryHeaders:
     """`set_partial_vary` stamps the protective Vary header."""
 

@@ -5,8 +5,7 @@ from django.http import HttpRequest
 
 from next.forms.signals import action_dispatched
 from next.partial.headers import REQUEST_ID
-from next.static import StaticCollector
-from next.static.assets import StaticAsset
+from next.static import StaticAsset, StaticCollector
 from next.static.signals import collector_finalized
 from polls.broker import broker, build_snapshot
 

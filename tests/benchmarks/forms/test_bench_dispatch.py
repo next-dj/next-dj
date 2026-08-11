@@ -8,7 +8,8 @@ from django.http import HttpResponse, HttpResponseRedirect
 
 from next.forms import Form
 from next.forms.backends import ActionRegistration, RegistryFormActionBackend
-from next.forms.dispatch import FormActionDispatch, _normalize_handler_response
+from next.forms.dispatch import FormActionDispatch
+from next.forms.dispatch.responses import _normalize_handler_response
 from next.forms.origin import (
     _ORIGIN_MATCH_ATTR,
     _filter_reserved_url_kwargs,

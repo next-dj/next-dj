@@ -5,9 +5,10 @@ from typing import TYPE_CHECKING
 from django.http import HttpResponse
 
 from . import keys
+from .envelope import Envelope
 from .headers import MergeMode, set_partial_vary
 from .manager import asset_version, partial_backend_manager
-from .patches import Envelope, Patches, PatchResponse
+from .patches import Patches, PatchResponse
 from .render import UnknownZoneError, render_zone
 
 

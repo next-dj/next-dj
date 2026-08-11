@@ -9,16 +9,20 @@ Module summary
 ``next.apps`` contains the Django ``AppConfig`` and the helpers that the framework runs at application startup.
 
 ``NextFrameworkConfig.ready()`` first runs ``next.checks.register_all()`` to register the framework system checks.
-It then calls five installer hooks in a fixed order.
+It then runs six startup steps in a fixed order.
 
 #. ``autoreload.install()``
 #. ``templates.install()``
 #. ``staticfiles.install()``
 #. ``components.install()``
 #. ``autodiscover_forms()``
+#. ``partial_shaper_slot.set(PartialShaperImpl())``
 
 ``autodiscover_forms()`` imports the ``forms`` submodule of every installed app so shared forms register before the first request arrives.
 It respects the ``FORM_AUTODISCOVER`` setting and is a no-op when that setting is ``False``.
+
+The sixth step binds the partial shaper into the ``next.ports`` slot that ``next.pages`` and ``next.forms`` read on every request.
+Binding it here keeps the page and form subsystems free of an import of ``next.partial``.
 
 Public API
 ----------
@@ -71,4 +75,4 @@ See also
 
    :doc:`/content/topics/project-layout` for the application setup.
    :doc:`/content/topics/extending` for the extension surface.
-   :doc:`/content/internals/overview` for the full ``ready()`` sequence, including system-check registration and the installer hooks.
+   :doc:`/content/internals/overview` for the subsystem map the startup steps wire together.

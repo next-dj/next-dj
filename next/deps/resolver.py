@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 # unbounded dicts stay finite over a process lifetime.
 _signature_cache: dict[Any, inspect.Signature] = {}
 _type_hints_cache: dict[Any, dict[str, Any]] = {}
+_var_keyword_cache: dict[Any, bool] = {}
 
 
 def _introspect_key(func: Callable[..., Any]) -> tuple[object, bool]:
@@ -55,6 +56,19 @@ def cached_type_hints(func: Callable[..., Any]) -> dict[str, Any]:
     if cached is None:
         cached = get_type_hints(func)
         _type_hints_cache[key] = cached
+    return cached
+
+
+def cached_accepts_var_keyword(func: Callable[..., Any]) -> bool:
+    """Return whether `func` declares a `**kwargs` parameter, memoised per callable."""
+    key = _introspect_key(func)
+    cached = _var_keyword_cache.get(key)
+    if cached is None:
+        cached = any(
+            param.kind is inspect.Parameter.VAR_KEYWORD
+            for param in cached_signature(func).parameters.values()
+        )
+        _var_keyword_cache[key] = cached
     return cached
 
 

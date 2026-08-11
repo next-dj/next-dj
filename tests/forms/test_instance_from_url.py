@@ -14,8 +14,8 @@ from next.forms.checks import (
     check_instance_from_url_unknown_field,
 )
 from next.forms.diagnostics import registration_diagnostics
-from next.forms.dispatch import (
-    FormActionDispatch,
+from next.forms.dispatch import FormActionDispatch
+from next.forms.dispatch.build import (
     _accepts_var_keyword,
     _call_get_initial,
     _form_action_context_callable,

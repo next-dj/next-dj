@@ -2,8 +2,7 @@ import pytest
 from django.test import RequestFactory
 
 from next.partial import Patches, PatchResponse, UnknownZoneError, register_patch_op
-from next.partial.headers import CONTENT_TYPE
-from next.partial.patches import (
+from next.partial.errors import (
     BuiltinPatchOpError,
     CrossSiteHrefError,
     LayerHrefWithoutZoneError,
@@ -14,6 +13,7 @@ from next.partial.patches import (
     UnknownDedupeError,
     UnknownPatchOpError,
 )
+from next.partial.headers import CONTENT_TYPE
 from next.partial.registry import patch_op_registry
 from next.static.scripts import CSRF_PAYLOAD_KEY, DEV_PAYLOAD_KEY
 from tests.support import partial_request, plain_request

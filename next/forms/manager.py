@@ -8,7 +8,7 @@ from django.core.exceptions import ImproperlyConfigured
 from next.backends import backend_entries, load_backends
 
 from .backends import FormActionBackend, FormActionNotFoundError
-from .dispatch import _form_action_context_callable
+from .dispatch.build import _form_action_context_callable
 from .origin import _url_kwargs_for_request
 
 

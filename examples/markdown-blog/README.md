@@ -22,7 +22,7 @@ uv run python manage.py runserver     # http://127.0.0.1:8000/
 uv run pytest
 ```
 
-Tailwind loads via the Play CDN in [`screens/layout.djx`](blog/screens/layout.djx). No Node, no build step.
+Tailwind loads via the Play CDN in [`site/layout.djx`](site/layout.djx). No Node, no build step.
 
 ## Walking the code
 
@@ -93,7 +93,7 @@ Three methods, three responsibilities:
 - **`load_template`** — reads the file and returns the rendered body string. Returning `None` lets the chain fall through to the next loader.
 - **`source_path`** — points at the on-disk file for the framework's stale-cache detector. When the file's mtime changes, the composed template is recomputed on the next request.
 
-`source_name = "template.md"` is the human label surfaced in [`next.W043`](../../docs/content/reference/system-checks.rst) when a page declares both `template.md` and, say, a `template` module attribute.
+`source_name = "template.md"` is the human label surfaced in [`next.W043`](../../docs/content/ref/system-checks.rst) when a page declares both `template.md` and, say, a `template` module attribute.
 
 ### 3. Markdown helpers — pure, still used for metadata and reading-time
 
@@ -177,7 +177,7 @@ next.dj resolves the page body in this order:
 2. A `template = "..."` module attribute on the page.
 3. First registered `TemplateLoader` whose `can_load(page)` returns `True`. In this blog that is `MarkdownTemplateLoader` (followed by the built-in `DjxTemplateLoader`). Used by the home index and `/about/` (`template.djx`) and by every post (`template.md`).
 
-The highest-priority present source wins. If a page declares more than one, `manage.py check` emits [`next.W043`](../../docs/content/reference/system-checks.rst#compatibility) naming the winner so the shadow is never silent. Misconfigured loaders surface as `next.E042` / `next.E043` at check time.
+The highest-priority present source wins. If a page declares more than one, `manage.py check` emits [`next.W043`](../../docs/content/ref/system-checks.rst) naming the winner so the shadow is never silent. Misconfigured loaders surface as `next.E042` / `next.E043` at check time.
 
 ### 7. `{% url %}` with a variable name
 
@@ -223,7 +223,7 @@ def site_nav(request: HttpRequest) -> dict[str, object]:
     }
 ```
 
-Wired under `NEXT_FRAMEWORK["PAGE_BACKENDS"][0]["OPTIONS"]["context_processors"]`. The framework's [`next.E040`](../../docs/content/reference/system-checks.rst) check fails at `manage.py check` time if the processor signature does not accept `request`.
+Wired under `NEXT_FRAMEWORK["PAGE_BACKENDS"][0]["OPTIONS"]["context_processors"]`. The framework's [`next.E040`](../../docs/content/ref/system-checks.rst) check fails at `manage.py check` time if the processor signature does not accept `request`.
 
 The processor reads `request.path` and exposes it as `site_path`, which the footer renders. Using the argument keeps the signature honest — there is no unused parameter to suppress, and the `request`-named parameter still satisfies the `next.E040` contract.
 
@@ -259,15 +259,15 @@ Hyphens in folder names become underscores in the name: `hello-world` → `page_
 
 ## Gotchas
 
-### `{% component %}` props are literal strings
+### `{% component %}` props resolve against the template context
 
-`{% component "nav_link" url_name="next:page_about" %}` works; `{% component "nav_link" url_name=some_var %}` passes the literal string `"some_var"`. To drive a component from a list in a loop, either hardcode the literal prop values (as the root nav does) or rely on the parent template context being forwarded into the child render, and read `some_var` directly inside `component.py`.
+`{% component "nav_link" url_name="next:page_about" %}` passes a quoted literal, which is what the root nav in [`site/layout.djx`](site/layout.djx) needs. An unquoted `url_name=some_var` is compiled as a Django `FilterExpression` and resolved at render time, so a loop variable reaches the component the same way it reaches `{{ some_var }}`. A name missing from the context resolves to `string_if_invalid` rather than raising.
 
 ### `manage.py check` warns if a page has no body source
 
 `next.E012` fails when a `page.py` has none of: `render()`, `template` attribute, or a registered `TemplateLoader` that can load it. An **ancestor** `layout.djx` alone is not enough. In this blog `MarkdownTemplateLoader` satisfies the check for every post directory that has a `template.md`.
 
-If you declare more than one source on the same page, `manage.py check` emits [`next.W043`](../../docs/content/reference/system-checks.rst) naming the winner: `render()` > `template` > (registered loaders in declaration order). Misconfigured loader dotted paths surface as `next.E042` / `next.E043`.
+If you declare more than one source on the same page, `manage.py check` emits [`next.W043`](../../docs/content/ref/system-checks.rst) naming the winner: `render()` > `template` > (registered loaders in declaration order). Misconfigured loader dotted paths surface as `next.E042` / `next.E043`.
 
 ### Virtual pages and bodyless components
 

@@ -82,7 +82,7 @@ from .base import (
     Widget,
 )
 from .decorators import action
-from .dispatch import ActionOutcome, ActionOutcomeKind
+from .dispatch.responses import ActionOutcome, ActionOutcomeKind
 from .formsets import cleanup_extra_initial
 from .markers import DForm
 from .origin import (

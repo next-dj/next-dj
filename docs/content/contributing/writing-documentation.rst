@@ -169,7 +169,8 @@ The project uses ``doc8`` for RST style.
 
    uv run doc8 docs/content
 
-The linter catches trailing whitespace, lines that exceed 200 characters, and inconsistent indentation.
+The linter catches trailing whitespace and inconsistent indentation.
+It does not police line length, because semantic newlines put one sentence on one line however long that sentence runs.
 
 Translation notes
 -----------------

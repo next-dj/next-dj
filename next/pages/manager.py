@@ -21,9 +21,9 @@ from django.http.response import HttpResponseBase
 from django.template import Context as DjangoTemplateContext, Origin, Template
 from django.urls import URLPattern, path
 
-from next.checks.common import first_visit, get_router_manager, iter_scanned_page_pairs
 from next.conf import fail_loudly, next_framework_settings
 from next.deps import DependencyResolver, resolver
+from next.ports import partial_shaper_slot
 from next.utils import defining_file
 
 from .loaders import (
@@ -40,7 +40,7 @@ from .signals import page_rendered, template_loaded
 
 if TYPE_CHECKING:
     import types
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable
 
     from next.static import StaticCollector
     from next.static.serializers import JsContextSerializer
@@ -480,16 +480,10 @@ class Page:
             )
             if resolution.http_response is not None:
                 return resolution.http_response
-            # next.partial imports next.pages, so the zone branch defers
-            # its imports to break the cycle.
-            from next.partial import partial_intent  # noqa: PLC0415
-            from next.partial.view import zone_response  # noqa: PLC0415
-
-            intent = partial_intent(request)
-            if intent.zones:
-                return zone_response(
+            shaper = partial_shaper_slot.get()
+            if shaper.intent(request).zones:
+                return shaper.zone_response(
                     file_path,
-                    intent,
                     request,
                     dynamic_body=resolution.dynamic,
                     url_kwargs=dict(kwargs),
@@ -640,27 +634,3 @@ def reset_context_registry() -> None:
     `page.py` repopulates the registry from its current source.
     """
     page._context_manager.reset()
-
-
-def iter_serialized_page_context_keys() -> Iterator[tuple[Path, str]]:
-    """Yield the `page.py` path and key of every keyed `serialize=True` context.
-
-    A keyless `serialize=True` callable spreads the keys of the dict it
-    returns at render time, so those keys exist only at runtime and never
-    travel through here. One page reached through two spellings yields its
-    keys once, under the spelling the registry keys on.
-    """
-    router_manager, _errors = get_router_manager()
-    if router_manager is None:
-        return
-    registry = page._context_manager._context_registry
-    seen: set[Path] = set()
-    for router in router_manager.backends:
-        for _url_path, page_path in iter_scanned_page_pairs(router):
-            if not first_visit(page_path, seen):
-                continue
-            if not page_path.exists() or _load_python_module_memo(page_path) is None:
-                continue
-            for key, entry in registry.get(page_path, {}).items():
-                if entry.serialize and key is not None:
-                    yield page_path, key

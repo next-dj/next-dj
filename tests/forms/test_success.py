@@ -11,7 +11,8 @@ from next.forms import Form, FormWizard, ModelForm
 from next.forms.backends import RegistryFormActionBackend
 from next.forms.base import _declared_success_url, _format_success_message
 from next.forms.checks import check_success_message_framework
-from next.forms.dispatch import FormActionDispatch, _send_success_message
+from next.forms.dispatch import FormActionDispatch
+from next.forms.dispatch.responses import _send_success_message
 from next.forms.manager import form_action_manager
 from next.forms.signals import action_dispatched
 

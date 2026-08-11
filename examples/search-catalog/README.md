@@ -2,7 +2,7 @@
 
 A faceted product catalog with search, brand filters, price range, in-stock toggle, sort, and pagination. The listing renders six cards per page with deduplicated co-located CSS, the category and product detail routes thread an inherited `Category` instance through the `[category]/[slug]/` chain without re-querying, and identical search requests share a single `LocMemCache` entry through the lifetime of one process.
 
-The example focuses on the file-router and DI subsystems of next-dj. It dogfoods a new core `DQuery[T]` provider that mirrors `DUrl[T]` for query-string parameters. Two domain providers, `DFilters` and `DPage`, build typed snapshots from `request.GET` with `DFilters` reusing `QueryParamProvider` for the brand list. A `cached_search` helper is keyed by a stable hash of the filter set. An `active_filters` context processor surfaces a chip strip with a precomputed drop URL per chip. A three-level nested layout chain (`storefront` then `catalog` then `[category]`) wires the rest of the page tree.
+The example focuses on the file-router and DI subsystems of next-dj. It dogfoods the core `DQuery[T]` provider that mirrors `DUrl[T]` for query-string parameters. Two domain providers, `DFilters` and `DPage`, build typed snapshots from `request.GET` with `DFilters` reusing `QueryParamProvider` for the brand list. A `cached_search` helper is keyed by a stable hash of the filter set. An `active_filters` context processor surfaces a chip strip with a precomputed drop URL per chip. A three-level nested layout chain (`storefront` then `catalog` then `[category]`) wires the rest of the page tree.
 
 ## What you will see
 
@@ -32,7 +32,7 @@ uv run python manage.py runserver      # http://127.0.0.1:8000/
 uv run pytest
 ```
 
-Tailwind loads via the Play CDN in [`catalog/storefront/layout.djx`](catalog/storefront/layout.djx). No Node, no build step. Components carry co-located CSS and JS that the static collector picks up, deduplicates, and emits exactly once per page. The results list lives in a `catalog-results` zone, so the filter panel auto-submits as you type and the listing grows on scroll without a full reload. The `filter_panel` component ships a small `component.js` that runs live constraint validation on the search field (minimum 3 characters) through the native Constraint Validation API, rewired through `Next.partial.onMount` so it survives a morphed panel. Every behaviour degrades to a plain GET when the runtime is absent.
+Tailwind loads via the Play CDN in [`marketplace/layout.djx`](marketplace/layout.djx). No Node, no build step. Components carry co-located CSS and JS that the static collector picks up, deduplicates, and emits exactly once per page. The results list lives in a `catalog-results` zone, so the filter panel auto-submits as you type and the listing grows on scroll without a full reload. The `filter_panel` component ships a small `component.js` that runs live constraint validation on the search field (minimum 3 characters) through the native Constraint Validation API, rewired through `Next.partial.onMount` so it survives a morphed panel. Every behaviour degrades to a plain GET when the runtime is absent.
 
 ## Walking the code
 
@@ -40,7 +40,7 @@ Tailwind loads via the Play CDN in [`catalog/storefront/layout.djx`](catalog/sto
 
 Search is idempotent. A bookmark of `?q=iphone&brand=Acme&page=2` should reproduce the same listing. That is the natural shape of `<form method="get">` posting back to the same page, so the live filter stays plain HTML. A form action earns its place only for a discrete jump that should sit in browser history, which is exactly the preset filter in section 8. [`catalog/storefront/catalog/_cards/filter_panel/component.djx`](catalog/storefront/catalog/_cards/filter_panel/component.djx) renders a regular HTML form. The `submit_url` value comes from [`catalog/storefront/catalog/_cards/filter_panel/component.py`](catalog/storefront/catalog/_cards/filter_panel/component.py) which reverses the current category page when scoped, otherwise the all-products listing. Pagination uses [`catalog/templatetags/catalog_qs.py`](catalog/templatetags/catalog_qs.py) to keep every other query parameter intact.
 
-### 2. The new `DQuery[T]` provider
+### 2. The `DQuery[T]` provider
 
 [`next/urls/markers.py`](../../next/urls/markers.py) ships a marker that mirrors `DUrl[T]` and reads `request.GET`. Any GET listing page can declare a typed parameter and skip the `request.GET.get(...)` plumbing.
 
@@ -124,7 +124,7 @@ The product detail page in [`catalog/storefront/catalog/[category]/[slug]/page.p
 
 `filter_panel` also ships [`component.js`](catalog/storefront/catalog/_cards/filter_panel/component.js). It runs live validation on the query field using the native Constraint Validation API. The `<input>` declares `minlength="3"`, so the browser already enforces the rule on submit and shows the `invalid:` Tailwind variant (rose border on a red-tinted background). The script layers a contextual help message on top: it reads `data-help-default` and `data-help-tooshort` from the input, calls `setCustomValidity()` with a tailored message ("Need 2 more — at least 3 characters in total"), and updates the help paragraph with three colour states (`text-slate-500` idle, `text-rose-600` too short, `text-emerald-600` valid). The empty string is treated as "no filter" so the user can clear the field without seeing an error.
 
-The script registers its work through `Next.partial.onMount`, not a `document.querySelectorAll` scan at load. The runtime runs the callback over the initial DOM and over every subtree it later inserts, so a panel that arrives in a morphed zone is wired the same way the first render was, with no listener orphaned by the swap. The script is injected via `{% collect_scripts %}` in [`storefront/layout.djx`](catalog/storefront/layout.djx).
+The script registers its work through `Next.partial.onMount`, not a `document.querySelectorAll` scan at load. The runtime runs the callback over the initial DOM and over every subtree it later inserts, so a panel that arrives in a morphed zone is wired the same way the first render was, with no listener orphaned by the swap. The script is injected via `{% collect_scripts %}` in [`marketplace/layout.djx`](marketplace/layout.djx).
 
 ### 7. Auto-submit and infinite scroll on the results zone
 
@@ -163,7 +163,7 @@ The default `sort=newest` is filtered out of the chip list to avoid permanent no
 
 ## Further reading
 
-- [`next/urls/markers.py`](../../next/urls/markers.py) ships both the `DUrl` provider for URL path segments and the new `DQuery` provider for query-string parameters. The narrative section lives in [`docs/content/topics/dependency-injection.rst`](../../docs/content/topics/dependency-injection.rst).
+- [`next/urls/markers.py`](../../next/urls/markers.py) ships both the `DUrl` provider for URL path segments and the `DQuery` provider for query-string parameters. The narrative section lives in [`docs/content/topics/dependency-injection.rst`](../../docs/content/topics/dependency-injection.rst).
 - [`next/pages/registry.py`](../../next/pages/registry.py) hosts the `_collect_inherited_context` walk used by `inherit_context=True`.
 - [`next/pages/context.py`](../../next/pages/context.py) hosts the `ContextByDefaultProvider` that injects inherited values into downstream callables by parameter name.
 - [`next/static/collector.py`](../../next/static/collector.py) hosts the static collector that deduplicates co-located component CSS.

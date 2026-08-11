@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from typing import ClassVar
 from unittest.mock import MagicMock
@@ -25,8 +26,8 @@ from next.forms import (
     ModelForm,
     RegistryFormActionBackend,
 )
-from next.forms.dispatch import (
-    FormActionDispatch,
+from next.forms.dispatch import FormActionDispatch
+from next.forms.dispatch.build import (
     _bind_form_for_post,
     _form_action_context_callable,
     _form_from_initial_data,
@@ -187,7 +188,7 @@ class TestFormActionDispatch:
     def test_ensure_http_response_variants(
         self, response_val, kwargs, expected_status, assert_extra, warns
     ) -> None:
-        """ensure_http_response: None, str, redirect-like, unknown, empty url."""
+        """Every handler return shape coerces into an HttpResponse."""
         if warns:
             with pytest.warns(RuntimeWarning, match="unsupported"):
                 resp = FormActionDispatch.ensure_http_response(response_val, **kwargs)
@@ -496,7 +497,7 @@ class TestFormDispatchRenderInvalidPageBranches:
             FormActionDispatch.dispatch(backend, request, "test_action", meta)
 
     def test_dispatch_no_form_class_no_handler_returns_400(
-        self, mock_http_request
+        self, mock_http_request, caplog
     ) -> None:
         """Dispatch with no form_class and no handler returns 400."""
         backend = RegistryFormActionBackend()
@@ -511,8 +512,29 @@ class TestFormDispatchRenderInvalidPageBranches:
             "file_path": _FAKE_FILE,
             "scope": "shared",
         }
+        with caplog.at_level(logging.WARNING, logger="next.forms.dispatch"):
+            response = FormActionDispatch.dispatch(backend, request, "no_op", meta)
+        assert response.status_code == 400
+        body = response.content.decode()
+        assert "'no_op'" in body
+        assert _FAKE_FILE not in body
+        assert _FAKE_FILE in caplog.text
+        assert "'no_op'" in caplog.text
+
+    def test_dispatch_no_target_without_file_path_names_the_action(
+        self, mock_http_request
+    ) -> None:
+        """The 400 body names the action even when the meta stores no file path."""
+        backend = RegistryFormActionBackend()
+        post = QueryDict(mutable=True)
+        request = mock_http_request(method="POST", POST=post, FILES=None)
+
+        meta = {"handler": None, "form_class": None, "uid": "fake_uid"}
         response = FormActionDispatch.dispatch(backend, request, "no_op", meta)
         assert response.status_code == 400
+        body = response.content.decode()
+        assert "'no_op'" in body
+        assert "declared in" not in body
 
 
 class TestDispatchOnValid:
@@ -696,7 +718,7 @@ class TestShapeResponseHook:
 
 
 class TestResolveFormClass:
-    """`_resolve_form_class`: type passthrough, factory call, error paths."""
+    """`_resolve_form_class` passes a class through, calls a factory, or raises."""
 
     def test_form_class_type_returned_as_is(self, mock_http_request) -> None:
         """A `Form` subclass returns `(cls, {})` without DI resolution."""

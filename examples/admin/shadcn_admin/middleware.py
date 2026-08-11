@@ -23,7 +23,7 @@ class AdminPermissionMiddleware:
         self.get_response = get_response
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
-        """Gate admin paths; let exempt prefixes pass through unchanged."""
+        """Gate admin paths and let exempt prefixes pass through unchanged."""
         path = request.path
         if (
             path.startswith(utils.ADMIN_PREFIX)

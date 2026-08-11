@@ -10,16 +10,18 @@ from django.forms import BaseForm, BaseFormSet, FileField
 from django.http import HttpResponse, HttpResponseRedirect
 from django.utils.http import url_has_allowed_host_and_scheme
 
-from next.forms.dispatch import ActionOutcome, ActionOutcomeKind, FormActionDispatch
+from next.forms.dispatch import FormActionDispatch
+from next.forms.dispatch.responses import ActionOutcome, ActionOutcomeKind
 from next.forms.origin import resolve_origin, resolve_url_to_match
 from next.forms.uid import FORM_ORIGIN_OVERRIDE_KEY
 from next.pages import page
 from next.static.scripts import csrf_payload
 
 from . import keys
+from .envelope import FormMeta
 from .headers import RESPONSE_ACTION, RESPONSE_FORM, partial_intent, set_partial_vary
 from .manager import partial_backend_manager
-from .patches import FormMeta, Patches, PatchResponse
+from .patches import Patches, PatchResponse
 from .registry import zones_of
 from .render import render_zone
 from .signals import field_validated

@@ -195,20 +195,18 @@ Login uses a plain `Form` (username and password) and authenticates manually ins
 
 ## What is in core for this example
 
-Five pre-existing pieces of next.dj's form layer plus one small core fix carry the example.
+Six pieces of next.dj's form layer carry the example.
 
-- **`@action(form_class=callable)`.** [`next/forms/dispatch.py`](../../next/forms/dispatch.py) accepts a callable beside a `Form` subclass. `_resolve_form_class` runs the factory through `resolver.resolve_dependencies` once per request, so admin pages produce a class shaped by `ModelAdmin.get_form()` on the fly.
+- **`@action(form_class=callable)`.** [`next/forms/dispatch/build.py`](../../next/forms/dispatch/build.py) accepts a callable beside a `Form` subclass. `_resolve_form_class` runs the factory through `resolver.resolve_dependencies` once per request, so admin pages produce a class shaped by `ModelAdmin.get_form()` on the fly.
 - **`{% form "action_name" %}`.** The tag takes a positional action name — a string literal or a context variable — plus optional `key="value"` HTML attributes rendered onto the opening `<form>` tag. `action`, `method`, and the `data-next-*` prefix are reserved for the framework. [`next/templatetags/forms.py`](../../next/templatetags/forms.py) compiles the value through `parser.compile_filter`, so the `admin_form` template keeps one `{% form %}` block and resolves `admin:add` or `admin:change` from `form_state.action_name` at render time, while [`action_bar`](shadcn_admin/_panels/action_bar/component.djx) passes `id=` and `class=` straight on the tag. The companion `{% action_url %}` tag resolves the dispatch URL by action name for hand-crafted forms — the topbar Sign out form in [`surfaces/layout.djx`](shadcn_admin/surfaces/layout.djx) uses it.
 - **`{% form key=... %}` distinguishes repeated forms.** A form rendered once per row shares one action UID, so `key=` writes `data-next-key` and the client morphs the submitted instance rather than the first. The change view's per-row `admin:inline_change` forms key on the child primary key. The `next.W070` system check flags a looped `{% form %}` that carries neither a `key=` nor a wrapping `zone=`.
-- **`action_dispatched` carries `form` and `url_kwargs`.** [`next/forms/dispatch.py`](../../next/forms/dispatch.py) sends both fields on every successful dispatch (the form is `None` for handlers without a `form_class`). [`admin_audit.signals.log_admin_action`](admin_audit/signals.py) reads them to write one `AdminActivityLog` row per dispatch without ever touching the handlers it observes.
+- **`action_dispatched` carries `form` and `url_kwargs`.** [`next/forms/dispatch/`](../../next/forms/dispatch/) sends both fields on every successful dispatch (the form is `None` for handlers without a `form_class`). [`admin_audit.signals.log_admin_action`](admin_audit/signals.py) reads them to write one `AdminActivityLog` row per dispatch without ever touching the handlers it observes.
 - **`Form.clean()` → `ValidationError` re-renders the origin page.** The same path the framework already uses for field-level errors lets `AdminForm.clean()` validate inline formsets and surface their errors on the bound form, with the user's typed data preserved.
 - **Virtual pages survive form re-render.** The dispatcher resolves the posted `_next_form_origin` URL against the URLconf and reads the page identity from the matched view, so a page that exists only as a `template.djx` directory (no `page.py` anchor) re-renders correctly on validation failure. That lets the add and change views in this example live as `template.djx`-only directories.
 
-Existing form-action code is unaffected. Passing a `Form` subclass and a quoted action name keeps the original control flow.
-
 ## Further reading
 
-- [`next/forms/decorators.py`](../../next/forms/decorators.py) and [`next/forms/dispatch.py`](../../next/forms/dispatch.py) for the `@action` factory contract.
+- [`next/forms/decorators.py`](../../next/forms/decorators.py) and [`next/forms/dispatch/`](../../next/forms/dispatch/) for the `@action` factory contract.
 - [`next/forms/signals.py`](../../next/forms/signals.py) for the `action_dispatched` / `form_validation_failed` payload contracts.
 - [`next/templatetags/forms.py`](../../next/templatetags/forms.py) for `{% form %}` argument compilation.
 - [`docs/content/topics/forms/actions.rst`](../../docs/content/topics/forms/actions.rst) for the form-action lifecycle, including the guards and the factory pattern used by sections 4 and 5 above.

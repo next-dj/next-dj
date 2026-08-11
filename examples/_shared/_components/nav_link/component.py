@@ -44,10 +44,8 @@ def href(
 ) -> str:
     """Resolve the anchor target from ``url_name`` or a literal ``url``.
 
-    Pass ``url_name`` for named routes; combine with ``url_kwargs`` or
-    ``url_args`` when the URL pattern has converters. Pass ``url``
-    directly for literal hrefs or values precomputed via
-    ``{% url ... as %}``.
+    A literal ``url`` wins so a caller can precompute the href, and an
+    unreversible ``url_name`` degrades to ``#`` instead of raising.
     """
     if url:
         return url
