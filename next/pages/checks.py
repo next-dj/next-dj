@@ -601,11 +601,11 @@ def _check_context_function(
 ) -> CheckMessage | None:
     """Emit an error when keyless context callables are not annotated dict-like.
 
-    The check is static: executing user code at ``manage.py check`` time
-    is expensive and can hit databases that have not been migrated yet.
-    Callables without a return annotation are accepted — the runtime
-    emits a clear ``TypeError`` on first render if the result is not a
-    mapping.
+    The check is static, because executing user code at ``manage.py check``
+    time is expensive and can hit databases that have not been migrated yet.
+    Callables without a return annotation are accepted.
+    The runtime emits a clear ``TypeError`` on first render if the result is
+    not a mapping.
     """
     try:
         annotation = inspect.signature(func).return_annotation

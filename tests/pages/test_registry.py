@@ -175,7 +175,7 @@ class TestPageContextRegistry:
     ) -> None:
         """The ancestor walk is bounded by `_MAX_ANCESTOR_WALK_DEPTH`.
 
-        This test fabricates a 70-level deep tree — past the 64 cap —
+        This test fabricates a 70-level deep tree, past the 64 cap,
         and asserts the call returns in bounded time with an empty
         merged context rather than iterating all 70 ancestors.
         """

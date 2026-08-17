@@ -186,9 +186,8 @@ class KindRegistry:
     def inline_tag(self, kind: str) -> str | None:
         """Return the inline wrapper element for the kind or None.
 
-        A `None` result means inline bodies of this kind render
-        verbatim, preserving backward compatibility for custom kinds
-        registered without an inline wrapper.
+        A `None` result means the kind has no wrapper registered, so its
+        inline bodies render verbatim.
         """
         return self._inline_tags.get(kind)
 

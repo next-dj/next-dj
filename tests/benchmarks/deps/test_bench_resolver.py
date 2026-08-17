@@ -43,14 +43,14 @@ class TestBenchDependencyResolver:
 
     @pytest.mark.benchmark(group="deps.resolver")
     def test_resolve_five_params(self, benchmark) -> None:
-        """Five-parameter function — measures per-arg overhead."""
+        """Five-parameter function, measures per-arg overhead."""
         resolver = DependencyResolver()
         request = MagicMock()
         benchmark(resolver.resolve_dependencies, _handler_five, request=request)
 
     @pytest.mark.benchmark(group="deps.resolver")
     def test_resolve_mixed_markers(self, benchmark) -> None:
-        """Mix of ``Depends`` and ``Context`` markers — provider chain cost."""
+        """Mix of ``Depends`` and ``Context`` markers, provider chain cost."""
         resolver = DependencyResolver()
         resolver.dependency("theme")(lambda: "dark")
         request = MagicMock()

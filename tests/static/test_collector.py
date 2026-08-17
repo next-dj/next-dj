@@ -212,7 +212,7 @@ class TestHashContentDedup:
 
 
 class TestIdentityDedup:
-    """IdentityDedup keeps every registration — no deduplication."""
+    """IdentityDedup keeps every registration and deduplicates nothing."""
 
     def test_duplicates_are_kept(self) -> None:
         collector = StaticCollector(dedup=IdentityDedup())

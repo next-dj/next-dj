@@ -782,7 +782,7 @@ class TestSetSlotTag:
 
         Passing ``{% #slot "x" %}{% /slot %}`` at the call site sets
         ``slot_x`` to an empty string. The default body must not run in
-        that case — the caller asked for the slot to render empty.
+        that case, because the caller asked for the slot to render empty.
         """
         t = Template(
             '{% load components %}{% #set_slot "label" %}fallback{% /set_slot %}'

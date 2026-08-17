@@ -107,7 +107,7 @@ class TestBenchLoaderChain:
 
     @pytest.mark.benchmark(group="pages.loaders")
     def test_build_registered_loaders_warm(self, benchmark) -> None:
-        """Memoised lookup — should be O(1) after the first call."""
+        """Memoised lookup stays O(1) after the first call."""
         build_registered_loaders()
         benchmark(build_registered_loaders)
 
@@ -129,7 +129,7 @@ class TestBenchLoaderChain:
 
     @pytest.mark.benchmark(group="pages.loaders")
     def test_chain_miss_then_hit(self, tmp_path: Path, benchmark) -> None:
-        """No ``.djx`` sibling — chain must fall through to a layout."""
+        """No ``.djx`` sibling, so the chain falls through to a layout."""
         leaf = tmp_path / "d_0"
         leaf.mkdir()
         (leaf / "layout.djx").write_text("{% block template %}{% endblock template %}")
