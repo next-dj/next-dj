@@ -37,18 +37,18 @@ The Notes project from the tutorial demonstrates the full layout.
        forms.py
        admin.py
        migrations/
-       _components/
-         note_card/
-           component.djx
-           component.py
-           component.css
-           component.js
        pages/
          layout.djx
          layout.css
          page.py
          template.djx
          template.css
+         _components/
+           note_card/
+             component.djx
+             component.py
+             component.css
+             component.js
          notes/
            layout.djx
            [id]/
@@ -67,13 +67,18 @@ The Notes project from the tutorial demonstrates the full layout.
 Three things are special about this tree.
 
 - ``pages/`` is the page root. Every directory below it becomes a URL.
-- ``_components/`` lives at the application root. Every directory below it becomes a reusable component.
+- ``_components/`` lives inside the page root. Every directory below it becomes a reusable component.
 - ``static/`` keeps project-wide assets that are not co-located with a page or a component.
+
+The file router registers each ``_components/`` folder it meets while walking the page tree, and it skips that folder as a route.
+A ``_components/`` folder placed beside ``pages/`` rather than inside it is never walked, so the ``{% component %}`` tag finds nothing there.
+A component root outside the page tree needs an explicit ``DIRS`` entry on the component backend, covered in :doc:`/content/howto/share-components-across-projects`.
 
 Configuration touchpoints
 -------------------------
 
-Three settings keys point at the directories above.
+Two ``NEXT_FRAMEWORK`` keys point at the directories above.
+The project ``static/`` directory is reached through Django ``STATICFILES_DIRS`` instead, see *Static files* below.
 
 .. code-block:: python
    :caption: config/settings.py
@@ -98,7 +103,7 @@ Three settings keys point at the directories above.
    }
 
 ``PAGES_DIR`` names the page root inside each application.
-``COMPONENTS_DIR`` names the component root inside each application.
+``COMPONENTS_DIR`` names the component folder the router looks for inside that page root.
 The names are convention.
 You can choose anything that fits your domain.
 

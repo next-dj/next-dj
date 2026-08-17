@@ -8,6 +8,7 @@ Module summary
 
 ``next.backends`` holds the shared loading and lazy management helpers behind every settings-driven backend family.
 ``load_backends`` instantiates a configured backend list, ``resolve_backend_class`` resolves one dotted ``BACKEND`` path against a family root, and ``SingleBackendManager`` lazily builds the single backend named by one settings key.
+``backend_entries`` returns the dict entries under one list-valued framework settings key, dropping any entry that is not a dict.
 ``BackendRoot`` is the type alias each family uses to pass its abstract root class to these helpers.
 
 The two loading paths differ in how they treat a misconfigured entry.
@@ -18,6 +19,8 @@ Public API
 ----------
 
 .. autofunction:: next.backends.load_backends
+
+.. autofunction:: next.backends.backend_entries
 
 .. autofunction:: next.backends.resolve_backend_class
 

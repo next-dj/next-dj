@@ -22,17 +22,21 @@ The form tag
    {% endform %}
 
 The first argument is the action name as a quoted string or a context variable that resolves to a string.
+An unquoted argument is looked up as a template variable, so a bare ``{% form contact_form %}`` resolves to an empty name and raises ``FormActionNotFoundError`` at render time.
+Quote the action name to pass it as a literal.
+``{% action_url %}`` raises the same error for the same mistake.
 An opening tag without the action name raises ``TemplateSyntaxError`` at parse time.
 Optional ``key="value"`` arguments after the name render as HTML attributes on the ``<form>`` element (see `HTML attributes`_ below), except for the reserved partial param names (see `Partial attributes`_ below).
 
 The tag does the following.
 
-1. Looks up the action name in the registry, preferring a page-scoped match for the current page, then falling back to shared scope.
+1. Looks up the action name against the nearest anchor, the enclosing ``component.py`` first when the template is a component's own, then the current page's ``page.py``, then the shared registry.
 2. Resolves the stable dispatch URL for that action.
 3. Emits ``<form action="..." method="post" data-next-action="...">`` plus an automatic ``enctype="multipart/form-data"`` for a multipart form, then any attributes passed to the tag.
 4. Emits a hidden ``csrfmiddlewaretoken`` input.
 5. Emits a hidden ``_next_form_origin`` input set to ``request.path``, used by ``redirect_to_origin`` on success and resolved through the URLconf on the error re-render.
-6. Publishes ``form`` inside the block body (see `The form Variable`_ below).
+6. Publishes ``form`` inside the block body (see `The form variable`_ below).
+7. Publishes ``wizard`` alongside ``form`` when the action is a ``FormWizard``.
 
 On the validation-error re-render the request targets the dispatch endpoint, so the tag re-emits the posted origin of the original page instead of ``request.path``.
 On a wizard advance in a partial render the shaping layer sets the ``FORM_ORIGIN_OVERRIDE_KEY`` context key to the next step URL, and that value wins over the posted origin.
@@ -79,7 +83,7 @@ The tag compiles each one to a ``data-next-*`` attribute the client runtime read
      - Carries
    * - ``validate``
      - ``data-next-validate``
-     - The client-side validation mode for the form.
+     - The switch that turns on client-side validation on blur. The value is not read, so omitting the argument is the only way to keep validation off.
    * - ``trigger``
      - ``data-next-trigger``
      - The event that triggers a partial submission.
@@ -107,8 +111,10 @@ Pass each as a ``key="value"`` argument like any other, and the value resolves a
 Scope resolution
 ----------------
 
-When the template renders inside a page, the tag first looks for a page-scoped registration whose file matches the current ``page.py``.
-If no page-scoped match exists the tag falls back to the first registration of that name and accepts it only when its scope is shared.
+The tag resolves a name against the nearest anchor first.
+Inside a component's own template the chain is the component's ``component.py``, then the enclosing page's ``page.py``, then the shared registry.
+In a page or layout template the chain is the page's ``page.py``, then the shared registry.
+An anchor match only counts when the registration carries page scope, so a shared registration answers a lookup that no anchor claims.
 This means a page-local ``NoteForm`` takes precedence over a shared ``NoteForm`` with the same derived name.
 
 The ``form`` variable
@@ -126,6 +132,13 @@ Re-rendered page after a failing POST.
 Form-less action.
    When the action is a plain function registered with ``@action`` (no form class), ``form`` resolves to ``None``.
    The block body should not attempt to render field widgets in this case.
+
+Published by a context callable.
+   When the render context already holds a variable named after the action and that object exposes a ``form`` attribute, the tag uses it verbatim instead of building the form itself.
+   Declare it with ``@context("<action_name>")`` returning ``SimpleNamespace(form=...)`` to control construction, as :doc:`formsets` shows.
+
+Wizard action.
+   ``form`` is the current step's form and ``wizard`` is the live ``FormWizard`` instance, see :doc:`wizard`.
 
 Captured URL parameters
 -----------------------
@@ -257,7 +270,7 @@ Form in a component
 ~~~~~~~~~~~~~~~~~~~
 
 A component template hosts ``{% form %}`` exactly like a page template.
-The framework injects ``current_page_module_path`` from the surrounding page, so the action lookup scopes to the correct page.
+A form declared in the component's own ``component.py`` resolves against that component first, and any other name falls through to the enclosing page's ``page.py`` and then the shared registry, see :doc:`actions`.
 
 Form in a layout
 ~~~~~~~~~~~~~~~~

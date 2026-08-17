@@ -117,6 +117,53 @@ The framework supplies ``request`` to any parameter annotated ``HttpRequest``, a
 A parameter named after a URL segment is filled from the URL, and the rest resolve through providers.
 See :doc:`actions` for the full signature rules.
 
+.. _topics-forms-overview-cbv-map:
+
+Coming from Django class-based views
+------------------------------------
+
+A ``FormView`` splits its behaviour across overridden methods and mixins.
+next.dj keeps the same set of decisions and moves them onto the form class itself, either as a ``Meta`` key or as a method the dependency injector calls.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 40 30
+
+   * - Django class-based view
+     - next.dj
+     - Detail
+   * - ``form_valid(form)``
+     - ``on_valid``, a method on the form class
+     - :doc:`actions`
+   * - ``form_invalid(form)``
+     - Nothing to write, the dispatcher re-renders the origin page with the bound form and its errors
+     - :doc:`validation-rerender`
+   * - ``success_url``
+     - ``Meta.success_url``, which the default ``on_valid`` follows
+     - :ref:`topics-forms-actions-success`
+   * - :class:`~django.contrib.messages.views.SuccessMessageMixin` with ``success_message``
+     - ``Meta.success_message``, interpolated over ``cleaned_data``
+     - :ref:`topics-forms-actions-success`
+   * - :class:`~django.contrib.auth.mixins.LoginRequiredMixin`
+     - ``Meta.login_required = True``
+     - :ref:`topics-forms-actions-guards`
+   * - :class:`~django.contrib.auth.mixins.PermissionRequiredMixin` with ``permission_required``
+     - ``Meta.permission_required``, a string or an iterable of strings
+     - :ref:`topics-forms-actions-guards`
+   * - :class:`~django.contrib.auth.mixins.UserPassesTestMixin` with ``test_func``
+     - ``check_permissions``, a dependency-injected classmethod evaluated per request
+     - :ref:`topics-forms-actions-dynamic-guards`
+   * - ``get_form_kwargs``
+     - A ``form_class`` factory returning a ``(FormClass, init_kwargs)`` tuple
+     - *Dynamic form classes* in :doc:`actions`
+   * - ``get_initial``
+     - ``get_initial``, a classmethod with the same dependency-injected signature
+     - *Handling submissions* above
+
+Two differences are worth stating rather than inferring.
+The ``Meta`` guard keys are static and freeze at import time, while ``check_permissions`` and its object-level sibling ``has_object_permission`` run per request and may read the database.
+The guards also protect the POST endpoint rather than the page, so rendering a guarded form on a public page is allowed and hiding it in the template is the author's job.
+
 Shared dependency cache
 -----------------------
 

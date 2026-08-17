@@ -54,6 +54,9 @@ The tag takes no arguments.
 Assets of kind ``js`` and kind ``module`` both land in the ``scripts`` slot.
 Place the tag at the end of ``<body>`` so the document body is parsed before scripts execute.
 
+Under the default ``AUTO`` script injection policy this tag is also where the ``next.min.js`` runtime and the ``Next._init`` call land, so a layout chain without it leaves ``window.Next`` undefined.
+See :ref:`Runtime script options <topics-static-js-runtime-script-options>` for the policy that controls the injection.
+
 use_style
 ---------
 
@@ -81,6 +84,11 @@ The asset is prepended to the collector the same way as ``use_style``.
 The tag always registers the URL under kind ``js``, so it cannot publish an ECMAScript module.
 For a ``.mjs`` dependency, list the URL in the page or component ``scripts`` module-level variable instead, see :doc:`co-located-files`.
 
+.. note::
+
+   The four registration tags need the request-scoped collector that the page pipeline puts in the template context.
+   A template rendered outside that pipeline, for example through ``render_to_string`` in a plain view, silently registers nothing and emits nothing.
+
 Inline blocks
 -------------
 
@@ -107,6 +115,11 @@ The author writes only the inner CSS or JS, not the surrounding tag.
 The block body is rendered with the current template context, so inline blocks can interpolate page variables.
 Blank only blocks are dropped.
 The collector deduplicates inline entries by the rendered body, so two identical blocks collapse to one.
+
+.. note::
+
+   A block form needs the same request-scoped collector as the void form.
+   A template rendered outside the page pipeline registers nothing and emits nothing, and the body never reaches the document.
 
 Placement rules
 ---------------

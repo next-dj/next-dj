@@ -8,6 +8,7 @@ Goal
 
 This part wires create, edit, and delete flows for notes through the form and action subsystem.
 By the end the index has a create form, each detail page has edit and delete buttons, and every submission lands in a typed action handler that the framework dispatches automatically.
+The delete action also carries an access guard, because an action endpoint is reachable without the page that renders its form.
 
 Prerequisites
 -------------
@@ -29,9 +30,8 @@ Create ``notes/forms.py``.
 .. code-block:: python
    :caption: notes/forms.py
 
-   from django.http import HttpRequest
    from notes.models import Note
-   from next.forms import BooleanField, Form, ModelForm, redirect_to_origin
+   from next.forms import BooleanField, Form, ModelForm
 
    class CreateNoteForm(ModelForm):
        class Meta:
@@ -41,19 +41,14 @@ Create ``notes/forms.py``.
    class DeleteNoteForm(Form):
        confirm = BooleanField(required=True)
 
-       def on_valid(self, request: HttpRequest):
-           return redirect_to_origin(request)
-
 ``next.forms.ModelForm`` and ``next.forms.Form`` are the framework form base classes.
-Subclassing either one auto-registers the form.
+Subclassing either one auto-registers the form as an :term:`action`.
 The action name is derived from the class name in ``snake_case``.
 ``CreateNoteForm`` registers as ``create_note_form`` and ``DeleteNoteForm`` registers as ``delete_note_form``.
+
 Override ``on_valid`` to run code after the form passes validation.
-The default ``on_valid`` on ``ModelForm`` calls ``self.save()`` then redirects back.
-``redirect_to_origin`` sends the visitor back to the page that rendered the form.
-See the :term:`origin page` glossary entry.
-``next.forms`` re-exports the common Django form fields and widgets used in this tutorial, so ``BooleanField`` and the rest are importable from one place.
-Import other fields directly from :mod:`django.forms` when you need them.
+The default ``on_valid`` saves a ``ModelForm`` and redirects back to the page that rendered the form, the :term:`origin page`.
+Common Django fields and widgets are re-exported from ``next.forms``, see :doc:`/content/ref/forms`.
 
 Register context for the index page
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -229,6 +224,13 @@ The ``{% form %}`` tag emits the framework fields itself.
 ``csrfmiddlewaretoken`` carries the CSRF token and ``_next_form_origin`` records the page URL, such as ``/notes/7/``.
 The dispatcher resolves that path against the URLconf, which recovers the captured ``id`` through the URL converter.
 The action handler therefore resolves ``DUrl["id", int]`` without any extra argument on the tag.
+
+.. warning::
+
+   ``_next_form_origin`` is submitted by the client like every other field.
+   The dispatcher checks only that the value is a same-site path, never that the visitor is allowed to act on the page it names.
+   Every URL segment recovered from the origin is untrusted input, so an action that mutates a row guards itself.
+
 Add the delete handler to the detail page.
 ``DeleteNoteForm`` is declared in ``notes/forms.py`` and registers automatically at startup via autodiscovery.
 The detail ``page.py`` only needs to add its own context.
@@ -247,8 +249,8 @@ The detail ``page.py`` only needs to add its own context.
    def fetch_note(note_id: DUrl["id", int]) -> Note:
        return get_object_or_404(Note, pk=note_id)
 
-``DeleteNoteForm.on_valid`` handles the delete.
-Update ``notes/forms.py`` to add the full import block and the delete logic.
+``DeleteNoteForm.on_valid`` handles the delete, and ``Meta.login_required`` guards it.
+Update ``notes/forms.py`` to add the full import block, the guard, and the delete logic.
 The complete file now looks like this.
 
 .. code-block:: python
@@ -269,11 +271,65 @@ The complete file now looks like this.
    class DeleteNoteForm(Form):
        confirm = BooleanField(required=True)
 
+       class Meta:
+           login_required = True
+
        def on_valid(self, request: HttpRequest, note_id: DUrl["id", int]):
            get_object_or_404(Note, pk=note_id).delete()
            return HttpResponseRedirect(reverse("next:page_"))
 
+An action is dispatched at ``/_next/form/<uid>/``, outside the page URL space, so nothing on the detail page protects it.
+``Meta.login_required`` is the declarative guard for that endpoint, and the dispatcher enforces it before it builds the form.
+An anonymous POST is redirected to ``LOGIN_URL`` with ``next`` set to the posted origin, and ``on_valid`` never reaches the database.
+Without the guard any visitor deletes the note named by the origin they post.
+
+The static guard decides who may call the action.
+A multi-user version of Notes also has to decide who owns the row, which is what the ``has_object_permission`` hook answers.
+See :ref:`topics-forms-actions-guards` for the full guard contract and :doc:`/content/howto/enforce-object-level-permissions` for the owner check.
+
+Sign in before deleting
+~~~~~~~~~~~~~~~~~~~~~~~
+
+The guard needs somewhere to send an anonymous visitor.
+``django.contrib.auth`` is already installed from :doc:`install`, so its built-in views cover the login page.
+Mount them above the file router and send a successful login back to the index.
+
+.. code-block:: python
+   :caption: config/urls.py
+
+   from django.urls import include, path
+
+   urlpatterns = [
+       path("accounts/", include("django.contrib.auth.urls")),
+       path("", include("next.urls")),
+   ]
+
+.. code-block:: python
+   :caption: config/settings.py, one added line
+
+   LOGIN_REDIRECT_URL = "/"
+
+The login view renders ``registration/login.html``, which the application supplies through the ordinary Django template loader.
+
+.. code-block:: jinja
+   :caption: notes/templates/registration/login.html
+
+   <form method="post">
+     {% csrf_token %}
+     {{ form.as_div }}
+     <button type="submit">Sign in</button>
+   </form>
+
+Create an account and use it to sign in.
+
+.. code-block:: bash
+   :caption: shell
+
+   uv run python manage.py createsuperuser
+
+Open ``http://127.0.0.1:8000/accounts/login/`` and sign in with that account.
 Submit the delete button on a note and the detail page redirects to the index, which no longer lists that note.
+An anonymous visitor who posts the same form lands on the login page instead, and the note survives.
 
 How re-render works
 ~~~~~~~~~~~~~~~~~~~
@@ -299,6 +355,9 @@ The Notes application is functionally complete.
      forms.py
      models.py
      migrations/
+     templates/
+       registration/
+         login.html
      pages/
        layout.djx
        page.py
@@ -320,6 +379,7 @@ The Notes application is functionally complete.
 
 Users can create, view, edit, and delete notes.
 Every action goes through a typed action handler that receives the validated form and any DI markers it asks for.
+The delete action requires a signed-in user, and the create and edit actions are still open to anyone who reaches their endpoints.
 
 Common pitfalls
 ---------------
@@ -336,6 +396,10 @@ Edit form does not show the existing data.
    The ``{% form %}`` tag builds the form for the named action, so a plain ``@context("form")`` value never reaches it.
    Pass a ``form_class`` factory callable to ``@action`` that resolves the URL ``id`` and returns the form class with the bound ``instance``.
 
+Delete lands on the login page instead of deleting.
+   ``DeleteNoteForm`` declares ``Meta.login_required``, so the dispatcher redirects an anonymous POST to ``LOGIN_URL``.
+   Sign in at ``/accounts/login/`` and submit the form again.
+
 See :doc:`/content/faq/troubleshooting` for the full catalog of errors and fixes.
 
 Next steps
@@ -349,3 +413,4 @@ The next part shows how to test the pages and how to use the development server 
    :doc:`tutorial05` writes end-to-end tests with ``NextClient`` and ``SignalRecorder``.
    :doc:`/content/topics/forms/index` covers actions, formsets, and re-render mechanics in depth.
    :doc:`/content/topics/forms/validation-rerender` explains the dispatch pipeline.
+   :doc:`/content/security/overview` covers the access model behind the delete guard.

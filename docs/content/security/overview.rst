@@ -74,7 +74,9 @@ Origin spoofing.
 
 Open redirect.
    ``HttpResponseRedirect`` accepts any URL.
-   Validate destinations before passing user input into a redirect target.
+   Validate destinations with ``django.utils.http.url_has_allowed_host_and_scheme`` before passing user input into a redirect target.
+   A routing check is not enough, because a protocol-relative value such as ``//evil.com`` can resolve against a wildcard route and still leave the site.
+   See :doc:`di-and-untrusted-input` for the worked pattern.
    The partial ``redirect(href, external=True)`` patch is the same escape hatch on the client side, see `Server-authored redirects`_.
 
 Object-level authorization.

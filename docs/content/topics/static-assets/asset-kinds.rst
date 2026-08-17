@@ -10,7 +10,7 @@ The framework ships three kinds and lets projects register more.
    :local:
    :depth: 2
 
-Built in kinds
+Built-in kinds
 --------------
 
 ``register_defaults`` registers three kinds at startup through ``next.static.default_kinds``.
@@ -37,7 +37,7 @@ Built in kinds
      - ``render_module_tag``
 
 The static subsystem does not privilege CSS or JS in core code.
-The three built in kinds register through the same public API that a project uses for a new kind.
+The three built-in kinds register through the same public API that a project uses for a new kind.
 
 The registry
 ------------
@@ -155,23 +155,8 @@ The verb travels in the ``load`` field of the manifest entry, see :doc:`/content
 A kind is loadable on a partial render when it registers one of those three renderers, whatever the kind is named.
 The ``jsx`` kind registered above with ``render_module_tag`` therefore loads on a partial render exactly as ``module`` does.
 
-The form the asset travels in decides the verb as well.
-A URL-form asset takes the verb of its renderer.
-An inline body keeps that verb only when the kind wraps it in the element the runtime builds, ``style`` for the ``link`` verb and ``script`` for the ``script`` verb.
-The ``module`` verb builds a typed ``<script type="module">`` that no ``inline_tag`` names, so an inline body under ``render_module_tag`` carries no verb, and neither does the inline body of a kind registered without an ``inline_tag``.
-Such a body reaches the browser on a full page render, which emits it verbatim, and is skipped on a partial render, so the two renders agree on the element that holds it.
-When a kind's ``inline_tag`` names an element different from the one its renderer's verb builds, its URL form still travels in a patch while its inline bodies stay on the full render.
-The ``next.W076`` check reports such a kind.
-
-The rule the two sides follow reads in three parts.
-The server derives the verb from the renderer registered for the kind and writes it into the entry.
-A URL-form entry that reaches the client with no ``load`` field falls back to the verb implied by the name of a built-in kind, ``link`` for ``css``, ``script`` for ``js``, and ``module`` for ``module``.
-An entry carrying an inline body takes no such fallback, and without an explicit ``load`` field it is dropped rather than wrapped in an element the full render would not build.
-
-A kind registered with a custom renderer, such as the ``render_babel_tag`` example, carries no verb.
-Its assets render on a full page render and are skipped on a partial render, because the runtime has no element to build for them.
-The ``next.W074`` system check reports every such kind at ``manage.py check``.
-Register the kind with one of the three bundled renderers when its assets must also arrive through a patch envelope.
+An inline body additionally needs the ``inline_tag`` that the renderer's verb builds, ``style`` for the ``link`` verb and ``script`` for the ``script`` verb, and a body without it reaches the browser on a full page render only.
+The wire format of the ``load`` field and the client fallback live in the partial rendering reference.
 
 Placeholder slots
 -----------------

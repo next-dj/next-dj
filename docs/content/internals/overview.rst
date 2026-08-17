@@ -124,15 +124,18 @@ Subsystem dependencies
 
 The dependency graph between subsystems is shallow.
 
-- ``next.conf`` has no internal dependencies and sits at the bottom.
+- ``next.conf`` sits at the bottom.
+  Its ``defaults`` and ``settings`` modules import nothing from the framework, and only its ``checks`` module reaches up to ``next.checks``.
 - ``next.deps`` imports nothing from the framework and sits at the bottom next to ``next.conf``.
 - ``next.ports`` imports no subsystem at all and declares the protocols one subsystem calls another through.
-- ``next.pages`` and ``next.components`` depend on ``next.conf`` and ``next.deps``.
+- ``next.pages`` depends on ``next.conf`` and ``next.deps``, and reaches ``next.static`` and ``next.urls`` only through deferred call-site imports.
+- ``next.components`` depends on ``next.conf`` and ``next.deps``, and adds a module-level dependency on ``next.pages.watch`` so the watcher and the checks share one page-tree reading.
 - ``next.static`` depends on ``next.conf``, ``next.pages``, and ``next.components``, whose trees its discovery and staticfiles finder walk.
 - ``next.forms`` depends on ``next.conf``, ``next.pages``, ``next.deps``, ``next.components``, and ``next.static``, the last two through the component-widget binding.
 - ``next.pages`` and ``next.forms`` reach partial shaping through the ``next.ports`` slot rather than through ``next.partial``, so neither imports the partial subsystem on the request path.
 - ``next.urls`` depends on ``next.conf``, ``next.deps``, ``next.pages``, ``next.components``, and ``next.forms``.
-- ``next.partial`` depends on ``next.conf``, ``next.pages``, ``next.components``, ``next.static``, and ``next.forms`` to render zones and shape patches, and touches ``next.urls`` only in its system checks.
+- ``next.partial`` depends on ``next.conf``, ``next.pages``, ``next.static``, and ``next.forms`` to render zones and shape patches, and reads ``next.templatetags.forms`` in its system checks.
+  It touches ``next.urls`` only in those checks, under ``TYPE_CHECKING``.
 - ``next.server`` depends on ``next.conf``, ``next.pages``, ``next.urls``, and ``next.components``, the subsystems whose trees it watches.
 - ``next.testing`` depends on the page, component, form, dependency, static, and partial subsystems to drive isolation and rendering helpers.
 - ``next.apps`` depends on every subsystem.
@@ -150,7 +153,7 @@ Each subsystem keeps a shallow module layout, and a submodule becomes a package 
    * - Subsystem
      - Submodules
    * - ``next.pages``
-     - ``manager``, ``registry``, ``loaders``, ``context``, ``processors``, ``checks``, ``signals``, ``watch``.
+     - ``manager``, ``registry``, ``loaders``, ``context``, ``processors``, ``scan``, ``checks``, ``signals``, ``watch``.
    * - ``next.components``
      - ``manager``, ``registry``, ``scanner``, ``loading``, ``renderers``, ``context``, ``facade``, ``info``, ``backends``, ``watch``, ``checks``, ``signals``.
    * - ``next.urls``

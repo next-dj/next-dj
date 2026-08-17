@@ -109,20 +109,23 @@ The provider matches the bare ``DTenant`` annotation when a request carries a te
 
 Unlike ``DFlag[Flag]``, ``DTenant`` is matched by class identity rather than ``get_origin``, so it carries no type parameter and the provider compares ``param.annotation`` to the class directly.
 
-Import the module at the top of ``apps.py`` so the auto-registry wires the provider at startup.
-The ``ready`` hook does not need to re-run anything because ``RegisteredParameterProvider`` registers the provider as a side effect of class definition.
+Import the module from ``AppConfig.ready`` so the auto-registry wires the provider once the app registry is populated.
+``RegisteredParameterProvider`` registers the provider as a side effect of class definition, so importing the module is the whole registration step.
+A top-level import in ``apps.py`` also registers the provider, but only when the provider module reaches no model, so ``ready`` is the placement that always holds.
 
 .. code-block:: python
    :caption: notes/apps.py
 
    from django.apps import AppConfig
-   from notes import providers
-
-   _ = providers
 
    class NotesConfig(AppConfig):
        default_auto_field = "django.db.models.BigAutoField"
        name = "notes"
+
+       def ready(self) -> None:
+           from notes import providers  # noqa: PLC0415
+
+           _ = providers
 
 The ``_ = providers`` line documents the intentional side-effect import so a linter does not flag it as unused.
 
@@ -149,12 +152,12 @@ A ``@context(..., inherit_context=True)`` callable on the workspace root publish
 .. code-block:: python
    :caption: notes/workspaces/page.py
 
-   from notes.models import Note
+   from notes.models import Tenant
    from notes.providers import DTenant
    from next import context
 
    @context("tenant", inherit_context=True)
-   def tenant(active_tenant: DTenant) -> "Tenant":
+   def tenant(active_tenant: DTenant) -> Tenant:
        """Expose the active tenant under `tenant` to every workspace page."""
        return active_tenant
 

@@ -157,6 +157,23 @@ List the dotted path of the subclass under ``PAGE_BACKENDS``.
        ],
    }
 
+Register a backend that is not a file router
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A backend that subclasses ``RouterBackend`` directly rather than ``FileRouterBackend`` takes a shorter entry.
+
+.. code-block:: python
+   :caption: config/settings.py
+
+   NEXT_FRAMEWORK = {
+       "PAGE_BACKENDS": [
+           {"BACKEND": "wiki.backends.DatabaseRouterBackend"},
+       ],
+   }
+
+``RouterFactory`` calls the class with no arguments, so a backend that is not a file router reads its own configuration.
+The entry carries ``BACKEND`` and nothing else, and any other key reports ``next.E035``.
+
 Reload when the table changes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

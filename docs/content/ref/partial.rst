@@ -47,7 +47,7 @@ Framework machinery.
    ``ActionRef``, ``shape_validate``, and ``drain_messages`` live in ``next.partial.shaping``.
    ``PatchOpRegistry``, the ``patch_op_registry`` instance, and ``BUILTIN_OPS`` live in
    ``next.partial.registry``.
-   ``PartialShaperImpl``, the implementation the app binds into the ``next.ports`` slot at
+   ``PartialShaperImpl``, the implementation the app binds into the :doc:`next.ports <ports>` slot at
    startup, lives in ``next.partial.shaper``.
 
 Internal hooks.

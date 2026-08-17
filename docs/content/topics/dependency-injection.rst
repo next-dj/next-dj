@@ -96,6 +96,8 @@ equals the parameter name, then coerces the captured value to ``T``.
 A value that already satisfies ``T`` passes through untouched.
 A Django converter that pre-coerced the segment, such as ``[uuid:id]`` producing a :class:`~uuid.UUID`, reaches the handler in that shape.
 A failed parse falls back to the raw captured value rather than raising.
+A segment the route never captured resolves to ``None``, not to the parameter default, because the marker claims the parameter on its annotation alone.
+This differs from ``DQuery``, which falls back to the default when the key is absent.
 ``bool`` treats ``"1"``, ``"true"``, and ``"yes"`` as ``True`` and everything else as ``False``.
 ``date`` and ``datetime`` parse the ISO 8601 forms accepted by :meth:`date.fromisoformat <datetime.date.fromisoformat>` and :meth:`datetime.fromisoformat <datetime.datetime.fromisoformat>`.
 For wildcard ``[[name]]`` segments the captured value is the matched path string.
@@ -386,12 +388,9 @@ Resolution cache
 Each resolution pass wraps a per-render dependency cache in a fresh ``DependencyCache``.
 The wrapper is new per call, but the backing store is shared across every ``@context`` callable in one page render, so a ``Depends("name")`` value resolved by one callable is reused by the next.
 The cache memoises ``Depends("name")`` callables only, keyed by the registered name.
-Parameter providers run once per parameter per resolution pass and their results are not stored.
-A second context function that asks for the same ``DQuery`` or ``DUrl`` parameter triggers another provider call.
 
 A second context function in the same page render that asks for the same ``Depends("name")`` dependency receives the memoised value, not a fresh call.
 To share one value across several context functions in the same render, publish it through a named dependency such as ``Depends("active_tenant")``.
-The cache memoises named dependencies but not raw provider calls.
 See :doc:`/content/howto/share-context-across-pages` for a worked example.
 
 The cache lives for one form dispatch.

@@ -113,6 +113,13 @@ Register the backend by its dotted path.
 
 Send the matching ``Content-Security-Policy`` header from middleware.
 
+The runtime script and the nonce
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The backend covers the collected assets only.
+The ``next.min.js`` tag and the inline ``Next._init`` script come from the runtime script builder, which formats its templates once per process and cannot carry a per-request nonce.
+Under a strict CSP switch ``NEXT_JS_OPTIONS`` to the ``MANUAL`` policy and emit the three fragments from a template tag that reads the nonce off the request.
+
 Co-located JS
 -------------
 
@@ -158,3 +165,4 @@ See also
    :doc:`/content/topics/static-assets/backends` for backend customisation.
    :doc:`/content/deployment/static-files` for the production pipeline.
    :doc:`/content/topics/static-assets/js-context` for ``NEXT_JS_OPTIONS``, ``ScriptInjectionPolicy``, and CSP-related templates.
+   :ref:`Runtime script options <topics-static-js-runtime-script-options>` for the ``MANUAL`` policy and the script builder.

@@ -47,6 +47,7 @@ It pairs well with the runtime, because the nonced bootstrap script loads the as
 This is a recommendation, not a guarantee the framework can make for your deployment.
 A CSP is your policy.
 The framework carries the nonce and refuses to run inline patch scripts, which removes the two mechanisms a partial update could otherwise use to bypass a policy.
+A nonce policy without ``'unsafe-inline'`` also blocks an event-handler attribute a patch carries, which the applier does not remove.
 It does not author your policy, validate your directives, or promise that any particular policy is correct for your site.
 Treat ``'strict-dynamic'`` as a sensible default for a nonce-based policy and verify the resulting headers against your own threat model.
 

@@ -156,8 +156,9 @@ Local builds reveal anchor and cross reference issues quickly.
 System checks
 -------------
 
-Run ``uv run python manage.py check`` after every change that affects the API surface or the system checks.
+Run ``uv run python examples/admin/manage.py check`` after every change that affects the API surface or the system checks, because the framework itself ships no ``manage.py``.
 The output makes sure that no contributed check broke during development.
+See :doc:`/content/internals/contributing-notes` for the canonical description of that invocation.
 
 Linting the docs
 ----------------

@@ -7,7 +7,7 @@ Module summary
 --------------
 
 ``next.conf`` merges user ``NEXT_FRAMEWORK`` settings with framework defaults.
-It exposes the merged-settings object, the import helpers, the ``extend_default_backend`` helper, and the ``settings_reloaded`` signal.
+It exposes the merged-settings object, the ``DEFAULTS`` mapping and the ``USER_SETTING`` name, the import helpers, the ``extend_default_backend`` helper, the ``fail_loudly`` predicate that every fail-loud path reads, and the ``settings_reloaded`` signal.
 
 Public API
 ----------

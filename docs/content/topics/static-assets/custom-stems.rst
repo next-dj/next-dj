@@ -42,8 +42,14 @@ When to add a stem
 
 Add a stem when a project ships an asset under a filename that the default stems do not cover.
 
-- A ``page`` stem so that ``page.css`` is picked up alongside ``template.css``.
+- A ``page`` stem so that a project can name the page asset ``page.css`` instead of ``template.css``.
 - A ``vendor`` stem for third party assets inside a component folder.
+
+.. warning::
+
+   Two stems of one role collapse into a single logical static path, because the path is built from the directory and drops the stem.
+   A directory holding both ``template.css`` and ``page.css`` therefore ships ``template.css`` only, and the second file is dropped without a warning.
+   Register an extra stem as a rename, not as an addition.
 
 Registering a stem
 ------------------

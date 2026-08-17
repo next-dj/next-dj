@@ -21,7 +21,7 @@ It then runs six startup steps in a fixed order.
 ``autodiscover_forms()`` imports the ``forms`` submodule of every installed app so shared forms register before the first request arrives.
 It respects the ``FORM_AUTODISCOVER`` setting and is a no-op when that setting is ``False``.
 
-The sixth step binds the partial shaper into the ``next.ports`` slot that ``next.pages`` and ``next.forms`` read on every request.
+The sixth step binds the partial shaper into the :doc:`next.ports <ports>` slot that ``next.pages`` and ``next.forms`` read on every request.
 Binding it here keeps the page and form subsystems free of an import of ``next.partial``.
 
 Public API

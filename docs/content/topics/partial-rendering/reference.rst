@@ -66,7 +66,7 @@ The envelope around the list always carries the ``assets`` and ``form`` keys, se
      - ``detail: {}``
    * - ``toast``
      - ``toast()``
-     - Show a toast, sugar over ``event`` with a built-in container.
+     - Show a toast, sugar over ``event`` with a built-in container. The text is set as ``textContent`` and never parsed as HTML.
      - ``variant: "info"``
    * - ``layer.open``
      - ``layer_open()``
@@ -205,14 +205,19 @@ Server to client.
      - Every envelope
      - ``application/vnd.next.patches+json``, the marker the runtime keys on.
    * - ``Vary``
-     - Every partial-capable path
-     - ``X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-Version``, set by the framework, so a shared cache is not poisoned.
+     - Every partial response
+     - ``X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-Version``, set on every
+       envelope, on the 400 and 409 short-circuits, on a wizard advance, and on an
+       SSE stream, so a shared cache never hands one intent's envelope to another.
+       A full page render keeps its own headers untouched and carries no partial
+       ``Vary``, so a cache in front of a zoned page is configured for the page
+       rather than by the framework.
    * - ``X-Next-Version``
      - Every envelope
      - The current asset version.
    * - ``X-Next-Form: invalid``
      - An invalid form
-     - The existing invalid-form contract.
+     - The marker of an invalid submission, always the literal ``invalid``, stamped alongside ``X-Next-Action``.
    * - ``X-Next-Action``
      - An invalid form
      - The uid of the failed action.
@@ -229,21 +234,20 @@ Status codes
    * - 200 with an envelope
      - Patches, including an invalid form. A validation error is state, not an HTTP failure.
    * - 200 without an envelope
-     - The fetch passed through a redirect. The runtime performs a full navigation to ``response.url``.
+     - The fetch followed a redirect, a guard bounce or a login wall.
+       The runtime performs a full navigation to ``response.url``, once, under the navigate-once flag.
    * - 204
      - A success with no patch to apply, for example a wizard advance with no redirect target. The runtime applies nothing.
    * - 303
-     - A mutation succeeded without the runtime, the existing full cycle.
-   * - 302 without an envelope
-     - A guard redirect served outside the shaping path. The runtime navigates fully to the final URL.
+     - A mutation succeeded with no runtime on the page, the plain ``POST`` then ``303`` then ``GET`` cycle.
    * - 403 without an envelope
      - A guard denial or a CSRF failure served outside the shaping path. On a mutation the runtime
        stays in place and fires ``partial:error`` with the status and body. On a safe method it
        navigates fully.
    * - 400
-     - An intent that did not validate: an unknown zone, a bad origin, a zone in a dynamic page body.
+     - An intent that did not validate, such as an unknown zone, a bad origin, or a zone named on a dynamic page body.
    * - 404
-     - An unknown form uid, the existing behaviour.
+     - The request named a form uid the action registry does not hold.
    * - 409
      - A version mismatch on a safe method, with an empty body. The runtime
        fully visits the current URL. A mutation always runs, and a version
@@ -274,9 +278,10 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from its par
      - The zone address, written by the ``{% zone %}`` tag.
    * - ``data-next-lazy``
      - Lazy zone wrapper, infinite-scroll sentinel
-     - ``load`` or ``revealed``, the materialisation trigger. ``load`` fetches on
-       ``ready``, ``revealed`` waits for the viewport. On a pagination sentinel
-       ``revealed`` arms the observer that fires the merge GET. Any other value is
+     - ``load`` or ``revealed``, the materialisation trigger. On a zone wrapper
+       ``load`` fetches on ``ready`` and ``revealed`` waits for the viewport. On a
+       pagination sentinel the attribute only marks the link observable, either
+       value arms the observer that fires the merge GET. A value outside the two is
        ignored, with a console warning in dev.
    * - ``data-next-poll``
      - Zone wrapper
@@ -291,7 +296,10 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from its par
      - The action uid, written by ``{% form %}``, enables submit interception.
    * - ``data-next-validate``
      - ``<form>``
-     - Inline validation, source is the ``validate=`` tag parameter.
+     - Inline validation on blur, written from the ``validate=`` tag parameter. The
+       runtime keys off the presence of the attribute alone and never reads its value,
+       so every value behaves the same and there is no closed set to choose from. The
+       examples write ``blur`` because blur is the trigger.
    * - ``data-next-target``
      - ``<a>``, ``<form>``
      - Route the response into a zone. On a GET filter it names the zone to morph,
@@ -301,8 +309,10 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from its par
      - Filter ``<form>``, sort ``<select>``
      - The event that auto-submits a GET filter, ``input`` or ``change``. Submit and click interception are wired by ``data-next-action`` and ``data-next-merge``, not this attribute.
    * - ``data-next-debounce``
-     - With ``data-next-trigger``
-     - Debounce in milliseconds.
+     - With ``data-next-trigger``, or on a validating ``<form>``
+     - Debounce in milliseconds. On a filter it collapses a burst of keystrokes
+       into one GET, on a validating form it collapses a burst of blur probes into
+       one validate POST.
    * - ``data-next-merge``
      - Pagination link
      - ``append`` or ``prepend``, travels as ``X-Next-Merge``. Any other value is
@@ -337,10 +347,20 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from its par
      - Set by the runtime on every layer dialog, the styling hook for the modal shell.
    * - ``data-next-toasts``
      - Runtime toast container
-     - The toast tray, created by the runtime on the first ``toast`` and the styling hook for the stack.
+     - The toast tray, created by the runtime on the first ``toast`` and the styling
+       hook for the stack. The runtime also stamps ``aria-live="polite"`` on it, so a
+       replacement tray carries its own live region.
    * - ``data-next-toast``
      - Runtime toast item
-     - One toast, the value is the variant, the styling hook for a single notification.
+     - One toast, the value is the variant, the styling hook for a single
+       notification. The text is set as ``textContent`` and never parsed as HTML, so
+       a toast string cannot carry markup.
+
+.. warning::
+
+   ``data-next-validate`` carries no off switch, unlike the closed value sets of ``data-next-lazy`` and ``data-next-merge``.
+   Writing ``validate="off"`` on the tag turns inline validation on, because the rendered attribute is present either way.
+   Omit the ``validate=`` parameter to leave inline validation off.
 
 Lifecycle events
 ----------------
@@ -361,7 +381,8 @@ The ``next:mounted``, ``next:removed``, and ``next:morph-*`` node events live on
      - Detail
    * - ``ready``
      - No
-     - The existing core contract.
+     - The seeded client context, the same object ``Next.context`` exposes.
+       A listener added after the runtime is ready is replayed with it at once.
    * - ``context-updated``
      - No
      - ``{context, changed}``, where ``context`` is the whole merged store and
@@ -433,33 +454,85 @@ Client runtime
 
 The runtime exposes ``window.Next`` once the bundle loads.
 The surface is small, and every entry mirrors a seam the runtime already uses internally.
+A member whose name starts with an underscore is a test seam rather than part of that surface, so ``Next.partial._configure`` and ``Next.partial._reset`` are not application entry points.
 
 .. list-table::
    :header-rows: 1
-   :widths: 38 62
+   :widths: 32 20 48
 
    * - Member
+     - Returns
      - Purpose
    * - ``Next.on(event, listener)``
-     - Subscribe to a lifecycle event and receive a teardown function. A known event from the table above types its payload. A ``ready`` listener added after the runtime is ready fires at once.
+     - An unsubscribe function
+     - Subscribe to a lifecycle event. A known event from the table above types
+       its payload. A ``ready`` listener added after the runtime is ready fires
+       at once. A listener that throws is logged and the rest of the fan-out
+       still runs.
    * - ``Next.use(plugin)``
-     - Run a plugin function with ``Next`` and return its result, the registration point for an island adapter or a wire-format plugin.
+     - Whatever the plugin returns
+     - Run a plugin function with ``Next`` as its only argument, the registration point for an island adapter or a wire-format plugin.
    * - ``Next.context``
-     - A frozen snapshot of the client context the server seeded and the ``context`` verb merges into.
+     - A frozen copy of the client context
+     - A property rather than a call. Each read copies the store the server
+       seeded and the ``context`` verb merges into, so a held reference never
+       sees a later merge.
+   * - ``Next._init(context)``
+     - Nothing
+     - The bootstrap the injected init script calls once per page. It opens the
+       dev channel when the payload sets ``$dev`` to ``true``, seeds the context,
+       mounts the document, and fires ``context-updated`` then ``ready``.
    * - ``Next.partial.defineOp(name, handler)``
-     - Register a handler for a custom verb the server authors, dispatched through the same pipeline as the built-ins.
+     - Nothing
+     - Register a handler for a custom verb the server authors, dispatched through the same pipeline as the built-ins. A second registration under one name replaces the first.
    * - ``Next.partial.onMount(selector, callback)``
-     - A re-executable mount registry. The callback runs over the matching elements at load and over every matching element a later patch inserts.
+     - A teardown that unregisters the callback
+     - A re-executable mount registry. The callback runs over the matching
+       elements at load and over every matching element a later patch inserts,
+       and a registration made after the runtime is ready catches up over the
+       present document at once.
    * - ``Next.partial.parseHook(contentType, hook)``
-     - Register a parser that turns a foreign content type into an envelope before the apply pipeline, so a third party can emulate another wire format.
+     - Nothing
+     - Register a parser keyed by bare content type. The hook owns the response body before classification, so a foreign wire format becomes an envelope instead of a navigation.
+   * - ``Next.partial.setCsrf(csrf)``
+     - Nothing
+     - Replace the CSRF payload the next mutation submits, the seam a custom
+       login flow drives after rotating a token out of band. Passing
+       ``undefined`` clears it, and an envelope carrying a rotated token
+       overwrites it.
+   * - ``Next.partial.ready()``
+     - Nothing
+     - Seed the asset registry from the document, run the mount callbacks over it, then arm the triggers. The bootstrap calls it once, and a page calls it only when it drives the runtime by hand.
    * - ``Next.partial.apply(raw)``
-     - Parse and apply a wire envelope directly, the entry a parse hook or a test feeds.
+     - The parsed envelope
+     - Parse and apply a wire envelope directly, the entry a parse hook or a
+       test feeds. The return is the parsed envelope rather than a completion
+       signal, because a stylesheet the manifest brings gates the ops into a
+       continuation. A body that is not an object, or one carrying no
+       ``version``, raises a ``TypeError``.
    * - ``Next.partial.fetch(request)``
-     - Send one partial request through the wire's queues and locks.
+     - A promise
+     - Send one partial request through the wire's queues and locks. The promise
+       settles when the request finishes, and network, HTTP, and parse failures
+       surface as ``partial:error`` rather than as a rejection. A second
+       mutation on a uid already in flight settles at once without sending.
    * - ``Next.partial.layers``
-     - The layer stack for driving modals from script: ``open(opener, href, zone)``, ``close(detail)``, and ``size()``.
+     - The layer stack
+     - The live stack of open layers, for driving modals from script.
    * - ``Next.partial.sse``
-     - The stream registry: ``size()`` for the count of open connections and ``remember(id)`` to feed a request id into the echo ring.
+     - The stream registry
+     - The registry of open Server-Sent Events connections.
+
+The layer stack carries the members a page drives plus the seams the applier and the triggers call through it.
+``open(opener, href, zone)`` builds the dialog and its zone container, then returns a promise that resolves once the layer's first fetch lands, or rejects with that fetch's error after unwinding the half-built layer.
+A call naming neither an href nor a zone shows a bare shell, pushes no history entry, and resolves as soon as the shell is in the document.
+``close(detail)`` closes the top layer and returns nothing, accepting with a ``result`` key and dismissing with ``dismiss`` and ``reason``.
+``size()`` returns the number of open layers, ``toast(text, variant)`` appends one toast as ``textContent``, and ``urlFor(el)`` returns the URL of the page that owns an element, the address a poll tick re-GETs.
+``resolveZone``, ``resolveSelector``, ``busy``, and ``install`` are the resolution and instrumentation seams, reachable because the stack is one object rather than because a page drives them.
+
+The stream registry is narrower.
+``size()`` returns the count of open connections, ``remember(id)`` feeds a request id into the echo ring so the matching stream event drops, and ``scan(root)`` opens a stream for every ``data-next-sse`` container in an inserted subtree.
+The last two return nothing.
 
 The runtime's dev mode follows Django ``DEBUG``.
 Under the default ``auto`` script injection policy a full render seeds the ``$dev`` key of the init payload while ``DEBUG`` is on.
@@ -472,6 +545,17 @@ Dev also counts what the envelope boundary dropped, so a malformed op and a malf
 An ``ops`` or ``assets`` value that is not an array is dropped whole and earns its own console warning naming the field, since the per-entry counts would otherwise report nothing wrong.
 An asset whose insertion verb the envelope boundary cannot resolve is a ``console.debug`` skip naming its kind, because a kind with a custom renderer is a normal configuration rather than damage.
 A production page carries no ``$dev`` key, so it carries neither the measurements nor any of the console lines.
+
+How the bundle is built and shipped
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The runtime is written as TypeScript modules under ``next/client/``, with ``next.ts`` as the single entry point that mounts ``window.Next`` and pulls in the morph, apply, wire, layer, trigger, asset, and stream modules.
+``make build-js`` runs esbuild over that entry point, bundling and minifying it to ``next/static/next/next.min.js`` with a source map beside it, targeting ES2022.
+The compiled file is a build product rather than a tracked source file, and the packaging configuration lists it as a build artefact so a distribution carries it.
+
+Inside a project the file is an ordinary staticfiles asset of the ``next`` application, published under the path ``next/next.min.js``, which the script builder resolves through the active staticfiles storage before writing the preload hint and the script tag.
+A project therefore installs no Node toolchain of its own to serve the runtime, and the pipeline that fingerprints the rest of its static files fingerprints this one the same way.
+Continuous integration builds the bundle on every change and holds it to a fourteen kilobyte gzip budget, so growth past that point calls for a lazily loaded chunk rather than a larger single file.
 
 Intercepting modals
 -------------------

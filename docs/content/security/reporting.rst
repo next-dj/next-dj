@@ -5,6 +5,7 @@ Reporting a vulnerability
 
 This page covers how to report a security vulnerability in next.dj.
 The disclosure process is private and the maintainers acknowledge every report.
+The canonical policy is :repo:`SECURITY.md <blob/main/SECURITY.md>` in the repository, and this page restates it for the manual.
 
 .. contents::
    :local:
@@ -13,7 +14,7 @@ The disclosure process is private and the maintainers acknowledge every report.
 Where to report
 ---------------
 
-Use the private GitHub Security Advisory form at the project repository.
+Use the private :repo:`Security advisories <security/advisories>` form on the repository and click *Report a vulnerability*.
 The form accepts an encrypted description and lets the maintainers coordinate a patch before public disclosure.
 
 Public issues and pull requests are not the right channel.
@@ -35,7 +36,7 @@ A reproducible test case shortens the triage time considerably.
 What happens next
 -----------------
 
-The maintainers respond within five business days with an acknowledgement and an initial assessment.
+The maintainers acknowledge receipt within a few business days and follow up with an initial assessment.
 A fix is prepared and released once the assessment confirms the issue.
 A coordinated public disclosure happens after the fix is available.
 

@@ -22,7 +22,7 @@ Walkthrough
 Create the component folder
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The :doc:`component </content/topics/components>` backend looks for component folders under the configured root.
+The :term:`component` backend looks for component folders under the configured root.
 :doc:`install` set ``COMPONENTS_DIR`` to ``_components``, so a component named ``note_card`` lives at ``notes/pages/_components/note_card/``.
 The folder sits inside the page tree because the file router registers each ``_components/`` folder it walks past during page discovery.
 A ``_components/`` folder placed beside ``pages/`` rather than inside it is never discovered, and the ``{% component %}`` tag then renders nothing.
@@ -94,7 +94,7 @@ Place a CSS file next to ``component.djx`` and the :doc:`static pipeline </conte
      background: #f5f5f5;
    }
 
-The framework finds ``component.css`` by stem, the filename without its extension.
+The framework finds ``component.css`` by :term:`stem`, the filename without its extension.
 When a page renders a component that has co-located styles, the static collector adds the file to the current request slot.
 Asset discovery picks up files co-located with the component folder.
 See :doc:`/content/topics/components` for the full component model.

@@ -118,23 +118,17 @@ A ``<div>`` is not valid everywhere.
 Inside a ``<ul>``, a ``<select>``, or a ``<table>`` the parser would drop it, so name the wrapping element with ``tag=``.
 
 .. code-block:: jinja
-   :caption: a list zone and a table zone
+   :caption: a list zone
 
    {% zone "catalog-results" tag="ul" %}
-     {% for product in page_obj.products %}
+     {% for product in page_obj %}
        <li data-next-key="{{ product.pk }}">{% component "product_card" %}</li>
      {% endfor %}
    {% endzone %}
 
-   <table>
-     <thead>…</thead>
-     {% zone "audit-rows" tag="tbody" %}
-       {% for entry in entries %}
-         {% component "audit_row" %}
-       {% endfor %}
-     {% endzone %}
-   </table>
-
+Here ``page_obj`` is a Django :class:`~django.core.paginator.Page`, published by the paginated context callable of :ref:`topics-pages-pagination`.
+A ``Page`` iterates over its own rows, so the loop reads it directly.
+A table zone names ``tag="tbody"`` for the same reason, shown in the pagination scenario of :doc:`scenarios`.
 The wrapper carries ``data-next-zone`` regardless of the tag, so the zone stays addressable.
 
 Key your dynamic list rows
@@ -151,7 +145,7 @@ A row that carries both earns a console warning in dev, and the key wins.
 .. code-block:: jinja
    :caption: keyed rows
 
-   {% for product in page_obj.products %}
+   {% for product in page_obj %}
      <li data-next-key="{{ product.pk }}">{% component "product_card" %}</li>
    {% endfor %}
 
@@ -189,6 +183,8 @@ A few placements break a standalone zone render, and a system check catches each
 
 A zone name must be unique within a page's composed template, the layout chain plus the page template.
 A zone may not sit inside a ``{% for %}`` or a ``{% if %}``, because a standalone render does not see loop variables or the condition that gated the block.
+A zone may not sit directly inside a ``{% with %}`` either, because the with-bindings are not visible to a standalone zone render.
+This one is the warning ``next.W067`` rather than an error, so move the bindings into a context provider or inside the zone body.
 A ``lazy=`` zone needs a ``{% placeholder %}`` branch.
 A zone belongs to a page, not a component, so a ``{% zone %}`` in a component template is rejected.
 See :doc:`/content/ref/system-checks` for the full list and the check codes.

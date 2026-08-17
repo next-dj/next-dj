@@ -43,10 +43,15 @@ The render pipeline
 A request to ``/_next/form/<uid>/`` follows a fixed pipeline.
 
 1. The dispatcher resolves the action UID to its handler and form class.
-2. The form is constructed with POST data, uploaded files, and the initial data that ``get_initial`` returns.
-3. ``form.is_valid()`` runs.
-4. On valid form, the handler is called with the dependency-resolved parameters and its return value goes to the client.
-5. On invalid form, the dispatcher loads the origin page, reattaches the cached dependencies, and re-renders the template with ``form`` set to the bound failing form.
+2. The static ``ActionGuard`` runs, so a denied request never reaches application code, see :ref:`topics-forms-actions-guards`.
+3. The posted origin resolves to its page module and typed URL kwargs, and the shared dependency cache is installed on the request.
+4. The form class resolves through the dependency resolver and ``check_permissions`` runs on it, see :ref:`topics-forms-actions-dynamic-guards`.
+5. The form is constructed with POST data, uploaded files, and the initial data that ``get_initial`` returns.
+6. ``has_object_permission`` runs on the bound form.
+7. A request that names validate fields short circuits here with a field-level answer, and ``is_valid`` never runs for it.
+8. ``form.is_valid()`` runs.
+   On a valid form the handler is called with the dependency-resolved parameters and its return value goes to the client.
+   On an invalid form the dispatcher loads the origin page, reattaches the cached dependencies, and re-renders the template with ``form`` set to the bound failing form.
 
 The pipeline stays inside the same request.
 A failing form does not redirect, the user stays on the same URL.
@@ -106,7 +111,8 @@ The bound form variable
 On the re-rendered page the variable ``form`` is the bound form with errors.
 The template can render error messages inline with each field.
 
-On re-render the dispatcher always supplies the bound failing form under the action-named context key so the user sees the input that triggered the failure.
+On re-render the dispatcher supplies the bound failing form under the action-named context key whenever the origin page resolves to registered action meta and a composed template.
+When either is missing the bundled backend falls back to rendering the bare form, see :doc:`backends`.
 ``get_initial`` still runs on the POST bind to seed the form's ``initial``, but the submitted values win in the rendered fields.
 
 Multiple forms on the same page

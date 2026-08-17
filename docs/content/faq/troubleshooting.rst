@@ -273,12 +273,12 @@ Three common causes explain this.
 - The callable asks for data that is not in the request-scoped cache yet (for example the wrong phase of a form re-render).
   Compare your scenario with the lifecycle discussion in :doc:`/content/topics/dependency-injection`.
 
-To inspect what the resolver would actually inject, use ``resolve_call`` from ``next.testing`` in a shell or test.
+To inspect what the resolver would actually inject, use ``resolve_call`` from ``next.testing.deps`` in a shell or test.
 The snippet below uses ``fetch_note``, the ``@context("note")`` callable from the :doc:`tutorial </content/intro/tutorial02>` detail page.
 
 .. code-block:: python
 
-   from next.testing import resolve_call, make_resolution_context
+   from next.testing.deps import resolve_call
    from next.urls import DUrl
 
    def fetch_note(note_id: DUrl["id", int]):
@@ -289,7 +289,7 @@ The snippet below uses ``fetch_note``, the ``@context("note")`` callable from th
 
 Import the real ``fetch_note`` directly when the page module sits at an importable path.
 ``resolve_call`` returns the kwargs dict the resolver would pass to the callable.
-Use ``make_resolution_context`` when you need finer control over the request, form, URL kwargs, or context data supplied to the resolver.
+Use ``make_resolution_context`` from the same module when you need finer control over the request, form, URL kwargs, or context data supplied to the resolver.
 
 Custom marker not handled
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -302,14 +302,14 @@ Testing with custom providers
 
 ``reset_registries()`` resets the form-action and component backends.
 It does not touch the provider list, so a custom provider registered in ``AppConfig.ready`` survives the call.
-To swap a provider for the duration of a test, use ``override_provider`` from ``next.testing``.
+To swap a provider for the duration of a test, use ``override_provider`` from ``next.testing.patching``.
 The context manager prepends the provider to the resolver list on entry and removes it on exit.
 
 .. code-block:: python
 
    from django.test import TestCase
 
-   from next.testing import override_provider
+   from next.testing.patching import override_provider
    from myapp.providers import TenantProvider
 
    class TenantProviderTests(TestCase):

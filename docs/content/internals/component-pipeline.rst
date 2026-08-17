@@ -140,8 +140,12 @@ Extension points
 ----------------
 
 - Subclass ``ComponentsBackend`` to serve components from another source.
-- Subclass ``ComponentRenderStrategy`` for non standard rendering, for example a JSX bridge.
+- Define a ``render`` function in ``component.py`` for a non standard render path, for example a JSX bridge.
 - Subscribe to ``components_registered`` to keep caches in sync with the registry.
+
+``ComponentRenderStrategy`` is not an extension point.
+``ComponentsManager._ensure_render_pipeline`` builds the strategy list from the composite and simple renderers itself, and no settings key feeds that list, so a third strategy cannot be reached.
+A render path the two built-in strategies do not cover goes through a ``render`` function in ``component.py``, or through a ``ComponentsBackend`` that hands back records the composite renderer can serve.
 
 See also
 --------

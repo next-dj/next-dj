@@ -183,7 +183,7 @@ The separation comes from the directories, not from the backends, because layout
        ]
    }
 
-The first backend reads ``notes/pages/`` and uses ``notes/pages/layout.djx`` as its root.
+The first backend reads ``notes/routes/`` and uses ``notes/routes/layout.djx`` as its root.
 The second backend reads ``notes/admin_routes/`` and uses ``notes/admin_routes/layout.djx`` as its root.
 The two chains stay separate only because the two directories share no ancestor that carries a ``layout.djx``.
 A layout in a shared ancestor directory, such as the ``notes`` package directory itself, wraps pages from both backends.
@@ -239,7 +239,8 @@ Inherited context not visible to a sub-page.
 
 Two roots produce one composed page.
    A page composes its layout chain from its own ancestor directories.
-   A page lives under exactly one backend, even when the file path is also reachable from another backend.
+   The chain follows the directory the file sits in, so a file routed by two backends composes the same layouts under both mounts.
+   The duplicate route itself is reported as ``next.E015``, see :doc:`file-router`.
 
 See also
 --------

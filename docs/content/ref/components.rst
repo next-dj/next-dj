@@ -114,7 +114,7 @@ Prefer the Application imports tier unless you are building framework tooling.
 .. autoclass:: next.components.ComponentInfo
    :members:
 
-The duplicate-name check groups by ``(scope_root, scope_relative, name)``, the same pair the visibility resolver scores on, so only two components the resolver cannot tell apart collide under ``next.E020``.
+The duplicate-name check groups by ``(scope_root, scope_relative, name)``, and the first two are exactly the scope the visibility resolver scores on, so only two components the resolver cannot tell apart collide under ``next.E020``.
 The same name under a deeper route trail of one tree is the documented override and stays silent.
 
 .. autoclass:: next.components.ContextFunction

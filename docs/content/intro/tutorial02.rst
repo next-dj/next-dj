@@ -21,7 +21,7 @@ Walkthrough
 Add a root layout
 ~~~~~~~~~~~~~~~~~
 
-A ``layout.djx`` placed in any directory wraps every page below it.
+A ``layout.djx`` placed in any directory is a :term:`layout` that wraps every page below it.
 For the Notes application the most common layout sits at the root of the page tree, ``notes/pages/layout.djx``.
 
 .. code-block:: jinja
@@ -70,13 +70,14 @@ Share site context
 ~~~~~~~~~~~~~~~~~~
 
 The layout references ``site_name`` and ``tagline``, but no page module produces them yet.
-Add a ``page.py`` next to ``layout.djx`` and define a :term:`context function` for each value.
+Extend the existing ``notes/pages/page.py`` with a :term:`context function` for each value.
 A context function is a callable decorated with ``@context("key")`` that publishes a value to the template scope.
 Pass ``inherit_context=True`` so every descendant page can read the value too.
 
 .. code-block:: python
    :caption: notes/pages/page.py
 
+   from notes.models import Note
    from next import context
 
    @context("site_name", inherit_context=True)
@@ -86,6 +87,10 @@ Pass ``inherit_context=True`` so every descendant page can read the value too.
    @context("tagline", inherit_context=True)
    def tagline() -> str:
        return "A small tutorial application."
+
+   @context("notes")
+   def recent_notes() -> list[Note]:
+       return list(Note.objects.all())
 
 ``inherit_context`` defaults to ``False``, so a context value published in ``page.py`` is visible only to the page that declares it.
 Passing ``inherit_context=True`` publishes the value to every descendant page as well.
@@ -111,10 +116,8 @@ The typed ``[int:id]`` directory form rejects non-numeric URLs at routing time b
    def fetch_note(note_id: DUrl["id", int]) -> Note:
        return get_object_or_404(Note, pk=note_id)
 
-The ``DUrl["id", int]`` annotation is a DI marker (:term:`DI marker`), an annotation in the type position that tells the framework where a value comes from.
-Dependency injection means the framework fills a function's parameters from their names and type annotations rather than from an explicit call.
-See :doc:`/content/topics/dependency-injection` for the full model.
-Here the ``DUrl["id", int]`` marker tells the dependency injector to read the ``id`` segment captured by the ``[id]`` directory and coerce it to ``int``.
+The ``DUrl["id", int]`` annotation is a :term:`DI marker`, the mechanism :doc:`overview` introduces and :doc:`/content/topics/dependency-injection` covers in full.
+It tells the resolver to read the ``id`` segment captured by the ``[id]`` directory and coerce it to ``int``.
 The segment name is given explicitly because the parameter ``note_id`` differs from the captured segment.
 The :func:`~django.shortcuts.get_object_or_404` shortcut is the standard Django way to fetch a row or return a 404 response.
 An ``id`` that matches no note returns Django's standard 404 response.
@@ -159,10 +162,10 @@ Use counts across pages
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 Add a small bit of inherited context that the layout reads on every page.
-Append the ``note_count`` function to the existing ``notes/pages/page.py`` and add ``from notes.models import Note`` at the top of the file.
+Append the ``note_count`` function to the existing ``notes/pages/page.py``.
 
 .. code-block:: python
-   :caption: notes/pages/page.py
+   :caption: notes/pages/page.py, the note count context
 
    @context("note_count", inherit_context=True)
    def note_count() -> int:
@@ -172,7 +175,7 @@ Reference the count in the layout.
 Update the ``<header>`` block inside ``notes/pages/layout.djx``, leaving the rest of the file unchanged.
 
 .. code-block:: jinja
-   :caption: notes/pages/layout.djx
+   :caption: notes/pages/layout.djx, the header block
 
    <header>
      <a href="{% url 'next:page_' %}"><h1>{{ site_name }}</h1></a>

@@ -6,7 +6,7 @@ Pages reference
 Module summary
 --------------
 
-``next.pages`` exposes the page module API, the ``@context`` decorator, and the layout composition helpers.
+``next.pages`` exposes the ``Page`` coordinator and its ``page`` singleton, the ``@context`` decorator, the ``Context`` and ``ContextResult`` value objects, the ``PageModuleImportError`` raised by a broken ``page.py``, and the ``checks`` and ``signals`` submodules.
 
 Public API
 ----------
@@ -51,7 +51,8 @@ Loaders
 .. autoclass:: next.pages.loaders.TemplateLoader
    :members:
 
-``DjxTemplateLoader`` reads a sibling ``template.djx`` next to ``page.py``. It is the only loader in the default ``TEMPLATE_LOADERS`` chain.
+``DjxTemplateLoader`` reads a sibling ``template.djx`` next to ``page.py``.
+It is the only loader in the default ``TEMPLATE_LOADERS`` chain.
 
 .. autoclass:: next.pages.loaders.DjxTemplateLoader
    :members:
@@ -85,6 +86,15 @@ The static discovery layer reads the ``styles`` and ``scripts`` lists of a ``pag
 Anything but a list or tuple of non-empty strings reads as an empty list, so the caller never type-checks what a user module bound to the name.
 
 .. autofunction:: next.pages.loaders.read_module_string_lists
+
+Scan
+~~~~
+
+``next.pages.scan`` walks the routed page tree for the system checks.
+``iter_existing_scanned_pages`` yields each existing ``page.py`` once across routers, and ``iter_serialized_page_context_keys`` yields the ``page.py`` path and key of every keyed ``serialize=True`` context callable.
+
+.. automodule:: next.pages.scan
+   :members:
 
 Import failures
 ~~~~~~~~~~~~~~~

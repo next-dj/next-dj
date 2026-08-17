@@ -10,8 +10,16 @@ Selectors and swap strategies never cross the wire.
 
 Every interaction in this section degrades to a full page cycle when JavaScript is off, layered on top of the same ``POST`` then ``303`` then ``GET`` flow the framework already serves.
 
-Read :doc:`scenarios` first.
+Read :doc:`comparison` when the open question is whether to reach for zones at all rather than for htmx, Turbo, or Django Unicorn.
+
+Read :doc:`scenarios` first once that question is settled.
 It walks seven concrete tasks from markup to handler, and the rest of the section deepens one concern at a time.
+
+.. rubric:: Orientation
+
+:doc:`comparison`
+   Zones set beside htmx, Turbo, and Django Unicorn on four checkable axes, and where each
+   alternative is the better fit.
 
 .. rubric:: The tutorial
 
@@ -26,7 +34,7 @@ It walks seven concrete tasks from markup to handler, and the rest of the sectio
    One partial update followed end to end, from the zone in the template to the envelope on the wire to the morph in the browser.
 
 :doc:`zones`
-   Why zones are an optimisation rather than required markup, what the extract default costs today, and the keying rule for dynamic list rows.
+   Why zones are an optimisation rather than required markup, what the extract default costs, and the keying rule for dynamic list rows.
 
 :doc:`done-choreographies`
    The two ways a wizard inside a modal refreshes the list on the page beneath it, compared honestly.
@@ -59,6 +67,7 @@ It walks seven concrete tasks from markup to handler, and the rest of the sectio
    :hidden:
    :maxdepth: 1
 
+   comparison
    scenarios
    how-it-works
    zones

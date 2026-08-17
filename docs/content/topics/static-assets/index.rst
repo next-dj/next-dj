@@ -47,9 +47,9 @@ The static pipeline discovers co-located CSS, JS, and module files, deduplicates
    overview
    co-located-files
    template-tags
+   js-context
    deduplication
    asset-kinds
    custom-stems
-   js-context
    backends
    signals

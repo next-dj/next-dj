@@ -203,6 +203,8 @@ On ``INVALID`` outcomes the ``page_path`` and ``origin`` fields carry the resolv
 The ``page_path`` field holds the source location of its ``page.py`` and the ``origin`` field holds the validated origin URL path.
 ``FormActionDispatch.shape_response`` builds the default envelope for one outcome, and the backend hook delegates to it unless overridden.
 ``ensure_http_response`` coerces a handler return value into an ``HttpResponse`` for custom backends that drive the pipeline by hand, and is reachable as ``FormActionDispatch.ensure_http_response``.
+An action registered with no handler, no ``form_class``, and no ``wizard_class`` has nothing to dispatch to, so the pipeline answers HTTP 400 with a body naming the action and logs a warning on the ``next.forms.dispatch`` logger that also names the declaring file.
+The registration file is a server location, so it stays in the log and out of the response body.
 The underscore-prefixed helpers are internal hooks per the ``Internal hooks`` tier described above.
 
 .. automodule:: next.forms.dispatch

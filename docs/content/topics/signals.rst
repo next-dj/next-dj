@@ -165,11 +165,7 @@ Use ``django.dispatch.receiver`` to connect a callable to a signal.
    def log_dispatch(sender, **kwargs) -> None:
        logger.info("action dispatched: %s", kwargs["action_name"])
 
-Multiple receivers
-~~~~~~~~~~~~~~~~~~
-
-Several receivers can connect to the same signal.
-They run in registration order.
+Several receivers can connect to one signal and they run in connection order.
 
 Disconnecting
 ~~~~~~~~~~~~~
@@ -180,12 +176,23 @@ The same ``dispatch_uid`` passed to ``connect`` can be supplied to ``disconnect`
 .. code-block:: python
    :caption: notes/receivers.py
 
+   import logging
    from next.signals import action_dispatched
 
+   logger = logging.getLogger(__name__)
+
    def log_dispatch(sender, **kwargs) -> None:
-       ...
+       logger.info("dispatched")
 
    action_dispatched.connect(log_dispatch, dispatch_uid="notes.log_dispatch")
+
+The teardown lives wherever the receiver should stop firing, such as a test fixture or a shutdown hook.
+
+.. code-block:: python
+   :caption: notes/teardown.py
+
+   from next.signals import action_dispatched
+
    action_dispatched.disconnect(dispatch_uid="notes.log_dispatch")
 
 The ``SignalRecorder`` from ``next.testing.signals`` disconnects its receivers on context-manager exit, or when ``stop()`` is called explicitly.

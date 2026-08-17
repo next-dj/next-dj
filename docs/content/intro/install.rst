@@ -3,20 +3,51 @@
 Installation
 ============
 
-This page installs next.dj into a fresh Django project, configures the page backend, and verifies that the file router is reachable.
+This page installs next.dj, configures the page backend, and verifies that the file router is reachable.
+It scaffolds a new Django project on the way, so a project that already exists starts at :ref:`intro-install-installed-apps` and keeps its own layout.
 By the end you have a project that renders a single page from the filesystem and is ready for :doc:`tutorial01`.
 
 Requirements
 ------------
 
 - Python 3.12 or newer (3.12, 3.13, 3.14 tested).
-- Django 5.2 or newer (5.2, 6.0 supported).
+- Django 5.2 or 6.0.
 - Python 3.14 requires Django 6.0.
   Django 5.2 supports Python 3.12 and 3.13.
 - An ASGI or WSGI server compatible with the Django version in use.
 
 next.dj extends Django.
 It does not replace the ORM, migrations, admin, or auth (:ref:`intro-overview-django-unchanged`).
+
+Create the project folder
+-------------------------
+
+Both installers need an environment to install into.
+``uv`` reads a ``pyproject.toml`` from the current directory, and ``pip`` installs into the active virtualenv.
+Create the folder first, then initialise the environment inside it.
+
+.. code-block:: bash
+   :caption: shell, uv
+
+   mkdir notes-site
+   cd notes-site
+   uv init --bare --python 3.12
+
+.. code-block:: bash
+   :caption: shell, pip
+
+   mkdir notes-site
+   cd notes-site
+   python3.12 -m venv .venv
+   source .venv/bin/activate
+
+Any interpreter from the supported range works in place of ``python3.12``.
+On Windows the activation command is ``.venv\Scripts\activate``.
+Running ``uv add`` in a folder without a ``pyproject.toml`` fails with ``No pyproject.toml found in current directory or any parent directory``, which is what this step prevents.
+
+Later commands on this page carry a ``uv run`` prefix.
+Drop that prefix when an activated virtualenv already puts ``python`` and ``django-admin`` on the path.
+A project that already has a manifest or an environment skips this section.
 
 Install the package
 -------------------
@@ -36,7 +67,7 @@ The import path is always ``next``.
 Create a Django project
 -----------------------
 
-If you do not already have a Django project, scaffold one in an empty folder.
+If you do not already have a Django project, scaffold one in the folder created above.
 
 .. code-block:: bash
    :caption: shell
@@ -46,6 +77,8 @@ If you do not already have a Django project, scaffold one in an empty folder.
 
 The tutorial uses ``config`` as the project package and ``notes`` as the first application.
 The same instructions work with any other names if you adapt the imports.
+
+.. _intro-install-installed-apps:
 
 Add next.dj to INSTALLED_APPS
 -----------------------------
@@ -65,9 +98,9 @@ Open ``config/settings.py`` and register both ``next`` and your application in :
        "notes",
    ]
 
-This list replaces the one ``django-admin startproject`` generates.
-It intentionally drops ``django.contrib.admin`` because next.dj does not require the admin site.
-Add ``django.contrib.admin`` back if the project needs it.
+The list above is what the project scaffolded in the previous section needs.
+A project that already exists keeps its own entries and adds a single ``next`` entry.
+The list drops ``django.contrib.admin`` because next.dj does not require the admin site, so a project that uses the admin keeps that entry in place.
 
 The ``next`` app registers system checks, template tag builtins, autoreload hooks, and static file collectors at startup.
 
@@ -112,6 +145,7 @@ Mount the router
 
 Forward all unmatched URLs to next.dj by replacing ``config/urls.py`` with the file below.
 This replacement also removes the ``admin`` import that ``startproject`` generated, which pairs with dropping ``django.contrib.admin`` from ``INSTALLED_APPS`` above.
+A project that already has routes keeps its ``urlpatterns`` and appends the ``include`` line as the last entry.
 
 .. code-block:: python
    :caption: config/urls.py

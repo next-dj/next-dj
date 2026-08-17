@@ -45,7 +45,9 @@ Reverse-name population iterates the wrapped sequence with ``reversed()``, which
 ``RouterManager`` owns the active backend list, and the ``router_manager`` singleton exposes ``reload()`` to rebuild it.
 ``reload()`` logs and skips a backend entry whose construction raises ``ValueError``, ``TypeError``, ``KeyError``, or ``ImportError``.
 Any other exception from a custom backend propagates and stops startup.
-``backends`` returns the loaded list as a tuple and builds it from ``PAGE_BACKENDS`` on the first read, so the system checks reach the configured routers even before the first resolve.
+``backends`` returns the loaded list as a tuple and builds it from ``PAGE_BACKENDS`` on the first read, so a caller that asks before the first resolve reads the configured routers instead of an empty tuple.
+The build runs under a reentrant lock, so under a threaded server a read racing the first load waits for it rather than resolving against a list that is not there yet, while a backend consulting the manager while it is constructed still reads the pre-rebuild list.
+Iterating the manager yields URL patterns rather than backends, so the manager itself carries neither ``len`` nor indexing and ``backends`` answers both.
 ``version`` is the cache token the lazy urlpatterns concat keys on, bumped by every ``reload()``, and a caller that derives its own cache from the router set reads it for the same purpose.
 
 .. automodule:: next.urls.manager
@@ -190,6 +192,38 @@ Checks
 
 ``check_next_pages_configuration``.
    Validates the ``NEXT_FRAMEWORK['PAGE_BACKENDS']`` structure, the ``BACKEND`` path, and per-backend ``DIRS``/``APP_DIRS``/``PAGES_DIR``/``OPTIONS`` keys.
+   ``OPTIONS`` accepts only ``context_processors``, and an entry whose backend is not a file router accepts only ``BACKEND``.
+
+   .. list-table::
+      :header-rows: 1
+      :widths: 20 80
+
+      * - Error
+        - Condition
+      * - ``next.E001``
+        - ``NEXT_FRAMEWORK`` is not a dictionary, or ``PAGE_BACKENDS`` is not a list.
+      * - ``next.E022``
+        - ``PAGE_BACKENDS`` is an empty list.
+      * - ``next.E002``
+        - An entry in ``PAGE_BACKENDS`` is not a dictionary.
+      * - ``next.E003``
+        - An entry carries no ``BACKEND`` key.
+      * - ``next.E004``
+        - ``BACKEND`` names a path that is neither registered nor importable as a ``RouterBackend`` subclass.
+      * - ``next.E024``
+        - A ``FileRouterBackend`` entry carries no ``PAGES_DIR``.
+      * - ``next.E027``
+        - ``PAGES_DIR`` is not a string.
+      * - ``next.E025``
+        - A ``FileRouterBackend`` entry carries no ``APP_DIRS``.
+      * - ``next.E005``
+        - ``APP_DIRS`` is not a boolean.
+      * - ``next.E026``
+        - A ``FileRouterBackend`` entry carries no ``OPTIONS``.
+      * - ``next.E006``
+        - ``DIRS`` is not a list, ``OPTIONS`` is not a dictionary, ``context_processors`` is not a list of strings, or ``OPTIONS`` names a key other than ``context_processors``.
+      * - ``next.E035``
+        - An entry carries a key outside its allowed set, ``BACKEND``, ``APP_DIRS``, ``DIRS``, ``OPTIONS``, and ``PAGES_DIR`` for a file router, ``BACKEND`` alone otherwise.
 
 ``check_url_patterns``.
    Collects patterns from every configured tree, application pages and root ``DIRS`` alike.

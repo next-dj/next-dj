@@ -109,7 +109,8 @@ Scripts in patches never run
 
 A ``<script>`` inside patch HTML is never executed by any insertion path.
 The applier removes every script element from parsed patch HTML before it reaches the document.
-Behaviour is delivered only through the co-located asset manifest and the ``event`` verb, never through inline script in a morph.
+Behaviour arrives through the co-located asset manifest and the ``event`` verb.
+The applier strips ``<script>`` elements from patch markup, it does not strip event-handler attributes, so an ``onclick`` the server renders into patch HTML still runs unless a Content Security Policy blocks it.
 This is structural, not a parser side effect, and it is why an inline widget initialiser has to move to one of the idioms above.
 See :doc:`/content/security/csp-and-nonce` for how this interacts with a Content Security Policy.
 

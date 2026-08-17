@@ -91,6 +91,9 @@ Reading ``page``, ``context``, ``component``, or ``action`` loads a much larger 
 :doc:`backends`
    ``next.backends`` for the shared loading of settings-driven backend families.
 
+:doc:`ports`
+   ``next.ports`` for the narrow protocols one subsystem calls another through.
+
 .. rubric:: Configuration
 
 :doc:`settings`
@@ -125,6 +128,7 @@ Reading ``page``, ``context``, ``component``, or ``action`` loads a much larger 
    apps
    utils
    backends
+   ports
    settings
    system-checks
    template-tags
