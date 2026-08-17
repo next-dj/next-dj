@@ -30,7 +30,10 @@ The envelope around the list always carries the ``assets`` and ``form`` keys, se
      - Default
    * - ``morph``
      - ``morph()``
-     - The default verb. Morph the target into the HTML. The target names a zone or a form by uid. ``extract: true`` carries a whole document the client trims to the target.
+     - The default verb.
+       Morph the target into the HTML.
+       The target names a zone or a form by uid.
+       ``extract: true`` carries a whole document the client trims to the target.
      - ``extract: false``
    * - ``replace``
      - ``replace()``
@@ -54,7 +57,8 @@ The envelope around the list always carries the ``assets`` and ``form`` keys, se
      - none
    * - ``refresh``
      - ``refresh()``
-     - Ask the client to re-fetch the zone with its own cookies. The safe default of an SSE fan-out.
+     - Ask the client to re-fetch the zone with its own cookies.
+       The safe default of an SSE fan-out.
      - none
    * - ``context``
      - ``context()``
@@ -66,12 +70,13 @@ The envelope around the list always carries the ``assets`` and ``form`` keys, se
      - ``detail: {}``
    * - ``toast``
      - ``toast()``
-     - Show a toast, sugar over ``event`` with a built-in container. The text is set as ``textContent`` and never parsed as HTML.
+     - Show a toast, sugar over ``event`` with a built-in container.
+       The text is set as ``textContent`` and never parsed as HTML.
      - ``variant: "info"``
    * - ``layer.open``
      - ``layer_open()``
-     - Open a layer from the server, optionally seeding a zone to fill later or an
-       href whose zone loads into the modal. See :ref:`partial-server-layers`.
+     - Open a layer from the server, optionally seeding a zone to fill later or an href whose zone loads into the modal.
+       See :ref:`partial-server-layers`.
      - none
    * - ``layer.close``
      - ``layer_close()``
@@ -79,13 +84,14 @@ The envelope around the list always carries the ``assets`` and ``form`` keys, se
      - accept, no result
    * - ``url``
      - ``push_url()``
-     - Push browser history. The href is validated by the server. The client also honours
-       ``action: "replace"``, reachable only from a raw or backend-authored envelope, the
-       ``push_url()`` builder always pushes.
+     - Push browser history.
+       The href is validated by the server.
+       The client also honours ``action: "replace"``, reachable only from a raw or backend-authored envelope, the ``push_url()`` builder always pushes.
      - ``action: "push"``
    * - ``visit``
      - ``redirect()``
-     - A full client navigation to a server-authored href. ``external=True`` skips same-host validation, see :ref:`security-overview`.
+     - A full client navigation to a server-authored href.
+       ``external=True`` skips same-host validation, see :ref:`security-overview`.
      - none
 
 A target carries exactly one address key, and the client resolves ``zone``, then ``form``, then ``field``, then ``css``.
@@ -125,15 +131,15 @@ Each entry carries ``kind`` and ``url`` always, plus ``inline`` and ``load`` whe
      - The kind the asset was discovered under, ``css``, ``js``, ``module``, or a kind the project registered.
    * - ``url``
      - A published URL
-     - The URL form of the asset. An inline asset carries an empty string here.
+     - The URL form of the asset.
+       An inline asset carries an empty string here.
    * - ``inline``
      - An asset body
      - The body of an inline asset, absent on a URL-form asset.
    * - ``load``
      - ``link``, ``script``, or ``module``
      - The insertion verb, derived from the renderer registered for the kind.
-       Absent when that renderer is a custom backend method, and absent on an
-       inline body whose kind does not wrap it in the element the verb builds.
+       Absent when that renderer is a custom backend method, and absent on an inline body whose kind does not wrap it in the element the verb builds.
 
 The runtime inserts an asset by its verb rather than by its kind, so a custom kind registered with one of the three built-in renderers loads like the built-in kind that shares it.
 The verb of an entry resolves in three steps.
@@ -163,7 +169,8 @@ All values are ASCII, and zone names are ASCII slugs.
      - Semantics
    * - ``X-Next-Request: 1``
      - Every intercepted request
-     - The partial switch. Without it the response is the full page, byte for byte.
+     - The partial switch.
+       Without it the response is the full page, byte for byte.
    * - ``Accept``
      - Every intercepted request
      - ``application/vnd.next.patches+json, text/html;q=0.9``, the switch at the content-negotiation level.
@@ -178,7 +185,8 @@ All values are ASCII, and zone names are ASCII slugs.
      - ``append`` or ``prepend``, the merge intent.
    * - ``X-Next-Version``
      - Every request once a version is learned
-     - The asset version the client holds. The first request of a page asserts none.
+     - The asset version the client holds.
+       The first request of a page asserts none.
    * - ``X-Next-Request-Id``
      - Every mutation
      - The ring id used to suppress an SSE echo.
@@ -206,12 +214,8 @@ Server to client.
      - ``application/vnd.next.patches+json``, the marker the runtime keys on.
    * - ``Vary``
      - Every partial response
-     - ``X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-Version``, set on every
-       envelope, on the 400 and 409 short-circuits, on a wizard advance, and on an
-       SSE stream, so a shared cache never hands one intent's envelope to another.
-       A full page render keeps its own headers untouched and carries no partial
-       ``Vary``, so a cache in front of a zoned page is configured for the page
-       rather than by the framework.
+     - ``X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-Version``, set on every envelope, on the 400 and 409 short-circuits, on a wizard advance, and on an SSE stream, so a shared cache never hands one intent's envelope to another.
+       A full page render keeps its own headers untouched and carries no partial ``Vary``, so a cache in front of a zoned page is configured for the page rather than by the framework.
    * - ``X-Next-Version``
      - Every envelope
      - The current asset version.
@@ -232,29 +236,31 @@ Status codes
    * - Status
      - Semantics
    * - 200 with an envelope
-     - Patches, including an invalid form. A validation error is state, not an HTTP failure.
+     - Patches, including an invalid form.
+       A validation error is state, not an HTTP failure.
    * - 200 without an envelope
      - The fetch followed a redirect, a guard bounce or a login wall.
        The runtime performs a full navigation to ``response.url``, once, under the navigate-once flag.
    * - 204
-     - A success with no patch to apply, for example a wizard advance with no redirect target. The runtime applies nothing.
+     - A success with no patch to apply, for example a wizard advance with no redirect target.
+       The runtime applies nothing.
    * - 303
      - A mutation succeeded with no runtime on the page, the plain ``POST`` then ``303`` then ``GET`` cycle.
    * - 403 without an envelope
-     - A guard denial or a CSRF failure served outside the shaping path. On a mutation the runtime
-       stays in place and fires ``partial:error`` with the status and body. On a safe method it
-       navigates fully.
+     - A guard denial or a CSRF failure served outside the shaping path.
+       On a mutation the runtime stays in place and fires ``partial:error`` with the status and body.
+       On a safe method it navigates fully.
    * - 400
      - An intent that did not validate, such as an unknown zone, a bad origin, or a zone named on a dynamic page body.
    * - 404
      - The request named a form uid the action registry does not hold.
    * - 409
-     - A version mismatch on a safe method, with an empty body. The runtime
-       fully visits the current URL. A mutation always runs, and a version
-       mismatch surfaces in the envelope version, which the client reads to
-       reload once into a full client visit.
+     - A version mismatch on a safe method, with an empty body.
+       The runtime fully visits the current URL.
+       A mutation always runs, and a version mismatch surfaces in the envelope version, which the client reads to reload once into a full client visit.
    * - 5xx
-     - No envelope. The runtime swaps nothing and fires ``partial:error``.
+     - No envelope.
+       The runtime swaps nothing and fires ``partial:error``.
 
 A safe-method zone GET that answers with a non-envelope navigates once under a navigate-once flag, the same shape the version-mismatch reload uses.
 A ``lazy="load"`` zone re-asks on the freshly loaded page, so an expired session, a WAF stub, or a maintenance page that keeps answering non-envelope would otherwise loop the navigation.
@@ -278,45 +284,39 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from its par
      - The zone address, written by the ``{% zone %}`` tag.
    * - ``data-next-lazy``
      - Lazy zone wrapper, infinite-scroll sentinel
-     - ``load`` or ``revealed``, the materialisation trigger. On a zone wrapper
-       ``load`` fetches on ``ready`` and ``revealed`` waits for the viewport. On a
-       pagination sentinel the attribute only marks the link observable, either
-       value arms the observer that fires the merge GET. A value outside the two is
-       ignored, with a console warning in dev.
+     - ``load`` or ``revealed``, the materialisation trigger.
+       On a zone wrapper ``load`` fetches on ``ready`` and ``revealed`` waits for the viewport.
+       On a pagination sentinel the attribute only marks the link observable, either value arms the observer that fires the merge GET.
+       A value outside the two is ignored, with a console warning in dev.
    * - ``data-next-poll``
      - Zone wrapper
-     - The poll interval in milliseconds, from the ``poll=`` literal, written on the
-       full render and on the partial response wrapper. The runtime re-GETs the zone
-       on the interval while the tab is visible. A hand-written value outside the
-       whole-millisecond grammar, below the one-second floor, or above the browser
-       timer ceiling is dropped, as is the attribute on an element without
-       ``data-next-zone``, each with a console warning in dev.
+     - The poll interval in milliseconds, from the ``poll=`` literal, written on the full render and on the partial response wrapper.
+       The runtime re-GETs the zone on the interval while the tab is visible.
+       A hand-written value outside the whole-millisecond grammar, below the one-second floor, or above the browser timer ceiling is dropped, as is the attribute on an element without ``data-next-zone``, each with a console warning in dev.
    * - ``data-next-action``
      - ``<form>``
      - The action uid, written by ``{% form %}``, enables submit interception.
    * - ``data-next-validate``
      - ``<form>``
-     - Inline validation on blur, written from the ``validate=`` tag parameter. The
-       runtime keys off the presence of the attribute alone and never reads its value,
-       so every value behaves the same and there is no closed set to choose from. The
-       examples write ``blur`` because blur is the trigger.
+     - Inline validation on blur, written from the ``validate=`` tag parameter.
+       The runtime keys off the presence of the attribute alone and never reads its value, so every value behaves the same and there is no closed set to choose from.
+       The examples write ``blur`` because blur is the trigger.
    * - ``data-next-target``
      - ``<a>``, ``<form>``
-     - Route the response into a zone. On a GET filter it names the zone to morph,
-       and on a POST form it is written by the ``zone=`` tag parameter and travels
-       as the morph target of the submission.
+     - Route the response into a zone.
+       On a GET filter it names the zone to morph, and on a POST form it is written by the ``zone=`` tag parameter and travels as the morph target of the submission.
    * - ``data-next-trigger``
      - Filter ``<form>``, sort ``<select>``
-     - The event that auto-submits a GET filter, ``input`` or ``change``. Submit and click interception are wired by ``data-next-action`` and ``data-next-merge``, not this attribute.
+     - The event that auto-submits a GET filter, ``input`` or ``change``.
+       Submit and click interception are wired by ``data-next-action`` and ``data-next-merge``, not this attribute.
    * - ``data-next-debounce``
      - With ``data-next-trigger``, or on a validating ``<form>``
-     - Debounce in milliseconds. On a filter it collapses a burst of keystrokes
-       into one GET, on a validating form it collapses a burst of blur probes into
-       one validate POST.
+     - Debounce in milliseconds.
+       On a filter it collapses a burst of keystrokes into one GET, on a validating form it collapses a burst of blur probes into one validate POST.
    * - ``data-next-merge``
      - Pagination link
-     - ``append`` or ``prepend``, travels as ``X-Next-Merge``. Any other value is
-       ignored, with a console warning in dev.
+     - ``append`` or ``prepend``, travels as ``X-Next-Merge``.
+       Any other value is ignored, with a console warning in dev.
    * - ``data-next-layer``
      - ``<a>``
      - Open the href in a layer, the zone container is created before the request.
@@ -332,29 +332,25 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from its par
    * - ``data-next-key``
      - List rows, repeated ``<form>``
      - The match key for the morph and for ``append`` dedup, falling back to ``id``.
-       On a repeated form it names the instance, written by the ``key=`` tag parameter,
-       so a partial morph lands on the submitted form rather than the first.
+       On a repeated form it names the instance, written by the ``key=`` tag parameter, so a partial morph lands on the submitted form rather than the first.
    * - ``data-next-sse``
      - A container
      - Subscribe to a patch stream at the URL.
    * - ``data-next-busy``
      - Layer opener, layer zone container
-     - Written during a layer open on the opener link and the layer's zone
-       container, alongside ``aria-busy="true"``. The submit double-click guard
-       is the per-uid mutation lock, not this attribute.
+     - Written during a layer open on the opener link and the layer's zone container, alongside ``aria-busy="true"``.
+       The submit double-click guard is the per-uid mutation lock, not this attribute.
    * - ``data-next-dialog``
      - Runtime ``<dialog>``
      - Set by the runtime on every layer dialog, the styling hook for the modal shell.
    * - ``data-next-toasts``
      - Runtime toast container
-     - The toast tray, created by the runtime on the first ``toast`` and the styling
-       hook for the stack. The runtime also stamps ``aria-live="polite"`` on it, so a
-       replacement tray carries its own live region.
+     - The toast tray, created by the runtime on the first ``toast`` and the styling hook for the stack.
+       The runtime also stamps ``aria-live="polite"`` on it, so a replacement tray carries its own live region.
    * - ``data-next-toast``
      - Runtime toast item
-     - One toast, the value is the variant, the styling hook for a single
-       notification. The text is set as ``textContent`` and never parsed as HTML, so
-       a toast string cannot carry markup.
+     - One toast, the value is the variant, the styling hook for a single notification.
+       The text is set as ``textContent`` and never parsed as HTML, so a toast string cannot carry markup.
 
 .. warning::
 
@@ -385,39 +381,29 @@ The ``next:mounted``, ``next:removed``, and ``next:morph-*`` node events live on
        A listener added after the runtime is ready is replayed with it at once.
    * - ``context-updated``
      - No
-     - ``{context, changed}``, where ``context`` is the whole merged store and
-       ``changed`` lists only the keys of the delta that arrived. The
-       initial seed lists every seeded key in ``changed``.
+     - ``{context, changed}``, where ``context`` is the whole merged store and ``changed`` lists only the keys of the delta that arrived.
+       The initial seed lists every seeded key in ``changed``.
    * - ``partial:before-request``
      - No
-     - ``{url, method, intent}``, where ``intent`` is ``{zone?, uid?}``. The runtime fires this through the bus before the fetch leaves, so a listener observes the request rather than vetoing it.
+     - ``{url, method, intent}``, where ``intent`` is ``{zone?, uid?}``.
+       The runtime fires this through the bus before the fetch leaves, so a listener observes the request rather than vetoing it.
    * - ``partial:before-apply``
      - Yes
      - ``{envelope}``, the op list is mutable.
    * - ``partial:applied``
      - No
-     - ``{envelope, ok}``. ``ok`` is ``false`` when any op threw or named an
-       unknown verb, so a listener tells a clean apply from a degraded one that
-       still mounted what did change. Observe ``ok``, not the bare fact of apply.
+     - ``{envelope, ok}``.
+       ``ok`` is ``false`` when any op threw or named an unknown verb, so a listener tells a clean apply from a degraded one that still mounted what did change.
+       Observe ``ok``, not the bare fact of apply.
    * - ``partial:error``
      - No
-     - A discriminated union on ``kind``, where each cause carries only its own
-       fields.
-       ``{kind: "network", error}`` is a fetch reject, a dropped stream
-       connection, or a zone that still answers a non-envelope after the
-       navigate-once fallback already navigated, with no status or body to report.
-       ``{kind: "http", status, body}`` is a 5xx or a mutating reply that is not
-       an envelope.
+     - A discriminated union on ``kind``, where each cause carries only its own fields.
+       ``{kind: "network", error}`` is a fetch reject, a dropped stream connection, or a zone that still answers a non-envelope after the navigate-once fallback already navigated, with no status or body to report.
+       ``{kind: "http", status, body}`` is a 5xx or a mutating reply that is not an envelope.
        ``{kind: "parse", body, error}`` is a malformed JSON body.
-       ``{kind: "op", op, error, target?}`` is a thrown or unknown verb
-       mid-apply, where ``op`` names the verb and ``target`` is the
-       human-readable address of the patch, present only when the op carried a
-       recognised target.
-       ``{kind: "asset", error, url?}`` is a stylesheet that failed to load or a
-       version mismatch surviving a reload, where ``url`` is present only on a
-       version mismatch.
-       The ``status`` and ``body`` fields belong to ``http`` alone, and ``body``
-       also to ``parse``, so a listener branches on ``kind`` before reading them.
+       ``{kind: "op", op, error, target?}`` is a thrown or unknown verb mid-apply, where ``op`` names the verb and ``target`` is the human-readable address of the patch, present only when the op carried a recognised target.
+       ``{kind: "asset", error, url?}`` is a stylesheet that failed to load or a version mismatch surviving a reload, where ``url`` is present only on a version mismatch.
+       The ``status`` and ``body`` fields belong to ``http`` alone, and ``body`` also to ``parse``, so a listener branches on ``kind`` before reading them.
        An ``AbortError`` never reaches this event.
    * - ``partial:layer-opened``
      - No
@@ -430,21 +416,27 @@ The ``next:mounted``, ``next:removed``, and ``next:morph-*`` node events live on
      - ``{reason}``
    * - ``next:mounted``
      - No
-     - Fired on each touched node, bubbles. The node is the event target. Pairs with ``next:removed`` as the mount half of a framework island lifecycle.
+     - Fired on each touched node, bubbles.
+       The node is the event target.
+       Pairs with ``next:removed`` as the mount half of a framework island lifecycle.
    * - ``next:removed``
      - No
-     - Fired on a node immediately before it detaches, bubbles, no detail. The unmount half of the island lifecycle, the place to tear down a mounted root or a timer.
+     - Fired on a node immediately before it detaches, bubbles, no detail.
+       The unmount half of the island lifecycle, the place to tear down a mounted root or a timer.
    * - ``next:morph-element``
      - Yes
-     - Fired on the old node before a pair morphs. Detail ``{newNode}``. ``preventDefault()`` skips the morph of this node and its subtree.
+     - Fired on the old node before a pair morphs.
+       Detail ``{newNode}``.
+       ``preventDefault()`` skips the morph of this node and its subtree.
    * - ``next:morph-attribute``
      - Yes
-     - Fired on the old element before one attribute changes. Detail
-       ``{name, mutationType}``, where ``mutationType`` is ``"update"`` or ``"remove"``.
+     - Fired on the old element before one attribute changes.
+       Detail ``{name, mutationType}``, where ``mutationType`` is ``"update"`` or ``"remove"``.
        ``preventDefault()`` skips that one attribute mutation.
    * - ``next:toast``
      - No
-     - Detail ``{text, variant}``. The ``toast`` verb fires it on the document and the ``Next.on`` bus alongside building the toast.
+     - Detail ``{text, variant}``.
+       The ``toast`` verb fires it on the document and the ``Next.on`` bus alongside building the toast.
 
 The mount and morph events run during the patch apply, so a framework island can take over a node by vetoing its morph and managing its own subtree.
 The mounted and removed pair brackets the node's life inside the document, the symmetry an adapter relies on to mount and unmount a root.
@@ -465,57 +457,51 @@ A member whose name starts with an underscore is a test seam rather than part of
      - Purpose
    * - ``Next.on(event, listener)``
      - An unsubscribe function
-     - Subscribe to a lifecycle event. A known event from the table above types
-       its payload. A ``ready`` listener added after the runtime is ready fires
-       at once. A listener that throws is logged and the rest of the fan-out
-       still runs.
+     - Subscribe to a lifecycle event.
+       A known event from the table above types its payload.
+       A ``ready`` listener added after the runtime is ready fires at once.
+       A listener that throws is logged and the rest of the fan-out still runs.
    * - ``Next.use(plugin)``
      - Whatever the plugin returns
      - Run a plugin function with ``Next`` as its only argument, the registration point for an island adapter or a wire-format plugin.
    * - ``Next.context``
      - A frozen copy of the client context
-     - A property rather than a call. Each read copies the store the server
-       seeded and the ``context`` verb merges into, so a held reference never
-       sees a later merge.
+     - A property rather than a call.
+       Each read copies the store the server seeded and the ``context`` verb merges into, so a held reference never sees a later merge.
    * - ``Next._init(context)``
      - Nothing
-     - The bootstrap the injected init script calls once per page. It opens the
-       dev channel when the payload sets ``$dev`` to ``true``, seeds the context,
-       mounts the document, and fires ``context-updated`` then ``ready``.
+     - The bootstrap the injected init script calls once per page.
+       It opens the dev channel when the payload sets ``$dev`` to ``true``, seeds the context, mounts the document, and fires ``context-updated`` then ``ready``.
    * - ``Next.partial.defineOp(name, handler)``
      - Nothing
-     - Register a handler for a custom verb the server authors, dispatched through the same pipeline as the built-ins. A second registration under one name replaces the first.
+     - Register a handler for a custom verb the server authors, dispatched through the same pipeline as the built-ins.
+       A second registration under one name replaces the first.
    * - ``Next.partial.onMount(selector, callback)``
      - A teardown that unregisters the callback
-     - A re-executable mount registry. The callback runs over the matching
-       elements at load and over every matching element a later patch inserts,
-       and a registration made after the runtime is ready catches up over the
-       present document at once.
+     - A re-executable mount registry.
+       The callback runs over the matching elements at load and over every matching element a later patch inserts, and a registration made after the runtime is ready catches up over the present document at once.
    * - ``Next.partial.parseHook(contentType, hook)``
      - Nothing
-     - Register a parser keyed by bare content type. The hook owns the response body before classification, so a foreign wire format becomes an envelope instead of a navigation.
+     - Register a parser keyed by bare content type.
+       The hook owns the response body before classification, so a foreign wire format becomes an envelope instead of a navigation.
    * - ``Next.partial.setCsrf(csrf)``
      - Nothing
-     - Replace the CSRF payload the next mutation submits, the seam a custom
-       login flow drives after rotating a token out of band. Passing
-       ``undefined`` clears it, and an envelope carrying a rotated token
-       overwrites it.
+     - Replace the CSRF payload the next mutation submits, the seam a custom login flow drives after rotating a token out of band.
+       Passing ``undefined`` clears it, and an envelope carrying a rotated token overwrites it.
    * - ``Next.partial.ready()``
      - Nothing
-     - Seed the asset registry from the document, run the mount callbacks over it, then arm the triggers. The bootstrap calls it once, and a page calls it only when it drives the runtime by hand.
+     - Seed the asset registry from the document, run the mount callbacks over it, then arm the triggers.
+       The bootstrap calls it once, and a page calls it only when it drives the runtime by hand.
    * - ``Next.partial.apply(raw)``
      - The parsed envelope
-     - Parse and apply a wire envelope directly, the entry a parse hook or a
-       test feeds. The return is the parsed envelope rather than a completion
-       signal, because a stylesheet the manifest brings gates the ops into a
-       continuation. A body that is not an object, or one carrying no
-       ``version``, raises a ``TypeError``.
+     - Parse and apply a wire envelope directly, the entry a parse hook or a test feeds.
+       The return is the parsed envelope rather than a completion signal, because a stylesheet the manifest brings gates the ops into a continuation.
+       A body that is not an object, or one carrying no ``version``, raises a ``TypeError``.
    * - ``Next.partial.fetch(request)``
      - A promise
-     - Send one partial request through the wire's queues and locks. The promise
-       settles when the request finishes, and network, HTTP, and parse failures
-       surface as ``partial:error`` rather than as a rejection. A second
-       mutation on a uid already in flight settles at once without sending.
+     - Send one partial request through the wire's queues and locks.
+       The promise settles when the request finishes, and network, HTTP, and parse failures surface as ``partial:error`` rather than as a rejection.
+       A second mutation on a uid already in flight settles at once without sending.
    * - ``Next.partial.layers``
      - The layer stack
      - The live stack of open layers, for driving modals from script.
@@ -591,11 +577,14 @@ A page that opens in a layer declares a zone with ``{% zone "name" %}``, and tha
    * - Call
      - Effect
    * - ``layer_open()``
-     - Open a bare modal shell. Its container carries no zone name, so only a css-targeted patch can address it. Name a zone to fill the modal with zone patches.
+     - Open a bare modal shell.
+       Its container carries no zone name, so only a css-targeted patch can address it.
+       Name a zone to fill the modal with zone patches.
    * - ``layer_open(zone="cart")``
      - Open a layer whose zone container is named ``cart``, so a following ``morph(zone="cart")`` in the same envelope lands inside the modal.
    * - ``layer_open(href="/records/42/", zone="record")``
-     - Fetch the ``record`` zone of ``/records/42/`` and load it into the layer. The page at that href declares ``{% zone "record" %}``.
+     - Fetch the ``record`` zone of ``/records/42/`` and load it into the layer.
+       The page at that href declares ``{% zone "record" %}``.
 
 A modal that shows a page's content takes the third form.
 
@@ -658,12 +647,12 @@ The rest are ignored, multi-backend selection is not supported, and a list with 
      - Meaning
    * - ``VERSION``
      - ``"manifest"``
-     - The source of ``X-Next-Version``. The sentinel hashes the staticfiles manifest
-       when the active storage hashes its files, an explicit string overrides it, and
-       without a manifest the version guard stays silent.
+     - The source of ``X-Next-Version``.
+       The sentinel hashes the staticfiles manifest when the active storage hashes its files, an explicit string overrides it, and without a manifest the version guard stays silent.
    * - ``PUSH_WIZARD_STEPS``
      - ``False``
-     - The global default for pushing wizard steps to history. A wizard's ``Meta.push_steps`` overrides it per wizard.
+     - The global default for pushing wizard steps to history.
+       A wizard's ``Meta.push_steps`` overrides it per wizard.
    * - ``SSE.HEARTBEAT_SECONDS``
      - ``25``
      - The heartbeat period for an async source.
