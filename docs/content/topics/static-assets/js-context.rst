@@ -301,7 +301,8 @@ An absent or empty ``NEXT_JS_OPTIONS`` uses the ``AUTO`` policy and the default 
      - Injects the preload hint before ``</head>`` and the ``<script>`` tag plus the ``Next._init`` call into the ``scripts`` slot.
      - Pages that read ``window.Next.context`` or use co-located JS.
    * - ``DISABLED``
-     - Skips injection entirely. ``window.Next`` is not defined.
+     - Skips injection entirely.
+       ``window.Next`` is not defined.
      - Pages that serve raw data or HTML fragments and have no client-side JS that reads ``window.Next``.
    * - ``MANUAL``
      - Skips automatic injection in the static manager, the same as ``DISABLED``.

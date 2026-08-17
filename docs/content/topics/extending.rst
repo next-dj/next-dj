@@ -127,17 +127,22 @@ Register entries in ``AppConfig.ready`` or through a settings key.
    * - Target
      - How to register
    * - Asset kinds
-     - ``default_kinds.register(...)`` in ``AppConfig.ready``. Import ``default_kinds`` from ``next.static`` (top-level re-export).
+     - ``default_kinds.register(...)`` in ``AppConfig.ready``.
+       Import ``default_kinds`` from ``next.static`` (top-level re-export).
    * - Asset stems
-     - ``default_stems.register(...)`` in ``AppConfig.ready``. Import ``default_stems`` from ``next.static.discovery`` (deep import).
+     - ``default_stems.register(...)`` in ``AppConfig.ready``.
+       Import ``default_stems`` from ``next.static.discovery`` (deep import).
    * - Placeholder slots
-     - ``default_placeholders.register(...)`` in ``AppConfig.ready``. Import ``default_placeholders`` from ``next.static`` (top-level re-export).
+     - ``default_placeholders.register(...)`` in ``AppConfig.ready``.
+       Import ``default_placeholders`` from ``next.static`` (top-level re-export).
    * - Dependency providers
      - Subclass ``RegisteredParameterProvider``, imported in ``AppConfig.ready``.
    * - Named dependencies
-     - ``@resolver.dependency("name")`` decorator. Import ``resolver`` from ``next.deps``.
+     - ``@resolver.dependency("name")`` decorator.
+       Import ``resolver`` from ``next.deps``.
    * - Patch verbs
-     - ``register_patch_op("name")`` in ``AppConfig.ready``. Import ``register_patch_op`` from ``next.partial``.
+     - ``register_patch_op("name")`` in ``AppConfig.ready``.
+       Import ``register_patch_op`` from ``next.partial``.
    * - Template loaders
      - The ``TEMPLATE_LOADERS`` settings key.
 
@@ -284,12 +289,14 @@ Use the entries below as a quick map.
 - **Validate every dispatch.** Implement a form action backend.
 - **Log every dispatch.** Subscribe to the ``action_dispatched`` signal.
 - **Change the patch wire format.** Register a partial protocol backend under ``PARTIAL_BACKENDS``.
-- **Add a custom patch verb.** Call ``register_patch_op``. See :doc:`/content/topics/partial-rendering/extending`.
+- **Add a custom patch verb.** Call ``register_patch_op``.
+  See :doc:`/content/topics/partial-rendering/extending`.
 - **Persist wizard drafts elsewhere.** Subclass ``FormWizardBackend`` and name it under ``FORM_WIZARD_BACKEND``.
 - **Change how URLs land in HTML.** Customise a static backend.
 - **Vary URLs by request.** Use a request-aware static backend.
 - **Inspect every rendered page.** Subscribe to the ``page_rendered`` signal.
-- **Watch extra directories during development.** Call ``register_autoreload_watch_spec``. See *Autoreload watch specs* above.
+- **Watch extra directories during development.** Call ``register_autoreload_watch_spec``.
+  See *Autoreload watch specs* above.
 
 Worked examples
 ---------------

@@ -159,9 +159,7 @@ Each subsystem keeps a shallow module layout, and a submodule becomes a package 
    * - ``next.urls``
      - ``manager``, ``backends``, ``dispatcher``, ``parser``, ``resolver``, ``markers``, ``reverse``, ``checks``, ``signals``.
    * - ``next.forms``
-     - ``manager``, ``dispatch`` (``build``, ``permissions``, ``responses``, ``wizard``),
-       ``backends``, ``decorators``, ``base``, ``markers``, ``serializers``, ``formsets``,
-       ``uid``, ``rendering``, ``autodiscover``, ``wizard``, ``widgets``, ``origin``, ``diagnostics``, ``checks``, ``signals``.
+     - ``manager``, ``dispatch`` (``build``, ``permissions``, ``responses``, ``wizard``), ``backends``, ``decorators``, ``base``, ``markers``, ``serializers``, ``formsets``, ``uid``, ``rendering``, ``autodiscover``, ``wizard``, ``widgets``, ``origin``, ``diagnostics``, ``checks``, ``signals``.
    * - ``next.static``
      - ``manager``, ``collector``, ``discovery``, ``backends``, ``assets``, ``scripts``, ``serializers``, ``defaults``, ``finders``, ``checks``, ``signals``.
    * - ``next.partial``

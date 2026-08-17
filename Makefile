@@ -1,4 +1,4 @@
-.PHONY: help install test bench test-compat lint format type-check clean build docs docs-serve docs-clean docs-linkcheck install-js build-js test-js test-js-coverage lint-js format-js format-js-check type-check-js test-examples ci pre-commit-install pre-commit-run dev-setup
+.PHONY: help install test bench test-compat lint format type-check clean build docs docs-lint docs-serve docs-clean docs-linkcheck install-js build-js test-js test-js-coverage lint-js format-js format-js-check type-check-js test-examples ci pre-commit-install pre-commit-run dev-setup
 
 # Allow CI to point at a prebuilt venv's pytest (bypassing `uv run` and its sync step)
 PYTEST ?= uv run pytest
@@ -20,6 +20,7 @@ help: # show this help message
 	@echo "  ci              - run the core CI checks locally with 100% coverage (docs and security run only in GitHub Actions)"
 	@echo "  dev-setup       - setup development environment"
 	@echo "  docs            - build documentation"
+	@echo "  docs-lint       - check semantic newlines in the documentation prose"
 	@echo "  docs-serve      - build and serve documentation"
 	@echo "  docs-clean      - clean documentation build"
 	@echo "  install-js      - install JS toolchain via npm ci"
@@ -167,7 +168,10 @@ dev-setup: # setup development environment
 	make build-js
 	make pre-commit-install
 
-docs: # build documentation
+docs-lint: # check semantic newlines in the documentation prose
+	uv run python docs/prose_lint.py docs/content
+
+docs: docs-lint # build documentation
 	uv sync --locked --group docs
 	uv run sphinx-build -aETW --keep-going -b html docs docs/_build
 

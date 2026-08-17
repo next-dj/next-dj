@@ -6,11 +6,8 @@ Forms reference
 Module summary
 --------------
 
-``next.forms`` exposes form base classes, the ``@action`` decorator,
-formset helpers, frozen field and form specs,
-and a curated set of commonly used Django form fields and widgets.
-Any public ``django.forms`` name is also importable from ``next.forms``,
-see `Fields and widgets`_ for the contract.
+``next.forms`` exposes form base classes, the ``@action`` decorator, formset helpers, frozen field and form specs, and a curated set of commonly used Django form fields and widgets.
+Any public ``django.forms`` name is also importable from ``next.forms``, see `Fields and widgets`_ for the contract.
 
 API tiers
 ---------
@@ -20,50 +17,30 @@ The lists below are representative.
 The autodoc blocks under `Public API`_ are the exhaustive surface.
 
 Stable.
-   ``Form``, ``ModelForm``, ``BaseForm``, ``BaseModelForm``, ``@action``, ``redirect_to_origin``,
-   ``FormWizard``, ``DForm``, ``FormActionNotFoundError``, and ``autodiscover_forms``.
+   ``Form``, ``ModelForm``, ``BaseForm``, ``BaseModelForm``, ``@action``, ``redirect_to_origin``, ``FormWizard``, ``DForm``, ``FormActionNotFoundError``, and ``autodiscover_forms``.
    Use these in application code.
    Form classes self-register, so reach for ``@action`` only for form-less handlers.
 
 Advanced.
-   ``FormActionBackend``, ``RegistryFormActionBackend``,
-   ``ActionOutcome``, ``ActionOutcomeKind``,
-   ``ActionRegistration``, ``ActionGuard``, ``ComponentWidget``,
-   ``FormWizardBackend``, ``SessionFormWizardBackend``, ``CacheFormWizardBackend``,
-   the frozen specs (``FieldSpec``, ``FormsetSpec``, ``FormSpec``, ``FormSectionSpec``,
-   ``FormsetRowSpec``, ``FieldKind``), the spec helpers (``field_spec``, ``form_spec``,
-   ``formset_spec``), the formset helper ``cleanup_extra_initial``,
-   the origin helpers (``OriginMatch``, ``resolve_origin``, ``resolve_url_to_match``,
-   ``resolve_url_to_page``),
-   the ``PermissionOutcome`` type alias for the dynamic permission hooks,
-   and the ``signals`` and ``checks`` submodules.
+   ``FormActionBackend``, ``RegistryFormActionBackend``, ``ActionOutcome``, ``ActionOutcomeKind``, ``ActionRegistration``, ``ActionGuard``, ``ComponentWidget``, ``FormWizardBackend``, ``SessionFormWizardBackend``, ``CacheFormWizardBackend``, the frozen specs (``FieldSpec``, ``FormsetSpec``, ``FormSpec``, ``FormSectionSpec``, ``FormsetRowSpec``, ``FieldKind``), the spec helpers (``field_spec``, ``form_spec``, ``formset_spec``), the formset helper ``cleanup_extra_initial``, the origin helpers (``OriginMatch``, ``resolve_origin``, ``resolve_url_to_match``, ``resolve_url_to_page``), the ``PermissionOutcome`` type alias for the dynamic permission hooks, and the ``signals`` and ``checks`` submodules.
    Use these when writing a custom backend or a form renderer.
 
 Framework machinery.
    The wiring lives on the owning submodules and is not re-exported at the package level.
-   ``FormActionDispatch`` lives in ``next.forms.dispatch``, whose ``build``, ``permissions``,
-   ``responses``, and ``wizard`` submodules carry the pipeline bodies.
-   ``FormActionManager``, the ``form_action_manager`` instance, and
-   ``build_form_namespace_for_action`` live in ``next.forms.manager``.
-   ``ActionMeta``, ``file_to_dotted_module``, ``scope_key_for``,
-   ``build_action_guard``, and ``record_possible_collision`` live in ``next.forms.backends``.
+   ``FormActionDispatch`` lives in ``next.forms.dispatch``, whose ``build``, ``permissions``, ``responses``, and ``wizard`` submodules carry the pipeline bodies.
+   ``FormActionManager``, the ``form_action_manager`` instance, and ``build_form_namespace_for_action`` live in ``next.forms.manager``.
+   ``ActionMeta``, ``file_to_dotted_module``, ``scope_key_for``, ``build_action_guard``, and ``record_possible_collision`` live in ``next.forms.backends``.
    The ``wizard_backend_manager`` instance lives in ``next.forms.wizard``.
    ``FormProvider`` and ``CleanedDataProvider`` live in ``next.forms.markers``.
    ``bind_component_widgets`` lives in ``next.forms.widgets``.
    ``render_form_page_with_errors`` lives in ``next.forms.rendering``.
-   ``RegistrationDiagnostics`` and the ``registration_diagnostics`` instance live in
-   ``next.forms.diagnostics``.
-   The UID helpers ``FORM_ACTION_REVERSE_NAME``, ``URL_NAME_FORM_ACTION``,
-   ``ORIGIN_FIELD_NAME``, ``FORM_ORIGIN_OVERRIDE_KEY``, ``reverse_form_action``,
-   and ``validated_origin_path`` live in ``next.forms.uid``.
-   The test isolation helper ``reset_form_registration_state`` belongs to ``next.testing``,
-   documented under :doc:`/content/ref/testing`.
+   ``RegistrationDiagnostics`` and the ``registration_diagnostics`` instance live in ``next.forms.diagnostics``.
+   The UID helpers ``FORM_ACTION_REVERSE_NAME``, ``URL_NAME_FORM_ACTION``, ``ORIGIN_FIELD_NAME``, ``FORM_ORIGIN_OVERRIDE_KEY``, ``reverse_form_action``, and ``validated_origin_path`` live in ``next.forms.uid``.
+   The test isolation helper ``reset_form_registration_state`` belongs to ``next.testing``, documented under :doc:`/content/ref/testing`.
 
 Internal hooks.
-   Underscore-prefixed helpers inside the submodules, such as the form-building functions in
-   ``next.forms.dispatch.build``, are implementation details.
-   ``next.forms.__all__`` is the source of truth for the curated package surface and exports no
-   underscore names.
+   Underscore-prefixed helpers inside the submodules, such as the form-building functions in ``next.forms.dispatch.build``, are implementation details.
+   ``next.forms.__all__`` is the source of truth for the curated package surface and exports no underscore names.
    Do not import underscore names in application code.
 
 Public API
@@ -134,12 +111,9 @@ See :doc:`/content/topics/forms/wizard` and :doc:`/content/topics/forms/wizard-b
 .. autoclass:: next.forms.CacheFormWizardBackend
    :members:
 
-``wizard_backend_manager`` in ``next.forms.wizard`` is the lazy holder for the single
-configured wizard backend, a ``SingleBackendManager`` bound to ``FORM_WIZARD_BACKEND``.
+``wizard_backend_manager`` in ``next.forms.wizard`` is the lazy holder for the single configured wizard backend, a ``SingleBackendManager`` bound to ``FORM_WIZARD_BACKEND``.
 It reads the setting on first use and caches the result.
-A malformed entry, an unimportable path, or a class outside the ``FormWizardBackend``
-family raises ``ImproperlyConfigured`` out of ``get``, since a family with one backend
-has nothing to fall back to.
+A malformed entry, an unimportable path, or a class outside the ``FormWizardBackend`` family raises ``ImproperlyConfigured`` out of ``get``, since a family with one backend has nothing to fall back to.
 
 .. autoclass:: next.backends.SingleBackendManager
    :members:
@@ -150,17 +124,11 @@ The canonical entry for the class lives in :doc:`backends`.
 Fields and widgets
 ~~~~~~~~~~~~~~~~~~
 
-The framework re-exports a curated set of commonly used Django form fields and widgets through
-``next.forms`` so a single import covers most form definitions.
+The framework re-exports a curated set of commonly used Django form fields and widgets through ``next.forms`` so a single import covers most form definitions.
 The package surface is a superset of ``django.forms`` by construction.
-Any public ``django.forms``
-name resolves through ``next.forms``, with the framework versions winning where next.dj overrides
-a name such as ``Form`` or ``ModelForm``, and every other name resolving to the Django original.
-The factories ``formset_factory``, ``modelformset_factory``, ``inlineformset_factory``, and
-``modelform_factory`` plus ``BoundField`` are re-exported statically so type checkers see them,
-the rest of the passthrough resolves at runtime through the module ``__getattr__``.
-The submodules ``next.forms.widgets`` and ``next.forms.formsets`` carry the same passthrough for
-the public names of ``django.forms.widgets`` and ``django.forms.formsets`` respectively.
+Any public ``django.forms`` name resolves through ``next.forms``, with the framework versions winning where next.dj overrides a name such as ``Form`` or ``ModelForm``, and every other name resolving to the Django original.
+The factories ``formset_factory``, ``modelformset_factory``, ``inlineformset_factory``, and ``modelform_factory`` plus ``BoundField`` are re-exported statically so type checkers see them, the rest of the passthrough resolves at runtime through the module ``__getattr__``.
+The submodules ``next.forms.widgets`` and ``next.forms.formsets`` carry the same passthrough for the public names of ``django.forms.widgets`` and ``django.forms.formsets`` respectively.
 
 .. automodule:: next.forms.base
    :members:
@@ -172,12 +140,9 @@ See :doc:`/content/topics/forms/field-components` for the topic guide.
 .. autoclass:: next.forms.ComponentWidget
    :members:
 
-``bind_component_widgets`` injects the page scope path, the live request, the static collector,
-and optionally the field errors onto every ``ComponentWidget`` of a form before rendering.
-The ``{% form %}`` tag calls it, so application code needs it only when rendering a component-widget
-form outside the tag.
-It accepts a form or a formset and binds every member form of a formset, which is how formset
-rendering through ``{% form %}`` carries component widgets.
+``bind_component_widgets`` injects the page scope path, the live request, the static collector, and optionally the field errors onto every ``ComponentWidget`` of a form before rendering.
+The ``{% form %}`` tag calls it, so application code needs it only when rendering a component-widget form outside the tag.
+It accepts a form or a formset and binds every member form of a formset, which is how formset rendering through ``{% form %}`` carries component widgets.
 It imports from ``next.forms.widgets`` directly.
 
 .. autofunction:: next.forms.widgets.bind_component_widgets
@@ -272,8 +237,7 @@ The test isolation helper :func:`next.testing.reset_form_registration_state` cle
 Action URL helpers
 ~~~~~~~~~~~~~~~~~~
 
-``reverse_form_action`` resolves the dispatch URL for an action UID under either URL wiring,
-the namespaced ``next:form_action`` route or the bare ``form_action`` route.
+``reverse_form_action`` resolves the dispatch URL for an action UID under either URL wiring, the namespaced ``next:form_action`` route or the bare ``form_action`` route.
 It lives in ``next.forms.uid`` and is not re-exported at the package level.
 ``ORIGIN_FIELD_NAME`` is the wire name of the hidden origin field every rendered form carries, ``"_next_form_origin"``.
 ``validated_origin_path`` accepts a posted origin value only as a same-site path.
@@ -313,9 +277,7 @@ Frozen specs
 Signals
 -------
 
-See :doc:`signals` and :doc:`/content/topics/forms/signals` for the form signals
-(``action_registered``, ``action_dispatched``, ``form_validation_failed``,
-``wizard_step_submitted``, ``wizard_completed``, ``form_access_denied``).
+See :doc:`signals` and :doc:`/content/topics/forms/signals` for the form signals (``action_registered``, ``action_dispatched``, ``form_validation_failed``, ``wizard_step_submitted``, ``wizard_completed``, ``form_access_denied``).
 
 See also
 --------

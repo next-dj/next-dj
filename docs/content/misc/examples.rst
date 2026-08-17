@@ -57,8 +57,10 @@ The **Primary docs** column points to the sections of this manual where the tech
 Shared assets
 -------------
 
-* :repo:`_shared <tree/main/examples/_shared>`. A shared component palette consumed through ``COMPONENT_BACKENDS`` ``DIRS``.
-* :repo:`_template <tree/main/examples/_template>`. An empty scaffold to copy when starting a new example-shaped project.
+* :repo:`_shared <tree/main/examples/_shared>`.
+  A shared component palette consumed through ``COMPONENT_BACKENDS`` ``DIRS``.
+* :repo:`_template <tree/main/examples/_template>`.
+  An empty scaffold to copy when starting a new example-shaped project.
 
 See also
 --------

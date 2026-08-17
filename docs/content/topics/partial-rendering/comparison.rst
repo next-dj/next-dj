@@ -26,29 +26,38 @@ The axes at a glance
      - With JavaScript off
      - Who owns the wire format
    * - next.dj zones
-     - The page view. A zone request resolves the page body before any zone renders.
-     - On the server. The wire carries zone names, and every address in an envelope is written by a handler.
+     - The page view.
+       A zone request resolves the page body before any zone renders.
+     - On the server.
+       The wire carries zone names, and every address in an envelope is written by a handler.
      - The same URL answers the whole document, and the interaction stays an ordinary link or form post.
-     - The project. One protocol backend from ``PARTIAL_BACKENDS`` serialises every envelope.
+     - The project.
+       One protocol backend from ``PARTIAL_BACKENDS`` serialises every envelope.
    * - htmx
      - The view the attribute points at, like any Django view.
      - In the markup, on the element that triggers the request.
-     - It depends on the trigger. An attribute over a real link or form leaves the plain navigation in place.
-     - htmx. The body is an HTML fragment and the ``HX-`` response headers steer the client.
+     - It depends on the trigger.
+       An attribute over a real link or form leaves the plain navigation in place.
+     - htmx.
+       The body is an HTML fragment and the ``HX-`` response headers steer the client.
    * - Turbo
      - The view behind the frame or the stream.
      - In the frame identifier on both sides, and in the target of a stream element.
      - Links and forms stay links and forms, and a frame renders its content in place.
-     - Turbo. Frames and streams are custom elements with a fixed action vocabulary.
+     - Turbo.
+       Frames and streams are custom elements with a fixed action vocabulary.
    * - Django Unicorn
      - The component class that handles the action, the way a view handles a request.
-     - Neither side names one. The component is the unit that updates.
+     - Neither side names one.
+       The component is the unit that updates.
      - The component renders once and its interactions do not run.
-     - Django Unicorn. The endpoint, the payload, and the state round trip belong to the library.
+     - Django Unicorn.
+       The endpoint, the payload, and the state round trip belong to the library.
    * - Full page reload
      - The view, and the whole document is the answer.
      - Nowhere.
-     - Unchanged. This is the baseline every other row falls back to.
+     - Unchanged.
+       This is the baseline every other row falls back to.
      - HTML.
 
 Who authorizes the patch

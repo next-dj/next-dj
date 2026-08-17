@@ -18,15 +18,12 @@ It walks seven concrete tasks from markup to handler, and the rest of the sectio
 .. rubric:: Orientation
 
 :doc:`comparison`
-   Zones set beside htmx, Turbo, and Django Unicorn on four checkable axes, and where each
-   alternative is the better fit.
+   Zones set beside htmx, Turbo, and Django Unicorn on four checkable axes, and where each alternative is the better fit.
 
 .. rubric:: The tutorial
 
 :doc:`scenarios`
-   Seven scenarios from task to markup to handler, from neighbouring forms and inline
-   validation to an auto-submitting filter, pagination and infinite scroll, a live
-   stream, a modal wizard that refreshes a list, and lazy zones.
+   Seven scenarios from task to markup to handler, from neighbouring forms and inline validation to an auto-submitting filter, pagination and infinite scroll, a live stream, a modal wizard that refreshes a list, and lazy zones.
 
 .. rubric:: Concepts
 

@@ -94,10 +94,7 @@ Reverse helpers
 .. py:function:: next.urls.reverse.page_reverse_lazy(path_template="", *, namespace=app_name, **kwargs)
 
    Lazy variant of ``page_reverse``, the way :func:`~django.urls.reverse_lazy` pairs with :func:`~django.urls.reverse`.
-   The URL resolves when the value is first coerced to ``str``,
-   which makes it safe in positions evaluated at class-definition time,
-   before the URLconf is ready,
-   such as ``Meta.success_url`` on a form class.
+   The URL resolves when the value is first coerced to ``str``, which makes it safe in positions evaluated at class-definition time, before the URLconf is ready, such as ``Meta.success_url`` on a form class.
 
 .. autofunction:: next.urls.reverse.with_query
 

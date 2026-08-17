@@ -279,9 +279,11 @@ When more than one body source applies the framework picks the highest priority 
    * - ``render`` function
      - Wins outright when the page module defines ``def render(...)``.
    * - ``template`` attribute
-     - Used when no ``render`` function exists and the page module sets ``template = "..."``. Consulted before any template loader.
+     - Used when no ``render`` function exists and the page module sets ``template = "..."``.
+       Consulted before any template loader.
    * - Template loaders
-     - Consulted only when neither of the above applies. Loaders run in ``TEMPLATE_LOADERS`` order and the first one whose ``can_load`` returns ``True`` supplies the body.
+     - Consulted only when neither of the above applies.
+       Loaders run in ``TEMPLATE_LOADERS`` order and the first one whose ``can_load`` returns ``True`` supplies the body.
 
 The template loaders have no fixed numbering between them.
 ``DjxTemplateLoader`` matches the sibling ``template.djx``, but a custom loader placed before it in ``TEMPLATE_LOADERS`` is consulted first and wins when both could load the same directory.

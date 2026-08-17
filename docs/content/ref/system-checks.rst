@@ -206,8 +206,7 @@ Errors
      - ``next.urls.checks``
    * - ``next.E029``
      - A keyless ``@context`` callable is not annotated as returning a dict.
-       The check reads the context registry, so it catches ``@context``,
-       ``@page.context``, an aliased import, and ``async def`` alike.
+       The check reads the context registry, so it catches ``@context``, ``@page.context``, an aliased import, and ``async def`` alike.
      - ``next.pages.checks``
    * - ``next.E030``
      - An error was raised while checking router pages.
@@ -261,7 +260,8 @@ Errors
      - A form action backend class does not subclass ``FormActionBackend``.
      - ``next.forms.checks``
    * - ``next.E046``
-     - One shared action name is declared in two different modules, so bare-name lookups resolve to whichever module imported first. Rename one class or set ``Meta.scope``.
+     - One shared action name is declared in two different modules, so bare-name lookups resolve to whichever module imported first.
+       Rename one class or set ``Meta.scope``.
      - ``next.forms.checks``
    * - ``next.E047``
      - A form class ``Meta.scope`` or an ``@action`` ``scope`` keyword is set to a value other than ``"page"`` or ``"shared"``.
@@ -358,7 +358,8 @@ Warnings
    * - ``next.W002``
      - A directory named by ``PAGES_DIR`` sits beside the working directory, holds pages, and no configured router routes it, so nothing under it is served.
        Name the directory in ``PAGE_BACKENDS`` ``DIRS``, or turn that entry's ``APP_DIRS`` off, which routes ``BASE_DIR`` over ``PAGES_DIR`` when ``DIRS`` names no root.
-       The tree is not walked by the page checks, so its contents raise no ``next.E010``, ``next.E012``, or ``next.E017``. This one warning stands for all of them.
+       The tree is not walked by the page checks, so its contents raise no ``next.E010``, ``next.E012``, or ``next.E017``.
+       This one warning stands for all of them.
      - ``next.pages.checks``
    * - ``next.W030``
      - ``STATIC_BACKENDS`` is empty, so the framework falls back to ``StaticFilesBackend``.
@@ -420,7 +421,8 @@ Warnings
        Thread a ``key=`` into the form to keep the repeated morph correct.
      - ``next.partial.checks``
    * - ``next.W071``
-     - ``PARTIAL_BACKENDS`` has more than one entry. Partial rendering uses a single protocol backend, so only the first entry runs and the rest are ignored.
+     - ``PARTIAL_BACKENDS`` has more than one entry.
+       Partial rendering uses a single protocol backend, so only the first entry runs and the rest are ignored.
      - ``next.partial.checks``
    * - ``next.W072``
      - A ``NEXT_FRAMEWORK`` bool key, ``STRICT_CONTEXT``, ``STRICT_LOADING``, ``LAZY_COMPONENT_MODULES``, or ``FORM_AUTODISCOVER``, holds a non-bool value.

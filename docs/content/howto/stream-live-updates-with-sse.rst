@@ -13,9 +13,7 @@ Solution
 
 Return a ``PatchEventStream`` from a page module's ``render`` escape hatch and drive it from an in-process broker.
 The stream carries patch envelopes as ``next-patches`` events, the same envelope an HTTP partial response carries.
-Each event uses the ``refresh`` verb so every tab re-fetches the stale zone with its own
-cookies through the page view, which keeps authorization in the subscriber's own view and
-never broadcasts one user's HTML to another.
+Each event uses the ``refresh`` verb so every tab re-fetches the stale zone with its own cookies through the page view, which keeps authorization in the subscriber's own view and never broadcasts one user's HTML to another.
 A full implementation lives under ``examples/live-polls/``.
 See :doc:`/content/misc/examples`.
 

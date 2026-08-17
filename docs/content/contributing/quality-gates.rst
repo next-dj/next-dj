@@ -45,6 +45,9 @@ GitHub Actions runs the same work split across jobs, and adds the documentation 
    * - Documentation
      - ``make docs``
      - ``docs`` job
+   * - Documentation prose
+     - ``make docs-lint``
+     - ``docs`` job, and the ``prose-lint`` pre-commit hook
    * - Benchmarks
      - ``make bench``
      - ``bench`` workflow on every pull request
@@ -102,6 +105,11 @@ The ``docs`` job builds the manual with ``sphinx-build -T -W --keep-going -b htm
 The ``-W`` flag turns every Sphinx warning into an error, so an unresolved cross reference, a page missing from a toctree, or an unregistered role fails the build.
 ``make docs`` adds ``-a`` and ``-E`` to force a full rebuild, which is what picks up a change under ``docs/_templates/``.
 ``uv run doc8 docs/content`` covers the reStructuredText style rules the pre-commit hooks also run.
+
+Neither of those two sees semantic newlines, so ``docs/prose_lint.py`` covers that rule on its own.
+It reports a line that holds the end of one sentence and the start of the next, and a sentence wrapped onto a second physical line, and it skips literal blocks, inline literals, roles, abbreviations, file names, and version numbers so the signal stays usable.
+The ``docs`` job runs it before the build, ``make docs-lint`` runs it locally, ``make docs`` runs it before ``sphinx-build``, and the ``prose-lint`` pre-commit hook runs it over the changed files under ``docs/content/``.
+The rule it enforces is stated in :doc:`style-guide`.
 
 Support matrix
 --------------

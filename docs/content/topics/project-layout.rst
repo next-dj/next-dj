@@ -66,8 +66,10 @@ The Notes project from the tutorial demonstrates the full layout.
 
 Three things are special about this tree.
 
-- ``pages/`` is the page root. Every directory below it becomes a URL.
-- ``_components/`` lives inside the page root. Every directory below it becomes a reusable component.
+- ``pages/`` is the page root.
+  Every directory below it becomes a URL.
+- ``_components/`` lives inside the page root.
+  Every directory below it becomes a reusable component.
 - ``static/`` keeps project-wide assets that are not co-located with a page or a component.
 
 The file router registers each ``_components/`` folder it meets while walking the page tree, and it skips that folder as a route.

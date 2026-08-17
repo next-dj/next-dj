@@ -48,8 +48,11 @@ Sentences
 ---------
 
 One sentence per line (semantic newlines).
-Each statement is a complete sentence.
-No fragments.
+A sentence is never wrapped onto a second physical line, however long it runs, because ``doc8`` disables ``D001`` and no line length limit applies.
+Two sentences never share one line.
+The same rule holds inside a ``list-table`` cell, where the second and later sentences of a cell repeat the indentation of the cell body.
+Running prose is written in complete sentences, while a table cell or a definition term may be a noun phrase.
+``make docs-lint`` checks this rule, and :doc:`quality-gates` records where else it runs.
 
 Paragraphs
 ----------
@@ -131,6 +134,7 @@ A documentation pull request lands when.
 
 - ``make docs`` is green.
 - ``uv run doc8 docs/content`` is green.
+- ``make docs-lint`` reports no semantic newline violation.
 - Every new section follows its template.
 - Every page under ``content/internals/`` includes a ``.. mermaid::`` diagram.
 - Cross references resolve.

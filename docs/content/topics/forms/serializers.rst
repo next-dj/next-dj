@@ -138,7 +138,8 @@ Each field carries a ``FieldKind`` literal that classifies the widget.
    * - ``select_multi``
      - ``SelectMultiple`` widget.
    * - ``input``
-     - Every other widget. ``input_type`` carries the HTML input type.
+     - Every other widget.
+       ``input_type`` carries the HTML input type.
 
 Admin ``RelatedFieldWidgetWrapper`` widgets are unwrapped to their inner widget before classification.
 

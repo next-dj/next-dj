@@ -90,8 +90,7 @@ The URL path provider coerces the captured segment to the requested type.
    def note(note_id: DUrl[int]) -> Note:
        return Note.objects.get(pk=note_id)
 
-In the simplest form ``DUrl[T]`` matches the captured segment whose name
-equals the parameter name, then coerces the captured value to ``T``.
+In the simplest form ``DUrl[T]`` matches the captured segment whose name equals the parameter name, then coerces the captured value to ``T``.
 ``T`` may be ``str``, ``int``, ``bool``, ``float``, ``UUID``, ``Decimal``, ``date``, or ``datetime``.
 A value that already satisfies ``T`` passes through untouched.
 A Django converter that pre-coerced the segment, such as ``[uuid:id]`` producing a :class:`~uuid.UUID`, reaches the handler in that shape.
@@ -106,19 +105,16 @@ Annotate as ``DUrl[str]`` or leave it unannotated.
 The marker has three forms.
 
 ``DUrl[T]``.
-   Reads the captured segment that shares the parameter name and coerces
-   it to ``T``. Use it when the parameter name already matches the
-   directory segment.
+   Reads the captured segment that shares the parameter name and coerces it to ``T``.
+   Use it when the parameter name already matches the directory segment.
 
 ``DUrl["segment"]``.
    Reads the named captured segment and returns it in string form.
-   Use it when the parameter name differs from the segment name and no
-   type coercion is needed.
+   Use it when the parameter name differs from the segment name and no type coercion is needed.
 
 ``DUrl["segment", T]``.
-   Reads the named captured segment and coerces it to ``T``. Use it when
-   the parameter name differs from the segment name, for example
-   ``note_id: DUrl["id", int]`` for an ``[id]`` directory.
+   Reads the named captured segment and coerces it to ``T``.
+   Use it when the parameter name differs from the segment name, for example ``note_id: DUrl["id", int]`` for an ``[id]`` directory.
 
 The string in ``DUrl["segment"]`` and ``DUrl["segment", T]`` is the URL kwarg key the resolver looks up, not the Django converter label.
 Hyphens in directory names are normalised to underscores in the kwarg, so a ``[my-id]`` directory is read as ``DUrl["my_id"]``.
@@ -348,9 +344,8 @@ The base classes are ``RegisteredParameterProvider`` and ``DDependencyBase``.
                raise Http404 from exc
 
 One marker can serve both a page render and a form action handler.
-A page render captures the identifier in the URL, while a form action carries
-it in the POST body. The ``resolve`` method above checks both sources, so the
-same ``DNote[Note]`` parameter works in either call site.
+A page render captures the identifier in the URL, while a form action carries it in the POST body.
+The ``resolve`` method above checks both sources, so the same ``DNote[Note]`` parameter works in either call site.
 The form template carries the identifier in a hidden input so the POST branch can read it.
 See ``examples/kanban`` for a marker that serves both call sites.
 

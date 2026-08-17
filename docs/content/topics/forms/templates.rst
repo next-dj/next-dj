@@ -83,7 +83,8 @@ The tag compiles each one to a ``data-next-*`` attribute the client runtime read
      - Carries
    * - ``validate``
      - ``data-next-validate``
-     - The switch that turns on client-side validation on blur. The value is not read, so omitting the argument is the only way to keep validation off.
+     - The switch that turns on client-side validation on blur.
+       The value is not read, so omitting the argument is the only way to keep validation off.
    * - ``trigger``
      - ``data-next-trigger``
      - The event that triggers a partial submission.

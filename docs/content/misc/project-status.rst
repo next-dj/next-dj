@@ -14,7 +14,6 @@ Maturity
 --------
 
 The framework is under active development, and the repository README asks a project to treat a release as evolving until it validates the behaviour that project depends on.
-The published distribution carries the ``Development Status :: 3 - Alpha`` classifier.
 A deployment therefore pins an exact release and re-reads this page before it upgrades.
 Run ``uv run python manage.py check`` after an upgrade, because the framework reports a configuration mistake with a code and a hint, as :doc:`/content/ref/system-checks` describes.
 
@@ -83,6 +82,6 @@ See also
 
 .. seealso::
 
-   :doc:`roadmap` for the boundaries the current model states about itself.
+   :doc:`/content/topics/partial-rendering/limitations` for the boundaries the current model states about itself.
    :doc:`/content/faq/general` for the rules that define the safe import surface.
    :doc:`/content/contributing/quality-gates` for what every change passes before it merges.
