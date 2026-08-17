@@ -6,9 +6,8 @@ from django.template import Context, Template, engines
 from next.static.collector import StaticCollector
 
 
-# Triggering Django template engines also triggers a global init which
-# registers builtins (including our next tags) with every Engine. Warm up
-# once at import time so the bench body stays focused on render cost.
+# Touching the engines triggers the global init that registers the next tags,
+# so warm it up here and keep the bench body on render cost alone.
 engines.all()
 
 

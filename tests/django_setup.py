@@ -82,9 +82,8 @@ def setup() -> None:
         return
 
     settings.configure(**_build_test_settings())
-    # Register form actions before URL conf loads: `django.setup()` loads
-    # `next.urls` which builds url patterns, so `@action` handlers must be
-    # in the form-action registry by then.
+    # `django.setup()` loads `next.urls` and builds the patterns, so the
+    # `@action` handlers must already sit in the form-action registry.
 
     django.setup()
 

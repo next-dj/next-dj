@@ -99,19 +99,15 @@ class ComponentWidget(django_forms.Widget):
             raise _unregistered_component_error(self.component_name, anchor)
         collect_component_assets(info, self._static_collector)
         merged = self.build_attrs(self.attrs, attrs or {})
-        # Hyphenated keys such as aria-invalid cannot be read as template vars, so
-        # alias them to an underscore form (aria_invalid) unless that name already
-        # exists as a real attr. The raw merged mapping stays under "attrs" so
-        # template iteration still sees the hyphenated originals. The shared
-        # input/textarea components read identifier-named vars and are also used
-        # directly via {% component %}, so spreading merged and extra_kwargs to the
-        # top level keeps those templates rendering. attrs, name, value, and errors
-        # win over any same-named extra kwarg.
+        # Hyphenated keys such as aria-invalid cannot be read as template vars,
+        # so they alias to an underscore form unless that name is already taken.
         aliased = {
             k.replace("-", "_"): v
             for k, v in merged.items()
             if "-" in k and k.replace("-", "_") not in merged
         }
+        # The shared input and textarea components read identifier-named vars, so
+        # the merged attrs spread to the top level while "attrs" keeps the originals.
         context = {
             **merged,
             **aliased,

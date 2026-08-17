@@ -259,8 +259,8 @@ def _format_success_message(cls: type, cleaned_data: dict[str, Any]) -> str:
 
 def _is_self_registered(cls: type) -> bool:
     """Return True when auto-registration stamped this exact class."""
-    # Own-dict lookup on purpose: a concrete subclass of a registered base
-    # must not inherit the marker.
+    # The lookup is own-dict on purpose, a concrete subclass of a registered
+    # base must not inherit the marker.
     return _SELF_REGISTERED_ATTR in cls.__dict__
 
 

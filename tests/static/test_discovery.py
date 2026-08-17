@@ -53,9 +53,8 @@ class TestBackendProviderProtocol:
         assert not isinstance(object(), BackendProvider)
 
     def test_a_router_backend_is_not_a_provider(self) -> None:
-        # Both contracts carry a `page_roots`, and they return different types.
-        # A structural match needs `default_backend` too, which no router has,
-        # so the shared name cannot make a router pass for a provider.
+        # Both contracts carry a `page_roots`, but a structural match also needs
+        # `default_backend`, which no router has.
         assert not isinstance(FileRouterBackend(app_dirs=False), BackendProvider)
 
 
@@ -281,9 +280,8 @@ class TestAssetDiscoveryModuleLists:
         discovery = AssetDiscovery(provider)
         collector = StaticCollector()
 
-        # Two parseable pages exercise the happy-path eviction (line after the
-        # successful cache write). A third, broken page exercises the "module is
-        # None" eviction branch.
+        # Two parseable pages exercise the happy-path eviction, a third broken
+        # one exercises the "module is None" branch.
         for i in range(2):
             ok_dir = tmp_path / f"ok_{i}"
             ok_dir.mkdir()

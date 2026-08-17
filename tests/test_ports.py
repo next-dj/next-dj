@@ -1,8 +1,26 @@
+import inspect
+
 import pytest
 
 from next.partial.shaper import PartialShaperImpl
-from next.ports import PartialShaperSlot, partial_shaper_slot
+from next.ports import PartialShaper, PartialShaperSlot, partial_shaper_slot
 from tests.support import IntentOnlyShaper
+
+
+def _port_methods() -> list[str]:
+    return sorted(
+        name
+        for name, member in vars(PartialShaper).items()
+        if not name.startswith("_") and inspect.isfunction(member)
+    )
+
+
+def _parameter_shape(owner: type, name: str) -> list[tuple[str, object, object]]:
+    signature = inspect.signature(getattr(owner, name))
+    return [
+        (param.name, param.kind, param.default)
+        for param in signature.parameters.values()
+    ]
 
 
 class TestUnboundSlot:
@@ -11,13 +29,6 @@ class TestUnboundSlot:
     def test_get_raises_before_set(self) -> None:
         with pytest.raises(RuntimeError, match="unbound"):
             PartialShaperSlot().get()
-
-    def test_get_raises_after_reset(self) -> None:
-        slot = PartialShaperSlot()
-        slot.set(IntentOnlyShaper())
-        slot.reset()
-        with pytest.raises(RuntimeError, match="unbound"):
-            slot.get()
 
 
 class TestBoundSlot:
@@ -35,6 +46,33 @@ class TestBoundSlot:
         replacement = IntentOnlyShaper()
         slot.set(replacement)
         assert slot.get() is replacement
+
+
+class TestPortImplementations:
+    """Both implementations keep the exact call shape the port declares.
+
+    mypy checks the real implementation but never reads `tests/`, so the
+    stub the intent-gate tests bind is compared against the port here.
+    """
+
+    def test_the_port_declares_the_expected_methods(self) -> None:
+        assert _port_methods() == [
+            "intent",
+            "shape_response",
+            "shape_validate",
+            "zone_response",
+        ]
+
+    @pytest.mark.parametrize("name", _port_methods())
+    @pytest.mark.parametrize(
+        "implementation", [PartialShaperImpl, IntentOnlyShaper], ids=["real", "stub"]
+    )
+    def test_implementation_parameters_match_the_port(
+        self, implementation, name
+    ) -> None:
+        assert _parameter_shape(implementation, name) == _parameter_shape(
+            PartialShaper, name
+        )
 
 
 class TestAppComposition:

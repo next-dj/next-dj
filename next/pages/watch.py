@@ -42,10 +42,8 @@ _MALFORMED = (
     "watcher. The same failure is not logged again until the settings reload."
 )
 
-# These helpers rebuild the backends on every reloader tick and every static
-# lookup, so nothing per instance can remember a report and one broken backend
-# would log forever. One key per source and subject bounds the set by the
-# configured backends, and a settings reload clears it.
+# The backends are rebuilt on every tick, so a per-instance flag cannot stop a
+# broken one from logging forever. One key per source and subject bounds the set.
 _reported_failures: set[tuple[str, str]] = set()
 
 
@@ -80,9 +78,8 @@ def iter_page_backends_for_watch() -> Iterator[RouterBackend]:
         try:
             backend = RouterFactory.create_backend(config)
         except Exception:
-            # Keyed by position among the configured entries, because an entry
-            # that names no BACKEND shares its name with every other one that
-            # names none.
+            # Keyed by position, because every entry that names no BACKEND
+            # would otherwise share one key.
             if _first_failure(str(position), "construction"):
                 logger.exception(_NOT_BUILT, position, config.get("BACKEND"))
             continue

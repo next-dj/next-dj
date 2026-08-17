@@ -433,10 +433,8 @@ class Page:
         module = _load_python_module_memo(file_path)
         error = last_load_error(file_path)
         if error is not None:
-            # Not Http404. The caller is assembling a patch envelope for
-            # another URL, so a 404 would answer that request instead of the
-            # morph. Falling through would render the sibling template.djx
-            # past the guards the broken render() would have applied.
+            # Not Http404. A 404 would answer the caller's own URL instead of
+            # the morph, and falling through would skip the page's guards.
             raise error
         resolution = self._resolve_page_body(file_path, module, request, **kwargs)
         return resolution.http_response, resolution.dynamic
@@ -481,10 +479,12 @@ class Page:
             if resolution.http_response is not None:
                 return resolution.http_response
             shaper = partial_shaper_slot.get()
-            if shaper.intent(request).zones:
+            intent = shaper.intent(request)
+            if intent.zones:
                 return shaper.zone_response(
                     file_path,
                     request,
+                    intent,
                     dynamic_body=resolution.dynamic,
                     url_kwargs=dict(kwargs),
                 )
@@ -603,9 +603,8 @@ class Page:
         self, url_path: str, file_path: Path, url_parser: URLPatternParser
     ) -> URLPattern | None:
         """Return a `path()` pattern for a page, template, or virtual entry."""
-        # The error class is reached through the parser because a top-level
-        # import of next.urls here would close the next.pages <-> next.urls
-        # circular import.
+        # The error class comes through the parser, because importing next.urls
+        # at module level would close the next.pages <-> next.urls cycle.
         try:
             django_pattern, parameters = url_parser.parse_url_pattern(url_path)
         except url_parser.duplicate_parameter_error as exc:

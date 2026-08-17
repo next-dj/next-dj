@@ -44,10 +44,11 @@ def _maybe_validate_only(
     falls through to the normal submit path.
     """
     shaper = partial_shaper_slot.get()
-    if not shaper.intent(request).validate_fields:
+    intent = shaper.intent(request)
+    if not intent.validate_fields:
         return None
     return shaper.shape_validate(
-        backend, request, form, action_name=action_name, uid=state.uid or ""
+        backend, request, form, intent, action_name=action_name, uid=state.uid or ""
     )
 
 

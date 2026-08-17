@@ -41,17 +41,14 @@ CSRF_PAYLOAD_KEY: Final = "$csrf"
 # production render carries no dev-only bytes.
 DEV_PAYLOAD_KEY: Final = "$dev"
 
-# The init-payload keys the framework owns. A colliding js-context key never reaches
-# the payload, whether or not this render has a framework value to write under it, so
-# the client store carries one meaning for the key in every environment.
+# The init-payload keys the framework owns. A colliding js-context key never
+# reaches the payload, so the key means one thing in every environment.
 RESERVED_PAYLOAD_KEYS: Final[frozenset[str]] = frozenset(
     {CSRF_PAYLOAD_KEY, DEV_PAYLOAD_KEY}
 )
 
-# Escape the inline-init payload for the HTML `<script>` context, mirroring
-# Django's `json_script`. These code points only ever appear inside JSON string
-# literals, so `\u00XX` and `\u202X` keep the value semantically identical while
-# stopping a `serialize=True` value from closing the element with `</script>`.
+# Escapes for the HTML `<script>` context, mirroring Django's `json_script`. The
+# code points only appear inside JSON strings, so escaping them changes nothing.
 _SCRIPT_ESCAPES: Final[dict[int, str]] = {
     ord("<"): "\\u003C",
     ord(">"): "\\u003E",

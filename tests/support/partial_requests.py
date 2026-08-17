@@ -4,20 +4,38 @@ from django.test import RequestFactory
 
 from next.forms.manager import form_action_manager
 from next.forms.uid import ORIGIN_FIELD_NAME
-from next.partial.headers import ORIGIN, REQUEST_FLAG
+from next.partial.headers import MERGE, ORIGIN, REQUEST_FLAG, VALIDATE, ZONE
 
 
 _ACTION_PATH = "/_next/form/x/"
 
 
-def partial_meta(host: str | None = None) -> dict[str, str]:
+def wsgi_header(name: str) -> str:
+    """Return the WSGI META key a request header travels under."""
+    return f"HTTP_{name.upper().replace('-', '_')}"
+
+
+def partial_meta(
+    host: str | None = None,
+    *,
+    zones: str | None = None,
+    validate: str | None = None,
+    merge: str | None = None,
+) -> dict[str, str]:
     """Return WSGI META that flags a request as partial, optional host origin.
 
-    Pass `host` to stamp the `X-Next-Origin` header with a host page URL.
+    Pass `host` to stamp the `X-Next-Origin` header with a host page URL, and
+    the keyword arguments to name zones, validate-only fields, or a merge mode.
     """
-    meta = {f"HTTP_{REQUEST_FLAG.upper().replace('-', '_')}": "1"}
-    if host is not None:
-        meta[f"HTTP_{ORIGIN.upper().replace('-', '_')}"] = host
+    meta = {wsgi_header(REQUEST_FLAG): "1"}
+    for header, value in (
+        (ORIGIN, host),
+        (ZONE, zones),
+        (VALIDATE, validate),
+        (MERGE, merge),
+    ):
+        if value is not None:
+            meta[wsgi_header(header)] = value
     return meta
 
 

@@ -41,12 +41,13 @@ class IntentOnlyShaper:
         self,
         page_path: Path,
         request: HttpRequest,
+        intent: PartialIntent,
         *,
         dynamic_body: bool,
         url_kwargs: dict[str, object],
     ) -> NoReturn:
         """Fail because a request naming no zone must never reach here."""
-        del page_path, request, dynamic_body, url_kwargs
+        del page_path, request, intent, dynamic_body, url_kwargs
         _shaping_refused("zone_response")
 
     def shape_response(
@@ -61,10 +62,11 @@ class IntentOnlyShaper:
         backend: object,
         request: HttpRequest,
         form: BaseForm | BaseFormSet,
+        intent: PartialIntent,
         *,
         action_name: str,
         uid: str,
     ) -> NoReturn:
         """Fail because a submission naming no validate field must never reach here."""
-        del backend, request, form, action_name, uid
+        del backend, request, form, intent, action_name, uid
         _shaping_refused("shape_validate")

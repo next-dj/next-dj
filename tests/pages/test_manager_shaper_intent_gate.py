@@ -1,20 +1,4 @@
-import pytest
 from django.test import Client
-
-from next.ports import partial_shaper_slot
-from tests.support import IntentOnlyShaper
-
-
-@pytest.fixture()
-def intent_only_shaper():
-    """Bind a shaper that refuses to shape, restore the real one after."""
-    bound = partial_shaper_slot.get()
-    shaper = IntentOnlyShaper()
-    partial_shaper_slot.set(shaper)
-    try:
-        yield shaper
-    finally:
-        partial_shaper_slot.set(bound)
 
 
 class TestPlainPageRequest:

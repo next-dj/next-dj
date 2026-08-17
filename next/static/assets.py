@@ -32,9 +32,7 @@ _RENDERER_LOADS: Final[dict[str, str]] = {
 }
 
 # The element the runtime builds around an inline body for each verb. A kind whose
-# own `inline_tag` differs would render that body into another element on a full
-# page render, so the verb is withheld instead of letting the two renders disagree.
-# The `module` verb builds a typed script no `inline_tag` can name, hence its absence.
+# own `inline_tag` differs is withheld, and `module` names no element at all.
 _LOAD_INLINE_TAGS: Final[dict[str, str]] = {"link": "style", "script": "script"}
 
 

@@ -32,11 +32,10 @@ from .responses import (
     ActionOutcome,
     ActionOutcomeKind,
     _flash_success_before_rerender,
-    _origin_rerender_response,
     _send_success_message,
     ensure_http_response,
 )
-from .wizard import _bind_wizard_step, _dispatch_wizard, _maybe_validate_only
+from .wizard import _dispatch_wizard, _maybe_validate_only
 
 
 if TYPE_CHECKING:
@@ -62,9 +61,8 @@ class FormActionDispatch:
     the one stable identity receivers filter on.
     """
 
-    _bind_wizard_step = staticmethod(_bind_wizard_step)
-    _dispatch_wizard = staticmethod(_dispatch_wizard)
-    _origin_rerender_response = staticmethod(_origin_rerender_response)
+    # The documented address a custom backend that drives the pipeline by
+    # hand calls, so the alias is part of the public surface.
     ensure_http_response = staticmethod(ensure_http_response)
 
     @staticmethod

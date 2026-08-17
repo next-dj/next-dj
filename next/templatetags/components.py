@@ -33,7 +33,8 @@ from next.conf import fail_loudly, next_framework_settings
 from next.static import collect_component_assets
 
 
-# Allow line breaks inside ``{% ... %}`` (multiline tag bodies).
+# Component tags carry their props over several lines, which Django's tag
+# regex refuses by default.
 template_base.tag_re = re.compile(template_base.tag_re.pattern, re.DOTALL)
 
 logger = logging.getLogger(__name__)
@@ -51,14 +52,13 @@ _END_BLOCK_SET_SLOT = ("/set_slot",)
 _SHORT_SLOT_EMPTY_NAME = "{% slot %} tag requires a quoted slot name"
 _SHORT_SET_SLOT_EMPTY_NAME = "{% set_slot %} tag requires a quoted slot name"
 
-# Slot collection uses this key during parent ``{% #component %}`` body render
+# The key slot collection writes while the parent ``{% #component %}`` body renders.
 _INTERNAL_CONTEXT_KEYS = frozenset({"_component_slots"})
 
 _DASH_BEFORE_DASH = re.compile(r"-(?=-)")
 
-# Sentinel distinguishing "slot key absent" from "slot present but empty".
-# An explicitly empty slot (``{% #slot "x" %}{% /slot %}``) renders nothing,
-# whereas a missing slot falls back to the ``{% #set_slot %}`` default body.
+# Sentinel distinguishing "slot key absent" from "slot present but empty", since
+# only a missing slot falls back to the ``{% #set_slot %}`` default body.
 _SLOT_MISSING: Any = object()
 
 
@@ -261,10 +261,8 @@ class ComponentNode(Node):
         render_ctx["children"] = "".join(child_chunks)
 
         for slot_name, content in slots.items():
-            # Slot content lives exclusively under ``slot_<name>`` so prop
-            # names never collide with slot names. The unprefixed key would
-            # shadow a same-named prop and make ``{% #set_slot %}`` defaults
-            # unreachable when a prop happened to share the slot's name.
+            # Slot content lives only under ``slot_<name>``, because an
+            # unprefixed key would shadow a prop that shares the slot's name.
             render_ctx[f"slot_{slot_name}"] = content
 
         request = render_ctx.get("request")

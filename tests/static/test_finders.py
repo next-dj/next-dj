@@ -331,7 +331,6 @@ class TestCollectstaticIntegration:
             call_command(
                 "collectstatic", "--noinput", "--dry-run", "--ignore=*.py", stdout=out
             )
-        # Dry-run completes without ImproperlyConfigured. The finder wires
-        # up the staticfiles command path — full asset enumeration is tested
-        # in unit tests above.
+        # The dry run only proves the finder wires up the staticfiles command,
+        # full asset enumeration is covered by the unit tests above.
         assert "Pretending to copy" in out.getvalue()

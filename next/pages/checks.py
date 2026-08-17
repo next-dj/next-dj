@@ -40,12 +40,11 @@ from .loaders import (
     last_load_error,
 )
 from .manager import page
+from .scan import iter_existing_scanned_pages
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
-
-    from next.urls import RouterManager
+    from collections.abc import Callable
 
 
 logger = logging.getLogger(__name__)
@@ -105,15 +104,13 @@ def check_pages_structure(*args, **kwargs) -> list[CheckMessage]:
     # page trees.
     seen: set[Path] = set()
     for router in router_manager.backends:
-        # This is the one check that names a failing `page_roots`. Every other
-        # reader takes the empty list, so one broken router costs one message
-        # and, here, the single traceback of the run.
+        # The one check that names a failing `page_roots`, every other reader
+        # takes the empty list, so a broken router costs one message and trace.
         try:
             roots = read_page_roots(router)
         except PageRootsError as e:
-            # Only a raised failure carries a traceback, and it is the
-            # backend's own. A wrong shape has no cause, and its whole
-            # diagnosis is the message below.
+            # Only a raised failure carries a traceback, a wrong shape has no
+            # cause and its whole diagnosis is the message below.
             hint = None
             if e.__cause__ is not None:
                 logger.exception("a router failed to report its page trees")
@@ -612,24 +609,6 @@ def _check_registered_context_functions(page_path: Path) -> list[CheckMessage]:
     return errors
 
 
-def _iter_existing_scanned_pages(
-    router_manager: RouterManager, seen: set[Path]
-) -> Iterator[Path]:
-    """Yield each existing `page.py` once across routers, de-duplicated by `seen`.
-
-    The identity is the resolved path, so a tree reached through a symlink
-    reports once. The spelling the router walked is what travels on, because
-    the loader and the page-context registry both key on that spelling.
-    Virtual `template.djx`-only pages carry a non-existent path and are skipped.
-    """
-    for router in router_manager.backends:
-        for _url_path, page_path in iter_scanned_page_pairs(router):
-            if not first_visit(page_path, seen):
-                continue
-            if page_path.exists():
-                yield page_path
-
-
 def _page_import_error_message(page_path: Path) -> str:
     """Compose the `next.E017` text, naming the recorded failure when known."""
     error = last_load_error(page_path)
@@ -659,7 +638,7 @@ def check_page_module_imports(*args, **kwargs) -> list[CheckMessage]:
         return init_errors
     return [
         Error(_page_import_error_message(page_path), obj=str(page_path), id="next.E017")
-        for page_path in _iter_existing_scanned_pages(router_manager, set())
+        for page_path in iter_existing_scanned_pages(router_manager, set())
         if _load_python_module_memo(page_path) is None
     ]
 
@@ -672,7 +651,7 @@ def check_context_functions(*args, **kwargs) -> list[CheckMessage]:
         return init_errors
 
     errors: list[CheckMessage] = []
-    for page_path in _iter_existing_scanned_pages(router_manager, set()):
+    for page_path in iter_existing_scanned_pages(router_manager, set()):
         if _load_python_module_memo(page_path) is None:
             continue
         errors.extend(_check_registered_context_functions(page_path))
@@ -691,7 +670,7 @@ def check_context_registration_files(*args, **kwargs) -> list[CheckMessage]:
     if router_manager is None:
         return init_errors
 
-    for page_path in _iter_existing_scanned_pages(router_manager, set()):
+    for page_path in iter_existing_scanned_pages(router_manager, set()):
         _load_python_module_memo(page_path)
 
     return registration_file_errors(
@@ -713,7 +692,7 @@ def check_single_keyless_context(*args, **kwargs) -> list[CheckMessage]:
 
     errors: list[CheckMessage] = []
     conflicts = page._context_manager._keyless_conflicts
-    for page_path in _iter_existing_scanned_pages(router_manager, set()):
+    for page_path in iter_existing_scanned_pages(router_manager, set()):
         if _load_python_module_memo(page_path) is None:
             continue
         names = conflicts.get(page_path)
@@ -832,26 +811,6 @@ def check_template_loaders(*args, **kwargs) -> list[CheckMessage]:
     return messages
 
 
-def iter_serialized_page_context_keys() -> Iterator[tuple[Path, str]]:
-    """Yield the `page.py` path and key of every keyed `serialize=True` context.
-
-    A keyless `serialize=True` callable spreads the keys of the dict it
-    returns at render time, so those keys exist only at runtime and never
-    travel through here. One page reached through two spellings yields its
-    keys once, under the spelling the registry keys on.
-    """
-    router_manager, _errors = get_router_manager()
-    if router_manager is None:
-        return
-    registry = page._context_manager._context_registry
-    for page_path in _iter_existing_scanned_pages(router_manager, set()):
-        if _load_python_module_memo(page_path) is None:
-            continue
-        for key, entry in registry.get(page_path, {}).items():
-            if entry.serialize and key is not None:
-                yield page_path, key
-
-
 __all__ = [
     "check_context_functions",
     "check_context_processor_signature",
@@ -864,5 +823,4 @@ __all__ = [
     "check_single_keyless_context",
     "check_template_loaders",
     "check_unrouted_working_directory_pages",
-    "iter_serialized_page_context_keys",
 ]

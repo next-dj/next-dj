@@ -24,10 +24,8 @@ if TYPE_CHECKING:
     from django.http import HttpRequest
 
 
-# Memoise per-callable introspection. A bound method is recreated each access, so
-# key by its stable `__func__` (never the instance) plus a bound flag. Keys are the
-# framework's page, component, and action callables, declared once at import, so the
-# unbounded dicts stay finite over a process lifetime.
+# Keyed by the stable `__func__` plus a bound flag, because a bound method is
+# recreated on each access. The keys are import-time callables, so these stay finite.
 _signature_cache: dict[Any, inspect.Signature] = {}
 _type_hints_cache: dict[Any, dict[str, Any]] = {}
 _var_keyword_cache: dict[Any, bool] = {}

@@ -42,6 +42,8 @@ class PartialShaper(Protocol):
 
     The caller decides through `intent` whether a request is partial and
     only then enters a shape method, so a full render never pays for one.
+    That intent travels on as an argument, so a shape method never re-reads
+    the request to learn what was asked.
     """
 
     def intent(self, request: HttpRequest) -> PartialIntentView:
@@ -52,11 +54,12 @@ class PartialShaper(Protocol):
         self,
         page_path: Path,
         request: HttpRequest,
+        intent: PartialIntentView,
         *,
         dynamic_body: bool,
         url_kwargs: dict[str, object],
     ) -> HttpResponse:
-        """Return the envelope for the zones the request named."""
+        """Return the envelope for the zones the intent named."""
         ...
 
     def shape_response(
@@ -70,6 +73,7 @@ class PartialShaper(Protocol):
         backend: object,
         request: HttpRequest,
         form: BaseForm | BaseFormSet,
+        intent: PartialIntentView,
         *,
         action_name: str,
         uid: str,
@@ -98,10 +102,6 @@ class PartialShaperSlot:
         if self._impl is None:
             raise RuntimeError(_UNBOUND_SHAPER)
         return self._impl
-
-    def reset(self) -> None:
-        """Drop the binding, which only a test that rebinds it needs."""
-        self._impl = None
 
 
 partial_shaper_slot = PartialShaperSlot()

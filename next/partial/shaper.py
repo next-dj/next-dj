@@ -17,15 +17,15 @@ if TYPE_CHECKING:
 
     from next.forms.backends import FormActionBackend
     from next.forms.dispatch.responses import ActionOutcome
+    from next.ports import PartialIntentView
 
 
 class PartialShaperImpl(PartialShaper):
     """Binds the port to the partial rendering and shaping entry points.
 
     The port keeps `pages` and `forms` off the `partial` package, so the
-    area-owned argument types arrive here as `object` and are cast back.
-    The intent a caller already branched on is memoised on the request, so
-    reading it again here is a lookup and keeps it out of the port types.
+    area-owned arguments arrive as `object` or as the narrow intent view
+    and are cast back to the types the shaping entry points take.
     """
 
     @override
@@ -38,14 +38,15 @@ class PartialShaperImpl(PartialShaper):
         self,
         page_path: "Path",
         request: "HttpRequest",
+        intent: "PartialIntentView",
         *,
         dynamic_body: bool,
         url_kwargs: dict[str, object],
     ) -> "HttpResponse":
-        """Return the envelope for the zones the request named."""
+        """Return the envelope for the zones the intent named."""
         return zone_response(
             page_path,
-            partial_intent(request),
+            cast("PartialIntent", intent),
             request,
             dynamic_body=dynamic_body,
             url_kwargs=url_kwargs,
@@ -66,6 +67,7 @@ class PartialShaperImpl(PartialShaper):
         backend: object,
         request: "HttpRequest",
         form: "BaseForm | BaseFormSet",
+        intent: "PartialIntentView",
         *,
         action_name: str,
         uid: str,
@@ -75,7 +77,7 @@ class PartialShaperImpl(PartialShaper):
             cast("FormActionBackend", backend),
             request,
             form,
-            partial_intent(request),
+            cast("PartialIntent", intent),
             ActionRef(action_name=action_name, uid=uid),
         )
 

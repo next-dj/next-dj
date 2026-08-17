@@ -84,8 +84,7 @@ def _flash_success_before_rerender(
 ) -> bool:
     """Flash the success message ahead of an in-place origin re-render."""
     # A None result re-renders the origin within this same request, so the
-    # message must reach the store before that render reads {% messages %}. An
-    # unresolvable origin degrades to 400 and is left to the caller status guard.
+    # message must reach the store before that render reads {% messages %}.
     if raw is None and page_path is not None:
         _send_success_message(request, source, cleaned_data)
         return True
@@ -101,13 +100,10 @@ def _normalize_handler_response(
     if _is_model_instance(raw):
         get_absolute_url = getattr(raw, "get_absolute_url", None)
         if get_absolute_url is not None:
-            # CreateView-style idiom: a returned model instance redirects
-            # to its canonical URL.
+            # Mirrors Django's CreateView convention for a returned instance.
             return HttpResponseRedirect(str(get_absolute_url()))
-    # The isinstance check above runs first by contract: every rich return
-    # type the framework ships must subclass HttpResponse. The `.url` sniff
-    # below is last-resort sugar for model-like objects, never a primary
-    # extension point.
+    # Every rich return type the framework ships subclasses HttpResponse and is
+    # caught above, so the `.url` sniff is last-resort sugar, not a hook.
     if hasattr(raw, "url") and (url := getattr(raw, "url", None)):
         return HttpResponseRedirect(url)
     warnings.warn(

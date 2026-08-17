@@ -11,6 +11,7 @@ the page tree at import time.
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, overload, override
 
@@ -51,11 +52,22 @@ class RouterManager:
         self._backends: list[RouterBackend] = []
         self._config_cache: list[dict[str, Any]] | None = None
         self._loaded: bool = False
+        self._building_thread: int | None = None
+        self._lock = threading.RLock()
 
     def _ensure_loaded(self) -> None:
-        """Build the backend list on the first read, whichever accessor asks."""
-        if not self._loaded:
-            self.reload()
+        """Build the backend list on the first read, whichever accessor asks.
+
+        The in-build escape is keyed on the building thread, so a backend
+        consulting the manager on construction cannot recurse while a
+        reader on another thread waits for the build instead of resolving
+        against the still-empty list.
+        """
+        if self._loaded or self._building_thread == threading.get_ident():
+            return
+        with self._lock:
+            if not self._loaded:
+                self.reload()
 
     @property
     def backends(self) -> tuple[RouterBackend, ...]:
@@ -78,21 +90,15 @@ class RouterManager:
             f"loaded={self._loaded}>"
         )
 
-    def __len__(self) -> int:
-        """Return the number of configured backends, loading on first use."""
-        self._ensure_loaded()
-        return len(self._backends)
-
     def __iter__(self) -> Generator[URLPattern | URLResolver, None, None]:
-        """All patterns from each backend, loading config on first use."""
+        """All patterns from each backend, loading config on first use.
+
+        Iteration yields URL patterns rather than backends, so the manager
+        deliberately offers no `len` or indexing. Read `backends` for those.
+        """
         self._ensure_loaded()
         for backend in self._backends:
             yield from backend.generate_urls()
-
-    def __getitem__(self, index: int) -> RouterBackend:
-        """Return the backend at the given index, loading on first use."""
-        self._ensure_loaded()
-        return self._backends[index]
 
     def reload(self) -> None:
         """Rebuild backends from `PAGE_BACKENDS` and notify listeners.
@@ -100,24 +106,34 @@ class RouterManager:
         The Django URL resolver caches resolved patterns. The cache is
         cleared here so the next request sees the freshly built backend
         list. The `router_reloaded` signal fires after the rebuild and
-        the cache flush so receivers observe a consistent state.
+        the cache flush so receivers observe a consistent state. The lock
+        is reentrant, so a receiver reloading again from this thread is
+        answered rather than deadlocked.
         """
-        self.version += 1
-        self._config_cache = None
-        self._backends.clear()
+        with self._lock:
+            self.version += 1
+            self._config_cache = None
 
-        configs = self._get_next_pages_config()
-        for config in configs:
+            built: list[RouterBackend] = []
+            # Recorded for the whole build, so a backend reading the manager
+            # while it is constructed is answered instead of deadlocking on
+            # the lock this thread already holds.
+            self._building_thread = threading.get_ident()
             try:
-                self._backends.append(RouterFactory.create_backend(config))
-            except (ValueError, TypeError, KeyError, ImportError):
-                logger.exception("error creating router from config %s", config)
+                for config in self._get_next_pages_config():
+                    try:
+                        built.append(RouterFactory.create_backend(config))
+                    except (ValueError, TypeError, KeyError, ImportError):
+                        logger.exception("error creating router from config %s", config)
+            finally:
+                self._building_thread = None
 
-        # Marked loaded before the signal, so a receiver reading `backends`
-        # sees the rebuilt list instead of re-entering this method.
-        self._loaded = True
-        clear_url_caches()
-        router_reloaded.send(sender=type(self))
+            # One-step publish, so a mid-build read never sees a partial list.
+            self._backends = built
+            # Set before the signal, so a receiver reading `backends` stays out.
+            self._loaded = True
+            clear_url_caches()
+            router_reloaded.send(sender=type(self))
 
     def _get_next_pages_config(self) -> list[dict[str, Any]]:
         """Router list from `settings.NEXT_FRAMEWORK` (merged defaults, cached)."""
@@ -214,9 +230,8 @@ def _build_url_resolver() -> URLResolver:
     """Instantiate the resolver class named by `NEXT_FRAMEWORK["URL_RESOLVER"]`."""
     dotted = next_framework_settings.URL_RESOLVER
     if dotted == _DEFAULT_URL_RESOLVER:
-        # The package binds `TrieURLResolver` only after importing this
-        # module, so the import helper would hit a partially initialised
-        # `next.urls` when the default is built during package import.
+        # The package binds `TrieURLResolver` only after importing this module,
+        # so the import helper would hit a half-initialised `next.urls`.
         cls: type[Any] = TrieURLResolver
     else:
         try:

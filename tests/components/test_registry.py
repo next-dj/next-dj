@@ -250,9 +250,8 @@ class TestComponentVisibilityResolver:
         scope_root.mkdir()
         sub = scope_root / "area"
         sub.mkdir()
-        # Two components share the same scope_root so a single `resolve_visible()`
-        # call queries `_get_relative_parts_cached` twice for that key: the second
-        # lookup hits the cache and exercises `move_to_end`.
+        # Two components share a scope_root, so one `resolve_visible()` queries
+        # `_get_relative_parts_cached` twice and the second hit moves the entry.
         reg.register(
             ComponentInfo("c1", scope_root, "area", sub / "c1.djx", None, True)
         )

@@ -63,11 +63,10 @@ class FormActionManager:
         """
         configs = backend_entries("FORM_ACTION_BACKENDS")
         self.version += 1
-        # No default: an entry without BACKEND is a next.E044 misconfiguration.
+        # No default, an entry without BACKEND is a next.E044 misconfiguration.
         self._backends = load_backends(configs, base=FormActionBackend)
-        # Losing every entry is a broken config rather than a load result, so
-        # the next access rereads settings. A settings_reloaded receiver cannot
-        # do it instead, because dropping the backends drops their actions.
+        # An empty load is a broken config, not a result, so the next access
+        # rereads settings. A receiver cannot, dropping backends drops actions.
         self._loaded = bool(self._backends) or not configs
 
     def _ensure_backends(self) -> None:

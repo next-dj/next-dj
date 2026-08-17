@@ -41,8 +41,8 @@ class RegistrationDiagnostics:
                 buffer.extend(value)
 
 
-# Resolved once: dataclasses.fields() is too slow for the per-test clear()
-# the isolation helpers run.
+# Resolved once, because dataclasses.fields() is too slow for the per-test
+# clear() the isolation helpers run.
 _BUFFER_NAMES: tuple[str, ...] = tuple(
     spec.name for spec in fields(RegistrationDiagnostics)
 )

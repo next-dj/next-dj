@@ -196,9 +196,8 @@ class TestComponentTag:
                 "<i>fallback</i>",
                 ("prop value",),
             ),
-            # Block form passes ``description`` both as a prop and as a
-            # slot body. The injected slot wins over the prop and over
-            # the default body.
+            # ``description`` arrives as both a prop and a slot body, and the
+            # injected slot wins over the prop and the default body.
             (
                 (
                     '{% #component "card" description="prop value" %}'
@@ -251,10 +250,8 @@ class TestComponentTag:
     @pytest.mark.parametrize(
         ("call_site", "context_extra", "must_contain", "must_not_contain"),
         [
-            # Plain string literal: Django's FilterExpression marks bare
-            # quoted literals as safe by convention, so without the
-            # component-side demotion the ``<slug>`` token would be
-            # parsed by the browser as a tag and disappear visually.
+            # Django marks a bare quoted literal safe, so without the
+            # component-side demotion the ``<slug>`` token renders as a tag.
             (
                 '{% component "card" body="visit /s/<slug>/ now" %}',
                 {},
@@ -751,14 +748,11 @@ class TestSetSlotTag:
     @pytest.mark.parametrize(
         ("context_data", "expected_substring", "forbidden_substrings"),
         [
-            # No slot key in context: prop with the same name as the slot
-            # must not shadow the default body. Earlier versions fell back
-            # to the unprefixed ``<name>`` key, which leaked props into
-            # the slot lookup.
+            # With no slot key in context, a prop sharing the slot name must
+            # not shadow the default body through the unprefixed key.
             ({"description": "prop value"}, "<span>default</span>", ("prop value",)),
-            # Both slot_<name> and a same-named prop are present: the
-            # caller-injected slot wins over both the prop and the
-            # default fallback body.
+            # With both slot_<name> and a same-named prop present, the
+            # caller-injected slot wins over the prop and the default body.
             (
                 {"slot_description": "<em>real</em>", "description": "prop"},
                 "<em>real</em>",

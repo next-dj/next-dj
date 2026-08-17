@@ -15,15 +15,16 @@ from next.pages.loaders import (
     reset_module_memo,
 )
 from next.pages.registry import PageContextRegistry
+from next.ports import partial_shaper_slot
 from next.server import NextStatReloader
 from next.urls import URLPatternParser
 from tests.support import (
+    IntentOnlyShaper,
     _full_resolver,
     _minimal_resolver,
     _resolver_with_form,
     build_mock_http_request,
     named_temp_py,
-    patch_checks_router_manager,
     tick_scenario,
 )
 
@@ -151,7 +152,16 @@ def reloader_tick_scenario(request):
 
 
 @pytest.fixture()
-def checks_router_patch(tmp_path):
-    """Point the check seams at the page tree under `tmp_path`."""
-    with patch_checks_router_manager(pages_directory=tmp_path) as ctx:
-        yield ctx
+def intent_only_shaper():
+    """Bind a shaper that refuses to shape, restore the real one after.
+
+    The slot is process-global, so the previously bound implementation is
+    captured and put back rather than dropped.
+    """
+    bound = partial_shaper_slot.get()
+    shaper = IntentOnlyShaper()
+    partial_shaper_slot.set(shaper)
+    try:
+        yield shaper
+    finally:
+        partial_shaper_slot.set(bound)

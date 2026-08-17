@@ -5,7 +5,12 @@ from unittest.mock import MagicMock
 import pytest
 
 from next.deps import Depends
-from next.deps.resolver import DependencyResolver
+from next.deps.resolver import (
+    DependencyResolver,
+    cached_accepts_var_keyword,
+    cached_signature,
+    cached_type_hints,
+)
 from next.pages.context import Context
 
 
@@ -55,3 +60,26 @@ class TestBenchDependencyResolver:
             request=request,
             _context_data={"page_value": 42},
         )
+
+
+class TestBenchIntrospectionCache:
+    """Warm reads of the per-callable introspection memos.
+
+    Every page, component, and action callable goes through these on each
+    resolve, and the form dispatcher reads the var-keyword one on its own.
+    """
+
+    @pytest.mark.benchmark(group="deps.introspection")
+    def test_signature_hit(self, benchmark) -> None:
+        cached_signature(_handler_five)
+        benchmark(cached_signature, _handler_five)
+
+    @pytest.mark.benchmark(group="deps.introspection")
+    def test_type_hints_hit(self, benchmark) -> None:
+        cached_type_hints(_handler_five)
+        benchmark(cached_type_hints, _handler_five)
+
+    @pytest.mark.benchmark(group="deps.introspection")
+    def test_accepts_var_keyword_hit(self, benchmark) -> None:
+        cached_accepts_var_keyword(_handler_five)
+        benchmark(cached_accepts_var_keyword, _handler_five)

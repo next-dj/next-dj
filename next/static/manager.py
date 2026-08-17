@@ -208,9 +208,8 @@ class StaticManager:
             serializers = collector.js_context_serializers()
             collided = RESERVED_PAYLOAD_KEYS.intersection(js_context)
             if collided:
-                # Fresh mappings leave the collector untouched. A reserved key
-                # belongs to the framework on every render, so the fragment and
-                # the serializer a colliding key recorded go out with the value.
+                # Fresh mappings leave the collector untouched, and a colliding
+                # key drops its fragment and serializer along with its value.
                 js_context = {k: v for k, v in js_context.items() if k not in collided}
                 encoded = {k: v for k, v in encoded.items() if k not in collided}
                 serializers = {

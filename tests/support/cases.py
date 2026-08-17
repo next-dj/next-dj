@@ -121,9 +121,8 @@ URL_BY_ANNOTATION_RESOLVE_CASES: tuple[UrlByAnnotationResolveCase, ...] = (
 )
 
 
-# Sentinels marking a hook return that the matrix interprets specially. RAISE
-# means the hook body raises PermissionDenied, BAD_TYPE means it returns an
-# unsupported type so the normaliser must raise TypeError.
+# Sentinels the matrix reads specially: RAISE makes the hook raise
+# PermissionDenied, BAD_TYPE makes it return an unsupported type.
 PERMISSION_HOOK_RAISE = object()
 PERMISSION_HOOK_BAD_TYPE = object()
 

@@ -291,8 +291,7 @@ class FileRouterBackend(RouterBackend):
         if app_path is None:
             return None
         # The directory sits beside the answer rather than in the key, because
-        # this runs per static lookup and a `str` key hashes cheaper than a
-        # `Path` one.
+        # this runs per static lookup and a `str` key hashes cheaper.
         cached = self._app_pages_path_cache.get(app_name)
         if cached is not None and cached[0] == app_path:
             return cached[1]
