@@ -13,6 +13,7 @@ from next.forms.checks import (
     check_form_anchor_files,
     check_form_wizard_backend,
 )
+from next.partial.checks import check_partial_backends_is_a_list
 from next.static.checks import check_js_context_serializer
 
 
@@ -20,7 +21,6 @@ VALID_TYPED_VALUES: dict[str, object] = {
     "PAGE_BACKENDS": [],
     "COMPONENT_BACKENDS": [],
     "STATIC_BACKENDS": [],
-    "PARTIAL_BACKENDS": [],
     "TEMPLATE_LOADERS": [],
     "URL_NAME_TEMPLATE": "page_{name}",
     "URL_RESOLVER": "next.urls.TrieURLResolver",
@@ -31,7 +31,7 @@ VALID_TYPED_VALUES: dict[str, object] = {
 class TestValueTypeErrors:
     """`check_next_framework_value_types` reports mistyped keys as next.E076."""
 
-    def test_key_types_map_covers_exactly_eight_keys(self) -> None:
+    def test_key_types_map_covers_exactly_seven_keys(self) -> None:
         assert set(_KEY_TYPES) == set(VALID_TYPED_VALUES)
 
     @pytest.mark.parametrize(
@@ -40,7 +40,6 @@ class TestValueTypeErrors:
             ("PAGE_BACKENDS", "x"),
             ("COMPONENT_BACKENDS", {}),
             ("STATIC_BACKENDS", {}),
-            ("PARTIAL_BACKENDS", {}),
             ("TEMPLATE_LOADERS", {}),
             ("URL_NAME_TEMPLATE", []),
             ("URL_RESOLVER", []),
@@ -53,7 +52,7 @@ class TestValueTypeErrors:
         assert [m.id for m in messages] == ["next.E076"]
         assert f"NEXT_FRAMEWORK[{key!r}]" in messages[0].msg
 
-    def test_silent_on_valid_map_of_all_eight_keys(self) -> None:
+    def test_silent_on_valid_map_of_all_seven_keys(self) -> None:
         with override_settings(NEXT_FRAMEWORK=dict(VALID_TYPED_VALUES)):
             assert check_next_framework_value_types() == []
 
@@ -119,6 +118,7 @@ class TestKeysWithDedicatedRawChecks:
             "FORM_ANCHOR_FILES",
             "FORM_ACTION_BACKENDS",
             "JS_CONTEXT_SERIALIZER",
+            "PARTIAL_BACKENDS",
         }
     )
 
@@ -142,6 +142,7 @@ class TestKeysWithDedicatedRawChecks:
                 "FORM_ANCHOR_FILES": 42,
                 "FORM_ACTION_BACKENDS": "oops",
                 "JS_CONTEXT_SERIALIZER": 42,
+                "PARTIAL_BACKENDS": "oops",
             }
         ):
             assert check_next_framework_value_types() == []
@@ -151,6 +152,7 @@ class TestKeysWithDedicatedRawChecks:
                 "next.E044"
             ]
             assert [m.id for m in check_js_context_serializer()] == ["next.W042"]
+            assert [m.id for m in check_partial_backends_is_a_list()] == ["next.E067"]
 
 
 class TestSilencing:

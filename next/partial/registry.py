@@ -52,10 +52,13 @@ class PatchOpRegistry:
         self._custom: set[str] = set()
 
     def register(self, name: str) -> None:
-        """Register a custom verb and announce it to subscribers."""
+        """Register a custom verb and announce it to subscribers.
+
+        The name is recorded whatever it is, so a registration shadowing a
+        built-in verb stays visible to the check that reports it.
+        """
         self._ops.add(name)
-        if name not in BUILTIN_OPS:
-            self._custom.add(name)
+        self._custom.add(name)
         if patch_op_registered.receivers:
             patch_op_registered.send(sender=type(self), name=name)
 
@@ -64,7 +67,7 @@ class PatchOpRegistry:
         return name in self._ops
 
     def custom_names(self) -> frozenset[str]:
-        """Return the verb names registered beyond the built-in set."""
+        """Return every verb name a project registered itself."""
         return frozenset(self._custom)
 
 

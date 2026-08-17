@@ -2,7 +2,7 @@
 
 This package exposes a narrow public surface. Internal helpers are
 available through deep imports from the submodules (`context`,
-`loaders`, `registry`, `processors`, `watch`, `manager`).
+`loaders`, `registry`, `processors`, `watch`, `manager`, `scan`).
 """
 
 from __future__ import annotations

@@ -69,6 +69,18 @@ class TestRegisterPatchOp:
         register_patch_op("spark")
         assert "spark" in patch_op_registry
 
+    def test_custom_names_reports_what_the_project_registered(self) -> None:
+        registry = PatchOpRegistry()
+        registry.register("confetti")
+        assert registry.custom_names() == frozenset({"confetti"})
+
+    def test_a_name_shadowing_a_builtin_stays_visible(self) -> None:
+        # the check that reports the shadowing reads custom_names, so a
+        # registration dropped here would leave it with nothing to report
+        registry = PatchOpRegistry()
+        registry.register("morph")
+        assert registry.custom_names() == frozenset({"morph"})
+
 
 def _zoned_template() -> Template:
     source = (

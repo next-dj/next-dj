@@ -27,6 +27,7 @@ from next.checks.common import (
     get_page_roots,
     get_router_manager,
     iter_scanned_page_pairs,
+    page_tree_skip_names,
     read_page_roots,
     registration_file_errors,
 )
@@ -44,7 +45,7 @@ from .scan import iter_existing_scanned_pages
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
 
 logger = logging.getLogger(__name__)
@@ -123,10 +124,11 @@ def check_pages_structure(*args, **kwargs) -> list[CheckMessage]:
                 )
             errors.append(Error(detail, hint=hint, obj=settings, id="next.E030"))
             continue
+        skip_dir_names = page_tree_skip_names(router)
         try:
             for root in roots:
                 root_errors, root_warnings = _check_pages_directory(
-                    root.path, root.label, seen
+                    root.path, root.label, seen, skip_dir_names
                 )
                 errors.extend(root_errors)
                 warnings.extend(root_warnings)
@@ -265,7 +267,10 @@ def _check_directory_syntax(
 
 
 def _check_missing_page_files(
-    directories: list[Path], pages_path: Path, context: str
+    directories: list[Path],
+    pages_path: Path,
+    context: str,
+    skip_dir_names: frozenset[str],
 ) -> list[CheckMessage]:
     """Check for missing `page.py` files inside parameter directories."""
     errors: list[CheckMessage] = []
@@ -284,6 +289,8 @@ def _check_missing_page_files(
 
             has_child_routes = False
             for child in item.iterdir():
+                if child.name in skip_dir_names:
+                    continue
                 if child.is_dir() and (child / "page.py").exists():
                     has_child_routes = True
                     break
@@ -301,8 +308,28 @@ def _check_missing_page_files(
     return errors
 
 
+def _iter_routed_directories(
+    pages_path: Path, skip_dir_names: frozenset[str]
+) -> Iterator[Path]:
+    """Yield every directory under `pages_path` the router's own walk enters.
+
+    A refused name takes its whole subtree with it, so a structural report
+    names only directories a route can come out of.
+    """
+    try:
+        items = sorted(pages_path.iterdir())
+    except OSError as e:
+        logger.debug("Cannot list directory %s: %s", pages_path, e)
+        return
+    for item in items:
+        if not item.is_dir() or item.name in skip_dir_names:
+            continue
+        yield item
+        yield from _iter_routed_directories(item, skip_dir_names)
+
+
 def _check_pages_directory(
-    pages_path: Path, context: str, seen: set[Path]
+    pages_path: Path, context: str, seen: set[Path], skip_dir_names: frozenset[str]
 ) -> tuple[list[CheckMessage], list[CheckMessage]]:
     """Check a specific pages directory for issues, skipping directories in `seen`."""
     if not pages_path.exists():
@@ -313,11 +340,13 @@ def _check_pages_directory(
 
     directories = [
         item
-        for item in pages_path.rglob("*")
-        if item.is_dir() and first_visit(item, seen)
+        for item in _iter_routed_directories(pages_path, skip_dir_names)
+        if first_visit(item, seen)
     ]
     errors.extend(_check_directory_syntax(directories, pages_path, context))
-    errors.extend(_check_missing_page_files(directories, pages_path, context))
+    errors.extend(
+        _check_missing_page_files(directories, pages_path, context, skip_dir_names)
+    )
 
     return errors, warnings
 
@@ -361,10 +390,11 @@ def check_page_functions(*args, **kwargs) -> list[CheckMessage]:
     # One `page.py` reached through several page trees is one page.
     seen: set[Path] = set()
     for router in router_manager.backends:
+        skip_dir_names = page_tree_skip_names(router)
         try:
             for root in get_page_roots(router):
                 root_errors, root_warnings = _check_page_functions_in_directory(
-                    root.path, root.label, seen
+                    root.path, root.label, seen, skip_dir_names
                 )
                 errors.extend(root_errors)
                 warnings.extend(root_warnings)
@@ -379,17 +409,23 @@ def check_page_functions(*args, **kwargs) -> list[CheckMessage]:
 
 
 def _check_page_functions_in_directory(
-    pages_path: Path, context: str, seen: set[Path]
+    pages_path: Path, context: str, seen: set[Path], skip_dir_names: frozenset[str]
 ) -> tuple[list[CheckMessage], list[CheckMessage]]:
-    """Check `page.py` files for render/template rules, skipping files in `seen`."""
+    """Check `page.py` files for render/template rules, skipping files in `seen`.
+
+    The walk refuses what the router refuses, so a `page.py` under a skipped
+    directory answers no URL and is held to no body-source rule.
+    """
     errors: list[CheckMessage] = []
     warnings: list[CheckMessage] = []
 
     if not pages_path.exists():
         return errors, warnings
 
-    for page_file in pages_path.rglob("page.py"):
-        if not first_visit(page_file, seen):
+    for _url_path, page_file in walk_page_tree(pages_path, skip_dir_names):
+        # A virtual page carries a path that never existed, and the
+        # template.djx that made it is body source enough.
+        if not page_file.exists() or not first_visit(page_file, seen):
             continue
         render_func = _load_render_function(page_file)
         if last_load_error(page_file) is not None:
