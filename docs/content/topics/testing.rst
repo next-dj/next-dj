@@ -5,6 +5,7 @@ Testing
 
 next.dj ships ``next.testing`` with a test client, registry isolation, signal capture, action helpers, and HTML utilities.
 This page covers the public surface of the module and the patterns for testing pages, components, forms, and signals end to end.
+No helper in ``next.testing`` imports pytest, so every one of them works under Django's ``TestCase``, stdlib ``unittest``, and pytest alike.
 
 .. contents::
    :local:
@@ -14,7 +15,6 @@ Choose the right helper
 -----------------------
 
 ``next.testing`` groups its helpers into focused submodules.
-The submodules cover the client, isolation, signal capture, rendering, loaders, HTML assertions, patching, action helpers, and dependency context builders.
 The table below maps each testing goal to the helper and its import path.
 
 .. list-table::
@@ -29,6 +29,9 @@ The table below maps each testing goal to the helper and its import path.
      - ``next.testing`` or ``next.testing.client``
    * - POST to a registered action by name
      - ``NextClient.post_action``
+     - ``next.testing`` or ``next.testing.client``
+   * - Resolve an action name to its dispatch URL without posting
+     - ``NextClient.get_action_url``
      - ``next.testing`` or ``next.testing.client``
    * - GET a URL as a partial zone request
      - ``NextClient.get_zones``
@@ -63,7 +66,7 @@ The table below maps each testing goal to the helper and its import path.
    * - Temporarily override ``NEXT_FRAMEWORK`` or framework wiring
      - ``override_next_settings``, ``override_dependency``, ``override_provider``, ``override_form_action``, ``override_component_backends``, ``patch_static_collector``
      - ``next.testing`` or ``next.testing.patching``
-   * - Wrap the static collector for assertions
+   * - Read the collector a patched block built
      - ``StaticCollectorProxy``
      - ``next.testing`` or ``next.testing.patching``
    * - Unit-test a custom provider or resolver path
@@ -73,14 +76,16 @@ The table below maps each testing goal to the helper and its import path.
      - ``eager_load_components``, ``eager_load_pages``, ``clear_loaded_dirs``
      - ``next.testing`` or ``next.testing.loaders``
    * - Reload backends after mutating settings or registries
-     - ``reset_registries`` (opt-in), or narrower ``reset_components`` / ``reset_form_actions`` / ``reset_page_cache``
+     - ``reset_registries`` (opt-in), or narrower ``reset_components`` / ``reset_form_actions``
+     - ``next.testing`` or ``next.testing.isolation``
+   * - Drop the page template cache after rewriting template files on disk
+     - ``reset_page_cache``
      - ``next.testing`` or ``next.testing.isolation``
    * - Clear the form registries, diagnostics, and wizard backend
      - ``reset_form_registration_state``
      - ``next.testing`` or ``next.testing.isolation``
 
-You can import everything above from the ``next.testing`` package.
-Submodule imports stay valid when you prefer explicit paths.
+Every helper in the table is importable from the ``next.testing`` package or from its submodule.
 See :doc:`/content/ref/testing` for generated signatures.
 
 Boot the suite
@@ -101,6 +106,29 @@ Pytest.
 
 Stdlib ``unittest``.
    Call ``django.setup()`` once before importing any ``next.testing`` helper, then run the suite with the standard runner.
+   The helpers carry no pytest fixtures, so a plain ``TestCase`` drives them through ``setUp`` and ``addCleanup``.
+
+   .. code-block:: python
+      :caption: tests/test_signals_unittest.py
+
+      from pathlib import Path
+      from unittest import TestCase
+
+      from next.signals import page_rendered
+      from next.testing import NextClient, SignalRecorder, clear_loaded_dirs, eager_load_pages
+
+      PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+      class IndexTest(TestCase):
+          def setUp(self) -> None:
+              clear_loaded_dirs()
+              self.addCleanup(clear_loaded_dirs)
+              eager_load_pages(PROJECT_ROOT / "notes" / "pages")
+
+          def test_index_emits_page_rendered(self) -> None:
+              with SignalRecorder(page_rendered) as recorder:
+                  NextClient().get("/")
+              assert len(recorder.events) == 1
 
 Registry state between tests
 ----------------------------
@@ -140,7 +168,9 @@ Every project under ``examples/`` uses this scaffold.
       def _load_components() -> None:
           eager_load_components()
 
-   With the default ``LAZY_COMPONENT_MODULES = False``, all registrations are in place after ``AppConfig.ready``, so the extra call is unnecessary.
+   With the default ``LAZY_COMPONENT_MODULES = False``, the configured component roots are imported during ``AppConfig.ready``.
+   Components that live inside a page tree register during the URL router walk instead, so a suite that renders them without any HTTP request triggers the walk first, for example by reversing one route with ``page_reverse()``.
+   See :doc:`/content/howto/test-a-component-in-isolation` for the full recipe.
    See :ref:`ref-settings` for the full description of ``LAZY_COMPONENT_MODULES``.
 
 Resetting registries
@@ -184,6 +214,8 @@ Eager page loading
 ~~~~~~~~~~~~~~~~~~
 
 ``eager_load_pages(base_dir)`` imports every ``page.py`` under a given directory.
+It returns the list of imported ``page.py`` paths and raises ``FileNotFoundError`` when the directory does not exist.
+A repeated call for the same directory returns an empty list, because the loader memoises per absolute directory.
 Use it when a test suite does not go through the full request cycle and must trigger ``@context`` and ``@action`` side-effects manually.
 ``clear_loaded_dirs()`` drops the per-directory memoisation so a later ``eager_load_pages`` call re-imports.
 It is intended for self-tests of the loader and for the rare case of rewritten ``page.py`` files within one session.
@@ -204,9 +236,7 @@ NextClient
        response = NextClient().get("/")
        assert response.status_code == 200
 
-The client mirrors Django's ``Client`` API.
-``get``, ``post``, ``put``, ``delete``, and ``patch`` all work.
-Pass ``follow=True`` to a request to follow redirects, exactly as with Django's ``Client``.
+Every inherited method behaves as documented for :class:`django.test.Client`, including ``follow=True``.
 
 Posting to actions
 ~~~~~~~~~~~~~~~~~~
@@ -240,7 +270,7 @@ An unknown name raises ``FormActionNotFoundError`` from ``next.forms``.
 Partial requests
 ~~~~~~~~~~~~~~~~
 
-The client drives partial rendering without hand-built headers.
+The client stamps the partial switch, the zone list, and the client asset version for you.
 Pass ``partial=True`` and ``zones=`` to ``post_action`` to turn the POST into a patch request scoped to a zone.
 ``zones`` accepts one name or a tuple of names.
 
@@ -273,9 +303,13 @@ Both ``post_action`` and ``get_zones`` accept a ``version=`` keyword that stamps
        envelope = envelope_of(response)
        assert envelope.zone_targets() == ["notes"]
 
+Both methods forward any extra keyword argument to the underlying request as a WSGI META key, so the remaining protocol headers reach the server unchanged.
+Pass ``HTTP_X_NEXT_VALIDATE="title"`` to drive the validate-only branch, ``HTTP_X_NEXT_MERGE="append"`` to drive a paginating merge, and ``HTTP_X_NEXT_ORIGIN`` to name the host page.
+
 ``envelope_of(response)`` decodes a patch response into a ``PartialEnvelope``.
-It raises when the response is not a patch envelope, so a navigation fallback never passes a structural assertion.
+It raises ``AssertionError`` when the response is not a patch envelope, so a navigation fallback never passes a structural assertion.
 ``PartialEnvelope`` exposes ``version``, ``ops``, and ``assets``, plus ``op_verbs``, ``targets``, ``zone_targets``, ``form_targets``, ``form_meta``, ``toasts``, and ``html_for_zone`` for asserting on the server contract without parsing HTML.
+``html_for_zone`` raises ``AssertionError`` when no op targets the named zone.
 See :doc:`/content/topics/partial-rendering/index` for the zone and patch model these helpers exercise.
 
 Render a page
@@ -332,7 +366,8 @@ Capture signals
        assert event.kwargs["action_name"] == "create_note"
 
 The recorder holds a list of ``SignalEvent`` instances with ``signal``, ``sender``, and ``kwargs`` attributes.
-``SignalRecorder`` accepts one or more signals and exposes these public members.
+``SignalRecorder`` accepts one or more signals and raises ``ValueError`` when constructed with none.
+It exposes these public members.
 
 ``events``.
    The full list of captured ``SignalEvent`` instances in emission order.
@@ -402,6 +437,7 @@ HTML utilities
 --------------
 
 ``next.testing.html`` provides assertions for inspecting rendered HTML fragments.
+In the second example below, ``at`` is the template path the component is referenced from, and it drives which components are visible.
 
 .. code-block:: python
    :caption: html assertions
@@ -418,11 +454,12 @@ HTML utilities
    def test_card_class() -> None:
        html = render_component_by_name(
            "note_card",
-           at="notes/pages/page.py",
+           at="notes/pages/template.djx",
            context={"note": {"title": "First"}},
        )
        assert_has_class(html, "note-card")
 
+See :doc:`/content/howto/test-a-component-in-isolation` for the full component recipe.
 ``find_anchor`` returns the matching anchor tag and raises ``LookupError`` when no anchor matches the filters, see :func:`next.testing.html.find_anchor` for the accepted keywords.
 ``assert_has_class`` and ``assert_missing_class`` check the class list of the first start tag in the fragment.
 
@@ -450,10 +487,10 @@ Patching
    * - ``patch_static_collector``
      - Temporarily swap the static collector implementation.
    * - ``StaticCollectorProxy``
-     - Thin proxy around a collector for introspection in tests.
+     - Handle exposing the collector most recently built inside the patch.
 
 A ``StaticCollectorProxy`` is yielded by ``patch_static_collector(capture=True)``.
-Its ``.collector`` attribute holds the collector built inside the block, so a test can assert on the emitted styles and scripts without parsing HTML.
+Its ``.collector`` attribute holds the collector most recently built inside the block, so a page that renders twice leaves the second one, and a test can assert on the emitted styles and scripts without parsing HTML.
 Pass ``factory=`` to swap the collector implementation entirely.
 The callable runs in place of the default ``create_collector`` and returns a custom ``StaticCollector`` for the duration of the block.
 
@@ -484,6 +521,9 @@ Use ``patch_static_collector(capture=True)`` to inspect which assets a page emit
        assert response.status_code == 200
 
 The patch reverts on exit, so the next test sees the original configuration.
+The merge is shallow.
+A key supplied as a keyword replaces the whole value under that name, so overriding one entry of a nested mapping drops its siblings for the block.
+The helper wraps Django's ``override_settings``, so the ``settings_reloaded`` chain fires and the framework managers rebuild against the patched configuration inside the block.
 
 ``override_dependency`` binds a stub value to a ``Depends("name")`` registration for the block, and restores the previous registration on exit.
 
@@ -522,6 +562,51 @@ Implement the ``ParameterProvider`` protocol on a plain class for the stub, beca
        with override_provider(EveryIntIsSeven()):
            kwargs = resolve_call(count_notes)
        assert kwargs == {"limit": 7}
+
+``override_form_action`` registers a handler under an action name for the block.
+It snapshots the whole action registry on entry and restores it on exit, so an action the project already registered under that name survives the block.
+The override claims the name binding, which means it wins name lookup even when such an action exists.
+Pass ``form_class=`` to give the override a form, which is what ``build_form_for`` and a bound dispatch need.
+
+.. code-block:: python
+   :caption: temporary form action
+
+   from django import forms
+   from next.testing.client import NextClient
+   from next.testing.patching import override_form_action
+
+   class TitleForm(forms.Form):
+       title = forms.CharField()
+
+   def test_stub_action_receives_post() -> None:
+       seen: list[str] = []
+
+       def handler(form: TitleForm) -> None:
+           seen.append(form.cleaned_data["title"])
+
+       with override_form_action("create_note", handler, form_class=TitleForm):
+           NextClient().post_action("create_note", {"title": "Stub"}, origin="/")
+       assert seen == ["Stub"]
+
+``override_component_backends`` takes backend config dicts positionally and replaces ``COMPONENT_BACKENDS`` for the block.
+It reads the manager's backends on entry, so the swap takes effect immediately rather than on the next render.
+The example below points a temporary root at ``tmp_path``, whose ``_components/info_card/`` folder holds the component under test.
+
+.. code-block:: python
+   :caption: temporary component root
+
+   from next.testing.patching import override_component_backends
+   from next.testing.rendering import render_component_by_name
+
+   def test_component_from_temporary_root(tmp_path) -> None:
+       config = {
+           "BACKEND": "next.components.FileComponentsBackend",
+           "DIRS": [str(tmp_path)],
+           "COMPONENTS_DIR": "_components",
+       }
+       with override_component_backends(config):
+           html = render_component_by_name("info_card", at=tmp_path / "template.djx")
+       assert "info-card" in html
 
 Resolution context doubles
 --------------------------

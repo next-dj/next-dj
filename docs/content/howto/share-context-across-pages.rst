@@ -45,13 +45,13 @@ The value is injected into the shared context dict for that request, so both the
 
    <p>{{ note_count }} notes in total.</p>
 
-Limit inheritance to a subtree
+Keep a value local to one page
 ------------------------------
 
 Drop the flag for values that should stay local to the current page only.
 
 .. code-block:: python
-   :caption: notes/pages/page.py (local only)
+   :caption: notes/pages/page.py
 
    from next import context
 
@@ -61,6 +61,9 @@ Drop the flag for values that should stay local to the current page only.
 
 Without ``inherit_context=True`` the value is available only when ``notes/pages/page.py`` handles the request directly.
 Descendant routes do not receive it.
+
+To scope an inherited value to part of the tree, declare it with ``inherit_context=True`` in the ``page.py`` at the root of that subtree.
+Only the routes below that directory receive it.
 
 A descendant page that declares the same key with its own ``@context`` overrides the inherited value for that request.
 The page's own function runs after the inherited ones, so its value wins across the whole render, layout chain included.

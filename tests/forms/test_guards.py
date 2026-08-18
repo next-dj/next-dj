@@ -30,13 +30,13 @@ from next.forms import (
 from next.forms.backends import build_action_guard
 from next.forms.base import _hook_func
 from next.forms.checks import check_action_guard_permissions
-from next.forms.dispatch import (
-    FormActionDispatch,
+from next.forms.dispatch import FormActionDispatch
+from next.forms.dispatch.build import _resolve_and_call
+from next.forms.dispatch.permissions import (
     _check_access,
     _emit_form_access_denied,
     _normalize_permission,
     _redirect_to_login,
-    _resolve_and_call,
 )
 from next.forms.manager import form_action_manager
 from next.forms.signals import action_dispatched, form_access_denied
@@ -540,7 +540,12 @@ class TestEmitFormAccessDenied:
         form_access_denied.connect(receiver)
         try:
             _emit_form_access_denied(
-                request, "act", "uid-1", layer="view", reason="denied"
+                request,
+                "act",
+                "uid-1",
+                layer="view",
+                reason="denied",
+                sender=FormActionDispatch,
             )
         finally:
             form_access_denied.disconnect(receiver)
@@ -555,7 +560,14 @@ class TestEmitFormAccessDenied:
         """With no receiver connected the helper makes no send and raises nothing."""
         request = mock_http_request(method="POST")
         assert form_access_denied.receivers == []
-        _emit_form_access_denied(request, "act", None, layer="object", reason="raised")
+        _emit_form_access_denied(
+            request,
+            "act",
+            None,
+            layer="object",
+            reason="raised",
+            sender=FormActionDispatch,
+        )
 
 
 class TestBaseSentinelHooks:

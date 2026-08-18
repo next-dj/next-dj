@@ -62,14 +62,17 @@ A directory under `routes/` with a `page.py` becomes a URL. The framework compos
 Ancestor layouts cascade: `routes/admin/stats/` inherits `routes/admin/layout.djx`, which itself is wrapped by the project-level [`host/layout.djx`](host/layout.djx). Look at the nested toolbar in [`admin/layout.djx`](shortener/routes/admin/layout.djx):
 
 ```djx
-<section class="space-y-4">
-  <div class="flex items-center justify-between border-b pb-3">
-    <h1 class="text-2xl font-bold">Admin panel</h1>
-    <nav>…subnav…</nav>
-  </div>
+<div class="space-y-6">
+  {% #component "page_header" title="Admin panel" %}
+    {% #slot "actions" %}
+      {% #component "nav" %}
+        {% #slot "content" %}…subnav…{% /slot %}
+      {% /component %}
+    {% /slot %}
+  {% /component %}
 
   {% block template %}{% endblock template %}
-</section>
+</div>
 ```
 
 The placeholder is empty. The outer toolbar stays visible on every admin sub-page.
@@ -146,9 +149,13 @@ class CreateLinkForm(Form):
 
 ```djx
 {% form "create_link_form" %}
-  {{ form.url }}
-  {% if form.errors %}<p class="text-rose-600">{{ form.url.errors|first }}</p>{% endif %}
-  <button type="submit">Shorten</button>
+  {% #component "field" label="Long URL" for_id="id_url" %}
+    {% #slot "control" %}{{ form.url }}{% /slot %}
+  {% /component %}
+  {% if form.errors %}
+    {% component "alert" variant="destructive" text=form.url.errors|first %}
+  {% endif %}
+  {% component "button" type="submit" text="Shorten" variant="default" %}
 {% endform %}
 ```
 
@@ -200,21 +207,19 @@ Usage in a loop:
 {% endfor %}
 ```
 
-`{% component "name" %}` accepts only **literal string props**. To pass the loop variable, the framework automatically forwards the parent template's flattened context, so the `link` loop variable lands inside the component and `ContextByNameProvider` fills the `link: Link` parameter of `short_url`.
+Every `{% component %}` prop compiles as a Django `FilterExpression`, so `title="Hello"` passes a literal while `link=link` passes the loop variable. The tag also forwards the parent template's flattened context, which is why the bare call above still lands the `link` loop variable inside the component and lets `ContextByNameProvider` fill the `link: Link` parameter of `short_url`. [`link_row`](shortener/routes/_widgets/link_row/component.djx) takes the explicit route and writes `{% component "link_card" link=link %}`.
 
 ### 7. Shared `nav_link` — DRY the active-state logic
 
-Root nav and admin subnav both need the same active-state rule. The logic lives once in [`_widgets/nav_link/component.py`](shortener/routes/_widgets/nav_link/component.py):
+Root nav and admin subnav both need the same active-state rule. The logic lives once in the shared kit at [`_shared/_components/nav_link/component.py`](../_shared/_components/nav_link/component.py), registered as a global component root through `COMPONENT_BACKENDS[0]["DIRS"]` in [`config/settings.py`](config/settings.py):
 
 ```python
-@component.context("href")
-def _href(url_name: str) -> str:
-    return reverse(url_name)
-
-
 @component.context("is_active")
-def _is_active(url_name: str, request: HttpRequest, active_when: str = "") -> bool:
-    view_name = request.resolver_match.view_name
+def is_active(request: HttpRequest, url_name: str = "", active_when: str = "") -> bool:
+    match = getattr(request, "resolver_match", None)
+    if match is None:
+        return False
+    view_name = match.view_name
     if active_when:
         return active_when in view_name
     return view_name == url_name
@@ -224,10 +229,10 @@ Usage:
 
 ```djx
 {# exact match #}
-{% component "nav_link" url_name="next:page_admin_stats" label="Stats" %}
+{% component "nav_link" url_name="next:page_admin_stats" label="Stats" variant="tabs" %}
 
 {# prefix match — stays active across every URL name that contains 'page_admin' #}
-{% component "nav_link" url_name="next:page_admin" active_when="page_admin" label="admin" class_base="text-sm" %}
+{% component "nav_link" url_name="next:page_admin" active_when="page_admin" label="admin" variant="bar" %}
 ```
 
 No `request.path` string-munging, no custom template tag, no context processor. Django populates `request.resolver_match.view_name` and the component reads it.
@@ -332,9 +337,9 @@ Two rules:
 1. **Do not use `from __future__ import annotations` in a `page.py` or `component.py` that declares DI-injected parameters** (see [`admin/links/[slug]/page.py`](shortener/routes/admin/links/[slug]/page.py)).
 2. **Types used in DI annotations must be runtime-importable**, not hidden behind `if TYPE_CHECKING`. The resolver uses `typing.get_type_hints` to evaluate strings and needs the type in module globals.
 
-### `{% component %}` props are literal strings
+### An unresolvable `{% component %}` prop renders empty
 
-`{% component "card" title="Hello" %}` is valid. `{% component "card" title=some_var %}` is **not** — `some_var` is taken as the literal string `"some_var"`. To pass variables, rely on the parent template context being forwarded (see `link_card` above), or compute values inside the component via `@component.context`.
+`{% component "card" title=some_var %}` resolves `some_var` against the template context. A name that is not there resolves to Django's `string_if_invalid` instead of raising, so a typo in a prop name shows up as a blank slot rather than an error. Quoted literals are demoted from `SafeString` to plain `str` so `{{ prop }}` autoescapes — opt back in with `prop=value|safe`.
 
 ### Template wins over `render()` for file-routed pages
 
@@ -344,6 +349,6 @@ If any `layout.djx` applies to a `page.py`, the framework renders a template and
 
 - [next/urls/backends.py](../../next/urls/backends.py) — file router implementation.
 - [next/deps/providers.py](../../next/deps/providers.py) — DI base classes used by `DLink`.
-- [next/forms/dispatch.py](../../next/forms/dispatch.py) — form action dispatch pipeline.
+- [next/forms/dispatch/](../../next/forms/dispatch/) — form action dispatch pipeline.
 - [next/components/context.py](../../next/components/context.py) — `@component.context` mechanics.
 - [next/pages/loaders.py](../../next/pages/loaders.py) — layout composition logic.

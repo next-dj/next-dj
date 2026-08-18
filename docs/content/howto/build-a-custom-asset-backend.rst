@@ -83,10 +83,11 @@ Read the Vite manifest
 A production build writes hashed filenames into ``dist/.vite/manifest.json``.
 The backend reads that file once, caches it, and looks up the built output.
 A missing manifest logs one warning and falls back to staticfiles so the dev workflow stays unblocked.
-Add these methods to ``ViteManifestBackend``.
+The three methods below sit inside the ``ViteManifestBackend`` class body shown above, at the same indentation as ``register_file``.
+The zero-argument ``super()`` call they use resolves only from there.
 
 .. code-block:: python
-   :caption: kanban/backends.py
+   :caption: kanban/backends.py, methods of ViteManifestBackend
 
    def _resolve_from_manifest(self, source_path: Path, logical_name: str) -> str:
        manifest = self._load_manifest()

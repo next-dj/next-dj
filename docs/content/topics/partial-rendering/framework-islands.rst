@@ -9,7 +9,7 @@ An island that mounts but never unmounts leaks its listeners, timers, and observ
 
 The runtime ships the two events and the one attribute an adapter needs.
 It does not ship a compiled Vue or React adapter, because a plugin that imports a framework cannot live in the page-wide bundle and would pull a framework release into the support matrix.
-The six lines below are the adapter.
+The two blocks below are the whole adapter, one for React and one for Vue.
 
 .. contents::
    :local:

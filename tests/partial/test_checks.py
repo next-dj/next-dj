@@ -328,7 +328,7 @@ class TestUnregisteredOpCheck:
 
     def test_shadowing_a_builtin_verb_errors(self) -> None:
         # a custom op named after a built-in verb never runs, the built-in wins
-        patch_op_registry._custom.add("morph")
+        register_patch_op("morph")
         ids = [m.id for m in checks.check_custom_patch_ops_well_formed()]
         assert ids == [checks.E_UNREGISTERED_OP]
 

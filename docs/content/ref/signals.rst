@@ -39,8 +39,7 @@ The dispatch-time form signals (``action_dispatched``, ``form_validation_failed`
      - Form action backend class
      - ``action_name``, ``uid``, ``form_class``, ``wizard_class``, ``file_path``, ``scope``, ``handler``
      - After the backend stores an action target for a name.
-       Exactly one of ``handler``, ``form_class``, or ``wizard_class`` identifies the target,
-       except the ``@action(form_class=...)`` path which supplies a handler and a form factory together.
+       Exactly one of ``handler``, ``form_class``, or ``wizard_class`` identifies the target, except the ``@action(form_class=...)`` path which supplies a handler and a form factory together.
    * - ``asset_registered``
      - The ``StaticAsset`` instance
      - ``collector``, ``backend``
@@ -63,15 +62,18 @@ The dispatch-time form signals (``action_dispatched``, ``form_validation_failed`
    * - ``component_registered``
      - ``ComponentRegistry``
      - ``info``
-     - After a single component is registered. Not fired from the bulk path.
+     - After a single component is registered.
+       Not fired from the bulk path.
    * - ``component_rendered``
      - ``ComponentsManager``
      - ``info``, ``template_path``
-     - After a component is rendered to HTML. ``template_path`` may be ``None`` for components without a template file.
+     - After a component is rendered to HTML.
+       ``template_path`` may be ``None`` for components without a template file.
    * - ``components_registered``
      - ``ComponentRegistry``
      - ``infos``
-     - After a batch of components is registered. ``infos`` is the tuple of added components.
+     - After a batch of components is registered.
+       ``infos`` is the tuple of added components.
    * - ``context_registered``
      - ``PageContextRegistry``
      - ``file_path``, ``key``
@@ -86,7 +88,8 @@ The dispatch-time form signals (``action_dispatched``, ``form_validation_failed`
      - ``FormActionDispatch``
      - ``action_name``, ``uid``, ``request``, ``layer``, ``reason``
      - When a dynamic permission hook denies a request, never on the static guard path.
-       ``layer`` is ``"view"`` or ``"object"``. ``reason`` is ``"raised"``, ``"denied"``, or ``"response"``.
+       ``layer`` is ``"view"`` or ``"object"``.
+       ``reason`` is ``"raised"``, ``"denied"``, or ``"response"``.
    * - ``form_validation_failed``
      - ``FormActionDispatch``
      - ``action_name``, ``uid``, ``request``, ``error_count``, ``field_names``
@@ -94,11 +97,15 @@ The dispatch-time form signals (``action_dispatched``, ``form_validation_failed`
    * - ``html_injected``
      - A ``StaticManager`` instance
      - ``html_before``, ``html_after``, ``collector``, ``placeholders_replaced``, ``injected_bytes``, ``request``
-     - After placeholder replacement completes. ``placeholders_replaced`` is the tuple of replaced slot names. ``injected_bytes`` is the length delta.
+     - After placeholder replacement completes.
+       ``placeholders_replaced`` is the tuple of replaced slot names.
+       ``injected_bytes`` is the length delta.
    * - ``page_rendered``
      - ``Page``
      - ``file_path``, ``duration_ms``, ``styles_count``, ``scripts_count``, ``context_keys``
-     - After ``Page.render`` produces HTML and injects static assets. ``duration_ms`` times the render. ``context_keys`` is the tuple of context keys.
+     - After ``Page.render`` produces HTML and injects static assets.
+       ``duration_ms`` times the render.
+       ``context_keys`` is the tuple of context keys.
        Fired only when a receiver is connected, and the ``duration_ms`` timer runs under the same gate.
    * - ``patch_op_registered``
      - ``PatchOpRegistry``
@@ -123,7 +130,8 @@ The dispatch-time form signals (``action_dispatched``, ``form_validation_failed`
    * - ``sse_stream_closed``
      - ``PatchEventStream``
      - ``request``, ``duration_ms``, ``envelopes_sent``
-     - When a patch event stream ends, its source exhausted or the client gone. ``envelopes_sent`` counts the envelopes flushed over the connection.
+     - When a patch event stream ends, its source exhausted or the client gone.
+       ``envelopes_sent`` counts the envelopes flushed over the connection.
    * - ``sse_stream_opened``
      - ``PatchEventStream``
      - ``request``
@@ -145,15 +153,18 @@ The dispatch-time form signals (``action_dispatched``, ``form_validation_failed`
    * - ``wizard_step_submitted``
      - The wizard class
      - ``step``, ``cleaned_data``, ``uid``, ``request``
-     - After a ``FormWizard`` step validates during dispatch. ``cleaned_data`` is a copy of that step's validated data.
+     - After a ``FormWizard`` step validates during dispatch.
+       ``cleaned_data`` is a copy of that step's validated data.
    * - ``zone_registered``
      - The compiled page template class
      - ``template``, ``zone_name``, ``lazy``, ``poll``
-     - Once per compiled composed template, when its named zones are first read. ``lazy`` is the trigger string or ``None``, ``poll`` the interval in milliseconds or ``None``.
+     - Once per compiled composed template, when its named zones are first read.
+       ``lazy`` is the trigger string or ``None``, ``poll`` the interval in milliseconds or ``None``.
    * - ``zone_rendered``
      - ``ZoneRenderResult``
      - ``zone_name``, ``page_path``, ``request``, ``duration_ms``
-     - After a zone body renders for a partial request. ``duration_ms`` times the zone render.
+     - After a zone body renders for a partial request.
+       ``duration_ms`` times the zone render.
 
 Subpackage signals
 ------------------

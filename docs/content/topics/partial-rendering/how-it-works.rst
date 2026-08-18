@@ -5,63 +5,75 @@ How a partial request flows
 
 A partial update is one request and one response laid over the ordinary page cycle.
 The server authors every DOM operation, the client applies it, and the wire carries verbs and addresses rather than selectors or swap strategies.
-This page follows one update end to end.
+This page follows one update end to end, a catalogue page narrowing its result list as the user types.
 
 .. contents::
    :local:
    :depth: 1
 
-The page and its zones
-----------------------
+The zone in the template
+------------------------
 
-A directory maps to a URL and a ``page.py`` turns a segment into a page, rendered through a ``.djx`` template.
-A ``{% zone %}`` block marks a slice of that template the server can re-render on its own.
-A zone is an optimisation rather than required markup.
-The server can address a page region without one, and a zone names the region so the response carries only the slice instead of the whole document.
+A ``{% zone %}`` block marks the slice of a page template the server can re-render on its own.
+
+.. code-block:: jinja
+   :caption: catalog/template.djx
+
+   {% zone "catalog-results" %}
+     {% for product in page_obj.products %}
+       <p data-next-key="{{ product.pk }}">{{ product.title }}</p>
+     {% endfor %}
+   {% endzone %}
+
+The tag wraps the body in ``<div data-next-zone="catalog-results">``, which is the address the server patches later.
+A zone is an optimisation rather than required markup, and :doc:`zones` covers what the default without one costs.
 
 The request
 -----------
 
 An interaction issues a partial request instead of a full navigation.
-A form submit, an auto-submitting filter, a paginating link, a lazy zone scrolling into view, and a Server-Sent Events message each reach the same pipeline.
-The request carries the ``X-Next-Request`` switch the server reads to choose a partial response over a full page.
-It also carries an ``Accept`` naming the patch media type at the content-negotiation level and further ``X-Next-*`` headers that name the zone, the origin page, and the asset version.
+A form submit, an auto-submitting filter, a paginating link, a lazy zone entering the viewport, and a Server-Sent Events message all reach the same pipeline.
+
+.. code-block:: http
+   :caption: request
+
+   GET /catalog/?q=ban HTTP/1.1
+   X-Next-Request: 1
+   Accept: application/vnd.next.patches+json, text/html;q=0.9
+   X-Next-Zone: catalog-results
+
+``X-Next-Request`` is the switch the server reads to choose a partial response over the full page.
+The other ``X-Next-*`` headers name the zone, the origin page, and the asset version.
 
 The envelope
 ------------
 
-The server shapes a patch envelope and serialises it through the configured ``PARTIAL_BACKENDS`` backend.
-The envelope carries a version, an ordered list of operations, an asset manifest, optional form metadata, and an optional rotated CSRF token.
-The server authors every operation and every address.
-A selector or a swap strategy never crosses the wire, so the client cannot be asked to do anything the server did not name.
+The server renders the named zone alone and serialises the result through the configured ``PARTIAL_BACKENDS`` backend.
+
+.. code-block:: json
+   :caption: response body
+
+   {
+     "version": "9f3c2e1b",
+     "ops": [
+       {"op": "morph", "target": {"zone": "catalog-results"},
+        "html": "<div data-next-zone=\"catalog-results\">…</div>"}
+     ],
+     "assets": [],
+     "form": null
+   }
+
+Every operation and every address is authored by the server, so the client is never asked to do anything the server did not name.
+:doc:`reference` lists the verbs, the addresses, the manifest fields, and the headers in tables.
 
 The apply
 ---------
 
-The client narrows the envelope and runs each operation against the addressed zone.
-A patch answering a zone GET resolves inside the page that GET fetched, so a base-page refresh cannot morph a same-named zone in an open modal.
-A patch with no page attached resolves top-down, a layer zone before the same-named page zone.
-The built-in verbs are ``morph``, ``replace``, ``inner``, ``append``, ``prepend``, ``remove``, ``refresh``, ``event``, ``toast``, ``url``, ``visit``, ``layer.open``, ``layer.close``, and ``context``.
-``morph`` is the default, reconciling the live subtree in place against the new markup so focus, the caret, and a field the user is editing survive the update.
-A reused node keeps its own state, scroll position included, because it never leaves the document.
-``append`` and ``prepend`` dedupe by key so a re-fetched page of a list cannot double its rows.
+The client resolves ``catalog-results`` inside the page that GET fetched and morphs the live wrapper against the new markup.
+The morph reconciles the subtree in place, so focus, the caret, and a field the user is editing survive the update, and a row matched by ``data-next-key`` keeps its own state.
+After the operations apply, ``next:mounted`` fires on every touched node, and before a node detaches ``next:removed`` fires on it.
 
-The morph engine protects a focused input and a dirty field from the server value, leaves a ``data-next-keep`` node untouched, and treats a custom element or a shadow root as atomic.
-After the operations apply, ``next:mounted`` fires on every touched node, and before any node detaches ``next:removed`` fires on it, the pair a framework island binds to.
-
-The surfaces around the apply
------------------------------
-
-A modal opens through the layer stack, which pushes the honest URL of the modal body so the modal is shareable and a refresh resolves the URL as its own standalone page, and Back closes the top layer.
-A Server-Sent Events stream feeds the same apply pipeline, suppressing the echo of the client's own mutation and revalidating its zones on returning visibility.
-A lazy zone and a trigger pull their own follow-up request through the same wire.
-
-Degrading without JavaScript
-----------------------------
-
-Every interaction degrades to a full page cycle when the runtime is absent.
-The runtime is an enhancement over the ``POST`` then ``303`` then ``GET`` flow the framework already serves.
-A page that works without it keeps working with it and gains the partial behaviour for free.
+Without the runtime the same URL answers with the whole document, so the filter stays a plain GET form and the page reloads.
 
 See also
 --------

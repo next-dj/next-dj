@@ -115,6 +115,7 @@ Python module change.
 
 Route set change.
    ``NextStatReloader`` diffs the discovered route set on every tick.
+   A per-tree signature of directory mtimes and directory count gates the rescan, so an unchanged tree reuses the cached route set.
    A new or removed page directory calls ``notify_file_changed`` so Django restarts the process even when no watched file mtime changed.
 
 The route set diff is taken by ``NextStatReloader`` from the configured page roots.

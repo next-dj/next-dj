@@ -10,16 +10,18 @@ from django.forms import BaseForm, BaseFormSet, FileField
 from django.http import HttpResponse, HttpResponseRedirect
 from django.utils.http import url_has_allowed_host_and_scheme
 
-from next.forms.dispatch import ActionOutcome, ActionOutcomeKind, FormActionDispatch
+from next.forms.dispatch import FormActionDispatch
+from next.forms.dispatch.responses import ActionOutcome, ActionOutcomeKind
 from next.forms.origin import resolve_origin, resolve_url_to_match
 from next.forms.uid import FORM_ORIGIN_OVERRIDE_KEY
 from next.pages import page
 from next.static.scripts import csrf_payload
 
 from . import keys
+from .envelope import FormMeta
 from .headers import RESPONSE_ACTION, RESPONSE_FORM, partial_intent, set_partial_vary
 from .manager import partial_backend_manager
-from .patches import FormMeta, Patches, PatchResponse
+from .patches import Patches, PatchResponse
 from .registry import zones_of
 from .render import render_zone
 from .signals import field_validated
@@ -212,11 +214,8 @@ def _shape_advance(
     form = next_wizard.current_form()
     patches = Patches(request)
     overrides = _wizard_overrides(form, next_wizard, outcome.action_name)
-    # Override the form origin so the next step's hidden _next_form_origin
-    # field carries the next step URL, not the current step URL from
-    # request.POST. Without this, blur-validate probes on the new step
-    # resolve the origin back to the previous step page and morph the
-    # wrong step into the zone or the page.
+    # The hidden _next_form_origin must carry the next step URL, not the current
+    # one from request.POST, or a blur probe morphs the previous step back in.
     overrides[FORM_ORIGIN_OVERRIDE_KEY] = redirect_to
     zone = _form_zone(request, page_path)
     if zone is not None:
@@ -456,9 +455,8 @@ def _scrub_errors(form: "BaseForm | BaseFormSet", requested: frozenset[str]) -> 
     if isinstance(form, BaseFormSet):
         for member in form.forms:
             _scrub_member_errors(member, requested)
-        # The non-form errors live on the protected attribute the formset
-        # populates in full_clean, reset it so a cross-form clean never
-        # surfaces on a per-field blur. Django keeps no public setter for it.
+        # Django keeps no public setter for the non-form errors, which must go
+        # so a cross-form clean never surfaces on a per-field blur.
         cast("_NonFormErrors", form)._non_form_errors = form.error_class()
         return
     _scrub_form_errors(form, requested)

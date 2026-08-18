@@ -39,9 +39,8 @@ class NextFrameworkSettings:
         self._merged_cache = None
         self._attr_value_cache.clear()
         clear_import_cache()
-        # next.conf.signals imports this settings module, so the signal import
-        # is deferred here to break the next.conf.settings <-> next.conf.signals
-        # cycle.
+        # Deferred because next.conf.signals imports this module, which would
+        # close the next.conf.settings <-> next.conf.signals cycle.
         from .signals import settings_reloaded  # noqa: PLC0415
 
         settings_reloaded.send(sender=type(self))

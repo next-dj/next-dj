@@ -100,6 +100,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-python-uv
+      - name: Check prose semantic newlines
+        run: uv run python docs/prose_lint.py docs/content
       - name: Install docs dependencies
         run: uv sync --locked --group docs
       - name: Build documentation (fail on warnings)

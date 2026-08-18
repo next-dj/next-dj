@@ -21,9 +21,9 @@ Subclassing ``next.forms.FormWizard`` registers the class through the ``__init_s
 The action name is the ``snake_case`` of the class name, so ``AccessRequestWizard`` becomes ``access_request_wizard``.
 
 The scope rules match plain forms.
-A wizard declared in ``page.py`` is page-scoped and keyed to its file.
-A wizard declared in any other module is shared and reachable project-wide.
-See :doc:`overview` for the full scope derivation.
+A wizard declared in an anchor file, ``page.py`` or ``component.py`` by default, is page-scoped and keyed to that file.
+A wizard declared anywhere else is shared and reachable project-wide, and ``Meta.scope`` pins either choice.
+See :doc:`actions` for the anchor-file rule and the ``NEXT_FRAMEWORK["FORM_ANCHOR_FILES"]`` setting that names the anchor files.
 
 The access guards also match plain forms.
 ``Meta.login_required`` and ``Meta.permission_required`` on the wizard class guard its endpoint, and the guard is enforced on every step submission, not only the final one.

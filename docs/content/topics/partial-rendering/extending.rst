@@ -88,6 +88,7 @@ A value is pushed by the name of a registered ``serialize=True`` provider on the
 .. code-block:: python
    :caption: cart/page.py
 
+   from cart.models import Cart
    from django.http import HttpRequest, HttpResponse
 
    from next import action, context

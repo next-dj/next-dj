@@ -31,7 +31,7 @@ URL parameters
 --------------
 
 ``DUrl[T]`` coerces the captured value to ``T`` for ``int``, ``float``, ``bool``, ``UUID``, ``Decimal``, ``date``, and ``datetime``.
-A value that fails to parse falls through as the raw string, so the page module still runs.
+A value that fails to parse falls through as the raw string instead of raising, so the callable can receive a ``str`` where the annotation names an ``int``.
 Use a directory named with the typed segment form such as ``[int:id]`` or ``[uuid:id]`` to reject a malformed capture with ``404`` before the page module runs.
 
 ``DUrl[str]`` accepts any non slash value.
@@ -70,12 +70,14 @@ Validate or scope every lookup that reads a URL kwarg, whether the value arrived
 Query strings
 -------------
 
-``DQuery[T]`` coerces the value to ``T`` for the same scalar set as ``DUrl``.
-A value that fails to parse falls back to the raw query string rather than raising, so a crafted input cannot crash the page module.
-``DQuery[str]`` returns the raw string.
-``DQuery[list[T]]`` returns a list of coerced values.
+``DQuery[T]`` coerces the value to ``T`` for the same scalar set as ``DUrl``, and reads the key that matches the parameter name.
+A value that fails to parse falls back to the raw query string in the same way, so the annotated type is a hint and not a guarantee.
+``?page=abc``, ``?page=1.5``, and an empty ``?page=`` all reach a ``DQuery[int]`` parameter as a ``str``.
+``DQuery[str]`` returns the raw string, and ``DQuery[list[T]]`` coerces each value on its own, so one unparsable entry leaves a string inside a list of integers.
 
-Validate the resulting values against business rules.
+The parameter default covers the absent key only.
+A missing parameter with no default arrives as ``None`` for the scalar forms and as an empty list for ``DQuery[list[T]]``.
+Check the injected value before comparing or computing with it, because a crafted query string otherwise raises ``TypeError`` inside the callable.
 
 .. code-block:: python
    :caption: notes/pages/page.py
@@ -85,9 +87,12 @@ Validate the resulting values against business rules.
 
    @context("page")
    def page_number(page: DQuery[int] = 1) -> int:
+       if not isinstance(page, int):
+           return 1
        return max(1, min(page, 1000))
 
-The example clamps the page number to a reasonable range to prevent denial of service through huge offsets.
+The ``isinstance`` guard absorbs the raw string that a non numeric ``page`` value produces.
+The clamp keeps the page number in a range that prevents denial of service through huge offsets.
 
 Form bodies
 -----------
@@ -161,13 +166,19 @@ Redirects
 ---------
 
 Validate destination URLs before passing them to ``HttpResponseRedirect``.
+A routing check answers the wrong question.
+:func:`django.urls.resolve` reports whether a string matches a route in the URLconf, not whether the destination stays on this site.
+A project with a wildcard page at the root, where a directory named ``[[args]]`` expands to ``<path:args>``, routes almost any string, including ``//evil.com``, so the routing check passes and the redirect still leaves the site.
+Browsers read a leading double slash as a protocol relative URL and treat ``//evil.com`` as ``https://evil.com``, which makes that form the one most likely to slip through a path oriented check.
+
+Django ships ``url_has_allowed_host_and_scheme`` in ``django.utils.http`` for this task.
 
 .. code-block:: python
    :caption: notes/actions.py
 
    from django.http import HttpRequest, HttpResponseRedirect
-   from django.urls import resolve, Resolver404
-   from next.forms import Form, CharField
+   from django.utils.http import url_has_allowed_host_and_scheme
+   from next.forms import CharField, Form
    from next.urls import DQuery
 
    class LoginForm(Form):
@@ -175,13 +186,21 @@ Validate destination URLs before passing them to ``HttpResponseRedirect``.
        password = CharField()
 
        def on_valid(self, request: HttpRequest, next_url: DQuery[str] = "/") -> HttpResponseRedirect:
-           try:
-               resolve(next_url)
-           except Resolver404:
+           if not url_has_allowed_host_and_scheme(
+               url=next_url,
+               allowed_hosts={request.get_host()},
+               require_https=request.is_secure(),
+           ):
                next_url = "/"
            return HttpResponseRedirect(next_url)
 
-The ``resolve`` call rejects external URLs and unknown paths.
+The helper inspects the host and the scheme of the destination rather than the existence of a route.
+It rejects an absolute URL on another host, the protocol relative form ``//evil.com``, the triple slash form, and an empty value.
+It also normalises backslashes the way browsers do, so ``\\evil.com`` fails the same check.
+
+The ``allowed_hosts`` argument carries the current host from ``request.get_host()``, which limits an absolute destination to the site that served the form.
+The ``require_https`` argument follows ``request.is_secure()``, so a page served over HTTPS refuses to redirect down to plain HTTP.
+Django applies the same pair of arguments to the ``next`` parameter of its own login view, see :doc:`django:topics/auth/default` and :doc:`django:ref/utils`.
 
 Logging
 -------

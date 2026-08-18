@@ -27,14 +27,14 @@ Walkthrough
 Wrap the note list in a zone
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A ``{% zone %}`` block marks a slice of a template the server can re-render on its own.
+A ``{% zone %}`` block marks a :term:`zone`, a slice of a template the server can re-render on its own.
 A zone is an optimisation rather than required markup.
 The page renders identically without one, and naming the region lets a response carry only that slice instead of the whole document.
 
 Wrap the list in ``notes/pages/template.djx`` and give each row a stable key.
 
 .. code-block:: jinja
-   :caption: notes/pages/template.djx
+   :caption: notes/pages/template.djx, the list zone
 
    {% zone "note-list" tag="ul" %}
      {% for note in notes %}
@@ -44,7 +44,7 @@ Wrap the list in ``notes/pages/template.djx`` and give each row a stable key.
 
 The ``tag="ul"`` argument makes the zone the ``<ul>`` element itself.
 A wrapper ``<div>`` inside a ``<ul>`` would be dropped by the HTML parser, so a list zone names the list element directly.
-Each ``data-next-key`` keeps a row stable when the list re-renders, so the morph reuses the node a row already owns instead of rebuilding it.
+Each ``data-next-key`` keeps a row stable when the list re-renders, so the :term:`morph` reuses the node a row already owns instead of rebuilding it.
 
 Reload ``/`` and confirm the list looks unchanged.
 The zone is invisible until something targets it.
@@ -56,7 +56,7 @@ Add a search box above the list.
 It is a plain ``GET`` form that names the zone it updates.
 
 .. code-block:: jinja
-   :caption: notes/pages/template.djx
+   :caption: notes/pages/template.djx, the search box above the list
 
    <form method="get" action="{% url 'next:page_' %}"
          data-next-target="note-list"
@@ -136,7 +136,8 @@ The server re-renders only the ``note-list`` zone and answers with a single morp
      "form": null
    }
 
-The envelope also ships the co-located assets of the zone body, here the ``note_card`` styles and script, and adds a ``context`` op with the js-context delta when one applies.
+The envelope also ships the co-located assets of the zone body, here the ``note_card`` styles and script.
+A page that publishes values to ``window.Next.context`` gets a ``context`` op alongside the morph, see :doc:`/content/topics/static-assets/js-context`.
 The runtime syncs the address bar with ``history.replaceState``, so ``/?q=gro`` stays shareable.
 A new keystroke aborts an in-flight request, and a stale response that arrives after a fresher one is discarded.
 
@@ -147,7 +148,7 @@ Create a note in place
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 The create form from :doc:`tutorial04` already posts through a registered action.
-Teach its handler to answer a partial request with a patch instead of a redirect.
+Teach its handler to answer a :term:`partial request` with a patch instead of a redirect.
 Update the ``CreateNoteForm`` class in ``notes/forms.py`` and merge the new imports, keeping ``DeleteNoteForm`` and its imports in place.
 
 .. code-block:: python
@@ -177,17 +178,33 @@ It saves and redirects to origin, and the reload shows the new note.
 The form tag itself does not change.
 
 .. code-block:: jinja
-   :caption: notes/pages/template.djx
+   :caption: notes/pages/template.djx, the create form unchanged
 
-   {% form "create_note_form" %}
-     <label>Title {{ form.title }}</label>
-     <label>Body {{ form.body }}</label>
-     <button type="submit">Create</button>
-   {% endform %}
+   <section class="note-create">
+     {% form "create_note_form" %}
+       <label>
+         Title
+         {{ form.title }}
+       </label>
+       <label>
+         Body
+         {{ form.body }}
+       </label>
+       {% if form.errors %}
+         <ul class="errors">
+           {% for field, errors in form.errors.items %}
+             {% for error in errors %}<li>{{ field }} {{ error }}</li>{% endfor %}
+           {% endfor %}
+         </ul>
+       {% endif %}
+       <button type="submit">Create</button>
+     {% endform %}
+   </section>
 
 The form carries no ``zone=`` argument, so a validation failure still re-renders the form in place with its errors, the default re-render from :doc:`tutorial04`.
 The handler drives the list update explicitly, only on success and only for a partial request.
-The morph keeps the caret in the title field, so a visitor can add several notes in a row without the page jumping.
+The create form is outside the zone, so the morph leaves it untouched and the submitted title stays in the input.
+Add a second op that re-renders the form when it should be cleared, see :doc:`/content/topics/partial-rendering/reference` for ``morph(form=...)``.
 
 Submit a note with a title and watch it appear at the top of the list with no reload.
 Submit with an empty title and the form re-renders its error in place, the list untouched.
@@ -217,6 +234,44 @@ Filtering re-renders one zone as the visitor types, creating a note refreshes th
        page.py           # query context, notes context filters by q
        template.djx      # search form, {% zone "note-list" %}
 
+The index template carries the create form, the search box, and the zone together.
+
+.. code-block:: jinja
+   :caption: notes/pages/template.djx
+
+   <section class="note-create">
+     {% form "create_note_form" %}
+       <label>
+         Title
+         {{ form.title }}
+       </label>
+       <label>
+         Body
+         {{ form.body }}
+       </label>
+       {% if form.errors %}
+         <ul class="errors">
+           {% for field, errors in form.errors.items %}
+             {% for error in errors %}<li>{{ field }} {{ error }}</li>{% endfor %}
+           {% endfor %}
+         </ul>
+       {% endif %}
+       <button type="submit">Create</button>
+     {% endform %}
+   </section>
+
+   <form method="get" action="{% url 'next:page_' %}"
+         data-next-target="note-list"
+         data-next-trigger="input" data-next-debounce="300">
+     <input type="search" name="q" value="{{ query }}" placeholder="Filter notes">
+   </form>
+
+   {% zone "note-list" tag="ul" %}
+     {% for note in notes %}
+       <li data-next-key="{{ note.id }}">{% component "note_card" %}</li>
+     {% endfor %}
+   {% endzone %}
+
 No new models, no new URLs, and no client code.
 The behaviour rides the action dispatch and the file router the application already had.
 
@@ -233,6 +288,10 @@ Creating a note redirects instead of updating in place.
 The new note appears twice for a moment.
    Confirm each ``<li>`` carries ``data-next-key="{{ note.id }}"``.
    The key lets the morph match a row to the node it already owns instead of duplicating it.
+
+The create form keeps the previous title.
+   The morph targets the ``note-list`` zone and the form sits outside it, so nothing resets the inputs.
+   Append a second op that re-renders the form when the handler should clear it.
 
 See :doc:`/content/faq/troubleshooting` for the full catalog of errors and fixes.
 

@@ -10,7 +10,7 @@ This page covers how to opt a context value in, how to choose a serializer, and 
    :local:
    :depth: 2
 
-The next object
+The Next object
 ---------------
 
 The static manager injects a runtime script that defines ``window.Next`` before the collected scripts run.
@@ -42,7 +42,7 @@ It implements the ``JsContextSerializer`` protocol, which has one method, ``dump
 The framework ships two implementations.
 
 ``JsonJsContextSerializer``.
-   The process wide default.
+   The process-wide default.
    Encodes through Django ``DjangoJSONEncoder``.
 
 ``PydanticJsContextSerializer``.
@@ -281,6 +281,8 @@ A plugin is any function that takes the ``Next`` object, so it can subscribe to 
      value: () => next.context.note_count ?? 0,
    }));
 
+.. _topics-static-js-runtime-script-options:
+
 Runtime script options
 ----------------------
 
@@ -296,21 +298,25 @@ An absent or empty ``NEXT_JS_OPTIONS`` uses the ``AUTO`` policy and the default 
      - Effect
      - When to use
    * - ``AUTO`` (default)
-     - Injects the preload hint, the ``<script>`` tag, and the ``Next._init`` call into every rendered page.
+     - Injects the preload hint before ``</head>`` and the ``<script>`` tag plus the ``Next._init`` call into the ``scripts`` slot.
      - Pages that read ``window.Next.context`` or use co-located JS.
    * - ``DISABLED``
-     - Skips injection entirely. ``window.Next`` is not defined.
+     - Skips injection entirely.
+       ``window.Next`` is not defined.
      - Pages that serve raw data or HTML fragments and have no client-side JS that reads ``window.Next``.
    * - ``MANUAL``
      - Skips automatic injection in the static manager, the same as ``DISABLED``.
        The script builder stays available for custom emission.
      - Pages where you control placement of the script tags in a layout template.
 
+The runtime rides the ``scripts`` slot, so a layout without ``{% collect_scripts %}`` gets no ``next.min.js`` and no ``window.Next`` even under ``AUTO``, while the preload hint is still injected and points at a script the page never loads.
+The preload hint needs a ``</head>`` in the document, and a fragment rendered without one carries none.
+
 .. note::
 
    Under ``MANUAL`` the static manager skips both the preload hint and the ``Next._init`` wrap, exactly like ``DISABLED``.
    To inject ``window.Next`` yourself, resolve the runtime URL with ``staticfiles_storage.url(NEXT_JS_STATIC_PATH)`` from ``next.static.scripts``, then bind one ``builder = NextScriptBuilder.from_options(url, NEXT_JS_OPTIONS)``.
-   Emit ``builder.preload_link()``, ``builder.script_tag()``, and ``builder.init_script(js_context)`` from a custom template tag or middleware.
+   Emit ``builder.preload_link()`` and ``builder.script_tag()`` from a custom template tag or middleware, then read the collector from the template context under the ``_static_collector`` key and pass ``builder.init_script(collector.js_context(), key_serializers=collector.js_context_serializers(), encoded=collector.js_context_encoded())`` so per-key serializers and the fragments the collector already validated are reused.
    A payload built this way carries no framework ``$csrf`` or ``$dev`` entry, because the static manager both claims and writes those keys only under ``AUTO``.
    The manual payload is exactly the mapping the caller passes, so the caller owns what any ``$``-prefixed key of it means.
 
@@ -324,6 +330,11 @@ Set the policy through the ``NEXT_JS_OPTIONS`` dict.
    }
 
 Accepted string values for ``policy`` are ``"auto"``, ``"disabled"``, and ``"manual"``.
+The key also accepts a ``ScriptInjectionPolicy`` member directly, so a settings module may import the enum from ``next.static`` instead of spelling the string.
+
+Any other value raises ``ValueError`` from the script builder.
+No system check validates ``NEXT_JS_OPTIONS``, and the builder is created on the first injection, so a typo surfaces as a render-time error on every page rather than at ``manage.py check``.
+Verify the value by loading one page after the change.
 
 .. warning::
 
@@ -352,7 +363,8 @@ Use them to add attributes such as ``nonce``, ``async``, or ``crossorigin`` with
 A template carries only its own placeholder, ``{url}`` or ``{payload}``, and no other substitution is supported.
 The templates are formatted with Python ``str.format``, not Django templates.
 A literal ``{`` or ``}`` inside the template body collides with the formatter and must be doubled to ``{{`` or ``}}`` to survive ``str.format``.
-For per-request values such as CSP nonces, use a custom static backend instead.
+A per-request value such as a CSP nonce cannot travel through these templates, because the framework formats them once per process.
+Switch to the ``MANUAL`` policy and emit the three fragments from a template tag that reads the nonce off the request, as described under :ref:`Runtime script options <topics-static-js-runtime-script-options>`.
 
 See also
 --------

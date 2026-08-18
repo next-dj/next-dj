@@ -23,7 +23,8 @@ The dependency injection layer contributes no Django system checks.
 Every next.dj check carries the ``next`` tag.
 Run ``uv run python manage.py check --tag next`` to execute only the framework checks and skip the built-in Django and third-party ones.
 Checks that also concern templates or URL patterns keep their :doc:`Django tags <django:ref/checks>` (``templates``, ``urls``) alongside ``next``, so filtering by those tags still reaches them.
-A tagged run reports what a full run reports: every check that reads registrations discovers the files declaring them itself, rather than relying on a URL check having expanded the router first.
+A tagged run reports what a full run reports.
+Every check that reads registrations discovers the files declaring them itself, rather than relying on a URL check having expanded the router first.
 
 ``next.checks.reset_check_caches`` drops every per-run check cache so the next run rebuilds from the current sources.
 The cached state covers the router and components managers, the composed-pages memo, the collected URL patterns, the page module memo, and the context registry.
@@ -205,8 +206,7 @@ Errors
      - ``next.urls.checks``
    * - ``next.E029``
      - A keyless ``@context`` callable is not annotated as returning a dict.
-       The check reads the context registry, so it catches ``@context``,
-       ``@page.context``, an aliased import, and ``async def`` alike.
+       The check reads the context registry, so it catches ``@context``, ``@page.context``, an aliased import, and ``async def`` alike.
      - ``next.pages.checks``
    * - ``next.E030``
      - An error was raised while checking router pages.
@@ -260,7 +260,8 @@ Errors
      - A form action backend class does not subclass ``FormActionBackend``.
      - ``next.forms.checks``
    * - ``next.E046``
-     - One shared action name is declared in two different modules, so bare-name lookups resolve to whichever module imported first. Rename one class or set ``Meta.scope``.
+     - One shared action name is declared in two different modules, so bare-name lookups resolve to whichever module imported first.
+       Rename one class or set ``Meta.scope``.
      - ``next.forms.checks``
    * - ``next.E047``
      - A form class ``Meta.scope`` or an ``@action`` ``scope`` keyword is set to a value other than ``"page"`` or ``"shared"``.
@@ -309,6 +310,7 @@ Errors
      - ``next.partial.checks``
    * - ``next.E067``
      - ``NEXT_FRAMEWORK['PARTIAL_BACKENDS']`` is not a list, so the value is ignored and the default protocol backend loads in place of the configured one.
+       The generic shape probe behind ``next.E076`` leaves this key out, so the drop is reported once.
      - ``next.partial.checks``
    * - ``next.E072``
      - A composed page template does not compile, so the syntax error would otherwise surface only as a 500 on the first request to the page.
@@ -328,8 +330,9 @@ Errors
      - ``next.components.checks``
    * - ``next.E076``
      - A ``NEXT_FRAMEWORK`` value has a type the settings merge silently drops in favour of the framework default.
-       The check covers ``PAGE_BACKENDS``, ``COMPONENT_BACKENDS``, ``STATIC_BACKENDS``, ``PARTIAL_BACKENDS``, and ``TEMPLATE_LOADERS`` as lists.
+       The check covers ``PAGE_BACKENDS``, ``COMPONENT_BACKENDS``, ``STATIC_BACKENDS``, and ``TEMPLATE_LOADERS`` as lists.
        It also covers ``URL_NAME_TEMPLATE`` and ``URL_RESOLVER`` as strings and ``NEXT_JS_OPTIONS`` as a dict.
+       ``PARTIAL_BACKENDS``, ``FORM_ACTION_BACKENDS``, and ``FORM_ANCHOR_FILES`` carry their own per-key checks, ``next.E067``, ``next.E044``, and ``next.E052``, so this probe leaves them out.
      - ``next.conf.checks``
    * - ``next.E077``
      - ``NEXT_FRAMEWORK`` is not a dict, so the settings layer ignores it entirely and the project runs on the framework defaults.
@@ -355,7 +358,8 @@ Warnings
    * - ``next.W002``
      - A directory named by ``PAGES_DIR`` sits beside the working directory, holds pages, and no configured router routes it, so nothing under it is served.
        Name the directory in ``PAGE_BACKENDS`` ``DIRS``, or turn that entry's ``APP_DIRS`` off, which routes ``BASE_DIR`` over ``PAGES_DIR`` when ``DIRS`` names no root.
-       The tree is not walked by the page checks, so its contents raise no ``next.E010``, ``next.E012``, or ``next.E017``. This one warning stands for all of them.
+       The tree is not walked by the page checks, so its contents raise no ``next.E010``, ``next.E012``, or ``next.E017``.
+       This one warning stands for all of them.
      - ``next.pages.checks``
    * - ``next.W030``
      - ``STATIC_BACKENDS`` is empty, so the framework falls back to ``StaticFilesBackend``.
@@ -417,7 +421,8 @@ Warnings
        Thread a ``key=`` into the form to keep the repeated morph correct.
      - ``next.partial.checks``
    * - ``next.W071``
-     - ``PARTIAL_BACKENDS`` has more than one entry. Partial rendering uses a single protocol backend, so only the first entry runs and the rest are ignored.
+     - ``PARTIAL_BACKENDS`` has more than one entry.
+       Partial rendering uses a single protocol backend, so only the first entry runs and the rest are ignored.
      - ``next.partial.checks``
    * - ``next.W072``
      - A ``NEXT_FRAMEWORK`` bool key, ``STRICT_CONTEXT``, ``STRICT_LOADING``, ``LAZY_COMPONENT_MODULES``, or ``FORM_AUTODISCOVER``, holds a non-bool value.

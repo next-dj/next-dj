@@ -22,44 +22,7 @@ The default.
 The wizard closes the layer with a result, and the link that opened the modal re-fetches the zone it named in ``data-next-accepted``.
 The wizard does not know the list exists.
 
-.. code-block:: python
-   :caption: request/[step]/page.py
-
-   class AccessRequestWizard(FormWizard):
-       def done(
-           self, request: HttpRequest, cleaned_data: dict[str, Any]
-       ) -> HttpResponse:
-           """Create the access request and close the layer with a result."""
-           access_request = AccessRequest.objects.create(**cleaned_data)
-           return (
-               Patches(request)
-               .layer_close(result={"id": access_request.pk})
-               .toast("Request created", variant="success")
-               .response(fallback=f"/request/{access_request.pk}/audit/")
-           )
-
-The last step answers with a close and a toast.
-
-.. code-block:: json
-   :caption: response body
-
-   {
-     "version": "9f3c2e1b",
-     "ops": [
-       {"op": "layer.close", "result": {"id": 42}},
-       {"op": "toast", "text": "Request created", "variant": "success"}
-     ]
-   }
-
-The runtime closes the layer, fires accept, and by ``data-next-accepted="request-list"`` sends a second GET for the list.
-
-.. code-block:: http
-   :caption: the re-GET
-
-   GET / HTTP/1.1
-   X-Next-Request: 1
-   X-Next-Zone: request-list
-   X-Next-Origin: /
+The default choreography is the one :doc:`scenarios` walks through, from the ``done`` method that returns a ``layer.close`` and a toast to the re-GET the accepted zone earns.
 
 The list re-renders through its own page view, with its own guards and middleware, on a request that carries the caller's cookies.
 The wizard is portable.
@@ -81,9 +44,13 @@ The builder takes ``page=`` and ``url_kwargs=`` alongside ``zone=``, and the req
 .. code-block:: python
    :caption: request/[step]/page.py
 
-   from django.http import Http404, HttpResponse
+   from typing import Any
 
-   from next.partial import resolve_partial_origin
+   from access.models import AccessRequest
+   from django.http import Http404, HttpRequest, HttpResponse
+
+   from next.forms import FormWizard
+   from next.partial import Patches, resolve_partial_origin
 
 
    class AccessRequestWizard(FormWizard):

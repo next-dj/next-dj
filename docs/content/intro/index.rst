@@ -4,7 +4,7 @@ Getting started
 ===============
 
 This section gets you from zero to a running next.dj project.
-Read the overview to learn the mental model, then install the package.
+Read the overview to learn the mental model, map your Django vocabulary onto it, then install the package.
 The six tutorial parts build a small Notes application from there.
 
 .. rubric:: Read first
@@ -12,6 +12,9 @@ The six tutorial parts build a small Notes application from there.
 :doc:`overview`
    The mental model behind next.dj.
    Read it once to understand pages, layouts, components, and actions.
+
+:doc:`from-django`
+   A mapping table from the Django concepts you already know to their next.dj counterparts.
 
 :doc:`install`
    Install the package, register it in Django, and serve a single page.
@@ -44,6 +47,7 @@ The six tutorial parts build a small Notes application from there.
    :maxdepth: 1
 
    overview
+   from-django
    install
    tutorial01
    tutorial02

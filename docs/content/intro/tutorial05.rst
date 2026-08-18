@@ -51,6 +51,7 @@ The ``PAGES_DIR`` path must match the actual app and page-root names, so a proje
 
    from pathlib import Path
    import pytest
+   from next.testing.client import NextClient
    from next.testing.loaders import eager_load_pages
 
    PAGES_DIR = Path(__file__).resolve().parent / "notes" / "pages"
@@ -59,6 +60,13 @@ The ``PAGES_DIR`` path must match the actual app and page-root names, so a proje
    def _next_dj_registration():
        eager_load_pages(PAGES_DIR)
        yield
+
+   @pytest.fixture
+   def next_client() -> NextClient:
+       return NextClient()
+
+The fixture is named ``next_client`` rather than ``client`` so it sits next to pytest-django's own ``client`` fixture instead of replacing it.
+A test that wants Django's plain client asks for ``client`` and a test that wants the framework client asks for ``next_client``.
 
 The forms in ``notes/forms.py`` need no conftest wiring.
 The ``next`` app runs form autodiscovery at startup, and pytest-django boots Django before any fixture runs, so ``CreateNoteForm`` and ``DeleteNoteForm`` are already registered.
@@ -81,23 +89,17 @@ Create ``tests/test_notes_e2e.py``.
 .. code-block:: python
    :caption: tests/test_notes_e2e.py
 
-   import pytest
    from notes.models import Note
-   from next.testing.client import NextClient
 
-   @pytest.fixture
-   def client() -> NextClient:
-       return NextClient()
-
-   def test_index_lists_notes(client, db) -> None:
+   def test_index_lists_notes(next_client, db) -> None:
        Note.objects.create(title="First", body="hello")
-       response = client.get("/")
+       response = next_client.get("/")
        assert response.status_code == 200
        assert "First" in response.content.decode()
 
-   def test_detail_renders_note(client, db) -> None:
+   def test_detail_renders_note(next_client, db) -> None:
        note = Note.objects.create(title="Second", body="world")
-       response = client.get(f"/notes/{note.id}/")
+       response = next_client.get(f"/notes/{note.id}/")
        assert response.status_code == 200
        assert "Second" in response.content.decode()
 
@@ -123,11 +125,9 @@ The framework gives each action a stable URL.
    :caption: tests/test_notes_actions.py
 
    from notes.models import Note
-   from next.testing.client import NextClient
 
-   def test_create_note_action(db) -> None:
-       client = NextClient()
-       response = client.post_action("create_note_form", {"title": "From test", "body": "body"})
+   def test_create_note_action(next_client, db) -> None:
+       response = next_client.post_action("create_note_form", {"title": "From test", "body": "body"})
        assert response.status_code == 302
        assert Note.objects.filter(title="From test").exists()
        assert response["Location"] == "/"
@@ -147,12 +147,11 @@ A validation failure fires ``form_validation_failed`` instead and never reaches 
    :caption: tests/test_notes_signals.py
 
    from next.signals import action_dispatched
-   from next.testing.client import NextClient
    from next.testing.signals import SignalRecorder
 
-   def test_create_emits_action_dispatched(db) -> None:
+   def test_create_emits_action_dispatched(next_client, db) -> None:
        with SignalRecorder(action_dispatched) as recorder:
-           NextClient().post_action("create_note_form", {"title": "Signal", "body": ""})
+           next_client.post_action("create_note_form", {"title": "Signal", "body": ""})
 
        assert len(recorder) == 1
        event = recorder.first_for(action_dispatched)
@@ -174,11 +173,10 @@ The test passes ``origin="/"``, which fills the hidden ``_next_form_origin`` fie
 Append the failure test to ``tests/test_notes_actions.py``.
 
 .. code-block:: python
-   :caption: tests/test_notes_actions.py
+   :caption: tests/test_notes_actions.py, the failure test
 
-   def test_create_with_blank_title_rerenders(db) -> None:
-       client = NextClient()
-       response = client.post_action("create_note_form", {"title": "", "body": "x"}, origin="/")
+   def test_create_with_blank_title_rerenders(next_client, db) -> None:
+       response = next_client.post_action("create_note_form", {"title": "", "body": "x"}, origin="/")
        assert response.status_code == 200
        assert b"This field is required" in response.content
 

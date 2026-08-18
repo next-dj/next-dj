@@ -1,6 +1,6 @@
 # next-dj examples
 
-Each folder below is a self-contained Django project that runs on SQLite and Django's in-process `LocMemCache`. No Docker, no Node, and no external services are required. Every example overrides `PAGES_DIR` and `COMPONENTS_DIR` in `NEXT_FRAMEWORK` to demonstrate that the naming is user-controlled. Each example also registers a project-level page root through `PAGE_BACKENDS["DIRS"]`: `chrome/`, `host/`, `site/`, `frame/`, `shell/`, `portal/`, `instrument/`, `marketplace/`, `cockpit/`, `studio/`, or `root_pages/`. This root owns the shared HTML envelope that sits outside the per-app page tree.
+Each folder below is a self-contained Django project that runs on SQLite and Django's in-process `LocMemCache`. No Docker and no external services are required. Only [`kanban/`](kanban/) and [`live-polls/`](live-polls/) carry a Vite toolchain and need Node, every other example loads Tailwind from the Play CDN with no build step. Every example overrides `PAGES_DIR` and `COMPONENTS_DIR` in `NEXT_FRAMEWORK` to demonstrate that the naming is user-controlled. Each example also registers a project-level page root through `PAGE_BACKENDS["DIRS"]`: `chrome/`, `host/`, `site/`, `frame/`, `shell/`, `portal/`, `instrument/`, `marketplace/`, `cockpit/`, `studio/`, or `root_pages/`. This root owns the shared HTML envelope that sits outside the per-app page tree.
 
 ## Shared UI kit
 
@@ -26,7 +26,7 @@ Each example is a complete mini-product with e2e tests and a dedicated README.
 | [`kanban/`](kanban/) | Custom `StaticBackend` that registers a `.jsx` kind through the public `KindRegistry`, multi-level `@context(serialize=True)` with `DeepMergePolicy`, `HashContentDedup` on co-located CSS, composite components with React JSX |
 | [`live-polls/`](live-polls/) | Server-Sent Events stream from a `threading.Condition` broker with per-poll monotonic revisions, signal-driven fan-out using the bound form on `action_dispatched`, locally bundled Vue 3 SFC subscribing through `EventSource`, custom `.vue` asset kind, three-level nested layouts with `inherit_context=True` |
 | [`observability/`](observability/) | Every signal group wired through one receiver each, custom `ComponentsBackend` and `DedupStrategy`, `JsContextSerializer` swapped both globally and per-decorator on `live_stats`, React sparkline via CDN-loaded Babel-standalone, nested layout with filter form action |
-| [`admin/`](admin/) | Full Django admin UI on next.dj: shadcn-style templates over `ModelAdmin.get_changelist_instance()`/`get_form()`/`get_inline_instances()`/`get_actions()`, request-aware form factories via `@action(form_class=callable)`, declarative `login_required=True` guards plus `ModelAdmin` permission checks on every mutating action, `{% action_url %}` in a hand-crafted form, two page roots (admin shell + auth shell), middleware guard for `/admin/` pages, LogEntry history |
+| [`admin/`](admin/) | Full Django admin UI on next.dj: shadcn-style templates over `ModelAdmin.get_changelist_instance()`/`get_form()`/`get_inline_instances()`/`get_actions()`, request-aware form factories via `@action(form_class=callable)`, declarative `login_required=True` guards plus `ModelAdmin` permission checks on every mutating action, `{% action_url %}` in a hand-crafted form, a two-layer layout whose inner shell branches between admin chrome and auth chrome, middleware guard for `/admin/` pages, LogEntry history |
 
 ## Running any example
 
@@ -37,12 +37,12 @@ uv run python manage.py runserver
 uv run pytest
 ```
 
-Tailwind is loaded via the Play CDN (`https://cdn.tailwindcss.com`) from the root layout. No build step is required.
+Tailwind is loaded via the Play CDN (`https://cdn.tailwindcss.com`) through the shared `page_head` component that every root layout calls. The two Vite examples add an `npm install` plus a dev server or a build on top, documented in their own READMEs.
 
 ## Conventions every example follows
 
 - One custom `PAGES_DIR` (`routes`, `screens`, `panels`, …) and one custom components directory (`_widgets`, `_parts`, `_chunks`, …).
 - One project-level page root listed in `PAGE_BACKENDS["DIRS"]` (e.g. `host/`, `frame/`, `shell/`, `studio/`). The file router walks it alongside the per-app `PAGES_DIR`, and its `layout.djx` becomes the outermost wrapper around every page. The [`multi-tenant`](multi-tenant/) example goes one step further and also drops project-shared components inside this root (`root_blocks/header`, `root_blocks/footer`). The [`markdown-blog`](markdown-blog/) example shows the same trick with a `site/_parts/site_footer` registered through `COMPONENT_BACKENDS["DIRS"]`.
 - Co-located CSS/JS next to the `page.py`, `component.py`, or `layout.djx` they belong to. The `{% collect_styles %}` / `{% collect_scripts %}` tags place them in the rendered HTML, with deduplication.
-- E2E tests driven by `next.testing`: `eager_load_pages`, `reset_registries`, `NextClient`.
+- E2E tests driven by `next.testing`: a session-scoped `eager_load_pages` and a `NextClient` fixture, on the canonical conftest scaffold in [`_template/conftest.py`](_template/conftest.py).
 - Forms redirect on success — either declaratively through `Meta.success_url` (plus an optional `Meta.success_message` flash, see [`shortener`](shortener/)) or by returning `HttpResponseRedirect` from `on_valid` when the target depends on the submission. The [`admin`](admin/) example shows the access side of the same surface: declarative `login_required=True` guards on every mutating action.

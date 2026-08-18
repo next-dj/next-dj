@@ -22,7 +22,7 @@ uv run python manage.py runserver     # http://127.0.0.1:8000/
 uv run pytest
 ```
 
-Tailwind loads via the Play CDN in [`panels/layout.djx`](flags/panels/layout.djx). No Node, no build step.
+Tailwind loads via the Play CDN in [`frame/layout.djx`](frame/layout.djx). No Node, no build step.
 
 Seed a few flags from the Django shell:
 
@@ -278,7 +278,7 @@ The bulk-toggle action is mounted at the framework's action URL. Tests use `Next
 
 Any module that declares a parameter `flag: DFlag[Flag]` **must not** start with `from __future__ import annotations`. PEP 563 would string-ify the annotation and `get_origin(...)` in `FlagProvider.can_handle` returns `None` on strings. The two component modules in this example skip that import on purpose.
 
-### `{% component %}` props are literal strings
+### `{% component %}` props resolve against the template context
 
 `{% component "feature_guard" flag_name="beta_checkout" %}` passes the literal `"beta_checkout"`. Inside a loop, use the parent variable binding instead: `flag_name=flag.name` resolves to the loop-iteration value because Django evaluates the expression during template rendering. The admin template uses this pattern.
 
@@ -297,5 +297,5 @@ A page with both `render()` and `template.djx` emits `next.W043`. If a page has 
 - [next/deps/providers.py](../../next/deps/providers.py) — `RegisteredParameterProvider` base and auto-registration.
 - [next/pages/signals.py](../../next/pages/signals.py) — `page_rendered` payload documentation.
 - [next/forms/manager.py](../../next/forms/manager.py) — form-action registration, dispatch, and the CSRF + form-class contract.
-- [next/forms/dispatch.py](../../next/forms/dispatch.py) — where `check_permissions` runs in the dispatch sequence and how its return is normalised into an allow / `403` / verbatim response.
+- [next/forms/dispatch/permissions.py](../../next/forms/dispatch/permissions.py) — where `check_permissions` runs in the dispatch sequence and how its return is normalised into an allow / `403` / verbatim response.
 - [next/signals.py](../../next/signals.py) — aggregate re-export covering every signal the framework emits, including `page_rendered` and `form_access_denied`.

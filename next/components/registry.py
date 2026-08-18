@@ -189,10 +189,8 @@ class ComponentVisibilityResolver:
                     (score, dirs_origin, component.name, position, component)
                 )
 
-        # Higher score wins. At equal score a page-tree component shadows a
-        # shared DIRS root one, so a project-local override takes precedence.
-        # Same-origin ties fall back to name then registration order, keeping
-        # the component discovered first ahead of a later same-named sibling.
+        # Higher score wins, then a page-tree component shadows a shared DIRS one,
+        # then name and registration order keep the first discovery ahead.
         candidates.sort(key=lambda x: (-x[0], x[1], x[2], x[3]))
 
         seen: set[str] = set()

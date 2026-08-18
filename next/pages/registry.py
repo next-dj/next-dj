@@ -170,10 +170,8 @@ class PageContextRegistry:
         context_data: dict[str, Any] = {}
         js_context: dict[str, Any] = {}
         js_context_serializers: dict[str, JsContextSerializer] = {}
-        # Reuse the dispatch dep_cache during a validation-failure re-render
-        # so Depends("name") providers resolved by the form action are not
-        # recomputed when the same name is referenced from page or component
-        # context callables.
+        # Reuse the dispatch dep_cache on a validation-failure re-render, so a
+        # Depends("name") the form action resolved is not recomputed here.
         shared = get_request_dep_cache(request)
         dep_cache: dict[str, Any] = shared if shared is not None else {}
         dep_stack: list[str] = []
@@ -230,10 +228,10 @@ class PageContextRegistry:
 
         Walks ancestor directories that contain a `page.py` and runs every
         `@context(..., inherit_context=True)` callable registered there.
-        A sibling `layout.djx` is not required — the shared HTML envelope
-        can live one level up under ``PAGE_BACKENDS["DIRS"]``,
-        and pages declaring inheritable context should still surface it
-        on descendant routes.
+        A sibling `layout.djx` is not required.
+        The shared HTML envelope can live one level up under
+        ``PAGE_BACKENDS["DIRS"]``, and pages declaring inheritable context
+        should still surface it on descendant routes.
         """
         inherited_context = {}
         current_dir = file_path.parent

@@ -17,6 +17,11 @@ You have a Django application named ``notes`` registered in ``INSTALLED_APPS``.
 From :doc:`install` your ``config/urls.py`` already forwards URLs to next.dj through ``include("next.urls")``.
 If ``/`` does not respond, revisit :doc:`install`.
 
+.. note::
+
+   Throughout the six parts, a captioned code block holds the complete content of the named file.
+   A block that shows only a fragment says so in its caption, for example ``notes/forms.py, the create form``.
+
 Walkthrough
 -----------
 
@@ -58,13 +63,12 @@ Apply the :doc:`migration <django:topics/migrations>` and seed two rows so the i
 Add the index page
 ~~~~~~~~~~~~~~~~~~
 
-The file router treats the ``notes/pages/`` directory as the page root for the application.
+The file router treats the ``notes/pages/`` directory as the :term:`page root` for the application.
 The directory that contains a ``page.py`` becomes a URL.
 ``notes/pages/page.py`` therefore answers the empty path ``/``.
 The router scans each application in ``INSTALLED_APPS`` for a ``pages/`` directory, leaving out Django's own applications and ``next`` itself.
 
 Create the page module.
-A captioned code block holds the complete content of the named file unless the prose explicitly says to append to it.
 
 .. code-block:: python
    :caption: notes/pages/page.py

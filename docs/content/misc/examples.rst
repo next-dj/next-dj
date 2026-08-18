@@ -33,7 +33,7 @@ The **Primary docs** column points to the sections of this manual where the tech
      - Custom ``FormActionBackend``, ``action_dispatched`` / ``form_validation_failed`` signals, dual audit channels, ``FormWizard`` in a modal layer, lazy audit-table zone
      - :doc:`/content/topics/forms/wizard`, :doc:`/content/topics/forms/backends`, :doc:`/content/topics/forms/signals`, :doc:`/content/topics/partial-rendering/index`
    * - :repo:`search-catalog <tree/main/examples/search-catalog>`
-     - Faceted site search. ``DQuery[T]``, faceted filters, nested layouts, ``inherit_context=True``, cached search
+     - ``DQuery[T]``, faceted filters, nested layouts, ``inherit_context=True``, cached search
      - :doc:`/content/topics/dependency-injection`, :doc:`/content/topics/context`
    * - :repo:`wiki <tree/main/examples/wiki>`
      - ``HybridRouterBackend``, ``router_manager.reload()`` on signal, DI, live search zone, forms with live Markdown preview
@@ -57,8 +57,10 @@ The **Primary docs** column points to the sections of this manual where the tech
 Shared assets
 -------------
 
-* :repo:`_shared <tree/main/examples/_shared>`. A shared component palette consumed through ``COMPONENT_BACKENDS`` ``DIRS``.
-* :repo:`_template <tree/main/examples/_template>`. An empty scaffold to copy when starting a new example-shaped project.
+* :repo:`_shared <tree/main/examples/_shared>`.
+  A shared component palette consumed through ``COMPONENT_BACKENDS`` ``DIRS``.
+* :repo:`_template <tree/main/examples/_template>`.
+  An empty scaffold to copy when starting a new example-shaped project.
 
 See also
 --------

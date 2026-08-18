@@ -3,8 +3,7 @@ from typing import get_args, get_origin
 
 from django.http import Http404
 
-from next.deps import DDependencyBase, RegisteredParameterProvider
-from next.deps.context import ResolutionContext
+from next.deps import DDependencyBase, RegisteredParameterProvider, ResolutionContext
 
 
 class DPoll[T](DDependencyBase[T]):

@@ -140,8 +140,9 @@ They are a public contract, the only thing the system checks and the development
 The checks walk the reported trees themselves, refusing the names ``skip_dir_names`` returns plus the folder ``components_folder_name`` names, while the watcher derives its watch specs from ``page_roots`` and ``components_folder_name`` alone, as :doc:`autoreload` describes.
 
 ``RouterManager.backends`` is the public read of the loaded backend list, a tuple in routing order.
-Reading the property loads no backends.
-The list appears after the first iteration of the manager or after ``reload()``, so a caller that needs the configured set asks after one of those.
+The first read loads the backends from ``PAGE_BACKENDS``, the same build the first iteration of the manager runs, so a caller that asks before the first resolve reads the configured set rather than an empty tuple.
+Later reads hand back a snapshot of the loaded list, and ``reload()`` rebuilds it.
+The ``repr`` of the manager reports the raw state instead of loading, so inspecting it under a debugger neither rebuilds the routes nor fires ``router_reloaded``.
 
 Extension points
 ----------------

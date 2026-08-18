@@ -27,6 +27,7 @@ from next.checks.common import (
     get_page_roots,
     get_router_manager,
     iter_scanned_page_pairs,
+    page_tree_skip_names,
     read_page_roots,
     registration_file_errors,
 )
@@ -40,12 +41,11 @@ from .loaders import (
     last_load_error,
 )
 from .manager import page
+from .scan import iter_existing_scanned_pages
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
-
-    from next.urls import RouterManager
 
 
 logger = logging.getLogger(__name__)
@@ -105,15 +105,13 @@ def check_pages_structure(*args, **kwargs) -> list[CheckMessage]:
     # page trees.
     seen: set[Path] = set()
     for router in router_manager.backends:
-        # This is the one check that names a failing `page_roots`. Every other
-        # reader takes the empty list, so one broken router costs one message
-        # and, here, the single traceback of the run.
+        # The one check that names a failing `page_roots`, every other reader
+        # takes the empty list, so a broken router costs one message and trace.
         try:
             roots = read_page_roots(router)
         except PageRootsError as e:
-            # Only a raised failure carries a traceback, and it is the
-            # backend's own. A wrong shape has no cause, and its whole
-            # diagnosis is the message below.
+            # Only a raised failure carries a traceback, a wrong shape has no
+            # cause and its whole diagnosis is the message below.
             hint = None
             if e.__cause__ is not None:
                 logger.exception("a router failed to report its page trees")
@@ -126,10 +124,11 @@ def check_pages_structure(*args, **kwargs) -> list[CheckMessage]:
                 )
             errors.append(Error(detail, hint=hint, obj=settings, id="next.E030"))
             continue
+        skip_dir_names = page_tree_skip_names(router)
         try:
             for root in roots:
                 root_errors, root_warnings = _check_pages_directory(
-                    root.path, root.label, seen
+                    root.path, root.label, seen, skip_dir_names
                 )
                 errors.extend(root_errors)
                 warnings.extend(root_warnings)
@@ -268,7 +267,10 @@ def _check_directory_syntax(
 
 
 def _check_missing_page_files(
-    directories: list[Path], pages_path: Path, context: str
+    directories: list[Path],
+    pages_path: Path,
+    context: str,
+    skip_dir_names: frozenset[str],
 ) -> list[CheckMessage]:
     """Check for missing `page.py` files inside parameter directories."""
     errors: list[CheckMessage] = []
@@ -287,6 +289,8 @@ def _check_missing_page_files(
 
             has_child_routes = False
             for child in item.iterdir():
+                if child.name in skip_dir_names:
+                    continue
                 if child.is_dir() and (child / "page.py").exists():
                     has_child_routes = True
                     break
@@ -304,8 +308,28 @@ def _check_missing_page_files(
     return errors
 
 
+def _iter_routed_directories(
+    pages_path: Path, skip_dir_names: frozenset[str]
+) -> Iterator[Path]:
+    """Yield every directory under `pages_path` the router's own walk enters.
+
+    A refused name takes its whole subtree with it, so a structural report
+    names only directories a route can come out of.
+    """
+    try:
+        items = sorted(pages_path.iterdir())
+    except OSError as e:
+        logger.debug("Cannot list directory %s: %s", pages_path, e)
+        return
+    for item in items:
+        if not item.is_dir() or item.name in skip_dir_names:
+            continue
+        yield item
+        yield from _iter_routed_directories(item, skip_dir_names)
+
+
 def _check_pages_directory(
-    pages_path: Path, context: str, seen: set[Path]
+    pages_path: Path, context: str, seen: set[Path], skip_dir_names: frozenset[str]
 ) -> tuple[list[CheckMessage], list[CheckMessage]]:
     """Check a specific pages directory for issues, skipping directories in `seen`."""
     if not pages_path.exists():
@@ -316,11 +340,13 @@ def _check_pages_directory(
 
     directories = [
         item
-        for item in pages_path.rglob("*")
-        if item.is_dir() and first_visit(item, seen)
+        for item in _iter_routed_directories(pages_path, skip_dir_names)
+        if first_visit(item, seen)
     ]
     errors.extend(_check_directory_syntax(directories, pages_path, context))
-    errors.extend(_check_missing_page_files(directories, pages_path, context))
+    errors.extend(
+        _check_missing_page_files(directories, pages_path, context, skip_dir_names)
+    )
 
     return errors, warnings
 
@@ -364,10 +390,11 @@ def check_page_functions(*args, **kwargs) -> list[CheckMessage]:
     # One `page.py` reached through several page trees is one page.
     seen: set[Path] = set()
     for router in router_manager.backends:
+        skip_dir_names = page_tree_skip_names(router)
         try:
             for root in get_page_roots(router):
                 root_errors, root_warnings = _check_page_functions_in_directory(
-                    root.path, root.label, seen
+                    root.path, root.label, seen, skip_dir_names
                 )
                 errors.extend(root_errors)
                 warnings.extend(root_warnings)
@@ -382,17 +409,23 @@ def check_page_functions(*args, **kwargs) -> list[CheckMessage]:
 
 
 def _check_page_functions_in_directory(
-    pages_path: Path, context: str, seen: set[Path]
+    pages_path: Path, context: str, seen: set[Path], skip_dir_names: frozenset[str]
 ) -> tuple[list[CheckMessage], list[CheckMessage]]:
-    """Check `page.py` files for render/template rules, skipping files in `seen`."""
+    """Check `page.py` files for render/template rules, skipping files in `seen`.
+
+    The walk refuses what the router refuses, so a `page.py` under a skipped
+    directory answers no URL and is held to no body-source rule.
+    """
     errors: list[CheckMessage] = []
     warnings: list[CheckMessage] = []
 
     if not pages_path.exists():
         return errors, warnings
 
-    for page_file in pages_path.rglob("page.py"):
-        if not first_visit(page_file, seen):
+    for _url_path, page_file in walk_page_tree(pages_path, skip_dir_names):
+        # A virtual page carries a path that never existed, and the
+        # template.djx that made it is body source enough.
+        if not page_file.exists() or not first_visit(page_file, seen):
             continue
         render_func = _load_render_function(page_file)
         if last_load_error(page_file) is not None:
@@ -568,11 +601,11 @@ def _check_context_function(
 ) -> CheckMessage | None:
     """Emit an error when keyless context callables are not annotated dict-like.
 
-    The check is static: executing user code at ``manage.py check`` time
-    is expensive and can hit databases that have not been migrated yet.
-    Callables without a return annotation are accepted — the runtime
-    emits a clear ``TypeError`` on first render if the result is not a
-    mapping.
+    The check is static, because executing user code at ``manage.py check``
+    time is expensive and can hit databases that have not been migrated yet.
+    Callables without a return annotation are accepted.
+    The runtime emits a clear ``TypeError`` on first render if the result is
+    not a mapping.
     """
     try:
         annotation = inspect.signature(func).return_annotation
@@ -612,24 +645,6 @@ def _check_registered_context_functions(page_path: Path) -> list[CheckMessage]:
     return errors
 
 
-def _iter_existing_scanned_pages(
-    router_manager: RouterManager, seen: set[Path]
-) -> Iterator[Path]:
-    """Yield each existing `page.py` once across routers, de-duplicated by `seen`.
-
-    The identity is the resolved path, so a tree reached through a symlink
-    reports once. The spelling the router walked is what travels on, because
-    the loader and the page-context registry both key on that spelling.
-    Virtual `template.djx`-only pages carry a non-existent path and are skipped.
-    """
-    for router in router_manager.backends:
-        for _url_path, page_path in iter_scanned_page_pairs(router):
-            if not first_visit(page_path, seen):
-                continue
-            if page_path.exists():
-                yield page_path
-
-
 def _page_import_error_message(page_path: Path) -> str:
     """Compose the `next.E017` text, naming the recorded failure when known."""
     error = last_load_error(page_path)
@@ -659,7 +674,7 @@ def check_page_module_imports(*args, **kwargs) -> list[CheckMessage]:
         return init_errors
     return [
         Error(_page_import_error_message(page_path), obj=str(page_path), id="next.E017")
-        for page_path in _iter_existing_scanned_pages(router_manager, set())
+        for page_path in iter_existing_scanned_pages(router_manager, set())
         if _load_python_module_memo(page_path) is None
     ]
 
@@ -672,7 +687,7 @@ def check_context_functions(*args, **kwargs) -> list[CheckMessage]:
         return init_errors
 
     errors: list[CheckMessage] = []
-    for page_path in _iter_existing_scanned_pages(router_manager, set()):
+    for page_path in iter_existing_scanned_pages(router_manager, set()):
         if _load_python_module_memo(page_path) is None:
             continue
         errors.extend(_check_registered_context_functions(page_path))
@@ -691,7 +706,7 @@ def check_context_registration_files(*args, **kwargs) -> list[CheckMessage]:
     if router_manager is None:
         return init_errors
 
-    for page_path in _iter_existing_scanned_pages(router_manager, set()):
+    for page_path in iter_existing_scanned_pages(router_manager, set()):
         _load_python_module_memo(page_path)
 
     return registration_file_errors(
@@ -713,7 +728,7 @@ def check_single_keyless_context(*args, **kwargs) -> list[CheckMessage]:
 
     errors: list[CheckMessage] = []
     conflicts = page._context_manager._keyless_conflicts
-    for page_path in _iter_existing_scanned_pages(router_manager, set()):
+    for page_path in iter_existing_scanned_pages(router_manager, set()):
         if _load_python_module_memo(page_path) is None:
             continue
         names = conflicts.get(page_path)

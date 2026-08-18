@@ -323,9 +323,8 @@ class TestEveryPagesRootIsScanned:
         assert list(iter_scanned_page_pairs(router)) == list(scan_pages_tree(real))
 
     def test_one_tree_under_two_labels_is_scanned_once(self, tmp_path: Path) -> None:
-        # An app tree also listed in DIRS is routed twice for real, so the
-        # roots keep both entries for the URL checks to compare, while the
-        # scan that feeds the page checks walks the tree once.
+        # An app tree also listed in DIRS is routed twice for real, so the roots
+        # keep both entries while the scan behind the page checks walks it once.
         _write_page(tmp_path, "blog")
         router = _TwoLabelRouter(tmp_path)
 

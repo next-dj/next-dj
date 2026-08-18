@@ -24,11 +24,16 @@ Skim this map before changing code. Each `next/<area>/` module owns one framewor
 | [next/deps/](next/deps/) | Dependency injection: providers, resolver, markers, cache. |
 | [next/forms/](next/forms/) | Forms pipeline: action registry, dispatch, rendering, uid generation. |
 | [next/pages/](next/pages/) | `Page`, template loaders (`DjxTemplateLoader`, `PythonTemplateLoader`), layouts, page registry. |
+| [next/partial/](next/partial/) | Partial rendering: zones, patch envelope, wire headers, SSE. |
 | [next/server/](next/server/) | Dev-server autoreload (`NextStatReloader`) and filesystem watcher. |
 | [next/static/](next/static/) | Static asset discovery, collector, finders, backends, template-tag scripts. |
 | [next/client/](next/client/) | TypeScript client runtime sources and their co-located vitest tests, bundled by esbuild to `next/static/next/next.min.js`. |
 | [next/templatetags/](next/templatetags/) | Django template tag libraries for components, forms, and `{% next_static %}`. |
+| [next/testing/](next/testing/) | Public test toolkit: client, isolation, signal capture, rendering, patching. |
 | [next/urls/](next/urls/) | File-router backends, URL-pattern parser, dispatcher, markers (`DUrl`). |
+| [next/backends.py](next/backends.py) | Shared backend-loading machinery used by every area. |
+| [next/ports.py](next/ports.py) | Narrow Protocol ports and their slots, composed in `AppConfig.ready()`. |
+| [next/signals.py](next/signals.py) | Aggregate re-export of every framework signal. |
 | [next/utils.py](next/utils.py) | Small shared utilities. |
 
 Tests mirror this layout:
@@ -208,11 +213,11 @@ The [Benchmarks workflow](.github/workflows/bench.yml) runs on every PR and ever
 
 Always run `make bench` locally when your change touches any `next/<area>/` file that has a mirror under `tests/benchmarks/<area>/`. That currently covers:
 
-- **Hot-path modules** (run locally, results matter): `next/server/autoreload.py`, `next/components/{registry,backends}.py`, `next/static/discovery.py`, `next/pages/{loaders,manager}.py`, `next/urls/{parser,backends}.py`, `next/conf/settings.py`, `next/forms/{dispatch,manager,backends}.py`, `next/deps/resolver.py`.
+- **Hot-path modules** (run locally, results matter): `next/server/autoreload.py`, `next/components/{registry,backends}.py`, `next/static/discovery.py`, `next/pages/{loaders,manager}.py`, `next/urls/{parser,backends,manager}.py`, `next/conf/settings.py`, `next/forms/{dispatch,manager,backends}.py`, `next/deps/resolver.py`, `next/partial/headers.py`, `next/ports.py`.
 - Any caching or invalidation logic, regardless of area.
 - Any code in a hot render, autoreload, or URL-generation path.
 
-Non-hot paths (checks, one-shot app startup code, templatetag glue) do not need a local bench pass — the CI comment covers that.
+Non-hot paths (checks, one-shot app startup code, templatetag glue) do not need a local bench pass. The CI comment covers those.
 
 ## Examples
 

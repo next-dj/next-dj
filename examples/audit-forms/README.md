@@ -137,13 +137,13 @@ Each step is a bare `django.forms.ModelForm` (or `Form`) — the wizard owns dis
 
 The wizard binds the current step's form to the POST, validates only that step's fields, and saves the cleaned data through the wizard backend. On a non-final step it 302-redirects to the next step's URL, computed by swapping the `[step]` segment of the origin path. On the final step it calls `done(request, cleaned_data)` with the merged dict of every step, so `AccessRequest.objects.create(**cleaned_data)` builds the row once. No per-step `.save()`, no hidden id fields, no hand-written routing.
 
-### 5. Two composite components, two patterns
+### 5. Three composite components, two patterns
 
 The example ships three composite components that demonstrate two different ways the framework lets a component contribute logic:
 
 - **`progress_bar/` — synthesised state from wizard truth.** Lives at `views/request/[step]/_blocks/progress_bar/`. Its `@component.context` functions take the `wizard` instance (pushed into the template context by the `{% form %}` tag) and read `current_step()`, `step_names()`, and `completed_steps()`. A step is `current` when it is the active step, `saved` when it has stored data, otherwise `pending`. No page-level step context is needed — all step knowledge lives in the wizard.
 
-- **`step_section/` — Python `render()` gating on wizard state.** Lives next to `progress_bar`. Has only a `component.py` (no `.djx`); the `render()` function takes `form` and `wizard` via DI, then assembles HTML through inline `django.template.Template` instances. It owns the section chrome: red border on validation errors, "✓ saved" pill plus a compact value summary when a step is past, slate placeholder for steps not yet visited. The page template calls `{% component "step_section" %}` once and the component renders every step.
+- **`step_section/` — Python `render()` gating on wizard state.** Lives next to `progress_bar`. Has only a `component.py` and no `.djx`. The `render()` function takes `form` and `wizard` via DI, then assembles HTML through inline `django.template.Template` instances. It owns the section chrome: red border on validation errors, "✓ saved" pill plus a compact value summary when a step is past, slate placeholder for steps not yet visited. The page template calls `{% component "step_section" %}` once and the component renders every step.
 
 - **`audit_row/` — `@component.context` deriving display data.** Lives at `views/_blocks/audit_row/` (one scope above the admin and per-request pages so both can use it). Takes an `AuditEntry` from the parent loop and exposes `kind_class`, `source_class`, `summary`, `payload_keys`, `request_link`, and `data_attrs`. The template stays markup-only.
 
@@ -269,7 +269,7 @@ The test suite asserts the server contract — the envelopes, the zone targets, 
 - [`next/forms/wizard.py`](../../next/forms/wizard.py) — the declarative `FormWizard` base class, the `FormWizardBackend` contract, the default `SessionFormWizardBackend` this example builds on, and the optional `CacheFormWizardBackend`.
 - [`next/forms/manager.py`](../../next/forms/manager.py) — the lazy, settings-driven `FormActionManager` used by every example.
 - [`next/forms/backends.py`](../../next/forms/backends.py) — the `FormActionBackend` ABC and `RegistryFormActionBackend` superclass.
-- [`next/forms/dispatch.py`](../../next/forms/dispatch.py) — where `action_dispatched`, `form_validation_failed`, `wizard_step_submitted`, `wizard_completed`, and `form_access_denied` are sent, and where the `check_permissions` / `has_object_permission` hooks run.
+- [`next/forms/dispatch/`](../../next/forms/dispatch/) — where `action_dispatched`, `form_validation_failed`, `wizard_step_submitted`, `wizard_completed`, and `form_access_denied` are sent, and where the `check_permissions` / `has_object_permission` hooks run.
 - [`next/forms/checks.py`](../../next/forms/checks.py) — `next.E041` (duplicate handlers), `next.E044` (bad backend config), `next.E045` (wrong backend type).
 - [`next/testing/signals.py`](../../next/testing/signals.py) — `SignalRecorder` and `capture_signals` helpers used in the tests.
 - [`docs/content/topics/testing.rst`](../../docs/content/topics/testing.rst) — canonical conftest scaffold mirrored in this example.

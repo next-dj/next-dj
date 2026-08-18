@@ -86,7 +86,7 @@ Project directories.
 
 Custom backends.
    Additional entries in ``COMPONENT_BACKENDS`` can serve components from any other source.
-   See :doc:`extending` for the contract.
+   See `Component backends`_ below for the contract.
 
 .. code-block:: python
    :caption: config/settings.py
@@ -370,7 +370,7 @@ Module loading
 --------------
 
 By default the framework imports every ``component.py`` from each ``DIRS`` root during component backend setup.
-``import_component_modules`` walks only the ``DIRS``-derived registry entries present at setup time and returns the paths it imported.
+``import_component_modules`` imports every ``component.py`` the backend has registered by the time it runs, both the ``DIRS`` roots and the page-tree folders the router walk claimed, and returns the paths it imported.
 The bulk import runs the side effects of ``@component.context`` so they are visible from the first request.
 A ``component.py`` may also register a form action by importing ``action`` from ``next.forms`` and applying ``@action``, which the same import makes visible.
 See :doc:`/content/topics/forms/actions` for the action decorator.
@@ -430,6 +430,136 @@ Hot reload
 The development server reloads when a ``component.py`` changes inside a watched component folder.
 The watched folders are the ``DIRS`` roots configured on a backend and the page-tree component folders the URL router walks.
 Template-only edits to ``.djx`` files are reflected on the next request without a process restart.
+
+Component backends
+------------------
+
+``COMPONENT_BACKENDS`` lists the sources the framework asks for components.
+A backend subclasses ``next.components.ComponentsBackend`` and receives its whole settings entry as the single constructor argument.
+Every entry declares ``BACKEND``, ``DIRS``, and ``COMPONENTS_DIR``, and ``next.E031`` reports an entry that omits one of them.
+
+A backend answers with ``ComponentInfo`` records and never renders.
+``ComponentsManager`` owns the render pipeline and shares it across every configured backend, which is why the contract asks for only two methods.
+
+Required methods
+~~~~~~~~~~~~~~~~
+
+``get_component(name, template_path)``.
+   Return the ``ComponentInfo`` this backend holds for ``name`` as seen from ``template_path``, or ``None`` to pass the name on.
+   The manager consults backends in configuration order and takes the first record that is not ``None``.
+
+``collect_visible_components(template_path)``.
+   Return the mapping of every component name this backend makes visible from ``template_path``.
+   The manager merges those mappings in configuration order, and the first backend to claim a name keeps it.
+
+A ``ComponentInfo`` carries the component name, its scope root and scope-relative path, an optional template path, an optional module path, and the simple or composite flag.
+The template body is read from a ``.djx`` file at the template path, or from a module-level ``component`` string in the module at the module path.
+A backend that stores markup anywhere else materialises it in one of those two places before handing the record over.
+
+Optional hooks
+~~~~~~~~~~~~~~
+
+The remaining five methods carry defaults that decline.
+Leaving a hook alone is a supported answer, and it keeps the backend out of the behaviour that hook feeds.
+A backend that resolves names on demand implements the two required methods and touches none of these.
+
+``discover()``.
+   Populate the backend from its source.
+   The framework calls it on every configured backend once during application startup.
+   The default does nothing, which suits a backend that resolves names lazily.
+
+``import_component_modules()``.
+   Execute the Python module of every known component and return the paths imported.
+   It is separate from ``discover`` because ``LAZY_COMPONENT_MODULES`` leaves those modules unexecuted, and a caller that reads decorator state cannot wait for a render.
+   The default returns an empty tuple, which is also the right answer for a backend whose components carry no module.
+
+``register_walked_folder(folder, pages_root, scope_relative)``.
+   Claim a components folder the page-tree walk found by returning ``True``.
+   The walk offers each folder to the backends in configuration order and stops at the first that claims it, so one folder belongs to exactly one backend.
+   The default returns ``False`` and leaves page-tree folders to another backend.
+
+``iter_components()``.
+   Return every component this backend has registered.
+   The system checks read it to report duplicate names and wrong-decorator modules, which the render contract alone cannot answer.
+   The default returns an empty iterable and keeps the backend out of those reports.
+
+``global_component_roots()``.
+   Return the scope roots whose root-scope components resolve from every template.
+   The cross-root name check reads it to tell a shared root from a page tree.
+   The default returns an empty iterable.
+
+A worked backend
+~~~~~~~~~~~~~~~~
+
+This backend serves one flat folder of ``.djx`` files as globally visible components.
+It implements the two required methods, populates itself in ``discover``, and opts into the two enumeration hooks so the system checks see its components.
+
+.. code-block:: python
+   :caption: notes/backends.py
+
+   from pathlib import Path
+   from typing import Any
+
+   from next.components import ComponentInfo, ComponentsBackend
+
+   class UiKitBackend(ComponentsBackend):
+       """Serve a flat folder of .djx files as global components."""
+
+       def __init__(self, config: dict[str, Any]) -> None:
+           self._root = Path(config["DIRS"][0])
+           self._components: dict[str, ComponentInfo] = {}
+
+       def discover(self) -> None:
+           for djx in sorted(self._root.glob("*.djx")):
+               self._components[djx.stem] = ComponentInfo(
+                   name=djx.stem,
+                   scope_root=self._root,
+                   scope_relative="",
+                   template_path=djx,
+                   module_path=None,
+                   is_simple=True,
+               )
+
+       def get_component(self, name: str, template_path: Path) -> ComponentInfo | None:
+           return self._components.get(name)
+
+       def collect_visible_components(
+           self, template_path: Path
+       ) -> dict[str, ComponentInfo]:
+           return dict(self._components)
+
+       def iter_components(self) -> list[ComponentInfo]:
+           return list(self._components.values())
+
+       def global_component_roots(self) -> list[Path]:
+           return [self._root]
+
+Register it after the default backend so page-tree and ``DIRS`` components resolve first and this one answers the names they do not hold.
+
+.. code-block:: python
+   :caption: config/settings.py
+
+   from pathlib import Path
+
+   BASE_DIR = Path(__file__).resolve().parent.parent
+
+   NEXT_FRAMEWORK = {
+       "COMPONENT_BACKENDS": [
+           {
+               "BACKEND": "next.components.FileComponentsBackend",
+               "DIRS": [],
+               "COMPONENTS_DIR": "_components",
+           },
+           {
+               "BACKEND": "notes.backends.UiKitBackend",
+               "DIRS": [str(BASE_DIR / "ui_kit")],
+               "COMPONENTS_DIR": "_components",
+           },
+       ]
+   }
+
+Only the ``COMPONENTS_DIR`` value of the first entry takes effect, because the URL router reads the folder name it skips from that entry alone.
+The ``component_backend_loaded`` signal fires once per backend instance with ``config`` and ``instance``, so a receiver can inspect what was built.
 
 Lifecycle signals
 -----------------

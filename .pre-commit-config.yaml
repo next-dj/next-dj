@@ -15,6 +15,11 @@ repos:
         files: ^docs/.*\.rst$
   - repo: local
     hooks:
+      - id: prose-lint
+        name: prose semantic newlines
+        entry: uv run python docs/prose_lint.py
+        language: system
+        files: ^docs/content/.*\.rst$
       - id: prettier
         name: prettier
         entry: npm run format:check

@@ -57,7 +57,7 @@ Namespace override
 ~~~~~~~~~~~~~~~~~~
 
 The default namespace is ``next``, configured through ``next.urls.manager.app_name``.
-``page_reverse`` forwards ``namespace=`` straight to ``django.urls.reverse``, so the value must name a Django URL namespace that already exists.
+``page_reverse`` joins ``namespace`` to the computed URL name with a colon and hands the single view name to ``django.urls.reverse``, so the value must name a Django URL namespace that already exists.
 The ``next`` namespace exists because ``next.urls`` sets ``app_name = "next"``, and a second namespace exists only when ``next.urls`` is mounted again under an explicit ``namespace`` argument.
 
 .. code-block:: python
@@ -67,18 +67,28 @@ The ``next`` namespace exists because ``next.urls`` sets ``app_name = "next"``, 
 
    urlpatterns = [
        path("", include("next.urls")),
-       path("admin/", include("next.urls", namespace="admin")),
+       path("staff/", include("next.urls", namespace="staff")),
    ]
+
+The second ``include`` republishes the whole page tree and the form action endpoint under the new prefix.
+``next.urls`` exposes one pattern list that holds every routed page plus the dispatch endpoint, and both mounts read that same list.
+Every page therefore answers on ``/<route>/`` and on ``/staff/<route>/``, and requests to ``/staff/_next/form/`` reach the dispatcher as well.
+
+.. warning::
+
+   Duplicating the public surface is rarely wanted, because every page then answers at two addresses and an access rule written against one path leaves the other reachable.
+   To place a page under a second prefix, add the directory to the page tree so the route becomes ``staff/dashboard`` under a single mount, or redirect the second path to the existing route with a plain Django view.
 
 With that second mount in place, ``page_reverse`` can target it.
 
 .. code-block:: python
    :caption: secondary namespace
 
-   page_reverse("dashboard", namespace="admin")  # "/admin/dashboard/"
+   page_reverse("dashboard", namespace="staff")  # "/staff/dashboard/"
 
-The ``/admin/`` prefix comes from the ``path("admin/", ...)`` mount, not from the ``namespace`` argument.
-``page_reverse`` only selects which namespace ``reverse`` resolves against.
+The ``/staff/`` prefix comes from the ``path("staff/", ...)`` mount, not from the ``namespace`` argument.
+The ``namespace`` argument selects which copy of the tree ``reverse`` resolves against.
+It does not narrow the set of routes a mount publishes, because both mounts publish the same set.
 
 Passing a ``namespace`` that no Django mount registers raises ``NoReverseMatch``.
 

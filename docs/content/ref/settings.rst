@@ -161,7 +161,8 @@ PARTIAL_BACKENDS
 List of partial protocol backend configurations.
 The first entry is active and owns the patch wire format that partial rendering serialises over HTTP and Server-Sent Events.
 Entries after the first are ignored, and ``manage.py check`` reports them with ``next.W071``.
-The value has to be a list, since any other shape is dropped in favour of the default and ``manage.py check`` reports it with ``next.E067``.
+The value has to be a list, since any other shape is dropped in favour of the default.
+``manage.py check`` reports the drop as ``next.E067`` from the partial checks, which own the shape probe for this key.
 
 Default value.
 
@@ -292,8 +293,10 @@ A broken ``page.py`` answers 404 while ``logger.exception`` records the full tra
 ``settings.DEBUG`` raises the same page-load error without this flag, so the flag matters for a ``DEBUG=False`` deployment.
 In every mode the failure is scoped to the broken page, sibling pages keep serving.
 
+Every fail-loud path reads the flag through the ``next.conf.fail_loudly`` predicate, which combines it with ``settings.DEBUG`` so the page loader and the component tag cannot drift apart.
+
 Default value ``False``.
-See :doc:`pages` for the page-load contract, :doc:`template-tags` for the component-miss outcomes, and :doc:`/content/deployment/settings` for the production recommendation.
+See :doc:`pages` for the page-load contract, :doc:`template-tags` for the component-miss outcomes, :doc:`conf` for ``fail_loudly``, and :doc:`/content/deployment/settings` for the production recommendation.
 
 Loudness axes
 ~~~~~~~~~~~~~
@@ -317,7 +320,7 @@ Five independent switches decide how loudly a broken piece fails.
      - Django context processor exceptions
      - Raises regardless of ``DEBUG``.
    * - ``next.E076``
-     - Eight ``NEXT_FRAMEWORK`` keys whose mistyped value the settings merge silently drops
+     - Seven ``NEXT_FRAMEWORK`` keys whose mistyped value the settings merge silently drops
      - Always, on ``manage.py check``.
    * - ``next.E077``
      - A ``NEXT_FRAMEWORK`` that is not a dict at all, which the settings layer ignores entirely
@@ -331,8 +334,11 @@ A broken ``page.py`` that answered 404 starts raising, so the switch flips more 
 The configuration checks stay independent of every flag above, so ``manage.py check`` reports ``next.E076``, ``next.E077``, and ``next.W072`` in any combination of ``DEBUG`` and the strict flags.
 See :doc:`system-checks` for each check condition.
 
+Component loading
+-----------------
+
 LAZY_COMPONENT_MODULES
-~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
 
 Controls bulk import of ``component.py`` modules in configured component roots during ``next.apps.components.install``.
 When ``True``, each ``component.py`` is imported on demand the first time ``get_component`` resolves it.

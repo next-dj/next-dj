@@ -19,7 +19,7 @@ Three neighbouring forms
 A board settings page carries three independent forms, one to rename the board, one to add a column, one to archive the board.
 A validation error in one form must not touch the DOM of the other two, so text typed but not yet submitted in a neighbour survives.
 
-This works with no changes at all.
+Three plain ``{% form %}`` tags are the whole markup.
 The ``{% form %}`` tag already emits ``data-next-action="<uid>"`` and the hidden origin field, so the dispatcher can rebuild the source page on a failure.
 
 .. code-block:: jinja
@@ -58,7 +58,7 @@ Submitting an empty title posts to the form endpoint with the partial switch set
 
    title=&_next_form_origin=/board/7/settings/
 
-The response is a 200 carrying the existing invalid-form headers and a patch envelope.
+The response is a 200 carrying the invalid-form headers and a patch envelope.
 
 .. code-block:: json
    :caption: response body
@@ -73,7 +73,7 @@ The response is a 200 carrying the existing invalid-form headers and a patch env
               "errors": {"title": ["This field is required."]}}
    }
 
-Without the runtime the same submission returns the full page with errors, the current behaviour byte for byte.
+Without the runtime the same submission returns the full page with its errors.
 
 Inline validation on blur
 -------------------------
@@ -81,19 +81,19 @@ Inline validation on blur
 A wizard step carries an email field.
 The user should see a format error the moment focus leaves the field, before submitting, and with no server code.
 
-One parameter on the existing ``{% form %}`` tag turns it on.
+One parameter on the ``{% form %}`` tag turns it on.
 
 .. code-block:: jinja
    :caption: request/[step]/template.djx
 
-   {% form "access_request_wizard" validate="blur" %}
+   {% form "access_request_wizard" validate="blur" debounce="300" %}
      {% component "progress_bar" %}
      {% component "step_section" %}
      …
    {% endform %}
 
-The tag renders ``data-next-validate="blur"``.
-The page module does not change.
+The tag renders ``data-next-validate="blur"`` and ``data-next-debounce="300"``, so a burst of blur probes collapses into one validate POST.
+The page module needs nothing new.
 The validate branch lives inside the dispatcher right after the access guard and the origin resolve, so the handler never runs and the wizard storage is never touched.
 
 A blur on the email field with an invalid value posts the validate request.
@@ -132,14 +132,14 @@ The morph keeps the caret and any value typed in a neighbouring field during the
 The guard runs before validation, so an anonymous caller on a protected action gets a denial, not an envelope.
 A uniqueness validator never becomes an enumeration oracle for an unauthorised request.
 
-Without the runtime nothing happens on blur and validation runs on submit, the current behaviour.
+Without the runtime nothing happens on blur and validation runs on submit.
 
 An auto-submitting filter
 -------------------------
 
 A product catalogue is filtered by a panel form over search, brands, price, and sort.
-Today an Apply button triggers a full reload.
-The results should update as the user types, the URL should stay shareable, and the providers should not change.
+A plain submit of that panel reloads the whole page.
+The results should update as the user types, the URL should stay shareable, and the providers need nothing new.
 
 The panel form gets three attributes, and the sort select gets one.
 
@@ -161,19 +161,21 @@ The catalogue page wraps its results in a zone.
 
    <header>
      <h1>All products</h1>
-     <p>{{ page_obj.total }} products</p>
+     <p>{{ page_obj.paginator.count }} products</p>
    </header>
 
    {% zone "catalog-results" %}
      <ul>
-       {% for product in page_obj.products %}
+       {% for product in page_obj %}
          <li data-next-key="{{ product.pk }}">{% component "product_card" %}</li>
        {% endfor %}
      </ul>
      {% component "pagination" %}
    {% endzone %}
 
-The page module does not change.
+Here ``page_obj`` is a Django :class:`~django.core.paginator.Page`, published by the paginated context callable of :ref:`topics-pages-pagination`.
+The template reads the standard ``Page`` API, iterating the page for its rows and reaching through ``paginator`` for the total.
+The page module needs nothing new.
 The provider already reads ``request.GET``, so the zone GET reuses the same query parsing the full page uses.
 
 Typing ``ban`` debounces for 300 ms, then sends one zone GET.
@@ -200,7 +202,7 @@ The runtime syncs the address bar with ``history.replaceState`` so the URL stays
 A new keystroke aborts the in-flight GET, an aborted request does not reach ``partial:error``, and a monotonic counter discards a stale response that arrives after a fresher one.
 Each ``data-next-key`` on a row keeps the morph stable as the list changes.
 
-Without the runtime nothing happens until the Apply button submits a plain GET that reloads the page.
+Without the runtime the panel stays a plain GET form whose submit reloads the page.
 
 Pagination and infinite scroll
 ------------------------------
@@ -214,14 +216,13 @@ A wrapper ``<div>`` inside a ``<ul>`` would be dropped by the HTML parser, so a 
 .. code-block:: jinja
    :caption: catalog/template.djx with infinite scroll
 
-   {% load catalog_qs %}
    {% zone "catalog-results" tag="ul" %}
-     {% for product in page_obj.products %}
+     {% for product in page_obj %}
        <li data-next-key="{{ product.pk }}">{% component "product_card" %}</li>
      {% endfor %}
      {% if page_obj.has_next %}
        <li id="results-sentinel">
-         <a href="?{% querystring page=page_obj.page|add:'1' %}"
+         <a href="{% querystring page=page_obj.next_page_number %}"
             data-next-target="catalog-results" data-next-merge="append"
             data-next-lazy="revealed">
            Show more
@@ -230,6 +231,7 @@ A wrapper ``<div>`` inside a ``<ul>`` would be dropped by the HTML parser, so a 
      {% endif %}
    {% endzone %}
 
+``has_next`` and ``next_page_number`` are the ``Page`` API again, and Django's built-in ``querystring`` tag keeps the active filters while it swaps the page number.
 A table uses ``tag="tbody"`` for the same reason.
 
 .. code-block:: jinja
@@ -272,7 +274,7 @@ The response carries ``Vary: X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-V
 Changing the search query is the morph of the same zone from the previous scenario, which resets the accumulated list on its own.
 Dropping the ``data-next-lazy="revealed"`` attribute leaves the same link click-driven, which gives button pagination from the same code.
 
-Without the runtime the sentinel is a plain link and the click navigates to ``?page=2`` through the existing pagination component.
+Without the runtime the sentinel is a plain link and the click navigates to ``?page=2`` through the pagination component.
 
 A live stream
 -------------
@@ -315,7 +317,7 @@ The vote page wraps its results in a zone and connects the stream with a ``data-
    {% endzone %}
    <div data-next-sse="/polls/{{ poll.pk }}/stream/"></div>
 
-The vote form lives inside the chart component and does not change.
+The vote form lives inside the chart component and carries no partial markup of its own.
 The broker carries one extra field.
 Each change event ships the request id of the mutation that produced it.
 Threading that id is the application channel's job, the framework does not smuggle it.
@@ -383,7 +385,7 @@ The list is a zone.
      </ul>
    {% endzone %}
 
-The step template is the existing one, wrapped in a zone.
+The step template is the plain wizard step, wrapped in a zone.
 
 .. code-block:: jinja
    :caption: request/[step]/template.djx

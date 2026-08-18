@@ -110,8 +110,8 @@ A ``handler500`` view receives only the request.
        """Render the branded 500 page."""
        return render(request, "500.html", status=500)
 
-Raise http404 from a page
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+Raise Http404 from a page
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
 A ``render`` function or a ``@context`` callable can raise :exc:`~django.http.Http404` when a record is missing.
 The exception propagates out of the page to Django's URL resolver, which then invokes ``handler404`` and renders the branded page.

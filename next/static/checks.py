@@ -14,7 +14,7 @@ from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, re
 from next.checks import NEXT
 from next.components.context import iter_serialized_component_context_keys
 from next.conf import import_class_cached, next_framework_settings
-from next.pages.manager import iter_serialized_page_context_keys
+from next.pages.scan import iter_serialized_page_context_keys
 
 from .assets import default_kinds
 from .backends import StaticBackend

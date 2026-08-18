@@ -17,11 +17,11 @@ Its ``__eq__`` compares the Django-bound members ``FieldSpec.bound`` and ``Forms
 Overview
 --------
 
-The module ``next.forms.serializers`` exposes five dataclasses.
+The module ``next.forms.serializers`` exposes the frozen specs below, the ``FieldKind`` literal that classifies a widget, and the three builders under `Building a spec`_.
 
 FieldSpec.
    Render-time descriptor for one ``BoundField``.
-   Includes the field kind, the input type, the current value, the selected values for choice fields, and an ``is_extra`` flag.
+   Includes the field kind, the input type, the current value, and, for a ``select_multi`` field only, the tuple of selected values, plus an ``is_extra`` flag.
    The ``bound`` attribute is the underlying Django ``BoundField`` and is Django-only.
 
 FormsetRowSpec.
@@ -108,6 +108,8 @@ A renderer running outside Django templates handles them explicitly.
 ``FieldSpec.bound`` is a Django ``BoundField``.
    Call ``str(spec.bound)`` to get the default widget HTML, or ``spec.bound.as_widget(...)`` to render with custom attributes.
    The plain-data attributes (``kind``, ``input_type``, ``value``, ``selected``) cover most layouts without touching ``bound``, so a custom control can be built from those alone.
+   ``selected`` is populated only when ``kind`` is ``select_multi``.
+   A single ``select`` carries its chosen option in ``value``, which the template compares against each option key.
 
 ``FormsetSpec.management_form`` is a Django form.
    Its hidden inputs (``TOTAL_FORMS``, ``INITIAL_FORMS``, and the rest) must be rendered into the POSTed markup, or Django raises a ``ManagementForm`` error and the whole formset fails validation.
@@ -136,7 +138,8 @@ Each field carries a ``FieldKind`` literal that classifies the widget.
    * - ``select_multi``
      - ``SelectMultiple`` widget.
    * - ``input``
-     - Every other widget. ``input_type`` carries the HTML input type.
+     - Every other widget.
+       ``input_type`` carries the HTML input type.
 
 Admin ``RelatedFieldWidgetWrapper`` widgets are unwrapped to their inner widget before classification.
 

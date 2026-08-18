@@ -510,8 +510,8 @@ def check_partial_backends_is_a_list(*args, **kwargs) -> list[CheckMessage]:
 
     The settings layer merges the key only when it holds a list, so a tuple
     or a bare dict is dropped and the default protocol backend loads in its
-    place. Every other partial diagnostic reads the merged value, so nothing
-    else would report the drop.
+    place. This check owns the shape probe for the key, which the
+    configuration checks leave out so the drop is reported once.
     """
     raw = getattr(settings, "NEXT_FRAMEWORK", None)
     if not isinstance(raw, dict):

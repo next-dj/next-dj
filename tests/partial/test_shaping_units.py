@@ -5,7 +5,7 @@ from django.middleware.csrf import rotate_token
 from django.test import RequestFactory
 from django.urls import set_script_prefix
 
-from next.forms.dispatch import ActionOutcome, ActionOutcomeKind
+from next.forms.dispatch.responses import ActionOutcome, ActionOutcomeKind
 from next.forms.manager import form_action_manager
 from next.partial import Patches, shape_partial, shaping as shaping_module
 from next.partial.headers import VARY_HEADERS

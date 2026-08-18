@@ -149,7 +149,7 @@ The default implementation on ``BaseModelForm`` calls ``self.save()`` then follo
 See `Success feedback`_ for the ``success_url`` contract.
 
 The return value follows the same contract as a handler function, checked in a fixed order.
-An ``HttpResponse`` instance passes through unchanged, and this check runs first, so every rich response type the framework ships subclasses ``HttpResponse``.
+An ``HttpResponse`` instance passes through unchanged, and that check runs first, which is why every rich response type the framework ships subclasses ``HttpResponse`` and reaches the client untouched.
 A string becomes the body of an HTTP 200 response, never a redirect target.
 ``None`` triggers a re-render of the origin page with HTTP 200.
 A model instance with a ``get_absolute_url`` method redirects to that URL, the ``CreateView``-style idiom for a handler that saves and shows the result.
@@ -379,6 +379,7 @@ The semantics mirror Django's :class:`~django.contrib.auth.mixins.PermissionRequ
 ``permission_required`` accepts a single permission string or an iterable of them, the user must hold every listed permission, and declaring a permission implicitly requires authentication.
 The static guard runs before the form is built, ahead of ``get_initial``, form binding, and any database access, so a request denied by the static guard runs no application code.
 An anonymous user is redirected to ``LOGIN_URL`` with ``next`` set to the posted origin page.
+A submission whose ``_next_form_origin`` is missing or not a same-site path gets ``next=/`` instead, so a hand-crafted form should always carry the field.
 An authenticated user missing a permission gets :exc:`~django.core.exceptions.PermissionDenied`, which Django renders as HTTP 403.
 
 Unlike ``Meta.abstract``, which is own-class-only, the guard keys survive subclassing through plain class-attribute lookup.
@@ -485,8 +486,7 @@ Both hooks share one return contract.
 - Returning an ``HttpResponse``, including a redirect, short-circuits and that response is returned verbatim.
 - Any other return type raises ``TypeError``, so a misconfigured gate fails loudly.
 
-The ``HttpResponse`` return is how an anonymous visitor is sent to a login page or a paywall instead of receiving a bare 403,
-a decision the static ``login_required`` redirect cannot express per request.
+The ``HttpResponse`` return is how an anonymous visitor is sent to a login page or a paywall instead of receiving a bare 403, a decision the static ``login_required`` redirect cannot express per request.
 The hook return type alias is ``next.forms.PermissionOutcome``, equal to ``bool | HttpResponse | None``, for annotating an override.
 
 The two hooks combine with the static guard in a fixed order.
@@ -496,8 +496,7 @@ A request it denies never reaches a dynamic hook, so the static guard stays the 
 
 The view hook resolves on the resolved form class, so a factory ``form_class`` is covered as well, see `Dynamic form classes`_.
 A handler-only ``@action`` carries no class to host a method, so it has no dynamic hook.
-Such a handler runs its own check in the body and raises :exc:`~django.core.exceptions.PermissionDenied` or returns a redirect,
-the same pattern shown for ``messages.success`` under `Success messages`_.
+Such a handler runs its own check in the body and raises :exc:`~django.core.exceptions.PermissionDenied` or returns a redirect, the same pattern shown for ``messages.success`` under `Success messages`_.
 
 An object-level denial returns a bare HTTP 403.
 It does not re-render the origin page.
@@ -601,6 +600,7 @@ System checks
 -------------
 
 The forms subsystem contributes Django system checks that run through ``python manage.py check``.
+The registration and scope checks are listed here, the wizard checks on :doc:`wizard`, the backend-configuration checks on :doc:`backends`, and the component-widget checks on :doc:`field-components`.
 
 ``next.E041``
    Two or more registrations share the same action name but come from different handlers.
@@ -653,3 +653,4 @@ See also
    :doc:`templates` for the ``{% form %}`` tag.
    :doc:`validation-rerender` for what happens on a failing submission.
    :doc:`/content/ref/forms` for the public API.
+   :doc:`/content/ref/system-checks` for every check the framework registers.

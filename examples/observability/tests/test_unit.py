@@ -41,7 +41,7 @@ from obs.serializers import PydanticJsContextSerializer, WrappedJsContextSeriali
 from obs.static_policies import InstrumentedDedup
 from pydantic import BaseModel
 
-from next.components.backends import FileComponentsBackend
+from next.components import FileComponentsBackend
 from next.partial.registry import patch_op_registry
 from next.static import StaticAsset
 

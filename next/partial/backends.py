@@ -9,7 +9,7 @@ from .headers import CONTENT_TYPE
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from .patches import Envelope
+    from .envelope import Envelope
 
 
 _SSE_EVENT_NAME = "next-patches"

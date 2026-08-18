@@ -59,6 +59,11 @@ class PartialIntent:
     origin: str | None = None
 
 
+# Every field defaults to an immutable empty value, so one instance is
+# shared by every non-partial request instead of being rebuilt per request.
+_NOT_PARTIAL = PartialIntent()
+
+
 def _split_names(raw: str | None) -> tuple[str, ...]:
     """Split a comma-separated header value into trimmed non-empty names."""
     if not raw:
@@ -84,7 +89,7 @@ def _value(request: "HttpRequest", name: str) -> str | None:
 def _parse_intent(request: "HttpRequest") -> PartialIntent:
     """Parse the partial-request headers of a request into an intent."""
     if _value(request, REQUEST_FLAG) != "1":
-        return PartialIntent()
+        return _NOT_PARTIAL
     return PartialIntent(
         partial=True,
         zones=_split_names(_value(request, ZONE)),

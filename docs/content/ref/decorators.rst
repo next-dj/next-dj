@@ -112,14 +112,10 @@ DForm
 
 Type annotation that injects a form instance during action dispatch.
 
-FormProvider
-~~~~~~~~~~~~
+The nine built-in providers are listed with their priorities in :doc:`/content/topics/dependency-injection`.
 
-.. autoclass:: next.forms.markers.FormProvider
-   :no-index:
-
-Provider class for injecting bound forms.
-Matches a ``DForm[...]`` annotation or any parameter named ``form``.
+Provider base classes
+---------------------
 
 DDependencyBase
 ~~~~~~~~~~~~~~~

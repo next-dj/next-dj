@@ -10,7 +10,7 @@ from next.forms import BaseModelForm, Form, ModelForm
 from next.forms.base import _is_self_registered
 from next.forms.decorators import action as action_decorator
 from next.forms.diagnostics import registration_diagnostics
-from next.forms.dispatch import _form_action_context_callable
+from next.forms.dispatch.build import _form_action_context_callable
 from next.forms.manager import build_form_namespace_for_action, form_action_manager
 from tests.support import attribution, handler_declared_here
 

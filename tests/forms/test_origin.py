@@ -7,7 +7,7 @@ from django.http import HttpRequest, QueryDict
 from django.urls import clear_script_prefix, set_script_prefix
 
 from next.forms import Form, origin
-from next.forms.dispatch import _form_action_context_callable
+from next.forms.dispatch.build import _form_action_context_callable
 from next.forms.origin import (
     _ORIGIN_MATCH_ATTR,
     OriginMatch,

@@ -43,6 +43,8 @@ Typed captured segment.
 Wildcard segment.
    A directory wrapped in double brackets becomes a ``path`` converter that swallows multiple URL segments.
    ``routes/api/[[suffix]]/page.py`` answers ``/api/<path:suffix>/``.
+   A route holds at most one wildcard segment.
+   A second ``[[name]]`` anywhere in the same trail raises ``DuplicateURLParameterError`` at router build and reports :ref:`next.E028 <ref-system-checks>` at check time, whatever the two names are.
 
 The following layout shows the four shapes together.
 
@@ -89,6 +91,7 @@ The bracket syntax accepts every Django path converter.
    * - ``[[name]]``
      - ``<path:name>``
      - Wildcard that matches one or more segments including slashes.
+       A route holds at most one, and a second ``[[name]]`` raises ``DuplicateURLParameterError`` at router build and reports :ref:`next.E028 <ref-system-checks>` at check time, whatever the two names are.
 
 A bracket label is passed to Django verbatim, so any converter registered with :func:`django.urls.register_converter` works in ``[label:name]``.
 The parser handles three bracket forms.
@@ -194,7 +197,8 @@ The router resolves routes from app directories and project directories, in the 
 
 App directories.
    When ``APP_DIRS`` is ``True`` the router scans each installed application for a directory named ``PAGES_DIR``.
-   ``PAGES_DIR`` is required on every backend entry, and the ``next.E024`` system check fails when the key is missing.
+   ``PAGES_DIR`` is required on every ``FileRouterBackend`` entry, and the ``next.E024`` system check fails when the key is missing.
+   A backend that is not a file router carries only ``BACKEND``, and any other key on that entry reports ``next.E035``.
    In the tutorial it is set to ``pages``, so the router scans ``notes/pages/``.
    Applications are resolved through Django's application registry, so an ``INSTALLED_APPS`` entry written as an ``AppConfig`` path such as ``notes.apps.NotesConfig`` scans the same ``notes/pages/`` directory as the plain ``notes`` entry, and both are reported as ``App 'notes'``.
    The scanned directory is the one the registry reports for the application, so an ``AppConfig`` that declares its own ``path`` moves the scan with it, and an application shipped as a namespace package is scanned like any other.
@@ -381,7 +385,7 @@ The router contributes Django system checks that validate the configuration at s
 
 - ``check_next_pages_configuration`` validates the ``NEXT_FRAMEWORK`` structure and each backend entry.
 - ``check_pages_structure`` validates directory naming, captured parameter syntax, and the presence of ``page.py`` or ``template.djx``.
-- ``check_page_functions`` reports :ref:`next.E012 <ref-system-checks>` when a directory has neither a render function nor a template.
+- ``check_page_functions`` reports :ref:`next.E012 <ref-system-checks>` when a directory has no render function, no template attribute, no loader-backed source, and no sibling ``layout.djx``.
 - ``check_pages_structure`` and ``check_page_functions`` come from ``next.pages`` and appear here because they validate the same page tree the router scans.
 - ``check_url_patterns`` reports two routes that convert to exactly the same Django path string, whether they come from one tree or several (:ref:`next.E015 <ref-system-checks>`).
   The comparison is string equality after bracket conversion, so ``posts/[int:id]`` next to ``posts/[id]`` is not reported.
@@ -396,9 +400,12 @@ Extension points
 
 Three surfaces let you replace or augment the router.
 
-- ``next.urls.backends.RouterBackend`` is the abstract contract for any source of URL patterns.
-- ``next.urls.backends.FileRouterBackend`` is the default file-based implementation.
-- ``next.urls.backends.RouterFactory.register_backend`` maps a dotted path to a custom backend.
+- ``next.urls.RouterBackend`` is the abstract contract for any source of URL patterns.
+- ``next.urls.FileRouterBackend`` is the default file-based implementation.
+- ``next.urls.RouterFactory.register_backend`` maps a dotted path to a custom backend.
+  Registration is optional.
+  ``RouterFactory`` imports any dotted path it does not already know, so listing the class in ``PAGE_BACKENDS`` is enough.
+  Register it when you want the class validated at registration time rather than at the first router build.
 
 Subclass ``FileRouterBackend`` to add additional patterns or augment URL names without writing a backend from scratch.
 See :doc:`extending` for a worked example.

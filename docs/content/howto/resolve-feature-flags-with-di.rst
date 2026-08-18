@@ -143,7 +143,7 @@ A top-level import in ``apps.py`` would run while Django is still loading app co
 
        def ready(self) -> None:
            """Import providers and connect receivers once the app registry is populated."""
-           from flags import providers, receivers
+           from flags import providers, receivers  # noqa: PLC0415
 
            _ = providers
            receivers.connect()

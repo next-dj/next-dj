@@ -180,10 +180,8 @@ class _RouterContract:
     skip_names: frozenset[str]
 
 
-# Keyed by identity, because a backend is free to compare equal to another on
-# configuration alone (`FileRouterBackend` does) and a subclass would then read
-# what the base class answered. `_CACHED_ROUTERS` pins each key for the run, so
-# no `id` is ever reused under a live entry.
+# Keyed by identity, because configuration-equal backends (`FileRouterBackend`)
+# would share an entry. The list pins each key so no `id` is reused while live.
 _CACHED_ROUTERS: list[RouterBackend] = []
 _SCANNED_TREES_CACHE: dict[int, _ScannedTrees] = {}
 _ROUTER_CONTRACT_CACHE: dict[int, _RouterContract] = {}

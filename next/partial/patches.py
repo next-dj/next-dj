@@ -1,7 +1,6 @@
-"""Patch envelope value objects, the request-bound builder, and PatchResponse."""
+"""The request-bound patch envelope builder and its PatchResponse."""
 
 import json
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -15,6 +14,19 @@ from next.static.scripts import RESERVED_PAYLOAD_KEYS
 from next.static.serializers import resolve_serializer
 
 from . import keys
+from .envelope import Asset, Envelope, FormMeta, Patch
+from .errors import (
+    BuiltinPatchOpError,
+    CrossSiteHrefError,
+    DynamicForeignPageError,
+    ForeignPageNotAuthorizedError,
+    LayerHrefWithoutZoneError,
+    ReservedContextKeyError,
+    ReservedEventNameError,
+    UnknownContextNameError,
+    UnknownDedupeError,
+    UnknownPatchOpError,
+)
 from .headers import (
     CONTENT_TYPE,
     RESPONSE_VERSION,
@@ -27,7 +39,7 @@ from .render import render_zone
 
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Mapping
 
     from django.http import HttpResponseBase
 
@@ -51,315 +63,9 @@ DedupeMode = Literal["key", "id"]
 _DEDUPE_MODES: frozenset[str] = frozenset({"key", "id"})
 
 
-class UnknownPatchOpError(LookupError):
-    """Raised when the builder is asked to emit an unregistered verb.
-
-    The runtime guard pairs with the `next.E066` check, so an unknown
-    verb fails fast in `op()` rather than reaching the client.
-    """
-
-    def __init__(self, name: str) -> None:
-        """Store the unknown verb name and build a readable message."""
-        self.name = name
-        super().__init__(
-            f'Patch op "{name}" is not registered. Register it with '
-            "register_patch_op() before emitting it."
-        )
-
-
-class ReservedPatchKeyError(ValueError):
-    """Raised when a custom op payload names a structural wire key.
-
-    The `op`, `target`, and `html` keys carry the patch structure, so a
-    payload that names one of them is refused rather than overwriting it.
-    """
-
-    def __init__(self, op: str, reserved: frozenset[str]) -> None:
-        """Store the offending verb and the reserved keys it collided with."""
-        self.op = op
-        self.keys = reserved
-        names = ", ".join(sorted(reserved))
-        super().__init__(
-            f'Patch op "{op}" payload names the reserved wire key(s) {names}. '
-            "Use a different payload key, op/target/html are structural."
-        )
-
-
-class BuiltinPatchOpError(ValueError):
-    """Raised when the generic `op()` channel names a built-in verb.
-
-    A built-in verb owns typed wire keys, so it must travel through its
-    typed builder method rather than the raw `op()` payload channel.
-    """
-
-    def __init__(self, name: str) -> None:
-        """Store the built-in verb name and build a readable message."""
-        self.name = name
-        super().__init__(
-            f'Patch op "{name}" is built in, emit it through its typed '
-            "builder method rather than the generic op() channel."
-        )
-
-
-class ReservedEventNameError(ValueError):
-    """Raised when `event()` names a framework-owned client-bus event.
-
-    The `ready` and `context-updated` events and the `partial:` and
-    `next:` prefixes belong to the runtime lifecycle, so an app event under
-    one of those names is refused rather than forging a framework signal.
-    """
-
-    def __init__(self, name: str) -> None:
-        """Store the reserved name and build a readable message."""
-        self.name = name
-        super().__init__(
-            f'Event name "{name}" is reserved by the framework client bus. '
-            "Use your own application event name instead."
-        )
-
-
-class ForeignPageNotAuthorizedError(PermissionError):
-    """Raised when an OOB morph names a foreign page that denies the request.
-
-    A `morph(page=...)` re-runs the foreign page's body resolution before
-    rendering its zone, so the zone never travels in the master's response
-    when the page would have redirected or denied the caller on its own
-    request. The denial is surfaced rather than swallowed into an empty
-    morph so the master path can answer with a clear shape.
-    """
-
-    def __init__(self, page_path: "Path", status_code: int) -> None:
-        """Store the page path and the short-circuit status code."""
-        self.page_path = page_path
-        self.status_code = status_code
-        super().__init__(
-            f"Page {page_path} did not authorize an out-of-band zone morph, "
-            f"its body resolution short-circuited with status {status_code}. "
-            "The zone of a foreign page is rendered only when that page would "
-            "have served the request."
-        )
-
-
-class DynamicForeignPageError(ValueError):
-    """Raised when an OOB morph names a foreign page with a `render()` body.
-
-    A `render()` string body never reaches the composed-template cache, so
-    it has no compiled source to render a standalone zone against. The OOB
-    view branch refuses the same shape with a 400, so the builder refuses
-    it here rather than morphing the page's stale static template.
-    """
-
-    def __init__(self, page_path: "Path") -> None:
-        """Store the page path and build a readable message."""
-        self.page_path = page_path
-        super().__init__(
-            f"Page {page_path} resolves a dynamic render() body, which has no "
-            "zone to morph out of band. A foreign zone morph needs a page "
-            "whose body is a static template."
-        )
-
-
-class UnknownContextNameError(LookupError):
-    """Raised when `context()` names a value that is not a serialize provider.
-
-    Only the names of registered `serialize=True` context providers may
-    travel in a context patch, so an arbitrary mapping is rejected at the
-    builder rather than serialized blind. The message names the available
-    providers so a typo points at what is registered.
-    """
-
-    def __init__(self, name: str, available: tuple[str, ...] = ()) -> None:
-        """Store the rejected name and the available serialize provider names."""
-        self.name = name
-        self.available = available
-        message = (
-            f'Context name "{name}" is not a registered serialize=True '
-            "provider on the origin page. Mark its @context provider "
-            "serialize=True or drop it from the patch."
-        )
-        if available:
-            names = ", ".join(repr(provider) for provider in available)
-            message = f"{message} Available serialize providers: {names}."
-        super().__init__(message)
-
-
-class ReservedContextKeyError(ValueError):
-    """Raised when `context()` names a key the init payload owns.
-
-    A full render keeps a reserved key for the framework, so a context
-    patch that names one would leave the client store disagreeing with the
-    page it patches. The explicit naming is a caller bug refused at the
-    builder rather than merged on the client.
-    """
-
-    def __init__(self, reserved: frozenset[str]) -> None:
-        """Store the reserved keys the call collided with."""
-        self.keys = reserved
-        names = ", ".join(sorted(reserved))
-        super().__init__(
-            f"Context patch names the reserved init-payload key(s) {names}. "
-            "The framework owns those keys on every render, rename the "
-            "serialize provider instead."
-        )
-
-
-class UnknownDedupeError(ValueError):
-    """Raised when a merge op names a dedupe strategy the client cannot apply.
-
-    The client keys a merge row by `data-next-key` then `id`, so only
-    `key` and `id` mean anything on the wire, an unknown value is refused
-    at the builder rather than dropped to a silent no-dedup downstream.
-    """
-
-    def __init__(self, dedupe: str) -> None:
-        """Store the rejected dedupe value and build a readable message."""
-        self.dedupe = dedupe
-        super().__init__(
-            f'Dedupe strategy "{dedupe}" is not supported, use "key" or "id".'
-        )
-
-
-class CrossSiteHrefError(ValueError):
-    """Raised when a builder href sink names a cross-site URL.
-
-    The `push_url`, `layer_open(href=)`, and internal `redirect` sinks
-    author an in-app navigation, so a cross-site href is a caller bug
-    refused at the builder rather than masked as a fallback to the origin
-    path. A server-authored external destination travels through
-    `redirect(external=True)` instead.
-    """
-
-    def __init__(self, href: str) -> None:
-        """Store the rejected href and build a readable message."""
-        self.href = href
-        super().__init__(
-            f'href "{href}" is not same-site, for a server-authored external '
-            "destination use redirect(external=True)."
-        )
-
-
-class LayerHrefWithoutZoneError(ValueError):
-    """Raised when a layer seeds an href but names no zone to load it into.
-
-    The client fetch path needs a zone to know which fragment of the href
-    to pull, so an href without one would silently open an empty modal,
-    which is a caller bug refused at the builder.
-    """
-
-    def __init__(self, href: str) -> None:
-        """Store the rejected href and build a readable message."""
-        self.href = href
-        super().__init__(
-            f'href "{href}" needs a zone to load into, name the page zone that '
-            'receives the content, for example layer_open(href=..., zone="record").'
-        )
-
-
 def _is_reserved_event(name: str) -> bool:
     """Return True when the name belongs to the framework client-bus channel."""
     return name in _RESERVED_EVENT_NAMES or name.startswith(_RESERVED_EVENT_PREFIXES)
-
-
-@dataclass(frozen=True, slots=True)
-class Patch:
-    """One addressed DOM operation of a patch envelope.
-
-    A patch carries a verb, an optional target object with a single key,
-    optional HTML payload, and any verb-specific extras.
-    """
-
-    op: str
-    target: "Mapping[str, Any] | None" = None
-    html: str | None = None
-    extras: "Mapping[str, Any]" = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        """Refuse an extras payload that names a structural wire key."""
-        collision = keys.RESERVED_PATCH_KEYS & self.extras.keys()
-        if collision:
-            raise ReservedPatchKeyError(self.op, frozenset(collision))
-
-    def as_dict(self) -> dict[str, Any]:
-        """Return the wire form of the patch as an ordered mapping."""
-        data: dict[str, Any] = {keys.OP: self.op}
-        if self.target is not None:
-            data[keys.TARGET] = dict(self.target)
-        if self.html is not None:
-            data[keys.HTML] = self.html
-        data.update(self.extras)
-        return data
-
-
-@dataclass(frozen=True, slots=True)
-class Asset:
-    """One co-located asset of a rendered target by kind, URL, and inline body.
-
-    The `load` field is the client insertion verb resolved from the kind
-    registry. It stays None for a kind the runtime cannot insert, and the
-    wire then omits the field entirely.
-    """
-
-    kind: str
-    url: str
-    inline: str | None = None
-    load: str | None = None
-
-    def as_dict(self) -> dict[str, str]:
-        """Return the wire form of the asset, carrying its inline body when set."""
-        data = {keys.KIND: self.kind, keys.URL: self.url}
-        if self.inline is not None:
-            data[keys.INLINE] = self.inline
-        if self.load is not None:
-            data[keys.LOAD] = self.load
-        return data
-
-
-@dataclass(frozen=True, slots=True)
-class FormMeta:
-    """Machine-readable state of a form built from its field specs."""
-
-    uid: str
-    valid: bool
-    errors: "Mapping[str, Sequence[str]]" = field(default_factory=dict)
-
-    def as_dict(self) -> dict[str, Any]:
-        """Return the wire form of the form meta object."""
-        return {
-            keys.UID: self.uid,
-            keys.VALID: self.valid,
-            keys.ERRORS: {name: list(msgs) for name, msgs in self.errors.items()},
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class Envelope:
-    """A patch envelope carrying ordered ops and protocol meta.
-
-    Every field but `version` is optional, an absent value is empty on
-    the wire. The `csrf` and `request_id` meta are stamped only when set
-    so the wire shape stays stable whether or not they travel.
-    """
-
-    version: str
-    ops: "Sequence[Patch]" = ()
-    assets: "Sequence[Asset]" = ()
-    form: "FormMeta | None" = None
-    csrf: "Mapping[str, Any] | None" = None
-    request_id: str | None = None
-
-    def as_dict(self) -> dict[str, Any]:
-        """Return the wire form of the envelope as an ordered mapping."""
-        data: dict[str, Any] = {
-            keys.VERSION: self.version,
-            keys.OPS: [op.as_dict() for op in self.ops],
-            keys.ASSETS: [asset.as_dict() for asset in self.assets],
-            keys.FORM: self.form.as_dict() if self.form is not None else None,
-        }
-        if self.csrf is not None:
-            data[keys.CSRF] = dict(self.csrf)
-        if self.request_id is not None:
-            data[keys.REQUEST_ID] = self.request_id
-        return data
 
 
 class Patches:
@@ -969,23 +675,4 @@ class PatchResponse(HttpResponse):
         set_partial_vary(self)
 
 
-__all__ = [
-    "Asset",
-    "BuiltinPatchOpError",
-    "CrossSiteHrefError",
-    "DedupeMode",
-    "DynamicForeignPageError",
-    "Envelope",
-    "ForeignPageNotAuthorizedError",
-    "FormMeta",
-    "LayerHrefWithoutZoneError",
-    "Patch",
-    "PatchResponse",
-    "Patches",
-    "ReservedContextKeyError",
-    "ReservedEventNameError",
-    "ReservedPatchKeyError",
-    "UnknownContextNameError",
-    "UnknownDedupeError",
-    "UnknownPatchOpError",
-]
+__all__ = ["DedupeMode", "PatchResponse", "Patches"]

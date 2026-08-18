@@ -15,7 +15,7 @@ from next.components.signals import (
 )
 from next.conf import next_framework_settings
 from next.conf.signals import settings_reloaded
-from next.deps.providers import RegisteredParameterProvider
+from next.deps import RegisteredParameterProvider
 from next.deps.signals import provider_registered
 from next.forms.signals import (
     action_dispatched,
@@ -23,8 +23,8 @@ from next.forms.signals import (
     form_validation_failed,
 )
 from next.pages.signals import context_registered, page_rendered, template_loaded
+from next.server import iter_all_autoreload_watch_specs
 from next.server.signals import watch_specs_ready
-from next.server.watcher import iter_all_autoreload_watch_specs
 from next.static.signals import (
     asset_registered,
     backend_loaded,

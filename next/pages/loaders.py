@@ -177,9 +177,8 @@ def reset_module_memo() -> None:
     otherwise return a stale module. Recorded import failures share that
     lifecycle and go with it.
     """
-    # Errors go first so a concurrent load racing this reset can at worst
-    # leave a fresh memo entry behind, never a memoised failure without
-    # its recorded error.
+    # Errors go first, so a load racing this reset can at worst leave a fresh
+    # memo entry behind, never a memoised failure without its recorded error.
     _LAST_LOAD_ERROR.clear()
     _MODULE_MEMO.clear()
 

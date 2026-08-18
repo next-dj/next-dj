@@ -8,7 +8,7 @@ from django.core.exceptions import ImproperlyConfigured
 from next.backends import backend_entries, load_backends
 
 from .backends import FormActionBackend, FormActionNotFoundError
-from .dispatch import _form_action_context_callable
+from .dispatch.build import _form_action_context_callable
 from .origin import _url_kwargs_for_request
 
 
@@ -63,11 +63,11 @@ class FormActionManager:
         """
         configs = backend_entries("FORM_ACTION_BACKENDS")
         self.version += 1
-        # No default: an entry without BACKEND is a next.E044 misconfiguration.
+        # No default, an entry without BACKEND is a next.E044 misconfiguration.
         self._backends = load_backends(configs, base=FormActionBackend)
-        # Losing every entry is a broken config rather than a load result, so
-        # the next access rereads settings. A settings_reloaded receiver cannot
-        # do it instead, because dropping the backends drops their actions.
+        # An empty load is a broken config, not a result, so the next access
+        # rereads settings. A settings_reloaded receiver cannot do that instead,
+        # because dropping the backends drops their actions.
         self._loaded = bool(self._backends) or not configs
 
     def _ensure_backends(self) -> None:

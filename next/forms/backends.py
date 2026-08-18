@@ -14,8 +14,11 @@ from django.http import Http404
 from django.urls import get_script_prefix, path
 from django.views.decorators.http import require_http_methods
 
+from next.ports import partial_shaper_slot
+
 from .diagnostics import registration_diagnostics
-from .dispatch import ActionOutcome, FormActionDispatch
+from .dispatch import FormActionDispatch
+from .dispatch.responses import ActionOutcome
 from .rendering import _ErrorRenderParams, render_form_page_with_errors
 from .signals import action_registered
 from .uid import URL_NAME_FORM_ACTION, reverse_form_action
@@ -47,10 +50,8 @@ class FormActionNotFoundError(LookupError):
         registry_empty: bool = False,
     ) -> None:
         """Store the lookup context, deferring close-match work until rendered."""
-        # Raising must stay cheap: the manager probes backends by catching
-        # this exception, so the context rides one packed attribute and
-        # difflib plus the message run only when something renders the
-        # failure.
+        # The manager probes backends by catching this, so raising stays cheap:
+        # one packed attribute now, difflib and the message only when rendered.
         self._context: tuple[
             str, str | None, Callable[[], Iterable[str]] | Iterable[str], bool
         ] = (name, page_path, candidates, registry_empty)
@@ -126,8 +127,8 @@ class FormActionNotFoundError(LookupError):
         return message
 
 
-# Memoised by raw path: both hit a filesystem syscall on every registration and
-# scoped lookup. No invalidation needed since resolve() is process-stable.
+# Memoised by raw path, because both hit a syscall on every registration and
+# scoped lookup, and a process-stable resolve() needs no invalidation.
 _resolved_path_cache: dict[str, str] = {}
 _dotted_module_cache: dict[str, str] = {}
 
@@ -341,16 +342,12 @@ class FormActionBackend(ABC):
     ) -> "HttpResponse":
         """Turn one pipeline outcome into the HTTP response.
 
-        A partial request routes through `shape_partial` for a patch
-        envelope. A plain request keeps the default full-page path
-        byte-for-byte.
+        A partial request routes through the partial shaper port for a
+        patch envelope, a plain request takes the default full-page path.
         """
-        # Deferred to break the next.forms <-> next.partial import cycle:
-        # partial shaping imports the form dispatch and origin helpers.
-        from next.partial import is_partial_request, shape_partial  # noqa: PLC0415
-
-        if is_partial_request(request):
-            return shape_partial(self, request, outcome)
+        shaper = partial_shaper_slot.get()
+        if shaper.intent(request).partial:
+            return shaper.shape_response(self, request, outcome)
         return FormActionDispatch.shape_response(self, request, outcome)
 
 
@@ -462,9 +459,8 @@ class RegistryFormActionBackend(FormActionBackend):
             if old_obj is not None and new_obj is not None:
                 record_possible_collision(f"{scope_key}:{name}", old_obj, new_obj)
 
-        # None-valued target and guard keys are omitted: every reader goes
-        # through .get(), and slim metas keep registration and registry
-        # teardown proportional to what an action actually declares.
+        # None-valued target and guard keys are omitted, because every reader
+        # goes through .get() and a slim meta keeps teardown proportional.
         meta: ActionMeta = {
             "name": name,
             "uid": uid,
@@ -534,9 +530,8 @@ class RegistryFormActionBackend(FormActionBackend):
                 if url is None:
                     url = reverse_form_action(uid)
                     if not self._url_cache:
-                        # Lazy invalidation hookup keeps backend creation
-                        # cheap: only a backend that cached a URL needs the
-                        # ROOT_URLCONF signal.
+                        # Only a backend that cached a URL needs the
+                        # ROOT_URLCONF signal, so the hookup is lazy.
                         _url_caching_backends.add(self)
                     self._url_cache[cache_key] = url
                 return url

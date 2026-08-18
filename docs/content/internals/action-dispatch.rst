@@ -85,10 +85,16 @@ Modules
 ``next.forms.dispatch``.
    ``FormActionDispatch`` runs the pipeline per request.
    Manages the bound form, the dependency cache reuse, and the response selection.
+   It is also the sender of ``form_access_denied``, ``action_dispatched``, and ``form_validation_failed``.
+
+``next.forms.dispatch.build``, ``next.forms.dispatch.permissions``, ``next.forms.dispatch.responses``, ``next.forms.dispatch.wizard``.
+   The pipeline bodies behind ``FormActionDispatch``, split by concern.
+   Form construction and hook invocation, guard and permission enforcement, outcome types and response coercion, and wizard step dispatch.
 
 ``next.forms.backends``.
    ``FormActionBackend`` abstract contract, ``RegistryFormActionBackend`` default implementation, and the ``FormActionNotFoundError`` exception.
-   Turning the configured entries into instances is not the module's job: ``FormActionManager`` delegates that to the shared ``load_backends`` helper every backend family uses.
+   Turning the configured entries into instances is not the module's job.
+   ``FormActionManager`` delegates that to the shared ``load_backends`` helper every backend family uses.
 
 ``next.forms.uid``.
    ``redirect_to_origin``, ``reverse_form_action``, and ``validated_origin_path`` helpers for the origin page round trip, plus the ``ORIGIN_FIELD_NAME`` wire constant and the ``FORM_ORIGIN_OVERRIDE_KEY`` render-context key the partial shaping layer sets on a wizard advance.
@@ -113,6 +119,10 @@ Modules
 
 ``next.forms.formsets``.
    ``cleanup_extra_initial`` helper for blank extra rows.
+
+``next.ports``.
+   The ``PartialShaper`` protocol and the ``partial_shaper_slot`` the app config binds at startup.
+   The dispatch pipeline asks the slot whether a request is partial and hands it the outcome, so the forms path never imports ``next.partial``.
 
 Access guard
 ------------
@@ -219,7 +229,7 @@ Extension points
 
 - Subclass ``RegistryFormActionBackend`` and override ``dispatch`` to wrap the standard pipeline.
 - Override ``render_invalid_page`` for custom validation-error HTML, or ``shape_response`` for a custom response envelope.
-  The base ``shape_response`` routes a partial request through ``shape_partial`` before the default full-page envelope, so an override that never calls ``super().shape_response`` disables the patch envelopes.
+  The base ``shape_response`` asks ``partial_shaper_slot`` whether the request is partial and hands a partial outcome to the bound shaper, reaching the default full-page envelope only for a plain request, so an override that never calls ``super().shape_response`` disables the patch envelopes.
 - Register the custom backend through ``FORM_ACTION_BACKENDS``.
 - Subscribe to ``action_dispatched`` for audit and cache invalidation.
 - Subscribe to ``form_validation_failed`` for alerting on failure rates.

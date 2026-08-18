@@ -58,23 +58,28 @@ The annotation drives coercion of the raw query string.
    Clamp or otherwise bound the value yourself, as the ``featured`` example does with ``max`` and ``min``.
 
 ``DQuery[int]``.
-   Parsed with ``int()``. A value that does not parse, such as ``?show=abc``, falls back to the raw string rather than raising.
+   Parsed with ``int()``.
+   A value that does not parse, such as ``?show=abc``, falls back to the raw string rather than raising.
    Validate when a bad value must be rejected.
 
 ``DQuery[float]``.
    Parsed with ``float()``, with the same string fallback on a parse failure.
 
 ``DQuery[bool]``.
-   ``True`` when the value is ``1``, ``true``, or ``yes``, case-insensitive. Every other value, including ``0`` and ``false``, is ``False``.
+   ``True`` when the value is ``1``, ``true``, or ``yes``, case-insensitive.
+   Every other value, including ``0`` and ``false``, is ``False``.
 
 ``DQuery[UUID]``.
-   Parsed with :class:`UUID(...) <uuid.UUID>`. A value that does not parse falls back to the raw string.
+   Parsed with :class:`UUID(...) <uuid.UUID>`.
+   A value that does not parse falls back to the raw string.
 
 ``DQuery[Decimal]``.
-   Parsed with :class:`Decimal(...) <decimal.Decimal>`. A value that does not parse falls back to the raw string.
+   Parsed with :class:`Decimal(...) <decimal.Decimal>`.
+   A value that does not parse falls back to the raw string.
 
 ``DQuery[date]`` and ``DQuery[datetime]``.
-   Parsed via :meth:`date.fromisoformat <datetime.date.fromisoformat>` and :meth:`datetime.fromisoformat <datetime.datetime.fromisoformat>`. A value that does not parse falls back to the raw string.
+   Parsed via :meth:`date.fromisoformat <datetime.date.fromisoformat>` and :meth:`datetime.fromisoformat <datetime.datetime.fromisoformat>`.
+   A value that does not parse falls back to the raw string.
 
 ``DQuery[str]``.
    The raw value, unchanged.

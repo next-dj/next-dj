@@ -56,13 +56,17 @@ Modules
    Discovers and imports the context processor callables listed in each page backend's ``OPTIONS.context_processors`` and in the first Django ``TEMPLATES`` entry.
    Processors are applied after all ``@context`` functions finish, so a processor that returns the same key as a context function overrides it.
 
+``next.pages.scan``.
+   Walks the routed page tree once per check run and yields the existing ``page.py`` paths, plus the keyed ``serialize=True`` context keys the static reserved-key check reads.
+
 ``next.pages.watch``.
    Returns the watch specs that the autoreloader uses to track page directories.
 
 Render path
 -----------
 
-1. The view loads the page module through the mtime-keyed module memo, reading from disk only when the file changed.
+1. The router loads the page module through the mtime-keyed memo once, while it builds the URL pattern, and the generated view closes over that module.
+   A page whose module raised at build time is the exception, and its view re-reads the memo on every request so a fixed file recovers without a restart.
 2. The body source produces the page body string.
 3. The framework composes the ancestor layout chain, the innermost layout wrapping the page body first and each outer layout wrapping the result.
    Each layout substitutes the wrapped content into ``{% block template %}{% endblock template %}``.
@@ -75,12 +79,16 @@ When the body source is a ``render`` function that returns an ``HttpResponseBase
 Composed-template cache
 -----------------------
 
-``Page`` keeps two parallel dicts that short-circuit layout composition for the callers of ``composed_template_for``.
+``Page`` keeps three parallel dicts that short-circuit layout composition for the callers of ``composed_template_for``.
 Those callers are the form re-render after a validation failure, the standalone zone render, and direct ``Page.render`` calls such as ``next.testing.render_page``.
 The canonical full-page path never consults the cache and recomposes the body and layout chain from the disk sources on each request.
 
 ``_template_registry``.
    Maps a ``page.py`` path to its already-composed template string.
+
+``_compiled_registry``.
+   Maps a ``page.py`` path to the compiled Django ``Template`` built from the composed source, carrying an ``Origin`` so a compile error names the page path.
+   Writing the source registry drops the compiled entry with it.
 
 ``_template_source_mtimes``.
    Snapshots the modification time of every file that contributed to the composition, including the page body source and each ancestor ``layout.djx``.
@@ -88,7 +96,7 @@ The canonical full-page path never consults the cache and recomposes the body an
 On each cache read ``_is_template_stale`` compares the current mtimes against the snapshot.
 A change to any contributing file evicts the entry, the composition step rebuilds the template string, and the new snapshot is stored.
 
-``Page.clear_template_caches`` drops both dicts and the mtime snapshots in one call.
+``Page.clear_template_caches`` drops all three in one call.
 A rewrite landing on the same mtime tick is invisible to the staleness check, which is why ``next.testing.reset_page_cache`` calls it between renders of a file rewritten in place.
 
 Layout composition
@@ -136,8 +144,11 @@ Extension points
 ----------------
 
 - Register a new template loader in ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]``.
-- Subclass ``Page`` to add metadata for rendering tools.
+- Subscribe to ``page_rendered`` to observe every render, and to ``template_loaded`` to observe every composed template written to the registry.
 - Add a context processor for global template variables.
+
+``Page`` is not an extension point.
+``next.pages.manager`` builds the ``page`` singleton at import time and no settings key swaps the class, so a subclass has no registration path and nothing would route requests through it.
 
 See also
 --------

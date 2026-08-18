@@ -111,7 +111,7 @@ class TestNextScriptBuilderDefaults:
 
 
 class TestNextScriptBuilderCustomTemplates:
-    """Every template is an instance attribute — pluggable without subclassing."""
+    """Every template is an instance attribute, so it is pluggable without subclassing."""
 
     def test_custom_preload(self) -> None:
         builder = NextScriptBuilder(

@@ -109,9 +109,9 @@ class TestBoardView:
 
     def test_nested_layout_chain(self, client: NextClient, board: Board) -> None:
         body = _board_html(client, board)
-        assert "🗂️ next.dj Kanban" in body  # root layout marker
-        assert "Board #" in body  # nested board layout marker
-        assert 'id="kanban-board"' in body  # React mount point
+        assert "🗂️ next.dj Kanban" in body
+        assert "Board #" in body
+        assert 'id="kanban-board"' in body
 
     def test_vite_module_scripts_present(
         self, client: NextClient, board: Board

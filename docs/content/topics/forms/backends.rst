@@ -168,7 +168,8 @@ The other fields carry what each kind needs.
 On ``INVALID`` outcomes the ``page_path`` and ``origin`` fields carry the identity of the origin page that the dispatcher resolved from the posted ``_next_form_origin`` field, and a ``page_path`` of ``None`` makes the default envelope answer HTTP 400.
 The dataclass may grow fields over time, so construct an ``ActionOutcome`` with keywords only.
 
-The base implementation first routes a partial request through ``shape_partial`` for a patch envelope, and only a plain request reaches ``FormActionDispatch.shape_response``, the default full-page envelope.
+The base implementation asks the partial shaper bound in ``next.ports`` whether the request is partial and, if so, hands it the outcome for a patch envelope.
+Only a plain request reaches ``FormActionDispatch.shape_response``, the default full-page envelope.
 An override that never calls ``super().shape_response`` therefore disables the partial envelopes for every action the backend dispatches, see :doc:`/content/topics/partial-rendering/how-it-works`.
 On the default full-page path an invalid submission re-renders the origin page with HTTP 200, the ``X-Next-Form: invalid`` header, and the ``X-Next-Action`` header when the outcome carries a ``uid``.
 A wizard advance redirects with HTTP 302.
@@ -176,7 +177,8 @@ Both are behaviour of the default backend, not a guarantee of the endpoint.
 A custom backend may answer with any envelope.
 The ``X-Next-*`` header namespace is reserved for the framework.
 
-A ``RESULT`` outcome whose ``raw`` value is ``None`` makes the default envelope re-render the origin page internally, through ``render_invalid_page`` with ``form=None``.
+A ``RESULT`` outcome that carries a bound ``form`` and a ``raw`` value of ``None`` makes the default envelope re-render the origin page internally, through ``render_invalid_page`` with ``form=None``.
+A handler-only action carries no form, so the same ``None`` answers HTTP 204 instead.
 That success re-render carries no ``X-Next-*`` headers and never re-enters ``shape_response``, so an envelope override observes it only as the original ``RESULT`` call.
 
 Customisation splits into two layers.
@@ -231,7 +233,7 @@ The four abstract methods must all be present.
            return FormActionDispatch.dispatch(self, request, meta["name"], meta)
 
 The skeleton keys its dispatch URL by the plain action name, where the bundled backend derives a hashed UID from the scope key and the name.
-Its meta stores no ``uid``, so the rendered forms carry no ``data-next-action`` attribute, as `get_meta and Multi-Backend Routing`_ describes.
+Its meta stores no ``uid``, so the rendered forms carry no ``data-next-action`` attribute, as `get_meta and multi-backend routing`_ describes.
 The bundled backend wraps its dispatch view in ``require_http_methods(["GET", "POST"])`` so the endpoint rejects other verbs, and a from-scratch backend should restrict its own view the same way.
 
 ``dispatch`` answers an unknown UID with a 404, either by returning ``HttpResponseNotFound`` or by raising :exc:`~django.http.Http404` with a message.
@@ -308,7 +310,8 @@ A custom ``dispatch`` that drives the pipeline by hand reuses one static helper 
 
 ``ensure_http_response(response, request=None, action_name=None, backend=None)``.
    Coerces a handler return value into an ``HttpResponse``.
-   A string becomes a body, an object with a ``url`` becomes a redirect, and ``None`` re-renders the origin page when ``request``, ``action_name``, and ``backend`` are passed, otherwise it returns a 204.
+   An ``HttpResponse`` passes through, a string becomes a 200 body, a model instance with ``get_absolute_url`` becomes a redirect to it, any other object with a truthy ``url`` becomes a redirect, and ``None`` re-renders the origin page when ``request``, ``action_name``, and ``backend`` are all passed, otherwise it returns a 204.
+   Any other return type emits a ``RuntimeWarning`` and is treated as ``None``.
    The ``None`` re-render follows the behaviour under `Shaping the response`_, through ``backend.render_invalid_page`` and never re-entering ``shape_response``.
 
 Every outcome funnels into the single ``shape_response`` call described under `Shaping the response`_, so a layer that must reshape responses globally overrides that one hook.

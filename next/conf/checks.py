@@ -31,11 +31,12 @@ def check_next_framework_unknown_top_level_keys(*args, **kwargs) -> list[CheckMe
     return common.errors_for_unknown_keys(raw, allowed=allowed, prefix="NEXT_FRAMEWORK")
 
 
-# These two carry their own raw per-key checks in next.forms, so probing them
-# here would report one key twice.
+# These carry their own raw per-key checks in next.forms and next.partial, so
+# probing them here would report one key twice.
 _TYPED_LIST_KEYS: frozenset[str] = NextFrameworkSettings.LIST_KEYS - {
     "FORM_ACTION_BACKENDS",
     "FORM_ANCHOR_FILES",
+    "PARTIAL_BACKENDS",
 }
 _KEY_TYPES: dict[str, type] = dict.fromkeys(sorted(_TYPED_LIST_KEYS), list) | {
     "URL_NAME_TEMPLATE": str,

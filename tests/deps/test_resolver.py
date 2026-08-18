@@ -12,6 +12,11 @@ from next.deps import (
     resolver,
 )
 from next.deps.cache import _IN_PROGRESS, DependencyCache
+from next.deps.resolver import (
+    _introspect_key,
+    _var_keyword_cache,
+    cached_accepts_var_keyword,
+)
 from next.urls import HttpRequestProvider, UrlKwargsProvider
 from tests.support import _ctx, _minimal_resolver, _resolver_with_form
 
@@ -560,3 +565,45 @@ class TestDependencyCycleError:
         finally:
             resolver._dependency_callables.pop("a", None)
             resolver._dependency_callables.pop("b", None)
+
+
+class TestCachedAcceptsVarKeyword:
+    """`cached_accepts_var_keyword` memoises the `**kwargs` answer per callable."""
+
+    def test_true_for_var_keyword(self) -> None:
+        def fn(**kwargs) -> None:
+            return None
+
+        assert cached_accepts_var_keyword(fn) is True
+
+    def test_false_without_var_keyword(self) -> None:
+        def fn(a: int, *args) -> int:
+            return a
+
+        assert cached_accepts_var_keyword(fn) is False
+
+    def test_second_call_reuses_the_memo(self) -> None:
+        def fn(**kwargs) -> None:
+            return None
+
+        key = _introspect_key(fn)
+        try:
+            assert cached_accepts_var_keyword(fn) is True
+            # A poisoned memo entry proves the second call never re-inspects.
+            _var_keyword_cache[key] = False
+            assert cached_accepts_var_keyword(fn) is False
+        finally:
+            _var_keyword_cache.pop(key, None)
+
+    def test_bound_method_keys_by_function(self) -> None:
+        class Holder:
+            def method(self, **kwargs) -> None:
+                return None
+
+        holder = Holder()
+        key = _introspect_key(holder.method)
+        try:
+            assert cached_accepts_var_keyword(holder.method) is True
+            assert key in _var_keyword_cache
+        finally:
+            _var_keyword_cache.pop(key, None)

@@ -25,7 +25,7 @@ uv run python manage.py runserver     # http://127.0.0.1:8000/
 uv run pytest
 ```
 
-Tailwind loads via the Play CDN in [`wiki/routes/layout.djx`](wiki/routes/layout.djx). No Node, no build step.
+Tailwind loads via the Play CDN in [`shell/layout.djx`](shell/layout.djx). No Node, no build step.
 
 Open the index, click `New article`, write some Markdown, and submit. The new article becomes available at `/wiki/<slug>/` immediately. Open the search page with `?q=...` to see both file and database matches in the same response.
 

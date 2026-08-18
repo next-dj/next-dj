@@ -20,7 +20,7 @@ _NESTED_DICT: dict[str, object] = {
 class TestBenchResolveSerializer:
     @pytest.mark.benchmark(group="static.serializers")
     def test_resolve_default(self, benchmark) -> None:
-        """``JS_CONTEXT_SERIALIZER`` unset — should return a cached default."""
+        """``JS_CONTEXT_SERIALIZER`` unset returns a cached default."""
         benchmark(resolve_serializer)
 
 

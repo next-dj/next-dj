@@ -23,9 +23,8 @@ _VALID_SCOPES = ("page", "shared")
 
 def _record_class_misuse(cls: type) -> None:
     """Buffer an @action-on-class mistake for the next.E053 system check."""
-    # Recording instead of raising lets the mistake surface through
-    # manage.py check rather than a bare TypeError aborting django.setup()
-    # mid-import.
+    # Recording instead of raising surfaces the mistake through manage.py check
+    # rather than aborting django.setup() with a bare TypeError mid-import.
     registration_diagnostics.action_applied_to_class.append(cls.__qualname__)
 
 

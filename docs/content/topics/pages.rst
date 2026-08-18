@@ -230,6 +230,7 @@ Register additional loaders in ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`` to support
 
 A user-provided ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`` replaces the default list entirely.
 Include ``DjxTemplateLoader`` explicitly when you still want sibling ``template.djx`` files to load.
+A class repeated in the list is instantiated once, and the later entry is dropped.
 
 ``next.pages.page.register_template(file_path, template_str)`` seeds the composed-template cache that ``composed_template_for`` reads.
 That cache serves direct ``Page.render`` calls, including ``next.testing.render_page``, the form re-render after a validation failure, and standalone zone renders.
@@ -278,9 +279,11 @@ When more than one body source applies the framework picks the highest priority 
    * - ``render`` function
      - Wins outright when the page module defines ``def render(...)``.
    * - ``template`` attribute
-     - Used when no ``render`` function exists and the page module sets ``template = "..."``. Consulted before any template loader.
+     - Used when no ``render`` function exists and the page module sets ``template = "..."``.
+       Consulted before any template loader.
    * - Template loaders
-     - Consulted only when neither of the above applies. Loaders run in ``TEMPLATE_LOADERS`` order and the first one whose ``can_load`` returns ``True`` supplies the body.
+     - Consulted only when neither of the above applies.
+       Loaders run in ``TEMPLATE_LOADERS`` order and the first one whose ``can_load`` returns ``True`` supplies the body.
 
 The template loaders have no fixed numbering between them.
 ``DjxTemplateLoader`` matches the sibling ``template.djx``, but a custom loader placed before it in ``TEMPLATE_LOADERS`` is consulted first and wins when both could load the same directory.
@@ -288,8 +291,135 @@ The template loaders have no fixed numbering between them.
 When a page directory declares more than one body source, :ref:`next.W043 <ref-system-checks>` reports it.
 The highest-priority source is used and the others are never consulted.
 
+.. _topics-pages-plain-django-views:
+
+Coexisting with plain Django views
+----------------------------------
+
+File-routed pages and hand-written Django views live in the same project.
+Adopting next.dj in an existing codebase does not require porting the views already there.
+
+Resolution order
+~~~~~~~~~~~~~~~~
+
+The file router mounts as a single ``include("next.urls")`` in the root URLconf, and the root URLconf stays an ordinary Django list resolved from top to bottom.
+Every pattern written above the include is matched first, and a page whose directory produces the same URL never sees the request.
+The router registers no catch-all pattern, so a path that matches no page directory falls through to whatever follows the include.
+
+.. code-block:: python
+   :caption: config/urls.py
+
+   from django.contrib import admin
+   from django.urls import include, path
+
+   from notes import views
+
+   urlpatterns = [
+       path("admin/", admin.site.urls),
+       path("reports/export/", views.export_report, name="export-report"),
+       path("", include("next.urls")),
+       path("legacy/<int:pk>/", views.legacy_detail, name="legacy-detail"),
+   ]
+
+Here ``/reports/export/`` reaches the hand-written view even when a ``pages/reports/export/`` directory exists, and ``/legacy/7/`` reaches its view because no page directory claims that path.
+The form action endpoints at ``/_next/form/<uid>/`` are part of the same include, so they follow the same ordering rule.
+
+What a plain view does not get
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The layout chain, the ``@context`` callables, and the static placeholder slots belong to the view the router generates.
+A template rendered through :func:`django.shortcuts.render` goes straight to the Django template engine, so none of the three run.
+
+- No ancestor ``layout.djx`` wraps the output, and the template renders alone.
+- No ``@context`` callable is collected, so values a ``page.py`` publishes are absent even when the template sits under a page root.
+- ``{% collect_styles %}`` and ``{% collect_scripts %}`` emit their placeholder comments and nothing replaces them, so co-located CSS and JS are not injected.
+
+Supply whatever the template needs through the view's own context dict, the same as in any Django project.
+
+What a plain view does get
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``NextFrameworkConfig.ready`` adds the framework tag libraries to the ``builtins`` option of every ``DjangoTemplates`` engine.
+``{% form %}``, ``{% component %}``, and the static tags therefore compile in any template the project renders, with no ``{% load %}`` line.
+Two of them read a context value the router publishes, and a hand-written view supplies that value itself.
+
+``{% component %}``.
+   The tag resolves a name against the components visible from ``current_template_path``, and produces no component when that key is absent from the context.
+   A component root listed in ``COMPONENT_BACKENDS["DIRS"]`` is visible from any path, so pointing the key at the rendering template is enough for shared components.
+   A ``_components`` folder inside a page tree is visible only to templates under its own directory, so name a path inside that tree to reach one.
+
+``{% form %}``.
+   The tag reads the page anchor from ``current_page_module_path`` and falls back to the shared registry when the key is absent.
+   A form declared in ``app/forms.py`` is shared and resolves, while a form declared in a ``page.py`` is page-scoped and does not.
+
+.. code-block:: python
+   :caption: notes/views.py
+
+   from pathlib import Path
+
+   from django.shortcuts import render
+
+   PAGES = Path(__file__).parent / "pages"
+
+   def feedback(request):
+       return render(
+           request,
+           "feedback.html",
+           {"current_template_path": PAGES / "feedback" / "template.djx"},
+       )
+
+   feedback.next_page_path = PAGES / "feedback" / "page.py"
+
+The ``next_page_path`` attribute on the last line is the re-render opt-in.
+Without it an invalid submission of a ``{% form %}`` rendered by a hand-written view returns HTTP 400 instead of re-rendering the page.
+See :ref:`topics-forms-templates-handwritten-views` for the full contract.
+
 Common patterns
 ---------------
+
+.. _topics-pages-pagination:
+
+Paginated list page
+~~~~~~~~~~~~~~~~~~~
+
+Django's :class:`~django.core.paginator.Paginator` works unchanged inside a context callable.
+Publish its page under the name the template expects, and read the requested page number from the query string with ``DQuery[int]``.
+
+.. code-block:: python
+   :caption: notes/pages/page.py
+
+   from django.core.paginator import Page, Paginator
+   from next import context
+   from notes.models import Note
+   from next.urls import DQuery
+
+   PER_PAGE = 20
+
+   @context("page_obj")
+   def note_page(page: DQuery[int] = 1) -> Page:
+       paginator = Paginator(Note.objects.order_by("-created_at"), PER_PAGE)
+       return paginator.get_page(page)
+
+``Paginator.get_page`` is the safe entry point here.
+``DQuery[int]`` returns the raw string when the query value does not parse as an integer, and ``get_page`` answers a missing, unparsable, or out-of-range value with the first or last page instead of raising.
+
+The template reads the standard :class:`~django.core.paginator.Page` API.
+
+.. code-block:: jinja
+   :caption: notes/pages/template.djx
+
+   <ul>
+     {% for note in page_obj %}
+       <li>{{ note.title }}</li>
+     {% endfor %}
+   </ul>
+
+   {% if page_obj.has_next %}
+     <a href="?page={{ page_obj.next_page_number }}">Older notes</a>
+   {% endif %}
+
+Wrap the list and its links in a ``{% zone %}`` to page without a full reload, and the same ``page_obj`` value serves the zone re-render.
+See :doc:`/content/topics/partial-rendering/zones` for the zone body and :doc:`/content/topics/partial-rendering/scenarios` for the paginated table walkthrough.
 
 Pure redirect page
 ~~~~~~~~~~~~~~~~~~
@@ -368,7 +498,8 @@ Wrap untrusted prose in ``{% verbatim %}`` blocks inside the loader, or escape t
 System checks
 -------------
 
-The pages subsystem contributes Django system checks. The ``check_page_functions`` check inspects every ``page.py`` and reports the following.
+The pages subsystem contributes Django system checks.
+The ``check_page_functions`` check inspects every ``page.py`` and reports the following.
 
 ``next.E012``.
    The page module has neither a ``render`` function nor a ``template`` attribute, no registered loader can produce a body, and no sibling ``layout.djx`` wraps it.
@@ -383,6 +514,16 @@ The ``check_context_functions`` check looks for keyless ``@context`` callables i
 
 ``next.E029``.
    A keyless ``@context`` callable has a return annotation that is not a mapping type.
+
+The ``check_template_loaders`` check validates every ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`` entry.
+
+``next.E042``.
+   A ``TEMPLATE_LOADERS`` entry is not a dotted-path string.
+
+``next.E043``.
+   A ``TEMPLATE_LOADERS`` entry cannot be imported or is not a ``TemplateLoader`` subclass.
+
+A bad entry is skipped at render time with a debug log only, so run the checks after editing the list.
 
 Run them through ``uv run python manage.py check``.
 

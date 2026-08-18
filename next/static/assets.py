@@ -32,9 +32,7 @@ _RENDERER_LOADS: Final[dict[str, str]] = {
 }
 
 # The element the runtime builds around an inline body for each verb. A kind whose
-# own `inline_tag` differs would render that body into another element on a full
-# page render, so the verb is withheld instead of letting the two renders disagree.
-# The `module` verb builds a typed script no `inline_tag` can name, hence its absence.
+# own `inline_tag` differs is withheld, and `module` names no element at all.
 _LOAD_INLINE_TAGS: Final[dict[str, str]] = {"link": "style", "script": "script"}
 
 
@@ -188,9 +186,8 @@ class KindRegistry:
     def inline_tag(self, kind: str) -> str | None:
         """Return the inline wrapper element for the kind or None.
 
-        A `None` result means inline bodies of this kind render
-        verbatim, preserving backward compatibility for custom kinds
-        registered without an inline wrapper.
+        A `None` result means the kind has no wrapper registered, so its
+        inline bodies render verbatim.
         """
         return self._inline_tags.get(kind)
 

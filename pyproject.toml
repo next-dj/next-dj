@@ -209,6 +209,8 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
+# A standalone gate script run by path, deliberately not an importable package
+"docs/prose_lint.py" = ["INP001"]
 # The ASCII banner is the package docstring, so summary-line rules cannot hold there
 "next/__init__.py" = ["D205", "D210", "D400", "D415"]
 "examples/*" = [

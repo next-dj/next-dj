@@ -8,7 +8,8 @@ from django.http import HttpResponse, HttpResponseRedirect
 
 from next.forms import Form
 from next.forms.backends import ActionRegistration, RegistryFormActionBackend
-from next.forms.dispatch import FormActionDispatch, _normalize_handler_response
+from next.forms.dispatch import FormActionDispatch
+from next.forms.dispatch.responses import _normalize_handler_response
 from next.forms.origin import (
     _ORIGIN_MATCH_ATTR,
     _filter_reserved_url_kwargs,
@@ -93,7 +94,7 @@ def _ok_handler(**kwargs) -> HttpResponseRedirect:
 class TestBenchDispatchEndToEnd:
     @pytest.mark.benchmark(group="forms.dispatch")
     def test_dispatch_valid_form(self, benchmark) -> None:
-        """Valid submission — handler runs, redirect emitted."""
+        """Valid submission, so the handler runs and a redirect is emitted."""
         backend = RegistryFormActionBackend()
         backend.register_action(
             ActionRegistration(
@@ -113,7 +114,7 @@ class TestBenchDispatchEndToEnd:
 
     @pytest.mark.benchmark(group="forms.dispatch")
     def test_dispatch_invalid_form(self, benchmark) -> None:
-        """Invalid submission — validation_failed signal + errors payload."""
+        """Invalid submission, so validation_failed fires with an errors payload."""
         backend = RegistryFormActionBackend()
         backend.register_action(
             ActionRegistration(

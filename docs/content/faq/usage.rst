@@ -79,6 +79,32 @@ How do I integrate Django admin
 Mount ``admin.site.urls`` above ``include("next.urls")`` in ``config/urls.py``.
 See :doc:`/content/howto/integrate-django-admin`.
 
+Can I run Django REST Framework alongside next.dj
+--------------------------------------------------
+
+Yes, and the two do not interact.
+A DRF view is an ordinary Django view reached through an ordinary URLconf entry, so it coexists with file-routed pages the same way the admin does.
+Mount the API above ``include("next.urls")`` in ``config/urls.py`` and the API paths resolve before the router ever sees them.
+
+.. code-block:: python
+   :caption: config/urls.py
+
+   from django.urls import include, path
+
+   urlpatterns = [
+       path("api/", include("api.urls")),
+       path("", include("next.urls")),
+   ]
+
+next.dj contributes no middleware, no authentication layer, and no renderer, so the DRF request cycle is untouched.
+The framework registers its template tags as Django builtins, which changes nothing for the browsable API because those templates never call them.
+
+JSON APIs for mobile clients and third-party consumers are out of scope for next.dj.
+The framework renders HTML for a browser, and it offers no serializer layer, no schema generation, and no content negotiation.
+A ``render`` function may return a :class:`~django.http.JsonResponse` for a small internal endpoint, described under *Common patterns* in :doc:`/content/topics/pages`, but that is a convenience rather than an API framework.
+
+See :doc:`/content/howto/integrate-django-admin` for the same mounting pattern applied to the admin, and *Coexisting with plain Django views* in :doc:`/content/topics/pages` for the general boundary.
+
 How do I split routes across applications
 -----------------------------------------
 

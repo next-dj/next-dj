@@ -25,9 +25,8 @@ _MIN_FORM_TAG_BITS = 2
 _RESERVED_FORM_ATTRS = frozenset({"action", "method"})
 _RESERVED_FORM_ATTR_PREFIX = "data-next-"
 
-# Python params of the tag that compile to client `data-next-*` attributes
-# on the form. The server authors these names, the client reads them, the
-# markup never carries a raw selector or swap mode.
+# Python params of the tag that compile to client `data-next-*` attributes on
+# the form, so the markup never carries a raw selector or swap mode.
 _PARTIAL_FORM_PARAMS: dict[str, str] = {
     "validate": "data-next-validate",
     "trigger": "data-next-trigger",

@@ -24,9 +24,8 @@ def reverse_form_action(uid: str) -> str:
 
 ORIGIN_FIELD_NAME = "_next_form_origin"
 
-# Render-context key the shaping layer sets on a wizard advance to override
-# the rendered form's _next_form_origin. The shaping layer merges it into the
-# zone render overrides instead of mutating a request attribute.
+# Render-context key the shaping layer sets on a wizard advance to override the
+# rendered form's _next_form_origin, instead of mutating a request attribute.
 FORM_ORIGIN_OVERRIDE_KEY = "form_origin_override"
 
 

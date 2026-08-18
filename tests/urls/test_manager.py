@@ -1,4 +1,5 @@
 import logging
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
@@ -50,37 +51,70 @@ class TestRouterManager:
     """RouterManager iteration, reload, and config access."""
 
     def test_init(self, manager) -> None:
-        """Starts with empty routers and no config cache."""
+        """Starts with empty routers, no config cache, and nothing loaded."""
         assert manager._backends == []
         assert manager._config_cache is None
+        assert manager._loaded is False
 
     def test_repr(self, manager) -> None:
-        """``repr`` shows router count."""
-        assert repr(manager) == "<RouterManager backends=0>"
+        """``repr`` shows router count and load state."""
+        manager.reload()
+        assert repr(manager) == "<RouterManager backends=1 loaded=True>"
+
+    def test_repr_on_a_fresh_manager_does_not_load(self, manager) -> None:
+        """Looking at a manager in a debugger never rebuilds the routes."""
+        with patch.object(manager, "reload") as mock_reload:
+            rendered = repr(manager)
+        mock_reload.assert_not_called()
+        assert rendered == "<RouterManager backends=0 loaded=False>"
 
     def test_backends_reports_the_loaded_list_in_order(self, manager) -> None:
         """``backends`` is the public read the other areas key their walks on."""
         first, second = Mock(), Mock()
         manager._backends = [first, second]
+        manager._loaded = True
         assert manager.backends == (first, second)
 
-    def test_backends_loads_nothing_and_survives_mutation(self, manager) -> None:
-        """Reading is inert, and the returned tuple detaches from the live list."""
-        with patch.object(manager, "reload") as mock_reload:
-            snapshot = manager.backends
-            assert snapshot == ()
-            mock_reload.assert_not_called()
-        manager._backends.append(Mock())
-        assert snapshot == ()
+    def test_backends_loads_the_configured_set_on_first_read(self, manager) -> None:
+        """A read before the first resolve loads, instead of reporting nothing."""
+        with patch.object(manager, "reload", wraps=manager.reload) as mock_reload:
+            loaded = manager.backends
+        mock_reload.assert_called_once()
+        assert manager._loaded is True
+        assert [type(backend) for backend in loaded] == [FileRouterBackend]
 
-    @pytest.mark.parametrize(
-        ("router_count", "expected_len"), [(0, 0), (1, 1)], ids=["empty", "one_router"]
-    )
-    def test_len_variations(self, manager, router_count, expected_len) -> None:
-        """``len`` matches number of registered routers."""
-        for _ in range(router_count):
-            manager._backends.append(Mock())
-        assert len(manager) == expected_len
+    def test_backends_reads_after_the_load_do_not_reload(self, manager) -> None:
+        """The load happens once, later reads hand back the loaded list."""
+        manager.reload()
+        with patch.object(manager, "reload") as mock_reload:
+            assert manager.backends == tuple(manager._backends)
+            assert manager.backends == tuple(manager._backends)
+            mock_reload.assert_not_called()
+
+    def test_backends_snapshot_detaches_from_the_live_list(self, manager) -> None:
+        """The returned tuple survives a later mutation of the live list."""
+        snapshot = manager.backends
+        manager._backends.append(Mock())
+        assert len(snapshot) == len(manager._backends) - 1
+
+    def test_empty_page_backends_loads_once_across_iterations(self, manager) -> None:
+        """An empty ``PAGE_BACKENDS`` is a loaded state, not a reason to reload."""
+        with (
+            override_next_settings(PAGE_BACKENDS=[]),
+            patch.object(manager, "reload", wraps=manager.reload) as mock_reload,
+        ):
+            assert list(manager) == []
+            assert list(manager) == []
+            assert mock_reload.call_count == 1
+
+    def test_manager_offers_neither_len_nor_indexing(self, manager) -> None:
+        """Backends are read through ``backends``, iteration yields patterns."""
+        manager.reload()
+        with pytest.raises(TypeError):
+            len(manager)
+        with pytest.raises(TypeError):
+            _ = manager[0]
+        assert manager.backends[0] is manager._backends[0]
 
     def test_iter_returns_url_patterns(self, manager) -> None:
         """Iteration concatenates generate_urls from each router."""
@@ -90,18 +124,20 @@ class TestRouterManager:
         mock_router2.generate_urls.return_value = ["url3"]
 
         manager._backends = [mock_router1, mock_router2]
+        manager._loaded = True
 
         url_patterns = list(manager)
         assert url_patterns == ["url1", "url2", "url3"]
 
-    def test_iter_triggers_reload_when_empty(self, manager) -> None:
-        """Empty routers triggers reload on iteration."""
+    def test_iter_triggers_reload_before_the_first_load(self, manager) -> None:
+        """Iteration on a manager that never loaded triggers the load."""
         with patch.object(manager, "reload") as mock_reload:
-            manager._backends = []
             list(manager)
             mock_reload.assert_called_once()
 
-    def test_iter_reloads_config_when_empty(self, manager) -> None:
+    def test_iter_returns_patterns_from_routers_created_by_reload(
+        self, manager
+    ) -> None:
         """After reload, iteration returns patterns from created routers."""
         with (
             patch.object(manager, "reload"),
@@ -126,13 +162,6 @@ class TestRouterManager:
 
             assert url_patterns == ["url1"]
 
-    def test_getitem(self, manager) -> None:
-        """Index access returns the router at that position."""
-        router = Mock()
-        manager._backends = [router]
-
-        assert manager[0] == router
-
     def test_reload_clears_cache(self, manager) -> None:
         """Reload replaces cache and builds routers from default framework config."""
         manager._config_cache = ["some", "cached", "config"]
@@ -143,6 +172,90 @@ class TestRouterManager:
         assert manager._config_cache[0]["BACKEND"] == "next.urls.FileRouterBackend"
         assert len(manager._backends) == 1
         assert isinstance(manager._backends[0], FileRouterBackend)
+
+    def test_a_backend_reading_the_manager_mid_build_neither_recurses_nor_grows(
+        self, manager
+    ) -> None:
+        """Every construction reads `backends` and the build still ends at two."""
+        seen_mid_build = []
+
+        def create_backend(config):
+            seen_mid_build.append(manager.backends)
+            return Mock()
+
+        with (
+            patch.object(
+                manager,
+                "_get_next_pages_config",
+                return_value=[{"first": True}, {"second": True}],
+            ),
+            patch("next.urls.RouterFactory.create_backend", side_effect=create_backend),
+        ):
+            manager.reload()
+
+        # The reads answer with the pre-rebuild list, empty on a first load.
+        assert seen_mid_build == [(), ()]
+        assert len(manager.backends) == 2
+        assert manager._building_thread is None
+
+    def test_a_read_racing_the_build_waits_instead_of_seeing_no_patterns(
+        self, manager
+    ) -> None:
+        """The in-build escape is for the builder thread, not for every reader."""
+        builder = threading.get_ident()
+        reader_waiting = threading.Event()
+        seen: list[tuple[str, ...]] = []
+
+        class WatchedLock:
+            """Reports the moment a non-builder thread asks for the lock."""
+
+            def __init__(self, lock) -> None:
+                self._lock = lock
+
+            def __enter__(self) -> bool:
+                if threading.get_ident() != builder:
+                    reader_waiting.set()
+                return self._lock.__enter__()
+
+            def __exit__(self, *exc_info) -> None:
+                self._lock.__exit__(*exc_info)
+
+        reader = threading.Thread(target=lambda: seen.append(tuple(manager)))
+
+        def create_backend(config):
+            reader.start()
+            reader_waiting.wait(timeout=5)
+            backend = Mock()
+            backend.generate_urls.return_value = ["url"]
+            return backend
+
+        manager._lock = WatchedLock(manager._lock)
+        with (
+            patch.object(
+                manager, "_get_next_pages_config", return_value=[{"first": True}]
+            ),
+            patch("next.urls.RouterFactory.create_backend", side_effect=create_backend),
+        ):
+            manager.reload()
+        reader.join(timeout=5)
+
+        assert seen == [("url",)]
+
+    def test_an_unexpected_backend_error_leaves_the_manager_loadable(
+        self, manager
+    ) -> None:
+        """An error the reload does not catch still clears the in-build flag."""
+        with (
+            patch(
+                "next.urls.RouterFactory.create_backend",
+                side_effect=RuntimeError("boom"),
+            ),
+            pytest.raises(RuntimeError),
+        ):
+            manager.reload()
+
+        assert manager._building_thread is None
+        assert len(manager.backends) == 1
 
     def test_reload_with_exception(self, manager) -> None:
         """Backend creation failure leaves routers empty but cache is still set."""
@@ -232,7 +345,10 @@ class TestGlobalInstances:
         assert isinstance(urlpatterns[0], TrieURLResolver)
         assert isinstance(urlpatterns[0].urlconf_name, _LazyUrlPatterns)
 
-        with patch.object(router_manager, "_backends", [Mock()]):
+        with (
+            patch.object(router_manager, "_backends", [Mock()]),
+            patch.object(router_manager, "_loaded", True),
+        ):
             mock_router = router_manager._backends[0]
             mock_router.generate_urls.return_value = ["url1", "url2"]
 

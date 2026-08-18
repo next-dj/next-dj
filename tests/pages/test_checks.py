@@ -30,6 +30,7 @@ from tests.support import (
     MalformedRootsRouter,
     RaisingRootsRouter,
     RootPagesRouter,
+    SkippingRouter,
     importable_dir,
     patch_checks_router_manager,
     patch_checks_router_manager_with_routers,
@@ -1256,8 +1257,10 @@ class TestRealFileRouterBackend:
 
         e010 = [m for m in messages if m.id == "next.E010"]
         assert [m.msg for m in e010] == [
-            "App 'shop_app' pages: Parameter directory \"items/[id]\" "
-            "is missing page.py file."
+            (
+                "App 'shop_app' pages: Parameter directory \"items/[id]\" "
+                "is missing page.py file."
+            )
         ]
 
     def test_third_party_backend_reports_the_pages_of_its_trees(self, tmp_path) -> None:
@@ -1287,6 +1290,89 @@ class TestRealFileRouterBackend:
                 messages = check_page_module_imports(None)
 
         assert [(m.id, m.obj) for m in messages] == [("next.E017", str(broken))]
+
+
+class TestSkippedDirectoriesLeaveThePageChecks:
+    """A directory the router refuses answers no URL, so no page check names it."""
+
+    def _write_bodyless_page(self, tree: Path, route: str) -> Path:
+        directory = tree / route
+        directory.mkdir(parents=True, exist_ok=True)
+        page_file = directory / "page.py"
+        page_file.write_text("")
+        return page_file
+
+    def test_the_components_folder_a_backend_names_is_skipped(self, tmp_path) -> None:
+        """A page.py inside the components folder is no route and no report."""
+        self._write_bodyless_page(tmp_path, "_components/card")
+        router = FileRouterBackend(app_dirs=False, extra_root_paths=[tmp_path])
+
+        with patch_checks_router_manager_with_routers(routers=[router]):
+            assert check_page_functions(None) == []
+            assert check_pages_structure(None) == []
+
+    def test_a_dirs_segment_the_file_router_refuses_is_skipped(self, tmp_path) -> None:
+        """The skip set the file router builds from DIRS holds for the checks too."""
+        self._write_bodyless_page(tmp_path, "drafts/wip")
+        router = FileRouterBackend(
+            app_dirs=False, extra_root_paths=[tmp_path, Path("drafts")]
+        )
+
+        with patch_checks_router_manager_with_routers(routers=[router]):
+            assert check_page_functions(None) == []
+
+    def test_a_skip_name_the_router_declares_leaves_the_body_check(
+        self, tmp_path
+    ) -> None:
+        """A directory the backend's own walk refuses keeps its pages unchecked."""
+        self._write_bodyless_page(tmp_path, "drafts/wip")
+
+        with patch_checks_router_manager_with_routers(
+            routers=[SkippingRouter([tmp_path], frozenset({"drafts"}))]
+        ):
+            assert check_page_functions(None) == []
+
+        reset_check_caches()
+        with patch_checks_router_manager_with_routers(
+            routers=[RootPagesRouter([tmp_path])]
+        ):
+            assert [m.id for m in check_page_functions(None)] == ["next.E012"]
+
+    def test_a_skip_name_the_router_declares_leaves_the_structure_check(
+        self, tmp_path
+    ) -> None:
+        """A parameter directory below a refused name raises no structural report."""
+        (tmp_path / "drafts" / "[id]").mkdir(parents=True)
+
+        with patch_checks_router_manager_with_routers(
+            routers=[SkippingRouter([tmp_path], frozenset({"drafts"}))]
+        ):
+            assert check_pages_structure(None) == []
+
+        reset_check_caches()
+        with patch_checks_router_manager_with_routers(
+            routers=[RootPagesRouter([tmp_path])]
+        ):
+            assert [m.id for m in check_pages_structure(None)] == ["next.E010"]
+
+    def test_a_child_route_under_a_skip_name_does_not_answer_for_e010(
+        self, tmp_path
+    ) -> None:
+        """A page under a refused name is no child route, so the parameter dir is bare."""
+        self._write_bodyless_page(tmp_path, "items/[id]/drafts")
+
+        with patch_checks_router_manager_with_routers(
+            routers=[SkippingRouter([tmp_path], frozenset({"drafts"}))]
+        ):
+            messages = check_pages_structure(None)
+        assert [m.id for m in messages] == ["next.E010"]
+        assert 'Parameter directory "items/[id]"' in messages[0].msg
+
+        reset_check_caches()
+        with patch_checks_router_manager_with_routers(
+            routers=[RootPagesRouter([tmp_path])]
+        ):
+            assert check_pages_structure(None) == []
 
 
 class TestThirdPartyBackendReachesEverySeam:

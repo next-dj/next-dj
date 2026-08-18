@@ -5,11 +5,8 @@ from next.partial import zone_requested
 from tests.site_pages.counted.probe import counters
 
 
-# The render counters live in `probe`, a normally-imported singleton module,
-# so every reload of this page file shares one counter store the tests read.
-# A `CountingMarker` bumps its counter only when its zone body stringifies it,
-# so an unrendered zone body leaves the counter at zero. The `db` counter sits
-# behind `zone_requested`, so off-zone requests never pay for the lazy report.
+# The counters live in `probe`, a singleton module, so every reload of this page
+# shares one store. A marker counts only when a zone body stringifies it.
 
 
 class CountingMarker:

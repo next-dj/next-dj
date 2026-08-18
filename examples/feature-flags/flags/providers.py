@@ -1,8 +1,12 @@
 import inspect
 from typing import get_args, get_origin
 
-from next.deps import DDependencyBase, RegisteredParameterProvider, resolver
-from next.deps.context import ResolutionContext
+from next.deps import (
+    DDependencyBase,
+    RegisteredParameterProvider,
+    ResolutionContext,
+    resolver,
+)
 
 from .cache import get_cached_flag
 

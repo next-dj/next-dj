@@ -68,6 +68,12 @@ The finder maps a template-directory asset to ``next/<logical_name><suffix>``.
 The logical name is the template directory relative to its page root, and a root template has the logical name ``index``.
 The stem does not appear in the static path, so ``page.css`` next to the root ``template.djx`` resolves under ``next/index.css``.
 
+.. warning::
+
+   Two stems of one role therefore share one logical path.
+   A directory holding both ``template.css`` and ``page.css`` ships ``template.css`` only, and ``page.css`` is dropped without a warning.
+   Treat the new stem as a rename of the existing file, not as a second file.
+
 See also
 --------
 

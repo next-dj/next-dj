@@ -4,8 +4,7 @@ from decimal import Decimal, InvalidOperation
 
 from django.http import HttpRequest
 
-from next.deps import DDependencyBase, RegisteredParameterProvider
-from next.deps.context import ResolutionContext
+from next.deps import DDependencyBase, RegisteredParameterProvider, ResolutionContext
 from next.urls import get_multi_values
 
 

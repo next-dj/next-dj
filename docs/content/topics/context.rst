@@ -36,7 +36,8 @@ Component context.
 Framework-provided keys
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-Every rendered template starts with three keys populated.
+A page render starts with three keys populated.
+A component body rendered by ``{% component %}`` carries a fourth.
 The two path keys are seeded before any user-defined ``@context`` callable runs, while ``request`` joins the scope after context collection finishes.
 
 ``request``.
@@ -197,6 +198,7 @@ The framework computes the template scope in this order.
 2. Inherited context functions from every ancestor ``page.py``, walked from the current page upward through every ancestor directory, bounded at 64 levels.
 3. Page level context functions declared in the current ``page.py``.
 4. Context processors run after every ``@context`` callable.
+   A processor is called with the request, and the callable must declare a parameter named ``request``.
    The first source is ``OPTIONS.context_processors`` on each page backend entry inside ``PAGE_BACKENDS``.
    The second source is the ``context_processors`` list of the first ``TEMPLATES`` entry in Django settings.
    See :ref:`ref-settings` and :doc:`project-layout` for the backend layout.
@@ -360,6 +362,9 @@ Functions decorated with a key may return any value.
 A ``page.py`` holds one keyless slot.
 Registering a second bare ``@context`` replaces the first, and ``next.E018`` reports the shadowed callable.
 Give each function a key or merge them.
+
+``check_context_processor_signature`` reports ``next.E040`` when a processor listed under ``OPTIONS.context_processors`` does not accept a ``request`` parameter.
+The check covers ``PAGE_BACKENDS`` entries only, not the Django ``TEMPLATES`` list.
 
 See also
 --------
