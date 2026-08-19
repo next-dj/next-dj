@@ -574,7 +574,7 @@ class Patches:
             self._render_context = page.build_render_context(
                 self._resolve_page_path(),
                 self._require_request(),
-                requested_zones=None,
+                _requested_zones=None,
                 **self._origin_url_kwargs(),
             )
         return dict(self._render_context)

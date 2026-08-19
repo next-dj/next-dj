@@ -64,7 +64,7 @@ def render_form_page_with_errors(
 
     # Pinned for mypy, which cannot rule out the untyped splat reaching it.
     context_data = page.build_render_context(
-        file_path, request, requested_zones=None, **url_kwargs
+        file_path, request, _requested_zones=None, **url_kwargs
     )
     if form is not None:
         namespace = types.SimpleNamespace(form=form)

@@ -208,7 +208,7 @@ class PageContextRegistry:
         file_path: Path,
         request: HttpRequest | None = None,
         *,
-        requested_zones: frozenset[str] | None = None,
+        _requested_zones: frozenset[str] | None = None,
         **kwargs,
     ) -> ContextResult:
         """Merge inherited ancestor page.py context with this file's context callables.
@@ -218,7 +218,7 @@ class PageContextRegistry:
         The returned `ContextResult` separates the full template context
         from the JavaScript-serializable subset. The js_context uses
         first-registration semantics so that page-level values always
-        take priority over inherited ones. A `requested_zones` batch narrows
+        take priority over inherited ones. A `_requested_zones` batch narrows
         this file's callables to the zone-less ones plus those bound to a
         named zone in the batch, a full render passes no batch and runs
         every callable.
@@ -245,9 +245,9 @@ class PageContextRegistry:
             # `isdisjoint` tests the zone batch without allocating an
             # intersection.
             if (
-                requested_zones is not None
+                _requested_zones is not None
                 and entry.zones is not None
-                and entry.zones.isdisjoint(requested_zones)
+                and entry.zones.isdisjoint(_requested_zones)
             ):
                 continue
             resolved = self._get_resolver().resolve_dependencies(

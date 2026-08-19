@@ -108,7 +108,7 @@ def render_zone(
         context_data = page.build_render_context(
             page_path,
             request,
-            requested_zones=_context_zone_names(rendered_names, zones),
+            _requested_zones=_context_zone_names(rendered_names, zones),
             **kwargs,
         )
     if overrides:
