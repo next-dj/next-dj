@@ -779,7 +779,7 @@ def check_context_reads_foreign_zone(*args, **kwargs) -> list[CheckMessage]:
         for url_path, page_path in pairs
         if _load_python_module_memo(page_path) is not None
     ]
-    bindings = page._context_manager.zone_bindings()
+    bindings = page.zone_bindings()
     warnings: list[CheckMessage] = []
     for url_path, page_path in loaded:
         warnings.extend(

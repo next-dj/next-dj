@@ -62,7 +62,7 @@ def render_form_page_with_errors(
     url_kwargs = params.url_kwargs
     overrides = params.overrides or {}
 
-    # Pinned for mypy, which cannot rule out the untyped splat reaching it.
+    # Pinned so mypy does not read the url kwarg splat as the zone batch.
     context_data = page.build_render_context(
         file_path, request, _requested_zones=None, **url_kwargs
     )

@@ -569,8 +569,7 @@ class Patches:
         fresh copy is handed out because consumers mutate the mapping.
         """
         if self._render_context is None:
-            # Unscoped by zone, the builder shares this context with `context()`.
-            # The None is pinned for mypy, which cannot rule out the splat.
+            # Pinned so mypy does not read the url kwarg splat as the zone batch.
             self._render_context = page.build_render_context(
                 self._resolve_page_path(),
                 self._require_request(),

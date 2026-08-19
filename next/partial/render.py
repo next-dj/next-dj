@@ -156,15 +156,9 @@ def _context_zone_names(
     A nested zone renders inside the body of a requested one, so its
     zone-bound context callables have to run for the batch.
     """
-    widened: set[str] | None = None
+    widened = set(rendered)
     for name in rendered:
-        nested = zones[name].nested
-        if nested:
-            if widened is None:
-                widened = set(rendered)
-            widened |= nested
-    if widened is None:
-        return frozenset(rendered)
+        widened |= zones[name].nested
     return frozenset(widened)
 
 

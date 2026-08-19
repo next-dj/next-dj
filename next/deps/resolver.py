@@ -132,13 +132,10 @@ class DependencyResolver:
     ) -> bool:
         """Return whether a registered provider fills `param` of `func` in `context`.
 
-        System checks ask this to tell a parameter the DI layer answers
-        from one only the page context can answer, without restating
-        which annotations the providers claim. `func`
-        travels along because a provider may read the callable being
-        resolved to see the annotation as `get_type_hints` resolves it.
-        Only providers answer here, so a caller that also cares about
-        `EXPLICIT_RESOLVE_KEYS` tests those names itself.
+        System checks separate a parameter the DI layer answers from one
+        only the page context can answer. `func` travels along because a
+        provider may read the callable to resolve the annotation, and
+        `EXPLICIT_RESOLVE_KEYS` is left to the caller.
         """
         self._ensure_providers()
         self._resolve_call_stack.append(func)

@@ -242,8 +242,7 @@ class PageContextRegistry:
             registry.items(), key=lambda item: (item[0] is not None, str(item[0] or ""))
         )
         for key, entry in ordered:
-            # `isdisjoint` tests the zone batch without allocating an
-            # intersection.
+            # `isdisjoint` tests the batch without allocating an intersection.
             if (
                 _requested_zones is not None
                 and entry.zones is not None

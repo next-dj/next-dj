@@ -46,6 +46,8 @@ if TYPE_CHECKING:
     from next.static.serializers import JsContextSerializer
     from next.urls import URLPatternParser
 
+    from .registry import ZoneBinding
+
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +175,10 @@ class Page:
             return func
 
         return decorator(func_or_key) if callable(func_or_key) else decorator
+
+    def zone_bindings(self) -> dict[Path, tuple[ZoneBinding, ...]]:
+        """Return the zone view of every registered `@context`, keyed by file."""
+        return self._context_manager.zone_bindings()
 
     def build_render_context(
         self,

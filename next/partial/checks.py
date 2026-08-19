@@ -405,10 +405,9 @@ def check_context_zone_names_exist(*args, **kwargs) -> list[CheckMessage]:
     messages: list[CheckMessage] = []
     # The composed-template walk imports each `page.py`, so read bindings after.
     composed = list(_iter_composed_pages())
-    bindings = page._context_manager.zone_bindings()
+    bindings = page.zone_bindings()
     for page_path, template in composed:
         page_bindings = bindings.get(page_path, ())
-        # No zone-bound callable leaves nothing to compare the zone names against.
         if not any(binding.zones for binding in page_bindings):
             continue
         declared = {node.name for node in _zone_nodes(template)}
