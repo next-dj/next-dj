@@ -17,8 +17,10 @@ from next.checks import (
     reset_check_caches,
 )
 from next.conf import next_framework_settings as s
+from next.deps import RegisteredParameterProvider, resolver
 from next.pages.checks import (
     check_context_processor_signature,
+    check_context_reads_foreign_zone,
     check_context_registration_files,
     check_template_loaders,
     check_unrouted_working_directory_pages,
@@ -967,6 +969,131 @@ class TestPageModuleImports:
         assert [
             m for m in messages if m.id in {"next.E012", "next.E013", "next.W043"}
         ] == []
+
+
+class TestContextReadsForeignZone:
+    """next.W077 warns when a @context reads a key bound to a zone it misses."""
+
+    def _write_page(
+        self,
+        page_file: Path,
+        reader: str,
+        *,
+        imports: str = "",
+        zone: str | None = "table",
+    ) -> None:
+        binding = "" if zone is None else f", zone={zone!r}"
+        page_file.parent.mkdir(parents=True, exist_ok=True)
+        page_file.write_text(
+            "from next.pages import page\n"
+            f"{imports}"
+            f"\n@page.context('entries'{binding})\n"
+            "def entries():\n"
+            "    return ['a', 'b']\n\n"
+            f"{reader}"
+        )
+
+    def test_zone_less_reader_reports_w077(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        self._write_page(
+            page_file,
+            "@page.context('count')\ndef count(entries):\n    return len(entries)\n",
+        )
+        with patch_checks_router_manager(pages_directory=tmp_path):
+            messages = check_context_reads_foreign_zone(None)
+        assert [m.id for m in messages] == ["next.W077"]
+        assert "count" in messages[0].msg
+        assert "entries" in messages[0].msg
+        assert "'table'" in messages[0].msg
+        assert messages[0].obj == str(page_file)
+
+    def test_reader_bound_to_another_zone_reports_w077(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        self._write_page(
+            page_file,
+            "@page.context('count', zone='side')\n"
+            "def count(entries):\n"
+            "    return len(entries)\n",
+        )
+        with patch_checks_router_manager(pages_directory=tmp_path):
+            messages = check_context_reads_foreign_zone(None)
+        assert [m.id for m in messages] == ["next.W077"]
+
+    def test_reader_bound_to_the_same_zone_is_silent(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        self._write_page(
+            page_file,
+            "@page.context('count', zone='table')\n"
+            "def count(entries):\n"
+            "    return len(entries)\n",
+        )
+        with patch_checks_router_manager(pages_directory=tmp_path):
+            assert check_context_reads_foreign_zone(None) == []
+
+    def test_reader_with_a_default_is_silent(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        self._write_page(
+            page_file,
+            "@page.context('count')\n"
+            "def count(entries=None):\n"
+            "    return len(entries or [])\n",
+        )
+        with patch_checks_router_manager(pages_directory=tmp_path):
+            assert check_context_reads_foreign_zone(None) == []
+
+    def test_query_parameter_of_the_same_name_is_silent(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        self._write_page(
+            page_file,
+            "@page.context('count')\n"
+            "def count(entries: DQuery[int]):\n"
+            "    return entries\n",
+            imports="from next.urls import DQuery\n",
+        )
+        with patch_checks_router_manager(pages_directory=tmp_path):
+            assert check_context_reads_foreign_zone(None) == []
+
+    def test_url_parameter_of_the_same_name_is_silent(self, tmp_path) -> None:
+        page_file = tmp_path / "[entries]" / "page.py"
+        self._write_page(
+            page_file,
+            "@page.context('count')\ndef count(entries):\n    return entries\n",
+        )
+        with patch_checks_router_manager(pages_directory=tmp_path):
+            assert check_context_reads_foreign_zone(None) == []
+
+    def test_a_registered_provider_silences_w077(self, tmp_path) -> None:
+        class EntriesProvider(RegisteredParameterProvider):
+            priority = 5
+
+            def can_handle(self, param, context) -> bool:
+                return param.name == "entries"
+
+            def resolve(self, param, context) -> object:
+                return []
+
+        page_file = tmp_path / "page.py"
+        self._write_page(
+            page_file,
+            "@page.context('count')\ndef count(entries):\n    return len(entries)\n",
+        )
+        provider = EntriesProvider()
+        resolver.prepend_provider(provider)
+        try:
+            with patch_checks_router_manager(pages_directory=tmp_path):
+                assert check_context_reads_foreign_zone(None) == []
+        finally:
+            resolver.remove_provider(provider)
+            RegisteredParameterProvider._registry.remove(EntriesProvider)
+
+    def test_page_without_a_zone_bound_context_is_silent(self, tmp_path) -> None:
+        self._write_page(
+            tmp_path / "page.py",
+            "@page.context('count')\ndef count(entries):\n    return len(entries)\n",
+            zone=None,
+        )
+        with patch_checks_router_manager(pages_directory=tmp_path):
+            assert check_context_reads_foreign_zone(None) == []
 
 
 class TestSingleKeylessContext:

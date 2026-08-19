@@ -22,24 +22,39 @@ def _reset_check_caches():
 
 
 @contextmanager
-def _composed_pages(*pages: tuple[Path, str]) -> Iterator[None]:
-    """Point the page-scanning checks at real on-disk page directories.
-
-    Each entry is a `page.py` path and the `template.djx` body next to it.
-    The global page instance compiles the body through its layout loader, so
-    a zone tag in the body is discovered exactly as it is in production.
-    """
-    root = pages[0][0].parent.parent if pages else Path()
-    for page_file, body in pages:
-        page_file.write_text("x = 1")
-        (page_file.parent / "template.djx").write_text(body)
-
+def _scanned_root(root: Path) -> Iterator[None]:
+    """Point the page-scanning checks at one on-disk page tree."""
     manager = MagicMock()
     manager.backends = (MagicMock(),)
     with (
         patch("next.partial.checks.get_router_manager", return_value=(manager, [])),
         patch("next.checks.common.get_pages_directories", return_value=[root]),
     ):
+        yield
+
+
+@contextmanager
+def _context_pages(*pages: tuple[Path, str, str]) -> Iterator[None]:
+    """Point the page-scanning checks at real on-disk page directories.
+
+    Each entry is a `page.py` path, its source, and the `template.djx` body
+    next to it. The composed-template walk imports the source and the global
+    page instance compiles the body through its layout loader, so a zone tag
+    and a `@context` registration both land as they do in production.
+    """
+    root = pages[0][0].parent.parent
+    for page_file, source, body in pages:
+        page_file.write_text(source)
+        (page_file.parent / "template.djx").write_text(body)
+
+    with _scanned_root(root):
+        yield
+
+
+@contextmanager
+def _composed_pages(*pages: tuple[Path, str]) -> Iterator[None]:
+    """Point the checks at pages whose `page.py` registers nothing."""
+    with _context_pages(*((page_file, "x = 1", body) for page_file, body in pages)):
         yield
 
 
@@ -209,6 +224,81 @@ class TestWithOverZoneCheck:
         body = '{% zone "z" %}{% with greeting="hi" %}{{ greeting }}{% endwith %}{% endzone %}'
         with _composed_pages((page_file, body)):
             assert checks.check_with_directly_over_zone() == []
+
+
+class TestContextZoneNameCheck:
+    """`next.E078` fires when a `@context(zone=)` names an undeclared zone."""
+
+    def test_undeclared_zone_name(self, tmp_path: Path) -> None:
+        page_file = _page_dir(tmp_path, "zone_unknown")
+        source = (
+            "from next.pages import page\n\n"
+            "@page.context('rows', zone='ledger')\n"
+            "def rows():\n"
+            "    return []\n"
+        )
+        body = '{% zone "table" %}<p>{{ rows }}</p>{% endzone %}'
+        with _context_pages((page_file, source, body)):
+            messages = checks.check_context_zone_names_exist()
+        assert [m.id for m in messages] == [checks.E_CONTEXT_ZONE_UNKNOWN]
+        assert 'rows (key "rows")' in messages[0].msg
+        assert '"ledger"' in messages[0].msg
+        assert "Declared zones: 'table'." in messages[0].msg
+        assert messages[0].obj == str(page_file)
+
+    def test_declared_zone_is_silent(self, tmp_path: Path) -> None:
+        page_file = _page_dir(tmp_path, "zone_ok")
+        source = (
+            "from next.pages import page\n\n"
+            "@page.context('rows', zone='table')\n"
+            "def rows():\n"
+            "    return []\n"
+        )
+        body = '{% zone "table" %}<p>{{ rows }}</p>{% endzone %}'
+        with _context_pages((page_file, source, body)):
+            assert checks.check_context_zone_names_exist() == []
+
+    def test_nested_zone_counts_as_declared(self, tmp_path: Path) -> None:
+        page_file = _page_dir(tmp_path, "zone_nested")
+        source = (
+            "from next.pages import page\n\n"
+            "@page.context('rows', zone='inner')\n"
+            "def rows():\n"
+            "    return []\n"
+        )
+        body = (
+            '{% zone "outer" %}<p>{{ rows }}</p>'
+            '{% zone "inner" %}<b>{{ rows }}</b>{% endzone %}'
+            "{% endzone %}"
+        )
+        with _context_pages((page_file, source, body)):
+            assert checks.check_context_zone_names_exist() == []
+
+    def test_context_without_a_zone_is_silent(self, tmp_path: Path) -> None:
+        page_file = _page_dir(tmp_path, "zone_less")
+        source = (
+            "from next.pages import page\n\n"
+            "@page.context('rows')\n"
+            "def rows():\n"
+            "    return []\n"
+        )
+        body = '{% zone "table" %}<p>{{ rows }}</p>{% endzone %}'
+        with _context_pages((page_file, source, body)):
+            assert checks.check_context_zone_names_exist() == []
+
+    def test_keyless_context_on_a_page_without_zones(self, tmp_path: Path) -> None:
+        page_file = _page_dir(tmp_path, "zone_none")
+        source = (
+            "from next.pages import page\n\n"
+            "@page.context(zone='table')\n"
+            "def merged() -> dict:\n"
+            "    return {}\n"
+        )
+        with _context_pages((page_file, source, "<p>{{ a }}</p>")):
+            messages = checks.check_context_zone_names_exist()
+        assert [m.id for m in messages] == [checks.E_CONTEXT_ZONE_UNKNOWN]
+        assert "The @context merged in" in messages[0].msg
+        assert "The page declares no zones." in messages[0].msg
 
 
 class TestRepeatedFormKeyCheck:

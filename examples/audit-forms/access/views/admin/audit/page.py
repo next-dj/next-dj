@@ -8,13 +8,14 @@ from next.partial import zone_requested
 _VALID_KIND_FILTERS = frozenset(k for k, _ in AuditEntry.KIND_CHOICES)
 
 
-@context("entries")
+@context("entries", zone="audit-table")
 def entries(request: HttpRequest) -> list[AuditEntry] | None:
     """Load audit rows only when the lazy `audit-table` zone is rendered.
 
     The full page render leaves this `None` so the heavy query never
     runs behind the skeleton. The query fires only on the partial GET the
-    runtime issues for the zone, where `zone_requested` is true.
+    runtime issues for the zone, where `zone_requested` is true. The
+    `zone=` binding saves even the call itself on a GET for another zone.
     """
     if not zone_requested(request, "audit-table"):
         return None

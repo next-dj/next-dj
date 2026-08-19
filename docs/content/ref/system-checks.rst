@@ -339,6 +339,9 @@ Errors
        It carries its own code rather than sharing ``next.E076``, so silencing the noise from one mistyped key never silences this one.
        The per-key probes are skipped, because there is nothing to index into.
      - ``next.conf.checks``
+   * - ``next.E078``
+     - A ``@context(zone=)`` names a zone the composed page template does not declare, so no zone request ever matches the callable and its value is missing from every zone render.
+     - ``next.partial.checks``
 
 A code emitted by ``next.checks.common`` is produced by a shared helper that the listed subsystem check modules call.
 
@@ -443,6 +446,9 @@ Warnings
        The URL form of such a kind travels in a patch envelope while its inline bodies carry no insertion verb and reach the browser only on a full page render.
        Pair ``render_link_tag`` with ``inline_tag="style"`` or ``render_script_tag`` with ``inline_tag="script"``.
      - ``next.static.checks``
+   * - ``next.W077``
+     - A ``@context`` parameter names the key of another ``@context`` bound to a zone the reader does not share, so a request outside that zone skips the provider and the reader runs with ``None``.
+     - ``next.pages.checks``
 
 .. note::
 

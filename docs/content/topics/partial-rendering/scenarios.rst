@@ -502,7 +502,7 @@ A lazy zone renders only its placeholder up front and fetches its body after loa
    {% endzone %}
 
 The body of a lazy zone does not run on the full render, only the placeholder branch does.
-Guard the expensive data with ``zone_requested`` so the query runs only when the lazy body is actually rendered.
+Bind the provider to the zone with ``zone=`` and guard the expensive data with ``zone_requested``, so the query runs only when the lazy body is actually rendered.
 
 .. code-block:: python
    :caption: admin/audit/page.py
@@ -514,14 +514,16 @@ Guard the expensive data with ``zone_requested`` so the query runs only when the
    from next.partial import zone_requested
 
 
-   @context("entries")
+   @context("entries", zone="audit-table")
    def entries(request: HttpRequest) -> list[AuditEntry] | None:
        """Load audit rows only when the lazy zone is rendered."""
        if not zone_requested(request, "audit-table"):
            return None
        return list(AuditEntry.objects.all()[:100])
 
-The context collector is all-or-nothing, so the laziness of the data is manual but honest.
+The two checks work together rather than replacing each other.
+``zone=`` saves the call on a GET for another zone of the same page, a poll tick of a neighbour among them.
+``zone_requested`` stays the source of truth for the full render, which carries no zone batch and runs every page callable.
 A forgotten ``zone_requested`` guard runs the expensive provider on every full render even though the lazy body is never painted, which defeats the point of marking the zone lazy.
 The :doc:`zones` page calls out the same trap.
 

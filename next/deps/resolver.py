@@ -104,8 +104,12 @@ class DependencyResolver:
             self._providers.extend(self._get_providers())
             self._providers_loaded = True
 
-    def _should_skip_parameter(self, param: inspect.Parameter) -> bool:
-        """Return True for `self` / `cls` and variadic parameters."""
+    def skips(self, param: inspect.Parameter) -> bool:
+        """Return True for `self` / `cls` and variadic parameters.
+
+        System checks share the predicate so a diagnostic never restates
+        which parameters the resolver refuses to fill.
+        """
         return param.name in ("self", "cls") or param.kind in (
             inspect.Parameter.VAR_POSITIONAL,
             inspect.Parameter.VAR_KEYWORD,
@@ -119,6 +123,31 @@ class DependencyResolver:
             if provider.can_handle(param, context):
                 return provider.resolve(param, context)
         return None if param.default is inspect.Parameter.empty else param.default
+
+    def provides(
+        self,
+        func: Callable[..., Any],
+        param: inspect.Parameter,
+        context: ResolutionContext,
+    ) -> bool:
+        """Return whether a registered provider fills `param` of `func` in `context`.
+
+        System checks ask this to tell a parameter the DI layer answers
+        from one only the page context can answer, without restating
+        which annotations the providers claim. `func`
+        travels along because a provider may read the callable being
+        resolved to see the annotation as `get_type_hints` resolves it.
+        Only providers answer here, so a caller that also cares about
+        `EXPLICIT_RESOLVE_KEYS` tests those names itself.
+        """
+        self._ensure_providers()
+        self._resolve_call_stack.append(func)
+        try:
+            return any(
+                provider.can_handle(param, context) for provider in self._providers
+            )
+        finally:
+            self._resolve_call_stack.pop()
 
     def register_dependency(
         self, name: str, callable_dep: Callable[..., Any]
@@ -234,7 +263,7 @@ class DependencyResolver:
 
             result: dict[str, Any] = {}
             for name, param in sig.parameters.items():
-                if self._should_skip_parameter(param):
+                if self.skips(param):
                     continue
 
                 value = self._resolve_parameter(param, context)

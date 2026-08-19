@@ -21,22 +21,31 @@ if TYPE_CHECKING:
     from next.urls import RouterManager
 
 
-def iter_existing_scanned_pages(
+def iter_existing_scanned_page_pairs(
     router_manager: RouterManager, seen: set[Path]
-) -> Iterator[Path]:
-    """Yield each existing `page.py` once across routers, de-duplicated by `seen`.
+) -> Iterator[tuple[str, Path]]:
+    """Yield the routed URL trail and path of each existing `page.py`, once.
 
     The identity is the resolved path, so a tree reached through a symlink
-    reports once. The spelling the router walked is what travels on, because
-    the loader and the page-context registry both key on that spelling.
-    Virtual `template.djx`-only pages carry a non-existent path and are skipped.
+    reports once, under the URL trail of the walk that reached it first. The
+    spelling the router walked is what travels on, because the loader and the
+    page-context registry both key on that spelling. Virtual
+    `template.djx`-only pages carry a non-existent path and are skipped.
     """
     for router in router_manager.backends:
-        for _url_path, page_path in iter_scanned_page_pairs(router):
+        for url_path, page_path in iter_scanned_page_pairs(router):
             if not first_visit(page_path, seen):
                 continue
             if page_path.exists():
-                yield page_path
+                yield url_path, page_path
+
+
+def iter_existing_scanned_pages(
+    router_manager: RouterManager, seen: set[Path]
+) -> Iterator[Path]:
+    """Yield each existing `page.py` once across routers, de-duplicated by `seen`."""
+    for _url_path, page_path in iter_existing_scanned_page_pairs(router_manager, seen):
+        yield page_path
 
 
 def iter_serialized_page_context_keys() -> Iterator[tuple[Path, str]]:
@@ -59,4 +68,8 @@ def iter_serialized_page_context_keys() -> Iterator[tuple[Path, str]]:
                 yield page_path, key
 
 
-__all__ = ["iter_existing_scanned_pages", "iter_serialized_page_context_keys"]
+__all__ = [
+    "iter_existing_scanned_page_pairs",
+    "iter_existing_scanned_pages",
+    "iter_serialized_page_context_keys",
+]

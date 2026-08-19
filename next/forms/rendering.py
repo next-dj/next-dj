@@ -62,7 +62,10 @@ def render_form_page_with_errors(
     url_kwargs = params.url_kwargs
     overrides = params.overrides or {}
 
-    context_data = page.build_render_context(file_path, request, **url_kwargs)
+    # Pinned for mypy, which cannot rule out the untyped splat reaching it.
+    context_data = page.build_render_context(
+        file_path, request, requested_zones=None, **url_kwargs
+    )
     if form is not None:
         namespace = types.SimpleNamespace(form=form)
         wizard_class = meta.get("wizard_class")

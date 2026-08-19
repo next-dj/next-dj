@@ -54,6 +54,8 @@ Detecting a partial request
 ``is_partial_request`` returns ``True`` when the request carries the ``X-Next-Request`` switch, the test a ``render`` escape hatch reads before shaping a patch response.
 ``partial_intent`` parses and memoises the ``X-Next-*`` headers into a ``PartialIntent``.
 ``zone_requested`` answers whether the intent names a given zone, the guard a lazy zone's context provider reads to skip an expensive query on a full render.
+``@context(..., zone="name")`` skips the provider call outright on a GET for another zone.
+``zone_requested`` stays the in-body guard for a provider of a lazy zone, whose work has to be skipped on a full render too.
 
 .. autofunction:: next.partial.is_partial_request
 

@@ -7,7 +7,7 @@ from django.http import HttpRequest
 from next.deps import DependencyResolver
 from next.pages import Context, Page
 from next.pages.context import ContextByDefaultProvider
-from next.pages.registry import PageContextEntry, PageContextRegistry
+from next.pages.registry import PageContextEntry, PageContextRegistry, ZoneBinding
 from next.static import StaticCollector
 from tests.support import inspect_parameter
 
@@ -349,6 +349,37 @@ class TestPageContextRegistry:
         assert "inherited_key2" in result.context_data
         assert result.context_data["inherited_key1"] == "value1"
         assert result.context_data["inherited_key2"] == "value2"
+
+
+class TestZoneBindings:
+    """`zone_bindings` gives the checks the zone view of each registration."""
+
+    def test_bindings_carry_key_name_zones_and_callable(
+        self, context_manager, test_file_path
+    ) -> None:
+        def rows() -> list:
+            return []
+
+        context_manager.register_context(test_file_path, "rows", rows, zone="table")
+        binding = context_manager.zone_bindings()[test_file_path][0]
+        assert binding.key == "rows"
+        assert binding.name == "rows"
+        assert binding.zones == frozenset({"table"})
+        assert binding.func is rows
+
+    def test_a_zone_less_registration_binds_to_no_zone(
+        self, context_manager, test_file_path
+    ) -> None:
+        def merged() -> dict:
+            return {}
+
+        context_manager.register_context(test_file_path, None, merged)
+        assert context_manager.zone_bindings()[test_file_path] == (
+            ZoneBinding(key=None, name="merged", zones=None, func=merged),
+        )
+
+    def test_an_empty_registry_binds_nothing(self, context_manager) -> None:
+        assert context_manager.zone_bindings() == {}
 
 
 class TestKeylessConflicts:

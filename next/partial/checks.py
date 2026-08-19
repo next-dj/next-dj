@@ -46,6 +46,7 @@ if TYPE_CHECKING:
 
     from django.template.base import Template
 
+    from next.pages.registry import ZoneBinding
     from next.urls import RouterBackend, RouterManager
 
     _ComposedMemo = tuple[RouterManager, list[tuple[Path, Template]]] | None
@@ -61,6 +62,7 @@ E_UNREGISTERED_OP: Final = "next.E066"
 E_BACKENDS_NOT_A_LIST: Final = "next.E067"
 E_COMPOSED_TEMPLATE_SYNTAX: Final = "next.E072"
 E_BACKEND_WITHOUT_PATH: Final = "next.E073"
+E_CONTEXT_ZONE_UNKNOWN: Final = "next.E078"
 
 W_WITH_OVER_ZONE: Final = "next.W067"
 W_FORM_BACKEND_NOT_AWARE: Final = "next.W068"
@@ -393,6 +395,66 @@ def _zones_directly_in_with(nodelist: NodeList) -> "Iterator[str]":
 
 
 @register(Tags.templates, NEXT)
+def check_context_zone_names_exist(*args, **kwargs) -> list[CheckMessage]:
+    """Error when a `@context(zone=)` names an undeclared zone (`next.E078`).
+
+    A full render runs every callable, so a misspelt zone name looks
+    healthy there and silently drops the callable from every zone
+    request instead.
+    """
+    messages: list[CheckMessage] = []
+    # The composed-template walk imports each `page.py`, so read bindings after.
+    composed = list(_iter_composed_pages())
+    bindings = page._context_manager.zone_bindings()
+    for page_path, template in composed:
+        declared = sorted({node.name for node in _zone_nodes(template)})
+        for label, zone_name in _zone_bound_contexts(bindings.get(page_path, ())):
+            if zone_name in declared:
+                continue
+            messages.append(
+                Error(
+                    f"The @context {label} in {page_path} binds to zone "
+                    f'"{zone_name}", which the composed page template does not '
+                    "declare. No zone request ever matches the callable, so its "
+                    "value is missing from every zone render. "
+                    f"{_declared_zones_sentence(declared)}",
+                    obj=str(page_path),
+                    id=E_CONTEXT_ZONE_UNKNOWN,
+                )
+            )
+    return messages
+
+
+def _declared_zones_sentence(declared: list[str]) -> str:
+    """Return the sentence naming the zones a composed page template declares."""
+    if not declared:
+        return "The page declares no zones."
+    names = ", ".join(repr(name) for name in declared)
+    return f"Declared zones: {names}."
+
+
+def _zone_bound_contexts(
+    bindings: "tuple[ZoneBinding, ...]",
+) -> "Iterator[tuple[str, str]]":
+    """Yield the label and bound zone name of every zone-bound `@context` of a page.
+
+    The page-context registry keys on the file declaring the callable,
+    which for a `page.py` is the very path the page scan walked, so the
+    composed-page path looks the bindings up directly.
+    """
+    for binding in bindings:
+        if binding.zones is None:
+            continue
+        label = (
+            binding.name
+            if binding.key is None
+            else f'{binding.name} (key "{binding.key}")'
+        )
+        for zone_name in sorted(binding.zones):
+            yield label, zone_name
+
+
+@register(Tags.templates, NEXT)
 def check_no_zone_in_component(*args, **kwargs) -> list[CheckMessage]:
     """Error when a component template declares a zone (`next.E065`)."""
     configs = next_framework_settings.COMPONENT_BACKENDS
@@ -666,6 +728,7 @@ def _staticfiles_storage_path() -> str | None:
 __all__ = [
     "E_BACKEND_WITHOUT_PATH",
     "E_COMPOSED_TEMPLATE_SYNTAX",
+    "E_CONTEXT_ZONE_UNKNOWN",
     "E_DUPLICATE_ZONE",
     "E_LAZY_WITHOUT_PLACEHOLDER",
     "E_NON_ASCII_ZONE",
@@ -679,6 +742,7 @@ __all__ = [
     "W_TOO_MANY_BACKENDS",
     "W_WITH_OVER_ZONE",
     "check_composed_templates_compile",
+    "check_context_zone_names_exist",
     "check_custom_patch_ops_well_formed",
     "check_duplicate_zone_names",
     "check_form_backend_partial_aware",

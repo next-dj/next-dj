@@ -130,6 +130,7 @@ class Page:
         inherit_context: bool = False,
         serialize: bool = False,
         serializer: JsContextSerializer | None = None,
+        zone: str | None = None,
     ) -> Callable[[C], C]: ...
     def context(
         self,
@@ -138,6 +139,7 @@ class Page:
         inherit_context: bool = False,
         serialize: bool = False,
         serializer: JsContextSerializer | None = None,
+        zone: str | None = None,
     ) -> Callable[..., Any]:
         """Register a keyed or dict-merge `@context` for the file declaring `func`.
 
@@ -145,7 +147,8 @@ class Page:
         `Next.context` so JavaScript code on the page can read it via
         `window.Next.context`. Pass `serializer=` to route this key
         through a custom `JsContextSerializer` instead of the global
-        `JS_CONTEXT_SERIALIZER` setting.
+        `JS_CONTEXT_SERIALIZER` setting. Pass `zone=` to bind the
+        callable to one zone, so a GET for another zone never runs it.
         """
         # Captured here rather than inside the decorator so both spellings see
         # the page.py that ran `@context`, not this module.
@@ -165,20 +168,28 @@ class Page:
                 inherit_context=inherit_context,
                 serialize=serialize,
                 serializer=serializer,
+                zone=zone,
             )
             return func
 
         return decorator(func_or_key) if callable(func_or_key) else decorator
 
     def build_render_context(
-        self, file_path: Path, request: HttpRequest | None = None, **kwargs
+        self,
+        file_path: Path,
+        request: HttpRequest | None = None,
+        *,
+        requested_zones: frozenset[str] | None = None,
+        **kwargs,
     ) -> dict[str, object]:
         """Build the full render context dict used by `render`.
 
         The returned dict includes `_next_js_context` holding the subset
         of values marked `serialize=True`. `render` pops that key and
         seeds the `StaticCollector` with it before creating the Django
-        template context.
+        template context. A `requested_zones` batch narrows the page
+        callables to that batch and stays out of the returned dict, so it
+        never reaches a template or the JS context.
         """
         context_data: dict[str, object] = {}
         template_djx = file_path.parent / "template.djx"
@@ -189,7 +200,7 @@ class Page:
         context_data.update(kwargs)
 
         context_result = self._context_manager.collect_context(
-            file_path, request, **kwargs
+            file_path, request, requested_zones=requested_zones, **kwargs
         )
         context_data.update(context_result.context_data)
         context_data["_next_js_context"] = context_result.js_context

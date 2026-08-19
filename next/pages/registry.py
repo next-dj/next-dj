@@ -34,15 +34,32 @@ class PageContextEntry(NamedTuple):
 
     The optional `serializer` overrides the global JS context
     serializer for the value this callable produces, but only when
-    `serialize` is true. Backed by `NamedTuple` so the hot
-    `register_context` path allocates a plain tuple rather than a
-    frozen dataclass instance.
+    `serialize` is true. The optional `zones` binds the callable to the
+    named zones, so a GET for a foreign zone never calls it. Backed by
+    `NamedTuple` so the hot `register_context` path allocates a plain
+    tuple rather than a frozen dataclass instance.
     """
 
     func: Callable[..., Any]
     inherit_context: bool
     serialize: bool
     serializer: JsContextSerializer | None = None
+    zones: frozenset[str] | None = None
+
+
+class ZoneBinding(NamedTuple):
+    """One registered `@context` seen through its zone binding.
+
+    The zone diagnostics pair a zone-bound callable with the callables
+    reading its key, so they need the zones next to the callable itself
+    while the rest of the entry stays inside the registry. A `zones` of
+    `None` marks a callable every render runs.
+    """
+
+    key: str | None
+    name: str
+    zones: frozenset[str] | None
+    func: Callable[..., Any]
 
 
 logger = logging.getLogger(__name__)
@@ -124,6 +141,25 @@ class PageContextRegistry:
             for file_path, entries in self._context_registry.items()
         }
 
+    def zone_bindings(self) -> dict[Path, tuple[ZoneBinding, ...]]:
+        """Return the zone view of the callables registered per file, for the checks.
+
+        The zone diagnostics read a callable's zones, its key, and its
+        signature, and this keeps them off the registry storage itself.
+        """
+        return {
+            file_path: tuple(
+                ZoneBinding(
+                    key=key,
+                    name=callable_name(entry.func),
+                    zones=entry.zones,
+                    func=entry.func,
+                )
+                for key, entry in entries.items()
+            )
+            for file_path, entries in self._context_registry.items()
+        }
+
     def register_context(
         self,
         file_path: Path,
@@ -133,8 +169,19 @@ class PageContextRegistry:
         inherit_context: bool = False,
         serialize: bool = False,
         serializer: JsContextSerializer | None = None,
+        zone: str | None = None,
     ) -> None:
-        """Bind `func` to `file_path` with keyed or dict-merge semantics."""
+        """Bind `func` to `file_path` with keyed or dict-merge semantics.
+
+        A `zone` name scopes the callable to that zone, so a GET for any
+        other zone skips it entirely.
+        """
+        if zone is not None and inherit_context:
+            msg = (
+                "`@context` cannot combine `zone=` with `inherit_context=True`, "
+                "an ancestor page.py cannot reference a descendant template's zone."
+            )
+            raise ValueError(msg)
         bucket = self._context_registry.setdefault(file_path, {})
         existing = bucket.get(None)
         # Compare by name so a re-executed module (same name) is not a conflict.
@@ -150,13 +197,19 @@ class PageContextRegistry:
             inherit_context=inherit_context,
             serialize=serialize,
             serializer=serializer,
+            zones=None if zone is None else frozenset({zone}),
         )
         context_registered.send(
             sender=PageContextRegistry, file_path=file_path, key=key
         )
 
     def collect_context(
-        self, file_path: Path, request: HttpRequest | None = None, **kwargs
+        self,
+        file_path: Path,
+        request: HttpRequest | None = None,
+        *,
+        requested_zones: frozenset[str] | None = None,
+        **kwargs,
     ) -> ContextResult:
         """Merge inherited ancestor page.py context with this file's context callables.
 
@@ -165,7 +218,10 @@ class PageContextRegistry:
         The returned `ContextResult` separates the full template context
         from the JavaScript-serializable subset. The js_context uses
         first-registration semantics so that page-level values always
-        take priority over inherited ones.
+        take priority over inherited ones. A `requested_zones` batch narrows
+        this file's callables to the zone-less ones plus those bound to a
+        named zone in the batch, a full render passes no batch and runs
+        every callable.
         """
         context_data: dict[str, Any] = {}
         js_context: dict[str, Any] = {}
@@ -186,6 +242,14 @@ class PageContextRegistry:
             registry.items(), key=lambda item: (item[0] is not None, str(item[0] or ""))
         )
         for key, entry in ordered:
+            # `isdisjoint` tests the zone batch without allocating an
+            # intersection.
+            if (
+                requested_zones is not None
+                and entry.zones is not None
+                and entry.zones.isdisjoint(requested_zones)
+            ):
+                continue
             resolved = self._get_resolver().resolve_dependencies(
                 entry.func,
                 request=request,

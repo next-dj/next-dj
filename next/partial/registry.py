@@ -85,11 +85,14 @@ class ZoneInfo:
 
     The render paths consume `options` whole, and the scalar read
     surface delegates to it so no mode can drift between the two.
+    `nested` names the zones declared inside the body, computed once with
+    the map so a standalone render never walks the nodes again.
     """
 
     name: str
     partial: "ZonePartial"
     options: "ZoneOptions"
+    nested: frozenset[str]
 
     @property
     def lazy(self) -> str | None:
@@ -116,9 +119,23 @@ def _zones_from_template(template: "Template") -> dict[str, ZoneInfo]:
     nodes = cast("list[ZoneNode]", template.nodelist.get_nodes_by_type(ZoneNode))
     for node in nodes:
         zones[node.name] = ZoneInfo(
-            name=node.name, partial=node.partial, options=node.options
+            name=node.name,
+            partial=node.partial,
+            options=node.options,
+            nested=_nested_names(node.partial),
         )
     return zones
+
+
+def _nested_names(partial: "ZonePartial") -> frozenset[str]:
+    """Return the names of the zones declared inside the body of a zone.
+
+    The walk starts at the body, so the placeholder branch of the zone
+    stays out. A standalone render shows the body alone, and Django
+    recurses through the child node lists, so any depth is covered.
+    """
+    inner = cast("list[ZoneNode]", partial.nodelist.get_nodes_by_type(ZoneNode))
+    return frozenset(child.name for child in inner)
 
 
 def zones_of(template: "Template") -> "Mapping[str, ZoneInfo]":

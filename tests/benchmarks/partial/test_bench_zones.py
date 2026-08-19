@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 import pytest
@@ -10,6 +11,7 @@ from next.partial import render_zone
 
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
     from next.pages import Page
@@ -31,6 +33,42 @@ def _write_zoned_page(directory: Path, body: str) -> Path:
     page_file.write_text("x = 1\n")
     (directory / "template.djx").write_text(body)
     return page_file
+
+
+_PROVIDER_COUNT = 10
+# Priced so ten providers outweigh the render and the filter delta reads clean.
+_PROVIDER_WORK = 2000
+_PRICED_ZONES = "".join(
+    f'{{% zone "z_{i}" %}}<p>{{{{ k_{i} }}}}</p>{{% endzone %}}'
+    for i in range(_PROVIDER_COUNT)
+)
+_PRICED_DJX = f"<main>{_PRICED_ZONES}</main>"
+
+
+def _priced_provider() -> str:
+    """Context provider standing in for a query of a controlled price."""
+    return str(sum(range(_PROVIDER_WORK)))
+
+
+@contextmanager
+def _priced_page(directory: Path, *, scoped: bool) -> Iterator[Path]:
+    """Build a ten-zone page whose providers are bound to a zone or not.
+
+    The registrations land in the module-level page singleton, so they are
+    taken back out on the way through.
+    """
+    page_file = _write_zoned_page(directory, _PRICED_DJX)
+    registry = page_singleton._context_manager
+    for i in range(_PROVIDER_COUNT):
+        zone = f"z_{i}" if scoped else None
+        registry.register_context(page_file, f"k_{i}", _priced_provider, zone=zone)
+    # render_zone drives the module-level page singleton, so seed its
+    # composed-template cache once before the timed loop.
+    page_singleton.composed_template_for(page_file)
+    try:
+        yield page_file
+    finally:
+        registry._context_registry.pop(page_file, None)
 
 
 class TestBenchFiveZonePageAgainstBaseline:
@@ -66,3 +104,25 @@ class TestBenchSingleZoneRender:
         page_singleton.composed_template_for(page_file)
         request = RequestFactory().get("/")
         benchmark(render_zone, page_file, ("z_0",), request, url_kwargs=_KWARGS)
+
+
+class TestBenchZoneGetProviderScope:
+    """One zone GET over ten priced providers, bound to a zone and unbound.
+
+    The pair is the delta of the `@context(zone=)` filter on a poll tick,
+    measured on one branch rather than against a checked-out base.
+    """
+
+    @pytest.mark.benchmark(group="partial.zone_get")
+    def test_zone_get_with_zone_bound_providers(
+        self, tmp_path: Path, benchmark
+    ) -> None:
+        request = RequestFactory().get("/")
+        with _priced_page(tmp_path, scoped=True) as page_file:
+            benchmark(render_zone, page_file, ("z_0",), request)
+
+    @pytest.mark.benchmark(group="partial.zone_get")
+    def test_zone_get_with_unbound_providers(self, tmp_path: Path, benchmark) -> None:
+        request = RequestFactory().get("/")
+        with _priced_page(tmp_path, scoped=False) as page_file:
+            benchmark(render_zone, page_file, ("z_0",), request)
