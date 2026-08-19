@@ -407,8 +407,13 @@ def check_context_zone_names_exist(*args, **kwargs) -> list[CheckMessage]:
     composed = list(_iter_composed_pages())
     bindings = page._context_manager.zone_bindings()
     for page_path, template in composed:
-        declared = sorted({node.name for node in _zone_nodes(template)})
-        for label, zone_name in _zone_bound_contexts(bindings.get(page_path, ())):
+        page_bindings = bindings.get(page_path, ())
+        # No zone-bound callable leaves nothing to compare the zone names against.
+        if not any(binding.zones for binding in page_bindings):
+            continue
+        declared = {node.name for node in _zone_nodes(template)}
+        sentence = _declared_zones_sentence(sorted(declared))
+        for label, zone_name in _zone_bound_contexts(page_bindings):
             if zone_name in declared:
                 continue
             messages.append(
@@ -416,8 +421,7 @@ def check_context_zone_names_exist(*args, **kwargs) -> list[CheckMessage]:
                     f"The @context {label} in {page_path} binds to zone "
                     f'"{zone_name}", which the composed page template does not '
                     "declare. No zone request ever matches the callable, so its "
-                    "value is missing from every zone render. "
-                    f"{_declared_zones_sentence(declared)}",
+                    f"value is missing from every zone render. {sentence}",
                     obj=str(page_path),
                     id=E_CONTEXT_ZONE_UNKNOWN,
                 )
