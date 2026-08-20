@@ -817,8 +817,8 @@ def _foreign_zone_reads(
 def _zone_request_context(url_path: str) -> ResolutionContext:
     """Build the resolution context of a zone request that carries no context data.
 
-    The empty `context_data` is the whole question, because a parameter some
-    provider still fills is not waiting on the zone-bound `@context`.
+    The `context_data` is empty on purpose, a parameter some provider still
+    fills is not waiting on the zone-bound `@context`.
     """
     return ResolutionContext(
         request=HttpRequest(),
@@ -846,8 +846,7 @@ def _context_parameters(func: Callable[..., Any]) -> list[inspect.Parameter]:
     """Return the parameters of a context callable that the context alone fills.
 
     A parameter carrying a default is left out, because the resolver falls
-    back to that default and a `Depends` or `Context` marker travels as one,
-    so the author already named a value for the absent case.
+    back to that default and a `Depends` or `Context` marker travels as one.
     """
     try:
         parameters = inspect.signature(func).parameters
@@ -879,8 +878,8 @@ def _url_parameter_names(url_path: str) -> list[str]:
 def _url_parser() -> URLPatternParser:
     """Return the parser the file router routes bracket segments through.
 
-    `next.urls` imports `next.pages`, so the module is reached when a check
-    runs rather than through an import that would close the cycle.
+    `next.urls` imports `next.pages`, so the parser is reached at check time
+    rather than through an import that would close the cycle.
     """
     parser: URLPatternParser = importlib.import_module(
         "next.urls.parser"

@@ -36,7 +36,7 @@ def _write_zoned_page(directory: Path, body: str) -> Path:
 
 
 _PROVIDER_COUNT = 10
-# Priced so ten providers outweigh the render and the filter delta reads clean.
+# Sized so the ten providers outweigh the render and the filter delta shows.
 _PROVIDER_WORK = 2000
 _PRICED_ZONES = "".join(
     f'{{% zone "z_{i}" %}}<p>{{{{ k_{i} }}}}</p>{{% endzone %}}'
@@ -54,16 +54,15 @@ def _priced_provider() -> str:
 def _priced_page(directory: Path, *, scoped: bool) -> Iterator[Path]:
     """Build a ten-zone page whose providers are bound to a zone or not.
 
-    The registrations land in the module-level page singleton, so they are
-    taken back out on the way through.
+    The registrations land in the module-level page singleton, so teardown
+    takes them back out.
     """
     page_file = _write_zoned_page(directory, _PRICED_DJX)
     registry = page_singleton._context_manager
     for i in range(_PROVIDER_COUNT):
         zone = f"z_{i}" if scoped else None
         registry.register_context(page_file, f"k_{i}", _priced_provider, zone=zone)
-    # render_zone drives the module-level page singleton, so seed its
-    # composed-template cache once before the timed loop.
+    # Seed the composed-template cache so the timed loop measures the render.
     page_singleton.composed_template_for(page_file)
     try:
         yield page_file

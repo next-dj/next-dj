@@ -441,9 +441,9 @@ def _zone_bound_contexts(
 ) -> "Iterator[tuple[str, str]]":
     """Yield the label and bound zone name of every zone-bound `@context` of a page.
 
-    The page-context registry keys on the file declaring the callable,
-    which for a `page.py` is the very path the page scan walked, so the
-    composed-page path looks the bindings up directly.
+    The registry keys on the file declaring the callable, which for a
+    `page.py` is the path the page scan walked, so the composed-page path
+    looks the bindings up directly.
     """
     for binding in bindings:
         if binding.zones is None:

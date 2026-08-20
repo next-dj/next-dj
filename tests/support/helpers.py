@@ -173,7 +173,7 @@ def file_router_backend_from_params(params: object) -> object:
 
 
 def counting_provider(calls: list[str], name: str) -> Callable[[], str]:
-    """Return a context provider recording every call of its own under `name`."""
+    """Return a context provider appending `name` to `calls` on every call."""
 
     def provider() -> str:
         calls.append(name)

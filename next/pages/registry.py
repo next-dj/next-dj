@@ -50,10 +50,10 @@ class PageContextEntry(NamedTuple):
 class ZoneBinding(NamedTuple):
     """One registered `@context` seen through its zone binding.
 
-    The zone diagnostics pair a zone-bound callable with the callables
-    reading its key, so they need the zones next to the callable itself
-    while the rest of the entry stays inside the registry. A `zones` of
-    `None` marks a callable every render runs.
+    The zone diagnostics pair a bound callable with the callables reading
+    its key, so the zones travel next to the callable while the rest of the
+    entry stays inside the registry. A `zones` of `None` marks a callable
+    every render runs.
     """
 
     key: str | None
@@ -142,11 +142,7 @@ class PageContextRegistry:
         }
 
     def zone_bindings(self) -> dict[Path, tuple[ZoneBinding, ...]]:
-        """Return the zone view of the callables registered per file, for the checks.
-
-        The zone diagnostics read a callable's zones, its key, and its
-        signature, and this keeps them off the registry storage itself.
-        """
+        """Return the zone view of the callables registered per file, for the checks."""
         return {
             file_path: tuple(
                 ZoneBinding(
