@@ -19,6 +19,7 @@ SLUG_ATTEMPTS_PER_LENGTH = 10
 SLUG_MAX_LENGTH = 12
 
 LATEST_LINKS_ZONE = "latest-links"
+BADGE_ZONE = "links-badge"
 _TEMPLATE_PATH = Path(__file__).resolve().parent / "template.djx"
 _ROW_TEMPLATE = Template('{% component "link_row" link=link %}')
 
@@ -88,14 +89,18 @@ def _render_row(link: Link, request: HttpRequest) -> str:
     )
 
 
-@context("recent_links")
+@context("recent_links", zone=LATEST_LINKS_ZONE)
 def recent_links() -> list[Link]:
     return list(Link.objects.all()[:5])
 
 
-@context("pending_total_label")
+@context("pending_total_label", zone=BADGE_ZONE)
 def pending_total_label() -> str:
-    """Label the badge zone with the live total of unflushed clicks."""
+    """Label the badge zone with the live total of unflushed clicks.
+
+    The `zone=` binding keeps the click-cache sum out of a `latest-links`
+    render, while the badge morph the detail page aims here still gets it.
+    """
     total = sum(pending_clicks().values())
     return f"{total} pending clicks"
 

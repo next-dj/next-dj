@@ -169,7 +169,7 @@ The expensive query is guarded by `zone_requested`, the idiom that makes the laz
 from next.partial import zone_requested
 
 
-@context("entries")
+@context("entries", zone="audit-table")
 def entries(request: HttpRequest) -> list[AuditEntry] | None:
     if not zone_requested(request, "audit-table"):
         return None
@@ -181,6 +181,8 @@ def entries(request: HttpRequest) -> list[AuditEntry] | None:
 ```
 
 On the full render the provider returns `None` and the query never runs. On the zone GET — where `X-Next-Zone: audit-table` is set — `zone_requested` is true and the rows load. The `?kind=` filter still reads `request.GET`, so it works on the zone request the same way it worked on the old full page. Without the runtime the placeholder simply stays, so the critical, always-needed content lives outside the lazy zone by design.
+
+The two filters stack rather than compete. `zone="audit-table"` on the decorator is the first filter, so a GET for any other zone on the page never calls `entries` at all. `zone_requested` inside the body covers the full render, where no zone is requested and every provider runs, and the body of a `lazy="revealed"` zone is not painted there.
 
 ### 9. Comparing the two audit channels
 

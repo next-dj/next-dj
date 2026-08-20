@@ -10,9 +10,13 @@ scripts = [
 ]
 
 
-@context("totals")
+@context("totals", zone="overview-totals")
 def totals() -> dict[str, int]:
-    """Return the headline counters every overview tile reads from."""
+    """Return the headline counters every overview tile reads from.
+
+    The `zone=` binding keeps the four aggregations off the lazy
+    `busiest-pages` GET.
+    """
     return {
         "pages_rendered": metrics.total_for_kind("pages.rendered"),
         "components_rendered": metrics.total_for_kind("components.rendered"),

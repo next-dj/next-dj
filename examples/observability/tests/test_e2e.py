@@ -314,6 +314,17 @@ class TestLazyLoadZone:
         assert "No pages have been rendered yet." not in html
         assert "Loading the busiest pages" not in html
 
+    def test_lazy_zone_get_skips_the_totals_provider(self, client, monkeypatch) -> None:
+        calls: list[str] = []
+
+        def _record(kind: str) -> int:
+            calls.append(kind)
+            return 0
+
+        monkeypatch.setattr(metrics, "total_for_kind", _record)
+        client.get_zones("/", "busiest-pages")
+        assert calls == []
+
 
 class TestMetricPulseVerb:
     """A partial apply morphs the totals zone and emits the custom verb."""

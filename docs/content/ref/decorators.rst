@@ -15,7 +15,7 @@ Decorators
 @context
 ~~~~~~~~
 
-.. py:decorator:: @context(func_or_key=None, *, inherit_context=False, serialize=False, serializer=None)
+.. py:decorator:: @context(func_or_key=None, *, inherit_context=False, serialize=False, serializer=None, zone=None)
 
 Registers a context function on a page module (``page.py``).
 The first positional argument is ``func_or_key``.
@@ -26,6 +26,9 @@ Pass ``serialize=True`` to expose the return value to the browser under ``window
 The value must be JSON-encodable by the active serializer.
 See :ref:`Serialization for the browser <topics-context-serialization>` for the contract.
 Pass ``serializer=`` to route that key through a custom ``JsContextSerializer``.
+Pass ``zone="name"`` to run the callable only for a matching zone GET request.
+The callable still runs on a full page render.
+``zone=`` cannot be combined with ``inherit_context=True``, and the pair raises ``ValueError`` at registration.
 
 @component.context
 ~~~~~~~~~~~~~~~~~~

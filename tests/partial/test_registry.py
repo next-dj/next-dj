@@ -153,6 +153,47 @@ class TestZonesOf:
         assert out == "<p>deep</p>"
 
 
+def _nested_template() -> Template:
+    source = (
+        '{% zone "outer" %}<p>{{ a }}</p>'
+        '{% zone "inner" %}<b>{{ b }}</b>'
+        '{% zone "deep" %}<i>{{ c }}</i>{% endzone %}'
+        "{% endzone %}"
+        "{% endzone %}"
+    )
+    return Template(source)
+
+
+class TestZoneInfoNested:
+    """`ZoneInfo.nested` names the zones declared inside the zone body."""
+
+    def test_leaf_zone_has_no_nested_names(self) -> None:
+        zones = zones_of(_nested_template())
+        assert zones["deep"].nested == frozenset()
+
+    def test_zone_names_its_direct_child(self) -> None:
+        zones = zones_of(_nested_template())
+        assert zones["inner"].nested == frozenset({"deep"})
+
+    def test_nesting_is_transitive(self) -> None:
+        zones = zones_of(_nested_template())
+        assert zones["outer"].nested == frozenset({"inner", "deep"})
+
+    def test_placeholder_branch_stays_out(self) -> None:
+        template = Template(
+            '{% zone "host" lazy="load" %}body{% placeholder %}'
+            '{% zone "ph" %}x{% endzone %}{% endzone %}'
+        )
+        zones = zones_of(template)
+        assert set(zones) == {"host", "ph"}
+        assert zones["host"].nested == frozenset()
+
+    def test_plain_zone_map_carries_empty_nested(self) -> None:
+        zones = zones_of(_zoned_template())
+        assert zones["first"].nested == frozenset()
+        assert zones["second"].nested == frozenset()
+
+
 class TestZoneRegisteredSignal:
     """`zone_registered` fires once per source on the first read."""
 

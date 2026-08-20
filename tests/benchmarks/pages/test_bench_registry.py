@@ -55,3 +55,15 @@ class TestBenchPageContextRegistry:
         for i in range(20):
             registry.register_context(page_path, f"k_{i}", _context_func)
         benchmark(registry.collect_context, page_path)
+
+    @pytest.mark.benchmark(group="pages.registry")
+    def test_collect_context_zone_tagged_full_render(
+        self, tmp_path: Path, benchmark
+    ) -> None:
+        """Full render of zone-bound callables, where the filter runs but skips none."""
+        page_path = tmp_path / "page.py"
+        page_path.touch()
+        registry = PageContextRegistry(None)
+        for i in range(20):
+            registry.register_context(page_path, f"k_{i}", _context_func, zone=f"z_{i}")
+        benchmark(registry.collect_context, page_path)

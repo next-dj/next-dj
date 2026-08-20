@@ -19,7 +19,7 @@ The page tree is `dashboards/`. The components live next to the pages that use t
 
 The filter form uses the framework `{% form "window_filter_form" %}` tag. Submitting it fires `forms.action_dispatched` so the example exercises the full form path without adding a model write. From the live page the form targets the `live-totals` zone, so the apply rides the partial protocol and ships a project-defined verb beside the built-in morph.
 
-The overview shows the other two zone modes. The stat-tile grid sits in `{% zone "overview-totals" poll="5s" %}`, so the client re-GETs the zone every five seconds and the counters refresh without a reload. Each poll tick re-renders the four tiles, so the components counter also counts the poll's own renders — visible proof the polling works. The busiest-pages widget below the sparkline is a `lazy="load"` zone: the first paint ships only its `{% placeholder %}` branch and the body arrives through one batched zone-GET as soon as the page loads.
+The overview shows the other two zone modes. The stat-tile grid sits in `{% zone "overview-totals" poll="5s" %}`, so the client re-GETs the zone every five seconds and the counters refresh without a reload. Each poll tick re-renders the four tiles, so the components counter also counts the poll's own renders — visible proof the polling works. The busiest-pages widget below the sparkline is a `lazy="load"` zone: the first paint ships only its `{% placeholder %}` branch and the body arrives through one batched zone-GET as soon as the page loads. The `totals` provider is declared as `@context("totals", zone="overview-totals")`, so the lazy GET for the widget skips the four counter aggregations it would never read, while the full render still runs them.
 
 ## How to run
 

@@ -63,7 +63,7 @@ The decorator
 
 The page-side ``@context`` decorator has two shapes.
 One is a keyed single value, the other is an unkeyed dict.
-The ``inherit_context`` flag and direct registration, covered after the two shapes, vary how a function is registered.
+The ``inherit_context`` flag, the ``zone`` keyword, and direct registration, covered after the two shapes, vary how a function is registered.
 
 Keyed single value
 ~~~~~~~~~~~~~~~~~~
@@ -119,6 +119,31 @@ The inherit_context flag
 
 Use this for header copy, brand colors, feature flags, and other shared values.
 Without the flag the value is only available when that exact ``page.py`` handles the request, and descendant routes cannot read it.
+
+The zone keyword
+~~~~~~~~~~~~~~~~
+
+``zone="name"`` binds a callable to one :doc:`zone <partial-rendering/zones>`.
+A zone GET that asks for any other zone skips the callable before its dependencies are resolved, so a lazy or polling neighbour does not pay for it.
+
+.. code-block:: python
+   :caption: admin/audit/page.py
+
+   from next import context
+   from audit.models import AuditEntry
+
+   @context("entries", zone="audit-table")
+   def entries() -> list[AuditEntry]:
+       return list(AuditEntry.objects.all()[:100])
+
+A full page render carries no zone batch and runs every page level callable, tagged or not.
+When the callable must also stay idle on a full render, keep the ``zone_requested`` guard inside its body, see :doc:`partial-rendering/scenarios`.
+
+A zone declared inside the body of a requested zone counts as requested with it, so its bound callables run when the outer body renders.
+
+A ``zone=`` that names a zone the page does not declare is reported as ``next.E078`` by ``manage.py check``, because no zone request would ever match the callable.
+A callable that takes the key of a zone-bound provider as a parameter receives ``None`` outside that zone, where the provider is skipped, and ``next.W077`` warns about the pair.
+Bind the reader to the same zone with ``zone=``, or have it handle the ``None``.
 
 Reusing a shared helper
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -197,6 +222,8 @@ The framework computes the template scope in this order.
 1. URL kwargs from the matched route are seeded into the context dict.
 2. Inherited context functions from every ancestor ``page.py``, walked from the current page upward through every ancestor directory, bounded at 64 levels.
 3. Page level context functions declared in the current ``page.py``.
+   A callable tagged ``zone="name"`` runs only when that zone belongs to the batch the current zone GET asks for, and a callable of any other zone is never called.
+   A full page render carries no batch and runs every page level callable, tagged or not.
 4. Context processors run after every ``@context`` callable.
    A processor is called with the request, and the callable must declare a parameter named ``request``.
    The first source is ``OPTIONS.context_processors`` on each page backend entry inside ``PAGE_BACKENDS``.
@@ -224,6 +251,10 @@ When two ancestor directories publish the same inherited key, the value from the
 
 The current page can shadow an inherited value by declaring a context function with the same key.
 The page level value takes precedence, and every layout wrapper in the chain sees that value.
+
+``inherit_context=True`` and ``zone=`` are incompatible, and combining them raises ``ValueError`` at registration.
+A zone is declared in the template of a descendant page, so an ancestor ``page.py`` has no way to name it.
+Inherited context therefore always runs, zone GET or full render alike.
 
 Inherited function that names a URL parameter
 ---------------------------------------------
@@ -361,6 +392,7 @@ Functions decorated with a key may return any value.
 
 A ``page.py`` holds one keyless slot.
 Registering a second bare ``@context`` replaces the first, and ``next.E018`` reports the shadowed callable.
+The slot holds one callable whatever its ``zone=``, so a second bare ``@context`` bound to another zone still displaces the first.
 Give each function a key or merge them.
 
 ``check_context_processor_signature`` reports ``next.E040`` when a processor listed under ``OPTIONS.context_processors`` does not accept a ``request`` parameter.

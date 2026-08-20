@@ -569,9 +569,11 @@ class Patches:
         fresh copy is handed out because consumers mutate the mapping.
         """
         if self._render_context is None:
+            # Pinned so mypy does not read the url kwarg splat as the zone batch.
             self._render_context = page.build_render_context(
                 self._resolve_page_path(),
                 self._require_request(),
+                _requested_zones=None,
                 **self._origin_url_kwargs(),
             )
         return dict(self._render_context)

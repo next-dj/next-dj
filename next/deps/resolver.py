@@ -104,8 +104,12 @@ class DependencyResolver:
             self._providers.extend(self._get_providers())
             self._providers_loaded = True
 
-    def _should_skip_parameter(self, param: inspect.Parameter) -> bool:
-        """Return True for `self` / `cls` and variadic parameters."""
+    def skips(self, param: inspect.Parameter) -> bool:
+        """Return True for `self` / `cls` and variadic parameters.
+
+        Public so a system check can ask the resolver itself which
+        parameters it refuses to fill.
+        """
         return param.name in ("self", "cls") or param.kind in (
             inspect.Parameter.VAR_POSITIONAL,
             inspect.Parameter.VAR_KEYWORD,
@@ -119,6 +123,27 @@ class DependencyResolver:
             if provider.can_handle(param, context):
                 return provider.resolve(param, context)
         return None if param.default is inspect.Parameter.empty else param.default
+
+    def provides(
+        self,
+        func: Callable[..., Any],
+        param: inspect.Parameter,
+        context: ResolutionContext,
+    ) -> bool:
+        """Return whether a registered provider fills `param` of `func` in `context`.
+
+        `func` travels along because a provider may read the callable to
+        resolve the annotation, and `EXPLICIT_RESOLVE_KEYS` is left to the
+        caller.
+        """
+        self._ensure_providers()
+        self._resolve_call_stack.append(func)
+        try:
+            return any(
+                provider.can_handle(param, context) for provider in self._providers
+            )
+        finally:
+            self._resolve_call_stack.pop()
 
     def register_dependency(
         self, name: str, callable_dep: Callable[..., Any]
@@ -234,7 +259,7 @@ class DependencyResolver:
 
             result: dict[str, Any] = {}
             for name, param in sig.parameters.items():
-                if self._should_skip_parameter(param):
+                if self.skips(param):
                     continue
 
                 value = self._resolve_parameter(param, context)

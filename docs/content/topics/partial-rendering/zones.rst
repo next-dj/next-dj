@@ -83,6 +83,7 @@ The verb comes from the renderer registered for the asset kind, so a kind regist
 An inline body keeps that verb only when the kind wraps it in the element the runtime builds, so a body of a kind that wraps it differently, or not at all, also stays with the full render.
 On a zone ``GET`` the envelope also ships the values of the page's ``serialize=True`` context providers, introduced in :doc:`/content/topics/context`, as a ``context`` patch.
 ``Next.context`` therefore stays in step with the re-rendered zone.
+A zone declared inside the body of another renders as part of that body, so a standalone render of the outer zone also runs the context callables bound to the inner one.
 See :doc:`co-located-js` for what once-per-page execution means for behaviour.
 See :doc:`/content/topics/static-assets/asset-kinds` for the renderer that decides the verb, and :doc:`/content/topics/static-assets/index` for how the assets are discovered and bundled.
 
@@ -109,6 +110,8 @@ A hidden tab holds no poll timers.
 On its return to the foreground each zone refetches only when its own interval elapsed while hidden, and otherwise the countdown resumes with the remaining time.
 A brief flicker between tabs therefore fetches nothing, and switching windows does not storm the server.
 A polling zone shows its body, so it cannot also be ``lazy=``, the two modes are exclusive and combining them is a compile error.
+A context callable tagged ``@context(..., zone="name")`` does not run on a foreign poll tick.
+A poll GET runs the zone-less callables plus the ones bound to the polled zone, see :doc:`/content/topics/context`.
 
 The wrapper element
 -------------------

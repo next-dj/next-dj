@@ -17,7 +17,7 @@ from next.urls import FileRouterBackend, HttpRequestProvider, UrlKwargsProvider
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Callable, Generator
 
 
 def build_mock_http_request(*, path: str | None = "/test/", **attrs) -> MagicMock:
@@ -170,3 +170,13 @@ def file_router_backend_from_params(params: object) -> object:
             return FileRouterBackend(params[0])
         return params
     return params
+
+
+def counting_provider(calls: list[str], name: str) -> Callable[[], str]:
+    """Return a context provider appending `name` to `calls` on every call."""
+
+    def provider() -> str:
+        calls.append(name)
+        return f"{name}-value"
+
+    return provider

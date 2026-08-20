@@ -9,6 +9,7 @@ from next.deps import (
     DependencyResolver,
     Depends,
     RegisteredParameterProvider,
+    ResolutionContext,
     resolver,
 )
 from next.deps.cache import _IN_PROGRESS, DependencyCache
@@ -607,3 +608,50 @@ class TestCachedAcceptsVarKeyword:
             assert key in _var_keyword_cache
         finally:
             _var_keyword_cache.pop(key, None)
+
+
+class TestDependencyResolverProvides:
+    """`provides` answers whether any registered provider fills a parameter."""
+
+    def _context(self, request=None) -> ResolutionContext:
+        return ResolutionContext(
+            request=request,
+            form=None,
+            url_kwargs={},
+            context_data={},
+            cache=DependencyCache(),
+        )
+
+    def test_provides_true_for_a_claimed_parameter(self, mock_http_request) -> None:
+        def fn(request: HttpRequest) -> None:
+            return None
+
+        instance = DependencyResolver()
+        param = inspect.signature(fn).parameters["request"]
+        assert instance.provides(fn, param, self._context(mock_http_request())) is True
+
+    def test_provides_false_for_an_unclaimed_parameter(self) -> None:
+        def fn(entries) -> None:
+            return None
+
+        instance = DependencyResolver()
+        param = inspect.signature(fn).parameters["entries"]
+        assert instance.provides(fn, param, self._context()) is False
+
+    def test_provides_reads_the_annotation_through_the_callable(
+        self, mock_http_request
+    ) -> None:
+        def fn(request: "HttpRequest") -> None:
+            return None
+
+        param = inspect.signature(fn).parameters["request"]
+        assert param.annotation == "HttpRequest"
+        assert resolver.provides(fn, param, self._context(mock_http_request())) is True
+
+    def test_provides_leaves_the_resolve_stack_empty(self) -> None:
+        def fn(entries) -> None:
+            return None
+
+        param = inspect.signature(fn).parameters["entries"]
+        resolver.provides(fn, param, self._context())
+        assert resolver.current_callable() is None

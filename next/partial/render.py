@@ -92,15 +92,11 @@ def render_zone(
 ) -> ZoneRenderResult:
     """Render the named zones of a page with the full page context.
 
-    The context is collected once for the whole batch of names through
-    `build_render_context` and a fresh collector is seeded by the same
-    convention as the canonical render path, so co-located assets of the
-    zone bodies are gathered. A caller that already built the origin context
-    passes it as `context_data` so it is reused rather than rebuilt. The
-    manifest travels outward in the result rather than through inject, which
-    is a no-op for fragments. Unknown zone names are skipped so one stale
-    name never poisons a batch, but a batch of only unknown names raises so
-    a single-zone request keeps its 400.
+    The batch travels into the context build widened by the zones nested in
+    the requested bodies, so a `@context(zone=)` bound outside it never runs.
+    An unknown zone name is skipped so one stale name never poisons a batch,
+    while a batch of only unknown names raises and a single-zone request keeps
+    its 400.
     """
     start = time.perf_counter()
     kwargs = url_kwargs or {}
@@ -109,7 +105,12 @@ def render_zone(
     rendered_names = _renderable_zone_names(zone_names, zones)
 
     if context_data is None:
-        context_data = page.build_render_context(page_path, request, **kwargs)
+        context_data = page.build_render_context(
+            page_path,
+            request,
+            _requested_zones=_context_zone_names(rendered_names, zones),
+            **kwargs,
+        )
     if overrides:
         context_data.update(overrides)
 
@@ -145,6 +146,20 @@ def _renderable_zone_names(
     if zone_names and not rendered:
         raise UnknownZoneError(zone_names[0], tuple(sorted(zones)))
     return rendered
+
+
+def _context_zone_names(
+    rendered: tuple[str, ...], zones: "Mapping[str, ZoneInfo]"
+) -> frozenset[str]:
+    """Return the batch names widened by the zones nested in their bodies.
+
+    A nested zone renders inside the body of a requested one, so its
+    zone-bound context callables have to run for the batch.
+    """
+    widened = set(rendered)
+    for name in rendered:
+        widened |= zones[name].nested
+    return frozenset(widened)
 
 
 def _seed_collector(
