@@ -47,6 +47,14 @@ The laziness covers the package root, not the subsystems it fronts.
 Reading ``Depends`` imports ``next.deps``, which pulls in a small set of modules from ``django.dispatch`` and ``django.utils``.
 Reading ``page``, ``context``, ``component``, or ``action`` loads a much larger part of Django.
 
+.. rubric:: API tiers and the cross-area contract
+
+Subsystem pages carry their own tier vocabularies, and those vocabularies stay as they are.
+:doc:`forms` and :doc:`partial` group their surface into Stable, Advanced, and Internal hooks, while :doc:`components` uses Application Imports, Framework Extension, and Internal Infrastructure.
+A fourth category sits beside those tiers, the cross-area contract, underscore-free methods that one ``next`` area calls on another.
+Such a method is safe from removal without notice, but it carries no Stable-tier guarantee for application code.
+:doc:`pages` lists the concrete methods.
+
 .. rubric:: Subsystems
 
 :doc:`pages`

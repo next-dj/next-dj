@@ -29,6 +29,14 @@ Public API
 
 .. autodata:: next.pages.page
 
+Cross-area contract
+~~~~~~~~~~~~~~~~~~~
+
+Four ``Page`` methods carry no leading underscore because other framework areas call them, not because application code should.
+``composed_template_for``, ``build_render_context``, ``render_with_static_assets``, and ``authorization_outcome`` serve ``next.forms`` and ``next.partial``.
+They follow the underscore rule of :doc:`/content/faq/general`, so they are safe from removal without notice.
+They do not carry the application-facing stability of a Stable tier, and their signatures may drift as partial rendering evolves.
+
 Manager
 ~~~~~~~
 

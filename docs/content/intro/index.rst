@@ -39,6 +39,9 @@ The six tutorial parts build a small Notes application from there.
 :doc:`tutorial06`
    Make the index live with zones and partial rendering, with a no-JavaScript fallback.
 
+:doc:`limitations`
+   The deliberate boundaries of the framework, from the synchronous pipeline to the single partial backend.
+
 :doc:`whatsnext`
    Where to go for deeper topics, recipes, and reference material.
 
@@ -55,4 +58,5 @@ The six tutorial parts build a small Notes application from there.
    tutorial04
    tutorial05
    tutorial06
+   limitations
    whatsnext
