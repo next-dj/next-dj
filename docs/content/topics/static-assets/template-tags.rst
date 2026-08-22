@@ -96,11 +96,13 @@ use_module
 
 The asset registers under kind ``module`` and renders as a ``<script type="module">`` tag through the backend ``render_module_tag`` hook.
 The asset is prepended to the collector the same way as ``use_style`` and ``use_script``.
-The tag has no ``#use_module`` block form because the ``module`` kind registers no inline tag.
+The browser defers a module script, so the prepend controls markup order, not execution order relative to classic scripts.
+The tag has no ``#use_module`` block form.
+The ``module`` kind names no inline wrapper element, so a block body would land in the slot verbatim instead of as an inline ES module, see :doc:`asset-kinds`.
 
 .. note::
 
-   The five registration tags need the request-scoped collector that the page pipeline puts in the template context.
+   The ``use_*`` registration tags and their block forms need the request-scoped collector that the page pipeline puts in the template context.
    A template rendered outside that pipeline, for example through ``render_to_string`` in a plain view, silently registers nothing and emits nothing.
 
 Inline blocks

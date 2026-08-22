@@ -73,7 +73,7 @@ class TestUseModuleTag:
         assert template.render(Context({})) == ""
 
     def test_block_use_module_is_not_registered(self) -> None:
-        with pytest.raises(TemplateSyntaxError):
+        with pytest.raises(TemplateSyntaxError, match="#use_module"):
             Template("{% load next_static %}{% #use_module %}x{% /use_module %}")
 
 

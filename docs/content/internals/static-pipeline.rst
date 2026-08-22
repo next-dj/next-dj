@@ -119,7 +119,7 @@ Signals
 The pipeline fires four signals.
 
 - ``asset_registered`` fires once per co-located file registered through a backend.
-  Module-level ``styles`` and ``scripts`` lists and every ``{% use_style %}``, ``{% use_script %}``, and ``{% use_module %}`` form, void or block, call ``collector.add`` directly and do not emit it.
+  Module-level ``styles`` and ``scripts`` lists, every ``{% use_style %}`` and ``{% use_script %}`` form, void or block, and the ``{% use_module %}`` tag call ``collector.add`` directly and do not emit it.
 - ``collector_finalized`` once per request after the collector closes its set.
 - ``html_injected`` once per request after the manager replaces the placeholder slots.
 - ``backend_loaded`` once per backend instance when the manager builds it, including the staticfiles backend it seeds when no entry survives.
