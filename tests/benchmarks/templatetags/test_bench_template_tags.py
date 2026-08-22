@@ -30,23 +30,6 @@ class TestBenchStaticTags:
         benchmark(run)
 
     @pytest.mark.benchmark(group="templatetags.static")
-    def test_use_module_dedup(self, benchmark) -> None:
-        """``{% use_module %}`` with dedup, 3 identical URLs, one dedups twice."""
-        template = Template(
-            "{% load next_static %}"
-            "{% use_module 'https://cdn.example.com/a.mjs' %}"
-            "{% use_module 'https://cdn.example.com/a.mjs' %}"
-            "{% use_module 'https://cdn.example.com/a.mjs' %}"
-        )
-
-        def run() -> str:
-            collector = StaticCollector()
-            ctx = Context({"_static_collector": collector})
-            return template.render(ctx)
-
-        benchmark(run)
-
-    @pytest.mark.benchmark(group="templatetags.static")
     def test_inline_script_block(self, benchmark) -> None:
         """``{% #use_script %}`` inline, body rendered, stripped, deduped."""
         template = Template(

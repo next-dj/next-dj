@@ -73,7 +73,7 @@ The CSS cascade therefore flows from generic dependencies to page specific styli
 use_script
 ----------
 
-``{% use_script %}`` registers an external JS URL on the active collector.
+``{% use_script %}`` registers an external URL on the active collector.
 
 .. code-block:: jinja
    :caption: notes/pages/template.djx
@@ -81,13 +81,23 @@ use_script
    {% use_script "https://cdn.example.com/vendor.js" %}
 
 The asset is prepended to the collector the same way as ``use_style``.
-The tag registers the URL under kind ``js``, so it renders as a classic ``<script>`` tag.
-For an ECMAScript module, use ``{% use_module %}`` or list the ``.mjs`` URL in the page or component ``scripts`` module-level variable, see :doc:`co-located-files`.
+
+The optional ``kind`` argument defaults to ``js``, which renders a classic ``<script>`` tag.
+Any other registered kind works too, and the registry decides both the slot the asset lands in and the backend renderer that builds its tag.
+
+.. code-block:: jinja
+   :caption: notes/pages/template.djx
+
+   {% use_script "https://cdn.example.com/vendor.mjs" kind="module" %}
+   {% use_script "https://cdn.example.com/inter.woff2" kind="font" %}
+
+A custom kind registered through ``KindRegistry.register`` therefore needs no template tag of its own, see :doc:`asset-kinds`.
+A kind that was never registered raises ``KeyError`` out of the render, so a typo surfaces on the first request instead of dropping the asset.
 
 use_module
 ----------
 
-``{% use_module %}`` registers an external ECMAScript module URL on the active collector.
+``{% use_module %}`` is the shorthand for ``{% use_script %}`` with ``kind="module"``.
 
 .. code-block:: jinja
    :caption: notes/pages/template.djx
@@ -95,10 +105,11 @@ use_module
    {% use_module "https://cdn.example.com/vendor.mjs" %}
 
 The asset registers under kind ``module`` and renders as a ``<script type="module">`` tag through the backend ``render_module_tag`` hook.
-The asset is prepended to the collector the same way as ``use_style`` and ``use_script``.
 The browser defers a module script, so the prepend controls markup order, not execution order relative to classic scripts.
 The tag has no ``#use_module`` block form.
 The ``module`` kind names no inline wrapper element, so a block body would land in the slot verbatim instead of as an inline ES module, see :doc:`asset-kinds`.
+
+The same URL registered under two kinds is two assets, so ``{% use_script %}`` and ``{% use_module %}`` on one URL emit both a classic and a module tag, see :doc:`deduplication`.
 
 .. note::
 

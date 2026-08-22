@@ -153,15 +153,17 @@ Static pipeline
    Registers an external CSS URL on the active collector.
    The asset is prepended so shared dependencies load before co-located styles.
 
-.. describe:: {% use_script "<url>" %}
+.. describe:: {% use_script "<url>" [kind="<kind>"] %}
 
-   Registers an external JS URL on the active collector.
+   Registers an external URL on the active collector.
    The asset is prepended the same way as ``use_style``.
+   The ``kind`` argument defaults to ``js`` and accepts any registered kind, which decides both the slot and the renderer.
+   An unregistered kind raises ``KeyError`` out of the render.
 
 .. describe:: {% use_module "<url>" %}
 
-   Registers an external ECMAScript module URL on the active collector.
-   The asset renders as a ``<script type="module">`` tag and is prepended the same way as ``use_script``.
+   Shorthand for ``{% use_script "<url>" kind="module" %}``.
+   The asset renders as a ``<script type="module">`` tag.
    Has no block form.
 
 .. describe:: {% #use_style %}...{% /use_style %}

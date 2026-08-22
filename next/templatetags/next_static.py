@@ -2,9 +2,9 @@
 
 The collect tags emit placeholder tokens and the use tags register assets on
 the request's ``StaticCollector``, so ``StaticManager.inject`` controls the
-final markup once ``Page.render`` has collected every referenced asset.
-Custom kinds register through the same public ``KindRegistry.register`` API
-without needing new template tags.
+final markup once ``Page.render`` has collected every referenced asset. The
+``kind`` argument of ``{% use_script %}`` reaches every kind in the registry,
+so a kind added through ``KindRegistry.register`` needs no tag of its own.
 """
 
 from __future__ import annotations
@@ -57,15 +57,20 @@ def use_style(context: template.Context, url: str) -> str:
 
 
 @register.simple_tag(takes_context=True)
-def use_script(context: template.Context, url: str) -> str:
-    """Register an external JS URL on the active collector for later injection."""
-    _register_asset(context, url, _KIND_JS)
+def use_script(context: template.Context, url: str, kind: str = _KIND_JS) -> str:
+    """Register an external URL on the active collector under the given kind.
+
+    The kind defaults to ``js`` and accepts any registered kind, so the
+    registry decides both the slot and the renderer. An unregistered kind
+    raises ``KeyError`` out of the render.
+    """
+    _register_asset(context, url, kind)
     return ""
 
 
 @register.simple_tag(takes_context=True)
 def use_module(context: template.Context, url: str) -> str:
-    """Register an external ES module URL on the active collector for injection."""
+    """Register an ES module URL, the ``kind="module"`` shorthand for use_script."""
     _register_asset(context, url, _KIND_MODULE)
     return ""
 

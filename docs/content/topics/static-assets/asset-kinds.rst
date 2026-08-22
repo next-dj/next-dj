@@ -194,11 +194,13 @@ Register a new slot when a kind should inject somewhere other than the standard 
 
 The layout must contain the slot token, or a template tag that emits it, for the manager to find a place to inject.
 A module-level list named after the slot, such as ``preload = [...]`` in ``page.py``, registers external URLs into it, see :ref:`topics-static-module-lists`.
+From a template, ``{% use_script "<url>" kind="font" %}`` registers the same URL, because the ``kind`` argument reaches every registered kind, see :doc:`template-tags`.
 
 Module kind
 -----------
 
 The ``module`` kind renders ``<script type="module" src="...">`` through ``render_module_tag``.
+Discovery picks it up from a co-located ``.mjs`` file, a ``scripts`` module-level list entry, or the ``{% use_module %}`` tag, which is the ``kind="module"`` shorthand for ``{% use_script %}``, see :doc:`template-tags`.
 Customise the rendered output through the ``module_tag`` key in the backend ``OPTIONS`` mapping, see :doc:`backends`.
 
 The ``module`` kind carries no ``inline_tag``, so it renders an inline body verbatim, as do custom kinds registered without an ``inline_tag``.
