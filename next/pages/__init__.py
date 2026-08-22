@@ -1,8 +1,9 @@
 """The pages subsystem covering templates, context, layouts, rendering, and URLs.
 
-This package exposes a narrow public surface. Internal helpers are
-available through deep imports from the submodules (`context`,
-`loaders`, `registry`, `processors`, `watch`, `manager`, `scan`).
+The names listed in `__all__` form the guaranteed public surface.
+A few underscore-free `Page` methods additionally serve `next.forms` and
+`next.partial` as a cross-area contract without a stability guarantee,
+as documented in the pages API reference.
 """
 
 from __future__ import annotations

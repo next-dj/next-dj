@@ -33,7 +33,8 @@ Conventions
 Module layout
 ~~~~~~~~~~~~~
 
-Each subsystem keeps a shallow layout where every submodule is small.
+Each subsystem keeps a shallow layout, while the size and number of its submodules vary from area to area.
+:doc:`adding-an-area` states the backbone contract a new area follows.
 A new submodule joins ``__init__.py`` only when its public surface needs a shorter import path.
 A submodule grows into a package of its own only when one concern splits across several bodies, and its façade keeps the import path the callers already use.
 

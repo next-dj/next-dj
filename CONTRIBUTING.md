@@ -275,10 +275,14 @@ Use **draft** PRs for work in progress.
 
 Maintainers check style with Ruff and mypy, review tests, and assess how the change fits `next/`. Response time depends on maintainer availability. This document does not define a fixed SLA.
 
+## First contributions
+
+Issues labeled [good first issue](https://github.com/next-dj/next-dj/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) are the entry point for newcomers — small, atomic tasks that touch one area and carry enough context to start without deep framework knowledge. Discuss questions and the intended approach in the issue thread before opening a PR.
+
 ## Help
 
 - Search [issues](https://github.com/next-dj/next-dj/issues) and prior PRs.
-- Mirror patterns in `next/` and `tests/` for similar features — each area is consistent with itself.
+- Areas share a backbone (`registry.py`, `manager.py`, `backends.py` where they apply), but each area picks its own module set — copy the closest existing area, not a fixed template.
 - For failing coverage after `make test`, inspect terminal output and `htmlcov/index.html`.
 - For quick test loops, run `uv run pytest tests/ -n auto` without coverage flags.
 - If `uv build` fails on the JS step with a clear `npm` error, ensure Node 24 is on `PATH` or set `NEXT_DJ_SKIP_JS_BUILD=1` when a valid bundle already exists.

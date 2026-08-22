@@ -87,6 +87,10 @@ The ``next.testing`` submodules are documented that way, so :doc:`/content/intro
 
 Second, symbols whose names start with a single underscore are internal and may change without notice, even when they appear in a module ``__all__``.
 The underscore rule is binding and overrides any incidental re-export.
+
+A few underscore-free names carry a narrower cross-area contract, documented on the reference page of their subsystem (see :doc:`/content/ref/pages`).
+The underscore rule holds for them, so they are not removed without notice, but they do not promise the application-facing stability of the Stable tier.
+
 See :doc:`/content/ref/forms` for a concrete example of how the API tiers apply to ``next.forms``.
 
 See also
