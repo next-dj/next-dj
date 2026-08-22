@@ -196,8 +196,8 @@ The static checks validate the backend configuration at startup.
 Run ``uv run python manage.py check`` after editing the backend list.
 The full list of static check codes lives in :doc:`/content/ref/system-checks`.
 
-The ``next.W031`` check validates the ``css_tag`` and ``js_tag`` templates.
-The ``module_tag`` template is not checked, so verify it contains ``{url}`` yourself.
+The ``next.W031`` check validates the ``css_tag``, ``js_tag``, and ``module_tag`` templates.
+A template that carries no ``{url}`` placeholder raises the warning, because the rendered tag would carry no asset URL.
 
 Common patterns
 ---------------

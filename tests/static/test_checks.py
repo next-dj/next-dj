@@ -143,6 +143,20 @@ class TestOptionsWarnings:
             messages = check_static_backends(app_configs=None)
         assert "next.W031" in _ids(messages)
 
+    def test_module_tag_without_placeholder_emits_w031(self) -> None:
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "STATIC_BACKENDS": [
+                    {
+                        "BACKEND": "next.static.StaticFilesBackend",
+                        "OPTIONS": {"module_tag": '<script type="module"></script>'},
+                    }
+                ]
+            }
+        ):
+            messages = check_static_backends(app_configs=None)
+        assert "next.W031" in _ids(messages)
+
     def test_non_string_tag_template_is_ignored(self) -> None:
         with override_settings(
             NEXT_FRAMEWORK={
