@@ -1,22 +1,13 @@
 """Template tags for static asset injection slots.
 
-``{% collect_styles %}`` emits a placeholder where CSS ``<link>`` tags will be
-written after rendering. ``{% collect_scripts %}`` emits a placeholder for JS
-``<script>`` tags. The placeholders are replaced by ``StaticManager.inject``
-once ``Page.render`` has collected every referenced asset from the page, its
-layouts, and nested components. ``{% use_style %}`` and ``{% use_script %}``
-register an external URL on the active ``StaticCollector`` so that layouts and
-templates can pull in shared third-party libraries without touching
-``page.py`` or ``component.py`` module lists. ``{% #use_style %}`` and
-``{% #use_script %}`` are block forms whose body is rendered with the current
-context and hoisted into the matching slot, so developers can co-locate
-inline ``<style>`` or ``<script>`` blocks with their components while still
-letting the collector control final placement and order.
-
-These convenience tags lean on the bootstrap-registered ``css`` and ``js``
-kinds. Custom kinds added by user code register through the same public
-``KindRegistry.register`` API and pick up automatic discovery without needing
-new template tags.
+``{% collect_styles %}`` and ``{% collect_scripts %}`` emit the placeholders
+that ``StaticManager.inject`` replaces after rendering. ``{% use_style %}``,
+``{% use_script %}``, and ``{% use_module %}`` register an external URL on the
+active ``StaticCollector``, and the ``{% #use_style %}`` / ``{% #use_script %}``
+block forms hoist an inline body into the matching slot. The tags lean on the
+bootstrap-registered ``css``, ``js``, and ``module`` kinds. Custom kinds
+register through the same public ``KindRegistry.register`` API and pick up
+automatic discovery without needing new template tags.
 """
 
 from __future__ import annotations
@@ -39,6 +30,7 @@ register = template.Library()
 
 _KIND_CSS = "css"
 _KIND_JS = "js"
+_KIND_MODULE = "module"
 _END_BLOCK_USE_STYLE = ("/use_style",)
 _END_BLOCK_USE_SCRIPT = ("/use_script",)
 
@@ -74,13 +66,20 @@ def use_script(context: template.Context, url: str) -> str:
     return ""
 
 
+@register.simple_tag(takes_context=True)
+def use_module(context: template.Context, url: str) -> str:
+    """Register an external ES module URL on the active collector for injection."""
+    _register_asset(context, url, _KIND_MODULE)
+    return ""
+
+
 def _register_asset(context: template.Context, url: str, kind: str) -> None:
     """Prepend an asset to the render's ``StaticCollector`` when one exists in context.
 
-    Assets declared from templates with ``{% use_style %}`` / ``{% use_script %}``
-    are treated as shared third-party dependencies and are inserted before any
-    co-located files or module-level lists, so the CSS cascade flows from
-    generic dependencies to page-specific styling.
+    Assets declared from templates with the ``use_style`` / ``use_script`` /
+    ``use_module`` URL tags are treated as shared third-party dependencies and
+    are inserted before any co-located files or module-level lists, so the CSS
+    cascade flows from generic dependencies to page-specific styling.
     """
     if not isinstance(url, str) or not url:
         return

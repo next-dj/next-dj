@@ -51,6 +51,8 @@ class TestWithQuery:
             ("/x/?q=old&p=1", {"q": "new"}, "/x/?p=1&q=new"),
             ("/x/?q=old&p=1", {"q": None}, "/x/?p=1"),
             ("/x/", {"tag": ["a", "b"]}, "/x/?tag=a&tag=b"),
+            ("/x/?tag=a&tag=b", {"tag": []}, "/x/"),
+            ("/x/?tag=a&tag=b", {"tag": ()}, "/x/"),
             ("/x/", {"page": 2}, "/x/?page=2"),
             ("/x/y/?a=1#top", {"a": "2"}, "/x/y/?a=2#top"),
             ("/x/", {"q": "a b&c"}, "/x/?q=a+b%26c"),
@@ -60,6 +62,8 @@ class TestWithQuery:
             "override",
             "drop_none",
             "list_value",
+            "drop_empty_list",
+            "drop_empty_tuple",
             "coerce_int",
             "preserve_fragment",
             "urlencode_special",
@@ -67,6 +71,10 @@ class TestWithQuery:
     )
     def test_query_string_composition(self, base, overrides, expected) -> None:
         assert with_query(base, **overrides) == expected
+
+    def test_empty_sequence_is_equivalent_to_none(self) -> None:
+        base = "/x/?tag=a&tag=b"
+        assert with_query(base, tag=[]) == with_query(base, tag=None)
 
 
 class TestPageReverseLazy:

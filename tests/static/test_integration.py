@@ -101,6 +101,23 @@ class TestUseStyleBlocksThroughPipeline:
         assert 'href="https://cdn/shared.css"' in final
 
 
+class TestUseModuleThroughPipeline:
+    """{% use_module %} URL reaches the document as a module script tag."""
+
+    def test_use_module_lands_in_final_html(
+        self, wired_manager: StaticManager, collector: StaticCollector
+    ) -> None:
+        template = Template(
+            "{% load next_static %}"
+            '{% use_module "https://cdn/vendor.mjs" %}'
+            f"{SCRIPTS_PLACEHOLDER}"
+        )
+        rendered = template.render(Context({"_static_collector": collector}))
+
+        final = wired_manager.inject(rendered, collector)
+        assert '<script type="module" src="https://cdn/vendor.mjs"></script>' in final
+
+
 class TestInlineBlocksThroughPipeline:
     """`{% #use_style %}` / `{% #use_script %}` reach the head as working tags."""
 

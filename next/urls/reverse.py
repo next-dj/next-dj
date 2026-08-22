@@ -31,7 +31,8 @@ def with_query(base: str, **overrides) -> str:
     """Return `base` with its query string updated by `overrides`.
 
     `None` values drop their key from the result. Multi-valued keys can be
-    set by passing a list/tuple value.
+    set by passing a list/tuple value. An empty list or tuple (`[]`/`()`)
+    also drops the key, equivalent to `None`.
     """
     parts = urlsplit(base)
     params = parse_qsl(parts.query, keep_blank_values=True)

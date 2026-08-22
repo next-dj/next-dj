@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from django.template import Context, Template
+import pytest
+from django.template import Context, Template, TemplateSyntaxError
 
-from next.static import StaticCollector
+from next.static import StaticAsset, StaticCollector
 
 
 STYLES_PLACEHOLDER = "<!-- next:styles -->"
@@ -49,6 +50,31 @@ class TestUseStyleScriptInlineTags:
         template = Template('{% load next_static %}{% use_style "https://cdn/a.css" %}')
         result = template.render(Context({}))
         assert result == ""
+
+
+class TestUseModuleTag:
+    def test_use_module_registers_and_emits_nothing(self) -> None:
+        out, coll = _render(
+            '{% load next_static %}{% use_module "https://cdn/a.mjs" %}'
+        )
+        assert out == ""
+        scripts = coll.assets_in_slot("scripts")
+        assert [(a.url, a.kind) for a in scripts] == [("https://cdn/a.mjs", "module")]
+
+    def test_use_module_ignores_empty_url(self) -> None:
+        out, coll = _render('{% load next_static %}{% use_module "" %}')
+        assert out == ""
+        assert coll.assets_in_slot("scripts") == []
+
+    def test_use_module_noop_without_collector(self) -> None:
+        template = Template(
+            '{% load next_static %}{% use_module "https://cdn/a.mjs" %}'
+        )
+        assert template.render(Context({})) == ""
+
+    def test_block_use_module_is_not_registered(self) -> None:
+        with pytest.raises(TemplateSyntaxError):
+            Template("{% load next_static %}{% #use_module %}x{% /use_module %}")
 
 
 class TestBlockUseStyleScript:
@@ -105,3 +131,13 @@ class TestPrependOrdering:
         )
         urls = [a.url for a in coll.assets_in_slot("styles")]
         assert urls == ["https://cdn/a.css", "https://cdn/b.css"]
+
+    def test_use_module_lands_at_front(self) -> None:
+        collector = StaticCollector()
+        collector.add(StaticAsset(url="https://cdn/colocated.js", kind="js"))
+        template = Template(
+            '{% load next_static %}{% use_module "https://cdn/a.mjs" %}'
+        )
+        template.render(Context({"_static_collector": collector}))
+        urls = [a.url for a in collector.assets_in_slot("scripts")]
+        assert urls == ["https://cdn/a.mjs", "https://cdn/colocated.js"]

@@ -3,9 +3,9 @@
 Static template tags
 ====================
 
-The static pipeline registers four Django template tags plus two inline block forms.
+The static pipeline registers five Django template tags plus two inline block forms.
 ``{% collect_styles %}`` and ``{% collect_scripts %}`` mark placeholder slots in the layout.
-``{% use_style %}`` and ``{% use_script %}`` register an external URL on the active collector.
+``{% use_style %}``, ``{% use_script %}``, and ``{% use_module %}`` register an external URL on the active collector.
 ``{% #use_style %}`` and ``{% #use_script %}`` are block forms that capture an inline body.
 
 .. contents::
@@ -81,12 +81,26 @@ use_script
    {% use_script "https://cdn.example.com/vendor.js" %}
 
 The asset is prepended to the collector the same way as ``use_style``.
-The tag always registers the URL under kind ``js``, so it cannot publish an ECMAScript module.
-For a ``.mjs`` dependency, list the URL in the page or component ``scripts`` module-level variable instead, see :doc:`co-located-files`.
+The tag registers the URL under kind ``js``, so it renders as a classic ``<script>`` tag.
+For an ECMAScript module, use ``{% use_module %}`` or list the ``.mjs`` URL in the page or component ``scripts`` module-level variable, see :doc:`co-located-files`.
+
+use_module
+----------
+
+``{% use_module %}`` registers an external ECMAScript module URL on the active collector.
+
+.. code-block:: jinja
+   :caption: notes/pages/template.djx
+
+   {% use_module "https://cdn.example.com/vendor.mjs" %}
+
+The asset registers under kind ``module`` and renders as a ``<script type="module">`` tag through the backend ``render_module_tag`` hook.
+The asset is prepended to the collector the same way as ``use_style`` and ``use_script``.
+The tag has no ``#use_module`` block form because the ``module`` kind registers no inline tag.
 
 .. note::
 
-   The four registration tags need the request-scoped collector that the page pipeline puts in the template context.
+   The five registration tags need the request-scoped collector that the page pipeline puts in the template context.
    A template rendered outside that pipeline, for example through ``render_to_string`` in a plain view, silently registers nothing and emits nothing.
 
 Inline blocks

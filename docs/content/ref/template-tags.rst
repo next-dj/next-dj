@@ -158,6 +158,12 @@ Static pipeline
    Registers an external JS URL on the active collector.
    The asset is prepended the same way as ``use_style``.
 
+.. describe:: {% use_module "<url>" %}
+
+   Registers an external ECMAScript module URL on the active collector.
+   The asset renders as a ``<script type="module">`` tag and is prepended the same way as ``use_script``.
+   Has no block form.
+
 .. describe:: {% #use_style %}...{% /use_style %}
 
    Inline CSS block.

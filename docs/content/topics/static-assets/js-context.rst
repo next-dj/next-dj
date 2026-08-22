@@ -235,7 +235,7 @@ Co-located JS and inline scripts then read the value under ``window.Next.context
    });
 
 The runtime script defines ``window.Next`` before the collected scripts run.
-The runtime script is always the first tag in the ``scripts`` slot, ahead of every co-located, module-list, and ``{% use_script %}`` asset, so any of those may safely read ``window.Next``.
+The runtime script is always the first tag in the ``scripts`` slot, ahead of every co-located, module-list, ``{% use_script %}``, and ``{% use_module %}`` asset, so any of those may safely read ``window.Next``.
 
 Client event API
 ~~~~~~~~~~~~~~~~~
