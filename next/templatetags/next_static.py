@@ -1,15 +1,10 @@
 """Template tags for static asset injection slots.
 
-``{% collect_styles %}`` and ``{% collect_scripts %}`` emit the placeholders
-that ``StaticManager.inject`` fills once ``Page.render`` has collected every
-referenced asset from the page, its layouts, and nested components.
-``{% use_style %}``, ``{% use_script %}``, and ``{% use_module %}`` register
-an external URL on the active ``StaticCollector``, and the
-``{% #use_style %}`` / ``{% #use_script %}`` block forms hoist an inline body
-into the matching slot. The tags lean on the bootstrap-registered ``css``,
-``js``, and ``module`` kinds. Custom kinds register through the same public
-``KindRegistry.register`` API and pick up automatic discovery without needing
-new template tags.
+The collect tags emit placeholder tokens and the use tags register assets on
+the request's ``StaticCollector``, so ``StaticManager.inject`` controls the
+final markup once ``Page.render`` has collected every referenced asset.
+Custom kinds register through the same public ``KindRegistry.register`` API
+without needing new template tags.
 """
 
 from __future__ import annotations
@@ -78,11 +73,9 @@ def use_module(context: template.Context, url: str) -> str:
 def _register_asset(context: template.Context, url: str, kind: str) -> None:
     """Prepend an asset to the render's ``StaticCollector`` when one exists in context.
 
-    Assets declared from templates with the ``use_style`` / ``use_script`` /
-    ``use_module`` URL tags are treated as shared third-party dependencies and
-    are inserted before any co-located files or module-level lists, so
-    dependency tags precede page-specific assets in the slot and the CSS
-    cascade flows from generic dependencies to page-specific styling.
+    URL-tag assets are shared third-party dependencies, so they land before
+    co-located files and module-level lists and the CSS cascade flows from
+    generic to page-specific.
     """
     if not isinstance(url, str) or not url:
         return
