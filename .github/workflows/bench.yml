@@ -7,13 +7,11 @@ on:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
 
-# PR runs are cancellable on new pushes. Main pushes are NOT cancelled
-# so the gh-pages auto-push cannot be left half-committed.
+# Main pushes are not cancelled so the gh-pages auto-push cannot be left half-committed.
 concurrency:
   group: bench-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# Job-level permissions override these per job (least privilege).
 permissions:
   contents: read
 
@@ -22,10 +20,7 @@ defaults:
     shell: bash
 
 env:
-  # Tuned for "fast enough on shared GitHub runners". Warmup eats one
-  # full pass per test, so 1000 iterations are plenty for branch /
-  # icache priming on CPython 3.13. Rounds = 10 keeps wall-clock under
-  # control while still giving stddev meaningful for the ×4 hard gate.
+  # Sized for shared GitHub runners, where more rounds buy noise, not signal.
   BENCH_FLAGS: >-
     -m perf
     --benchmark-only
@@ -42,8 +37,7 @@ env:
   PYTHONDONTWRITEBYTECODE: "1"
 
 jobs:
-  # Same-runner paired comparison via `git worktree`. Produces the
-  # artefact consumed by `comment` and `publish`.
+  # Paired comparison via `git worktree`, artefact consumed by `comment` and `publish`.
   bench:
     if: >-
       ${{ (github.event_name != 'pull_request'
@@ -94,8 +88,7 @@ jobs:
       - name: Create base worktree
         run: git worktree add --detach ../base "${{ steps.shas.outputs.base }}"
 
-      # Compute the BASE lockfile hash via sha256sum because `hashFiles()`
-      # is restricted to paths inside $GITHUB_WORKSPACE.
+      # `hashFiles()` cannot reach outside $GITHUB_WORKSPACE, so hash the worktree copy here.
       - name: Hash BASE lockfile
         id: base_lock
         run: |
@@ -107,9 +100,6 @@ jobs:
           fi
           echo "hash=$hash" >> "$GITHUB_OUTPUT"
 
-      # `ubuntu-latest` hands out more than one CPU generation, and a base
-      # result restored from a different one turns the paired comparison
-      # into a cross-hardware one that shifts every benchmark at once.
       - name: Identify runner CPU
         id: cpu
         run: |
@@ -119,11 +109,8 @@ jobs:
           echo "::notice::bench runner CPU is $model"
           echo "slug=$(printf '%s' "$model" | tr -cd '[:alnum:]' | cut -c1-32)" >> "$GITHUB_OUTPUT"
 
-      # Most PRs target the same `main` SHA. Caching the BASE result by
-      # base-SHA + lockfile hash means the second PR skips the BASE bench
-      # (and its `uv sync`) entirely. The CPU slug is part of the key so a
-      # runner of another generation re-measures the base instead of
-      # comparing against a number from foreign hardware.
+      # Most PRs share a base SHA, so the second one skips the BASE bench entirely.
+      # `ubuntu-latest` spans CPU generations, and the slug keeps a base off foreign hardware.
       - name: Cache BASE benchmark result
         id: base_cache
         uses: actions/cache@v4
@@ -153,19 +140,9 @@ jobs:
       - name: Sync head dependencies
         run: uv sync --locked --dev --python 3.13
 
-      # HEAD bench prints the comparison table itself (--benchmark-compare)
-      # and trips the hard gate via --benchmark-compare-fail. One pytest
-      # invocation does what used to take three steps.
-      #
-      # `--benchmark-compare` accepts a glob over saved-run filenames.
-      # `*_base` matches `0001_base.json` regardless of the auto-counter.
-      #
-      # `--benchmark-compare-fail` percentage parser enforces 0 < N < 100,
-      # so 99% (≈ ×2 of base) is the strictest hard gate the tool will
-      # accept. Anything tighter would noise-trip on shared CI runners
-      # anyway. The gate compares medians: the mean is swayed by single
-      # scheduling spikes on shared runners, while a real regression
-      # shifts the whole distribution and moves the median with it.
+      # `*_base` matches `0001_base.json` whatever the auto-counter did.
+      # The percentage parser enforces 0 < N < 100, so 99% is the strictest gate available.
+      # It compares medians because a scheduling spike moves the mean and a regression does not.
       - name: Bench HEAD and gate
         id: gate
         continue-on-error: true
@@ -178,10 +155,8 @@ jobs:
             --benchmark-compare-fail=median:99% \
             2>&1 | tee bench-compare.txt
 
-      # pytest-benchmark warns about a machine_info mismatch but still
-      # fails the gate on it. A cross-hardware compare moves every
-      # benchmark at once, so it says nothing about the diff and the hard
-      # gate stands down to a warning.
+      # A cross-hardware compare moves every benchmark at once, so it says nothing
+      # about the diff. pytest-benchmark warns and fails the gate anyway.
       - name: Check base and head ran on the same CPU
         id: machine
         if: always()
@@ -210,9 +185,7 @@ jobs:
             echo "same=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # Non-failing warning tier: surfaces sub-2x median drift the hard
-      # gate cannot express. It must never become a failing step, or the
-      # shared-runner noise the median gate avoids comes straight back.
+      # Never make this fail, or the shared-runner noise the median gate avoids comes back.
       - name: Warn on median drift over 30%
         if: always()
         run: |
@@ -311,9 +284,7 @@ jobs:
           echo "::error::pytest-benchmark compare-fail tripped (median ratio ≥ 2× of base)."
           exit 1
 
-  # Sticky PR comment. Runs after `bench` even on a hard regression so
-  # authors see the table when the gate trips. PRs from forks are
-  # skipped at the posting step (read-only GITHUB_TOKEN).
+  # Runs even on a tripped gate so authors see the table. Forks skip the posting step.
   comment:
     needs: bench
     if: ${{ github.event_name == 'pull_request' && always() && needs.bench.result != 'skipped' }}
@@ -351,8 +322,7 @@ jobs:
           path: ./_bench/bench-comment.md
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Push HEAD numbers to gh-pages history. Reuses the bench artefact,
-  # so benchmarks are not re-run.
+  # Reuses the bench artefact rather than re-running the benchmarks.
   publish:
     needs: bench
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.bench.result == 'success' }}
