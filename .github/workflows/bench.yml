@@ -107,9 +107,23 @@ jobs:
           fi
           echo "hash=$hash" >> "$GITHUB_OUTPUT"
 
+      # `ubuntu-latest` hands out more than one CPU generation, and a base
+      # result restored from a different one turns the paired comparison
+      # into a cross-hardware one that shifts every benchmark at once.
+      - name: Identify runner CPU
+        id: cpu
+        run: |
+          set -euo pipefail
+          model=$(awk -F': ' '/^model name/ {print $2; exit}' /proc/cpuinfo)
+          test -n "$model"
+          echo "::notice::bench runner CPU is $model"
+          echo "slug=$(printf '%s' "$model" | tr -cd '[:alnum:]' | cut -c1-32)" >> "$GITHUB_OUTPUT"
+
       # Most PRs target the same `main` SHA. Caching the BASE result by
       # base-SHA + lockfile hash means the second PR skips the BASE bench
-      # (and its `uv sync`) entirely.
+      # (and its `uv sync`) entirely. The CPU slug is part of the key so a
+      # runner of another generation re-measures the base instead of
+      # comparing against a number from foreign hardware.
       - name: Cache BASE benchmark result
         id: base_cache
         uses: actions/cache@v4
@@ -117,7 +131,7 @@ jobs:
           path: |
             .benchmarks
             bench-base.json
-          key: bench-base-${{ steps.shas.outputs.base }}-${{ steps.base_lock.outputs.hash }}
+          key: bench-base-${{ steps.shas.outputs.base }}-${{ steps.base_lock.outputs.hash }}-${{ steps.cpu.outputs.slug }}
 
       - name: Sync base dependencies
         if: steps.base_cache.outputs.cache-hit != 'true'
@@ -164,6 +178,38 @@ jobs:
             --benchmark-compare-fail=median:99% \
             2>&1 | tee bench-compare.txt
 
+      # pytest-benchmark warns about a machine_info mismatch but still
+      # fails the gate on it. A cross-hardware compare moves every
+      # benchmark at once, so it says nothing about the diff and the hard
+      # gate stands down to a warning.
+      - name: Check base and head ran on the same CPU
+        id: machine
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ ! -s bench-base.json ] || [ ! -s bench-head.json ]; then
+            echo "::notice::bench JSON missing, cannot verify the runner hardware."
+            echo "same=unknown" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          read_cpu() {
+            uv run python -c \
+              "import json,sys; print(json.load(open(sys.argv[1]))['machine_info']['cpu']['brand_raw'])" \
+              "$1"
+          }
+          base_cpu=$(read_cpu bench-base.json)
+          head_cpu=$(read_cpu bench-head.json)
+          {
+            echo "base_cpu=$base_cpu"
+            echo "head_cpu=$head_cpu"
+          } >> "$GITHUB_OUTPUT"
+          if [ "$base_cpu" = "$head_cpu" ]; then
+            echo "same=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning title=bench hardware mismatch::base ran on '$base_cpu', head on '$head_cpu'. The paired comparison is cross-hardware, so the hard gate stands down."
+            echo "same=false" >> "$GITHUB_OUTPUT"
+          fi
+
       # Non-failing warning tier: surfaces sub-2x median drift the hard
       # gate cannot express. It must never become a failing step, or the
       # shared-runner noise the median gate avoids comes straight back.
@@ -205,12 +251,23 @@ jobs:
           {
             echo "## next-dj benchmarks"
             echo
-            echo "Same-runner paired comparison on \`ubuntu-latest\` (Python 3.13)."
+            if [ "${{ steps.machine.outputs.same }}" = "false" ]; then
+              echo "Cross-hardware paired comparison on \`ubuntu-latest\` (Python 3.13)."
+              echo "Base ran on \`${{ steps.machine.outputs.base_cpu }}\`, head on \`${{ steps.machine.outputs.head_cpu }}\`."
+            else
+              echo "Same-runner paired comparison on \`ubuntu-latest\` (Python 3.13)."
+            fi
             echo "Base \`${{ steps.shas.outputs.base_short }}\` → head \`${{ steps.shas.outputs.head_short }}\`."
             echo "Hard-fail threshold: \`median:99%\` (≈ ×2 of base, the parser's max)."
             echo
             case "${{ steps.gate.outcome }}" in
-              failure) echo "**Result:** :red_circle: hard regression detected." ;;
+              failure)
+                if [ "${{ steps.machine.outputs.same }}" = "false" ]; then
+                  echo "**Result:** :yellow_circle: the gate tripped on a cross-hardware comparison, so it is reported and not enforced. Re-run once base and head land on the same CPU."
+                else
+                  echo "**Result:** :red_circle: hard regression detected."
+                fi
+                ;;
               success) echo "**Result:** :green_circle: within tolerance." ;;
               *)       echo "**Result:** :grey_question: bench did not finish (\`${{ steps.gate.outcome }}\`). See workflow logs." ;;
             esac
@@ -249,7 +306,7 @@ jobs:
           if-no-files-found: error
 
       - name: Fail job on hard regression
-        if: ${{ steps.gate.outcome == 'failure' }}
+        if: ${{ steps.gate.outcome == 'failure' && steps.machine.outputs.same != 'false' }}
         run: |
           echo "::error::pytest-benchmark compare-fail tripped (median ratio ≥ 2× of base)."
           exit 1
