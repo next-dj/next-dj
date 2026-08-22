@@ -134,7 +134,7 @@ class TestBlockUseStyleScript:
 
 
 class TestPrependOrdering:
-    """use_style/use_script insert before co-located files via collector prepend."""
+    """The use tags insert ahead of co-located files through collector prepend."""
 
     def test_use_style_lands_at_front(self) -> None:
         _, coll = _render(

@@ -30,9 +30,8 @@ page_reverse_lazy = lazy(page_reverse, str)
 def with_query(base: str, **overrides) -> str:
     """Return `base` with its query string updated by `overrides`.
 
-    `None` values drop their key from the result. Multi-valued keys can be
-    set by passing a list/tuple value. An empty list or tuple (`[]`/`()`)
-    also drops the key, equivalent to `None`.
+    A `None` or empty list/tuple value drops its key, a non-empty list or
+    tuple sets a multi-valued key, and anything else sets a single value.
     """
     parts = urlsplit(base)
     params = parse_qsl(parts.query, keep_blank_values=True)

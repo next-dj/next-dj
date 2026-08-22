@@ -1,11 +1,7 @@
-/* Site-wide keyboard shortcut for the examples catalog. Pressing "/" outside
-   a text field focuses the first search input on the page, the way the search
-   boxes in admin, wiki, and search-catalog expect.
-
-   This module belongs to no single component, so it is registered from the
-   shared page_head with {% use_module %} rather than co-located next to a
-   component.djx. A single listener on document survives a morph that replaces
-   the search markup, where a per-element listener would be lost. */
+/* Focus the first search input when "/" is pressed outside a text field.
+   The shortcut belongs to no single component, so page_head registers it with
+   use_module instead of co-locating it. A single listener on document survives
+   a morph that replaces the search markup, where a per-element one would not. */
 
 const SEARCH_SELECTOR = 'input[type="search"], input[name="q"]';
 
