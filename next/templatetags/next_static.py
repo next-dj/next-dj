@@ -1,22 +1,8 @@
 """Template tags for static asset injection slots.
 
-``{% collect_styles %}`` emits a placeholder where CSS ``<link>`` tags will be
-written after rendering. ``{% collect_scripts %}`` emits a placeholder for JS
-``<script>`` tags. The placeholders are replaced by ``StaticManager.inject``
-once ``Page.render`` has collected every referenced asset from the page, its
-layouts, and nested components. ``{% use_style %}`` and ``{% use_script %}``
-register an external URL on the active ``StaticCollector`` so that layouts and
-templates can pull in shared third-party libraries without touching
-``page.py`` or ``component.py`` module lists. ``{% #use_style %}`` and
-``{% #use_script %}`` are block forms whose body is rendered with the current
-context and hoisted into the matching slot, so developers can co-locate
-inline ``<style>`` or ``<script>`` blocks with their components while still
-letting the collector control final placement and order.
-
-These convenience tags lean on the bootstrap-registered ``css`` and ``js``
-kinds. Custom kinds added by user code register through the same public
-``KindRegistry.register`` API and pick up automatic discovery without needing
-new template tags.
+The collect tags emit placeholder tokens and the use tags register assets on
+the request's ``StaticCollector``, so ``StaticManager.inject`` owns the final
+markup once ``Page.render`` has seen every referenced asset.
 """
 
 from __future__ import annotations
@@ -39,6 +25,7 @@ register = template.Library()
 
 _KIND_CSS = "css"
 _KIND_JS = "js"
+_KIND_MODULE = "module"
 _END_BLOCK_USE_STYLE = ("/use_style",)
 _END_BLOCK_USE_SCRIPT = ("/use_script",)
 
@@ -68,19 +55,28 @@ def use_style(context: template.Context, url: str) -> str:
 
 
 @register.simple_tag(takes_context=True)
-def use_script(context: template.Context, url: str) -> str:
-    """Register an external JS URL on the active collector for later injection."""
-    _register_asset(context, url, _KIND_JS)
+def use_script(context: template.Context, url: str, kind: str = _KIND_JS) -> str:
+    """Register an external URL on the active collector under the given kind.
+
+    The kind reaches the registry unchanged, so it picks both the slot and the
+    renderer and a custom kind needs no tag of its own.
+    """
+    _register_asset(context, url, kind)
+    return ""
+
+
+@register.simple_tag(takes_context=True)
+def use_module(context: template.Context, url: str) -> str:
+    """Register an ES module URL, the ``kind="module"`` shorthand for use_script."""
+    _register_asset(context, url, _KIND_MODULE)
     return ""
 
 
 def _register_asset(context: template.Context, url: str, kind: str) -> None:
-    """Prepend an asset to the render's ``StaticCollector`` when one exists in context.
+    """Prepend an asset to the render's ``StaticCollector`` when context carries one.
 
-    Assets declared from templates with ``{% use_style %}`` / ``{% use_script %}``
-    are treated as shared third-party dependencies and are inserted before any
-    co-located files or module-level lists, so the CSS cascade flows from
-    generic dependencies to page-specific styling.
+    URL-tag assets are shared dependencies, so they belong ahead of co-located
+    files and the CSS cascade flows from generic to page-specific.
     """
     if not isinstance(url, str) or not url:
         return
@@ -93,19 +89,13 @@ def _register_asset(context: template.Context, url: str, kind: str) -> None:
 class _InlineAssetNode(Node):
     """Render an inline asset body and push it onto the active collector.
 
-    The block body is rendered with the current template context so inline
-    scripts and styles can still interpolate page variables. The rendered
-    body is stripped of leading and trailing whitespace before it reaches
-    the collector, so blank-only blocks are silently ignored. The collector
-    dedupes inline entries by the stripped body itself, so two blocks that
-    produce identical HTML collapse to one entry, while blocks that
-    interpolate different values into the body stay distinct. The node emits
-    nothing in place because the collector controls final placement inside
-    the matching collect_styles or collect_scripts slot.
+    The body renders with the current context so it can interpolate page
+    variables, and the node emits nothing in place because the collector owns
+    final placement inside the matching slot.
     """
 
     def __init__(self, kind: str, nodelist: NodeList) -> None:
-        """Remember the asset kind and the nested nodes to render at runtime."""
+        """Store the asset kind and the block body for the render pass."""
         self.kind = kind
         self.nodelist = nodelist
 

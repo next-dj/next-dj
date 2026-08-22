@@ -162,6 +162,11 @@ A scalar value replaces every existing entry for that key.
    with_query("/filter/?tag=python", tag=["python", "django"])
    # "/filter/?tag=python&tag=django"
 
+   with_query("/filter/?tag=python&tag=django", tag=[])
+   # "/filter/"
+
+An empty list or tuple removes every entry for the key, equivalent to ``tag=None``.
+
 Combining page_reverse and with_query
 -------------------------------------
 

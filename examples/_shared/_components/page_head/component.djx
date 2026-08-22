@@ -68,6 +68,7 @@
   </script>
   {% use_style "/static/shared/css/tokens.css" %}
   {% use_style "/static/shared/css/base.css" %}
+  {% use_module "/static/shared/js/base.mjs" %}
   {% collect_styles %}
   {% set_slot "extra" %}
 </head>

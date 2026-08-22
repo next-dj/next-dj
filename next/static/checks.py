@@ -104,7 +104,7 @@ def _check_single_backend(
         return messages
     options: Any = config.get("OPTIONS") or {}
     if isinstance(options, dict):
-        for tag_name in ("css_tag", "js_tag"):
+        for tag_name in ("css_tag", "js_tag", "module_tag"):
             if tag_name not in options:
                 continue
             message = _validate_tag_template(tag_name, options[tag_name], index)

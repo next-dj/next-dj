@@ -119,6 +119,10 @@ class TestBoardView:
         body = _board_html(client, board)
         assert re.search(r'<script type="module"', body)
 
+    def test_shared_base_module_present(self, client: NextClient, board: Board) -> None:
+        body = _board_html(client, board)
+        assert '<script type="module" src="/static/shared/js/base.mjs">' in body
+
     def test_inherit_context_visible_in_settings(
         self, client: NextClient, board: Board
     ) -> None:

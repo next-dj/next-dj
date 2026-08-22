@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from django.template import Context, Template
+import pytest
+from django.template import Context, Template, TemplateSyntaxError
 
-from next.static import StaticCollector
+from next.static import StaticAsset, StaticCollector
 
 
 STYLES_PLACEHOLDER = "<!-- next:styles -->"
@@ -51,6 +52,43 @@ class TestUseStyleScriptInlineTags:
         assert result == ""
 
 
+class TestUseScriptKindArgument:
+    def test_use_module_registers_the_module_kind(self) -> None:
+        out, coll = _render(
+            '{% load next_static %}{% use_module "https://cdn/a.mjs" %}'
+        )
+        assert out == ""
+        scripts = coll.assets_in_slot("scripts")
+        assert [(a.url, a.kind) for a in scripts] == [("https://cdn/a.mjs", "module")]
+
+    def test_use_script_kind_argument_matches_use_module(self) -> None:
+        out, coll = _render(
+            '{% load next_static %}{% use_script "https://cdn/a.mjs" kind="module" %}'
+        )
+        assert out == ""
+        scripts = coll.assets_in_slot("scripts")
+        assert [(a.url, a.kind) for a in scripts] == [("https://cdn/a.mjs", "module")]
+
+    def test_unregistered_kind_raises_out_of_the_render(self) -> None:
+        with pytest.raises(KeyError, match="wasm"):
+            _render('{% load next_static %}{% use_script "a.wasm" kind="wasm" %}')
+
+    def test_one_url_under_two_kinds_is_not_deduped(self) -> None:
+        _, coll = _render(
+            '{% load next_static %}{% use_script "https://cdn/x.js" %}'
+            '{% use_module "https://cdn/x.js" %}'
+        )
+        scripts = coll.assets_in_slot("scripts")
+        assert [(a.url, a.kind) for a in scripts] == [
+            ("https://cdn/x.js", "js"),
+            ("https://cdn/x.js", "module"),
+        ]
+
+    def test_block_use_module_is_not_registered(self) -> None:
+        with pytest.raises(TemplateSyntaxError, match="#use_module"):
+            Template("{% load next_static %}{% #use_module %}x{% /use_module %}")
+
+
 class TestBlockUseStyleScript:
     def test_inline_style_block(self) -> None:
         out, coll = _render(
@@ -96,7 +134,7 @@ class TestBlockUseStyleScript:
 
 
 class TestPrependOrdering:
-    """use_style/use_script insert before co-located files via collector prepend."""
+    """The use tags insert ahead of co-located files through collector prepend."""
 
     def test_use_style_lands_at_front(self) -> None:
         _, coll = _render(
@@ -105,3 +143,18 @@ class TestPrependOrdering:
         )
         urls = [a.url for a in coll.assets_in_slot("styles")]
         assert urls == ["https://cdn/a.css", "https://cdn/b.css"]
+
+    def test_use_script_and_use_module_share_one_prepend_run(self) -> None:
+        collector = StaticCollector()
+        collector.add(StaticAsset(url="https://cdn/colocated.js", kind="js"))
+        template = Template(
+            '{% load next_static %}{% use_script "https://cdn/a.js" %}'
+            '{% use_module "https://cdn/b.mjs" %}'
+        )
+        template.render(Context({"_static_collector": collector}))
+        urls = [a.url for a in collector.assets_in_slot("scripts")]
+        assert urls == [
+            "https://cdn/a.js",
+            "https://cdn/b.mjs",
+            "https://cdn/colocated.js",
+        ]

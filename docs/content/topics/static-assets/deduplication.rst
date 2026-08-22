@@ -24,6 +24,7 @@ The framework ships three strategies in ``next.static.collector``.
    The default.
    Keys URL assets by their URL and kind.
    Keys inline assets by their body and kind.
+   One URL registered under two kinds is therefore two keys, so ``{% use_script %}`` and ``{% use_module %}`` on the same URL both survive to injection.
 
 ``HashContentDedup``.
    Keys URL assets by the SHA-256 hash of the file at ``source_path``.
