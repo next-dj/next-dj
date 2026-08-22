@@ -145,6 +145,7 @@ Module map
 ----------
 
 Each subsystem keeps a shallow module layout, and a submodule becomes a package of its own only when one concern splits across several bodies, as the form dispatch pipeline does.
+The set of submodules differs by area, and :doc:`adding-an-area` states the contract a new area follows.
 
 .. list-table::
    :header-rows: 1

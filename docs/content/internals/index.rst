@@ -38,6 +38,9 @@ The partial rendering pipeline is traced in :doc:`/content/topics/partial-render
 :doc:`contributing-notes`
    Conventions the framework code follows.
 
+:doc:`adding-an-area`
+   Backbone contract for a new subsystem package.
+
 .. toctree::
    :hidden:
    :maxdepth: 1
@@ -52,3 +55,4 @@ The partial rendering pipeline is traced in :doc:`/content/topics/partial-render
    action-dispatch
    autoreload
    contributing-notes
+   adding-an-area
