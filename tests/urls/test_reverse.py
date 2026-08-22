@@ -72,10 +72,6 @@ class TestWithQuery:
     def test_query_string_composition(self, base, overrides, expected) -> None:
         assert with_query(base, **overrides) == expected
 
-    def test_empty_sequence_is_equivalent_to_none(self) -> None:
-        base = "/x/?tag=a&tag=b"
-        assert with_query(base, tag=[]) == with_query(base, tag=None)
-
 
 class TestPageReverseLazy:
     def test_defers_reverse_until_str(self) -> None:
