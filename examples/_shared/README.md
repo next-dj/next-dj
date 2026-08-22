@@ -239,5 +239,5 @@ When you move an existing project onto the shared kit:
 
 - Wire `SHARED_DIR`, `STATICFILES_DIRS`, and `COMPONENT_BACKENDS["DIRS"]` once in `settings.py`.
 - Remove any per-app `nav_link` / `stat_card` / `card` that now duplicates a shared component, otherwise `manage.py check` raises `next.E034` (root namespace collision).
-- Replace the `<head>` boilerplate (CDN script, two `{% use_style %}` lines, `{% collect_styles %}`) with `{% component "page_head" title="…" %}`.
+- Replace the `<head>` boilerplate (CDN script, two `{% use_style %}` lines, the `{% use_module %}` line, `{% collect_styles %}`) with `{% component "page_head" title="…" %}`.
 - Replace bespoke colour classes (`bg-slate-50`, `text-slate-900`, `bg-indigo-600`, …) with the short token aliases (`bg-background`, `text-foreground`, `bg-primary`, …) so per-tenant overrides cascade correctly.
