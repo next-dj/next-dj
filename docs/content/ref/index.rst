@@ -49,9 +49,10 @@ Reading ``page``, ``context``, ``component``, or ``action`` loads a much larger 
 
 .. rubric:: API tiers and the cross-area contract
 
-Subsystem pages carry their own tier vocabularies, and those vocabularies stay as they are.
+Subsystem pages carry their own tier vocabularies.
 :doc:`forms` and :doc:`partial` group their surface into Stable, Advanced, and Internal hooks, while :doc:`components` uses Application Imports, Framework Extension, and Internal Infrastructure.
-A fourth category sits beside those tiers, the cross-area contract, underscore-free methods that one ``next`` area calls on another.
+The cross-area contract is a fourth category beside those tiers and replaces none of them.
+It covers underscore-free methods that one ``next`` area calls on another.
 Such a method is safe from removal without notice, but it carries no Stable-tier guarantee for application code.
 :doc:`pages` lists the concrete methods.
 
