@@ -2,8 +2,8 @@
 
 Staying a `list` and a `dict` keeps every `isinstance` guard across the
 framework working unchanged, so freezing the merge costs no sweep of the
-readers. `copy.copy` and `copy.deepcopy` hand back plain mutable containers,
-so a caller who needs to edit a merged value still has a supported way to.
+readers. `copy.copy` and `copy.deepcopy` thaw a value back to plain
+containers, so editing a copy of the configuration stays possible.
 """
 
 from __future__ import annotations
@@ -31,10 +31,8 @@ def _immutable(*args: object, **kwargs: object) -> Never:
 class FrozenList(list[Any]):
     """A `list` whose mutating methods raise instead of changing contents.
 
-    `__init__` stays unguarded because the constructor needs it, so
-    re-invoking it by hand still refills the instance. That escape hatch
-    sits at the same tier as calling `list.append` unbound, which no
-    Python-level subclass can close.
+    `__init__` stays unguarded because the constructor needs it, so re-invoking
+    it by hand stays an escape hatch no Python-level subclass can close.
     """
 
     __slots__ = ()
@@ -143,10 +141,9 @@ def _freeze(value: object, memo: dict[int, object]) -> object:
 def freeze(value: object) -> object:
     """Return a deep immutable copy of one merged settings value.
 
-    Only exact `list`, `dict` and `tuple` values are rebuilt. Everything else,
-    subclasses included, is deep-copied the way the merge handled it before, so
-    the merge never aliases a value the caller still holds. The memo keeps
-    shared subtrees shared and turns a self-referential config into
+    Exact `list`, `dict` and `tuple` values are rebuilt and everything else is
+    deep-copied, so the merge never aliases a value the caller still holds.
+    Shared subtrees stay shared, and a self-referential config raises
     `ImproperlyConfigured` rather than a `RecursionError`.
     """
     return _freeze(value, {})

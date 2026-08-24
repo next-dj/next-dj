@@ -48,7 +48,7 @@ def _build_composite_component(root: Path) -> ComponentInfo:
 class TestBenchCompositeRender:
     @pytest.mark.benchmark(group="components.render")
     def test_render_end_to_end(self, tmp_path: Path, benchmark) -> None:
-        """Whole composite render: template read, compile, context merge, output.
+        """The whole composite render, from reading the template to the output.
 
         Disk and template compilation dominate this number, so it tracks the
         render as a whole rather than any single step of it.
@@ -69,7 +69,7 @@ class TestBenchCompositeRender:
 class TestBenchContextCollisionGuard:
     @pytest.mark.benchmark(group="components.render")
     def test_reject_collisions_on_a_clean_dict(self, tmp_path: Path, benchmark) -> None:
-        """The guard every keyless context dict pays, on a dict that collides with none."""
+        """The guard cost a keyless context dict pays when nothing collides."""
         info = build_component_info(tmp_path)
         guarded = _guarded_keys({COMPONENT_PROPS_CONTEXT_KEY: frozenset({"title"})})
         data = {"env": "prod", "version": "1"}

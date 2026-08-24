@@ -54,8 +54,7 @@ _SHORT_SLOT_EMPTY_NAME = "{% slot %} tag requires a quoted slot name"
 _SHORT_SET_SLOT_EMPTY_NAME = "{% set_slot %} tag requires a quoted slot name"
 
 # The key slot collection writes while the parent ``{% #component %}`` body
-# renders. ``_component_props`` needs no entry here because every node writes
-# its own set over whatever it inherited.
+# renders. ``_component_props`` stays out because every node overwrites it.
 _INTERNAL_CONTEXT_KEYS = frozenset({"_component_slots"})
 
 _DASH_BEFORE_DASH = re.compile(r"-(?=-)")
@@ -151,8 +150,8 @@ class ComponentNode(Node):
         self.name = name
         self.props = props
         self.nodelist = nodelist
-        # Prop names are fixed at compile time, so the render-time collision
-        # guard reads a set built once per node.
+        # Prop names are fixed at compile time, so the collision guard costs
+        # no rebuild per render.
         self.prop_names = frozenset(props)
 
     def _resolved_props(self, context: template.Context) -> dict[str, Any]:

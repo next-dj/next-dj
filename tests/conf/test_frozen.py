@@ -68,8 +68,8 @@ DICT_MUTATIONS = [
 LIST_GUARDED = frozenset(name for name, _ in LIST_MUTATIONS)
 DICT_GUARDED = frozenset(name for name, _ in DICT_MUTATIONS)
 
-# The rest of the inventory, inherited as is. `__init__` is in here because the
-# constructor needs it, which leaves re-invoking it by hand as an escape hatch.
+# The rest of the inventory, inherited as is, `__init__` included because the
+# constructor needs it.
 LIST_INHERITED = frozenset(
     {
         "__add__",

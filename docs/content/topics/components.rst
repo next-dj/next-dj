@@ -350,7 +350,7 @@ The reserved render keys are ``children``, ``request``, ``csrf_token``, ``curren
 The whole ``slot_`` prefix is reserved, so a returned ``slot_count`` raises even when the component declares no ``count`` slot.
 Register the value under an explicit ``@component.context("key")`` instead, which is the deliberate override and is never guarded.
 
-A page context key that reaches the component through the surrounding scope is not reserved, so an unkeyed dict may still shadow it for the component body.
+An ordinary page context key that reaches the component through the surrounding scope stays outside the guard, so an unkeyed dict may still shadow it for the component body.
 The ``{% component %}`` tag publishes the prop names of its own call site, ``ComponentWidget`` publishes the names it fills for its field, and ``render_component_by_name`` publishes the keys of its ``props`` mapping while leaving its ``context`` mapping ambient, so a bare ``render_component`` is the one path left guarding the reserved keys alone.
 The same component code therefore raises under ``{% component "note_card" preview=text %}`` and merges quietly under ``{% component "note_card" %}``.
 This failure leaves the render rather than degrading to an empty string, so ``STRICT_LOADING`` and ``DEBUG`` do not change it.

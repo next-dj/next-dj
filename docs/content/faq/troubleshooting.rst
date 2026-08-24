@@ -409,7 +409,7 @@ Merged NEXT_FRAMEWORK settings are immutable
 Appending to ``next_framework_settings.PAGE_BACKENDS``, assigning into it, or mutating a nested list or mapping raises ``TypeError`` reading ``Merged NEXT_FRAMEWORK settings are immutable``.
 The merge hands out frozen containers so that one caller cannot reshape the configuration every other reader sees.
 Change ``settings.NEXT_FRAMEWORK`` and call ``next_framework_settings.reload()``, or wrap the change in ``override_settings``, which reloads on its own.
-To work on a value of your own instead, copy it with ``list()``, ``dict()``, or ``copy.deepcopy`` for a nested one, each of which hands back a plain mutable container.
+To edit a copy instead, ``list()`` and ``dict()`` thaw the top level and ``copy.deepcopy`` thaws a nested value all the way down.
 Reading is untouched, so ``isinstance``, equality against a plain container, and ``json.dumps`` still work on a merged value.
 See :ref:`ref-conf` for the rest of the contract.
 

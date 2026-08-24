@@ -119,8 +119,7 @@ class ComponentWidget(django_forms.Widget):
             "errors": self._errors,
         }
         # Every name above comes from this widget and its field binding, so a
-        # keyless component context must not take any of them over. The set is
-        # read before the key itself lands in the context.
+        # keyless component context must not take any of them over.
         context[COMPONENT_PROPS_CONTEXT_KEY] = frozenset(context)
         # render_component returns template-rendered, already-escaped HTML, so a
         # SafeString wrapper matches the Widget.render contract without re-escaping.

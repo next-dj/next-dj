@@ -24,12 +24,12 @@ They remain a ``list`` and a ``dict``, so ``isinstance`` checks, equality agains
 The concrete types are ``FrozenList`` and ``FrozenDict`` from ``next.conf.frozen``, which is framework-internal and carries no stability guarantee.
 The guard covers ordinary mutation rather than a determined caller, because an unbound call such as ``list.append(value, item)`` still reaches the underlying container.
 
-To edit a merged value, copy it first.
-``list()`` and ``dict()`` thaw one level, and :func:`copy.copy` and :func:`copy.deepcopy` hand back plain mutable containers, the deep one thawed all the way down.
-Pickling a merged value round-trips it frozen, since the value on the other side is still the configuration.
-
 To change a value, change ``settings.NEXT_FRAMEWORK`` and call ``next_framework_settings.reload()``, which Django's ``override_settings`` already does on entry and exit.
 A ``NEXT_FRAMEWORK`` value that refers back to itself cannot be frozen and raises :exc:`~django.core.exceptions.ImproperlyConfigured` naming the self-referential value.
+
+To edit a value of your own instead, copy the merged one first.
+``list()`` and ``dict()`` thaw the top level, :func:`copy.copy` hands back the same plain container, and :func:`copy.deepcopy` thaws every level below it.
+Pickling round-trips a merged value frozen.
 
 Defaults
 ~~~~~~~~
