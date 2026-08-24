@@ -1,7 +1,7 @@
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 
-from next.conf import extend_default_backend
+from next.conf import DEFAULTS, extend_default_backend
 
 
 class TestExtendDefaultBackend:
@@ -54,3 +54,32 @@ class TestExtendDefaultBackend:
     def test_raises_for_negative_index(self) -> None:
         with pytest.raises(IndexError, match="out of range"):
             extend_default_backend("PAGE_BACKENDS", index=-1, PAGES_DIR="r")
+
+
+class TestExtendDefaultBackendStaysMutable:
+    """The helper hands back plain containers the caller may still edit."""
+
+    def test_result_containers_are_plain(self) -> None:
+        patched = extend_default_backend("PAGE_BACKENDS", PAGES_DIR="routes")
+        assert type(patched) is list
+        assert type(patched[0]) is dict
+        assert type(patched[0]["DIRS"]) is list
+        assert type(patched[0]["OPTIONS"]) is dict
+
+    def test_result_can_be_edited_at_every_depth(self) -> None:
+        patched = extend_default_backend("PAGE_BACKENDS", PAGES_DIR="routes")
+        patched.append({"BACKEND": "next.urls.FileRouterBackend"})
+        patched[0]["DIRS"].append("/tmp/x")
+        patched[0]["OPTIONS"]["context_processors"].append("app.ctx")
+        assert len(patched) == 2
+        assert patched[0]["DIRS"] == ["/tmp/x"]
+        assert patched[0]["OPTIONS"]["context_processors"] == ["app.ctx"]
+
+    def test_editing_the_result_leaves_defaults_alone(self) -> None:
+        patched = extend_default_backend("PAGE_BACKENDS", PAGES_DIR="routes")
+        patched[0]["DIRS"].append("/tmp/x")
+        patched[0]["OPTIONS"]["context_processors"].append("app.ctx")
+        default_entry = DEFAULTS["PAGE_BACKENDS"][0]
+        assert default_entry["PAGES_DIR"] == "pages"
+        assert default_entry["DIRS"] == []
+        assert default_entry["OPTIONS"]["context_processors"] == []

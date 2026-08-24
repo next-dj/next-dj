@@ -219,6 +219,81 @@ class TestComponentWidgetRequestCache:
         assert cache == {}
 
 
+_GUARD_TEMPLATE = "<div>name={{ name }} value={{ value }} hint={{ hint }}</div>"
+
+
+def _write_guarded_component(root: Path, returned: str) -> None:
+    """Write a `guarded` component whose keyless context returns `returned`."""
+    comp_dir = root / "guarded"
+    comp_dir.mkdir(parents=True)
+    (comp_dir / "component.djx").write_text(_GUARD_TEMPLATE)
+    (comp_dir / "component.py").write_text(
+        "from next.components import component\n\n\n"
+        "@component.context\n"
+        "def extra():\n"
+        f"    return {returned}\n"
+    )
+
+
+class TestComponentWidgetPropGuard:
+    """A keyless `@component.context` may not take over a name the widget supplies."""
+
+    @pytest.mark.parametrize("prop", ["attrs", "errors", "name", "value"])
+    def test_widget_supplied_name_raises(self, tmp_path: Path, prop: str) -> None:
+        root = tmp_path / "_components"
+        _write_guarded_component(root, f'{{"{prop}": "HIJACKED"}}')
+        widget = ComponentWidget("guarded")
+        widget._template_path = tmp_path / "page.djx"
+        with (
+            override_component_backends(_components_config(root)),
+            pytest.raises(ValueError, match=f"context returns '{prop}'"),
+        ):
+            widget.render("slug", "bound", attrs={})
+
+    def test_extra_kwarg_name_raises(self, tmp_path: Path) -> None:
+        root = tmp_path / "_components"
+        _write_guarded_component(root, '{"placeholder": "HIJACKED"}')
+        widget = ComponentWidget("guarded", placeholder="URL slug")
+        widget._template_path = tmp_path / "page.djx"
+        with (
+            override_component_backends(_components_config(root)),
+            pytest.raises(ValueError, match="context returns 'placeholder'"),
+        ):
+            widget.render("slug", "bound", attrs={})
+
+    def test_rendered_attr_name_raises(self, tmp_path: Path) -> None:
+        root = tmp_path / "_components"
+        _write_guarded_component(root, '{"id": "HIJACKED"}')
+        widget = ComponentWidget("guarded")
+        widget._template_path = tmp_path / "page.djx"
+        with (
+            override_component_backends(_components_config(root)),
+            pytest.raises(ValueError, match="context returns 'id'"),
+        ):
+            widget.render("slug", "bound", attrs={"id": "id_slug"})
+
+    def test_unrelated_key_merges(self, tmp_path: Path) -> None:
+        root = tmp_path / "_components"
+        _write_guarded_component(root, '{"hint": "merged"}')
+        widget = ComponentWidget("guarded")
+        widget._template_path = tmp_path / "page.djx"
+        with override_component_backends(_components_config(root)):
+            html = widget.render("slug", "bound", attrs={})
+        assert "hint=merged" in html
+        assert "value=bound" in html
+
+    def test_bound_form_value_is_not_replaced(self, tmp_path: Path) -> None:
+        root = tmp_path / "_components"
+        _write_guarded_component(root, '{"value": "HIJACKED", "name": "HIJACKED"}')
+        widget = ComponentWidget("guarded")
+        form_class = _echo_form(widget)
+        with override_component_backends(_components_config(root)):
+            form = form_class(data={"field": "bound"})
+            bind_component_widgets(form, template_path=tmp_path / "page.djx")
+            with pytest.raises(ValueError, match="returns 'name', 'value'"):
+                str(form["field"])
+
+
 class TestComponentWidgetConstructorAttrs:
     """Constructor `attrs=` merge into render output, render-time attrs win."""
 

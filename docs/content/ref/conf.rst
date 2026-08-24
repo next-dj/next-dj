@@ -18,6 +18,15 @@ Settings class
 .. automodule:: next.conf.settings
    :members:
 
+Merged values are immutable, so appending to ``next_framework_settings.PAGE_BACKENDS``, assigning into it, or mutating a nested list or mapping raises ``TypeError``.
+A value of any other type, such as a set inside ``OPTIONS``, is copied rather than frozen, so it stays editable and only the copy handed to you changes.
+They remain a ``list`` and a ``dict``, so ``isinstance`` checks, equality against a plain container, and ``json.dumps`` keep working, and only mutation is refused.
+The concrete types are ``FrozenList`` and ``FrozenDict`` from ``next.conf.frozen``, which is framework-internal and carries no stability guarantee.
+The guard covers ordinary mutation rather than a determined caller, because an unbound call such as ``list.append(value, item)`` still reaches the underlying container.
+
+To change a value, change ``settings.NEXT_FRAMEWORK`` and call ``next_framework_settings.reload()``, which Django's ``override_settings`` already does on entry and exit.
+A ``NEXT_FRAMEWORK`` value that refers back to itself cannot be frozen and raises :exc:`~django.core.exceptions.ImproperlyConfigured` naming the self-referential value.
+
 Defaults
 ~~~~~~~~
 

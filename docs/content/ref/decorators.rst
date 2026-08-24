@@ -38,6 +38,9 @@ The callable still runs on a full page render.
 Registers a component context function inside ``component.py``.
 The first positional argument is ``func_or_key``.
 Called bare as ``@component.context`` it merges the function's returned dict into the component template scope.
+The merge is guarded, so a returned key naming one of the reserved render keys, or any key starting with ``slot_``, raises ``ValueError`` at render time.
+Rendering through ``{% component %}`` extends the guard to the props of that one call site, and ``ComponentWidget`` and ``render_component_by_name`` extend it the same way to the names they pass, while a bare ``render_component`` guards the reserved keys alone.
+See :doc:`/content/topics/components` for the reserved set.
 Called as ``@component.context("greeting")`` it binds the function's return value to that key.
 Pass ``serialize=True`` to include the return value in ``window.Next.context``.
 The value must be JSON-encodable by the active serializer, the same contract documented under :ref:`Serialization for the browser <topics-context-serialization>`.

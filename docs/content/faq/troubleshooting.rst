@@ -178,6 +178,15 @@ Component prop does not resolve
 ``{% component "card" title="some_var" %}`` is a literal string.
 Pick the form that matches the value you want to pass.
 
+Component context returns a reserved key
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The render raises ``ValueError`` reading ``Component 'card' context returns 'title', reserved by the render path or by a prop of the calling tag``.
+An unkeyed ``@component.context`` returned a dict whose key names a prop of the ``{% component %}`` call site being rendered, a reserved render key such as ``children``, ``request``, or ``csrf_token``, or any key starting with ``slot_``.
+Rename the key, or register the value under an explicit ``@component.context("key")`` when overwriting is what you want.
+The error leaves the render instead of degrading to an empty string, so neither ``STRICT_LOADING`` nor ``DEBUG`` suppresses it.
+See :doc:`/content/topics/components` for the reserved set.
+
 Static
 ------
 
@@ -393,6 +402,15 @@ If a module raises an import error at startup, the server does not start.
 Set ``LAZY_COMPONENT_MODULES = True`` in ``NEXT_FRAMEWORK`` to defer imports for those roots until first resolve.
 Components beside page routes may still load earlier when URL patterns are constructed.
 This hides some startup errors but surfaces them when the failing component or route branch is first touched.
+
+Merged NEXT_FRAMEWORK settings are immutable
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Appending to ``next_framework_settings.PAGE_BACKENDS``, assigning into it, or mutating a nested list or mapping raises ``TypeError`` reading ``Merged NEXT_FRAMEWORK settings are immutable``.
+The merge hands out frozen containers so that one caller cannot reshape the configuration every other reader sees.
+Change ``settings.NEXT_FRAMEWORK`` and call ``next_framework_settings.reload()``, or wrap the change in ``override_settings``, which reloads on its own.
+Reading is untouched, so ``isinstance``, equality against a plain container, and ``json.dumps`` still work on a merged value.
+See :ref:`ref-conf` for the rest of the contract.
 
 System checks
 -------------

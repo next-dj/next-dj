@@ -36,10 +36,6 @@ The built-in specs for pages and filesystem components are derived from ``NEXT_F
 Each entry is a ``(path, glob)`` tuple consumed by ``StatReloader.watch_dir``.
 The function emits the ``watch_specs_ready`` signal on every call so subscribers can inspect the resolved set.
 
-``FilesystemWatchContributor`` is a runtime-checkable protocol declaring a single ``iter_watch_specs()`` method.
-It is exported for type annotations only.
-The watcher does not iterate contributors at runtime, so registration goes through ``register_autoreload_watch_spec``.
-
 .. automodule:: next.server.watcher
    :members:
 

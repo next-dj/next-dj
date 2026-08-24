@@ -333,6 +333,7 @@ The framework resolves parameters from the surrounding template scope, from URL 
    Registration raises ``ValueError`` for a key reserved for dependency injection, such as ``request``.
    It also raises ``ValueError`` for a duplicate registration of two different functions under the same key, or of two different unkeyed callables, in one ``component.py``.
    Re-registering the same function under the same key replaces the stored entry rather than raising.
+   These are the registration failures, and the unkeyed form raises one more ``ValueError`` at render time, described below.
 
 Pass ``serialize=True`` and optionally ``serializer=`` to include the return value in ``window.Next.context``.
 The behaviour is identical to ``@context`` on a page module, so the value must be JSON-encodable by the active serializer.
@@ -342,6 +343,17 @@ An unkeyed ``@component.context`` returning a dict serializes each key of that d
 A ``serializer=`` on such an unkeyed callable applies to every key of the returned dict.
 A keyed ``@component.context`` serializes its return value under the given key.
 An unkeyed callable that returns anything other than a mapping is silently dropped from the template scope.
+
+An unkeyed ``@component.context`` merges its dict into the component scope, so the framework guards the names that merge would quietly take over.
+The render raises ``ValueError`` when the returned dict carries a prop passed by the ``{% component %}`` tag being rendered, a reserved render key, or any key that starts with ``slot_``.
+The reserved render keys are ``children``, ``request``, ``csrf_token``, ``current_template_path``, ``current_component_module_path``, ``_static_collector``, and ``_component_props``.
+The whole ``slot_`` prefix is reserved, so a returned ``slot_count`` raises even when the component declares no ``count`` slot.
+Register the value under an explicit ``@component.context("key")`` instead, which is the deliberate override and is never guarded.
+
+A page context key that reaches the component through the surrounding scope is not reserved, so an unkeyed dict may still shadow it for the component body.
+The ``{% component %}`` tag publishes the prop names of its own call site, ``ComponentWidget`` publishes the names it fills for its field, and ``render_component_by_name`` publishes the keys of the ``context`` mapping it is handed, so a bare ``render_component`` is the one path left guarding the reserved keys alone.
+The same component code therefore raises under ``{% component "note_card" preview=text %}`` and merges quietly under ``{% component "note_card" %}``.
+This failure leaves the render rather than degrading to an empty string, so ``STRICT_LOADING`` and ``DEBUG`` do not change it.
 
 Co-located static assets
 ------------------------

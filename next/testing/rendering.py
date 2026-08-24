@@ -14,6 +14,7 @@ from django.test import RequestFactory
 
 from next.components.facade import render_component
 from next.components.manager import components_manager
+from next.components.renderers import COMPONENT_PROPS_CONTEXT_KEY
 from next.pages.manager import page
 
 
@@ -55,7 +56,11 @@ def render_component_by_name(
     if info is None:
         msg = f"Component not visible from {anchor}: {name!r}"
         raise LookupError(msg)
-    return render_component(info, dict(context or {}), request=request)
+    context_data = dict(context or {})
+    # The caller's keys stand in for the props a `{% component %}` call site
+    # would pass, so the guard here sees what the tag would show it.
+    context_data[COMPONENT_PROPS_CONTEXT_KEY] = frozenset(context_data)
+    return render_component(info, context_data, request=request)
 
 
 __all__ = ["render_component_by_name", "render_page"]

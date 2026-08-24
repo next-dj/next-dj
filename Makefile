@@ -180,7 +180,7 @@ docs-serve: docs # build and serve documentation
 	@open docs/_build/index.html
 
 docs-clean: # clean documentation build
-	rm -rf docs/_build/*
+	rm -rf docs/_build
 
 docs-linkcheck: # check documentation links
 	uv sync --locked --group docs

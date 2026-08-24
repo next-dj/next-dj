@@ -29,6 +29,7 @@ from django.template.base import (
 from django.utils.safestring import SafeString
 
 from next.components import collect_visible_components, get_component, render_component
+from next.components.renderers import COMPONENT_PROPS_CONTEXT_KEY, SLOT_KEY_PREFIX
 from next.conf import fail_loudly, next_framework_settings
 from next.static import collect_component_assets
 
@@ -52,7 +53,9 @@ _END_BLOCK_SET_SLOT = ("/set_slot",)
 _SHORT_SLOT_EMPTY_NAME = "{% slot %} tag requires a quoted slot name"
 _SHORT_SET_SLOT_EMPTY_NAME = "{% set_slot %} tag requires a quoted slot name"
 
-# The key slot collection writes while the parent ``{% #component %}`` body renders.
+# The key slot collection writes while the parent ``{% #component %}`` body
+# renders. ``_component_props`` needs no entry here because every node writes
+# its own set over whatever it inherited.
 _INTERNAL_CONTEXT_KEYS = frozenset({"_component_slots"})
 
 _DASH_BEFORE_DASH = re.compile(r"-(?=-)")
@@ -148,6 +151,9 @@ class ComponentNode(Node):
         self.name = name
         self.props = props
         self.nodelist = nodelist
+        # Prop names are fixed at compile time, so the render-time collision
+        # guard reads a set built once per node.
+        self.prop_names = frozenset(props)
 
     def _resolved_props(self, context: template.Context) -> dict[str, Any]:
         """Resolve every prop expression against the active template context.
@@ -259,11 +265,12 @@ class ComponentNode(Node):
         render_ctx: dict[str, Any] = {**parent_flat, **self._resolved_props(context)}
         render_ctx["current_template_path"] = path
         render_ctx["children"] = "".join(child_chunks)
+        render_ctx[COMPONENT_PROPS_CONTEXT_KEY] = self.prop_names
 
         for slot_name, content in slots.items():
             # Slot content lives only under ``slot_<name>``, because an
             # unprefixed key would shadow a prop that shares the slot's name.
-            render_ctx[f"slot_{slot_name}"] = content
+            render_ctx[f"{SLOT_KEY_PREFIX}{slot_name}"] = content
 
         request = render_ctx.get("request")
         if request is None:
@@ -289,7 +296,7 @@ class SetSlotNode(Node):
         slot (``{% #slot "x" %}{% /slot %}``) renders as the empty string. Only
         a missing slot key falls back to the inner template.
         """
-        slot_content = context.get(f"slot_{self.name}", _SLOT_MISSING)
+        slot_content = context.get(f"{SLOT_KEY_PREFIX}{self.name}", _SLOT_MISSING)
         if slot_content is _SLOT_MISSING:
             return self.nodelist.render(context)
         return str(slot_content)

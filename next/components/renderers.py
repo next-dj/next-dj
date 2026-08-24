@@ -33,6 +33,28 @@ if TYPE_CHECKING:
     from .loading import ModuleLoader
 
 
+# Where a call site publishes the names it passes in, so a keyless context
+# function cannot overwrite them. The component tag, the form widget and the
+# testing helper all fill it.
+COMPONENT_PROPS_CONTEXT_KEY = "_component_props"
+
+# Keys the render path owns. Overwriting any of them breaks the static
+# collector, the form-action anchor, or slot composition.
+_RESERVED_CONTEXT_KEYS = frozenset(
+    {
+        COMPONENT_PROPS_CONTEXT_KEY,
+        "_static_collector",
+        "children",
+        "csrf_token",
+        "current_component_module_path",
+        "current_template_path",
+        "request",
+    }
+)
+
+SLOT_KEY_PREFIX = "slot_"
+
+
 class ComponentTemplateLoader:
     """Read template source from a `.djx` file or a `component` module string."""
 
@@ -79,6 +101,44 @@ def _merge_csrf_context(
     context_dict["csrf_token"] = SimpleLazyObject(lambda: get_token(request))
 
 
+def _guarded_keys(context_data: dict[str, Any]) -> frozenset[str]:
+    """Return the names a keyless context function may not overwrite.
+
+    Names reach us through the context because only the call site knows what
+    it passed, so a direct `render_component` guards the reserved keys alone.
+    """
+    props = context_data.get(COMPONENT_PROPS_CONTEXT_KEY)
+    if isinstance(props, frozenset):
+        return _RESERVED_CONTEXT_KEYS | props
+    return _RESERVED_CONTEXT_KEYS
+
+
+def _is_slot_key(key: object) -> bool:
+    """Report whether a returned key lands in the reserved slot namespace.
+
+    A context function may return non-string keys, so the prefix test has to
+    survive them rather than raise from inside the render.
+    """
+    return isinstance(key, str) and key.startswith(SLOT_KEY_PREFIX)
+
+
+def _reject_collisions(
+    info: ComponentInfo, data: dict[Any, Any], guarded: frozenset[str]
+) -> None:
+    """Refuse a keyless dict that would silently overwrite a guarded name."""
+    if data.keys().isdisjoint(guarded) and not any(_is_slot_key(key) for key in data):
+        return
+
+    conflicts = sorted(key for key in data if key in guarded or _is_slot_key(key))
+    names = ", ".join(repr(key) for key in conflicts)
+    msg = (
+        f"Component {info.name!r} context returns {names}, reserved by the render "
+        "path or by a prop of the calling tag. Register the value under an "
+        "explicit @component.context key."
+    )
+    raise ValueError(msg)
+
+
 def _inject_component_context(
     info: ComponentInfo, context_data: dict[str, Any], request: HttpRequest | None
 ) -> None:
@@ -90,6 +150,7 @@ def _inject_component_context(
         return
 
     collector: StaticCollector | None = context_data.get("_static_collector")
+    guarded = _guarded_keys(context_data)
 
     shared = get_request_dep_cache(request)
     cache = DependencyCache(backing_dict=shared) if shared else DependencyCache()
@@ -107,6 +168,7 @@ def _inject_component_context(
         if ctx_func.key is None:
             data = ctx_func.func(**resolved)
             if isinstance(data, dict):
+                _reject_collisions(info, data, guarded)
                 context_data.update(data)
                 if ctx_func.serialize and collector is not None:
                     for k, v in data.items():

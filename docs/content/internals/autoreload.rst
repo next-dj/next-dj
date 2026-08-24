@@ -67,7 +67,6 @@ Runtime
 
 ``next.server.watcher``.
    ``iter_all_autoreload_watch_specs`` returns the deduplicated list of built-in specs plus pairs registered through ``register_autoreload_watch_spec``.
-   ``FilesystemWatchContributor`` is a runtime-checkable protocol exported for type annotations only and is not iterated at runtime.
 
 ``next.server.roots``.
    ``get_framework_filesystem_roots_for_linking`` returns the canonical page and component directory roots for build tooling.

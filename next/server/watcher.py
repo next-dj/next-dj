@@ -1,17 +1,16 @@
 """Watch-spec helpers for the development file reloader.
 
-`FilesystemWatchContributor` is a Protocol for objects that contribute
-`(path, glob)` pairs to Django's `StatReloader.watch_dir`. The module
-exposes built-in defaults derived from `NEXT_FRAMEWORK` and a registry
-for extra pairs contributed by third-party apps.
+The module exposes built-in `(path, glob)` defaults derived from
+`NEXT_FRAMEWORK` and a registry for extra pairs contributed by
+third-party apps.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING
 
+from next.backends import backend_entries
 from next.components import component_extra_roots_from_config
-from next.conf import next_framework_settings
 from next.pages.watch import (
     get_pages_directories_for_watch,
     iter_pages_roots_with_components_folder_names,
@@ -23,18 +22,6 @@ from .signals import watch_specs_ready
 if TYPE_CHECKING:
     from collections.abc import Iterable
     from pathlib import Path
-
-
-@runtime_checkable
-class FilesystemWatchContributor(Protocol):
-    """Yield `(root, glob)` pairs for `StatReloader.watch_dir`.
-
-    Each tuple is a filesystem root and a glob pattern relative to that
-    root.
-    """
-
-    def iter_watch_specs(self) -> Iterable[tuple[Path, str]]:
-        """Yield `(root, glob)` pairs for `StatReloader.watch_dir`."""
 
 
 _registered_extra_watch_specs: list[tuple[Path, str]] = []
@@ -79,15 +66,11 @@ def _iter_default_autoreload_watch_specs() -> list[tuple[Path, str]]:
         (root, f"**/{comp_name}/**/component.py")
         for root, comp_name in iter_pages_roots_with_components_folder_names()
     )
-    comp_cfgs = next_framework_settings.COMPONENT_BACKENDS
-    if isinstance(comp_cfgs, list):
-        for config in comp_cfgs:
-            if not isinstance(config, dict):
-                continue
-            specs.extend(
-                (root, "**/component.py")
-                for root in component_extra_roots_from_config(config)
-            )
+    for config in backend_entries("COMPONENT_BACKENDS"):
+        specs.extend(
+            (root, "**/component.py")
+            for root in component_extra_roots_from_config(config)
+        )
     return specs
 
 

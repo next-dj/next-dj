@@ -101,3 +101,47 @@ class TestRenderComponentByName:
             )
         assert f"[{module_path}]" in html
         assert "caller-anchor" not in html
+
+
+class TestRenderComponentByNamePropGuard:
+    """The caller's context keys stand in for props, as a tag call site would."""
+
+    @staticmethod
+    def _composite(tmp_path: Path, returned: str) -> ComponentInfo:
+        """Build a composite component whose keyless context returns `returned`."""
+        (tmp_path / "component.djx").write_text(
+            "<div>title={{ title }} hint={{ hint }}</div>"
+        )
+        (tmp_path / "component.py").write_text(
+            "from next.components import component\n\n\n"
+            "@component.context\n"
+            "def extra():\n"
+            f"    return {returned}\n"
+        )
+        return ComponentInfo(
+            name="card",
+            scope_root=tmp_path,
+            scope_relative="",
+            template_path=tmp_path / "component.djx",
+            module_path=(tmp_path / "component.py").resolve(),
+            is_simple=False,
+        )
+
+    def test_caller_context_key_raises(self, tmp_path: Path) -> None:
+        info = self._composite(tmp_path, '{"title": "from context"}')
+        with (
+            patch.object(components_manager, "get_component", return_value=info),
+            pytest.raises(ValueError, match="context returns 'title'"),
+        ):
+            render_component_by_name(
+                "card", at=tmp_path / "page.djx", context={"title": "from caller"}
+            )
+
+    def test_unrelated_key_merges(self, tmp_path: Path) -> None:
+        info = self._composite(tmp_path, '{"hint": "merged"}')
+        with patch.object(components_manager, "get_component", return_value=info):
+            html = render_component_by_name(
+                "card", at=tmp_path / "page.djx", context={"title": "from caller"}
+            )
+        assert "title=from caller" in html
+        assert "hint=merged" in html

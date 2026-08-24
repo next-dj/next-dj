@@ -13,6 +13,7 @@ from django.utils.safestring import SafeString
 
 from next.components.facade import get_component, render_component
 from next.components.manager import components_manager
+from next.components.renderers import COMPONENT_PROPS_CONTEXT_KEY
 from next.static import StaticCollector, collect_component_assets
 
 
@@ -117,6 +118,10 @@ class ComponentWidget(django_forms.Widget):
             "value": self.format_value(value),
             "errors": self._errors,
         }
+        # Every name above comes from this widget and its field binding, so a
+        # keyless component context must not take any of them over. The set is
+        # read before the key itself lands in the context.
+        context[COMPONENT_PROPS_CONTEXT_KEY] = frozenset(context)
         # render_component returns template-rendered, already-escaped HTML, so a
         # SafeString wrapper matches the Widget.render contract without re-escaping.
         html = render_component(info, context, request=self._request)

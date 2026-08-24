@@ -61,6 +61,11 @@ The ``context`` mapping fills the values the component template reads.
 
 The helper raises ``LookupError`` when no visible component matches the name from the ``at`` path.
 
+.. warning::
+
+   The keys of the ``context`` mapping reach the render-time guard as the props of this call site, the way ``{% component "info_card" title="Quick start" %}`` would pass them.
+   A component whose unkeyed ``@component.context`` returns one of those keys raises ``ValueError`` here too, so the isolated test fails wherever the page render would.
+
 Assert on the markup
 ~~~~~~~~~~~~~~~~~~~~
 
