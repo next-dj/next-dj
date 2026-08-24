@@ -1,8 +1,7 @@
 """Render helpers for next-dj pages and components.
 
-Thin wrappers over `page.render` and `render_component` so tests do not
-need to construct `ComponentInfo` manually or build an `HttpRequest`
-just to exercise a renderer.
+Thin wrappers over `page.render` and `render_component`, so a test needs no
+hand-built `ComponentInfo` or `HttpRequest` to exercise a renderer.
 """
 
 from __future__ import annotations
@@ -49,8 +48,7 @@ def render_component_by_name(
     """Render component `name` as resolved from the template path `at`.
 
     `at` drives visibility, `context` stands in for the ambient page scope, and
-    `props` for the names a `{% component %}` call site would pass. A name no
-    visible component matches raises `LookupError`.
+    `props` for the names a `{% component %}` call site would pass.
     """
     anchor = Path(at) if not isinstance(at, Path) else at
     info = components_manager.get_component(name, anchor)

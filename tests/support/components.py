@@ -8,8 +8,7 @@ def build_composite_component(
 ) -> tuple[ComponentContextManager, ComponentInfo, Path]:
     """Write a composite component under `root` and pair it with a fresh registry.
 
-    The manager is per call, so a test registers context functions without
-    touching the process-wide one.
+    The manager is per call, so a test registers context functions of its own.
     """
     root.mkdir(parents=True, exist_ok=True)
     module_path = (root / "component.py").resolve()

@@ -1,9 +1,8 @@
 """Immutable `list` and `dict` subclasses used for merged settings values.
 
-Staying a `list` and a `dict` keeps every `isinstance` guard across the
-framework working unchanged, so freezing the merge costs no sweep of the
-readers. `copy.copy` and `copy.deepcopy` thaw a value back to plain
-containers, so editing a copy of the configuration stays possible.
+Staying real builtins keeps every `isinstance` guard across the framework
+working unchanged, and `copy.copy` and `copy.deepcopy` thaw a value back to
+plain containers when a caller needs a mutable one.
 """
 
 from __future__ import annotations
@@ -31,8 +30,7 @@ def _immutable(*args: object, **kwargs: object) -> Never:
 class FrozenList(list[Any]):
     """A `list` whose mutating methods raise instead of changing contents.
 
-    `__init__` stays unguarded because the constructor needs it, so re-invoking
-    it by hand stays an escape hatch no Python-level subclass can close.
+    `__init__` stays unguarded, an escape hatch the constructor needs.
     """
 
     __slots__ = ()
@@ -112,9 +110,8 @@ _ATOMIC = (str, bytes, int, float, complex, frozenset, type(None))
 def _freeze(value: object, memo: dict[int, object]) -> object:
     if isinstance(value, _ATOMIC):
         return value
-    # Exact types only. A `defaultdict` rebuilt as a plain frozen mapping would
-    # lose its factory, and a namedtuple its field names, so subclasses go
-    # through `deepcopy` the way the merge handled every value before.
+    # Exact types only, since a rebuilt `defaultdict` would lose its factory and
+    # a rebuilt namedtuple its field names. Subclasses go through `deepcopy`.
     if type(value) is tuple:
         return tuple(_freeze(item, memo) for item in value)
     if type(value) is not dict and type(value) is not list:
@@ -142,9 +139,8 @@ def freeze(value: object) -> object:
     """Return a deep immutable copy of one merged settings value.
 
     Exact `list`, `dict` and `tuple` values are rebuilt and everything else is
-    deep-copied, so the merge never aliases a value the caller still holds.
-    Shared subtrees stay shared, and a self-referential config raises
-    `ImproperlyConfigured` rather than a `RecursionError`.
+    deep-copied, so the merge aliases nothing the caller still holds. A
+    self-referential config raises `ImproperlyConfigured`, not a `RecursionError`.
     """
     return _freeze(value, {})
 

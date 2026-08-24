@@ -33,12 +33,10 @@ if TYPE_CHECKING:
     from .loading import ModuleLoader
 
 
-# Where a call site publishes the names it passes, so a keyless context
-# function cannot overwrite them.
+# Prop names published by the call site, so a keyless context cannot take them.
 COMPONENT_PROPS_CONTEXT_KEY = "_component_props"
 
-# Keys the render path owns. Overwriting any of them breaks the static
-# collector, the form-action anchor, or slot composition.
+# Keys the render path owns, so overwriting one breaks the render itself.
 _RESERVED_CONTEXT_KEYS = frozenset(
     {
         COMPONENT_PROPS_CONTEXT_KEY,
@@ -104,8 +102,7 @@ def _merge_csrf_context(
 def _guarded_keys(context_data: dict[str, Any]) -> frozenset[str]:
     """Return the names a keyless context function may not overwrite.
 
-    Only the call site knows the props it passed, so it publishes them through
-    the context and a bare `render_component` guards the reserved keys alone.
+    A bare `render_component` has no call site, so only the reserved keys apply.
     """
     props = context_data.get(COMPONENT_PROPS_CONTEXT_KEY)
     if isinstance(props, frozenset):
@@ -114,11 +111,7 @@ def _guarded_keys(context_data: dict[str, Any]) -> frozenset[str]:
 
 
 def _is_slot_key(key: object) -> bool:
-    """Report whether a returned key lands in the reserved slot namespace.
-
-    A context function may return non-string keys, so the prefix test survives
-    them rather than raising from inside the render.
-    """
+    """Report whether a key lands in the slot namespace, non-strings included."""
     return isinstance(key, str) and key.startswith(SLOT_KEY_PREFIX)
 
 

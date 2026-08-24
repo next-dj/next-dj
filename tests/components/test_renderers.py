@@ -20,8 +20,7 @@ from tests.support.components import build_composite_component
 
 RESERVED_KEYS = sorted(_RESERVED_CONTEXT_KEYS)
 
-# The inventory as the docs publish it, pinned so a change to the core set has
-# to be made twice on purpose.
+# The inventory as the docs publish it, pinned so a core-set change is deliberate.
 PINNED_RESERVED_KEYS = frozenset(
     {
         "_component_props",

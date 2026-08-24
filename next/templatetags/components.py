@@ -150,8 +150,7 @@ class ComponentNode(Node):
         self.name = name
         self.props = props
         self.nodelist = nodelist
-        # Prop names are fixed at compile time, so the collision guard costs
-        # no rebuild per render.
+        # Prop names are fixed at compile time, so the guard rebuilds nothing.
         self.prop_names = frozenset(props)
 
     def _resolved_props(self, context: template.Context) -> dict[str, Any]:

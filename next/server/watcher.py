@@ -1,8 +1,7 @@
 """Watch-spec helpers for the development file reloader.
 
-The module exposes built-in `(path, glob)` defaults derived from
-`NEXT_FRAMEWORK` and a registry for extra pairs contributed by
-third-party apps.
+Built-in `(path, glob)` defaults come from `NEXT_FRAMEWORK`, and a registry
+takes the extra pairs third-party apps contribute.
 """
 
 from __future__ import annotations

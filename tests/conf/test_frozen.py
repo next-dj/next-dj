@@ -68,8 +68,7 @@ DICT_MUTATIONS = [
 LIST_GUARDED = frozenset(name for name, _ in LIST_MUTATIONS)
 DICT_GUARDED = frozenset(name for name, _ in DICT_MUTATIONS)
 
-# The rest of the inventory, inherited as is, `__init__` included because the
-# constructor needs it.
+# The rest of the inventory, inherited as is, `__init__` included.
 LIST_INHERITED = frozenset(
     {
         "__add__",
@@ -388,8 +387,7 @@ class TestFreeze:
     def test_mutable_leaf_stays_editable_inside_the_frozen_value(self) -> None:
         """The freeze reaches lists and dicts only, so a set leaf still edits.
 
-        Nothing leaks back to the caller, but the leaf itself is not frozen,
-        and this is where that boundary sits.
+        Nothing leaks back to the caller, the leaf itself is just not frozen.
         """
         tags = {"a"}
         frozen = freeze({"OPTIONS": {"TAGS": tags}})
