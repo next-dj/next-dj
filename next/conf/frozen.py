@@ -106,15 +106,19 @@ _IN_PROGRESS = object()
 # Leaves that cannot be mutated, so the merge may hand them out as they are.
 _ATOMIC = (str, bytes, int, float, complex, frozenset, type(None))
 
+# Containers the merge rebuilds. The frozen pair belongs here so a merged value
+# fed back into the settings freezes again instead of thawing through `copy`.
+_REBUILT = frozenset({dict, list, FrozenDict, FrozenList})
+
 
 def _freeze(value: object, memo: dict[int, object]) -> object:
     if isinstance(value, _ATOMIC):
         return value
-    # Exact types only, since a rebuilt `defaultdict` would lose its factory and
-    # a rebuilt namedtuple its field names. Subclasses go through `deepcopy`.
     if type(value) is tuple:
         return tuple(_freeze(item, memo) for item in value)
-    if type(value) is not dict and type(value) is not list:
+    # Any other subclass is deep-copied instead, since a rebuilt `defaultdict`
+    # would lose its factory and a rebuilt namedtuple its field names.
+    if not isinstance(value, dict | list) or type(value) not in _REBUILT:
         return copy.deepcopy(value)
     seen = memo.get(id(value), _MISSING)
     if seen is _IN_PROGRESS:
@@ -138,9 +142,9 @@ def _freeze(value: object, memo: dict[int, object]) -> object:
 def freeze(value: object) -> object:
     """Return a deep immutable copy of one merged settings value.
 
-    Exact `list`, `dict` and `tuple` values are rebuilt and everything else is
-    deep-copied, so the merge aliases nothing the caller still holds. A
-    self-referential config raises `ImproperlyConfigured`, not a `RecursionError`.
+    Exact `list`, `dict`, `tuple` and already-frozen containers are rebuilt and
+    everything else is deep-copied, so the merge aliases nothing the caller
+    still holds. A self-referential config raises `ImproperlyConfigured`.
     """
     return _freeze(value, {})
 

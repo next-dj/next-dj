@@ -19,6 +19,15 @@ def sample() -> list[dict[str, Any]]:
     ]
 
 
+def all_plain(value: object) -> bool:
+    """Report whether every container reachable from `value` is a builtin."""
+    if isinstance(value, dict):
+        return type(value) is dict and all(all_plain(item) for item in value.values())
+    if isinstance(value, list):
+        return type(value) is list and all(all_plain(item) for item in value)
+    return True
+
+
 def cyclic_list() -> list[Any]:
     """Build a list holding itself."""
     value: list[Any] = []
@@ -158,12 +167,37 @@ INVENTORIES = [
     pytest.param(dict, DICT_GUARDED, DICT_INHERITED, id="dict"),
 ]
 
+# The two container shapes a merged value hands out, each with a way to edit it.
+COPY_CASES = [
+    pytest.param(
+        lambda frozen: frozen, list, lambda clone: clone.append({}), id="list"
+    ),
+    pytest.param(
+        lambda frozen: frozen[0],
+        dict,
+        lambda clone: clone.__setitem__("BACKEND", "other"),
+        id="dict",
+    ),
+]
+
 GUARD_SETS = [
     pytest.param(FrozenList, LIST_GUARDED, id="list"),
     pytest.param(FrozenDict, DICT_GUARDED, id="dict"),
 ]
 
 CYCLES = [pytest.param(cyclic_list, id="list"), pytest.param(cyclic_dict, id="dict")]
+
+# Shapes an already frozen value takes when it reaches the merge a second time.
+REFREEZE_CASES = [
+    pytest.param(lambda frozen: frozen, lambda value: value[0], id="whole_value"),
+    pytest.param(lambda frozen: [frozen[0]], lambda value: value[0], id="in_list"),
+    pytest.param(
+        lambda frozen: {"PAGE_BACKENDS": frozen},
+        lambda value: value["PAGE_BACKENDS"][0],
+        id="in_dict",
+    ),
+    pytest.param(lambda frozen: (frozen[0],), lambda value: value[0], id="in_tuple"),
+]
 
 
 class TestFrozenListMutators:
@@ -294,38 +328,30 @@ class TestFrozenContainersStayBuiltins:
 class TestFrozenContainersRoundTrip:
     """copy and deepcopy thaw, pickle rebuilds a frozen value."""
 
-    def test_shallow_copy_hands_back_a_plain_list(self) -> None:
-        source = sample()
-        frozen = freeze(source)
+    @pytest.mark.parametrize(("pick", "builtin", "mutate"), COPY_CASES)
+    def test_shallow_copy_hands_back_a_plain_container(
+        self, pick, builtin, mutate
+    ) -> None:
+        frozen = pick(freeze(sample()))
         clone = copy.copy(frozen)
-        assert clone == source
-        assert type(clone) is list
-        assert clone[0] is frozen[0]
-        clone.append({})
+        assert clone == frozen
+        assert type(clone) is builtin
+        mutate(clone)
 
-    def test_shallow_copy_hands_back_a_plain_dict(self) -> None:
-        entry = freeze(sample())[0]
-        clone = copy.copy(entry)
-        assert clone == entry
-        assert type(clone) is dict
-        clone["BACKEND"] = "other"
-
-    def test_deep_copy_thaws_every_level(self) -> None:
+    @pytest.mark.parametrize(("pick", "builtin", "mutate"), COPY_CASES)
+    def test_deep_copy_thaws_every_level(self, pick, builtin, mutate) -> None:
         source = sample()
-        clone = copy.deepcopy(freeze(source))
-        assert clone == source
-        assert type(clone) is list
-        assert type(clone[0]) is dict
-        assert type(clone[0]["OPTIONS"]) is dict
-        clone[0]["OPTIONS"]["SSE"]["MS"] = 1
-        clone.append({})
+        frozen = pick(freeze(source))
+        clone = copy.deepcopy(frozen)
+        assert clone == frozen
+        assert type(clone) is builtin
+        assert all_plain(clone)
+        mutate(clone)
         assert freeze(source) == source
 
-    def test_deep_copy_thaws_a_frozen_dict_on_its_own(self) -> None:
-        clone = copy.deepcopy(FrozenDict({"OPTIONS": FrozenList(["a"])}))
-        assert type(clone) is dict
-        assert type(clone["OPTIONS"]) is list
-        clone["OPTIONS"].append("b")
+    def test_shallow_copy_keeps_the_frozen_items(self) -> None:
+        frozen = freeze(sample())
+        assert copy.copy(frozen)[0] is frozen[0]
 
     def test_deep_copy_keeps_shared_subtrees_shared(self) -> None:
         shared = {"A": 1}
@@ -394,6 +420,14 @@ class TestFreeze:
         frozen["OPTIONS"]["TAGS"].add("LEAKED")
         assert frozen["OPTIONS"]["TAGS"] == {"a", "LEAKED"}
         assert tags == {"a"}
+
+    @pytest.mark.parametrize(("rewrap", "entry_of"), REFREEZE_CASES)
+    def test_an_already_frozen_value_freezes_again(self, rewrap, entry_of) -> None:
+        """A merged value fed back into the settings comes out frozen, not thawed."""
+        entry = entry_of(freeze(rewrap(freeze(sample()))))
+        assert isinstance(entry, FrozenDict)
+        with pytest.raises(TypeError, match="immutable"):
+            entry["OPTIONS"]["SSE"]["MS"] = 1
 
     def test_tuple_is_rebuilt_with_frozen_items(self) -> None:
         source = ({"A": 1},)

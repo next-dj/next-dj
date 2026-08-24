@@ -390,6 +390,29 @@ class TestPartialBackendsDefault:
         assert "PARTIAL_BACKENDS" in NextFrameworkSettings.DEFAULTS
 
 
+# One case per merge branch that freezes a user value, each with a way to edit it.
+REUSED_MERGED_CASES = [
+    pytest.param(
+        "PAGE_BACKENDS",
+        [{"BACKEND": "next.urls.X", "DIRS": []}],
+        lambda value: value[0]["DIRS"].append("/tmp/x"),
+        id="backend_list",
+    ),
+    pytest.param(
+        "NEXT_JS_OPTIONS",
+        {"a": {"b": 1}},
+        lambda value: value["a"].__setitem__("b", 2),
+        id="options_mapping",
+    ),
+    pytest.param(
+        "FORM_WIZARD_BACKEND",
+        {"OPTIONS": {"ttl": 1}},
+        lambda value: value["OPTIONS"].__setitem__("ttl", 2),
+        id="wizard_backend",
+    ),
+]
+
+
 class TestMergedSettingsAreImmutable:
     """Merged values reject mutation at every depth without changing types."""
 
@@ -466,6 +489,19 @@ class TestMergedSettingsAreImmutable:
             user_entry["BACKEND"] = "next.urls.Y"
             user_list.append({})
             assert merged == [{"BACKEND": "next.urls.X", "DIRS": []}]
+
+    @pytest.mark.parametrize(("key", "user_value", "mutate"), REUSED_MERGED_CASES)
+    def test_a_merged_value_put_back_into_settings_stays_frozen(
+        self, key, user_value, mutate
+    ) -> None:
+        """Reusing a merged value as the user value freezes it again."""
+        with override_settings(NEXT_FRAMEWORK={key: user_value}):
+            next_framework_settings.reload()
+            reused = getattr(next_framework_settings, key)
+        with override_settings(NEXT_FRAMEWORK={key: reused}):
+            next_framework_settings.reload()
+            with pytest.raises(TypeError, match="immutable"):
+                mutate(getattr(next_framework_settings, key))
 
     def test_defaults_stay_plain_containers(self) -> None:
         """The merge leaves DEFAULTS a plain structure it never hands out."""
