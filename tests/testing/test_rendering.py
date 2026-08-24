@@ -104,7 +104,7 @@ class TestRenderComponentByName:
 
 
 class TestRenderComponentByNamePropGuard:
-    """The caller's context keys stand in for props, as a tag call site would."""
+    """`props` stands in for a tag call site, `context` for the page scope."""
 
     @staticmethod
     def _composite(tmp_path: Path, returned: str) -> ComponentInfo:
@@ -127,21 +127,32 @@ class TestRenderComponentByNamePropGuard:
             is_simple=False,
         )
 
-    def test_caller_context_key_raises(self, tmp_path: Path) -> None:
+    def test_caller_prop_raises(self, tmp_path: Path) -> None:
         info = self._composite(tmp_path, '{"title": "from context"}')
         with (
             patch.object(components_manager, "get_component", return_value=info),
             pytest.raises(ValueError, match="context returns 'title'"),
         ):
             render_component_by_name(
-                "card", at=tmp_path / "page.djx", context={"title": "from caller"}
+                "card", at=tmp_path / "page.djx", props={"title": "from caller"}
             )
 
-    def test_unrelated_key_merges(self, tmp_path: Path) -> None:
+    def test_ambient_context_key_is_shadowed(self, tmp_path: Path) -> None:
+        info = self._composite(tmp_path, '{"title": "from context"}')
+        with patch.object(components_manager, "get_component", return_value=info):
+            html = render_component_by_name(
+                "card", at=tmp_path / "page.djx", context={"title": "from page"}
+            )
+        assert "title=from context" in html
+
+    def test_props_win_over_ambient_context(self, tmp_path: Path) -> None:
         info = self._composite(tmp_path, '{"hint": "merged"}')
         with patch.object(components_manager, "get_component", return_value=info):
             html = render_component_by_name(
-                "card", at=tmp_path / "page.djx", context={"title": "from caller"}
+                "card",
+                at=tmp_path / "page.djx",
+                context={"title": "from page"},
+                props={"title": "from caller"},
             )
         assert "title=from caller" in html
         assert "hint=merged" in html

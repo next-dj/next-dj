@@ -293,22 +293,45 @@ class TestFrozenContainersStayBuiltins:
 
 
 class TestFrozenContainersRoundTrip:
-    """copy, deepcopy, and pickle rebuild through the constructor."""
+    """copy and deepcopy thaw, pickle rebuilds a frozen value."""
 
-    def test_shallow_copy(self) -> None:
+    def test_shallow_copy_hands_back_a_plain_list(self) -> None:
         source = sample()
         frozen = freeze(source)
         clone = copy.copy(frozen)
         assert clone == source
+        assert type(clone) is list
         assert clone[0] is frozen[0]
+        clone.append({})
 
-    def test_deep_copy(self) -> None:
+    def test_shallow_copy_hands_back_a_plain_dict(self) -> None:
+        entry = freeze(sample())[0]
+        clone = copy.copy(entry)
+        assert clone == entry
+        assert type(clone) is dict
+        clone["BACKEND"] = "other"
+
+    def test_deep_copy_thaws_every_level(self) -> None:
         source = sample()
-        frozen = freeze(source)
-        clone = copy.deepcopy(frozen)
+        clone = copy.deepcopy(freeze(source))
         assert clone == source
-        assert clone[0] is not frozen[0]
-        assert isinstance(clone[0], FrozenDict)
+        assert type(clone) is list
+        assert type(clone[0]) is dict
+        assert type(clone[0]["OPTIONS"]) is dict
+        clone[0]["OPTIONS"]["SSE"]["MS"] = 1
+        clone.append({})
+        assert freeze(source) == source
+
+    def test_deep_copy_thaws_a_frozen_dict_on_its_own(self) -> None:
+        clone = copy.deepcopy(FrozenDict({"OPTIONS": FrozenList(["a"])}))
+        assert type(clone) is dict
+        assert type(clone["OPTIONS"]) is list
+        clone["OPTIONS"].append("b")
+
+    def test_deep_copy_keeps_shared_subtrees_shared(self) -> None:
+        shared = {"A": 1}
+        clone = copy.deepcopy(freeze([shared, shared]))
+        assert clone[0] is clone[1]
 
     def test_reduce_names_the_constructor(self) -> None:
         source = sample()
@@ -323,8 +346,10 @@ class TestFrozenContainersRoundTrip:
         assert factory(*args) == {"a": 1}
         assert type(args[0]) is dict
 
-    def test_copies_stay_frozen(self) -> None:
-        clone = copy.deepcopy(freeze(sample()))
+    def test_rebuilt_value_stays_frozen(self) -> None:
+        factory, args = freeze(sample()).__reduce__()
+        clone = factory(*args)
+        assert isinstance(clone, FrozenList)
         with pytest.raises(TypeError, match="immutable"):
             clone.append({})
 

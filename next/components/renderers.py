@@ -47,6 +47,7 @@ _RESERVED_CONTEXT_KEYS = frozenset(
         "children",
         "csrf_token",
         "current_component_module_path",
+        "current_page_module_path",
         "current_template_path",
         "request",
     }

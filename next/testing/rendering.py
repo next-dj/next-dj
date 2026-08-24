@@ -43,12 +43,15 @@ def render_component_by_name(
     *,
     at: Path | str,
     context: Mapping[str, Any] | None = None,
+    props: Mapping[str, Any] | None = None,
     request: HttpRequest | None = None,
 ) -> str:
     """Resolve component `name` as seen from `at` and render it.
 
     `at` is the template path the component is referenced from. It is
     used for visibility/scoping by `components_manager.get_component`.
+    `context` stands in for the ambient template scope a page would
+    provide, `props` for the names a `{% component %}` call site passes.
     Raises `LookupError` when no matching visible component is found.
     """
     anchor = Path(at) if not isinstance(at, Path) else at
@@ -57,9 +60,10 @@ def render_component_by_name(
         msg = f"Component not visible from {anchor}: {name!r}"
         raise LookupError(msg)
     context_data = dict(context or {})
-    # The caller's keys stand in for the props a `{% component %}` call site
-    # would pass, so the guard here sees what the tag would show it.
-    context_data[COMPONENT_PROPS_CONTEXT_KEY] = frozenset(context_data)
+    context_data.update(props or {})
+    # Only `props` is published, the way the tag publishes its own names, so a
+    # keyless context function may still shadow an ambient page key.
+    context_data[COMPONENT_PROPS_CONTEXT_KEY] = frozenset(props or ())
     return render_component(info, context_data, request=request)
 
 

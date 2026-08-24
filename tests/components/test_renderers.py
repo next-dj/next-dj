@@ -29,6 +29,7 @@ PINNED_RESERVED_KEYS = frozenset(
         "children",
         "csrf_token",
         "current_component_module_path",
+        "current_page_module_path",
         "current_template_path",
         "request",
     }
@@ -141,18 +142,6 @@ class TestKeylessContextMerges:
 
         assert context_data["title"] == "component wins"
         assert context_data["variant"] == "wide"
-
-    def test_current_page_module_path_is_shadowed(self, tmp_path: Path) -> None:
-        """`current_page_module_path` stays a plain page key, not a reserved one."""
-        mgr, info, module_path = build_composite_component(tmp_path)
-        mgr._registry.register(
-            module_path, None, lambda: {"current_page_module_path": "/other/page.py"}
-        )
-        context_data = {"current_page_module_path": "/app/page.py"}
-
-        _inject(mgr, info, context_data)
-
-        assert context_data["current_page_module_path"] == "/other/page.py"
 
     def test_same_key_merges_when_tag_passes_no_prop(self, tmp_path: Path) -> None:
         """The guard follows the call site, so a propless call still merges."""

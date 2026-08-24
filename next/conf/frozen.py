@@ -2,7 +2,8 @@
 
 Staying a `list` and a `dict` keeps every `isinstance` guard across the
 framework working unchanged, so freezing the merge costs no sweep of the
-readers.
+readers. `copy.copy` and `copy.deepcopy` hand back plain mutable containers,
+so a caller who needs to edit a merged value still has a supported way to.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from .defaults import USER_SETTING
 _IMMUTABLE_MESSAGE = (
     f"Merged {USER_SETTING} settings are immutable. "
     f"Change settings.{USER_SETTING} and call next_framework_settings.reload(), "
-    "or copy the value with list() or dict() to edit it."
+    "or copy the value with list(), dict() or copy.deepcopy() to edit it."
 )
 
 
@@ -53,8 +54,19 @@ class FrozenList(list[Any]):
 
     @override
     def __reduce__(self) -> tuple[Any, ...]:
-        """Rebuild through the constructor so copy and pickle skip mutators."""
+        """Rebuild through the constructor so pickle skips the mutators."""
         return (type(self), (list(self),))
+
+    def __copy__(self) -> list[Any]:
+        """Return a plain mutable list, the same escape hatch as `list()`."""
+        return list(self)
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> list[Any]:
+        """Return a plain mutable deep copy, thawed all the way down."""
+        thawed: list[Any] = []
+        memo[id(self)] = thawed
+        thawed.extend(copy.deepcopy(item, memo) for item in self)
+        return thawed
 
 
 class FrozenDict(dict[Any, Any]):
@@ -76,8 +88,20 @@ class FrozenDict(dict[Any, Any]):
 
     @override
     def __reduce__(self) -> tuple[Any, ...]:
-        """Rebuild through the constructor so copy and pickle skip mutators."""
+        """Rebuild through the constructor so pickle skips the mutators."""
         return (type(self), (dict(self),))
+
+    def __copy__(self) -> dict[Any, Any]:
+        """Return a plain mutable dict, the same escape hatch as `dict()`."""
+        return dict(self)
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> dict[Any, Any]:
+        """Return a plain mutable deep copy, thawed all the way down."""
+        thawed: dict[Any, Any] = {}
+        memo[id(self)] = thawed
+        for key, value in self.items():
+            thawed[copy.deepcopy(key, memo)] = copy.deepcopy(value, memo)
+        return thawed
 
 
 _MISSING = object()

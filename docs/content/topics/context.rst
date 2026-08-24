@@ -58,8 +58,8 @@ A user ``@context`` callable reads ``request`` through an ``HttpRequest`` annota
 These path keys live in the template scope for the ``{% form %}`` and ``{% component %}`` tags to consume.
 They are not injected into a context callable by parameter name.
 
-Three of these keys are reserved inside a component, so an unkeyed ``@component.context`` that returns ``request``, ``current_template_path``, or ``current_component_module_path`` raises ``ValueError`` at render time.
-``current_page_module_path`` is deliberately left out of that guard, so a component may still shadow the page path for its own body.
+All four of these keys are reserved inside a component, so an unkeyed ``@component.context`` that returns ``request``, ``current_template_path``, ``current_page_module_path``, or ``current_component_module_path`` raises ``ValueError`` at render time.
+The two path anchors are guarded because ``{% form %}`` scopes its action lookup through them, so shadowing one would silently retarget a dispatch.
 See :doc:`components` for the rest of the reserved set.
 
 The decorator
