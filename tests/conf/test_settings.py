@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
+from django.core.exceptions import ImproperlyConfigured
 from django.test import override_settings
 from pytest_lazy_fixtures import lf
 
@@ -386,3 +388,183 @@ class TestPartialBackendsDefault:
 
     def test_is_known_top_level_key(self) -> None:
         assert "PARTIAL_BACKENDS" in NextFrameworkSettings.DEFAULTS
+
+
+# One case per merge branch that freezes a user value, each with a way to edit it.
+REUSED_MERGED_CASES = [
+    pytest.param(
+        "PAGE_BACKENDS",
+        [{"BACKEND": "next.urls.X", "DIRS": []}],
+        lambda value: value[0]["DIRS"].append("/tmp/x"),
+        id="backend_list",
+    ),
+    pytest.param(
+        "NEXT_JS_OPTIONS",
+        {"a": {"b": 1}},
+        lambda value: value["a"].__setitem__("b", 2),
+        id="options_mapping",
+    ),
+    pytest.param(
+        "FORM_WIZARD_BACKEND",
+        {"OPTIONS": {"ttl": 1}},
+        lambda value: value["OPTIONS"].__setitem__("ttl", 2),
+        id="wizard_backend",
+    ),
+]
+
+
+class TestMergedSettingsAreImmutable:
+    """Merged values reject mutation at every depth without changing types."""
+
+    @pytest.mark.parametrize(
+        "mutate",
+        [
+            pytest.param(lambda value: value.append({}), id="append"),
+            pytest.param(lambda value: value.__setitem__(0, {}), id="top_level_item"),
+            pytest.param(
+                lambda value: value[0].__setitem__("PAGES_DIR", "x"), id="nested_item"
+            ),
+            pytest.param(
+                lambda value: value[0].__delitem__("PAGES_DIR"), id="nested_delete"
+            ),
+            pytest.param(
+                lambda value: value[0]["DIRS"].append("/tmp/x"), id="nested_list"
+            ),
+            pytest.param(
+                lambda value: value[0]["OPTIONS"].update({"k": 1}), id="nested_options"
+            ),
+        ],
+    )
+    def test_page_backends_reject_mutation(self, mutate) -> None:
+        """Every reachable container under PAGE_BACKENDS is frozen."""
+        next_framework_settings.reload()
+        with pytest.raises(TypeError, match="immutable"):
+            mutate(next_framework_settings.PAGE_BACKENDS)
+        assert next_framework_settings.PAGE_BACKENDS[0]["PAGES_DIR"] == "pages"
+
+    def test_deeply_nested_partial_options_reject_mutation(self) -> None:
+        """PARTIAL_BACKENDS stays frozen three levels down at the SSE options."""
+        next_framework_settings.reload()
+        sse = next_framework_settings.PARTIAL_BACKENDS[0]["OPTIONS"]["SSE"]
+        with pytest.raises(TypeError, match="immutable"):
+            sse["RETRY_MS"] = 1
+        assert sse["RETRY_MS"] == 3000
+
+    def test_user_supplied_list_is_frozen(self) -> None:
+        """A user PAGE_BACKENDS list reaches the merge frozen, not aliased."""
+        with override_settings(
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "next.urls.X", "DIRS": []}]}
+        ):
+            next_framework_settings.reload()
+            with pytest.raises(TypeError, match="immutable"):
+                next_framework_settings.PAGE_BACKENDS[0]["DIRS"].append("/tmp/x")
+
+    def test_user_supplied_dict_is_frozen(self) -> None:
+        """NEXT_JS_OPTIONS is a frozen mapping once merged."""
+        with override_settings(NEXT_FRAMEWORK={"NEXT_JS_OPTIONS": {"a": {"b": 1}}}):
+            next_framework_settings.reload()
+            with pytest.raises(TypeError, match="immutable"):
+                next_framework_settings.NEXT_JS_OPTIONS["a"]["b"] = 2
+
+    def test_merged_wizard_backend_is_frozen(self) -> None:
+        """FORM_WIZARD_BACKEND merges defaults with the user dict and freezes."""
+        with override_settings(
+            NEXT_FRAMEWORK={"FORM_WIZARD_BACKEND": {"OPTIONS": {"ttl": 1}}}
+        ):
+            next_framework_settings.reload()
+            merged = next_framework_settings.FORM_WIZARD_BACKEND
+            assert merged["BACKEND"] == "next.forms.SessionFormWizardBackend"
+            assert merged["OPTIONS"] == {"ttl": 1}
+            with pytest.raises(TypeError, match="immutable"):
+                merged["OPTIONS"]["ttl"] = 2
+
+    def test_mutating_the_user_mapping_after_reload_is_not_visible(self) -> None:
+        """The merge rebuilds the user containers instead of aliasing them."""
+        user_entry: dict[str, Any] = {"BACKEND": "next.urls.X", "DIRS": []}
+        user_list = [user_entry]
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": user_list}):
+            next_framework_settings.reload()
+            merged = next_framework_settings.PAGE_BACKENDS
+            user_entry["DIRS"].append("/tmp/leak")
+            user_entry["BACKEND"] = "next.urls.Y"
+            user_list.append({})
+            assert merged == [{"BACKEND": "next.urls.X", "DIRS": []}]
+
+    @pytest.mark.parametrize(("key", "user_value", "mutate"), REUSED_MERGED_CASES)
+    def test_a_merged_value_put_back_into_settings_stays_frozen(
+        self, key, user_value, mutate
+    ) -> None:
+        """Reusing a merged value as the user value freezes it again."""
+        with override_settings(NEXT_FRAMEWORK={key: user_value}):
+            next_framework_settings.reload()
+            reused = getattr(next_framework_settings, key)
+        with override_settings(NEXT_FRAMEWORK={key: reused}):
+            next_framework_settings.reload()
+            with pytest.raises(TypeError, match="immutable"):
+                mutate(getattr(next_framework_settings, key))
+
+    def test_defaults_stay_plain_containers(self) -> None:
+        """The merge leaves DEFAULTS a plain structure it never hands out."""
+        next_framework_settings.reload()
+        merged = next_framework_settings.PAGE_BACKENDS
+        default = NextFrameworkSettings.DEFAULTS["PAGE_BACKENDS"]
+        assert merged is not default
+        assert merged[0] is not default[0]
+        assert type(default) is list
+        assert type(default[0]) is dict
+
+    @pytest.mark.parametrize(
+        ("key", "expected"),
+        [
+            ("URL_NAME_TEMPLATE", "page_{name}"),
+            ("URL_RESOLVER", "next.urls.TrieURLResolver"),
+            ("STRICT_CONTEXT", False),
+            ("JS_CONTEXT_SERIALIZER", None),
+            ("FORM_ANCHOR_FILES", None),
+        ],
+        ids=["template", "resolver", "strict", "serializer", "anchors"],
+    )
+    def test_scalars_are_returned_untouched(self, key: str, expected: object) -> None:
+        """Freezing leaves strings, bools, and None exactly as they were."""
+        next_framework_settings.reload()
+        value = getattr(next_framework_settings, key)
+        assert value == expected
+        assert type(value) is type(expected)
+
+    def test_cache_hit_returns_the_same_object(self) -> None:
+        """Reading twice hands back one identical object, no copy per read."""
+        next_framework_settings.reload()
+        first = next_framework_settings.PAGE_BACKENDS
+        assert next_framework_settings.PAGE_BACKENDS is first
+
+    def test_reload_rebuilds_the_frozen_value(self) -> None:
+        """A reload drops the frozen value and builds a fresh one."""
+        next_framework_settings.reload()
+        first = next_framework_settings.PAGE_BACKENDS
+        next_framework_settings.reload()
+        assert next_framework_settings.PAGE_BACKENDS is not first
+
+    def test_equality_with_plain_containers_survives(self) -> None:
+        """Frozen values keep comparing equal to plain lists and dicts."""
+        next_framework_settings.reload()
+        merged = next_framework_settings.PARTIAL_BACKENDS
+        plain = json.loads(json.dumps(merged))
+        assert type(plain) is list
+        assert merged == plain
+        assert plain.__eq__(merged) is True
+        assert next_framework_settings.NEXT_JS_OPTIONS == {}
+        assert next_framework_settings.TEMPLATE_LOADERS == [
+            "next.pages.loaders.DjxTemplateLoader"
+        ]
+
+    def test_self_referential_user_value_is_rejected(self) -> None:
+        """A cyclic user value surfaces as ImproperlyConfigured, not RecursionError."""
+        cyclic: list[Any] = []
+        cyclic.append(cyclic)
+        # The merge runs on the first read of the value, which is either the
+        # reload the settings change triggers or the attribute access below.
+        with (
+            pytest.raises(ImproperlyConfigured, match="self-referential"),
+            override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": cyclic}),
+        ):
+            assert next_framework_settings.PAGE_BACKENDS

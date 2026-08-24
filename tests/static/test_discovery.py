@@ -343,7 +343,10 @@ class TestAssetDiscoveryModuleListUrlRouting:
         assert collector.assets_in_slot("scripts") == []
 
     def test_url_with_mismatched_slot_is_dropped(
-        self, tmp_path: Path, file_backend: StaticBackend
+        self,
+        tmp_path: Path,
+        file_backend: StaticBackend,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         page_dir = tmp_path / "mismatch"
         page_dir.mkdir()
@@ -354,9 +357,18 @@ class TestAssetDiscoveryModuleListUrlRouting:
         discovery = AssetDiscovery(provider)
 
         collector = StaticCollector()
-        discovery.discover_page_assets(page_path, collector)
+        with caplog.at_level("DEBUG", logger="next.static.discovery"):
+            discovery.discover_page_assets(page_path, collector)
         assert collector.assets_in_slot("scripts") == []
         assert collector.assets_in_slot("styles") == []
+
+        message = next(
+            r.getMessage() for r in caplog.records if "styling.css" in r.getMessage()
+        )
+        assert message == (
+            "Module URL 'https://cdn.example.com/styling.css' maps to kind 'css' "
+            "in slot 'styles', so the 'scripts' list dropped it"
+        )
 
 
 class TestAssetDiscoveryComponents:

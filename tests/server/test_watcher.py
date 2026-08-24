@@ -1,21 +1,33 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
 
 from django.test import override_settings
 
+import next.server
 from next.conf import next_framework_settings
-from next.server import (
-    get_framework_filesystem_roots_for_linking,
-    iter_all_autoreload_watch_specs,
-    register_autoreload_watch_spec,
-)
+from next.server import iter_all_autoreload_watch_specs, register_autoreload_watch_spec
 from next.server.watcher import (
     _dedupe_watch_specs,
     _iter_default_autoreload_watch_specs,
     _registered_extra_watch_specs,
 )
+from tests.support.backends import file_components_entry
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+
+SERVER_EXPORTS = {
+    "NextStatReloader",
+    "get_framework_filesystem_roots_for_linking",
+    "iter_all_autoreload_watch_specs",
+    "register_autoreload_watch_spec",
+    "signals",
+}
 
 
 class TestServerAutoreloadWatchApi:
@@ -37,12 +49,6 @@ class TestServerAutoreloadWatchApi:
         finally:
             _registered_extra_watch_specs.clear()
 
-    def test_get_framework_filesystem_roots_for_linking_returns_paths(self) -> None:
-        """Linking helper returns a sorted list of paths."""
-        roots = get_framework_filesystem_roots_for_linking()
-        assert isinstance(roots, list)
-        assert all(isinstance(p, Path) for p in roots)
-
     def test_dedupe_watch_specs_when_resolve_raises_oserror(self) -> None:
         """Duplicate specs collapse when ``Path.resolve`` fails."""
         mock_path = MagicMock()
@@ -50,28 +56,22 @@ class TestServerAutoreloadWatchApi:
         specs = _dedupe_watch_specs([(mock_path, "*.py"), (mock_path, "*.py")])
         assert len(specs) == 1
 
-    def test_iter_default_includes_component_backend_dirs(self, tmp_path: Path) -> None:
+    def test_component_backend_dirs_are_watched_in_declaration_order(
+        self, tmp_path: Path, apply_component_backends: Callable[[list[Any]], None]
+    ) -> None:
         """``COMPONENT_BACKENDS`` ``DIRS`` add ``**/component.py`` (not ``.djx``)."""
-        comp_root = tmp_path / "shared_components"
-        comp_root.mkdir()
-        with override_settings(
-            NEXT_FRAMEWORK={
-                "PAGE_BACKENDS": [],
-                "COMPONENT_BACKENDS": [
-                    "not-a-dict",
-                    {
-                        "BACKEND": "next.components.FileComponentsBackend",
-                        "DIRS": [str(comp_root)],
-                        "COMPONENTS_DIR": "_components",
-                    },
-                ],
-            }
-        ):
-            next_framework_settings.reload()
-            specs = _iter_default_autoreload_watch_specs()
-        next_framework_settings.reload()
-        assert all(".djx" not in g for _, g in specs)
-        assert any(g == "**/component.py" and p == comp_root for p, g in specs)
+        first = tmp_path / "first"
+        second = tmp_path / "second"
+        first.mkdir()
+        second.mkdir()
+        apply_component_backends(
+            [file_components_entry(first), file_components_entry(second)]
+        )
+
+        specs = _iter_default_autoreload_watch_specs()
+
+        assert [p for p, glob in specs if glob == "**/component.py"] == [first, second]
+        assert all(".djx" not in glob for _, glob in specs)
 
     def test_iter_default_watches_component_py_under_each_page_root(
         self, tmp_path: Path
@@ -108,3 +108,12 @@ class TestServerAutoreloadWatchApi:
         for root in (custom.resolve(), pages_tree.resolve()):
             matches = [(p, g) for p, g in specs if p == root and g == expected_glob]
             assert len(matches) == 1
+
+
+class TestServerPublicSurface:
+    """Names the ``next.server`` package publishes."""
+
+    def test_exported_names_are_pinned(self) -> None:
+        """A dropped name coming back and a new one both have to be decided."""
+        assert set(next.server.__all__) == SERVER_EXPORTS
+        assert all(hasattr(next.server, name) for name in SERVER_EXPORTS)

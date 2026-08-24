@@ -9,12 +9,12 @@ reset their own state.
 
 from __future__ import annotations
 
-import copy
 from typing import Any, ClassVar, override
 
 from django.conf import settings
 
 from .defaults import DEFAULTS, USER_SETTING
+from .frozen import freeze
 from .imports import clear_import_cache
 
 
@@ -79,7 +79,9 @@ class NextFrameworkSettings:
     )
 
     def _build_flat_merged(self, user: dict[str, Any] | None) -> dict[str, Any]:
-        out = copy.deepcopy(self.DEFAULTS)
+        out: dict[str, Any] = {
+            key: freeze(value) for key, value in self.DEFAULTS.items()
+        }
         if not user:
             return out
         user = dict(user)
@@ -90,13 +92,11 @@ class NextFrameworkSettings:
             if key in {"URL_NAME_TEMPLATE", "URL_RESOLVER"} and isinstance(raw, str):
                 out[key] = raw
             elif key == "FORM_WIZARD_BACKEND" and isinstance(raw, dict):
-                merged = copy.deepcopy(self.DEFAULTS[key])
-                merged.update(copy.deepcopy(raw))
-                out[key] = merged
+                out[key] = freeze({**self.DEFAULTS[key], **raw})
             elif (key in self.LIST_KEYS and isinstance(raw, list)) or (
                 key == "NEXT_JS_OPTIONS" and isinstance(raw, dict)
             ):
-                out[key] = copy.deepcopy(raw)
+                out[key] = freeze(raw)
             elif key in self.BOOL_KEYS:
                 out[key] = bool(raw)
             elif key == "JS_CONTEXT_SERIALIZER" and (

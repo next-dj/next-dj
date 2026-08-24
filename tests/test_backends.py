@@ -11,6 +11,8 @@ from next.backends import (
     load_backends,
     resolve_backend_class,
 )
+from next.conf import next_framework_settings
+from next.conf.frozen import FrozenDict, FrozenList
 from tests.support.backends import (
     ALPHA,
     BETA,
@@ -140,8 +142,8 @@ class TestLoadBackends:
         [("type", TypeError), ("value", ValueError), ("import", ImportError)],
     )
     def test_other_errors_from_construction_escape(self, kind, error) -> None:
-        # a constructor failing for anything but its own config is a bug,
-        # not an entry to skip
+        # a constructor failing for anything but its own config is a bug
+        # rather than an entry to skip
         with pytest.raises(error, match="boom"):
             load_backends(
                 [{"BACKEND": RAISING, "ERROR": kind}, {"BACKEND": ALPHA}],
@@ -413,3 +415,27 @@ class TestFamilyShapes:
             pytest.raises(ImproperlyConfigured, match="under BACKEND"),
         ):
             _manager(setting).get()
+
+
+class TestFrozenMergedValuesAreReadUnchanged:
+    """The loaders read the frozen merged settings through the same guards."""
+
+    def test_backend_entries_keeps_its_list_and_dict_guards(self) -> None:
+        entries = [{"BACKEND": ALPHA}, "not-an-entry"]
+        with override_settings(NEXT_FRAMEWORK={_LIST_SETTING: entries}):
+            selected = backend_entries(_LIST_SETTING)
+            assert isinstance(next_framework_settings.PARTIAL_BACKENDS, FrozenList)
+            assert selected == [{"BACKEND": ALPHA}]
+            assert isinstance(selected[0], FrozenDict)
+
+    @pytest.mark.parametrize(("setting", "shape"), _FAMILY_SHAPES)
+    def test_selected_entry_stays_frozen_all_the_way_to_the_backend(
+        self, setting, shape
+    ) -> None:
+        entry = {"BACKEND": ALPHA, "OPTIONS": {"flag": True}}
+        with override_settings(NEXT_FRAMEWORK={setting: shape(entry)}):
+            config = _manager(setting).get().config
+            assert config == entry
+            assert isinstance(config, FrozenDict)
+            with pytest.raises(TypeError, match="immutable"):
+                config["OPTIONS"]["flag"] = False

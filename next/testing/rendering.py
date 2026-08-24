@@ -1,8 +1,7 @@
 """Render helpers for next-dj pages and components.
 
-Thin wrappers over `page.render` and `render_component` so tests do not
-need to construct `ComponentInfo` manually or build an `HttpRequest`
-just to exercise a renderer.
+Thin wrappers over `page.render` and `render_component`, so a test needs no
+hand-built `ComponentInfo` or `HttpRequest` to exercise a renderer.
 """
 
 from __future__ import annotations
@@ -14,6 +13,7 @@ from django.test import RequestFactory
 
 from next.components.facade import render_component
 from next.components.manager import components_manager
+from next.components.renderers import COMPONENT_PROPS_CONTEXT_KEY
 from next.pages.manager import page
 
 
@@ -42,20 +42,24 @@ def render_component_by_name(
     *,
     at: Path | str,
     context: Mapping[str, Any] | None = None,
+    props: Mapping[str, Any] | None = None,
     request: HttpRequest | None = None,
 ) -> str:
-    """Resolve component `name` as seen from `at` and render it.
+    """Render component `name` as resolved from the template path `at`.
 
-    `at` is the template path the component is referenced from. It is
-    used for visibility/scoping by `components_manager.get_component`.
-    Raises `LookupError` when no matching visible component is found.
+    `at` drives visibility, `context` stands in for the ambient page scope, and
+    `props` for the names a `{% component %}` call site would pass.
     """
     anchor = Path(at) if not isinstance(at, Path) else at
     info = components_manager.get_component(name, anchor)
     if info is None:
         msg = f"Component not visible from {anchor}: {name!r}"
         raise LookupError(msg)
-    return render_component(info, dict(context or {}), request=request)
+    context_data = dict(context or {})
+    context_data.update(props or {})
+    # Publishing `context` too would guard keys a page render leaves shadowable.
+    context_data[COMPONENT_PROPS_CONTEXT_KEY] = frozenset(props or ())
+    return render_component(info, context_data, request=request)
 
 
 __all__ = ["render_component_by_name", "render_page"]

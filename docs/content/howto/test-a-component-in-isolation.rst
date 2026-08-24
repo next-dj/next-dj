@@ -12,7 +12,7 @@ Solution
 --------
 
 Use ``render_component_by_name`` from ``next.testing``.
-It resolves a component by name as seen from a given template path, renders it with a context mapping you supply, and returns the HTML string.
+It resolves a component by name as seen from a given template path, renders it with the mappings you supply, and returns the HTML string.
 
 Walkthrough
 -----------
@@ -43,7 +43,7 @@ Render the component
 
 ``render_component_by_name`` takes the component name and the ``at`` path the component is referenced from.
 The ``at`` path drives visibility, so pass a template inside the page tree that can see the component.
-The ``context`` mapping fills the values the component template reads.
+The ``props`` mapping stands in for a ``{% component %}`` call site, so it fills the values the component template reads.
 
 .. code-block:: python
    :caption: tests/test_info_card.py
@@ -54,12 +54,35 @@ The ``context`` mapping fills the values the component template reads.
        html = render_component_by_name(
            "info_card",
            at="notes/pages/template.djx",
-           context={"title": "Quick start", "subtitle": "Read this first"},
+           props={"title": "Quick start", "subtitle": "Read this first"},
        )
        assert "Quick start" in html
        assert "info-card" in html
 
 The helper raises ``LookupError`` when no visible component matches the name from the ``at`` path.
+
+.. warning::
+
+   The keys of the ``props`` mapping reach the render-time guard as the props of this call site, the way ``{% component "info_card" title="Quick start" %}`` would pass them.
+   A component whose unkeyed ``@component.context`` returns one of those keys raises ``ValueError`` here too, so the isolated test fails wherever the page render would.
+
+Pass ambient page values through ``context``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A component that reads a value from the surrounding page scope rather than from its own call site takes it through the ``context`` mapping.
+Those keys are not published as props, so an unkeyed ``@component.context`` may shadow them exactly as it does on a page.
+
+.. code-block:: python
+   :caption: tests/test_info_card.py
+
+   def test_info_card_reads_the_page_scope() -> None:
+       html = render_component_by_name(
+           "info_card",
+           at="notes/pages/template.djx",
+           context={"section": "Guides"},
+           props={"title": "Quick start"},
+       )
+       assert "Guides" in html
 
 Assert on the markup
 ~~~~~~~~~~~~~~~~~~~~
@@ -76,7 +99,7 @@ The ``assert_has_class`` and ``find_anchor`` helpers from ``next.testing`` keep 
        html = render_component_by_name(
            "info_card",
            at="notes/pages/template.djx",
-           context={"title": "Quick start"},
+           props={"title": "Quick start"},
        )
        assert_has_class(html, "info-card")
 
@@ -84,7 +107,7 @@ The ``assert_has_class`` and ``find_anchor`` helpers from ``next.testing`` keep 
        html = render_component_by_name(
            "info_card",
            at="notes/pages/template.djx",
-           context={"title": "Quick start", "href": "/notes/1/"},
+           props={"title": "Quick start", "href": "/notes/1/"},
        )
        anchor = find_anchor(html, href="/notes/1/", text="Quick start")
        assert 'href="/notes/1/"' in anchor

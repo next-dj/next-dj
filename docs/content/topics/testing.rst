@@ -455,7 +455,7 @@ In the second example below, ``at`` is the template path the component is refere
        html = render_component_by_name(
            "note_card",
            at="notes/pages/template.djx",
-           context={"note": {"title": "First"}},
+           props={"note": {"title": "First"}},
        )
        assert_has_class(html, "note-card")
 

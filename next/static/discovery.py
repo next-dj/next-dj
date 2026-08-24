@@ -344,12 +344,13 @@ class AssetDiscovery:
         if kind is None:
             logger.debug("Module URL %r has unregistered extension %r", url, suffix)
             return
-        if default_kinds.slot(kind) != slot_name:
+        kind_slot = default_kinds.slot(kind)
+        if kind_slot != slot_name:
             logger.debug(
-                "Module URL %r maps to kind %r but list %r expects slot %r",
+                "Module URL %r maps to kind %r in slot %r, so the %r list dropped it",
                 url,
                 kind,
-                slot_name,
+                kind_slot,
                 slot_name,
             )
             return

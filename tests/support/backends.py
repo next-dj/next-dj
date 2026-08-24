@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, ClassVar
 
 from django.core.exceptions import ImproperlyConfigured
@@ -89,3 +90,15 @@ COUNTING = f"{__name__}.CountingBackend"
 CONCRETE = f"{__name__}.ConcreteFakeBackend"
 NOT_A_CLASS = f"{__name__}.not_a_class"
 MISSING = f"{__name__}.NoSuchBackend"
+
+
+FILE_COMPONENTS_BACKEND = "next.components.FileComponentsBackend"
+
+
+def file_components_entry(*dirs: Path) -> dict[str, Any]:
+    """Build one ``COMPONENT_BACKENDS`` entry listing the given directories."""
+    return {
+        "BACKEND": FILE_COMPONENTS_BACKEND,
+        "DIRS": [str(p) for p in dirs],
+        "COMPONENTS_DIR": "_components",
+    }
