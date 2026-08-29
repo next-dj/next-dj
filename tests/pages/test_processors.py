@@ -4,7 +4,6 @@ import pytest
 from django.http import HttpRequest
 from django.test import override_settings
 
-from next.conf import next_framework_settings
 from next.conf.signals import settings_reloaded
 from next.pages.processors import _get_context_processors
 from tests.support import file_router_config_entry
@@ -46,7 +45,6 @@ def router_settings():
         NEXT_FRAMEWORK={"PAGE_BACKENDS": _router_with("app.processors.one")},
         TEMPLATES=[],
     ):
-        next_framework_settings.reload()
         yield
 
 
@@ -82,7 +80,6 @@ class TestContextProcessorsMemo:
             override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": []}, TEMPLATES=[]),
             patch("next.pages.processors.import_string", return_value=_processor),
         ):
-            next_framework_settings.reload()
             assert _get_context_processors() == []
 
             with override_settings(TEMPLATES=_templates_with("app.processors.one")):
@@ -97,7 +94,6 @@ class TestContextProcessorsMemo:
             ),
             patch("next.pages.processors.import_string") as mock_import,
         ):
-            next_framework_settings.reload()
             mock_import.side_effect = [_processor, _other_processor]
 
             assert _get_context_processors() == [_processor, _other_processor]
@@ -115,8 +111,6 @@ class TestContextProcessorsMemo:
                 "next.pages.processors.import_string", return_value=_processor
             ) as mock_import,
         ):
-            next_framework_settings.reload()
-
             assert _get_context_processors() == [_processor]
             assert _get_context_processors() == [_processor]
             assert mock_import.call_count == 1
