@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from django.test import override_settings
 
+from next.server import NextStatReloader
+
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
@@ -17,6 +19,16 @@ class _MockAutoreloadSender:
 
     def watch_dir(self, path: object, glob: str) -> None:
         self.watch_calls.append((path, glob))
+
+
+@pytest.fixture(autouse=True)
+def _instant_reloader_ticks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Drop the one-second sleep a real tick performs.
+
+    Django's ``StatReloader.tick`` sleeps ``SLEEP_TIME`` before every
+    yield, so each tick a test drives costs a second of wall clock.
+    """
+    monkeypatch.setattr(NextStatReloader, "SLEEP_TIME", 0)
 
 
 @pytest.fixture()
