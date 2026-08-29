@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast, overload
 
+from django.conf import settings
 from django.http import Http404, HttpRequest, HttpResponse
 from django.http.response import HttpResponseBase
 from django.template import Context as DjangoTemplateContext, Origin, Template
@@ -33,6 +34,7 @@ from .loaders import (
     has_load_errors,
     last_load_error,
 )
+from .paths import clear_page_path_info, forget_page_path_info, page_path_info
 from .processors import _get_context_processors
 from .registry import PageContextRegistry
 from .signals import page_rendered, template_loaded
@@ -50,6 +52,21 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+# Mtimes of every source behind one composition, keyed by the page path the
+# composition belongs to.
+type _SourceMtimes = dict[Path, dict[Path, float]]
+
+
+def template_edits_watched() -> bool:
+    """Whether the composition caches stat their sources to notice an edit.
+
+    Autoreload leaves `.djx` alone, so under `DEBUG` the stat is the only
+    thing making an edit visible without a restart, while production trades
+    it for a stat-free hit. Read per call, so an override takes effect.
+    """
+    return bool(settings.DEBUG)
 
 
 class _RoutedPageView(Protocol):
@@ -93,7 +110,9 @@ class Page:
         """
         self._template_registry: dict[Path, str] = {}
         self._compiled_registry: dict[Path, Template] = {}
-        self._template_source_mtimes: dict[Path, dict[Path, float]] = {}
+        self._template_source_mtimes: _SourceMtimes = {}
+        self._skeleton_registry: dict[Path, str] = {}
+        self._skeleton_source_mtimes: _SourceMtimes = {}
         self._context_manager = PageContextRegistry(None)
         self._layout_loader = LayoutTemplateLoader()
 
@@ -104,15 +123,16 @@ class Page:
     def register_template(self, file_path: Path, template_str: str) -> None:
         """Store rendered template source for `file_path`.
 
-        The compiled-template entry is dropped alongside so every write
-        to the source registry invalidates the compiled layer with it.
+        The compiled-template entry and the memoised path facts go with it,
+        so every layer keyed off the page path invalidates together.
         """
         self._template_registry[file_path] = template_str
         self._compiled_registry.pop(file_path, None)
+        forget_page_path_info(file_path)
         template_loaded.send(sender=Page, file_path=file_path)
 
     def clear_template_caches(self) -> None:
-        """Drop the composed source, the compiled templates, and the mtimes.
+        """Drop every composed layer, the mtime snapshots, and the path facts.
 
         A caller that rewrites a page or a layout in place inside one process
         needs this, because the composed source is memoised per page path and
@@ -121,6 +141,9 @@ class Page:
         self._template_registry.clear()
         self._compiled_registry.clear()
         self._template_source_mtimes.clear()
+        self._skeleton_registry.clear()
+        self._skeleton_source_mtimes.clear()
+        clear_page_path_info()
 
     @overload
     def context[C: Callable[..., Any]](self, func_or_key: C, /) -> C: ...
@@ -197,12 +220,11 @@ class Page:
         callables to that batch and stays out of the returned dict, so it
         never reaches a template or the JS context.
         """
-        context_data: dict[str, object] = {}
-        template_djx = file_path.parent / "template.djx"
-        context_data["current_template_path"] = (
-            str(template_djx) if template_djx.exists() else str(file_path)
-        )
-        context_data["current_page_module_path"] = str(file_path.resolve())
+        info = page_path_info(file_path)
+        context_data: dict[str, object] = {
+            "current_template_path": info.template_path,
+            "current_page_module_path": info.module_path,
+        }
         context_data.update(kwargs)
 
         context_result = self._context_manager.collect_context(
@@ -384,12 +406,33 @@ class Page:
     ) -> str:
         """Compose `body` through layouts and render.
 
-        The template-registry cache is bypassed so dynamic bodies
-        produced by `render()` do not poison the cache.
+        Only the layout skeleton is cached, so a dynamic body produced by
+        `render()` never reaches the template registry.
         """
         start = time.perf_counter()
-        composed = self._layout_loader.compose_body(body, file_path)
+        skeleton = self._layout_skeleton_for(file_path)
+        composed = self._layout_loader.fill_skeleton(skeleton, body)
         return self._render_template_str(file_path, composed, start, request, **kwargs)
+
+    def _layout_skeleton_for(self, file_path: Path) -> str:
+        """Return the cached layout chain of `file_path` with an empty body slot.
+
+        The skeleton carries its own mtime snapshot, because the composed
+        registry refreshes its own on eviction and would otherwise hide a
+        layout edit from this cache.
+        """
+        skeleton = self._skeleton_registry.get(file_path)
+        if skeleton is None or self._is_template_stale(
+            file_path, self._skeleton_source_mtimes
+        ):
+            skeleton = self._layout_loader.compose_skeleton(file_path)
+            self._skeleton_registry[file_path] = skeleton
+            self._skeleton_source_mtimes.pop(file_path, None)
+            self._record_template_source_mtimes(file_path, self._skeleton_source_mtimes)
+            # A dynamic page never registers a template, so this is where a
+            # `template.djx` appearing next to it invalidates the path facts.
+            forget_page_path_info(file_path)
+        return skeleton
 
     def composed_template_for(self, file_path: Path) -> Template:
         """Return the compiled composed template for the static body.
@@ -400,7 +443,7 @@ class Page:
         together and a warm hit performs no file reads and no parsing.
         """
         if file_path not in self._template_registry or self._is_template_stale(
-            file_path
+            file_path, self._template_source_mtimes
         ):
             self._template_registry.pop(file_path, None)
             self._template_source_mtimes.pop(file_path, None)
@@ -408,7 +451,7 @@ class Page:
             body = self._load_static_body(file_path, module)
             composed = self._layout_loader.compose_body(body, file_path)
             self.register_template(file_path, composed)
-            self._record_template_source_mtimes(file_path)
+            self._record_template_source_mtimes(file_path, self._template_source_mtimes)
         compiled = self._compiled_registry.get(file_path)
         if compiled is None:
             # The origin makes compile errors name the page path.
@@ -464,13 +507,61 @@ class Page:
         *,
         broken_at_build: bool = False,
     ) -> Callable[..., HttpResponseBase]:
-        """Return a view that resolves the body, composes layouts, and renders.
+        """Return the view for a page, on the branch its body source dictates.
 
-        The view carries `next_page_path` so the form dispatch maps a resolved
-        origin URL back to the page source. A page marked `broken_at_build`
-        re-reads its module per request, so a fixed file comes back without a
-        restart and a still-broken one never serves the sibling template past
-        the guards its `render()` would have applied.
+        A page without a module-level `render()` serves the same composed
+        template on every request, while a page with one, or a
+        `broken_at_build` page whose module a request re-reads, resolves its
+        body per request. The view carries `next_page_path` so the form
+        dispatch maps a resolved origin URL back to the page source.
+        """
+        has_render = module is not None and callable(getattr(module, "render", None))
+        view = (
+            self._create_resolving_view(
+                file_path, module, broken_at_build=broken_at_build
+            )
+            if has_render or broken_at_build
+            else self._create_static_view(file_path)
+        )
+        cast("_RoutedPageView", view).next_page_path = file_path
+        return view
+
+    def _create_static_view(self, file_path: Path) -> Callable[..., HttpResponseBase]:
+        """Return the view of a page whose body comes from files on disk.
+
+        Nothing about that body depends on the request, so the view serves
+        the compiled composed template and resolves no body of its own.
+        """
+
+        def view(request: HttpRequest, **kwargs) -> HttpResponseBase:
+            # `has_load_errors` first, so a healthy site pays no stat.
+            if has_load_errors() and fail_loudly():
+                error = last_load_error(file_path)
+                if error is not None:
+                    raise error
+            shaper = partial_shaper_slot.get()
+            intent = shaper.intent(request)
+            if intent.zones:
+                return shaper.zone_response(
+                    file_path,
+                    request,
+                    intent,
+                    dynamic_body=False,
+                    url_kwargs=dict(kwargs),
+                )
+            return HttpResponse(self.render(file_path, request, **kwargs))
+
+        return view
+
+    def _create_resolving_view(
+        self, file_path: Path, module: types.ModuleType | None, *, broken_at_build: bool
+    ) -> Callable[..., HttpResponseBase]:
+        """Return the view that resolves a per-request body before composing.
+
+        A page marked `broken_at_build` re-reads its module per request, so a
+        fixed file comes back without a restart and a still-broken one never
+        serves the sibling template past the guards its `render()` would have
+        applied.
         """
 
         def view(request: HttpRequest, **kwargs) -> HttpResponseBase:
@@ -484,8 +575,8 @@ class Page:
                     if fail_loudly():
                         raise error
                     raise Http404
-            # Both guards run before `last_load_error`, so a healthy site and
-            # a flags-off production never pay its per-request stat.
+            # Both guards run first, so a healthy site and a flags-off
+            # production never pay the `last_load_error` stat.
             elif has_load_errors() and fail_loudly():
                 error = last_load_error(file_path)
                 if error is not None:
@@ -509,7 +600,6 @@ class Page:
             content = self._render_composed(file_path, body, request, **kwargs)
             return HttpResponse(content)
 
-        cast("_RoutedPageView", view).next_page_path = file_path
         return view
 
     def has_template(
@@ -523,17 +613,30 @@ class Page:
         return any(loader.can_load(file_path) for loader in build_registered_loaders())
 
     def _get_template_source_paths(self, file_path: Path) -> list[Path]:
-        """Return file-based loader source files and layout files behind this page."""
-        loader_paths: list[Path] = []
+        """Return every path whose change alters the composition of this page.
+
+        The directories come along with the files, because a `layout.djx`
+        created or deleted there moves no mtime a file-only snapshot sees.
+        """
+        paths: list[Path] = []
         for loader in build_registered_loaders():
             source = loader.source_path(file_path)
             if source is not None:
-                loader_paths.append(source)
-        layout_files = self._layout_loader._find_layout_files(file_path)
-        return loader_paths + (layout_files or [])
+                paths.append(source)
+        layout_files, watched_dirs = self._layout_loader.layout_sources(file_path)
+        paths += layout_files
+        paths += watched_dirs
+        return paths
 
-    def _record_template_source_mtimes(self, file_path: Path) -> None:
-        """Snapshot mtimes of template source files for stale detection."""
+    def _record_template_source_mtimes(
+        self, file_path: Path, store: _SourceMtimes
+    ) -> None:
+        """Snapshot mtimes of the template sources of `file_path` into `store`.
+
+        Taken whether or not the process watches template edits, because an
+        entry composed while the watch was off would otherwise hold nothing
+        to compare against and could never go stale once it comes on.
+        """
         paths = self._get_template_source_paths(file_path)
         if not paths:
             return
@@ -542,19 +645,27 @@ class Page:
             with contextlib.suppress(OSError):
                 mtimes[p] = p.stat().st_mtime
         if mtimes:
-            self._template_source_mtimes[file_path] = mtimes
+            store[file_path] = mtimes
 
-    def _is_template_stale(self, file_path: Path) -> bool:
-        """Return whether any tracked source file changed on disk."""
-        stored = self._template_source_mtimes.get(file_path)
+    def _is_template_stale(self, file_path: Path, store: _SourceMtimes) -> bool:
+        """Return whether any source tracked in `store` changed on disk.
+
+        A source that no longer stats reads as changed, because a deleted
+        `layout.djx` alters the composition exactly like an edited one. A
+        process that watches no edit answers no without a single stat.
+        """
+        if not template_edits_watched():
+            return False
+        stored = store.get(file_path)
         if not stored:
             return False
         for p, old_mtime in stored.items():
             try:
-                if p.stat().st_mtime > old_mtime:
-                    return True
-            except OSError as e:
-                logger.debug("Cannot stat %s in stale check: %s", p, e)
+                current = p.stat().st_mtime
+            except OSError:
+                return True
+            if current > old_mtime:
+                return True
         return False
 
     def _create_regular_page_pattern(

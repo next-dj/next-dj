@@ -19,6 +19,7 @@ from next.pages.loaders import (
     TemplateLoader,
     _load_python_module,
     _load_python_module_memo,
+    _page_roots,
     build_registered_loaders,
     has_load_errors,
     last_load_error,
@@ -455,7 +456,6 @@ class TestLayoutTemplateLoader:
             next_framework_settings.reload()
             result = loader._find_layout_files(page_file)
 
-        assert result is not None
         assert len(result) == 1
         assert layout_file in result
 
@@ -501,7 +501,6 @@ class TestLayoutTemplateLoader:
             next_framework_settings.reload()
             result = loader._find_layout_files(page_file)
 
-        assert result is not None
         assert len(result) == 1
         assert local_layout in result
 
@@ -530,7 +529,6 @@ class TestLayoutTemplateLoader:
             next_framework_settings.reload()
             result = loader._find_layout_files(page_file)
 
-        assert result is not None
         assert len(result) == 2
         assert local_layout in result
         assert additional_layout in result
@@ -640,10 +638,118 @@ class TestLayoutTemplateLoader:
         page_file = sub_dir / "page.py"
         layout_files = loader._find_layout_files(page_file)
 
-        assert layout_files is not None
         assert len(layout_files) == 2
         assert sub_layout in layout_files
         assert root_layout in layout_files
+
+    def test_layout_sources_reports_every_walked_directory(self, tmp_path) -> None:
+        """A page under no routed tree hands back every directory it visited."""
+        loader = LayoutTemplateLoader()
+
+        sub_dir = tmp_path / "sub" / "nested"
+        sub_dir.mkdir(parents=True)
+        layout = tmp_path / "sub" / "layout.djx"
+        layout.write_text("sub layout")
+
+        layout_files, watched_dirs = loader.layout_sources(sub_dir / "page.py")
+
+        assert layout_files == [layout]
+        assert watched_dirs[:3] == [sub_dir, tmp_path / "sub", tmp_path]
+        assert watched_dirs[-1].parent == watched_dirs[-1].parent.parent
+
+    def test_the_watched_directories_stop_at_the_page_root(self, tmp_path) -> None:
+        """A page inside a routed tree watches no directory above that tree.
+
+        The layout above the tree still joins the chain, because discovery
+        keeps climbing. Only the mtime watch stops, so an unrelated write to
+        a shared parent evicts no composition.
+        """
+        loader = LayoutTemplateLoader()
+
+        root = tmp_path / "site"
+        page_dir = root / "sub"
+        page_dir.mkdir(parents=True)
+        outer_layout = tmp_path / "layout.djx"
+        outer_layout.write_text("layout above the tree")
+        root_layout = root / "layout.djx"
+        root_layout.write_text("root layout")
+
+        with override_settings(
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(root)}
+        ):
+            layout_files, watched_dirs = loader.layout_sources(page_dir / "page.py")
+
+        assert layout_files == [root_layout, outer_layout]
+        assert watched_dirs == [page_dir, root]
+
+    def test_the_nearest_page_root_bounds_the_watched_directories(
+        self, tmp_path
+    ) -> None:
+        """Two routed trees on one path watch only up to the inner one."""
+        loader = LayoutTemplateLoader()
+
+        outer = tmp_path / "site"
+        inner = outer / "admin"
+        inner.mkdir(parents=True)
+        config = default_page_router_config(outer) + default_page_router_config(inner)
+
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": config}):
+            _, watched_dirs = loader.layout_sources(inner / "page.py")
+
+        assert watched_dirs == [inner]
+
+    def test_the_memoised_page_roots_survive_a_second_walk(self, tmp_path) -> None:
+        """The routers are built once, so the second walk reads the memo."""
+        root = tmp_path / "site"
+        root.mkdir()
+
+        with override_settings(
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(root)}
+        ):
+            first = _page_roots()
+            second = _page_roots()
+
+        assert first == second == (root,)
+
+    def test_an_app_list_change_drops_the_memoised_page_roots(self) -> None:
+        """An `APP_DIRS` router routes new trees when the app list moves."""
+        _page_roots()
+
+        with override_settings(INSTALLED_APPS=["django.contrib.contenttypes"]):
+            assert loaders_module._PAGE_ROOTS_CACHE["value"] is None
+
+    @pytest.mark.parametrize(
+        "layouts",
+        [[], ["."], [".."], [".", "..", "../.."]],
+        ids=["none", "sibling", "ancestor", "chain"],
+    )
+    @pytest.mark.parametrize(
+        "body",
+        ["<p>b</p>", "", "{% block template %}{% endblock template %}"],
+        ids=["body", "empty", "placeholder"],
+    )
+    def test_filled_skeleton_equals_a_direct_compose(
+        self, tmp_path, layouts, body
+    ) -> None:
+        """Filling the cached skeleton reproduces `compose_body` character for character."""
+        loader = LayoutTemplateLoader()
+
+        page_dir = tmp_path / "a" / "b"
+        page_dir.mkdir(parents=True)
+        page_file = page_dir / "page.py"
+        page_file.write_text("x = 1")
+        for index, relative in enumerate(layouts):
+            target = (page_dir / relative).resolve() / "layout.djx"
+            target.write_text(
+                f'<div class="l{index}">'
+                "{% block template %}{% endblock template %}</div>"
+            )
+
+        skeleton = loader.compose_skeleton(page_file)
+
+        assert loader.fill_skeleton(skeleton, body) == loader.compose_body(
+            body, page_file
+        )
 
     def test_compose_layout_hierarchy_exception_handling(self, tmp_path) -> None:
         """A layout that cannot be read leaves the body unwrapped instead of raising."""

@@ -29,6 +29,14 @@ from tests.support.helpers import (
     next_framework_settings_component_backends_list,
     next_framework_settings_for_checks_backends_value,
 )
+from tests.support.pages import (
+    build_nested_page,
+    build_page_request,
+    build_zone_request,
+    path_under,
+    record_path_calls,
+    unified_view,
+)
 from tests.support.partial_requests import (
     action_uid,
     partial_meta,
@@ -81,7 +89,10 @@ __all__ = [
     "_resolver_with_form",
     "action_uid",
     "build_mock_http_request",
+    "build_nested_page",
+    "build_page_request",
     "build_post_request",
+    "build_zone_request",
     "counting_provider",
     "default_page_router_config",
     "file_router_backend_from_params",
@@ -97,9 +108,12 @@ __all__ = [
     "patch_checks_components_manager",
     "patch_checks_router_manager",
     "patch_checks_router_manager_with_routers",
+    "path_under",
     "plain_get",
     "plain_request",
+    "record_path_calls",
     "tick_scenario",
+    "unified_view",
     "unwrapped_decorator",
     "wraps_decorator",
 ]

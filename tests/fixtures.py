@@ -5,7 +5,7 @@ import pytest
 from django.http import HttpRequest
 from django.middleware.csrf import get_token
 from django.template.engine import Engine
-from django.test import Client
+from django.test import Client, override_settings
 
 from next.conf import NextFrameworkSettings, next_framework_settings
 from next.pages import Page
@@ -70,6 +70,17 @@ def fresh_next_framework_settings() -> NextFrameworkSettings:
 def page_instance():
     """Create a fresh Page instance for each test."""
     return Page()
+
+
+@pytest.fixture()
+def watched_template_edits() -> Generator[None, None, None]:
+    """Run the body with the dev-loop staleness checks engaged.
+
+    The suite runs with ``DEBUG`` off, so a test about picking an edit up
+    without a restart asks for the dev setting by name.
+    """
+    with override_settings(DEBUG=True):
+        yield
 
 
 @pytest.fixture()

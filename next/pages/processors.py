@@ -13,9 +13,11 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
+from django.core.signals import setting_changed
 from django.utils.module_loading import import_string
 
 from next.conf import next_framework_settings
+from next.conf.signals import settings_reloaded
 
 
 if TYPE_CHECKING:
@@ -38,8 +40,27 @@ def _import_context_processor(
     return None
 
 
+# A single-slot holder mutated in place, so a reset needs no `global`.
+_CONTEXT_PROCESSORS_CACHE: dict[str, list[Callable[[Any], dict[str, Any]]] | None] = {
+    "value": None
+}
+
+
 def _get_context_processors() -> list[Callable[[Any], dict[str, Any]]]:
-    """Return the merged context processors from Next routers and Django."""
+    """Return the merged context processors from Next routers and Django.
+
+    The merge and its imports depend on settings alone, so the result is
+    memoised until either source setting changes.
+    """
+    cached = _CONTEXT_PROCESSORS_CACHE["value"]
+    if cached is None:
+        cached = _build_context_processors()
+        _CONTEXT_PROCESSORS_CACHE["value"] = cached
+    return cached
+
+
+def _build_context_processors() -> list[Callable[[Any], dict[str, Any]]]:
+    """Merge the router and `TEMPLATES` processor paths and import each one."""
     configs = next_framework_settings.PAGE_BACKENDS
     if not isinstance(configs, list):
         configs = []
@@ -59,3 +80,21 @@ def _get_context_processors() -> list[Callable[[Any], dict[str, Any]]]:
     )
     processor_paths = list(dict.fromkeys(from_next + from_templates))
     return [p for path in processor_paths if (p := _import_context_processor(path))]
+
+
+def _reset_context_processors_cache(**kwargs) -> None:
+    """Drop the memoised processors so the next render rebuilds the list."""
+    _CONTEXT_PROCESSORS_CACHE["value"] = None
+
+
+def _on_setting_changed(*, setting: str, **kwargs) -> None:
+    """Drop the memo when Django reports a `TEMPLATES` change.
+
+    `settings_reloaded` covers only the `NEXT_FRAMEWORK` half of the merge.
+    """
+    if setting == "TEMPLATES":
+        _reset_context_processors_cache()
+
+
+settings_reloaded.connect(_reset_context_processors_cache)
+setting_changed.connect(_on_setting_changed)

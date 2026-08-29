@@ -1,15 +1,17 @@
 import functools
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 from django.http import HttpRequest
 
+import next.pages.registry as registry_module
 from next.deps import DependencyResolver
 from next.pages import Context, Page
 from next.pages.context import ContextByDefaultProvider
 from next.pages.registry import PageContextEntry, PageContextRegistry, ZoneBinding
 from next.static import StaticCollector
-from tests.support import inspect_parameter
+from tests.support import inspect_parameter, record_path_calls
 
 
 class TestPageContextRegistry:
@@ -695,3 +697,247 @@ class TestPageContextRegistrySerializerOverride:
         assert '"other":"plain"' in html
         assert marker.calls.count("v") >= 1
         assert all(call == "v" for call in marker.calls)
+
+
+def _count_chain_builds(monkeypatch) -> list[Path]:
+    """Collect every ancestor-chain build the registry performs."""
+    builds: list[Path] = []
+    original = registry_module.page_path_info
+
+    def counting(file_path: Path):
+        builds.append(file_path)
+        return original(file_path)
+
+    monkeypatch.setattr(registry_module, "page_path_info", counting)
+    return builds
+
+
+def _build_ancestor_page(tmp_path: Path) -> tuple[Path, Path]:
+    """Write an ancestor ``page.py`` above a child page and return both."""
+    ancestor = tmp_path / "page.py"
+    ancestor.write_text("x = 1")
+    child_dir = tmp_path / "child"
+    child_dir.mkdir()
+    child = child_dir / "page.py"
+    child.write_text("x = 1")
+    return ancestor, child
+
+
+class TestContextRegistryVersion:
+    """The version counter every per-path memo keys off."""
+
+    def test_a_fresh_registry_starts_at_zero(self, context_manager) -> None:
+        """Nothing registered means nothing to invalidate."""
+        assert context_manager.version == 0
+
+    def test_every_registration_bumps_the_version(
+        self, context_manager, test_file_path
+    ) -> None:
+        """Each write moves the counter, including a rewrite of the same key."""
+        context_manager.register_context(test_file_path, "k", lambda: "v")
+        assert context_manager.version == 1
+
+        context_manager.register_context(test_file_path, "k", lambda: "w")
+        assert context_manager.version == 2
+
+    def test_reset_bumps_the_version(self, context_manager, test_file_path) -> None:
+        """Clearing the registry invalidates the memos with it."""
+        context_manager.register_context(test_file_path, "k", lambda: "v")
+        before = context_manager.version
+
+        context_manager.reset()
+
+        assert context_manager.version > before
+
+    def test_reset_drops_the_inherited_chain(self, context_manager, tmp_path) -> None:
+        """A collected chain does not survive the registry it came from."""
+        ancestor, child = _build_ancestor_page(tmp_path)
+        context_manager.register_context(
+            ancestor, "shared", lambda: "v", inherit_context=True
+        )
+        assert context_manager.collect_context(child).context_data == {"shared": "v"}
+
+        context_manager.reset()
+
+        assert context_manager.collect_context(child).context_data == {}
+
+    def test_a_new_ancestor_provider_reaches_the_next_collect(
+        self, context_manager, tmp_path
+    ) -> None:
+        """Registering upstream invalidates the memoised chain of the child."""
+        ancestor, child = _build_ancestor_page(tmp_path)
+        context_manager.register_context(
+            ancestor, "first", lambda: "1", inherit_context=True
+        )
+        assert context_manager.collect_context(child).context_data == {"first": "1"}
+
+        context_manager.register_context(
+            ancestor, "second", lambda: "2", inherit_context=True
+        )
+
+        assert context_manager.collect_context(child).context_data == {
+            "first": "1",
+            "second": "2",
+        }
+
+
+class TestInheritedChainMemo:
+    """The ancestor chain is read out of the registry, not off the disk."""
+
+    def test_a_second_collect_reuses_the_memoised_chain(
+        self, context_manager, tmp_path, monkeypatch
+    ) -> None:
+        """The chain is assembled once for a run of collects."""
+        ancestor, child = _build_ancestor_page(tmp_path)
+        context_manager.register_context(
+            ancestor, "shared", lambda: "v", inherit_context=True
+        )
+        builds = _count_chain_builds(monkeypatch)
+
+        context_manager.collect_context(child)
+        context_manager.collect_context(child)
+
+        assert builds == [child]
+
+    def test_a_warm_collect_probes_no_directory(
+        self, context_manager, tmp_path, monkeypatch
+    ) -> None:
+        """A repeat collect performs no ``exists`` call of its own."""
+        ancestor, child = _build_ancestor_page(tmp_path)
+        context_manager.register_context(
+            ancestor, "shared", lambda: "v", inherit_context=True
+        )
+        context_manager.collect_context(child)
+        probes = record_path_calls(monkeypatch, "exists")
+
+        context_manager.collect_context(child)
+
+        assert probes == []
+
+    def test_a_page_py_deleted_from_disk_keeps_its_live_registration(
+        self, context_manager, tmp_path
+    ) -> None:
+        """A registration outliving its file still reaches descendants."""
+        ancestor, child = _build_ancestor_page(tmp_path)
+        context_manager.register_context(
+            ancestor, "shared", lambda: "v", inherit_context=True
+        )
+
+        ancestor.unlink()
+
+        assert context_manager.collect_context(child).context_data == {"shared": "v"}
+
+
+class TestMergeOrder:
+    """The order the merge consumes this file's callables."""
+
+    def test_keyless_runs_first_then_keyed_in_string_order(
+        self, context_manager, test_file_path
+    ) -> None:
+        """Registration order does not decide the merge, the key string does."""
+        calls: list[str] = []
+
+        def record(name: str, value):
+            def run():
+                calls.append(name)
+                return value
+
+            return run
+
+        context_manager.register_context(test_file_path, "b", record("b", "vb"))
+        context_manager.register_context(test_file_path, "10", record("10", "v10"))
+        context_manager.register_context(
+            test_file_path, None, record("keyless", {"merged": "m"})
+        )
+        context_manager.register_context(test_file_path, "a", record("a", "va"))
+        context_manager.register_context(test_file_path, "2", record("2", "v2"))
+
+        result = context_manager.collect_context(test_file_path)
+
+        assert calls == ["keyless", "10", "2", "a", "b"]
+        assert result.context_data == {
+            "merged": "m",
+            "10": "v10",
+            "2": "v2",
+            "a": "va",
+            "b": "vb",
+        }
+
+    def test_a_keyed_value_overwrites_the_dict_merge_that_shares_its_name(
+        self, context_manager, test_file_path
+    ) -> None:
+        """Keyless first means a keyed callable owns the final value."""
+        context_manager.register_context(
+            test_file_path, None, lambda: {"shared": "from_merge"}
+        )
+        context_manager.register_context(test_file_path, "shared", lambda: "from_key")
+
+        result = context_manager.collect_context(test_file_path)
+
+        assert result.context_data["shared"] == "from_key"
+
+    def test_the_order_survives_a_memo_rebuild(
+        self, context_manager, test_file_path
+    ) -> None:
+        """A registration in between does not reshuffle the callables around it."""
+        calls: list[str] = []
+
+        def record(name: str):
+            def run() -> str:
+                calls.append(name)
+                return name
+
+            return run
+
+        context_manager.register_context(test_file_path, "b", record("b"))
+        context_manager.register_context(test_file_path, "a", record("a"))
+        context_manager.collect_context(test_file_path)
+
+        context_manager.register_context(test_file_path, "c", record("c"))
+        calls.clear()
+        context_manager.collect_context(test_file_path)
+
+        assert calls == ["a", "b", "c"]
+
+
+class TestZoneBatchWithInheritedChain:
+    """A zone batch narrows this file's callables and leaves the chain alone."""
+
+    def test_inherited_runs_while_a_foreign_zone_callable_is_skipped(
+        self, context_manager, tmp_path
+    ) -> None:
+        """The chain has no zone binding, so a batch never gates it."""
+        ancestor, child = _build_ancestor_page(tmp_path)
+        context_manager.register_context(
+            ancestor, "shared", lambda: "inherited", inherit_context=True
+        )
+        context_manager.register_context(child, "always", lambda: "own")
+        context_manager.register_context(child, "table", lambda: "rows", zone="table")
+
+        result = context_manager.collect_context(
+            child, _requested_zones=frozenset({"other"})
+        )
+
+        assert result.context_data == {"shared": "inherited", "always": "own"}
+
+    def test_the_memoised_chain_serves_every_batch(
+        self, context_manager, tmp_path, monkeypatch
+    ) -> None:
+        """Batches differ per request, the chain behind them does not."""
+        ancestor, child = _build_ancestor_page(tmp_path)
+        context_manager.register_context(
+            ancestor, "shared", lambda: "inherited", inherit_context=True
+        )
+        context_manager.register_context(child, "table", lambda: "rows", zone="table")
+        builds = _count_chain_builds(monkeypatch)
+
+        first = context_manager.collect_context(
+            child, _requested_zones=frozenset({"table"})
+        )
+        second = context_manager.collect_context(
+            child, _requested_zones=frozenset({"other"})
+        )
+
+        assert builds == [child]
+        assert first.context_data == {"shared": "inherited", "table": "rows"}
+        assert second.context_data == {"shared": "inherited"}

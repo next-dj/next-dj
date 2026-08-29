@@ -128,8 +128,8 @@ Filesystem walks at startup.
    Large projects can opt into ``LAZY_COMPONENT_MODULES``.
 
 String composition of layouts.
-   The composed template is cached and compiled per page and invalidated by source mtime.
-   A body produced by a ``render`` function bypasses that cache and is recomposed per render.
+   The composed template is cached and compiled per page and invalidated by source mtime under ``DEBUG``, while a production process holds it until a restart.
+   A body produced by a ``render`` function stays out of that cache, and only the layout chain around it is cached and refilled per render.
 
 Convention based naming.
    Directories must respect the naming rules.

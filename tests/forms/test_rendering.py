@@ -171,7 +171,7 @@ class TestRenderInvalidPage:
             assert "name" in html
 
     def test_rerender_picks_up_template_and_layout_edits(
-        self, mock_http_request, tmp_path
+        self, mock_http_request, tmp_path, watched_template_edits
     ) -> None:
         """Editing template.djx or an ancestor layout.djx invalidates the cache."""
         request = mock_http_request(method="GET")

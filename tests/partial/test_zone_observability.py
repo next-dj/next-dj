@@ -236,7 +236,7 @@ class TestRegistryMemoisationAndInvalidation:
         assert zones_of(template) is zones_of(template)
 
     def test_mtime_recompile_adds_distinct_entry(
-        self, page_instance: Page, tmp_path: Path
+        self, page_instance: Page, tmp_path: Path, watched_template_edits
     ) -> None:
         page_file = tmp_path / "page.py"
         page_file.write_text("x = 1")

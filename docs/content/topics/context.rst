@@ -253,6 +253,8 @@ The framework walks up from the current ``page.py`` directory and runs every ``@
 
 When two ancestor directories publish the same inherited key, the value from the outermost ancestor wins.
 
+The chain is read from the registry of ``@context`` registrations rather than probed on disk, so a ``page.py`` deleted inside a running process keeps publishing its inherited values until the registry is rebuilt.
+
 The current page can shadow an inherited value by declaring a context function with the same key.
 The page level value takes precedence, and every layout wrapper in the chain sees that value.
 

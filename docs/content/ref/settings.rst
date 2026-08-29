@@ -185,6 +185,7 @@ Default value.
 The ``OPTIONS`` keys tune the active backend.
 ``VERSION`` is the source of the ``X-Next-Version`` stamp.
 The sentinel ``"manifest"`` hashes the staticfiles manifest when the active storage hashes its files, and an explicit string pins the version yourself.
+The resolved string is memoised for the life of the configuration, so a manifest replaced under a running process keeps serving the version resolved before it until a settings reload or a restart.
 Without a manifest storage the version guard stays silent at runtime, and ``manage.py check`` reports ``next.W069``.
 ``PUSH_WIZARD_STEPS`` is the global default for pushing wizard steps to browser history, which a wizard's ``Meta.push_steps`` overrides per wizard.
 ``SSE.HEARTBEAT_SECONDS`` is the keepalive period in seconds for an async stream source, and ``SSE.RETRY_MS`` is the ``EventSource`` reconnect hint in milliseconds sent in the leading stream frame.
