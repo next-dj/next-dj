@@ -264,7 +264,7 @@ class TestDispatchViaClient:
         assert "X-Next-Action" not in resp.headers
 
     def test_redirect_action_returns_redirect(self, client_no_csrf) -> None:
-        """Redirect action returns 302 redirect."""
+        """A handler returning a redirect reaches the client unwrapped."""
         url = form_action_manager.get_action_url("simple_form_redirect")
         resp = client_no_csrf.post(url, data={"name": "Bob"}, follow=False)
         assert resp.status_code == 302

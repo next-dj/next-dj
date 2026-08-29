@@ -317,7 +317,7 @@ class TestRegisterComponentsFolderFromRouterWalk:
     def test_only_the_first_claiming_backend_registers_the_folder(
         self, tmp_path: Path, min_component_config: dict
     ) -> None:
-        """The documented rule stands: one folder reaches one backend."""
+        """One folder reaches exactly one backend."""
         folder = tmp_path / "_components"
         folder.mkdir()
         (folder / "c.djx").write_text("c")

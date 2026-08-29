@@ -28,7 +28,7 @@ class TestJsonJsContextSerializer:
         assert json.loads(payload) == {"when": "2024-01-01T12:30:00Z"}
 
     def test_raises_on_unsupported_type(self) -> None:
-        with pytest.raises(TypeError):
+        with pytest.raises(TypeError, match="not JSON serializable"):
             JsonJsContextSerializer().dumps({"thing": object()})
 
 
@@ -50,7 +50,7 @@ class TestPydanticJsContextSerializer:
     def test_falls_back_to_parent_encoder_for_unknown_types(self) -> None:
         pytest.importorskip("pydantic")
         serializer = PydanticJsContextSerializer()
-        with pytest.raises(TypeError):
+        with pytest.raises(TypeError, match="not JSON serializable"):
             serializer.dumps({"thing": object()})
 
     def test_raises_when_pydantic_missing(self, monkeypatch) -> None:

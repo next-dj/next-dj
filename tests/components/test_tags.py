@@ -218,11 +218,8 @@ class TestComponentTag:
     ) -> None:
         """A prop named like a slot never leaks into the slot lookup.
 
-        The component template wraps its content in
-        ``{% #set_slot "description" %}<i>fallback</i>{% /set_slot %}``.
-        Earlier versions of the renderer mirrored slot content under the
-        unprefixed ``<name>`` key, so passing a ``description`` prop
-        caused the default body to be replaced by the prop value.
+        Slot content lives under a prefixed key only, so a prop sharing the
+        slot name cannot displace the default body.
         """
         (tmp_path / "card.djx").write_text(
             "<article>"
@@ -286,14 +283,10 @@ class TestComponentTag:
     ) -> None:
         """Plain string literals reach ``{{ prop }}`` as text, not as HTML.
 
-        Earlier the renderer relied on ``FilterExpression.resolve`` which
-        auto-marks bare quoted literals as safe, so something like
-        ``description="visit /s/<slug>/"`` ended up interpolated as raw
-        HTML and the ``<slug>`` token was eaten by the browser parser.
-        ``ComponentNode._resolved_props`` now strips the safe marker from
-        literals without a filter chain, so component props behave like
-        user-facing text by default while ``|safe`` (or a safe variable)
-        stays available as an explicit opt-in.
+        Django marks a bare quoted literal safe, so a prop carrying markup
+        like ``visit /s/<slug>/`` would interpolate as raw HTML and lose the
+        token to the browser parser. A literal without a filter chain has
+        that marker stripped, leaving ``|safe`` as the explicit opt-in.
         """
         (tmp_path / "card.djx").write_text("<article>{{ body }}</article>")
         info = ComponentInfo(
@@ -664,7 +657,7 @@ class TestSlotTag:
             )
 
     def test_block_slot_parses_inside_block_component(self) -> None:
-        """{% #slot %} … {% /slot %} parses inside {% #component %}."""
+        """A block slot inside a block component compiles without error."""
         t = Template(
             "{% load components %}"
             '{% #component "c" %}'

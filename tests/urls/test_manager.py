@@ -109,9 +109,9 @@ class TestRouterManager:
     def test_manager_offers_neither_len_nor_indexing(self, manager) -> None:
         """Backends are read through ``backends``, iteration yields patterns."""
         manager.reload()
-        with pytest.raises(TypeError):
+        with pytest.raises(TypeError, match="has no len"):
             len(manager)
-        with pytest.raises(TypeError):
+        with pytest.raises(TypeError, match="not subscriptable"):
             _ = manager[0]
         assert manager.backends[0] is manager._backends[0]
 
@@ -249,7 +249,7 @@ class TestRouterManager:
                 "next.urls.RouterFactory.create_backend",
                 side_effect=RuntimeError("boom"),
             ),
-            pytest.raises(RuntimeError),
+            pytest.raises(RuntimeError, match="boom"),
         ):
             manager.reload()
 

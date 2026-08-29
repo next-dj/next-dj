@@ -104,7 +104,7 @@ class TestEnvelopeHelpers:
 
     def test_envelope_of_rejects_non_envelope(self) -> None:
         response = Client().get("/zoned/")
-        with pytest.raises(AssertionError):
+        with pytest.raises(AssertionError, match="not a patch envelope"):
             envelope_of(response)
 
     def test_toasts_filters_toast_ops(self) -> None:
@@ -144,5 +144,5 @@ class TestEnvelopeHelpers:
 
     def test_html_for_zone_raises_for_missing_zone(self) -> None:
         envelope = envelope_of(NextClient().get_zones("/zoned/", "alpha"))
-        with pytest.raises(AssertionError):
+        with pytest.raises(AssertionError, match="no op targets zone"):
             envelope.html_for_zone("absent")

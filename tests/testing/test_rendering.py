@@ -62,7 +62,7 @@ class TestRenderComponentByName:
         assert "<b>World</b>" in html
 
     def test_accepts_str_anchor(self, tmp_path: Path) -> None:
-        with pytest.raises(LookupError):
+        with pytest.raises(LookupError, match="Component not visible from"):
             render_component_by_name("nope", at=str(tmp_path / "page.djx"))
 
     @staticmethod

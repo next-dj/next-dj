@@ -730,7 +730,7 @@ class TestPermissionHookReturnContract:
         request = build_post_request(mock_http_request)
 
         if case.raises_type_error:
-            with pytest.raises(TypeError):
+            with pytest.raises(TypeError, match="permission hook returned unsupported"):
                 FormActionDispatch.dispatch(backend, request, "matrix_action", meta)
             return
         if case.raises_permission_denied:
@@ -1215,7 +1215,7 @@ class TestFormAccessDeniedPayload:
         meta = backend.get_meta("matrix_action")
         assert meta is not None
         request = build_post_request(mock_http_request)
-        with pytest.raises(TypeError):
+        with pytest.raises(TypeError, match="permission hook returned unsupported"):
             FormActionDispatch.dispatch(backend, request, "matrix_action", meta)
         assert captured == []
 

@@ -151,7 +151,7 @@ class TestLoadBackends:
             )
 
     def test_unexpected_error_from_construction_escapes(self) -> None:
-        with pytest.raises(KeyError):
+        with pytest.raises(KeyError, match="ERROR"):
             load_backends([{"BACKEND": RAISING}], base=FakeBackend)
 
     def test_no_signal_sends_nothing(self) -> None:

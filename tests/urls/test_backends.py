@@ -22,7 +22,7 @@ class TestRouterBackend:
 
     def test_router_backend_is_abstract(self) -> None:
         """Direct instantiation raises TypeError."""
-        with pytest.raises(TypeError):
+        with pytest.raises(TypeError, match="abstract"):
             RouterBackend()
 
 

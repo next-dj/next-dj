@@ -266,7 +266,7 @@ class TestFileComponentsBackend:
     def test_discover_stays_lazy_while_the_import_hook_executes(
         self, tmp_path: Path, min_component_config: dict
     ) -> None:
-        """The two hooks stay apart: ``discover`` registers, the other imports."""
+        """``discover`` registers while the import hook stays unrun."""
         comp_dir = tmp_path / "split_c"
         comp_dir.mkdir()
         marker = tmp_path / "imported.txt"
@@ -485,7 +485,7 @@ class TestComponentsManagerLoading:
             assert len(mgr2._backends) >= 1
 
     def test_manager_collect_visible_first_backend_wins(self) -> None:
-        """Same component name from two backends: first backend wins."""
+        """The first backend wins a component name two backends both claim."""
         mgr = ComponentsManager()
         info1 = ComponentInfo("a", Path("/"), "", None, None, True)
         info2 = ComponentInfo("a", Path("/b"), "", None, None, True)

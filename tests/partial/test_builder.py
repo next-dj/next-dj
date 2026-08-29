@@ -402,5 +402,5 @@ class TestVersionBuilderCompatibility:
         assert response["Location"] == "/after/"
 
     def test_version_builder_render_helpers_require_a_request(self) -> None:
-        with pytest.raises(RuntimeError):
+        with pytest.raises(RuntimeError, match="needs a request-bound"):
             Patches.versioned("9f3c").morph(zone="x")

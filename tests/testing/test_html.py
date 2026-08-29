@@ -53,7 +53,7 @@ class TestFindAnchor:
             find_anchor(html, text="nope")
 
     def test_raises_when_no_anchors_at_all(self) -> None:
-        with pytest.raises(LookupError):
+        with pytest.raises(LookupError, match="Anchor not found"):
             find_anchor("<div>no anchors here</div>", href="/x")
 
 
@@ -75,11 +75,11 @@ class TestAssertHasClass:
             assert_has_class('<a href="/x">x</a>', "alpha")
 
     def test_empty_class_attr_raises(self) -> None:
-        with pytest.raises(AssertionError):
+        with pytest.raises(AssertionError, match="Expected class token"):
             assert_has_class('<a class="">x</a>', "alpha")
 
     def test_raises_on_fragment_without_tag(self) -> None:
-        with pytest.raises(LookupError):
+        with pytest.raises(LookupError, match="does not contain a start tag"):
             assert_has_class("just text", "alpha")
 
 

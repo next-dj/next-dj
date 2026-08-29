@@ -40,7 +40,7 @@ class TestStaticBackendContract:
     """StaticBackend ABC enforces a uniform init signature."""
 
     def test_is_abstract(self) -> None:
-        with pytest.raises(TypeError):
+        with pytest.raises(TypeError, match="abstract"):
             StaticBackend()  # type: ignore[abstract]
 
     def test_accepts_config_mapping(self) -> None:

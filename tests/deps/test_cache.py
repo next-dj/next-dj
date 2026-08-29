@@ -101,7 +101,7 @@ class TestCallableDependencyCache:
         # One DependencyCache instance carries the in-progress set across both
         # resolves, which a plain dict-backed cache would not.
         cache = DependencyCache()
-        with pytest.raises(RuntimeError):
+        with pytest.raises(RuntimeError, match="first attempt fails"):
             r.resolve_dependencies(view, _cache=cache)
 
         assert r.resolve_dependencies(view, _cache=cache) == {"value": "ok"}
