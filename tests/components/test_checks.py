@@ -14,7 +14,6 @@ from next.checks import (
     check_duplicate_component_names,
     check_next_components_configuration,
     register_all,
-    reset_check_caches,
 )
 from next.checks.common import get_components_manager
 from next.components import ComponentInfo, FileComponentsBackend
@@ -27,13 +26,6 @@ from tests.support import (
     next_framework_settings_for_checks_backends_value as _next_framework_settings_for_checks_backends_value,
     patch_checks_components_manager,
 )
-
-
-@pytest.fixture(autouse=True)
-def _reset_check_caches():
-    reset_check_caches()
-    yield
-    reset_check_caches()
 
 
 class TestChecks:

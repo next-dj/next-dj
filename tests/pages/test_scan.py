@@ -2,19 +2,10 @@ import textwrap
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 from django.core.checks import Error
 
-from next.checks import reset_check_caches
 from next.pages.scan import iter_serialized_page_context_keys
 from tests.support import MalformedRootsRouter, patch_checks_router_manager
-
-
-@pytest.fixture(autouse=True)
-def _reset_check_caches():
-    reset_check_caches()
-    yield
-    reset_check_caches()
 
 
 class TestSerializedPageContextKeys:

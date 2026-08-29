@@ -7,18 +7,11 @@ import pytest
 from django.test import override_settings
 
 from next.server import NextStatReloader
+from tests.support import MockAutoreloadSender
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
-
-
-class _MockAutoreloadSender:
-    def __init__(self) -> None:
-        self.watch_calls: list[tuple[object, str]] = []
-
-    def watch_dir(self, path: object, glob: str) -> None:
-        self.watch_calls.append((path, glob))
 
 
 @pytest.fixture(autouse=True)
@@ -32,9 +25,9 @@ def _instant_reloader_ticks(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture()
-def mock_autoreload_sender() -> _MockAutoreloadSender:
+def mock_autoreload_sender() -> MockAutoreloadSender:
     """Minimal sender stub for ``autoreload_started`` signal tests."""
-    return _MockAutoreloadSender()
+    return MockAutoreloadSender()
 
 
 @pytest.fixture()

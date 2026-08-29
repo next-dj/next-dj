@@ -102,3 +102,15 @@ def file_components_entry(*dirs: Path) -> dict[str, Any]:
         "DIRS": [str(p) for p in dirs],
         "COMPONENTS_DIR": "_components",
     }
+
+
+class MockAutoreloadSender:
+    """Minimal ``autoreload_started`` sender that records what it was asked to watch."""
+
+    def __init__(self) -> None:
+        """Start with no recorded calls."""
+        self.watch_calls: list[tuple[object, str]] = []
+
+    def watch_dir(self, path: object, glob: str) -> None:
+        """Record the directory and glob the framework asked to watch."""
+        self.watch_calls.append((path, glob))

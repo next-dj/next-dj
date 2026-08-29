@@ -7,13 +7,10 @@ from django.middleware.csrf import get_token
 from django.template.engine import Engine
 from django.test import Client
 
+from next.checks import reset_check_caches
 from next.conf import NextFrameworkSettings, next_framework_settings
 from next.pages import Page
-from next.pages.loaders import (
-    DjxTemplateLoader,
-    PythonTemplateLoader,
-    reset_module_memo,
-)
+from next.pages.loaders import DjxTemplateLoader, PythonTemplateLoader
 from next.pages.registry import PageContextRegistry
 from next.ports import partial_shaper_slot
 from next.server import NextStatReloader
@@ -41,15 +38,16 @@ def _reload_next_framework_settings_after_test() -> Generator[None, None, None]:
 
 
 @pytest.fixture(autouse=True)
-def _reset_page_module_memo() -> Generator[None, None, None]:
-    """Reset the module memo and recorded import errors around each test.
+def _reset_check_caches() -> Generator[None, None, None]:
+    """Drop the per-run check caches and the page module memo around each test.
 
-    A leaked ``_LAST_LOAD_ERROR`` entry would keep the unified view's
-    fast-path guard engaged for every later test in the session.
+    The caches freeze the scanned page and component trees for the life of
+    the process, and a leaked ``_LAST_LOAD_ERROR`` entry would keep the
+    unified view's fast-path guard engaged for every later test.
     """
-    reset_module_memo()
+    reset_check_caches()
     yield
-    reset_module_memo()
+    reset_check_caches()
 
 
 @pytest.fixture()

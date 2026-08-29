@@ -39,13 +39,6 @@ from tests.support import (
 )
 
 
-@pytest.fixture(autouse=True)
-def _reset_check_caches():
-    reset_check_caches()
-    yield
-    reset_check_caches()
-
-
 class _AppRouter(RouterBackend):
     """Backend reporting one application tree, the shape `APP_DIRS` produces."""
 

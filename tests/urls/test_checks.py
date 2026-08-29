@@ -1,7 +1,6 @@
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 from django.core.checks import Error
 
 from next.checks import reset_check_caches
@@ -13,13 +12,6 @@ from next.urls.checks import (
     check_url_patterns,
 )
 from tests.support import importable_dir, patch_checks_router_manager_with_routers
-
-
-@pytest.fixture(autouse=True)
-def _reset_check_caches():
-    reset_check_caches()
-    yield
-    reset_check_caches()
 
 
 def _write_page(tree: Path, route: str) -> Path:
