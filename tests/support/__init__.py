@@ -16,7 +16,6 @@ from tests.support.cases import (
 from tests.support.forms import GuardedTenantForm, build_post_request
 from tests.support.helpers import (
     _ctx,
-    _full_resolver,
     _minimal_resolver,
     _resolver_with_form,
     build_mock_http_request,
@@ -76,7 +75,6 @@ __all__ = [
     "UrlByAnnotationResolveCase",
     "UrlKwargsResolveCase",
     "_ctx",
-    "_full_resolver",
     "_minimal_resolver",
     "_resolver_with_form",
     "action_uid",

@@ -1,64 +1,9 @@
 from collections.abc import Generator
-from pathlib import Path
 from typing import Any
 
 import pytest
 
-from next.pages import Page
-from next.pages.loaders import DjxTemplateLoader, PythonTemplateLoader
-from next.pages.registry import PageContextRegistry
 from next.pages.signals import context_registered, page_rendered, template_loaded
-from next.urls import URLPatternParser
-from tests.support import named_temp_py
-
-
-@pytest.fixture()
-def page_instance():
-    """Create a fresh Page instance for each test."""
-    return Page()
-
-
-@pytest.fixture()
-def url_parser():
-    """Create a URLPatternParser instance for testing."""
-    return URLPatternParser()
-
-
-@pytest.fixture()
-def python_template_loader():
-    """Create a PythonTemplateLoader instance for testing."""
-    return PythonTemplateLoader()
-
-
-@pytest.fixture()
-def djx_template_loader():
-    """Create a DjxTemplateLoader instance for testing."""
-    return DjxTemplateLoader()
-
-
-@pytest.fixture()
-def context_manager():
-    """Create a PageContextRegistry instance for testing."""
-    return PageContextRegistry(None)
-
-
-@pytest.fixture()
-def test_file_path():
-    """Create a test file path for render tests."""
-    return Path("/test/path/page.py")
-
-
-@pytest.fixture()
-def global_file_path():
-    """Create a file path for global page tests."""
-    return Path("/test/global/page.py")
-
-
-@pytest.fixture()
-def temp_python_file():
-    """Create a temporary Python file for testing."""
-    with named_temp_py('template = "test template"') as path:
-        yield path
 
 
 @pytest.fixture()

@@ -18,15 +18,7 @@ from next.pages.registry import PageContextRegistry
 from next.ports import partial_shaper_slot
 from next.server import NextStatReloader
 from next.urls import URLPatternParser
-from tests.support import (
-    IntentOnlyShaper,
-    _full_resolver,
-    _minimal_resolver,
-    _resolver_with_form,
-    build_mock_http_request,
-    named_temp_py,
-    tick_scenario,
-)
+from tests.support import IntentOnlyShaper, build_mock_http_request, tick_scenario
 
 
 @pytest.fixture()
@@ -109,13 +101,6 @@ def global_file_path():
 
 
 @pytest.fixture()
-def temp_python_file():
-    """Create a temporary Python file for testing."""
-    with named_temp_py('template = "test template"') as path:
-        yield path
-
-
-@pytest.fixture()
 def form_engine():
     """Template engine with forms builtin."""
     return Engine(builtins=["next.templatetags.forms"])
@@ -128,18 +113,6 @@ def csrf_request():
     req.method = "GET"
     get_token(req)
     return req
-
-
-@pytest.fixture()
-def dependency_resolver(request):
-    """Build a ``DependencyResolver`` for the ``minimal``, ``with_form``, or ``full`` param."""
-    kind = getattr(request, "param", "minimal")
-    factories = {
-        "minimal": _minimal_resolver,
-        "with_form": _resolver_with_form,
-        "full": _full_resolver,
-    }
-    return factories[kind]()
 
 
 @pytest.fixture()
