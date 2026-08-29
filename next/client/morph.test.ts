@@ -477,8 +477,7 @@ describe("morph hooks and events", () => {
   });
 
   it("re-focuses a checkbox whose caret read is null without a range restore", () => {
-    // A checkbox reports a null selectionStart, so the restore re-focuses but
-    // never reaches setSelectionRange.
+    // A checkbox reports a null selectionStart, so the restore only re-focuses.
     const target = mount(
       '<ul id="l"><li id="a"><input id="ca" type="checkbox" name="a"></li>' +
         '<li id="b">b</li></ul>',

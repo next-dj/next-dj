@@ -52,8 +52,7 @@ export interface SseDeps {
   document?: Document;
   source?: EventSourceAdapter;
   visibility?: VisibilityAdapter;
-  // The owning page of a container, answered by the layer stack. Absent, reads
-  // the address bar.
+  // The owning page of a container from the layer stack, else the address bar.
   pageUrl?: (el: Element) => string;
   // The monotonic clock the resume gate reads to measure the hidden span.
   now?: () => number;

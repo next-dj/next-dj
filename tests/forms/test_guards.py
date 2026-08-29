@@ -701,12 +701,8 @@ _HOOK_LAYERS = (
 class TestPermissionHookReturnContract:
     """Both permission layers honour one return contract through full dispatch."""
 
-    @pytest.mark.parametrize(
-        "layer", _HOOK_LAYERS, ids=[layer.id for layer in _HOOK_LAYERS]
-    )
-    @pytest.mark.parametrize(
-        "case", PERMISSION_OUTCOME_CASES, ids=[c.id for c in PERMISSION_OUTCOME_CASES]
-    )
+    @pytest.mark.parametrize("layer", _HOOK_LAYERS, ids=lambda layer: layer.id)
+    @pytest.mark.parametrize("case", PERMISSION_OUTCOME_CASES, ids=lambda case: case.id)
     def test_matrix_via_dispatch(
         self,
         layer: _HookLayer,
@@ -734,7 +730,7 @@ class TestPermissionHookReturnContract:
         request = build_post_request(mock_http_request)
 
         if case.raises_type_error:
-            with pytest.raises(TypeError):
+            with pytest.raises(TypeError, match="permission hook returned unsupported"):
                 FormActionDispatch.dispatch(backend, request, "matrix_action", meta)
             return
         if case.raises_permission_denied:
@@ -1219,7 +1215,7 @@ class TestFormAccessDeniedPayload:
         meta = backend.get_meta("matrix_action")
         assert meta is not None
         request = build_post_request(mock_http_request)
-        with pytest.raises(TypeError):
+        with pytest.raises(TypeError, match="permission hook returned unsupported"):
             FormActionDispatch.dispatch(backend, request, "matrix_action", meta)
         assert captured == []
 

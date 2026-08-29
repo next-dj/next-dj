@@ -39,9 +39,8 @@ const HEADER_VALIDATE = "X-Next-Validate";
 const LAZY_VALUES = new Set(["load", "revealed"]);
 const MERGE_VALUES = new Set(["append", "prepend"]);
 
-// One interval group of the poller: every zone on the same cadence rides one
-// timer chain and one batched GET. lastFire anchors the resume, a null handle is
-// a sleeping group.
+// One interval group of the poller, where every zone on the cadence rides one timer
+// chain and one batched GET. lastFire anchors the resume, a null handle sleeps.
 interface PollGroup {
   handle: number | null;
   lastFire: number;
@@ -69,14 +68,12 @@ export interface TriggerDeps {
     abortable?: boolean;
     key?: string;
   }) => void;
-  // Abort the in-flight request on a zone queue, so a submit cancels its own
-  // inline validation.
+  // Abort the in-flight request on a zone queue, so a submit cancels its validation.
   abort: (zone: string) => void;
   document?: Document;
   clock?: Clock;
   observer?: IntersectionAdapter;
-  // The tab-visibility seam, shared with the SSE bridge: a hidden tab holds no
-  // poll timers.
+  // The tab-visibility seam the SSE bridge shares, a hidden tab holds no poll timers.
   visibility?: VisibilityAdapter;
   // The owning page of an element, answered by the layer stack. Absent, lazy and
   // poll GETs read the address bar.
@@ -133,8 +130,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
 
   const pageUrl = deps.pageUrl ?? (() => here());
 
-  // The abortable zone key of a form's inline validation, shared by the sender and
-  // the submit canceller.
+  // The abortable zone key of inline validation, shared by sender and canceller.
   function validateZone(uid: string | null): string {
     return `validate:${uid ?? ""}`;
   }
@@ -196,8 +192,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
   function paginate(el: Element, zone: string): void {
     const href = el.getAttribute("href");
     if (href === null || href === "") return;
-    // Every caller reaches paginate via a [data-next-merge] match, so the
-    // fallback never runs.
+    // Every caller reaches paginate via a [data-next-merge] match, so this never runs.
     /* v8 ignore next */
     const merge = el.getAttribute(MERGE_ATTR) ?? "append";
     deps.fetch({ url: href, zone, headers: { [HEADER_MERGE]: merge } });
@@ -363,9 +358,8 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     joinPoll(el, ms);
   }
 
-  // Each element is re-read live: a wrapper missing either attribute was morphed
-  // away and tears down, a changed interval migrates. A group already gone returns
-  // silently.
+  // Each element is re-read live, a wrapper missing either attribute was morphed
+  // away and tears down, a changed interval migrates, a vanished group returns.
   function pollTick(interval: number): void {
     const group = groups.get(interval);
     if (group === undefined) return;
@@ -441,8 +435,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     flushBatches(batches);
   }
 
-  // The attribute of an element matched by an attribute selector, so the null arm
-  // cannot occur.
+  // An element matched by an attribute selector has it, so the null arm cannot occur.
   function attrOf(el: Element, name: string): string {
     /* v8 ignore next */
     return el.getAttribute(name) ?? "";
@@ -492,8 +485,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
       activate(el);
     }
     for (const el of matching(root, `a[${MERGE_ATTR}][${TARGET_ATTR}]`)) {
-      // Only marked sentinels arm an observer, plain pagination links stay
-      // click-driven.
+      // Only marked sentinels arm an observer, plain pagination links stay clicks.
       if (el.hasAttribute(LAZY_ATTR)) activate(el);
     }
     for (const el of matching(root, `[${POLL_ATTR}]`)) {

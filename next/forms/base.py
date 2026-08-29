@@ -53,8 +53,7 @@ _FOREIGN_ROOTS: Final[tuple[tuple[str, str], ...]] = (
 # The BASE_DIR decision stays uncached because settings repoint it.
 _foreign_file_cache: dict[str, bool] = {}
 
-# HttpResponseRedirect is a subclass of HttpResponse, so the login-redirect
-# short-circuit needs no extra arm.
+# HttpResponseRedirect subclasses HttpResponse, so a login redirect needs no arm.
 type PermissionOutcome = bool | HttpResponse | None
 
 
@@ -285,8 +284,6 @@ def _auto_register_form_class(cls: type) -> None:
 class _DivFormRenderer(DjangoTemplates):
     """Renderer pinning the div template so `{{ form }}` ignores FORM_RENDERER."""
 
-    # Pinning the div template keeps bare `{{ form }}` output stable regardless
-    # of the project's FORM_RENDERER setting.
     form_template_name = "django/forms/div.html"
 
 

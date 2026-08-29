@@ -7,9 +7,7 @@ from django.http import Http404, HttpRequest
 from next.urls import page_reverse
 
 
-# Path prefixes the auth middleware compares against. Kept as literals
-# because `path.startswith(...)` runs on every request and can't accept
-# a lazy reverse result.
+# Literals, because a lazy reverse cannot answer the per-request `startswith`.
 ADMIN_PREFIX = "/admin/"
 LOGIN_URL = "/admin/login/"
 LOGOUT_URL = "/admin/logout/"

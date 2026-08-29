@@ -34,8 +34,7 @@ from next.conf import fail_loudly, next_framework_settings
 from next.static import collect_component_assets
 
 
-# Component tags carry their props over several lines, which Django's tag
-# regex refuses by default.
+# Component tags span several lines, which Django's tag regex refuses by default.
 template_base.tag_re = re.compile(template_base.tag_re.pattern, re.DOTALL)
 
 logger = logging.getLogger(__name__)

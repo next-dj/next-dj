@@ -13,7 +13,6 @@ from django.test import override_settings
 
 import next.pages.loaders as loaders_module
 from next.checks import _load_python_module
-from next.conf import next_framework_settings
 from next.pages import Page, context, page
 from next.pages.loaders import (
     LayoutTemplateLoader,
@@ -23,7 +22,12 @@ from next.pages.loaders import (
 )
 from next.pages.registry import PageContextRegistry
 from next.static import default_manager as static_default_manager
-from tests.support import attribution, handler_declared_here
+from tests.support import (
+    attribution,
+    build_page_request,
+    handler_declared_here,
+    unified_view,
+)
 
 
 class TestPage:
@@ -63,17 +67,21 @@ class TestPage:
         assert "second" in page_instance.composed_template_for(page_file).source
 
     def test_clear_template_caches_empties_every_cache(self, page_instance) -> None:
-        """One call drops the source, the compiled template, and the mtimes."""
+        """One call drops every composed layer and the mtimes behind them."""
         file_path = Path("/test/path/page.py")
         page_instance.register_template(file_path, "<p>x</p>")
         page_instance._compiled_registry[file_path] = Template("<p>x</p>")
         page_instance._template_source_mtimes[file_path] = {}
+        page_instance._skeleton_registry[file_path] = "<p>x</p>"
+        page_instance._skeleton_source_mtimes[file_path] = {}
 
         page_instance.clear_template_caches()
 
         assert page_instance._template_registry == {}
         assert page_instance._compiled_registry == {}
         assert page_instance._template_source_mtimes == {}
+        assert page_instance._skeleton_registry == {}
+        assert page_instance._skeleton_source_mtimes == {}
 
     @pytest.mark.parametrize(
         ("decorator_type", "expected_key"),
@@ -381,7 +389,7 @@ class TestPageHasTemplateAndLazyRender:
         assert result == ""
 
     def test_render_invalidates_cache_when_template_stale(
-        self, page_instance, tmp_path
+        self, page_instance, tmp_path, watched_template_edits
     ) -> None:
         """When source .djx mtime changes, render() reloads template."""
         page_file = tmp_path / "page.py"
@@ -438,103 +446,6 @@ class TestPageHasTemplateAndLazyRender:
             page_instance.render(page_file, request=request)
 
         assert inject_mock.call_args.kwargs["request"] is request
-
-    def test_record_template_source_mtimes_empty_paths(
-        self, page_instance, tmp_path
-    ) -> None:
-        """_record_template_source_mtimes returns early when no source paths."""
-        page_file = tmp_path / "page.py"
-        page_instance._record_template_source_mtimes(page_file)
-        assert page_file not in page_instance._template_source_mtimes
-
-    def test_is_template_stale_handles_oserror(self, page_instance, tmp_path) -> None:
-        """_is_template_stale catches OSError when stat() fails (e.g. file removed)."""
-        page_file = tmp_path / "page.py"
-        missing_path = tmp_path / "removed.djx"
-        page_instance._template_source_mtimes[page_file] = {missing_path: 1000.0}
-        assert page_instance._is_template_stale(page_file) is False
-
-
-class TestComposedTemplateCache:
-    """`composed_template_for` caches the compiled composed template by mtime."""
-
-    def test_render_twice_reuses_compiled_template(
-        self, page_instance, tmp_path
-    ) -> None:
-        """A warm render reuses the compiled Template object as-is."""
-        page_file = tmp_path / "page.py"
-        page_file.write_text("x = 1")
-        (tmp_path / "template.djx").write_text("<h1>{{ title }}</h1>")
-        page_instance.render(page_file, title="One")
-        compiled = page_instance._compiled_registry[page_file]
-        result = page_instance.render(page_file, title="Two")
-        assert page_instance._compiled_registry[page_file] is compiled
-        assert "<h1>Two</h1>" in result
-
-    def test_stale_source_recompiles(self, page_instance, tmp_path) -> None:
-        """An edited template.djx invalidates both the source and compiled caches."""
-        page_file = tmp_path / "page.py"
-        page_file.write_text("x = 1")
-        djx = tmp_path / "template.djx"
-        djx.write_text("<h1>{{ title }}</h1>")
-        page_instance.render(page_file, title="One")
-        compiled = page_instance._compiled_registry[page_file]
-        djx.write_text("<h2>{{ title }}</h2>")
-        result = page_instance.render(page_file, title="Two")
-        assert page_instance._compiled_registry[page_file] is not compiled
-        assert "<h2>Two</h2>" in result
-
-    def test_stale_layout_recompiles(self, page_instance, tmp_path) -> None:
-        """An edited ancestor layout.djx invalidates the compiled cache too."""
-        layout = tmp_path / "layout.djx"
-        layout.write_text("<html>{% block template %}{% endblock template %}</html>")
-        page_dir = tmp_path / "sub"
-        page_dir.mkdir()
-        page_file = page_dir / "page.py"
-        page_file.write_text("x = 1")
-        (page_dir / "template.djx").write_text("<p>body</p>")
-        assert "<html>" in page_instance.render(page_file)
-        layout.write_text("<main>{% block template %}{% endblock template %}</main>")
-        assert "<main>" in page_instance.render(page_file)
-
-    def test_register_template_drops_compiled_entry(
-        self, page_instance, tmp_path
-    ) -> None:
-        """Every source-registry write evicts the compiled entry alongside."""
-        page_file = tmp_path / "page.py"
-        page_file.write_text("x = 1")
-        (tmp_path / "template.djx").write_text("<h1>old</h1>")
-        page_instance.render(page_file)
-        assert page_file in page_instance._compiled_registry
-        page_instance.register_template(page_file, "<p>replaced</p>")
-        assert page_file not in page_instance._compiled_registry
-        template = page_instance.composed_template_for(page_file)
-        assert template.source == "<p>replaced</p>"
-
-    def test_composed_template_carries_page_origin(
-        self, page_instance, tmp_path
-    ) -> None:
-        """The compiled composed template names the page path as its origin."""
-        page_file = tmp_path / "page.py"
-        page_file.write_text("x = 1")
-        (tmp_path / "template.djx").write_text("<p>ok</p>")
-        template = page_instance.composed_template_for(page_file)
-        assert template.origin.name == str(page_file)
-        assert template.name == str(page_file)
-
-    def test_render_function_pages_bypass_compiled_cache(
-        self, page_instance, tmp_path
-    ) -> None:
-        """Dynamic `render()` bodies never populate the compiled cache."""
-        page_file = tmp_path / "page.py"
-        page_file.write_text(
-            "def render(request, **kwargs):\n    return '<p>dynamic</p>'\n"
-        )
-        module = _load_python_module_memo(page_file)
-        view = page_instance._create_unified_view(page_file, {}, module)
-        response = view(_make_real_request())
-        assert b"dynamic" in response.content
-        assert page_file not in page_instance._compiled_registry
 
 
 class TestGlobalPageInstance:
@@ -801,15 +712,6 @@ class TestLoadPythonModule:
         assert hasattr(result, "template")
 
 
-def _make_real_request() -> HttpRequest:
-    """Build a minimal `HttpRequest` usable by the unified view."""
-    request = HttpRequest()
-    request.method = "GET"
-    request.META["SERVER_NAME"] = "testserver"
-    request.META["SERVER_PORT"] = "80"
-    return request
-
-
 class TestUnifiedViewBodyResolution:
     """`_create_unified_view` resolves the body via render > template > template.djx."""
 
@@ -833,9 +735,8 @@ class TestUnifiedViewBodyResolution:
         page_file = page_dir / "page.py"
         page_file.write_text('template = "<h1>attr body</h1>"')
 
-        module = _load_python_module_memo(page_file)
-        view = page_instance._create_unified_view(page_file, {}, module)
-        response = view(_make_real_request())
+        view = unified_view(page_instance, page_file)
+        response = view(build_page_request())
         body = response.content.decode()
         assert "<html><body>" in body
         assert "<h1>attr body</h1>" in body
@@ -855,9 +756,8 @@ class TestUnifiedViewBodyResolution:
             "def render(request, **kwargs):\n    return '<p>rendered</p>'\n"
         )
 
-        module = _load_python_module_memo(page_file)
-        view = page_instance._create_unified_view(page_file, {}, module)
-        response = view(_make_real_request())
+        view = unified_view(page_instance, page_file)
+        response = view(build_page_request())
         body = response.content.decode()
         assert "<html><body>" in body
         assert "<p>rendered</p>" in body
@@ -878,9 +778,8 @@ class TestUnifiedViewBodyResolution:
             "    return HttpResponse('raw', status=201)\n"
         )
 
-        module = _load_python_module_memo(page_file)
-        view = page_instance._create_unified_view(page_file, {}, module)
-        response = view(_make_real_request())
+        view = unified_view(page_instance, page_file)
+        response = view(build_page_request())
         assert response.status_code == 201
         assert response.content == b"raw"
         assert "<html>" not in response.content.decode()
@@ -901,9 +800,8 @@ class TestUnifiedViewBodyResolution:
             "    return HttpResponseRedirect('/target/')\n"
         )
 
-        module = _load_python_module_memo(page_file)
-        view = page_instance._create_unified_view(page_file, {}, module)
-        response = view(_make_real_request())
+        view = unified_view(page_instance, page_file)
+        response = view(build_page_request())
         assert response.status_code == 302
         assert response["Location"] == "/target/"
 
@@ -923,9 +821,8 @@ class TestUnifiedViewBodyResolution:
             "    return JsonResponse({'ok': True})\n"
         )
 
-        module = _load_python_module_memo(page_file)
-        view = page_instance._create_unified_view(page_file, {}, module)
-        response = view(_make_real_request())
+        view = unified_view(page_instance, page_file)
+        response = view(build_page_request())
         assert response["Content-Type"].startswith("application/json")
         assert response.content == b'{"ok": true}'
 
@@ -943,10 +840,9 @@ class TestUnifiedViewBodyResolution:
             f"def render(request, **kwargs):\n    return {return_value}\n"
         )
 
-        module = _load_python_module_memo(page_file)
-        view = page_instance._create_unified_view(page_file, {}, module)
+        view = unified_view(page_instance, page_file)
         with pytest.raises(TypeError, match="must return str or HttpResponse"):
-            view(_make_real_request())
+            view(build_page_request())
 
     def test_render_raising_propagates(self, page_instance, tmp_path) -> None:
         """`render()` raising an exception propagates to the caller."""
@@ -955,10 +851,9 @@ class TestUnifiedViewBodyResolution:
             "def render(request, **kwargs):\n    raise RuntimeError('boom')\n"
         )
 
-        module = _load_python_module_memo(page_file)
-        view = page_instance._create_unified_view(page_file, {}, module)
+        view = unified_view(page_instance, page_file)
         with pytest.raises(RuntimeError, match="boom"):
-            view(_make_real_request())
+            view(build_page_request())
 
     def test_priority_render_wins_over_template_attr(
         self, page_instance, tmp_path
@@ -971,9 +866,8 @@ class TestUnifiedViewBodyResolution:
             "    return '<p>from-render</p>'\n"
         )
 
-        module = _load_python_module_memo(page_file)
-        view = page_instance._create_unified_view(page_file, {}, module)
-        response = view(_make_real_request())
+        view = unified_view(page_instance, page_file)
+        response = view(build_page_request())
         assert b"from-render" in response.content
         assert b"from-attr" not in response.content
 
@@ -985,9 +879,8 @@ class TestUnifiedViewBodyResolution:
         page_file = tmp_path / "page.py"
         page_file.write_text('template = "<p>from-attr</p>"')
 
-        module = _load_python_module_memo(page_file)
-        view = page_instance._create_unified_view(page_file, {}, module)
-        response = view(_make_real_request())
+        view = unified_view(page_instance, page_file)
+        response = view(build_page_request())
         assert b"from-attr" in response.content
         assert b"from-djx" not in response.content
 
@@ -1003,9 +896,8 @@ class TestUnifiedViewBodyResolution:
         page_file = page_dir / "page.py"
         page_file.write_text("")
 
-        module = _load_python_module_memo(page_file)
-        view = page_instance._create_unified_view(page_file, {}, module)
-        response = view(_make_real_request())
+        view = unified_view(page_instance, page_file)
+        response = view(build_page_request())
         body = response.content.decode()
         assert "<html><body>" in body
         assert "</body></html>" in body
@@ -1056,7 +948,7 @@ class TestBrokenPageImportView:
 
         assert broken_pattern is not None
         assert ok_pattern is not None
-        response = ok_pattern.callback(_make_real_request())
+        response = ok_pattern.callback(build_page_request())
         assert response.status_code == 200
         assert b"<p>ok body</p>" in response.content
 
@@ -1068,7 +960,7 @@ class TestBrokenPageImportView:
             page_instance, tmp_path, url_parser, broken_source
         )
         with override_settings(DEBUG=True), pytest.raises(PageModuleImportError):
-            pattern.callback(_make_real_request())
+            pattern.callback(build_page_request())
 
     def test_broken_page_traceback_does_not_grow_across_requests(
         self, page_instance, tmp_path, url_parser
@@ -1078,9 +970,9 @@ class TestBrokenPageImportView:
         _page_file, pattern = self._broken_pattern(page_instance, tmp_path, url_parser)
         with override_settings(DEBUG=True):
             with pytest.raises(PageModuleImportError) as first:
-                pattern.callback(_make_real_request())
+                pattern.callback(build_page_request())
             with pytest.raises(PageModuleImportError) as second:
-                pattern.callback(_make_real_request())
+                pattern.callback(build_page_request())
 
         assert first.value is not second.value
         first_depth = len(traceback.extract_tb(first.value.__traceback__))
@@ -1090,8 +982,6 @@ class TestBrokenPageImportView:
     def test_healthy_page_renders_under_debug_with_sibling_error_recorded(
         self, page_instance, tmp_path, url_parser
     ) -> None:
-        # A recorded failure for another page must not trip the error probe
-        # of a healthy view even when the volume flags are active.
         _page_file, _pattern = self._broken_pattern(page_instance, tmp_path, url_parser)
         ok_dir = tmp_path / "ok"
         ok_dir.mkdir()
@@ -1101,7 +991,7 @@ class TestBrokenPageImportView:
         assert ok_pattern is not None
 
         with override_settings(DEBUG=True):
-            response = ok_pattern.callback(_make_real_request())
+            response = ok_pattern.callback(build_page_request())
 
         assert response.status_code == 200
         assert b"<p>ok body</p>" in response.content
@@ -1113,10 +1003,11 @@ class TestBrokenPageImportView:
         _page_file, pattern = self._broken_pattern(
             page_instance, tmp_path, url_parser, broken_source
         )
-        with override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}):
-            next_framework_settings.reload()
-            with pytest.raises(PageModuleImportError):
-                pattern.callback(_make_real_request())
+        with (
+            override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}),
+            pytest.raises(PageModuleImportError),
+        ):
+            pattern.callback(build_page_request())
 
     @_broken_sources
     def test_broken_page_returns_404_in_prod(
@@ -1131,20 +1022,20 @@ class TestBrokenPageImportView:
         )
 
         with pytest.raises(Http404):
-            pattern.callback(_make_real_request())
+            pattern.callback(build_page_request())
 
     def test_broken_page_recovers_after_fix_without_restart(
         self, page_instance, tmp_path, url_parser
     ) -> None:
         page_file, pattern = self._broken_pattern(page_instance, tmp_path, url_parser)
         with pytest.raises(Http404):
-            pattern.callback(_make_real_request())
+            pattern.callback(build_page_request())
 
         stamp = page_file.stat().st_mtime + 10
         page_file.write_text('template = "<p>revived</p>"\n')
         os.utime(page_file, (stamp, stamp))
 
-        response = pattern.callback(_make_real_request())
+        response = pattern.callback(build_page_request())
         assert response.status_code == 200
         assert b"<p>revived</p>" in response.content
 
@@ -1166,7 +1057,43 @@ class TestBrokenPageImportView:
         assert _load_python_module_memo(page_file) is None
 
         with override_settings(DEBUG=True), pytest.raises(PageModuleImportError):
-            pattern.callback(_make_real_request())
+            pattern.callback(build_page_request())
+
+    def test_render_page_broken_after_build_raises_under_debug(
+        self, page_instance, tmp_path, url_parser
+    ) -> None:
+        # The build-time module survives the rewrite, only the record reports it.
+        page_dir = tmp_path / "dyn"
+        page_dir.mkdir()
+        page_file = page_dir / "page.py"
+        page_file.write_text("def render(request):\n    return '<p>ok</p>'\n")
+        pattern = page_instance.create_url_pattern("dyn", page_file, url_parser)
+        assert pattern is not None
+
+        stamp = page_file.stat().st_mtime + 10
+        page_file.write_text(_BROKEN_SYNTAX)
+        os.utime(page_file, (stamp, stamp))
+        assert _load_python_module_memo(page_file) is None
+
+        with override_settings(DEBUG=True), pytest.raises(PageModuleImportError):
+            pattern.callback(build_page_request())
+
+    def test_render_page_renders_under_debug_with_sibling_error_recorded(
+        self, page_instance, tmp_path, url_parser
+    ) -> None:
+        _page_file, _pattern = self._broken_pattern(page_instance, tmp_path, url_parser)
+        ok_dir = tmp_path / "dyn"
+        ok_dir.mkdir()
+        ok_file = ok_dir / "page.py"
+        ok_file.write_text("def render(request):\n    return '<p>dyn body</p>'\n")
+        ok_pattern = page_instance.create_url_pattern("dyn", ok_file, url_parser)
+        assert ok_pattern is not None
+
+        with override_settings(DEBUG=True):
+            response = ok_pattern.callback(build_page_request())
+
+        assert response.status_code == 200
+        assert b"<p>dyn body</p>" in response.content
 
     def test_broken_page_requests_do_not_reexec_module(
         self, page_instance, tmp_path, url_parser, monkeypatch
@@ -1181,13 +1108,12 @@ class TestBrokenPageImportView:
         monkeypatch.setattr(loaders_module, "_load_python_module", counting)
 
         page_file, pattern = self._broken_pattern(page_instance, tmp_path, url_parser)
-        # The pattern build probes once and every later request answers 404
-        # off the memo, re-executing nothing.
+        # The build probes once, every later request answers 404 off the memo.
         with pytest.raises(Http404):
-            pattern.callback(_make_real_request())
+            pattern.callback(build_page_request())
         first_pass = calls.count(page_file)
         with pytest.raises(Http404):
-            pattern.callback(_make_real_request())
+            pattern.callback(build_page_request())
 
         assert calls.count(page_file) == first_pass
 
@@ -1205,19 +1131,20 @@ class TestAuthorizationOutcomeBrokenPage:
     def test_raises_under_debug(self, page_instance, tmp_path) -> None:
         page_file = self._broken_file(tmp_path)
         with override_settings(DEBUG=True), pytest.raises(PageModuleImportError):
-            page_instance.authorization_outcome(page_file, _make_real_request())
+            page_instance.authorization_outcome(page_file, build_page_request())
 
     def test_raises_under_strict_loading(self, page_instance, tmp_path) -> None:
         page_file = self._broken_file(tmp_path)
-        with override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}):
-            next_framework_settings.reload()
-            with pytest.raises(PageModuleImportError):
-                page_instance.authorization_outcome(page_file, _make_real_request())
+        with (
+            override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}),
+            pytest.raises(PageModuleImportError),
+        ):
+            page_instance.authorization_outcome(page_file, build_page_request())
 
     def test_raises_in_prod_instead_of_404(self, page_instance, tmp_path) -> None:
         page_file = self._broken_file(tmp_path)
         with pytest.raises(PageModuleImportError):
-            page_instance.authorization_outcome(page_file, _make_real_request())
+            page_instance.authorization_outcome(page_file, build_page_request())
 
 
 class TestLoadStaticBodyEdgeCases:

@@ -59,7 +59,7 @@ class TestEarlyRenderResponseIsVerbatim:
         # the structural reader refuses to treat it as a patch envelope
         response = NextClient().get_zones("/redirecting/", "alpha")
         assert response["Content-Type"] != CONTENT_TYPE
-        with pytest.raises(AssertionError):
+        with pytest.raises(AssertionError, match="not a patch envelope"):
             envelope_of(response)
 
     def test_early_response_skips_zone_render(self, counted_page) -> None:

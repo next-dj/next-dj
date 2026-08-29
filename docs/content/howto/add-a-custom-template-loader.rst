@@ -47,7 +47,7 @@ A loader whose ``source_name`` is empty is left out of that report.
            candidate = file_path.parent / "template.md"
            return candidate if candidate.is_file() else None
 
-``source_path`` names the file whose modification time the composed-template cache tracks, so a loader backed by a sibling file overrides it and one backed by anything else keeps the ``None`` default.
+``source_path`` names the file whose modification time the composed-template cache tracks under ``DEBUG``, so a loader backed by a sibling file overrides it and one backed by anything else keeps the ``None`` default.
 
 The loaded body is rendered as a Django template after composition with the layout chain.
 A ``{{ ... }}`` or ``{% ... %}`` token inside ``template.md`` is evaluated by the template engine before the user sees the page.

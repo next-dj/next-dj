@@ -10,7 +10,6 @@ from django.test import override_settings
 from django.utils.safestring import SafeString
 
 from next.components import ComponentInfo, components_manager
-from next.conf import next_framework_settings
 from next.static import StaticCollector
 
 
@@ -219,11 +218,8 @@ class TestComponentTag:
     ) -> None:
         """A prop named like a slot never leaks into the slot lookup.
 
-        The component template wraps its content in
-        ``{% #set_slot "description" %}<i>fallback</i>{% /set_slot %}``.
-        Earlier versions of the renderer mirrored slot content under the
-        unprefixed ``<name>`` key, so passing a ``description`` prop
-        caused the default body to be replaced by the prop value.
+        Slot content lives under a prefixed key only, so a prop sharing the
+        slot name cannot displace the default body.
         """
         (tmp_path / "card.djx").write_text(
             "<article>"
@@ -287,14 +283,10 @@ class TestComponentTag:
     ) -> None:
         """Plain string literals reach ``{{ prop }}`` as text, not as HTML.
 
-        Earlier the renderer relied on ``FilterExpression.resolve`` which
-        auto-marks bare quoted literals as safe, so something like
-        ``description="visit /s/<slug>/"`` ended up interpolated as raw
-        HTML and the ``<slug>`` token was eaten by the browser parser.
-        ``ComponentNode._resolved_props`` now strips the safe marker from
-        literals without a filter chain, so component props behave like
-        user-facing text by default while ``|safe`` (or a safe variable)
-        stays available as an explicit opt-in.
+        Django marks a bare quoted literal safe, so a prop carrying markup
+        like ``visit /s/<slug>/`` would interpolate as raw HTML and lose the
+        token to the browser parser. A literal without a filter chain has
+        that marker stripped, leaving ``|safe`` as the explicit opt-in.
         """
         (tmp_path / "card.djx").write_text("<article>{{ body }}</article>")
         info = ComponentInfo(
@@ -665,7 +657,7 @@ class TestSlotTag:
             )
 
     def test_block_slot_parses_inside_block_component(self) -> None:
-        """{% #slot %} … {% /slot %} parses inside {% #component %}."""
+        """A block slot inside a block component compiles without error."""
         t = Template(
             "{% load components %}"
             '{% #component "c" %}'
@@ -811,15 +803,14 @@ class TestComponentMissReporting:
 
     def test_strict_not_found_raises_with_suggestion(self, tmp_path: Path) -> None:
         missing, visible, spy_ctx = self._not_found_patches({"navbar": None})
-        with override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}):
-            next_framework_settings.reload()
-            with (
-                missing,
-                visible,
-                spy_ctx as spy,
-                pytest.raises(TemplateSyntaxError) as exc_info,
-            ):
-                self._render({"current_template_path": str(tmp_path / "t.djx")})
+        with (
+            override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}),
+            missing,
+            visible,
+            spy_ctx as spy,
+            pytest.raises(TemplateSyntaxError) as exc_info,
+        ):
+            self._render({"current_template_path": str(tmp_path / "t.djx")})
         resolved = (tmp_path / "t.djx").resolve()
         assert str(exc_info.value) == (
             f"component 'nvbar' not found from {resolved}, did you mean 'navbar'?"
@@ -831,28 +822,24 @@ class TestComponentMissReporting:
         self, tmp_path: Path
     ) -> None:
         missing, visible, spy_ctx = self._not_found_patches({})
-        with override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}):
-            next_framework_settings.reload()
-            with (
-                missing,
-                visible,
-                spy_ctx,
-                pytest.raises(TemplateSyntaxError) as exc_info,
-            ):
-                self._render({"current_template_path": str(tmp_path / "t.djx")})
+        with (
+            override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}),
+            missing,
+            visible,
+            spy_ctx,
+            pytest.raises(TemplateSyntaxError) as exc_info,
+        ):
+            self._render({"current_template_path": str(tmp_path / "t.djx")})
         resolved = (tmp_path / "t.djx").resolve()
         assert str(exc_info.value) == f"component 'nvbar' not found from {resolved}"
 
     def test_strict_no_discovery_path_names_missing_context(self) -> None:
-        with override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}):
-            next_framework_settings.reload()
-            with (
-                patch(
-                    "difflib.get_close_matches", wraps=difflib.get_close_matches
-                ) as spy,
-                pytest.raises(TemplateSyntaxError) as exc_info,
-            ):
-                self._render({})
+        with (
+            override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}),
+            patch("difflib.get_close_matches", wraps=difflib.get_close_matches) as spy,
+            pytest.raises(TemplateSyntaxError) as exc_info,
+        ):
+            self._render({})
         assert str(exc_info.value) == (
             "component 'nvbar' cannot be resolved because the template "
             "context has no current_template_path"
@@ -903,8 +890,7 @@ class TestComponentMissReporting:
 
     @override_settings(DEBUG=True)
     def test_debug_comment_sanitizes_odd_dash_runs(self, tmp_path: Path) -> None:
-        # Breaking whole pairs leaves the trailing dash of an odd run, which
-        # still closes the comment.
+        # Breaking whole pairs leaves a trailing dash, which still closes the comment.
         t = Template('{% load components %}{% component "nv--->x" %}')
         with (
             patch.object(components_manager, "get_component", return_value=None),

@@ -22,10 +22,15 @@ import logging
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, ClassVar, override
 
+from django.core.signals import setting_changed
+
 from next.conf import next_framework_settings
 from next.conf.imports import import_class_cached
 from next.conf.signals import settings_reloaded
 from next.utils import classify_dirs_entries, resolve_base_dir
+
+from .paths import _MAX_ANCESTOR_WALK_DEPTH
+from .watch import get_pages_directories_for_watch
 
 
 if TYPE_CHECKING:
@@ -37,7 +42,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-_MAX_ANCESTOR_WALK_DEPTH = 64
+# A token no real template source carries, so refilling the slot is unambiguous.
+_BODY_SLOT = "\x00next-page-body\x00"
 
 
 class PageModuleImportError(Exception):
@@ -183,8 +189,7 @@ def reset_module_memo() -> None:
     _MODULE_MEMO.clear()
 
 
-# A single-slot holder mutated in place so cache invalidation never rebinds a
-# module global, which keeps the reset and read paths free of `global`.
+# A single-slot holder mutated in place, so a reset needs no `global`.
 _ADDITIONAL_LAYOUTS_CACHE: dict[str, list[Path] | None] = {"value": None}
 
 
@@ -194,6 +199,40 @@ def _reset_additional_layouts_cache(**kwargs) -> None:
 
 
 settings_reloaded.connect(_reset_additional_layouts_cache)
+
+
+_PAGE_ROOTS_CACHE: dict[str, tuple[Path, ...] | None] = {"value": None}
+
+
+def _page_roots() -> tuple[Path, ...]:
+    """Return the resolved page trees the routers report, memoised.
+
+    Reading them builds every router backend, too much work to repeat per walk.
+    """
+    cached = _PAGE_ROOTS_CACHE["value"]
+    if cached is None:
+        cached = tuple(get_pages_directories_for_watch())
+        _PAGE_ROOTS_CACHE["value"] = cached
+    return cached
+
+
+def _reset_page_roots_cache(**kwargs) -> None:
+    """Drop the memoised page trees so the next walk asks the routers again."""
+    _PAGE_ROOTS_CACHE["value"] = None
+
+
+def _on_setting_changed(*, setting: str, **kwargs) -> None:
+    """Drop the memoised page trees when the app list behind them moves.
+
+    `settings_reloaded` covers only the `NEXT_FRAMEWORK` half, and the trees
+    of a router with `APP_DIRS` move with `INSTALLED_APPS`.
+    """
+    if setting == "INSTALLED_APPS":
+        _reset_page_roots_cache()
+
+
+settings_reloaded.connect(_reset_page_roots_cache)
+setting_changed.connect(_on_setting_changed)
 
 
 def _read_string_list(module: types.ModuleType, attr: str) -> list[str]:
@@ -300,7 +339,7 @@ class LayoutTemplateLoader(TemplateLoader):
     @override
     def can_load(self, file_path: Path) -> bool:
         """Return whether at least one `layout.djx` exists on the path."""
-        return self._find_layout_files(file_path) is not None
+        return bool(self._find_layout_files(file_path))
 
     @override
     def load_template(self, file_path: Path) -> str | None:
@@ -311,6 +350,18 @@ class LayoutTemplateLoader(TemplateLoader):
 
         template_content = self._wrap_in_template_block(file_path)
         return self._compose_layout_hierarchy(template_content, layout_files)
+
+    def compose_skeleton(self, file_path: Path) -> str:
+        """Return the layout chain for `file_path` with a slot where the body goes.
+
+        The chain depends on the path alone, so a caller with a body that
+        changes per request caches this and fills the slot per request.
+        """
+        return self.compose_body(_BODY_SLOT, file_path)
+
+    def fill_skeleton(self, skeleton: str, body: str) -> str:
+        """Return `skeleton` with `body` substituted into its body slot."""
+        return skeleton.replace(_BODY_SLOT, body)
 
     def compose_body(self, body: str, file_path: Path) -> str:
         """Wrap `body` through the ancestor layout chain for `file_path`.
@@ -333,25 +384,65 @@ class LayoutTemplateLoader(TemplateLoader):
         )
         return self._compose_layout_hierarchy(wrapped, layout_files)
 
-    def _find_layout_files(self, file_path: Path) -> list[Path] | None:
-        """Return `layout.djx` paths from near to far plus global layouts."""
-        layout_files = []
+    def layout_sources(self, file_path: Path) -> tuple[list[Path], list[Path]]:
+        """Return the layout files behind `file_path` and the directories watched.
+
+        A `layout.djx` appearing or disappearing moves the mtime of its
+        directory and of no tracked file, so a caller detecting change needs
+        the directories too.
+        """
+        return self._walk_ancestors(
+            file_path, self._watched_ancestor_depth(file_path.parent)
+        )
+
+    def _walk_ancestors(
+        self, file_path: Path, watched_depth: int
+    ) -> tuple[list[Path], list[Path]]:
+        """Climb the ancestors of `file_path` for layouts and watched directories."""
+        layout_files: list[Path] = []
+        watched_dirs: list[Path] = []
         current_dir = file_path.parent
 
-        for _ in range(_MAX_ANCESTOR_WALK_DEPTH):
+        for depth in range(_MAX_ANCESTOR_WALK_DEPTH):
             if current_dir == current_dir.parent:
                 break
+            if depth < watched_depth:
+                watched_dirs.append(current_dir)
             layout_file = current_dir / "layout.djx"
             if layout_file.exists():
                 layout_files.append(layout_file)
             current_dir = current_dir.parent
 
-        if additional_layouts := self._get_additional_layout_files():
-            for additional_layout in additional_layouts:
-                if additional_layout not in layout_files:
-                    layout_files.append(additional_layout)
+        for additional_layout in self._get_additional_layout_files():
+            if additional_layout not in layout_files:
+                layout_files.append(additional_layout)
 
-        return layout_files or None
+        return layout_files, watched_dirs
+
+    def _watched_ancestor_depth(self, start_dir: Path) -> int:
+        """Return how many ancestors of `start_dir` are worth watching for change.
+
+        The walk climbs past the page tree because a layout above it still
+        joins the chain, but a directory up there moves for reasons no page shares.
+        """
+        resolved = start_dir.resolve()
+        depths = [
+            len(resolved.relative_to(root).parts) + 1
+            for root in _page_roots()
+            if resolved.is_relative_to(root)
+        ]
+        if not depths:
+            return _MAX_ANCESTOR_WALK_DEPTH
+        return min(*depths, _MAX_ANCESTOR_WALK_DEPTH)
+
+    def _find_layout_files(self, file_path: Path) -> list[Path]:
+        """Return `layout.djx` paths from near to far plus global layouts.
+
+        The watched directories cost a `resolve` of the page trees, and no
+        caller down this path reads them, so the walk skips them.
+        """
+        layout_files, _ = self._walk_ancestors(file_path, 0)
+        return layout_files
 
     def _get_additional_layout_files(self) -> list[Path]:
         """Return root-level `layout.djx` files from each page backend `DIRS`."""
@@ -410,8 +501,7 @@ class LayoutTemplateLoader(TemplateLoader):
         return result
 
 
-# A single-slot holder mutated in place so cache invalidation never rebinds a
-# module global, which keeps the reset and read paths free of `global`.
+# A single-slot holder mutated in place, so a reset needs no `global`.
 _REGISTERED_LOADERS_CACHE: dict[str, list[TemplateLoader] | None] = {"value": None}
 
 

@@ -26,7 +26,9 @@ from __future__ import annotations
 import logging
 import os
 from collections import OrderedDict
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, NamedTuple, Protocol, runtime_checkable
+
+from django.conf import settings
 
 from next.pages import loaders as pages_loaders
 
@@ -50,6 +52,27 @@ logger = logging.getLogger(__name__)
 
 _MODULE_LIST_CACHE_MAX_SIZE = 2048
 _LAYOUT_DIR_CACHE_MAX_SIZE = 2048
+_PAGE_PLAN_CACHE_MAX_SIZE = 2048
+
+
+class _FoundAsset(NamedTuple):
+    """One co-located file a role directory contributes to a render."""
+
+    source_path: Path
+    logical_name: str
+    kind: str
+
+
+class _PageAssetPlan(NamedTuple):
+    """What one page path contributes, and the directories it was read from.
+
+    A warm render registers the files named here instead of probing every
+    stem again. `module_path` is the page itself, or `None` where it is gone.
+    """
+
+    files: tuple[_FoundAsset, ...]
+    module_path: Path | None
+    directory_mtimes: tuple[tuple[Path, float], ...]
 
 
 def _url_suffix(url: str) -> str:
@@ -80,6 +103,21 @@ def _rel_path_str(child: Path, root: Path) -> str | None:
     if os.sep != "/":  # pragma: no cover
         rel = rel.replace(os.sep, "/")
     return rel
+
+
+def _directory_mtimes(directories: list[Path]) -> tuple[tuple[Path, float], ...]:
+    """Snapshot the mtime of each directory, dropping the ones that do not stat.
+
+    Taken whether or not the process watches asset edits, so a plan built
+    with `DEBUG` off still has something to compare against once it comes on.
+    """
+    snapshot: list[tuple[Path, float]] = []
+    for directory in directories:
+        try:
+            snapshot.append((directory, directory.stat().st_mtime))
+        except OSError:
+            continue
+    return tuple(snapshot)
 
 
 @runtime_checkable
@@ -219,6 +257,7 @@ class AssetDiscovery:
         self._stems = stems or default_stems
         self._module_list_cache: OrderedDict[Path, dict[str, list[str]]] = OrderedDict()
         self._layout_dir_cache: OrderedDict[Path, list[Path]] = OrderedDict()
+        self._page_plan_cache: OrderedDict[Path, _PageAssetPlan] = OrderedDict()
 
     def discover_page_assets(self, file_path: Path, collector: StaticCollector) -> None:
         """Collect layout, template, and module-level assets for a page file.
@@ -227,29 +266,71 @@ class AssetDiscovery:
         the template directory, then from `styles` and `scripts`
         module lists declared in `page.py`.
         """
+        plan = self._page_asset_plan(file_path)
+        for found in plan.files:
+            self._register_file(found, collector)
+        if plan.module_path is not None:
+            self._collect_module_lists(plan.module_path, collector)
+
+    def _page_asset_plan(self, file_path: Path) -> _PageAssetPlan:
+        """Return the memoised plan of `file_path`, walking the disk on a miss."""
+        plan = self._page_plan_cache.get(file_path)
+        if plan is not None and not self._plan_stale(plan):
+            self._page_plan_cache.move_to_end(file_path)
+            return plan
+        plan = self._build_page_asset_plan(file_path)
+        self._page_plan_cache[file_path] = plan
+        if len(self._page_plan_cache) > _PAGE_PLAN_CACHE_MAX_SIZE:
+            self._page_plan_cache.popitem(last=False)
+        return plan
+
+    def _build_page_asset_plan(self, file_path: Path) -> _PageAssetPlan:
+        """Probe every role directory behind `file_path` in one pass."""
         resolved = file_path.resolve()
         page_root = self._resolver.find_page_root(resolved)
+        files: list[_FoundAsset] = []
+        directories: list[Path] = []
         for layout_dir in self._find_layout_directories(resolved, page_root):
-            self._collect_role_directory(
+            directories.append(layout_dir)
+            files += self._find_role_files(
                 layout_dir,
                 logical_name=self._resolver.logical_name_for_layout(
                     layout_dir, page_root
                 ),
                 role="layout",
-                collector=collector,
             )
-
-        self._collect_role_directory(
-            resolved.parent,
+        template_dir = resolved.parent
+        directories.append(template_dir)
+        files += self._find_role_files(
+            template_dir,
             logical_name=self._resolver.logical_name_for_template(
-                resolved.parent, page_root
+                template_dir, page_root
             ),
             role="template",
-            collector=collector,
+        )
+        return _PageAssetPlan(
+            files=tuple(files),
+            module_path=resolved if resolved.exists() else None,
+            directory_mtimes=_directory_mtimes(directories),
         )
 
-        if resolved.exists():
-            self._collect_module_lists(resolved, collector)
+    def _plan_stale(self, plan: _PageAssetPlan) -> bool:
+        """Whether a directory the plan was read from has moved since.
+
+        Only `DEBUG` pays the stats. An asset created or deleted moves the
+        mtime of the directory holding it. Read per call, so an override
+        takes effect.
+        """
+        if not settings.DEBUG:
+            return False
+        for directory, mtime in plan.directory_mtimes:
+            try:
+                current = directory.stat().st_mtime
+            except OSError:
+                return True
+            if current > mtime:
+                return True
+        return False
 
     def discover_component_assets(
         self, info: ComponentInfo, collector: StaticCollector
@@ -277,18 +358,30 @@ class AssetDiscovery:
         role: str,
         collector: StaticCollector,
     ) -> None:
-        """Register `{stem}{ext}` files for every registered kind.
+        """Register every `{stem}{ext}` file the directory holds for the role."""
+        for found in self._find_role_files(
+            directory, logical_name=logical_name, role=role
+        ):
+            self._register_file(found, collector)
 
-        The set of extensions probed comes from `KindRegistry.kinds()`,
-        so registering a new kind during `AppConfig.ready` is enough to
-        teach discovery about additional file types.
+    def _find_role_files(
+        self, directory: Path, *, logical_name: str, role: str
+    ) -> list[_FoundAsset]:
+        """Return the `{stem}{ext}` files that exist in `directory` for the role.
+
+        The set of extensions probed comes from `KindRegistry.kinds()`, so
+        registering a new kind during `AppConfig.ready` is enough to teach
+        discovery about it. Each hit carries its resolved path, because the
+        collector dedups on it.
         """
+        found: list[_FoundAsset] = []
         for stem in self._stems.stems(role):
             for kind in default_kinds.kinds():
                 suffix = default_kinds.extension(kind)
                 candidate = directory / f"{stem}{suffix}"
                 if candidate.exists():
-                    self._register_file(candidate, logical_name, kind, collector)
+                    found.append(_FoundAsset(candidate.resolve(), logical_name, kind))
+        return found
 
     def _collect_module_lists(
         self, module_path: Path, collector: StaticCollector
@@ -356,13 +449,7 @@ class AssetDiscovery:
             return
         collector.add(StaticAsset(url=url, kind=kind))
 
-    def _register_file(
-        self,
-        source_path: Path,
-        logical_name: str,
-        kind: str,
-        collector: StaticCollector,
-    ) -> None:
+    def _register_file(self, found: _FoundAsset, collector: StaticCollector) -> None:
         """Register a file with the backend and add the result to the collector.
 
         Warnings are logged for `OSError` and `ValueError`. All other
@@ -371,17 +458,19 @@ class AssetDiscovery:
         """
         backend = self._provider.default_backend
         try:
-            url = backend.register_file(source_path, logical_name, kind)
+            url = backend.register_file(
+                found.source_path, found.logical_name, found.kind
+            )
         except (OSError, ValueError) as e:
             logger.warning(
                 "Failed to register static asset %s as %r: %s",
-                source_path,
-                logical_name,
+                found.source_path,
+                found.logical_name,
                 e,
-                extra={"source_path": str(source_path), "kind": kind},
+                extra={"source_path": str(found.source_path), "kind": found.kind},
             )
             return
-        asset = StaticAsset(url=url, kind=kind, source_path=source_path.resolve())
+        asset = StaticAsset(url=url, kind=found.kind, source_path=found.source_path)
         collector.add(asset)
         asset_registered.send(sender=asset, collector=collector, backend=backend)
 

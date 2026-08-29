@@ -84,9 +84,7 @@ NEXT_FRAMEWORK = {
         {
             "BACKEND": "next.urls.FileRouterBackend",
             "APP_DIRS": True,
-            # `portal/` is the project-level page root that carries the
-            # shared HTML envelope around every request step and admin
-            # surface in this access-request workflow.
+            # Project-level page root carrying the shared HTML envelope.
             "DIRS": [str(BASE_DIR / "portal")],
             "PAGES_DIR": "views",
             "OPTIONS": {"context_processors": []},

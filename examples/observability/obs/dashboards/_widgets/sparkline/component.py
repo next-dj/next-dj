@@ -5,11 +5,7 @@ from obs.serializers import WrappedJsContextSerializer
 from next import component
 
 
-# React and Babel-standalone are declared at the page level
-# (`obs/dashboards/page.py`) so they land in injection slot #4 and
-# end up before this widget's own `component.jsx` (slot #5). Putting
-# the runtime dependency here would push it to slot #6, after the
-# JSX file that needs it.
+# React and Babel sit in the page, because its scripts land before this one.
 
 
 @component.context(

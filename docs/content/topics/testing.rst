@@ -191,7 +191,9 @@ Two narrower helpers reset a single registry.
    Reserve it for tests that verify registry behaviour itself.
 
 A third helper, ``reset_page_cache()``, resets no registry.
-It calls ``Page.clear_template_caches`` to drop the page template cache and is useful when a test rewrites template files on disk.
+It calls ``Page.clear_template_caches`` to drop the composed page template.
+The test environment runs with ``DEBUG`` off, and the composition cache stats its sources only under ``DEBUG``, so a template rewritten inside one process still renders from the composition built before the rewrite.
+Call ``reset_page_cache()`` after any such rewrite, or wrap the test in ``override_settings(DEBUG=True)`` to put the mtime check back on, which works on a composition built before the override because the snapshot it reads is taken either way.
 
 For tests that probe registration itself, ``reset_form_registration_state()`` clears every form registry, the registration diagnostics buffer, and resets the wizard backend in one call.
 

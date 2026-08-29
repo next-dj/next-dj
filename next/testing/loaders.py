@@ -72,8 +72,7 @@ def eager_load_components() -> None:
     """Import every registered `component.py` so decorators register before tests."""
     for backend in components_manager.backends:
         backend.discover()
-        # Running the module top level is a capability of its own, not the
-        # populate-the-registry one `discover` names.
+        # Running the module top level is its own capability, not `discover`'s.
         backend.import_component_modules()
 
 

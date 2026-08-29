@@ -101,7 +101,6 @@ class TestServerAutoreloadWatchApi:
                 ],
             }
         ):
-            next_framework_settings.reload()
             specs = _iter_default_autoreload_watch_specs()
         next_framework_settings.reload()
         expected_glob = "**/_/**/component.py"

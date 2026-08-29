@@ -1,8 +1,7 @@
 // The asset loader and the version safeguard. A registry of URLs already on the
-// page is the baseline against which an envelope manifest is a delta, so the
-// loaded-asset list never travels from client to server. A version mismatch
-// triggers a single full visit under a reload-once flag so a stale CDN cannot
-// loop the page.
+// page is the baseline an envelope manifest is a delta against, so the loaded-asset
+// list never travels from client to server. A version mismatch triggers one full
+// visit under a reload-once flag, so a stale CDN cannot loop the page.
 
 import {
   defaultClock,
@@ -238,8 +237,7 @@ export function createAssets(deps: AssetsDeps): Assets {
   function loadCss(manifest: readonly Asset[], done: () => void): void {
     whenParsed(() => {
       catchUp();
-      // Inline styles insert synchronously and never join the url delta done
-      // waits on.
+      // Inline styles insert synchronously and never join the url delta done waits on.
       const urls: string[] = [];
       for (const asset of manifest) {
         if (verbOf(asset) !== "link") continue;

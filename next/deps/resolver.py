@@ -107,8 +107,7 @@ class DependencyResolver:
     def skips(self, param: inspect.Parameter) -> bool:
         """Return True for `self` / `cls` and variadic parameters.
 
-        Public so a system check can ask the resolver itself which
-        parameters it refuses to fill.
+        Public so a system check can ask which parameters the resolver refuses.
         """
         return param.name in ("self", "cls") or param.kind in (
             inspect.Parameter.VAR_POSITIONAL,

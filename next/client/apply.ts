@@ -504,8 +504,7 @@ export class Applier {
     // carries an honest degraded signal.
     let ok = true;
     for (const op of envelope.ops) {
-      // A single failing op is contained, the rest still apply and the failure
-      // surfaces as partial:error.
+      // A failing op is contained, the rest apply and it surfaces as partial:error.
       try {
         if (!this.#timedOp(op, state)) ok = false;
       } catch (error) {
@@ -521,8 +520,7 @@ export class Applier {
     this.#emit("partial:applied", { envelope, ok }, false);
   }
 
-  // next:mounted and a mount-registry pass on each touched node, reviving what
-  // was inserted.
+  // next:mounted and a mount-registry pass revive every touched node.
   #runMount(state: ApplyState): void {
     for (const node of state.touched) {
       if (!node.isConnected) continue;
@@ -576,8 +574,7 @@ export class Applier {
     return false;
   }
 
-  // The partial:error of one failed op, shared by the contained-throw path and
-  // the unknown verb.
+  // The partial:error of one failed op, shared by the throw path and unknown verbs.
   #opError(patch: Patch, error: unknown): void {
     const target = describeOpTarget(patch);
     this.#emit(
@@ -1056,8 +1053,7 @@ const TARGET_KEYS = [
 // recognised address, or when that address refuses to serialise (a circular
 // value), so a description that cannot be produced reads as no description.
 function describeTarget(target: Target | undefined): string | undefined {
-  // The no-target guard is unreachable from either caller, present only to keep
-  // the helper total.
+  // The no-target guard is unreachable from either caller, kept to make it total.
   /* v8 ignore start */
   if (target === undefined) return undefined;
   /* v8 ignore stop */

@@ -1,6 +1,5 @@
-// The global `Next` facade every page reaches. Owns the client context store,
-// the event bus, the plugin hook, and mounts Next.partial for the morph and
-// fetch runtime.
+// The global `Next` facade every page reaches. Owns the client context store, the
+// event bus, the plugin hook, and mounts Next.partial for morph and fetch.
 
 import { createPartial } from "./partial";
 import type { PartialSurface } from "./partial";

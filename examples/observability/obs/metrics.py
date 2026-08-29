@@ -13,8 +13,7 @@ BUCKET_TTL_SECONDS = 3700
 def _now() -> datetime:
     """Return the current UTC moment.
 
-    Centralised so `time_machine.travel` can drive bucket-boundary
-    tests through this single seam.
+    Centralised so `time_machine.travel` can drive bucket-boundary tests through it.
     """
     return datetime.now(tz=UTC)
 

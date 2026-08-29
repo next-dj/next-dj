@@ -47,7 +47,7 @@ class TestForeignZoneByUrl:
         )
 
     def test_unresolvable_url_raises_lookup(self) -> None:
-        with pytest.raises(LookupError):
+        with pytest.raises(LookupError, match="No page resolves the URL"):
             Patches(partial_request()).morph(zone="alpha", page="/no/such/url/")
 
 

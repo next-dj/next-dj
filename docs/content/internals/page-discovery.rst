@@ -79,9 +79,9 @@ When the body source is a ``render`` function that returns an ``HttpResponseBase
 Composed-template cache
 -----------------------
 
-``Page`` keeps three parallel dicts that short-circuit layout composition for the callers of ``composed_template_for``.
-Those callers are the form re-render after a validation failure, the standalone zone render, and direct ``Page.render`` calls such as ``next.testing.render_page``.
-The canonical full-page path never consults the cache and recomposes the body and layout chain from the disk sources on each request.
+``Page`` keeps parallel dicts that short-circuit layout composition.
+Three of them back ``composed_template_for``, read by the canonical full-page render of a page without ``render()``, by the form re-render after a validation failure, by the standalone zone render, and by direct ``Page.render`` calls such as ``next.testing.render_page``.
+A page whose body comes from ``render()`` resolves that body per request and caches only the layout chain around it.
 
 ``_template_registry``.
    Maps a ``page.py`` path to its already-composed template string.
@@ -91,12 +91,23 @@ The canonical full-page path never consults the cache and recomposes the body an
    Writing the source registry drops the compiled entry with it.
 
 ``_template_source_mtimes``.
-   Snapshots the modification time of every file that contributed to the composition, including the page body source and each ancestor ``layout.djx``.
+   Snapshots the modification time of every file that contributed to the composition, including the page body source and each ancestor ``layout.djx``, and of every directory the layout walk visited.
+   The directories are tracked because a ``layout.djx`` that appears or disappears moves no mtime of a file the snapshot already holds.
+   Only the directories inside the page tree are tracked, so an unrelated write to a shared parent such as the home directory evicts nothing, and a ``layout.djx`` created above the tree joins the chain on the next composition instead.
+
+``_skeleton_registry``.
+   Maps a ``page.py`` path whose body comes from ``render()`` to its layout chain with an empty body slot, filled with the resolved body on each request.
+   No dynamic body enters the composed-source registry.
+   Its own snapshot lives in ``_skeleton_source_mtimes``, so an eviction on the composed side never reads as freshness here.
+
+The snapshot is taken on every composition, and only the check reading it is gated on ``DEBUG`` through ``template_edits_watched``, read per call so an override takes effect at once and sees the sources of a composition built before it.
+The dev watcher deliberately ignores ``.djx``, so under ``DEBUG`` this is the only mechanism that makes a template edit visible without a restart, and with ``DEBUG`` off a warm read performs no stat and holds the composition for the life of the process.
 
 On each cache read ``_is_template_stale`` compares the current mtimes against the snapshot.
-A change to any contributing file evicts the entry, the composition step rebuilds the template string, and the new snapshot is stored.
+A change to any contributing path evicts the entry, the composition step rebuilds the template string, and the new snapshot is stored.
+A tracked path that no longer stats counts as a change, so a deleted ``layout.djx`` evicts the entry exactly like an edited one.
 
-``Page.clear_template_caches`` drops all three in one call.
+``Page.clear_template_caches`` drops all of them in one call.
 A rewrite landing on the same mtime tick is invisible to the staleness check, which is why ``next.testing.reset_page_cache`` calls it between renders of a file rewritten in place.
 
 Layout composition

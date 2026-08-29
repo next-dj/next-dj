@@ -137,8 +137,7 @@ def bind_component_widgets(
 ) -> None:
     """Inject scope path, request, collector, and field errors onto ComponentWidgets.
 
-    A formset has no `fields` of its own, so each of its member forms is
-    bound instead.
+    A formset has no `fields` of its own, so each member form is bound instead.
     """
     if isinstance(form, django_forms.BaseFormSet):
         for member in form.forms:

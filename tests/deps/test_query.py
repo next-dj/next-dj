@@ -50,6 +50,15 @@ class TestQueryParamProviderCanHandle:
             (int, True, False),
             (list[str], True, False),
         ],
+        ids=[
+            "dquery_str",
+            "dquery_int",
+            "dquery_list",
+            "dquery_without_request",
+            "plain_str",
+            "plain_int",
+            "plain_list",
+        ],
     )
     def test_can_handle_matrix(
         self, provider, make_request, annotation, request_present, expected
@@ -141,6 +150,16 @@ class TestQueryParamProviderResolveMultiValue:
             ("brand=Acme,Globex", DQuery[list[str]], ["Acme", "Globex"]),
             ("ids=1,2,3", DQuery[list[int]], [1, 2, 3]),
             ("brand=Acme,,Globex,", DQuery[list[str]], ["Acme", "Globex"]),
+        ],
+        ids=[
+            "repeated_str",
+            "single_str",
+            "repeated_int",
+            "bracket_str",
+            "bracket_int",
+            "comma_str",
+            "comma_int",
+            "comma_with_empty_slots",
         ],
     )
     def test_multi_value(
@@ -242,6 +261,7 @@ class TestGetMultiValues:
             ("brand=Acme", ["Acme"]),
             ("", []),
         ],
+        ids=["repeated", "bracket", "comma", "single", "empty_query"],
     )
     def test_wire_formats(self, query_string, expected) -> None:
         """Return all values across plain-repeated, bracket, and comma forms."""

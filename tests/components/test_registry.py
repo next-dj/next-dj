@@ -15,7 +15,7 @@ class TestComponentRegistry:
     """ComponentRegistry helpers and dunders."""
 
     def test_root_mark_clear_iter_contains_len(self, tmp_path: Path) -> None:
-        """mark_as_root, is_root, clear, __contains__, __iter__, __len__."""
+        """A registered component is a member until the registry is cleared."""
         reg = ComponentRegistry()
         root = tmp_path.resolve()
         info = ComponentInfo("n", root, "", tmp_path / "n.djx", None, True)

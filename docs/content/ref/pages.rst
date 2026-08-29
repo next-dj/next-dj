@@ -81,10 +81,11 @@ It runs on a dedicated path and is not registered through ``TEMPLATE_LOADERS``.
 
 ``LayoutTemplateLoader`` keeps no cache of its own.
 Composition results live on ``Page``, where ``composed_template_for`` stores the composed source alongside the compiled ``Template``, so a warm render parses nothing and opens no template file.
-It still stats every source file behind the page to detect a change.
-Both layers are dropped together once a ``template.djx`` or ``layout.djx`` changes on disk.
-A page whose body comes from a module-level ``render()`` in ``page.py`` bypasses that cache and recomposes the layout chain on every request.
-``Page.clear_template_caches`` drops both layers and the mtime snapshots together, for a caller rewriting a page or a layout in place inside one process.
+A page without a module-level ``render()`` in ``page.py`` answers every request from that cache, and so do the standalone zone render and the form re-render.
+Under ``DEBUG`` the read stats every source file behind the page and every directory the layout walk visits, so an edited, a created, and a deleted ``layout.djx`` all reach the next request without a restart, and both layers are dropped together once any tracked path moves.
+With ``DEBUG`` off the same read performs no stat at all and the composition is held for the life of the process, so a template edited on a running production server lands with the next deploy.
+A page whose body comes from ``render()`` keeps that body out of the cache and caches only the layout chain around it, as a skeleton whose body slot is filled per request.
+``Page.clear_template_caches`` drops every layer and the mtime snapshots together, for a caller rewriting a page or a layout in place inside one process.
 
 Module reads
 ~~~~~~~~~~~~

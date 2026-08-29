@@ -131,7 +131,9 @@ Where assets live
 Hot reload
 ----------
 
-Discovery re-probes co-located files on every request, so a saved or added ``component.css`` or ``component.js`` is picked up on the next page load without a process restart.
+Discovery re-probes co-located files while ``DEBUG`` is true, so a saved or added ``component.css`` or ``component.js`` is picked up on the next page load without a process restart.
+A page is re-probed when the directory holding its assets moves, which is what creating or deleting a file there does.
+With ``DEBUG`` off, what a page contributes is read once per process and the probing cost disappears from the render path.
 Module-level ``styles`` and ``scripts`` lists are read when the module imports, so an edit to one takes effect after a ``page.py`` change restarts the dev server.
 See the Hot reload section of :doc:`/content/topics/components` for the full reload contract across ``page.py``, ``component.py``, and ``.djx`` changes.
 

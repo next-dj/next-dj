@@ -27,6 +27,32 @@ def _register_context_functions(page: Page, page_path, count: int) -> None:
         page._context_manager.register_context(page_path, key, _ctx)
 
 
+def _inherited_value() -> str:
+    """Inheritable context callable priced near zero, so the walk stays visible."""
+    return "v"
+
+
+def _build_ancestor_chain(page: Page, root: Path, depth: int, inherited: int) -> Path:
+    """Write ``depth`` ancestor ``page.py`` files above a leaf page and return the leaf.
+
+    Every ancestor registers ``inherited`` inheritable callables, so a run at
+    zero separates the walk itself from the callables it finds.
+    """
+    directory = root
+    for i in range(depth):
+        ancestor = directory / "page.py"
+        ancestor.write_text("x = 1\n")
+        for j in range(inherited):
+            page._context_manager.register_context(
+                ancestor, f"a_{i}_{j}", _inherited_value, inherit_context=True
+            )
+        directory = directory / f"seg_{i}"
+        directory.mkdir()
+    leaf = directory / "page.py"
+    leaf.write_text("x = 1\n")
+    return leaf
+
+
 class TestBenchBuildRenderContext:
     @pytest.mark.parametrize("count", [5, 20], ids=["small", "large"])
     @pytest.mark.benchmark(group="pages.render_context")
@@ -36,6 +62,20 @@ class TestBenchBuildRenderContext:
         page_path.write_text("def render(r): return 'x'\n")
         _register_context_functions(page, page_path, count)
         benchmark(page.build_render_context, page_path)
+
+
+class TestBenchInheritedWalk:
+    """Ancestor walk of `build_render_context` against the depth of the page tree."""
+
+    @pytest.mark.parametrize("depth", [1, 8, 32], ids=["d1", "d8", "d32"])
+    @pytest.mark.parametrize("inherited", [0, 1], ids=["plain", "inherit"])
+    @pytest.mark.benchmark(group="pages.render_context")
+    def test_inherited_walk_depth(
+        self, tmp_path: Path, depth: int, inherited: int, benchmark
+    ) -> None:
+        page = Page()
+        leaf = _build_ancestor_chain(page, tmp_path, depth, inherited)
+        benchmark(page.build_render_context, leaf)
 
 
 class TestBenchPageRenderedSignal:

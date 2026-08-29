@@ -19,6 +19,7 @@ from next.pages.loaders import (
     TemplateLoader,
     _load_python_module,
     _load_python_module_memo,
+    _page_roots,
     build_registered_loaders,
     has_load_errors,
     last_load_error,
@@ -286,7 +287,6 @@ class TestLayoutTemplateLoader:
         with override_settings(
             NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(tmp_path)}
         ):
-            next_framework_settings.reload()
             result = loader._get_additional_layout_files()
 
         assert len(result) == 1
@@ -324,7 +324,6 @@ class TestLayoutTemplateLoader:
         loader = LayoutTemplateLoader()
 
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": config}):
-            next_framework_settings.reload()
             result = loader._get_additional_layout_files()
 
         assert result == expected_result
@@ -452,10 +451,8 @@ class TestLayoutTemplateLoader:
         with override_settings(
             NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(tmp_path)}
         ):
-            next_framework_settings.reload()
             result = loader._find_layout_files(page_file)
 
-        assert result is not None
         assert len(result) == 1
         assert layout_file in result
 
@@ -471,7 +468,6 @@ class TestLayoutTemplateLoader:
         )
 
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": config}):
-            next_framework_settings.reload()
             result = loader._get_additional_layout_files()
 
         assert len(result) == 1
@@ -498,10 +494,8 @@ class TestLayoutTemplateLoader:
         with override_settings(
             NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(parent_dir)}
         ):
-            next_framework_settings.reload()
             result = loader._find_layout_files(page_file)
 
-        assert result is not None
         assert len(result) == 1
         assert local_layout in result
 
@@ -527,10 +521,8 @@ class TestLayoutTemplateLoader:
         with override_settings(
             NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(additional_dir)}
         ):
-            next_framework_settings.reload()
             result = loader._find_layout_files(page_file)
 
-        assert result is not None
         assert len(result) == 2
         assert local_layout in result
         assert additional_layout in result
@@ -640,10 +632,117 @@ class TestLayoutTemplateLoader:
         page_file = sub_dir / "page.py"
         layout_files = loader._find_layout_files(page_file)
 
-        assert layout_files is not None
         assert len(layout_files) == 2
         assert sub_layout in layout_files
         assert root_layout in layout_files
+
+    def test_layout_sources_reports_every_walked_directory(self, tmp_path) -> None:
+        """A page under no routed tree hands back every directory it visited."""
+        loader = LayoutTemplateLoader()
+
+        sub_dir = tmp_path / "sub" / "nested"
+        sub_dir.mkdir(parents=True)
+        layout = tmp_path / "sub" / "layout.djx"
+        layout.write_text("sub layout")
+
+        layout_files, watched_dirs = loader.layout_sources(sub_dir / "page.py")
+
+        assert layout_files == [layout]
+        assert watched_dirs[:3] == [sub_dir, tmp_path / "sub", tmp_path]
+        assert watched_dirs[-1].parent == watched_dirs[-1].parent.parent
+
+    def test_the_watched_directories_stop_at_the_page_root(self, tmp_path) -> None:
+        """A page inside a routed tree watches no directory above that tree.
+
+        The layout above still joins the chain, only the mtime watch stops, so
+        an unrelated write to a shared parent evicts no composition.
+        """
+        loader = LayoutTemplateLoader()
+
+        root = tmp_path / "site"
+        page_dir = root / "sub"
+        page_dir.mkdir(parents=True)
+        outer_layout = tmp_path / "layout.djx"
+        outer_layout.write_text("layout above the tree")
+        root_layout = root / "layout.djx"
+        root_layout.write_text("root layout")
+
+        with override_settings(
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(root)}
+        ):
+            layout_files, watched_dirs = loader.layout_sources(page_dir / "page.py")
+
+        assert layout_files == [root_layout, outer_layout]
+        assert watched_dirs == [page_dir, root]
+
+    def test_the_nearest_page_root_bounds_the_watched_directories(
+        self, tmp_path
+    ) -> None:
+        """Two routed trees on one path watch only up to the inner one."""
+        loader = LayoutTemplateLoader()
+
+        outer = tmp_path / "site"
+        inner = outer / "admin"
+        inner.mkdir(parents=True)
+        config = default_page_router_config(outer) + default_page_router_config(inner)
+
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": config}):
+            _, watched_dirs = loader.layout_sources(inner / "page.py")
+
+        assert watched_dirs == [inner]
+
+    def test_the_memoised_page_roots_survive_a_second_walk(self, tmp_path) -> None:
+        """The routers are built once, so the second walk reads the memo."""
+        root = tmp_path / "site"
+        root.mkdir()
+
+        with override_settings(
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(root)}
+        ):
+            first = _page_roots()
+            second = _page_roots()
+
+        assert first == second == (root,)
+
+    def test_an_app_list_change_drops_the_memoised_page_roots(self) -> None:
+        """An `APP_DIRS` router routes new trees when the app list moves."""
+        _page_roots()
+
+        with override_settings(INSTALLED_APPS=["django.contrib.contenttypes"]):
+            assert loaders_module._PAGE_ROOTS_CACHE["value"] is None
+
+    @pytest.mark.parametrize(
+        "layouts",
+        [[], ["."], [".."], [".", "..", "../.."]],
+        ids=["none", "sibling", "ancestor", "chain"],
+    )
+    @pytest.mark.parametrize(
+        "body",
+        ["<p>b</p>", "", "{% block template %}{% endblock template %}"],
+        ids=["body", "empty", "placeholder"],
+    )
+    def test_filled_skeleton_equals_a_direct_compose(
+        self, tmp_path, layouts, body
+    ) -> None:
+        """Filling the cached skeleton reproduces `compose_body` character for character."""
+        loader = LayoutTemplateLoader()
+
+        page_dir = tmp_path / "a" / "b"
+        page_dir.mkdir(parents=True)
+        page_file = page_dir / "page.py"
+        page_file.write_text("x = 1")
+        for index, relative in enumerate(layouts):
+            target = (page_dir / relative).resolve() / "layout.djx"
+            target.write_text(
+                f'<div class="l{index}">'
+                "{% block template %}{% endblock template %}</div>"
+            )
+
+        skeleton = loader.compose_skeleton(page_file)
+
+        assert loader.fill_skeleton(skeleton, body) == loader.compose_body(
+            body, page_file
+        )
 
     def test_compose_layout_hierarchy_exception_handling(self, tmp_path) -> None:
         """A layout that cannot be read leaves the body unwrapped instead of raising."""
@@ -676,7 +775,6 @@ class TestContextProcessors:
     def test_get_context_processors_empty_config(self, page_instance) -> None:
         """No backends and no ``TEMPLATES`` resolve to no processors."""
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": []}, TEMPLATES=[]):
-            next_framework_settings.reload()
             processors = _get_context_processors()
             assert processors == []
 
@@ -694,7 +792,6 @@ class TestContextProcessors:
         """A backend that declares no processors contributes none."""
         config = [file_router_config_entry(app_dirs=True)]
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": config}, TEMPLATES=[]):
-            next_framework_settings.reload()
             processors = _get_context_processors()
             assert processors == []
 
@@ -730,7 +827,6 @@ class TestContextProcessors:
                 TEMPLATES=templates_config,
                 NEXT_FRAMEWORK={"PAGE_BACKENDS": next_pages_config},
             ):
-                next_framework_settings.reload()
                 processors = _get_context_processors()
                 assert len(processors) == 2
                 assert processors[0] == test_processor
@@ -774,7 +870,6 @@ class TestContextProcessors:
                 TEMPLATES=templates_config,
                 NEXT_FRAMEWORK={"PAGE_BACKENDS": next_pages_config},
             ):
-                next_framework_settings.reload()
                 processors = _get_context_processors()
                 assert len(processors) == 2
                 assert processors[0] == next_pages_processor
@@ -805,7 +900,6 @@ class TestContextProcessors:
                 NEXT_FRAMEWORK={"PAGE_BACKENDS": next_pages_config},
             ),
         ):
-            next_framework_settings.reload()
             processors = _get_context_processors()
             assert len(processors) == 1
             assert processors[0] == shared_processor
@@ -815,7 +909,6 @@ class TestContextProcessors:
     ) -> None:
         """With empty TEMPLATES and no router processors, result is empty."""
         with override_settings(TEMPLATES=[], NEXT_FRAMEWORK={"PAGE_BACKENDS": []}):
-            next_framework_settings.reload()
             result = _get_context_processors()
             assert result == []
 
@@ -830,7 +923,6 @@ class TestContextProcessors:
         with override_settings(
             TEMPLATES=templates_config, NEXT_FRAMEWORK={"PAGE_BACKENDS": []}
         ):
-            next_framework_settings.reload()
             result = _get_context_processors()
             assert result == []
 
@@ -861,7 +953,6 @@ class TestContextProcessors:
             with override_settings(
                 NEXT_FRAMEWORK={"PAGE_BACKENDS": config}, TEMPLATES=[]
             ):
-                next_framework_settings.reload()
                 processors = _get_context_processors()
                 assert len(processors) == 2
                 assert processors[0] == test_processor
@@ -886,7 +977,6 @@ class TestContextProcessors:
             patch("next.pages.processors.import_string") as mock_import,
             patch("next.pages.processors.logger.warning") as mock_warning,
         ):
-            next_framework_settings.reload()
             mock_import.side_effect = [
                 ImportError("No module named 'invalid'"),
                 lambda request: {"request": request},
@@ -1134,7 +1224,6 @@ class TestBuildRegisteredLoaders:
         }
     )
     def test_user_list_replaces_default(self) -> None:
-        next_framework_settings.reload()
         self._reset_cache()
         loaders = build_registered_loaders()
         assert [type(loader) for loader in loaders] == [
@@ -1153,7 +1242,6 @@ class TestBuildRegisteredLoaders:
         }
     )
     def test_invalid_entries_are_skipped(self) -> None:
-        next_framework_settings.reload()
         self._reset_cache()
         loaders = build_registered_loaders()
         assert [type(loader) for loader in loaders] == [DjxTemplateLoader]
@@ -1175,7 +1263,6 @@ class TestBuildRegisteredLoaders:
     )
     def test_duplicate_entries_registered_once(self) -> None:
         """A loader class appears at most once even when listed multiple times."""
-        next_framework_settings.reload()
         self._reset_cache()
         loaders = build_registered_loaders()
         assert [type(loader) for loader in loaders] == [DjxTemplateLoader]
@@ -1379,8 +1466,7 @@ class TestPageModuleImportErrors:
         assert _load_python_module(page_file) is None
         assert page_file in loaders_module._LAST_LOAD_ERROR
 
-        # A file that vanished before the pre-exec stat has no mtime and
-        # cannot keep a keyed entry.
+        # A file gone before the pre-exec stat has no mtime to key an entry by.
         loaders_module._record_load_error(page_file, ValueError("boom"), None)
         assert page_file not in loaders_module._LAST_LOAD_ERROR
 

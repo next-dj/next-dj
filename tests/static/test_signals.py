@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pytest
 from django.test import RequestFactory, override_settings
@@ -18,6 +18,7 @@ from next.static.signals import (
     collector_finalized,
     html_injected,
 )
+from next.testing import SignalRecorder, capture_signals
 
 
 if TYPE_CHECKING:
@@ -30,59 +31,31 @@ SCRIPTS_PLACEHOLDER = "<!-- next:scripts -->"
 
 
 @pytest.fixture()
-def capture_asset_registered() -> Generator[list[dict[str, Any]], None, None]:
-    events: list[dict[str, Any]] = []
-
-    def _listener(sender: object, **kwargs) -> None:
-        events.append({"sender": sender, **kwargs})
-
-    asset_registered.connect(_listener)
-    try:
-        yield events
-    finally:
-        asset_registered.disconnect(_listener)
+def capture_asset_registered() -> Generator[SignalRecorder, None, None]:
+    """Record ``asset_registered`` emissions."""
+    with capture_signals(asset_registered) as recorder:
+        yield recorder
 
 
 @pytest.fixture()
-def capture_collector_finalized() -> Generator[list[dict[str, Any]], None, None]:
-    events: list[dict[str, Any]] = []
-
-    def _listener(sender: object, **kwargs) -> None:
-        events.append({"sender": sender, **kwargs})
-
-    collector_finalized.connect(_listener)
-    try:
-        yield events
-    finally:
-        collector_finalized.disconnect(_listener)
+def capture_collector_finalized() -> Generator[SignalRecorder, None, None]:
+    """Record ``collector_finalized`` emissions."""
+    with capture_signals(collector_finalized) as recorder:
+        yield recorder
 
 
 @pytest.fixture()
-def capture_html_injected() -> Generator[list[dict[str, Any]], None, None]:
-    events: list[dict[str, Any]] = []
-
-    def _listener(sender: object, **kwargs) -> None:
-        events.append({"sender": sender, **kwargs})
-
-    html_injected.connect(_listener)
-    try:
-        yield events
-    finally:
-        html_injected.disconnect(_listener)
+def capture_html_injected() -> Generator[SignalRecorder, None, None]:
+    """Record ``html_injected`` emissions."""
+    with capture_signals(html_injected) as recorder:
+        yield recorder
 
 
 @pytest.fixture()
-def capture_backend_loaded() -> Generator[list[dict[str, Any]], None, None]:
-    events: list[dict[str, Any]] = []
-
-    def _listener(sender: object, **kwargs) -> None:
-        events.append({"sender": sender, **kwargs})
-
-    backend_loaded.connect(_listener)
-    try:
-        yield events
-    finally:
-        backend_loaded.disconnect(_listener)
+def capture_backend_loaded() -> Generator[SignalRecorder, None, None]:
+    """Record ``backend_loaded`` emissions."""
+    with capture_signals(backend_loaded) as recorder:
+        yield recorder
 
 
 class TestAssetRegisteredSignal:
@@ -90,7 +63,7 @@ class TestAssetRegisteredSignal:
         self,
         tmp_path: Path,
         file_backend: StaticFilesBackend,
-        capture_asset_registered: list[dict[str, Any]],
+        capture_asset_registered: SignalRecorder,
     ) -> None:
 
         class _P:
@@ -109,10 +82,10 @@ class TestAssetRegisteredSignal:
         AssetDiscovery(_P()).discover_page_assets(page_path, collector)
 
         assert len(capture_asset_registered) == 1
-        event = capture_asset_registered[0]
-        assert isinstance(event["sender"], StaticAsset)
-        assert event["collector"] is collector
-        assert event["backend"] is file_backend
+        event = capture_asset_registered.events[0]
+        assert isinstance(event.sender, StaticAsset)
+        assert event.kwargs["collector"] is collector
+        assert event.kwargs["backend"] is file_backend
 
 
 class TestCollectorFinalizedSignal:
@@ -120,43 +93,39 @@ class TestCollectorFinalizedSignal:
         self,
         tmp_path: Path,
         fresh_manager: StaticManager,
-        capture_collector_finalized: list[dict[str, Any]],
+        capture_collector_finalized: SignalRecorder,
     ) -> None:
         collector = StaticCollector()
         page_path = tmp_path / "page.djx"
         fresh_manager.inject("<body/>", collector, page_path=page_path)
 
         assert len(capture_collector_finalized) == 1
-        assert capture_collector_finalized[0]["sender"] is collector
-        assert capture_collector_finalized[0]["page_path"] == page_path
+        assert capture_collector_finalized.events[0].sender is collector
+        assert capture_collector_finalized.events[0].kwargs["page_path"] == page_path
 
     def test_page_path_is_optional(
-        self,
-        fresh_manager: StaticManager,
-        capture_collector_finalized: list[dict[str, Any]],
+        self, fresh_manager: StaticManager, capture_collector_finalized: SignalRecorder
     ) -> None:
         collector = StaticCollector()
         fresh_manager.inject("<body/>", collector)
 
         assert len(capture_collector_finalized) == 1
-        assert capture_collector_finalized[0]["page_path"] is None
-        assert capture_collector_finalized[0]["request"] is None
+        assert capture_collector_finalized.events[0].kwargs["page_path"] is None
+        assert capture_collector_finalized.events[0].kwargs["request"] is None
 
     def test_carries_request_when_provided(
-        self,
-        fresh_manager: StaticManager,
-        capture_collector_finalized: list[dict[str, Any]],
+        self, fresh_manager: StaticManager, capture_collector_finalized: SignalRecorder
     ) -> None:
         collector = StaticCollector()
         sentinel = RequestFactory().get("/")
         fresh_manager.inject("<body/>", collector, request=sentinel)
 
-        assert capture_collector_finalized[0]["request"] is sentinel
+        assert capture_collector_finalized.events[0].kwargs["request"] is sentinel
 
 
 class TestHtmlInjectedSignal:
     def test_fired_with_before_and_after(
-        self, fresh_manager: StaticManager, capture_html_injected: list[dict[str, Any]]
+        self, fresh_manager: StaticManager, capture_html_injected: SignalRecorder
     ) -> None:
         collector = StaticCollector()
         collector.add(StaticAsset(url="https://cdn/a.css", kind="css"))
@@ -164,36 +133,36 @@ class TestHtmlInjectedSignal:
         out = fresh_manager.inject(html, collector)
 
         assert len(capture_html_injected) == 1
-        event = capture_html_injected[0]
-        assert event["sender"] is fresh_manager
-        assert event["html_before"] == html
-        assert event["html_after"] == out
-        assert event["collector"] is collector
-        assert event["placeholders_replaced"] == ("styles",)
-        assert event["injected_bytes"] == len(out) - len(html)
+        event = capture_html_injected.events[0]
+        assert event.sender is fresh_manager
+        assert event.kwargs["html_before"] == html
+        assert event.kwargs["html_after"] == out
+        assert event.kwargs["collector"] is collector
+        assert event.kwargs["placeholders_replaced"] == ("styles",)
+        assert event.kwargs["injected_bytes"] == len(out) - len(html)
 
     def test_reports_no_placeholders_when_html_has_none(
-        self, fresh_manager: StaticManager, capture_html_injected: list[dict[str, Any]]
+        self, fresh_manager: StaticManager, capture_html_injected: SignalRecorder
     ) -> None:
         collector = StaticCollector()
         fresh_manager.inject("<body/>", collector)
-        assert capture_html_injected[0]["placeholders_replaced"] == ()
+        assert capture_html_injected.events[0].kwargs["placeholders_replaced"] == ()
 
     def test_reports_both_placeholders_when_html_has_both(
-        self, fresh_manager: StaticManager, capture_html_injected: list[dict[str, Any]]
+        self, fresh_manager: StaticManager, capture_html_injected: SignalRecorder
     ) -> None:
         collector = StaticCollector()
         collector.add(StaticAsset(url="https://cdn/a.css", kind="css"))
         collector.add(StaticAsset(url="https://cdn/a.js", kind="js"))
         html = f"<head>{STYLES_PLACEHOLDER}</head><body>{SCRIPTS_PLACEHOLDER}</body>"
         fresh_manager.inject(html, collector)
-        assert capture_html_injected[0]["placeholders_replaced"] == (
+        assert capture_html_injected.events[0].kwargs["placeholders_replaced"] == (
             "styles",
             "scripts",
         )
 
     def test_carries_request_when_provided(
-        self, fresh_manager: StaticManager, capture_html_injected: list[dict[str, Any]]
+        self, fresh_manager: StaticManager, capture_html_injected: SignalRecorder
     ) -> None:
         collector = StaticCollector()
         collector.add(StaticAsset(url="https://cdn/a.css", kind="css"))
@@ -201,25 +170,25 @@ class TestHtmlInjectedSignal:
         fresh_manager.inject(
             f"<head>{STYLES_PLACEHOLDER}</head>", collector, request=sentinel
         )
-        assert capture_html_injected[0]["request"] is sentinel
+        assert capture_html_injected.events[0].kwargs["request"] is sentinel
 
 
 class TestBackendLoadedSignal:
     def test_fired_for_each_configured_backend(
-        self, fresh_manager: StaticManager, capture_backend_loaded: list[dict[str, Any]]
+        self, fresh_manager: StaticManager, capture_backend_loaded: SignalRecorder
     ) -> None:
         config = {"BACKEND": "next.static.StaticFilesBackend", "OPTIONS": {}}
         with override_settings(NEXT_FRAMEWORK={"STATIC_BACKENDS": [config]}):
             fresh_manager._ensure_backends()
 
         assert len(capture_backend_loaded) == 1
-        event = capture_backend_loaded[0]
-        assert event["sender"] is StaticFilesBackend
-        assert event["instance"] is fresh_manager.default_backend
-        assert event["config"] == config
+        event = capture_backend_loaded.events[0]
+        assert event.sender is StaticFilesBackend
+        assert event.kwargs["instance"] is fresh_manager.default_backend
+        assert event.kwargs["config"] == config
 
     def test_sender_class_allows_filtering(
-        self, fresh_manager: StaticManager, capture_backend_loaded: list[dict[str, Any]]
+        self, fresh_manager: StaticManager, capture_backend_loaded: SignalRecorder
     ) -> None:
         with override_settings(
             NEXT_FRAMEWORK={
@@ -227,22 +196,22 @@ class TestBackendLoadedSignal:
             }
         ):
             fresh_manager._ensure_backends()
-        senders = [e["sender"] for e in capture_backend_loaded]
+        senders = [e.sender for e in capture_backend_loaded]
         assert all(s is StaticFilesBackend for s in senders)
 
     def test_seeded_fallback_announces_itself(
-        self, fresh_manager: StaticManager, capture_backend_loaded: list[dict[str, Any]]
+        self, fresh_manager: StaticManager, capture_backend_loaded: SignalRecorder
     ) -> None:
         with override_settings(NEXT_FRAMEWORK={"STATIC_BACKENDS": []}):
             fresh_manager._ensure_backends()
 
         assert isinstance(fresh_manager.default_backend, StaticFilesBackend)
-        assert [event["sender"] for event in capture_backend_loaded] == [
+        assert [event.sender for event in capture_backend_loaded] == [
             StaticFilesBackend
         ]
 
     def test_seed_after_a_skipped_entry_announces_itself(
-        self, fresh_manager: StaticManager, capture_backend_loaded: list[dict[str, Any]]
+        self, fresh_manager: StaticManager, capture_backend_loaded: SignalRecorder
     ) -> None:
         with override_settings(
             NEXT_FRAMEWORK={"STATIC_BACKENDS": [{"BACKEND": "builtins.dict"}]}
@@ -250,7 +219,7 @@ class TestBackendLoadedSignal:
             fresh_manager._ensure_backends()
 
         assert isinstance(fresh_manager.default_backend, StaticFilesBackend)
-        assert [event["instance"] for event in capture_backend_loaded] == [
+        assert [event.kwargs["instance"] for event in capture_backend_loaded] == [
             fresh_manager.default_backend
         ]
 

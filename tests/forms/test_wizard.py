@@ -248,7 +248,7 @@ class TestWizardRegistration:
 
 
 class TestWizardStepIntrospection:
-    """`step_names`, `current_step`, `is_first`, `is_last`, `next_step`."""
+    """Where a wizard is in its step order, read without touching storage."""
 
     def test_step_names_in_declaration_order(self) -> None:
         """`step_names` returns names in the order steps were declared."""
@@ -347,7 +347,7 @@ class TestWizardGoto:
 
 
 class TestWizardStorageInteraction:
-    """`save_step`, `get_all_cleaned_data`, `completed_steps`, `clear_storage`."""
+    """What the wizard writes to storage and reads back out of it."""
 
     def test_save_step_then_get_all_cleaned_data_merges(self) -> None:
         """Saved steps merge into a single cleaned-data mapping read from storage."""
@@ -540,7 +540,7 @@ class TestWizardStorageScopeIsolation:
 
 
 class TestWizardFormResolution:
-    """`step_form_class`, `current_form`, `template_namespace`."""
+    """Resolving a step name to its form class and bound instance."""
 
     def test_step_form_class_resolves_by_name(self) -> None:
         """`step_form_class` resolves the form class registered for a step."""

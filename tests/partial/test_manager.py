@@ -85,14 +85,6 @@ class TestAssetVersion:
         ):
             assert asset_version() == _expected_mapping_hash(files)
 
-    def test_mapping_hash_is_stable_across_calls(self) -> None:
-        storage = _MappingOnlyStorage({"x.css": "x.1.css"})
-        with (
-            patch("next.partial.manager.staticfiles_storage", storage),
-            _backend_options({"VERSION": "manifest"}),
-        ):
-            assert asset_version() == asset_version()
-
     def test_manifest_sentinel_falls_back_without_manifest_storage(self) -> None:
         with (
             patch("next.partial.manager.staticfiles_storage", _PlainStorage()),
@@ -161,3 +153,122 @@ class TestPartialBackendSelection:
         settings_reloaded.send(sender=self.__class__)
 
         assert partial_backend_manager.get() is not first
+
+
+class TestAssetVersionMemo:
+    """The version is resolved once per configuration, not once per response."""
+
+    def test_the_version_resolves_once_across_ticks(self) -> None:
+        storage = _MappingOnlyStorage({"x.css": "x.1.css"})
+        with (
+            patch("next.partial.manager.staticfiles_storage", storage),
+            _backend_options({"VERSION": "manifest"}),
+            patch(
+                "next.partial.manager._manifest_version", return_value="hashed"
+            ) as resolve,
+        ):
+            assert asset_version() == "hashed"
+            assert asset_version() == "hashed"
+
+            assert resolve.call_count == 1
+
+    def test_the_manifest_mapping_is_hashed_once_across_ticks(self) -> None:
+        # The hashing branch walks the whole manifest, too much for a poll tick.
+        storage = _MappingOnlyStorage({f"a/{i}.css": f"a/{i}.x.css" for i in range(20)})
+        with (
+            patch("next.partial.manager.staticfiles_storage", storage),
+            _backend_options({"VERSION": "manifest"}),
+            patch(
+                "next.partial.manager._hash_mapping", return_value="digest"
+            ) as hasher,
+        ):
+            assert [asset_version(), asset_version(), asset_version()] == ["digest"] * 3
+
+            assert hasher.call_count == 1
+
+    def test_a_live_manifest_swap_keeps_the_previous_version(self) -> None:
+        with _backend_options({"VERSION": "manifest"}):
+            with patch(
+                "next.partial.manager.staticfiles_storage",
+                _RecordedHashStorage("before"),
+            ):
+                assert asset_version() == "before"
+            with patch(
+                "next.partial.manager.staticfiles_storage",
+                _RecordedHashStorage("after"),
+            ):
+                assert asset_version() == "before"
+
+    def test_settings_reloaded_drops_the_memoised_version(self) -> None:
+        with _backend_options({"VERSION": "manifest"}):
+            with patch(
+                "next.partial.manager.staticfiles_storage",
+                _RecordedHashStorage("before"),
+            ):
+                assert asset_version() == "before"
+            with patch(
+                "next.partial.manager.staticfiles_storage",
+                _RecordedHashStorage("after"),
+            ):
+                settings_reloaded.send(sender=self.__class__)
+
+                assert asset_version() == "after"
+
+    def test_a_storages_change_drops_the_memoised_version(self) -> None:
+        storages = {
+            "staticfiles": {
+                "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
+            }
+        }
+        with _backend_options({"VERSION": "manifest"}):
+            with patch(
+                "next.partial.manager.staticfiles_storage",
+                _RecordedHashStorage("before"),
+            ):
+                assert asset_version() == "before"
+            with (
+                patch(
+                    "next.partial.manager.staticfiles_storage",
+                    _RecordedHashStorage("after"),
+                ),
+                override_settings(STORAGES=storages),
+            ):
+                assert asset_version() == "after"
+
+    def test_a_static_root_change_drops_the_memoised_version(self) -> None:
+        with _backend_options({"VERSION": "manifest"}):
+            with patch(
+                "next.partial.manager.staticfiles_storage",
+                _RecordedHashStorage("before"),
+            ):
+                assert asset_version() == "before"
+            with (
+                patch(
+                    "next.partial.manager.staticfiles_storage",
+                    _RecordedHashStorage("after"),
+                ),
+                override_settings(STATIC_ROOT="/tmp/next-static-root"),
+            ):
+                assert asset_version() == "after"
+
+    def test_an_unrelated_setting_change_keeps_the_memoised_version(self) -> None:
+        with _backend_options({"VERSION": "manifest"}):
+            with patch(
+                "next.partial.manager.staticfiles_storage",
+                _RecordedHashStorage("before"),
+            ):
+                assert asset_version() == "before"
+            with (
+                patch(
+                    "next.partial.manager.staticfiles_storage",
+                    _RecordedHashStorage("after"),
+                ),
+                override_settings(USE_TZ=False),
+            ):
+                assert asset_version() == "before"
+
+    def test_a_pinned_version_still_follows_the_options(self) -> None:
+        with _backend_options({"VERSION": "release-1"}):
+            assert asset_version() == "release-1"
+        with _backend_options({"VERSION": "release-2"}):
+            assert asset_version() == "release-2"

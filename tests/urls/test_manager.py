@@ -10,7 +10,6 @@ from django.core.exceptions import ImproperlyConfigured
 from django.test import RequestFactory, override_settings
 from django.urls import Resolver404, URLResolver, include, path
 
-from next.conf import next_framework_settings
 from next.forms import ActionRegistration, RegistryFormActionBackend
 from next.forms.manager import FormActionManager
 from next.pages import page
@@ -110,9 +109,9 @@ class TestRouterManager:
     def test_manager_offers_neither_len_nor_indexing(self, manager) -> None:
         """Backends are read through ``backends``, iteration yields patterns."""
         manager.reload()
-        with pytest.raises(TypeError):
+        with pytest.raises(TypeError, match="has no len"):
             len(manager)
-        with pytest.raises(TypeError):
+        with pytest.raises(TypeError, match="not subscriptable"):
             _ = manager[0]
         assert manager.backends[0] is manager._backends[0]
 
@@ -250,7 +249,7 @@ class TestRouterManager:
                 "next.urls.RouterFactory.create_backend",
                 side_effect=RuntimeError("boom"),
             ),
-            pytest.raises(RuntimeError),
+            pytest.raises(RuntimeError, match="boom"),
         ):
             manager.reload()
 
@@ -317,7 +316,6 @@ class TestRouterManager:
     def test_get_next_pages_config_no_next_setting(self, manager) -> None:
         """When ``NEXT`` is unset, merged framework defaults include ``ROUTERS``."""
         with override_settings(NEXT_FRAMEWORK=None):
-            next_framework_settings.reload()
             manager._config_cache = None
             result = manager._get_next_pages_config()
             assert len(result) == 1

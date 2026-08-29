@@ -130,8 +130,7 @@ class URLPatternParser:
     def duplicate_parameter_names(self, url_path: str) -> list[str]:
         """Return normalised bracket names repeated within `url_path`.
 
-        Lets diagnostics name every duplicate where `parse_url_pattern`
-        raises on the first.
+        Lets diagnostics name every duplicate where `parse_url_pattern` raises on one.
         """
         seen: set[str] = set()
         duplicates: list[str] = []

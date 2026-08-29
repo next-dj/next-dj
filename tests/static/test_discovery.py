@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import os
+import shutil
 from typing import TYPE_CHECKING
+
+from django.test import override_settings
 
 from next.static import (
     AssetDiscovery,
@@ -53,8 +57,7 @@ class TestBackendProviderProtocol:
         assert not isinstance(object(), BackendProvider)
 
     def test_a_router_backend_is_not_a_provider(self) -> None:
-        # Both contracts carry a `page_roots`, but a structural match also needs
-        # `default_backend`, which no router has.
+        # Both carry `page_roots`, but a match also needs `default_backend`.
         assert not isinstance(FileRouterBackend(app_dirs=False), BackendProvider)
 
 
@@ -307,6 +310,100 @@ class TestAssetDiscoveryModuleLists:
             page.write_text("")
             discovery._find_layout_directories(page.resolve(), tmp_path.resolve())
         assert len(discovery._layout_dir_cache) <= 1
+
+
+class TestAssetDiscoveryPagePlanCache:
+    """The per-page plan is walked once and re-probed only under `DEBUG`."""
+
+    @staticmethod
+    def _page_with_layout(tmp_path: Path) -> Path:
+        (tmp_path / "layout.djx").write_text("")
+        page_dir = tmp_path / "section"
+        page_dir.mkdir()
+        page_path = page_dir / "page.djx"
+        page_path.write_text("")
+        return page_path
+
+    def test_an_asset_added_later_stays_invisible_off_debug(
+        self, tmp_path: Path, file_backend: StaticBackend
+    ) -> None:
+        page_path = self._page_with_layout(tmp_path)
+        provider = _Provider(file_backend, (tmp_path.resolve(),))
+        discovery = AssetDiscovery(provider)
+        discovery.discover_page_assets(page_path, StaticCollector())
+
+        (page_path.parent / "template.css").write_text("body{}")
+
+        collector = StaticCollector()
+        discovery.discover_page_assets(page_path, collector)
+        assert collector.assets_in_slot("styles") == []
+
+    def test_debug_notices_an_asset_that_appeared(
+        self, tmp_path: Path, file_backend: StaticBackend
+    ) -> None:
+        page_path = self._page_with_layout(tmp_path)
+        provider = _Provider(file_backend, (tmp_path.resolve(),))
+        discovery = AssetDiscovery(provider)
+        with override_settings(DEBUG=True):
+            discovery.discover_page_assets(page_path, StaticCollector())
+
+            (page_path.parent / "template.css").write_text("body{}")
+            moved = page_path.parent.stat().st_mtime + 10
+            os.utime(page_path.parent, (moved, moved))
+
+            collector = StaticCollector()
+            discovery.discover_page_assets(page_path, collector)
+        assert [a.url for a in collector.assets_in_slot("styles")] == [
+            "/static/next/section.css"
+        ]
+
+    def test_debug_keeps_the_plan_while_no_directory_moves(
+        self, tmp_path: Path, file_backend: StaticBackend
+    ) -> None:
+        page_path = self._page_with_layout(tmp_path)
+        (page_path.parent / "template.css").write_text("body{}")
+        provider = _Provider(file_backend, (tmp_path.resolve(),))
+        discovery = AssetDiscovery(provider)
+        with override_settings(DEBUG=True):
+            discovery.discover_page_assets(page_path, StaticCollector())
+            collector = StaticCollector()
+            discovery.discover_page_assets(page_path, collector)
+        assert [a.url for a in collector.assets_in_slot("styles")] == [
+            "/static/next/section.css"
+        ]
+
+    def test_debug_rebuilds_when_the_page_tree_is_gone(
+        self, tmp_path: Path, file_backend: StaticBackend
+    ) -> None:
+        page_path = self._page_with_layout(tmp_path)
+        (page_path.parent / "template.css").write_text("body{}")
+        provider = _Provider(file_backend, (tmp_path.resolve(),))
+        discovery = AssetDiscovery(provider)
+        with override_settings(DEBUG=True):
+            discovery.discover_page_assets(page_path, StaticCollector())
+            # The layout directory above keeps its mtime, so the walk reaches
+            # the page directory and finds it gone rather than merely moved.
+            held = tmp_path.stat().st_mtime
+            shutil.rmtree(page_path.parent)
+            os.utime(tmp_path, (held, held))
+
+            collector = StaticCollector()
+            discovery.discover_page_assets(page_path, collector)
+        assert collector.assets_in_slot("styles") == []
+
+    def test_the_plan_cache_evicts_the_oldest_key(
+        self, tmp_path: Path, file_backend: StaticBackend, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(discovery_mod, "_PAGE_PLAN_CACHE_MAX_SIZE", 1)
+        provider = _Provider(file_backend, (tmp_path.resolve(),))
+        discovery = AssetDiscovery(provider)
+        for i in range(2):
+            page_dir = tmp_path / f"p_{i}"
+            page_dir.mkdir()
+            page_path = page_dir / "page.djx"
+            page_path.write_text("")
+            discovery.discover_page_assets(page_path, StaticCollector())
+        assert len(discovery._page_plan_cache) <= 1
 
 
 class TestAssetDiscoveryModuleListUrlRouting:

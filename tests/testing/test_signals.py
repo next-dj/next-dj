@@ -103,14 +103,14 @@ class TestSignalRecorder:
         a, b = Signal(), Signal()
         with SignalRecorder(a, b) as rec:
             b.send(sender="x")
-        with pytest.raises(LookupError):
+        with pytest.raises(LookupError, match="No captured events for signal"):
             rec.first_for(a)
 
     def test_last_for_raises_when_no_matching_event(self) -> None:
         a, b = Signal(), Signal()
         with SignalRecorder(a, b) as rec:
             b.send(sender="x")
-        with pytest.raises(LookupError):
+        with pytest.raises(LookupError, match="No captured events for signal"):
             rec.last_for(a)
 
 

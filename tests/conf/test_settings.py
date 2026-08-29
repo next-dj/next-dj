@@ -35,7 +35,6 @@ class TestNextFrameworkSettingsDjangoIntegration:
     ) -> None:
         """Empty or invalid NEXT_FRAMEWORK keeps the default file router backend."""
         with override_settings(NEXT_FRAMEWORK=next_framework):  # type: ignore[arg-type]
-            next_framework_settings.reload()
             assert next_framework_settings.PAGE_BACKENDS[0]["BACKEND"] == (
                 "next.urls.FileRouterBackend"
             )
@@ -52,7 +51,6 @@ class TestNextFrameworkSettingsDjangoIntegration:
             }
         ]
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": custom}):
-            next_framework_settings.reload()
             assert custom == next_framework_settings.PAGE_BACKENDS
             assert (
                 next_framework_settings.PAGE_BACKENDS[0]["PAGES_DIR"] == "custom_pages"
@@ -71,7 +69,6 @@ class TestNextFrameworkSettingsDjangoIntegration:
                 ]
             }
         ):
-            next_framework_settings.reload()
             assert next_framework_settings.PAGE_BACKENDS[0]["PAGES_DIR"] == "pages"
             assert next_framework_settings.COMPONENT_BACKENDS[0]["DIRS"] == ["/tmp/x"]
 
@@ -88,7 +85,6 @@ class TestNextFrameworkSettingsDjangoIntegration:
     def test_only_url_name_template_overridden(self) -> None:
         """Setting only URL_NAME_TEMPLATE keeps default page backends."""
         with override_settings(NEXT_FRAMEWORK={"URL_NAME_TEMPLATE": "view_{name}"}):
-            next_framework_settings.reload()
             assert next_framework_settings.URL_NAME_TEMPLATE == "view_{name}"
             assert (
                 NextFrameworkSettings.DEFAULTS["PAGE_BACKENDS"]
@@ -108,7 +104,6 @@ class TestNextFrameworkSettingsDjangoIntegration:
     ) -> None:
         """Wrong type for a key is ignored and the default value is kept."""
         with override_settings(NEXT_FRAMEWORK=next_framework):  # type: ignore[arg-type, dict-item]
-            next_framework_settings.reload()
             assert NextFrameworkSettings.DEFAULTS[setting_name] == getattr(
                 next_framework_settings, setting_name
             )
@@ -184,7 +179,6 @@ class TestUrlResolverSetting:
         with override_settings(
             NEXT_FRAMEWORK={"URL_RESOLVER": "django.urls.resolvers.URLResolver"}
         ):
-            next_framework_settings.reload()
             assert (
                 next_framework_settings.URL_RESOLVER
                 == "django.urls.resolvers.URLResolver"
@@ -196,7 +190,6 @@ class TestUrlResolverSetting:
     def test_non_string_override_keeps_default(self, raw: object) -> None:
         """A non-string value is ignored by the merge and the default stays."""
         with override_settings(NEXT_FRAMEWORK={"URL_RESOLVER": raw}):  # type: ignore[dict-item]
-            next_framework_settings.reload()
             assert next_framework_settings.URL_RESOLVER == "next.urls.TrieURLResolver"
 
     def test_key_passes_unknown_key_check(self) -> None:
@@ -204,7 +197,6 @@ class TestUrlResolverSetting:
         with override_settings(
             NEXT_FRAMEWORK={"URL_RESOLVER": "next.urls.TrieURLResolver"}
         ):
-            next_framework_settings.reload()
             errors = check_next_framework_unknown_top_level_keys()
         assert errors == []
 
@@ -228,7 +220,6 @@ class TestNextFrameworkChecksUnknownKeys:
                 "NOT_A_FRAMEWORK_KEY": True,
             }
         ):
-            next_framework_settings.reload()
             errors = check_next_framework_unknown_top_level_keys()
         assert any(e.id == "next.E035" for e in errors)
 
@@ -247,7 +238,6 @@ class TestNextFrameworkChecksUnknownKeys:
     ) -> None:
         """Pre-rename keys with the dropped prefix are reported as unknown."""
         with override_settings(NEXT_FRAMEWORK={f"DEFAULT_{renamed_key}": []}):
-            next_framework_settings.reload()
             errors = check_next_framework_unknown_top_level_keys()
         assert any(e.id == "next.E035" for e in errors)
 
@@ -267,7 +257,6 @@ class TestNextFrameworkChecksUnknownKeys:
                 ]
             }
         ):
-            next_framework_settings.reload()
             errors = check_next_pages_configuration()
         assert any(e.id == "next.E035" for e in errors)
 
@@ -287,7 +276,6 @@ class TestNextFrameworkChecksUnknownKeys:
                 ]
             }
         ):
-            next_framework_settings.reload()
             errors = check_next_pages_configuration()
         assert any(e.id == "next.E035" for e in errors)
 
@@ -305,7 +293,6 @@ class TestNextFrameworkChecksUnknownKeys:
                 ]
             }
         ):
-            next_framework_settings.reload()
             errors = check_next_components_configuration()
         assert any(e.id == "next.E035" for e in errors)
 
@@ -324,7 +311,6 @@ class TestNextFrameworkChecksUnknownKeys:
                     "PAGE_BACKENDS": [{"BACKEND": backend_path, "PAGES_DIR": "pages"}]
                 }
             ):
-                next_framework_settings.reload()
                 errors = check_next_pages_configuration()
         finally:
             RouterFactory._backends.pop(backend_path, None)
@@ -344,7 +330,6 @@ class TestStrictLoadingSetting:
 
     def test_typed_read_of_override(self) -> None:
         with override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}):
-            next_framework_settings.reload()
             assert next_framework_settings.STRICT_LOADING is True
 
     @pytest.mark.parametrize(
@@ -452,26 +437,29 @@ class TestMergedSettingsAreImmutable:
 
     def test_user_supplied_list_is_frozen(self) -> None:
         """A user PAGE_BACKENDS list reaches the merge frozen, not aliased."""
-        with override_settings(
-            NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "next.urls.X", "DIRS": []}]}
+        with (
+            override_settings(
+                NEXT_FRAMEWORK={
+                    "PAGE_BACKENDS": [{"BACKEND": "next.urls.X", "DIRS": []}]
+                }
+            ),
+            pytest.raises(TypeError, match="immutable"),
         ):
-            next_framework_settings.reload()
-            with pytest.raises(TypeError, match="immutable"):
-                next_framework_settings.PAGE_BACKENDS[0]["DIRS"].append("/tmp/x")
+            next_framework_settings.PAGE_BACKENDS[0]["DIRS"].append("/tmp/x")
 
     def test_user_supplied_dict_is_frozen(self) -> None:
         """NEXT_JS_OPTIONS is a frozen mapping once merged."""
-        with override_settings(NEXT_FRAMEWORK={"NEXT_JS_OPTIONS": {"a": {"b": 1}}}):
-            next_framework_settings.reload()
-            with pytest.raises(TypeError, match="immutable"):
-                next_framework_settings.NEXT_JS_OPTIONS["a"]["b"] = 2
+        with (
+            override_settings(NEXT_FRAMEWORK={"NEXT_JS_OPTIONS": {"a": {"b": 1}}}),
+            pytest.raises(TypeError, match="immutable"),
+        ):
+            next_framework_settings.NEXT_JS_OPTIONS["a"]["b"] = 2
 
     def test_merged_wizard_backend_is_frozen(self) -> None:
         """FORM_WIZARD_BACKEND merges defaults with the user dict and freezes."""
         with override_settings(
             NEXT_FRAMEWORK={"FORM_WIZARD_BACKEND": {"OPTIONS": {"ttl": 1}}}
         ):
-            next_framework_settings.reload()
             merged = next_framework_settings.FORM_WIZARD_BACKEND
             assert merged["BACKEND"] == "next.forms.SessionFormWizardBackend"
             assert merged["OPTIONS"] == {"ttl": 1}
@@ -483,7 +471,6 @@ class TestMergedSettingsAreImmutable:
         user_entry: dict[str, Any] = {"BACKEND": "next.urls.X", "DIRS": []}
         user_list = [user_entry]
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": user_list}):
-            next_framework_settings.reload()
             merged = next_framework_settings.PAGE_BACKENDS
             user_entry["DIRS"].append("/tmp/leak")
             user_entry["BACKEND"] = "next.urls.Y"
@@ -496,12 +483,12 @@ class TestMergedSettingsAreImmutable:
     ) -> None:
         """Reusing a merged value as the user value freezes it again."""
         with override_settings(NEXT_FRAMEWORK={key: user_value}):
-            next_framework_settings.reload()
             reused = getattr(next_framework_settings, key)
-        with override_settings(NEXT_FRAMEWORK={key: reused}):
-            next_framework_settings.reload()
-            with pytest.raises(TypeError, match="immutable"):
-                mutate(getattr(next_framework_settings, key))
+        with (
+            override_settings(NEXT_FRAMEWORK={key: reused}),
+            pytest.raises(TypeError, match="immutable"),
+        ):
+            mutate(getattr(next_framework_settings, key))
 
     def test_defaults_stay_plain_containers(self) -> None:
         """The merge leaves DEFAULTS a plain structure it never hands out."""

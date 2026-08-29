@@ -94,8 +94,7 @@ class TestZoneTagSyntax:
         with pytest.raises(TemplateSyntaxError):
             Template('{% zone "z" poll="soon" %}b{% endzone %}')
 
-    # U+0665 is the Arabic-Indic digit five, which int() accepts but the
-    # strict ASCII-digit grammar must not.
+    # U+0665 is Arabic-Indic five, which int() accepts and the grammar must not.
     @pytest.mark.parametrize("literal", ["1_000", "+5s", "5 s", "\u0665s"])
     def test_malformed_poll_literal_raises_with_the_grammar_hint(
         self, literal: str

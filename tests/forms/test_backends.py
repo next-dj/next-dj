@@ -179,7 +179,7 @@ class TestFormActionManager:
         assert "_next/form/" in url
 
     def test_get_action_url_returns_url_for_form_less(self) -> None:
-        """Return URL for form-less action."""
+        """A handler-only action reverses to a dispatch URL like any other."""
         url = form_action_manager.get_action_url("test_no_form")
         assert "_next/form/" in url
 

@@ -135,8 +135,7 @@ export function createLayers(deps: LayerDeps): LayerStack {
     return root.querySelector(selector);
   }
 
-  // The layer's own container carries the zone, so it is matched directly, not
-  // only its descendants.
+  // The layer's container carries the zone, so it matches too, not just descendants.
   function findIn(container: HTMLElement, selector: string): Element | null {
     if (container.matches(selector)) return container;
     return container.querySelector(selector);

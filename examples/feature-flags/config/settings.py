@@ -78,9 +78,7 @@ NEXT_FRAMEWORK = {
         {
             "BACKEND": "next.urls.FileRouterBackend",
             "APP_DIRS": True,
-            # `frame/` is the project-level page root carrying the shared
-            # HTML envelope. The file router walks it alongside the app's
-            # `flags/panels/` tree.
+            # Project-level page root carrying the shared HTML envelope.
             "DIRS": [str(BASE_DIR / "frame")],
             "PAGES_DIR": "panels",
             "OPTIONS": {"context_processors": []},

@@ -11,8 +11,7 @@ from next.partial import Patches, PatchResponse
 class InternalRedirectForm(Form):
     """Form whose handler redirects to a same-site URL.
 
-    The shaping layer packs the redirect into an internal visit the host
-    validator approves.
+    The shaping layer packs the redirect into an internal visit the host approves.
     """
 
     name = forms.CharField(max_length=100)

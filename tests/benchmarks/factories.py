@@ -60,3 +60,23 @@ def build_component_info(root: Path, name: str = "c") -> ComponentInfo:
 def build_component_info_list(root: Path, count: int) -> list[ComponentInfo]:
     """Create ``count`` ``ComponentInfo`` objects without writing to the filesystem."""
     return [build_component_info(root, f"c_{i}") for i in range(count)]
+
+
+def build_layout_page(
+    root: Path, *, layouts: int, template: str | None = None, page_body: str = "x = 1\n"
+) -> Path:
+    """Materialise a page nested under ``layouts`` ancestor ``layout.djx`` wrappers.
+
+    The layouts sit strictly above the page directory, the shape the walk pays for.
+    """
+    directory = root
+    for i in range(layouts):
+        (directory / "layout.djx").write_text(
+            f'<div class="l{i}">{{% block template %}}{{% endblock template %}}</div>'
+        )
+        directory = directory / f"seg_{i}"
+        directory.mkdir()
+    (directory / "page.py").write_text(page_body)
+    if template is not None:
+        (directory / "template.djx").write_text(template)
+    return directory / "page.py"

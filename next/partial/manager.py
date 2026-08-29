@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from django.contrib.staticfiles.storage import ManifestFilesMixin, staticfiles_storage
 from django.core.exceptions import ImproperlyConfigured
+from django.core.signals import setting_changed
 
 from next.backends import SingleBackendManager
 from next.conf.signals import settings_reloaded
@@ -25,6 +26,8 @@ _HASH_WIDTH = 12
 _DEFAULT_BACKEND_PATH = (
     f"{PartialProtocolBackend.__module__}.{PartialProtocolBackend.__qualname__}"
 )
+# The settings the resolved version reads through, beyond NEXT_FRAMEWORK.
+_STORAGE_SETTINGS = frozenset({"STORAGES", "STATIC_ROOT"})
 
 
 # PARTIAL_BACKENDS is a list, but one protocol is active (next.W071).
@@ -33,8 +36,25 @@ partial_backend_manager = SingleBackendManager(
 )
 
 
+# A single-slot holder mutated in place, so a reset needs no `global`.
+_ASSET_VERSION_CACHE: dict[str, str | None] = {"value": None}
+
+
 def asset_version() -> str:
-    """Return the asset version string stamped on a partial response.
+    """Return the memoised asset version stamped on a partial response.
+
+    Every partial response reads it and the manifest branch hashes the whole
+    path mapping, so it resolves once per configuration, not per request.
+    """
+    cached = _ASSET_VERSION_CACHE["value"]
+    if cached is None:
+        cached = _resolve_asset_version()
+        _ASSET_VERSION_CACHE["value"] = cached
+    return cached
+
+
+def _resolve_asset_version() -> str:
+    """Resolve the asset version from the backend options and the manifest.
 
     An explicit `VERSION` option wins so a deployment may pin the version
     to a release tag. The `"manifest"` sentinel resolves to a stable hash
@@ -82,11 +102,23 @@ def _hash_mapping(hashed_files: "Mapping[str, str]") -> str:
 
 
 def _on_settings_reloaded(**kwargs) -> None:
-    """Drop the cached backend so a reloaded config takes effect."""
+    """Drop the cached backend and version so a reloaded config takes effect."""
     partial_backend_manager.reset()
+    _ASSET_VERSION_CACHE["value"] = None
+
+
+def _on_setting_changed(*, setting: str, **kwargs) -> None:
+    """Drop the memoised version when the staticfiles configuration moves.
+
+    `settings_reloaded` covers only the `NEXT_FRAMEWORK` half, and the
+    storage behind the manifest hash is configured on the Django half.
+    """
+    if setting in _STORAGE_SETTINGS:
+        _ASSET_VERSION_CACHE["value"] = None
 
 
 settings_reloaded.connect(_on_settings_reloaded)
+setting_changed.connect(_on_setting_changed)
 
 
 __all__ = ["asset_version", "partial_backend_manager"]

@@ -12,6 +12,7 @@ class TestZoneGetInlineAssets:
             ("styled", "css", ".zone-styled { color: crimson; }", "link"),
             ("scripted", "js", 'console.log("zone scripted");', "script"),
         ],
+        ids=["css", "js"],
     )
     def test_inline_asset_travels_with_its_body(
         self, zone: str, kind: str, body: str, load: str

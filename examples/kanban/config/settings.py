@@ -82,9 +82,7 @@ NEXT_FRAMEWORK = {
         {
             "BACKEND": "next.urls.FileRouterBackend",
             "APP_DIRS": True,
-            # `cockpit/` is the project-level page root for the Kanban
-            # app — it ships the shared HTML envelope wrapped around
-            # every board and settings screen.
+            # Project-level page root carrying the shared HTML envelope.
             "DIRS": [str(BASE_DIR / "cockpit")],
             "PAGES_DIR": "boards",
             "OPTIONS": {"context_processors": []},

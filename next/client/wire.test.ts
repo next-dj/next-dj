@@ -3,8 +3,7 @@ import { Wire } from "./wire";
 import type { SessionStore } from "./assets";
 import { ACCEPT, CONTENT_TYPE, HEADER_REQUEST_ID, REQUEST_FLAG } from "./protocol";
 
-// Isolated per harness so the navigate-once flag does not leak through the
-// shared jsdom sessionStorage.
+// Isolated per harness so the navigate-once flag never leaks through jsdom storage.
 function memorySession(): SessionStore {
   const store = new Map<string, string>();
   return {

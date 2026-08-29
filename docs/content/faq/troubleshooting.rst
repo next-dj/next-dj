@@ -381,7 +381,8 @@ If the template engine reports ``Invalid block tag`` on one of these names, conf
 
 The dev watcher restarts the process when Python entrypoints such as ``page.py`` change.
 Editing only ``template.djx`` or other DJX files refreshes rendered output without a full restart.
-The composed template cache is invalidated by file mtime.
+The composed template cache is invalidated by file mtime under ``DEBUG``.
+With ``DEBUG`` off the cache stats nothing and holds the composition for the life of the process, so a DJX edit on a running server needs a restart or a ``Page.clear_template_caches`` call.
 
 Settings behaviour
 ------------------

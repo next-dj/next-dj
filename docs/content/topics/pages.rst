@@ -233,8 +233,8 @@ Include ``DjxTemplateLoader`` explicitly when you still want sibling ``template.
 A class repeated in the list is instantiated once, and the later entry is dropped.
 
 ``next.pages.page.register_template(file_path, template_str)`` seeds the composed-template cache that ``composed_template_for`` reads.
-That cache serves direct ``Page.render`` calls, including ``next.testing.render_page``, the form re-render after a validation failure, and standalone zone renders.
-A regular HTTP request for the page bypasses the cache and resolves the body from its disk source, so a registered string never serves the page at its URL.
+That cache serves direct ``Page.render`` calls, including ``next.testing.render_page``, the form re-render after a validation failure, standalone zone renders, and the full-page render of a page without a module-level ``render()``.
+A page whose body comes from ``render()`` resolves that body per request, so a registered string never serves it at its URL.
 
 The method stores the supplied body verbatim, with no layout composition, so no ancestor ``layout.djx`` wraps it.
 Pre-compose the body through the layout chain before registering it when wrapping is required.
@@ -262,7 +262,7 @@ A loader sets one class attribute, implements two required methods, and may over
 ``source_path(file_path)``.
    Optional.
    Returns the backing file path for the cache invalidation hook.
-   Edits to that file invalidate the composed template on the next request.
+   Under ``DEBUG`` edits to that file invalidate the composed template on the next request.
    The default returns ``None`` for non-file-based loaders.
 
 Priority resolution

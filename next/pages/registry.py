@@ -16,6 +16,7 @@ from next.deps import DependencyResolver, get_request_dep_cache, resolver
 from next.utils import MisattributedContext, MisattributionLog, callable_name
 
 from .context import ContextResult
+from .paths import page_path_info
 from .signals import context_registered
 from .watch import get_pages_directories_for_watch
 
@@ -65,7 +66,7 @@ class ZoneBinding(NamedTuple):
 logger = logging.getLogger(__name__)
 
 
-_MAX_ANCESTOR_WALK_DEPTH = 64
+type _OrderedEntries = tuple[tuple[str | None, PageContextEntry], ...]
 
 
 def get_layout_djx_paths_for_watch() -> set[Path]:
@@ -103,6 +104,22 @@ class PageContextRegistry:
         self._keyless_conflicts: dict[Path, list[str]] = {}
         self._misattributions = MisattributionLog()
         self._resolver = resolver
+        self._version = 0
+        self._memo_version = 0
+        self._merge_order: dict[Path, _OrderedEntries] = {}
+        self._inheritable: dict[Path, _OrderedEntries] = {}
+
+    @property
+    def version(self) -> int:
+        """Monotonic counter bumped on every write to the registry.
+
+        The per-path memos key off it, so every write to the registry bumps it.
+        """
+        return self._version
+
+    def _bump(self) -> None:
+        """Mark the registry as moved so the per-path memos rebuild."""
+        self._version += 1
 
     def _get_resolver(self) -> DependencyResolver:
         """Return the injected resolver or the shared singleton."""
@@ -119,6 +136,7 @@ class PageContextRegistry:
         self._context_registry.clear()
         self._keyless_conflicts.clear()
         self._misattributions.clear()
+        self._bump()
 
     def misattributed(self) -> tuple[MisattributedContext, ...]:
         """Return every registration bound to a file other than the one running it."""
@@ -195,6 +213,7 @@ class PageContextRegistry:
             serializer=serializer,
             zones=None if zone is None else frozenset({zone}),
         )
+        self._bump()
         context_registered.send(
             sender=PageContextRegistry, file_path=file_path, key=key
         )
@@ -233,11 +252,7 @@ class PageContextRegistry:
         )
         context_data.update(inherited_context)
 
-        registry = self._context_registry.get(file_path, {})
-        ordered = sorted(
-            registry.items(), key=lambda item: (item[0] is not None, str(item[0] or ""))
-        )
-        for key, entry in ordered:
+        for key, entry in self._entries_in_merge_order(file_path):
             # `isdisjoint` tests the batch without allocating an intersection.
             if (
                 _requested_zones is not None
@@ -285,37 +300,64 @@ class PageContextRegistry:
     ) -> dict[str, Any]:
         """Return values from ancestor `page.py` callables marked `inherit_context`.
 
-        Walks ancestor directories that contain a `page.py` and runs every
-        `@context(..., inherit_context=True)` callable registered there.
-        A sibling `layout.djx` is not required.
-        The shared HTML envelope can live one level up under
-        ``PAGE_BACKENDS["DIRS"]``, and pages declaring inheritable context
-        should still surface it on descendant routes.
+        Runs every `@context(..., inherit_context=True)` callable an ancestor
+        `page.py` registered, with no sibling `layout.djx` required, so the
+        envelope under ``PAGE_BACKENDS["DIRS"]`` reaches descendant routes.
         """
-        inherited_context = {}
-        current_dir = file_path.parent
-
-        for _ in range(_MAX_ANCESTOR_WALK_DEPTH):
-            if current_dir == current_dir.parent:
-                break
-
-            page_file = current_dir / "page.py"
-
-            if page_file.exists():
-                for key, entry in self._context_registry.get(page_file, {}).items():
-                    if entry.inherit_context:
-                        resolved = self._get_resolver().resolve_dependencies(
-                            entry.func,
-                            request=request,
-                            _cache=dep_cache,
-                            _stack=dep_stack,
-                            **url_kwargs,
-                        )
-                        if key is None:
-                            inherited_context.update(entry.func(**resolved))
-                        else:
-                            inherited_context[key] = entry.func(**resolved)
-
-            current_dir = current_dir.parent
-
+        inherited_context: dict[str, Any] = {}
+        for key, entry in self._inheritable_entries(file_path):
+            resolved = self._get_resolver().resolve_dependencies(
+                entry.func,
+                request=request,
+                _cache=dep_cache,
+                _stack=dep_stack,
+                **url_kwargs,
+            )
+            if key is None:
+                inherited_context.update(entry.func(**resolved))
+            else:
+                inherited_context[key] = entry.func(**resolved)
         return inherited_context
+
+    def _sync_memos(self) -> None:
+        """Drop the per-path memos once the registry has moved under them."""
+        if self._memo_version != self._version:
+            self._merge_order.clear()
+            self._inheritable.clear()
+            self._memo_version = self._version
+
+    def _entries_in_merge_order(self, file_path: Path) -> _OrderedEntries:
+        """Return this file's callables in the order the merge consumes them.
+
+        Keyless callables come first so a dict merge never overwrites a keyed
+        value, and keyed ones follow in string order.
+        """
+        self._sync_memos()
+        entries = self._merge_order.get(file_path)
+        if entries is None:
+            entries = tuple(
+                sorted(
+                    self._context_registry.get(file_path, {}).items(),
+                    key=lambda item: (item[0] is not None, str(item[0] or "")),
+                )
+            )
+            self._merge_order[file_path] = entries
+        return entries
+
+    def _inheritable_entries(self, file_path: Path) -> _OrderedEntries:
+        """Return the inheritable callables of the ancestor chain, nearest first.
+
+        The chain is read out of the registry by path, so a render probes no
+        directory and a deleted `page.py` contributes until a reload.
+        """
+        self._sync_memos()
+        entries = self._inheritable.get(file_path)
+        if entries is None:
+            entries = tuple(
+                (key, entry)
+                for ancestor in page_path_info(file_path).ancestors
+                for key, entry in self._context_registry.get(ancestor, {}).items()
+                if entry.inherit_context
+            )
+            self._inheritable[file_path] = entries
+        return entries
