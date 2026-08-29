@@ -78,9 +78,7 @@ NEXT_FRAMEWORK = {
         {
             "BACKEND": "next.urls.FileRouterBackend",
             "APP_DIRS": True,
-            # `marketplace/` is the project-level page root. It owns the
-            # shared HTML envelope wrapped around `catalog/storefront/`
-            # and every nested catalog route.
+            # Project-level page root carrying the shared HTML envelope.
             "DIRS": [str(BASE_DIR / "marketplace")],
             "PAGES_DIR": "storefront",
             "OPTIONS": {

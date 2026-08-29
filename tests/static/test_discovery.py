@@ -53,8 +53,7 @@ class TestBackendProviderProtocol:
         assert not isinstance(object(), BackendProvider)
 
     def test_a_router_backend_is_not_a_provider(self) -> None:
-        # Both contracts carry a `page_roots`, but a structural match also needs
-        # `default_backend`, which no router has.
+        # Both carry `page_roots`, but a match also needs `default_backend`.
         assert not isinstance(FileRouterBackend(app_dirs=False), BackendProvider)
 
 

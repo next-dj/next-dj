@@ -72,8 +72,7 @@ def resolve_url_to_match(
 def resolve_url_to_page(url: str, request: "HttpRequest") -> "Path | None":
     """Resolve a URL to the page path of the view that serves it.
 
-    A URL that resolves to a view without a `next_page_path` or that fails
-    to resolve returns None.
+    A URL resolving to a view without `next_page_path`, or not resolving, gives None.
     """
     match = resolve_url_to_match(url, request)
     return match.page_path if match is not None else None

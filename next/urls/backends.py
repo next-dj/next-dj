@@ -256,8 +256,7 @@ class FileRouterBackend(RouterBackend):
     def _generate_root_urls(self) -> list[URLPattern | URLResolver]:
         """Return cached patterns from each configured root pages directory.
 
-        Returns a copy so callers appending to `generate_urls` results
-        never mutate the cache.
+        Returns a copy so a caller appending to the result never mutates the cache.
         """
         if self._root_patterns_cache is None:
             urls: list[URLPattern | URLResolver] = []

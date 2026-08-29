@@ -45,8 +45,7 @@ class ComponentsBackend(ABC):
     def discover(self) -> None:
         """Populate this backend from its source, once on app ready.
 
-        The default does nothing, which suits a backend that resolves names
-        on demand.
+        The default does nothing, which suits a backend resolving names on demand.
         """
         return
 

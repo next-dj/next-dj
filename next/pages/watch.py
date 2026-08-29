@@ -78,8 +78,7 @@ def iter_page_backends_for_watch() -> Iterator[RouterBackend]:
         try:
             backend = RouterFactory.create_backend(config)
         except Exception:
-            # Keyed by position, because every entry that names no BACKEND
-            # would otherwise share one key.
+            # Keyed by position, because entries naming no BACKEND share a key.
             if _first_failure(str(position), "construction"):
                 logger.exception(_NOT_BUILT, position, config.get("BACKEND"))
             continue
@@ -130,8 +129,7 @@ def components_folder_name_for_watch(backend: RouterBackend) -> str | None:
 def get_pages_directories_for_watch() -> list[Path]:
     """Return the resolved page roots the autoreloader should observe.
 
-    Every tree a router routes and nothing more, which is the set the page
-    system checks walk.
+    Every tree a router routes and nothing more, the set the page checks walk.
     """
     seen: set[Path] = set()
     result: list[Path] = []

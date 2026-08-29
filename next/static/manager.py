@@ -344,8 +344,7 @@ def get_static_manager() -> StaticManager:
     instance itself, so that a settings reload swapping the handle midway
     cannot send the restore to a different manager.
     """
-    # Reading an attribute runs the lazy setup. `_setup()` would replace a
-    # manager that is already built.
+    # Reading an attribute runs the lazy setup without rebuilding a live manager.
     _ = default_manager.create_collector
     return default_manager._wrapped
 

@@ -47,9 +47,7 @@ def inject_vite_dev_assets(sender: object, **kwargs) -> None:
         "data:text/javascript;base64,"
         + base64.b64encode(preamble_code.encode()).decode()
     )
-    # Two prepends in call order. Each insert goes to the next prepend
-    # slot, so the resulting bucket order is preamble, then @vite/client,
-    # then the regular module scripts.
+    # Prepends stack, so the order is preamble, @vite/client, module scripts.
     sender.add(  # type: ignore[attr-defined]
         StaticAsset(url=preamble_url, kind="module"), prepend=True
     )

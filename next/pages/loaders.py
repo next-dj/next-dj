@@ -42,8 +42,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# A token no realistic template source carries, so filling the slot back in is
-# one unambiguous substitution.
+# A token no real template source carries, so refilling the slot is unambiguous.
 _BODY_SLOT = "\x00next-page-body\x00"
 
 
@@ -202,15 +201,13 @@ def _reset_additional_layouts_cache(**kwargs) -> None:
 settings_reloaded.connect(_reset_additional_layouts_cache)
 
 
-# A single-slot holder mutated in place, so a reset needs no `global`.
 _PAGE_ROOTS_CACHE: dict[str, tuple[Path, ...] | None] = {"value": None}
 
 
 def _page_roots() -> tuple[Path, ...]:
     """Return the resolved page trees the routers report, memoised.
 
-    Reading them builds every router backend, which is too much work to
-    repeat per layout walk.
+    Reading them builds every router backend, too much work to repeat per walk.
     """
     cached = _PAGE_ROOTS_CACHE["value"]
     if cached is None:

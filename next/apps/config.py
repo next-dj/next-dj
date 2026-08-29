@@ -28,8 +28,7 @@ class NextFrameworkConfig(AppConfig):
         staticfiles.install()
         components.install()
         autodiscover_forms()
-        # Deferred so importing next.apps stays free of next.partial until
-        # Django has registered every AppConfig.
+        # Deferred so importing next.apps stays free of next.partial.
         from next.partial.shaper import PartialShaperImpl  # noqa: PLC0415
 
         partial_shaper_slot.set(PartialShaperImpl())

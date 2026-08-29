@@ -60,10 +60,7 @@ def inject_vite_dev_client(sender: StaticCollector, **kwargs) -> None:
     sender.add(StaticAsset(url=f"{origin}/@vite/client", kind="module"), prepend=True)
 
 
-# Wire the dev-client injector only when the developer opted into the
-# Vite dev server through `VITE_DEV_ORIGIN`. Without that env var the
-# example loads bundled assets from the manifest and never tries to
-# reach a dev server, so opening the page after `npm run build` works
-# in a single terminal.
+# The dev-client injector is wired only when `VITE_DEV_ORIGIN` opts into the
+# Vite dev server, so a plain `npm run build` needs no second terminal.
 if settings.VITE_DEV_ORIGIN:
     collector_finalized.connect(inject_vite_dev_client)

@@ -78,10 +78,8 @@ NEXT_FRAMEWORK = {
         {
             "BACKEND": "wiki.backends.HybridRouterBackend",
             "APP_DIRS": True,
-            # `shell/` carries the shared HTML envelope. The hybrid file
-            # router walks both this root and the per-app `wiki/routes/`
-            # tree, so the layout applies to file routes and database
-            # articles alike.
+            # Project-level page root carrying the shared HTML envelope. The
+            # hybrid router walks it with the per-app `wiki/routes/` tree.
             "DIRS": [str(BASE_DIR / "shell")],
             "PAGES_DIR": "routes",
             "OPTIONS": {

@@ -1113,8 +1113,7 @@ class TestBrokenPageImportView:
         monkeypatch.setattr(loaders_module, "_load_python_module", counting)
 
         page_file, pattern = self._broken_pattern(page_instance, tmp_path, url_parser)
-        # The pattern build probes once and every later request answers 404
-        # off the memo, re-executing nothing.
+        # The build probes once, every later request answers 404 off the memo.
         with pytest.raises(Http404):
             pattern.callback(build_page_request())
         first_pass = calls.count(page_file)

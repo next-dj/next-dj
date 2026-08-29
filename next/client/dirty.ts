@@ -1,7 +1,6 @@
-// Delegated listeners stamp touched elements with a monotonic counter. A field
-// is dirty relative to a response when its stamp is later than the snapshot
-// taken at fetch time, so an answer for one field never wipes what the user
-// typed into another.
+// Delegated listeners stamp touched elements with a monotonic counter. A field is
+// dirty relative to a response when its stamp is later than the snapshot taken at
+// fetch time, so an answer for one field never wipes what the user typed elsewhere.
 
 /** Tracks which elements the user touched, keyed against per-request snapshots. */
 export interface DirtyTracker {

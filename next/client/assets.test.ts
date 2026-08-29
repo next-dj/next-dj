@@ -383,8 +383,7 @@ describe("assets registry and delta", () => {
 
   it("leaves an inline body of the module kind alone when no verb spells it out", () => {
     // The module kind registers no inline wrapper, so the server withholds the
-    // verb and building a type=module script here would execute what a full
-    // render only prints.
+    // verb and a type=module script here would execute what a render only prints.
     const { assets } = makeAssets();
     assets.loadJs([{ kind: "module", url: "", inline: "mount()" }]);
     expect(document.head.querySelectorAll("script")).toHaveLength(0);
@@ -684,9 +683,8 @@ describe("seeding across the parse window", () => {
   });
 
   it("holds the js delta until parsing ends, seeing a tag parsed after seed", () => {
-    // A lazy load zone GETs mid-parse for a script the parser has not reached,
-    // so an eager delta doubles it. Deferred to DOMContentLoaded, the scan sees
-    // the tag.
+    // A lazy load zone GETs mid-parse for a script the parser has not reached, so
+    // an eager delta doubles it. Deferred to DOMContentLoaded, the scan sees it.
     const { assets } = makeAssets();
     assets.seed();
     assets.loadJs([{ kind: "js", url: "/static/react-dom.js" }]);

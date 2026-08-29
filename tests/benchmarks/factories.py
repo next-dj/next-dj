@@ -67,8 +67,7 @@ def build_layout_page(
 ) -> Path:
     """Materialise a page nested under ``layouts`` ancestor ``layout.djx`` wrappers.
 
-    The layouts sit strictly above the page directory, the shape the layout
-    walk pays for.
+    The layouts sit strictly above the page directory, the shape the walk pays for.
     """
     directory = root
     for i in range(layouts):

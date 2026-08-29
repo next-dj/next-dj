@@ -173,8 +173,7 @@ class TestAssetVersionMemo:
             assert resolve.call_count == 1
 
     def test_the_manifest_mapping_is_hashed_once_across_ticks(self) -> None:
-        # the hashing branch walks the whole manifest, which a poll tick used to
-        # pay on every request
+        # The hashing branch walks the whole manifest, too much for a poll tick.
         storage = _MappingOnlyStorage({f"a/{i}.css": f"a/{i}.x.css" for i in range(20)})
         with (
             patch("next.partial.manager.staticfiles_storage", storage),

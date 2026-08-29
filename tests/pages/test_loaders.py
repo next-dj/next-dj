@@ -1485,8 +1485,7 @@ class TestPageModuleImportErrors:
         assert _load_python_module(page_file) is None
         assert page_file in loaders_module._LAST_LOAD_ERROR
 
-        # A file that vanished before the pre-exec stat has no mtime and
-        # cannot keep a keyed entry.
+        # A file gone before the pre-exec stat has no mtime to key an entry by.
         loaders_module._record_load_error(page_file, ValueError("boom"), None)
         assert page_file not in loaders_module._LAST_LOAD_ERROR
 

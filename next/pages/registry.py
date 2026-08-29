@@ -113,8 +113,7 @@ class PageContextRegistry:
     def version(self) -> int:
         """Monotonic counter bumped on every write to the registry.
 
-        The per-path memos key off it, so every method touching
-        `_context_registry` has to bump it.
+        The per-path memos key off it, so every write to the registry bumps it.
         """
         return self._version
 

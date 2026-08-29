@@ -158,8 +158,7 @@ class TestIterPageBackendsForWatch:
 
         assert len(backends) == 1
         assert watched == [root.resolve()]
-        # Two passes over the same broken entry, one report, because this runs
-        # on every reloader tick.
+        # Two passes over one broken entry, one report, because this runs per tick.
         assert len(_watch_tracebacks(caplog)) == 1
 
     def test_two_nameless_broken_entries_are_diagnosed_apart(self, caplog) -> None:

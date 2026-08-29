@@ -54,8 +54,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# Mtimes of every source behind one composition, keyed by the page path the
-# composition belongs to.
+# Mtimes of every source behind one composition, keyed by its page path.
 type _SourceMtimes = dict[Path, dict[Path, float]]
 
 

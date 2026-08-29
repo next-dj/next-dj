@@ -903,8 +903,7 @@ class TestComponentMissReporting:
 
     @override_settings(DEBUG=True)
     def test_debug_comment_sanitizes_odd_dash_runs(self, tmp_path: Path) -> None:
-        # Breaking whole pairs leaves the trailing dash of an odd run, which
-        # still closes the comment.
+        # Breaking whole pairs leaves a trailing dash, which still closes the comment.
         t = Template('{% load components %}{% component "nv--->x" %}')
         with (
             patch.object(components_manager, "get_component", return_value=None),

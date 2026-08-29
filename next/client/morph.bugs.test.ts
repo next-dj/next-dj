@@ -111,8 +111,7 @@ const bugTable: BugCase[] = [
     after:
       '<form id="f"><input id="i" name="i" value="y"><span id="s">new</span></form>',
     verify: () => {
-      // Morph the same pair with focus inside and without, the serialised result
-      // must be byte-identical.
+      // Morph the same pair with and without focus, the result must be byte-identical.
       const withFocus = mount(
         '<form id="f"><input id="i" name="i" value="x"><span id="s">old</span></form>',
       );
@@ -281,8 +280,7 @@ describe("idiomorph bug checklist", () => {
         },
       }),
     ).toThrow("boom");
-    // Every node is still inside the target or removed, no stray wrapper at the
-    // document root.
+    // Every node is inside the target or removed, no stray wrapper at the root.
     for (const node of Array.from(document.body.children)) {
       expect(node).toBe(target);
     }

@@ -323,8 +323,7 @@ def check_reverse_name_collisions(*args, **kwargs) -> list[CheckMessage]:
     # they are dropped here instead of being reported twice.
     all_patterns, _ = _collect_all_patterns(router_manager)
 
-    # reverse() picks by arguments, so a collision needs a shared name and
-    # a shared parameter set.
+    # reverse() picks by arguments, so a collision needs name and parameters both.
     grouped: dict[tuple[str, frozenset[str]], dict[str, list[str]]] = {}
     for _pattern, url_path, source, parameters in all_patterns:
         full_name = next_framework_settings.URL_NAME_TEMPLATE.format(

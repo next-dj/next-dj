@@ -1,7 +1,6 @@
 """System checks for the static subsystem.
 
-All identifiers live in the `next.*` namespace to avoid collisions with
-Django core checks.
+All identifiers live in the `next.*` namespace, away from Django's core checks.
 """
 
 from __future__ import annotations

@@ -40,8 +40,7 @@ export function manualPollClock(): Clock & {
   };
 }
 
-// Holds every onChange subscriber, since the SSE bridge and the poll triggers
-// share the seam.
+// Holds every onChange subscriber, since the SSE bridge and poll triggers share it.
 export function manualVisibility(): VisibilityAdapter & {
   setHidden(v: boolean): void;
 } {

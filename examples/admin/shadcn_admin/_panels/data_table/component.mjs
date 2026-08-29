@@ -1,7 +1,6 @@
 /**
- * Toggle every `[name="_selected_action"]` checkbox in the table from the header
- * checkbox. Wired up at module load so all data tables in a page work without
- * per-instance setup.
+ * Toggle every `[name="_selected_action"]` checkbox from the header checkbox.
+ * Wired up at module load, so every data table in a page works unconfigured.
  */
 function initBulkToggles(root) {
   for (const master of root.querySelectorAll("[data-bulk-toggle]")) {

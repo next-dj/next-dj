@@ -1186,8 +1186,7 @@ describe("Applier op errors name their target", () => {
     const err = dispatched.find((d) => d.event === "partial:error");
     expect((err!.detail.error as Error).message).toBe("op blew up");
     expect(err!.detail).not.toHaveProperty("target");
-    // The description of a target never decides whether the rest of the
-    // envelope applies.
+    // A target's description never decides whether the rest of the envelope applies.
     expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("new");
     const applied = dispatched.find((d) => d.event === "partial:applied");
     expect(applied!.detail.ok).toBe(false);
@@ -1241,9 +1240,8 @@ describe("Applier next:removed before detach", () => {
     document.body.innerHTML = "";
   });
 
-  // Capture next:removed at the document, the bus the layer adapter delegates
-  // on, recording the target, whether it was still connected at fire time, and
-  // the event flags.
+  // Capture next:removed at the document, the bus the layer adapter delegates on,
+  // recording the target, whether it was connected at fire time, and the flags.
   function captureRemoved() {
     const seen: {
       target: Element;

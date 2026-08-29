@@ -80,8 +80,7 @@ class TestBenchUnifiedViewGet:
     def test_static_warm_debug(self, tmp_path: Path, benchmark) -> None:
         """The same static GET under `DEBUG`, where the caches stat their sources.
 
-        Every other case here measures the production branch, this one
-        prices the development loop.
+        Every other case measures the production branch, this one the dev loop.
         """
         page_file = build_layout_page(tmp_path, layouts=2, template=_STATIC_TEMPLATE)
         request = plain_get("/")

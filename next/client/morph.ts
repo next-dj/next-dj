@@ -137,8 +137,7 @@ function isHardMatch(
   );
 }
 
-// A soft match is a same-tag pair with no persistent id, ids are reserved for a
-// hard match.
+// A soft match is a same-tag pair with no id, ids are reserved for a hard match.
 function isSoftMatch(
   ctx: Ctx,
   oldNode: Node,
@@ -153,9 +152,8 @@ function isSoftMatch(
   return true;
 }
 
-// Find a match for one new child. A hard match is searched along the whole scan,
-// a soft match is taken only at the pointer, which is reserved when it carries a
-// persistent id.
+// Find a match for one new child. A hard match is searched along the whole scan, a
+// soft match only at the pointer, which is reserved when it carries a persistent id.
 function findMatch(
   ctx: Ctx,
   pointer: Node | null,
@@ -202,9 +200,8 @@ function discard(ctx: Ctx, node: Node): void {
   (node as ChildNode).remove();
 }
 
-// Sync the live value/checked/selected. The attribute twin is handled by the
-// attribute pass, the live property is set only when the field is neither active
-// nor dirty.
+// Sync the live value/checked/selected. The attribute twin belongs to the attribute
+// pass, the live property is set only when the field is neither active nor dirty.
 function syncLive(ctx: Ctx, oldEl: Element, newEl: Element): void {
   const tag = oldEl.tagName;
   if (tag === "INPUT") {
@@ -241,9 +238,8 @@ function syncLive(ctx: Ctx, oldEl: Element, newEl: Element): void {
   }
 }
 
-// Some attributes are owned by syncLive, not the generic pass: value/checked/
-// selected twins, a touched <details> open, and a <dialog> open that belongs to
-// the layer surface.
+// Attributes owned by syncLive rather than the generic pass, the value/checked and
+// selected twins, a touched <details> open, and a layer-owned <dialog> open.
 function skipAttribute(ctx: Ctx, el: Element, name: string): boolean {
   const tag = el.tagName;
   if (name === "value" || name === "checked") return tag === "INPUT";
@@ -423,8 +419,7 @@ function restoreFocus(doc: Document, snap: FocusSnapshot): void {
   }
 }
 
-// Parse a string through an inert <template>. A non-string is already a parsed
-// element or fragment.
+// Parse a string through an inert <template>, a non-string is already parsed.
 function parseContent(
   target: Element,
   html: string | Element | DocumentFragment,
@@ -499,8 +494,7 @@ export function morph(
     if (target.tagName === root.tagName) {
       morphNode(ctx, target, root, persistent);
     } else {
-      // Root tag changed: recreate the node so the result root is the new node in
-      // the target's position.
+      // A changed root tag recreates the node in the target's position.
       const parent = target.parentNode;
       if (parent !== null) {
         parent.insertBefore(root, target);

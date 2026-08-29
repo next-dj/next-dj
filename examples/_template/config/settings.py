@@ -78,19 +78,14 @@ STATICFILES_DIRS = [BASE_DIR / "static", SHARED_DIR / "static"]
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# Every example overrides PAGES_DIR and COMPONENTS_DIR to showcase the
-# convention. Pick names that fit your domain. For single-key overrides,
-# `next.conf.extend_default_backend` is a shorter alternative — see
-# docs/content/topics/project-layout.rst (section "Settings Helpers").
+# PAGES_DIR and COMPONENTS_DIR are yours to name, every example renames them.
+# A single-key override is shorter through `next.conf.extend_default_backend`.
 NEXT_FRAMEWORK = {
     "PAGE_BACKENDS": [
         {
             "BACKEND": "next.urls.FileRouterBackend",
             "APP_DIRS": True,
-            # Project-level page root: contains the HTML envelope layout
-            # (and may host project-shared components under `_widgets/`).
-            # Demonstrates `PAGE_BACKENDS["DIRS"]` working alongside
-            # `APP_DIRS=True`.
+            # Project-level page root with the HTML envelope, next to `APP_DIRS`.
             "DIRS": [str(BASE_DIR / "chrome")],
             "PAGES_DIR": "routes",
             "OPTIONS": {"context_processors": []},

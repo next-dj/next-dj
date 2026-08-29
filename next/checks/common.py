@@ -225,8 +225,7 @@ def get_router_manager() -> tuple[RouterManager | None, list[CheckMessage]]:
 def reset_router_manager_cache(**kwargs) -> None:
     """Drop the cached `RouterManager` and everything read off its routers.
 
-    The scans and the contract answers belong to routers this manager owns, so
-    they go with it.
+    The scans and contract answers belong to this manager's routers, so they go too.
     """
     _ROUTER_MANAGER_CACHE["value"] = None
     _SCANNED_TREES_CACHE.clear()

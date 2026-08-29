@@ -108,8 +108,7 @@ def check_pages_structure(*args, **kwargs) -> list[CheckMessage]:
     if router_manager is None:
         return init_errors + warnings
 
-    # Nested and doubly-mounted roots reach one directory through several
-    # page trees.
+    # Nested and doubly-mounted roots reach one directory through several trees.
     seen: set[Path] = set()
     for router in router_manager.backends:
         # The one check that names a failing `page_roots`, every other reader
@@ -187,8 +186,7 @@ def _touches_a_routed_tree(directory: Path, routed: set[Path]) -> bool:
 def _holds_a_page(directory: Path) -> bool:
     """Whether the walk finds anything under `directory` the router would route.
 
-    The walk refuses no directory name, because a tree no router routes has
-    no skip set of its own.
+    The walk refuses no directory name, because an unrouted tree has no skip set.
     """
     return next(walk_page_tree(directory), None) is not None
 
@@ -562,8 +560,7 @@ def check_layout_templates(*args, **kwargs) -> list[CheckMessage]:
     if router_manager is None:
         return init_errors + warnings
 
-    # Nested roots and several routers reach the same layout through more
-    # than one page.
+    # Nested roots and several routers reach one layout through more than one page.
     seen: set[Path] = set()
     for router in router_manager.backends:
         for _url_path, page_path in iter_scanned_page_pairs(router):

@@ -688,8 +688,7 @@ class TestFailingPageRootsRead:
         assert get_page_roots(RaisingRootsRouter()) == []
 
     def test_bare_paths_instead_of_page_roots_are_refused(self, tmp_path: Path) -> None:
-        # Every reader dereferences `root.path`, so a bare path may not reach
-        # one of them.
+        # Every reader dereferences `root.path`, so a bare path may not reach one.
         with pytest.raises(PageRootsError) as caught:
             read_page_roots(MalformedRootsRouter([tmp_path]))
 
