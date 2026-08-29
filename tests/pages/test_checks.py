@@ -363,14 +363,12 @@ class TestCheckTemplateLoaders:
     )
     def test_valid_default_is_clean(self) -> None:
 
-        s.reload()
         self._reset_loader_cache()
         assert self._run() == []
 
     @override_settings(NEXT_FRAMEWORK={"TEMPLATE_LOADERS": [123]})
     def test_non_string_entry_is_e042(self) -> None:
 
-        s.reload()
         self._reset_loader_cache()
         msgs = self._run()
         assert len(msgs) == 1
@@ -380,7 +378,6 @@ class TestCheckTemplateLoaders:
     @override_settings(NEXT_FRAMEWORK={"TEMPLATE_LOADERS": ["does.not.exist.Loader"]})
     def test_unimportable_entry_is_e043(self) -> None:
 
-        s.reload()
         self._reset_loader_cache()
         msgs = self._run()
         assert len(msgs) == 1
@@ -392,7 +389,6 @@ class TestCheckTemplateLoaders:
     )
     def test_non_subclass_entry_is_e043(self) -> None:
 
-        s.reload()
         self._reset_loader_cache()
         msgs = self._run()
         assert len(msgs) == 1
@@ -1698,5 +1694,4 @@ class TestUnroutedWorkingDirectoryPages:
             override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}),
             patch_checks_router_manager_with_routers(routers=[RootPagesRouter([])]),
         ):
-            s.reload()
             assert check_unrouted_working_directory_pages(None) == []

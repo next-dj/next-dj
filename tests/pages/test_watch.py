@@ -6,7 +6,6 @@ from unittest.mock import Mock, patch
 from django.test import override_settings
 
 from next.checks.common import get_page_roots
-from next.conf import next_framework_settings
 from next.pages.registry import (
     get_layout_djx_paths_for_watch,
     get_template_djx_paths_for_watch,
@@ -48,7 +47,6 @@ def _watch_tracebacks(caplog) -> list[logging.LogRecord]:
 def _watched(entry: dict[str, object]) -> list[Path]:
     """Return the directories the watcher observes for one `PAGE_BACKENDS` entry."""
     with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}):
-        next_framework_settings.reload()
         return get_pages_directories_for_watch()
 
 
@@ -134,7 +132,6 @@ class TestIterPageBackendsForWatch:
     def test_non_dict_entries_are_skipped(self) -> None:
         """List entries that are not dicts name no backend."""
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": ["not a dict", None]}):
-            next_framework_settings.reload()
             assert list(iter_page_backends_for_watch()) == []
 
     def test_construction_failure_costs_only_its_own_entry(
@@ -143,18 +140,19 @@ class TestIterPageBackendsForWatch:
         """An entry that cannot be built is skipped, the healthy one still answers."""
         root = tmp_path / "shell"
         root.mkdir()
-        with override_settings(
-            NEXT_FRAMEWORK={
-                "PAGE_BACKENDS": [
-                    {"BACKEND": "nonexistent.Backend"},
-                    file_router_config_entry(pages_dir=root),
-                ]
-            }
+        with (
+            override_settings(
+                NEXT_FRAMEWORK={
+                    "PAGE_BACKENDS": [
+                        {"BACKEND": "nonexistent.Backend"},
+                        file_router_config_entry(pages_dir=root),
+                    ]
+                }
+            ),
+            caplog.at_level(logging.ERROR, logger="next.pages.watch"),
         ):
-            next_framework_settings.reload()
-            with caplog.at_level(logging.ERROR, logger="next.pages.watch"):
-                backends = list(iter_page_backends_for_watch())
-                watched = get_pages_directories_for_watch()
+            backends = list(iter_page_backends_for_watch())
+            watched = get_pages_directories_for_watch()
 
         assert len(backends) == 1
         assert watched == [root.resolve()]
@@ -164,10 +162,11 @@ class TestIterPageBackendsForWatch:
 
     def test_two_nameless_broken_entries_are_diagnosed_apart(self, caplog) -> None:
         """Entries that name no BACKEND share a name, so position tells them apart."""
-        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [{}, {}]}):
-            next_framework_settings.reload()
-            with caplog.at_level(logging.ERROR, logger="next.pages.watch"):
-                assert list(iter_page_backends_for_watch()) == []
+        with (
+            override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [{}, {}]}),
+            caplog.at_level(logging.ERROR, logger="next.pages.watch"),
+        ):
+            assert list(iter_page_backends_for_watch()) == []
 
         assert len(_watch_tracebacks(caplog)) == 2
 
@@ -229,7 +228,6 @@ class TestWatchedRootsFollowThePageRoots:
         root.mkdir()
         entry = file_router_config_entry(pages_dir=root)
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry, dict(entry)]}):
-            next_framework_settings.reload()
             watched = get_pages_directories_for_watch()
 
         assert watched == [root.resolve()]
@@ -244,7 +242,6 @@ class TestWatchedRootsFollowThePageRoots:
                 NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "elsewhere.Backend"}]}
             ),
         ):
-            next_framework_settings.reload()
             assert get_pages_directories_for_watch() == []
 
 
@@ -273,7 +270,6 @@ class TestRouterFailuresNeverReachTheWatcher:
                 }
             ),
         ):
-            next_framework_settings.reload()
             watched = get_pages_directories_for_watch()
 
         assert watched == [root.resolve()]
@@ -294,7 +290,6 @@ class TestRouterFailuresNeverReachTheWatcher:
                 NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "broken.Backend"}]}
             ),
         ):
-            next_framework_settings.reload()
             watched = get_pages_directories_for_watch()
             pairs = iter_pages_roots_with_components_folder_names()
 
@@ -324,10 +319,9 @@ class TestRouterFailuresNeverReachTheWatcher:
                     ]
                 }
             ),
+            caplog.at_level(logging.ERROR, logger="next.pages.watch"),
         ):
-            next_framework_settings.reload()
-            with caplog.at_level(logging.ERROR, logger="next.pages.watch"):
-                watched = get_pages_directories_for_watch()
+            watched = get_pages_directories_for_watch()
 
         assert watched == [root.resolve()]
         # A wrong shape is no failing source, so it is reported as the wrong
@@ -350,12 +344,11 @@ class TestRouterFailuresNeverReachTheWatcher:
             override_settings(
                 NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "odd.Backend"}]}
             ),
+            caplog.at_level(logging.ERROR, logger="next.pages.watch"),
         ):
-            next_framework_settings.reload()
-            with caplog.at_level(logging.ERROR, logger="next.pages.watch"):
-                for _tick in range(3):
-                    pairs = iter_pages_roots_with_components_folder_names()
-                watched = get_pages_directories_for_watch()
+            for _tick in range(3):
+                pairs = iter_pages_roots_with_components_folder_names()
+            watched = get_pages_directories_for_watch()
 
         reports = [r for r in caplog.records if r.name == "next.pages.watch"]
         assert pairs == []
@@ -371,11 +364,10 @@ class TestRouterFailuresNeverReachTheWatcher:
             override_settings(
                 NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "broken.Backend"}]}
             ),
+            caplog.at_level(logging.ERROR, logger="next.pages.watch"),
         ):
-            next_framework_settings.reload()
-            with caplog.at_level(logging.ERROR, logger="next.pages.watch"):
-                for _tick in range(5):
-                    get_pages_directories_for_watch()
+            for _tick in range(5):
+                get_pages_directories_for_watch()
 
         assert len(_watch_tracebacks(caplog)) == 1
 
@@ -392,7 +384,6 @@ class TestRouterFailuresNeverReachTheWatcher:
                 ),
                 caplog.at_level(logging.ERROR, logger="next.pages.watch"),
             ):
-                next_framework_settings.reload()
                 get_pages_directories_for_watch()
                 get_pages_directories_for_watch()
             with (
@@ -401,7 +392,6 @@ class TestRouterFailuresNeverReachTheWatcher:
                 ),
                 caplog.at_level(logging.ERROR, logger="next.pages.watch"),
             ):
-                next_framework_settings.reload()
                 get_pages_directories_for_watch()
 
         assert len(_watch_tracebacks(caplog)) == 2
@@ -426,7 +416,6 @@ class TestIterPagesRootsWithComponentsFolderNames:
                 ],
             }
         ):
-            next_framework_settings.reload()
             pairs = iter_pages_roots_with_components_folder_names()
 
         assert pairs == [(root.resolve(), "widgets")]
@@ -445,7 +434,6 @@ class TestIterPagesRootsWithComponentsFolderNames:
                 NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "elsewhere.Backend"}]}
             ),
         ):
-            next_framework_settings.reload()
             assert get_pages_directories_for_watch() == [root.resolve()]
             assert iter_pages_roots_with_components_folder_names() == []
 
@@ -455,7 +443,6 @@ class TestIterPagesRootsWithComponentsFolderNames:
         root.mkdir()
         entry = file_router_config_entry(pages_dir=root)
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry, dict(entry)]}):
-            next_framework_settings.reload()
             pairs = iter_pages_roots_with_components_folder_names()
 
         assert pairs == [(root.resolve(), "_components")]
@@ -463,5 +450,4 @@ class TestIterPagesRootsWithComponentsFolderNames:
     def test_non_dict_entries_are_skipped(self) -> None:
         """Non-dict entries name no backend and produce no pair."""
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": ["not a dict"]}):
-            next_framework_settings.reload()
             assert iter_pages_roots_with_components_folder_names() == []

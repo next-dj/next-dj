@@ -856,7 +856,6 @@ class TestComputeScope:
     def test_form_anchor_files_setting_overrides_defaults(self, tmp_path) -> None:
         """FORM_ANCHOR_FILES replaces which file names count as anchors."""
         with override_settings(NEXT_FRAMEWORK={"FORM_ANCHOR_FILES": ["screen.py"]}):
-            next_framework_settings.reload()
             assert _compute_scope(str(tmp_path / "screen.py")) == "page"
             assert _compute_scope(str(tmp_path / "page.py")) == "shared"
         next_framework_settings.reload()
@@ -864,7 +863,6 @@ class TestComputeScope:
     def test_empty_form_anchor_files_disables_anchors(self, tmp_path) -> None:
         """An explicit empty FORM_ANCHOR_FILES means no file name is an anchor."""
         with override_settings(NEXT_FRAMEWORK={"FORM_ANCHOR_FILES": []}):
-            next_framework_settings.reload()
             assert _compute_scope(str(tmp_path / "page.py")) == "shared"
             assert _compute_scope(str(tmp_path / "component.py")) == "shared"
         next_framework_settings.reload()

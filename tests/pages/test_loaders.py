@@ -286,7 +286,6 @@ class TestLayoutTemplateLoader:
         with override_settings(
             NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(tmp_path)}
         ):
-            next_framework_settings.reload()
             result = loader._get_additional_layout_files()
 
         assert len(result) == 1
@@ -324,7 +323,6 @@ class TestLayoutTemplateLoader:
         loader = LayoutTemplateLoader()
 
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": config}):
-            next_framework_settings.reload()
             result = loader._get_additional_layout_files()
 
         assert result == expected_result
@@ -452,7 +450,6 @@ class TestLayoutTemplateLoader:
         with override_settings(
             NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(tmp_path)}
         ):
-            next_framework_settings.reload()
             result = loader._find_layout_files(page_file)
 
         assert result is not None
@@ -471,7 +468,6 @@ class TestLayoutTemplateLoader:
         )
 
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": config}):
-            next_framework_settings.reload()
             result = loader._get_additional_layout_files()
 
         assert len(result) == 1
@@ -498,7 +494,6 @@ class TestLayoutTemplateLoader:
         with override_settings(
             NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(parent_dir)}
         ):
-            next_framework_settings.reload()
             result = loader._find_layout_files(page_file)
 
         assert result is not None
@@ -527,7 +522,6 @@ class TestLayoutTemplateLoader:
         with override_settings(
             NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(additional_dir)}
         ):
-            next_framework_settings.reload()
             result = loader._find_layout_files(page_file)
 
         assert result is not None
@@ -676,7 +670,6 @@ class TestContextProcessors:
     def test_get_context_processors_empty_config(self, page_instance) -> None:
         """No backends and no ``TEMPLATES`` resolve to no processors."""
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": []}, TEMPLATES=[]):
-            next_framework_settings.reload()
             processors = _get_context_processors()
             assert processors == []
 
@@ -694,7 +687,6 @@ class TestContextProcessors:
         """A backend that declares no processors contributes none."""
         config = [file_router_config_entry(app_dirs=True)]
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": config}, TEMPLATES=[]):
-            next_framework_settings.reload()
             processors = _get_context_processors()
             assert processors == []
 
@@ -730,7 +722,6 @@ class TestContextProcessors:
                 TEMPLATES=templates_config,
                 NEXT_FRAMEWORK={"PAGE_BACKENDS": next_pages_config},
             ):
-                next_framework_settings.reload()
                 processors = _get_context_processors()
                 assert len(processors) == 2
                 assert processors[0] == test_processor
@@ -774,7 +765,6 @@ class TestContextProcessors:
                 TEMPLATES=templates_config,
                 NEXT_FRAMEWORK={"PAGE_BACKENDS": next_pages_config},
             ):
-                next_framework_settings.reload()
                 processors = _get_context_processors()
                 assert len(processors) == 2
                 assert processors[0] == next_pages_processor
@@ -805,7 +795,6 @@ class TestContextProcessors:
                 NEXT_FRAMEWORK={"PAGE_BACKENDS": next_pages_config},
             ),
         ):
-            next_framework_settings.reload()
             processors = _get_context_processors()
             assert len(processors) == 1
             assert processors[0] == shared_processor
@@ -815,7 +804,6 @@ class TestContextProcessors:
     ) -> None:
         """With empty TEMPLATES and no router processors, result is empty."""
         with override_settings(TEMPLATES=[], NEXT_FRAMEWORK={"PAGE_BACKENDS": []}):
-            next_framework_settings.reload()
             result = _get_context_processors()
             assert result == []
 
@@ -830,7 +818,6 @@ class TestContextProcessors:
         with override_settings(
             TEMPLATES=templates_config, NEXT_FRAMEWORK={"PAGE_BACKENDS": []}
         ):
-            next_framework_settings.reload()
             result = _get_context_processors()
             assert result == []
 
@@ -861,7 +848,6 @@ class TestContextProcessors:
             with override_settings(
                 NEXT_FRAMEWORK={"PAGE_BACKENDS": config}, TEMPLATES=[]
             ):
-                next_framework_settings.reload()
                 processors = _get_context_processors()
                 assert len(processors) == 2
                 assert processors[0] == test_processor
@@ -886,7 +872,6 @@ class TestContextProcessors:
             patch("next.pages.processors.import_string") as mock_import,
             patch("next.pages.processors.logger.warning") as mock_warning,
         ):
-            next_framework_settings.reload()
             mock_import.side_effect = [
                 ImportError("No module named 'invalid'"),
                 lambda request: {"request": request},
@@ -1134,7 +1119,6 @@ class TestBuildRegisteredLoaders:
         }
     )
     def test_user_list_replaces_default(self) -> None:
-        next_framework_settings.reload()
         self._reset_cache()
         loaders = build_registered_loaders()
         assert [type(loader) for loader in loaders] == [
@@ -1153,7 +1137,6 @@ class TestBuildRegisteredLoaders:
         }
     )
     def test_invalid_entries_are_skipped(self) -> None:
-        next_framework_settings.reload()
         self._reset_cache()
         loaders = build_registered_loaders()
         assert [type(loader) for loader in loaders] == [DjxTemplateLoader]
@@ -1175,7 +1158,6 @@ class TestBuildRegisteredLoaders:
     )
     def test_duplicate_entries_registered_once(self) -> None:
         """A loader class appears at most once even when listed multiple times."""
-        next_framework_settings.reload()
         self._reset_cache()
         loaders = build_registered_loaders()
         assert [type(loader) for loader in loaders] == [DjxTemplateLoader]

@@ -10,7 +10,6 @@ from django.test import override_settings
 from django.utils.safestring import SafeString
 
 from next.components import ComponentInfo, components_manager
-from next.conf import next_framework_settings
 from next.static import StaticCollector
 
 
@@ -811,15 +810,14 @@ class TestComponentMissReporting:
 
     def test_strict_not_found_raises_with_suggestion(self, tmp_path: Path) -> None:
         missing, visible, spy_ctx = self._not_found_patches({"navbar": None})
-        with override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}):
-            next_framework_settings.reload()
-            with (
-                missing,
-                visible,
-                spy_ctx as spy,
-                pytest.raises(TemplateSyntaxError) as exc_info,
-            ):
-                self._render({"current_template_path": str(tmp_path / "t.djx")})
+        with (
+            override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}),
+            missing,
+            visible,
+            spy_ctx as spy,
+            pytest.raises(TemplateSyntaxError) as exc_info,
+        ):
+            self._render({"current_template_path": str(tmp_path / "t.djx")})
         resolved = (tmp_path / "t.djx").resolve()
         assert str(exc_info.value) == (
             f"component 'nvbar' not found from {resolved}, did you mean 'navbar'?"
@@ -831,28 +829,24 @@ class TestComponentMissReporting:
         self, tmp_path: Path
     ) -> None:
         missing, visible, spy_ctx = self._not_found_patches({})
-        with override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}):
-            next_framework_settings.reload()
-            with (
-                missing,
-                visible,
-                spy_ctx,
-                pytest.raises(TemplateSyntaxError) as exc_info,
-            ):
-                self._render({"current_template_path": str(tmp_path / "t.djx")})
+        with (
+            override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}),
+            missing,
+            visible,
+            spy_ctx,
+            pytest.raises(TemplateSyntaxError) as exc_info,
+        ):
+            self._render({"current_template_path": str(tmp_path / "t.djx")})
         resolved = (tmp_path / "t.djx").resolve()
         assert str(exc_info.value) == f"component 'nvbar' not found from {resolved}"
 
     def test_strict_no_discovery_path_names_missing_context(self) -> None:
-        with override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}):
-            next_framework_settings.reload()
-            with (
-                patch(
-                    "difflib.get_close_matches", wraps=difflib.get_close_matches
-                ) as spy,
-                pytest.raises(TemplateSyntaxError) as exc_info,
-            ):
-                self._render({})
+        with (
+            override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}),
+            patch("difflib.get_close_matches", wraps=difflib.get_close_matches) as spy,
+            pytest.raises(TemplateSyntaxError) as exc_info,
+        ):
+            self._render({})
         assert str(exc_info.value) == (
             "component 'nvbar' cannot be resolved because the template "
             "context has no current_template_path"
