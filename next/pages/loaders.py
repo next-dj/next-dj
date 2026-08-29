@@ -391,10 +391,17 @@ class LayoutTemplateLoader(TemplateLoader):
         `layout.djx` that appears or disappears moves the mtime of its
         directory and of no tracked file.
         """
+        return self._walk_ancestors(
+            file_path, self._watched_ancestor_depth(file_path.parent)
+        )
+
+    def _walk_ancestors(
+        self, file_path: Path, watched_depth: int
+    ) -> tuple[list[Path], list[Path]]:
+        """Climb the ancestors of `file_path` for layouts and watched directories."""
         layout_files: list[Path] = []
         watched_dirs: list[Path] = []
         current_dir = file_path.parent
-        watched_depth = self._watched_ancestor_depth(current_dir)
 
         for depth in range(_MAX_ANCESTOR_WALK_DEPTH):
             if current_dir == current_dir.parent:
@@ -430,8 +437,12 @@ class LayoutTemplateLoader(TemplateLoader):
         return min(*depths, _MAX_ANCESTOR_WALK_DEPTH)
 
     def _find_layout_files(self, file_path: Path) -> list[Path]:
-        """Return `layout.djx` paths from near to far plus global layouts."""
-        layout_files, _ = self.layout_sources(file_path)
+        """Return `layout.djx` paths from near to far plus global layouts.
+
+        The watched directories cost a `resolve` of the page trees, and no
+        caller down this path reads them, so the walk skips them.
+        """
+        layout_files, _ = self._walk_ancestors(file_path, 0)
         return layout_files
 
     def _get_additional_layout_files(self) -> list[Path]:
