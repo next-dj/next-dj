@@ -1,6 +1,5 @@
 from collections.abc import Callable, Generator
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -11,6 +10,7 @@ from next.components.signals import (
     component_rendered,
     components_registered,
 )
+from next.testing import SignalRecorder, capture_signals
 
 
 @pytest.fixture()
@@ -76,67 +76,28 @@ def component_info_factory(tmp_path: Path) -> Callable[..., ComponentInfo]:
 
 
 @pytest.fixture()
-def capture_component_registered() -> Generator[list[dict[str, Any]], None, None]:
-    """Capture ``component_registered`` signal events."""
-    events: list[dict[str, Any]] = []
-
-    def _listener(sender: object, **kwargs) -> None:
-        events.append({"sender": sender, **kwargs})
-
-    component_registered.connect(_listener)
-    try:
-        yield events
-    finally:
-        component_registered.disconnect(_listener)
+def capture_component_registered() -> Generator[SignalRecorder, None, None]:
+    """Record ``component_registered`` emissions."""
+    with capture_signals(component_registered) as recorder:
+        yield recorder
 
 
 @pytest.fixture()
-def capture_components_registered() -> Generator[list[dict[str, Any]], None, None]:
-    """Capture ``components_registered`` (plural) signal events."""
-    events: list[dict[str, Any]] = []
-
-    def _listener(sender: object, **kwargs) -> None:
-        events.append({"sender": sender, **kwargs})
-
-    components_registered.connect(_listener)
-    try:
-        yield events
-    finally:
-        components_registered.disconnect(_listener)
+def capture_components_registered() -> Generator[SignalRecorder, None, None]:
+    """Record ``components_registered`` (plural) emissions."""
+    with capture_signals(components_registered) as recorder:
+        yield recorder
 
 
 @pytest.fixture()
-def capture_component_backend_loaded() -> Generator[list[dict[str, Any]], None, None]:
-    """Capture ``component_backend_loaded`` events with their class sender."""
-    events: list[dict[str, Any]] = []
-
-    def _listener(
-        sender: object,
-        config: dict[str, Any] | None = None,
-        instance: object = None,
-        **kwargs,
-    ) -> None:
-        events.append(
-            {"sender": sender, "config": config, "instance": instance, **kwargs}
-        )
-
-    component_backend_loaded.connect(_listener)
-    try:
-        yield events
-    finally:
-        component_backend_loaded.disconnect(_listener)
+def capture_component_backend_loaded() -> Generator[SignalRecorder, None, None]:
+    """Record ``component_backend_loaded`` emissions."""
+    with capture_signals(component_backend_loaded) as recorder:
+        yield recorder
 
 
 @pytest.fixture()
-def capture_component_rendered() -> Generator[list[dict[str, Any]], None, None]:
-    """Capture ``component_rendered`` signal events."""
-    events: list[dict[str, Any]] = []
-
-    def _listener(sender: object, **kwargs) -> None:
-        events.append({"sender": sender, **kwargs})
-
-    component_rendered.connect(_listener)
-    try:
-        yield events
-    finally:
-        component_rendered.disconnect(_listener)
+def capture_component_rendered() -> Generator[SignalRecorder, None, None]:
+    """Record ``component_rendered`` emissions."""
+    with capture_signals(component_rendered) as recorder:
+        yield recorder

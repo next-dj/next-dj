@@ -296,7 +296,9 @@ class TestStaticFastPathView:
         view = unified_view(page_instance, page_file)
 
         view(build_page_request())
-        assert [event["file_path"] for event in capture_template_loaded] == [page_file]
+        assert [event.kwargs["file_path"] for event in capture_template_loaded] == [
+            page_file
+        ]
 
         view(build_page_request())
         assert len(capture_template_loaded) == 1

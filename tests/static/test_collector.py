@@ -371,6 +371,7 @@ class TestJsContextWire:
             (FirstWinsPolicy(), {"a": 1}, {"a": 2}, {"a": 1}),
             (DeepMergePolicy(), {"a": 1}, {"b": 2}, {"a": 1, "b": 2}),
         ],
+        ids=["first_wins", "deep_merge"],
     )
     def test_second_write_pops_cache_and_wire_reflects_merge(
         self,

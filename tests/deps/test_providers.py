@@ -191,9 +191,7 @@ class TestUrlKwargsProvider:
         ctx = _ctx(url_kwargs=url_kwargs)
         assert provider.can_handle(param, ctx) is expected
 
-    @pytest.mark.parametrize(
-        "case", URL_KWARGS_RESOLVE_CASES, ids=[c.id for c in URL_KWARGS_RESOLVE_CASES]
-    )
+    @pytest.mark.parametrize("case", URL_KWARGS_RESOLVE_CASES, ids=lambda case: case.id)
     def test_resolve(self, case: UrlKwargsResolveCase) -> None:
         """Resolve applies annotation coercion and missing key rules."""
         provider = UrlKwargsProvider()
@@ -205,9 +203,7 @@ class TestUrlKwargsProvider:
 class TestCoerceUrlValue:
     """Table-driven checks for ``_coerce_url_value``."""
 
-    @pytest.mark.parametrize(
-        "case", COERCE_URL_VALUE_CASES, ids=[c.id for c in COERCE_URL_VALUE_CASES]
-    )
+    @pytest.mark.parametrize("case", COERCE_URL_VALUE_CASES, ids=lambda case: case.id)
     def test_coerce(self, case: CoerceUrlValueCase) -> None:
         """Apply registered coercions and retain the input when conversion cannot run."""
         assert _coerce_url_value(case.raw, case.hint) == case.expected
@@ -229,9 +225,7 @@ class TestUrlByAnnotationProvider:
         assert provider.can_handle(param, ctx) is expected
 
     @pytest.mark.parametrize(
-        "case",
-        URL_BY_ANNOTATION_RESOLVE_CASES,
-        ids=[c.id for c in URL_BY_ANNOTATION_RESOLVE_CASES],
+        "case", URL_BY_ANNOTATION_RESOLVE_CASES, ids=lambda case: case.id
     )
     def test_resolve(self, case: UrlByAnnotationResolveCase) -> None:
         """Resolve reads url_kwargs by param name and coerces via DUrl."""

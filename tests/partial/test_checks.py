@@ -6,19 +6,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 from django.test import override_settings
 
-from next.checks import reset_check_caches
 from next.components import ComponentInfo, FileComponentsBackend
 from next.forms.backends import FormActionBackend, RegistryFormActionBackend
 from next.partial import checks
 from next.partial.registry import patch_op_registry, register_patch_op
 from tests.support import RootPagesRouter, patch_checks_router_manager_with_routers
-
-
-@pytest.fixture(autouse=True)
-def _reset_check_caches():
-    reset_check_caches()
-    yield
-    reset_check_caches()
 
 
 @contextmanager

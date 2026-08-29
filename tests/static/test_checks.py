@@ -9,7 +9,7 @@ from django.test import override_settings
 
 import next.pages.loaders as loaders_module
 import next.static.checks as checks_module
-from next.checks import NEXT, reset_check_caches
+from next.checks import NEXT
 from next.components import FileComponentsBackend
 from next.static import KindRegistry
 from next.static.checks import (
@@ -20,13 +20,6 @@ from next.static.checks import (
     check_static_backends,
 )
 from tests.support import patch_checks_router_manager
-
-
-@pytest.fixture(autouse=True)
-def _reset_check_caches():
-    reset_check_caches()
-    yield
-    reset_check_caches()
 
 
 def _ids(messages: list) -> list[str]:

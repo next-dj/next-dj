@@ -2,14 +2,11 @@ from collections.abc import Generator
 from pathlib import Path
 
 import pytest
-from django.core.cache import cache
 
-from next.forms.diagnostics import registration_diagnostics
-from next.forms.manager import form_action_manager
 from next.forms.wizard import SessionFormWizardBackend, wizard_backend_manager
 from next.pages.loaders import _load_python_module
 from next.testing import NextClient
-from tests.support import CountingWizardBackend
+from tests.support import CountingWizardBackend, isolated_form_registries
 
 
 _PARTIAL_DIR = Path(__file__).resolve().parent
@@ -44,23 +41,10 @@ def _partial_form_registries():
     Re-execution each test is idempotent because registration keys on the
     file path.
     """
-    backend = form_action_manager.default_backend
-    backend_snapshot = backend.snapshot()
-    diagnostics_snapshot = registration_diagnostics.snapshot()
-
-    wizard_backend_manager.reset()
-    cache.clear()
-
-    for module_path in _PARTIAL_MODULES:
-        _load_python_module(module_path)
-
-    yield
-
-    backend.restore(backend_snapshot)
-    registration_diagnostics.restore(diagnostics_snapshot)
-
-    wizard_backend_manager.reset()
-    cache.clear()
+    with isolated_form_registries():
+        for module_path in _PARTIAL_MODULES:
+            _load_python_module(module_path)
+        yield
 
 
 @pytest.fixture()

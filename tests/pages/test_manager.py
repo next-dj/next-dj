@@ -13,7 +13,6 @@ from django.test import override_settings
 
 import next.pages.loaders as loaders_module
 from next.checks import _load_python_module
-from next.conf import next_framework_settings
 from next.pages import Page, context, page
 from next.pages.loaders import (
     LayoutTemplateLoader,
@@ -1004,10 +1003,11 @@ class TestBrokenPageImportView:
         _page_file, pattern = self._broken_pattern(
             page_instance, tmp_path, url_parser, broken_source
         )
-        with override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}):
-            next_framework_settings.reload()
-            with pytest.raises(PageModuleImportError):
-                pattern.callback(build_page_request())
+        with (
+            override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}),
+            pytest.raises(PageModuleImportError),
+        ):
+            pattern.callback(build_page_request())
 
     @_broken_sources
     def test_broken_page_returns_404_in_prod(
@@ -1135,10 +1135,11 @@ class TestAuthorizationOutcomeBrokenPage:
 
     def test_raises_under_strict_loading(self, page_instance, tmp_path) -> None:
         page_file = self._broken_file(tmp_path)
-        with override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}):
-            next_framework_settings.reload()
-            with pytest.raises(PageModuleImportError):
-                page_instance.authorization_outcome(page_file, build_page_request())
+        with (
+            override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}),
+            pytest.raises(PageModuleImportError),
+        ):
+            page_instance.authorization_outcome(page_file, build_page_request())
 
     def test_raises_in_prod_instead_of_404(self, page_instance, tmp_path) -> None:
         page_file = self._broken_file(tmp_path)

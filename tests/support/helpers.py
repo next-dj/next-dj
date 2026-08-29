@@ -116,11 +116,6 @@ def _resolver_with_form() -> DependencyResolver:
     )
 
 
-def _full_resolver() -> DependencyResolver:
-    """Return a resolver with all auto-registered providers (for callable dependency tests)."""
-    return DependencyResolver()
-
-
 @contextmanager
 def named_temp_py(content: str, *, suffix: str = ".py") -> Generator[Path, None, None]:
     """Write ``content`` to a named temp file and delete it after the block."""

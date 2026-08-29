@@ -27,7 +27,6 @@ from next.checks.common import (
     reset_components_manager_cache,
     reset_router_manager_cache,
 )
-from next.conf import next_framework_settings
 from next.conf.signals import settings_reloaded
 from next.urls import (
     FileRouterBackend,
@@ -399,7 +398,6 @@ class TestPageTreeSkipNames:
         ]
 
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": entries}):
-            next_framework_settings.reload()
             router = RouterFactory.create_backend(entries[1])
             routes = [url for url, _page in iter_scanned_page_pairs(router)]
 
@@ -495,7 +493,6 @@ class TestPageTreeComponentFolders:
         entry = file_router_config_entry(pages_dir=tree, dirs=["_drafts"])
 
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}):
-            next_framework_settings.reload()
             router = RouterFactory.create_backend(entry)
             assert list(iter_page_tree_component_folders(router)) == []
 
@@ -528,7 +525,6 @@ class TestPageTreeComponentFolders:
                 ]
             }
         ):
-            next_framework_settings.reload()
             assert list(iter_page_tree_component_folders(router)) == [
                 (widgets, tree, "")
             ]
@@ -583,7 +579,6 @@ class TestFileRouterWalkParity:
         entry = file_router_config_entry(pages_dir=tree, dirs=dirs)
 
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}):
-            next_framework_settings.reload()
             router = RouterFactory.create_backend(entry)
             checked = list(iter_scanned_page_pairs(router))
             routed = [
@@ -610,7 +605,6 @@ class TestFileRouterWalkParity:
         entry = file_router_config_entry(pages_dir=tree, dirs=dirs)
 
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}):
-            next_framework_settings.reload()
             router = RouterFactory.create_backend(entry)
 
             assert page_tree_skip_names(router) == router._skip_dir_names
@@ -630,7 +624,6 @@ class TestFileRouterWalkParity:
         with override_settings(
             NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry], "COMPONENT_BACKENDS": components}
         ):
-            next_framework_settings.reload()
             router = RouterFactory.create_backend(entry)
             routes = [url for url, _page in iter_scanned_page_pairs(router)]
 
