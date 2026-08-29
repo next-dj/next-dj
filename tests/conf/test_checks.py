@@ -45,6 +45,15 @@ class TestValueTypeErrors:
             ("URL_RESOLVER", []),
             ("NEXT_JS_OPTIONS", []),
         ],
+        ids=[
+            "list_key_given_str",
+            "list_key_given_dict",
+            "list_key_given_dict_static",
+            "list_key_given_dict_loaders",
+            "str_key_given_list",
+            "str_key_given_list_resolver",
+            "dict_key_given_list",
+        ],
     )
     def test_mistyped_key_yields_error(self, key: str, bad_value: object) -> None:
         with override_settings(NEXT_FRAMEWORK={key: bad_value}):

@@ -701,12 +701,8 @@ _HOOK_LAYERS = (
 class TestPermissionHookReturnContract:
     """Both permission layers honour one return contract through full dispatch."""
 
-    @pytest.mark.parametrize(
-        "layer", _HOOK_LAYERS, ids=[layer.id for layer in _HOOK_LAYERS]
-    )
-    @pytest.mark.parametrize(
-        "case", PERMISSION_OUTCOME_CASES, ids=[c.id for c in PERMISSION_OUTCOME_CASES]
-    )
+    @pytest.mark.parametrize("layer", _HOOK_LAYERS, ids=lambda layer: layer.id)
+    @pytest.mark.parametrize("case", PERMISSION_OUTCOME_CASES, ids=lambda case: case.id)
     def test_matrix_via_dispatch(
         self,
         layer: _HookLayer,

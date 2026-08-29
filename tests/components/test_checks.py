@@ -235,6 +235,15 @@ class TestChecks:
             "import next\n\n@next.page.context\ndef data():\n    return {}\n",
             "import next.pages\n\n@next.pages.context\ndef data():\n    return {}\n",
         ],
+        ids=[
+            "from_next_pages",
+            "from_next",
+            "aliased_import",
+            "page_attribute",
+            "next_attribute",
+            "next_page_attribute",
+            "next_pages_attribute",
+        ],
     )
     def test_check_component_py_no_pages_context_reports_import(
         self, source: str, tmp_path: Path, min_component_config: dict
@@ -259,6 +268,12 @@ class TestChecks:
             "from next.components import context\n",
             "from next import component\n\n@component.page.context\ndef data():\n    return {}\n",
             "def loader():\n    return None\n\n@loader().context\ndef data():\n    return {}\n",
+        ],
+        ids=[
+            "component_attribute",
+            "from_next_components",
+            "component_page_attribute",
+            "call_result_attribute",
         ],
     )
     def test_check_component_py_no_pages_context_allows_component_context(
