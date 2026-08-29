@@ -983,8 +983,6 @@ class TestBrokenPageImportView:
     def test_healthy_page_renders_under_debug_with_sibling_error_recorded(
         self, page_instance, tmp_path, url_parser
     ) -> None:
-        # A recorded failure for another page must not trip the error probe
-        # of a healthy view even when the volume flags are active.
         _page_file, _pattern = self._broken_pattern(page_instance, tmp_path, url_parser)
         ok_dir = tmp_path / "ok"
         ok_dir.mkdir()
@@ -1064,8 +1062,7 @@ class TestBrokenPageImportView:
     def test_render_page_broken_after_build_raises_under_debug(
         self, page_instance, tmp_path, url_parser
     ) -> None:
-        # A `render()` page keeps its build-time module, so the recorded
-        # failure is the only thing that can report the rewrite.
+        # The build-time module survives the rewrite, only the record reports it.
         page_dir = tmp_path / "dyn"
         page_dir.mkdir()
         page_file = page_dir / "page.py"
@@ -1084,8 +1081,6 @@ class TestBrokenPageImportView:
     def test_render_page_renders_under_debug_with_sibling_error_recorded(
         self, page_instance, tmp_path, url_parser
     ) -> None:
-        # A recorded failure for another page must not trip the error probe
-        # of a healthy `render()` view either.
         _page_file, _pattern = self._broken_pattern(page_instance, tmp_path, url_parser)
         ok_dir = tmp_path / "dyn"
         ok_dir.mkdir()

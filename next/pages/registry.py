@@ -300,11 +300,9 @@ class PageContextRegistry:
     ) -> dict[str, Any]:
         """Return values from ancestor `page.py` callables marked `inherit_context`.
 
-        Runs every `@context(..., inherit_context=True)` callable registered by
-        an ancestor `page.py`. A sibling `layout.djx` is not required.
-        The shared HTML envelope can live one level up under
-        ``PAGE_BACKENDS["DIRS"]``, and pages declaring inheritable context
-        should still surface it on descendant routes.
+        Runs every `@context(..., inherit_context=True)` callable an ancestor
+        `page.py` registered, with no sibling `layout.djx` required, so the
+        envelope under ``PAGE_BACKENDS["DIRS"]`` reaches descendant routes.
         """
         inherited_context: dict[str, Any] = {}
         for key, entry in self._inheritable_entries(file_path):
@@ -331,9 +329,8 @@ class PageContextRegistry:
     def _entries_in_merge_order(self, file_path: Path) -> _OrderedEntries:
         """Return this file's callables in the order the merge consumes them.
 
-        Keyless callables come first so a keyed value written afterwards is
-        never overwritten by a dict merge, and keyed ones follow in string
-        order so the outcome does not depend on registration order.
+        Keyless callables come first so a dict merge never overwrites a keyed
+        value, and keyed ones follow in string order.
         """
         self._sync_memos()
         entries = self._merge_order.get(file_path)

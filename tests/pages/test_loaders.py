@@ -660,9 +660,8 @@ class TestLayoutTemplateLoader:
     def test_the_watched_directories_stop_at_the_page_root(self, tmp_path) -> None:
         """A page inside a routed tree watches no directory above that tree.
 
-        The layout above the tree still joins the chain, because discovery
-        keeps climbing. Only the mtime watch stops, so an unrelated write to
-        a shared parent evicts no composition.
+        The layout above still joins the chain, only the mtime watch stops, so
+        an unrelated write to a shared parent evicts no composition.
         """
         loader = LayoutTemplateLoader()
 

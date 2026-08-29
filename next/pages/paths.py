@@ -1,8 +1,7 @@
 """Per-page path facts memoised for the render path.
 
 Nothing here depends on a request, so a value is read once per page path
-and dropped by the lifecycle that rebuilds a composition. The memo is
-process-wide, because two managers reading one path read one disk.
+and dropped by the lifecycle that rebuilds a composition.
 """
 
 from __future__ import annotations
@@ -15,8 +14,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-# The bound every ancestor walk in the package shares, so a page nested under a
-# pathological tree cannot walk to the filesystem root forever.
+# The bound every ancestor walk shares, so none reaches the filesystem root.
 _MAX_ANCESTOR_WALK_DEPTH = 64
 
 

@@ -8,8 +8,7 @@ from obs.serializers import WrappedJsContextSerializer
 from next import context
 
 
-# Chart.js sits at the page level, not next to the `render_chart` widget,
-# because a page-level script lands before every widget's co-located file.
+# Page level, not next to the widget, because it must land first.
 scripts = ["https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"]
 
 WINDOW_TO_MINUTES = {"1m": 1, "5m": 5, "1h": 60}

@@ -387,9 +387,9 @@ class LayoutTemplateLoader(TemplateLoader):
     def layout_sources(self, file_path: Path) -> tuple[list[Path], list[Path]]:
         """Return the layout files behind `file_path` and the directories watched.
 
-        A caller detecting change needs the directories too, because a
-        `layout.djx` that appears or disappears moves the mtime of its
-        directory and of no tracked file.
+        A `layout.djx` appearing or disappearing moves the mtime of its
+        directory and of no tracked file, so a caller detecting change needs
+        the directories too.
         """
         return self._walk_ancestors(
             file_path, self._watched_ancestor_depth(file_path.parent)
@@ -422,9 +422,8 @@ class LayoutTemplateLoader(TemplateLoader):
     def _watched_ancestor_depth(self, start_dir: Path) -> int:
         """Return how many ancestors of `start_dir` are worth watching for change.
 
-        The walk itself climbs past the page tree, because a layout above it
-        still joins the chain, but a directory up there is a shared one like
-        the home directory, whose mtime moves for reasons no page shares.
+        The walk climbs past the page tree because a layout above it still
+        joins the chain, but a directory up there moves for reasons no page shares.
         """
         resolved = start_dir.resolve()
         depths = [

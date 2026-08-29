@@ -5,8 +5,7 @@ from obs.serializers import WrappedJsContextSerializer
 from next import component
 
 
-# React and Babel-standalone are declared in `obs/dashboards/page.py`, because
-# a page-level script lands before this widget's own `component.jsx`.
+# React and Babel sit in the page, because its scripts land before this one.
 
 
 @component.context(

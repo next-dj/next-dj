@@ -187,8 +187,6 @@ class TestAssetVersionMemo:
             assert hasher.call_count == 1
 
     def test_a_live_manifest_swap_keeps_the_previous_version(self) -> None:
-        # a manifest replaced in a live process without a reload signal and
-        # without a restart keeps serving the version resolved before it
         with _backend_options({"VERSION": "manifest"}):
             with patch(
                 "next.partial.manager.staticfiles_storage",

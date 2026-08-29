@@ -60,7 +60,6 @@ def inject_vite_dev_client(sender: StaticCollector, **kwargs) -> None:
     sender.add(StaticAsset(url=f"{origin}/@vite/client", kind="module"), prepend=True)
 
 
-# The dev-client injector is wired only when `VITE_DEV_ORIGIN` opts into the
-# Vite dev server, so a plain `npm run build` needs no second terminal.
+# Wired only when `VITE_DEV_ORIGIN` opts in, so a plain build needs no dev server.
 if settings.VITE_DEV_ORIGIN:
     collector_finalized.connect(inject_vite_dev_client)

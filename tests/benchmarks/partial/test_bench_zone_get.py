@@ -51,9 +51,9 @@ def _zone_view(
 ) -> Iterator[Callable[..., HttpResponseBase]]:
     """Build the unified view of a ten-zone page with `providers` zone-gated callables.
 
-    Each provider is bound to its own zone, so a tick for one zone runs at most
-    one of them and the rest are the filter cost the batch pays. Registrations
-    land in the module-level page singleton, so teardown takes them back out.
+    Each provider is bound to its own zone, so a tick runs at most one of them
+    and the rest are the filter cost. The registrations land in the module-level
+    page singleton, so teardown takes them back out.
     """
     page_file = build_layout_page(directory, layouts=2, template=_ZONED_TEMPLATE)
     registry = page_singleton._context_manager

@@ -62,8 +62,7 @@ def template_edits_watched() -> bool:
     """Whether the composition caches stat their sources to notice an edit.
 
     Autoreload leaves `.djx` alone, so under `DEBUG` the stat is the only
-    thing making an edit visible without a restart, while production trades
-    it for a stat-free hit. Read per call, so an override takes effect.
+    thing making an edit visible. Read per call, so an override takes effect.
     """
     return bool(settings.DEBUG)
 
@@ -416,9 +415,8 @@ class Page:
     def _layout_skeleton_for(self, file_path: Path) -> str:
         """Return the cached layout chain of `file_path` with an empty body slot.
 
-        The skeleton carries its own mtime snapshot, because the composed
-        registry refreshes its own on eviction and would otherwise hide a
-        layout edit from this cache.
+        The skeleton keeps its own mtime snapshot, because the composed
+        registry refreshes its own on eviction and would hide a layout edit.
         """
         skeleton = self._skeleton_registry.get(file_path)
         if skeleton is None or self._is_template_stale(
@@ -428,8 +426,7 @@ class Page:
             self._skeleton_registry[file_path] = skeleton
             self._skeleton_source_mtimes.pop(file_path, None)
             self._record_template_source_mtimes(file_path, self._skeleton_source_mtimes)
-            # A dynamic page never registers a template, so this is where a
-            # `template.djx` appearing next to it invalidates the path facts.
+            # A dynamic page registers no template, so the facts drop here.
             forget_page_path_info(file_path)
         return skeleton
 
@@ -508,11 +505,9 @@ class Page:
     ) -> Callable[..., HttpResponseBase]:
         """Return the view for a page, on the branch its body source dictates.
 
-        A page without a module-level `render()` serves the same composed
-        template on every request, while a page with one, or a
-        `broken_at_build` page whose module a request re-reads, resolves its
-        body per request. The view carries `next_page_path` so the form
-        dispatch maps a resolved origin URL back to the page source.
+        A page without a module-level `render()` serves one composed template,
+        anything else resolves its body per request. The view carries
+        `next_page_path` so form dispatch maps an origin URL back to the page.
         """
         has_render = module is not None and callable(getattr(module, "render", None))
         view = (
@@ -559,8 +554,7 @@ class Page:
 
         A page marked `broken_at_build` re-reads its module per request, so a
         fixed file comes back without a restart and a still-broken one never
-        serves the sibling template past the guards its `render()` would have
-        applied.
+        slips past the guards its `render()` would have applied.
         """
 
         def view(request: HttpRequest, **kwargs) -> HttpResponseBase:
@@ -574,8 +568,7 @@ class Page:
                     if fail_loudly():
                         raise error
                     raise Http404
-            # Both guards run first, so a healthy site and a flags-off
-            # production never pay the `last_load_error` stat.
+            # Both guards first, so a healthy site pays no stat.
             elif has_load_errors() and fail_loudly():
                 error = last_load_error(file_path)
                 if error is not None:
@@ -632,9 +625,8 @@ class Page:
     ) -> None:
         """Snapshot mtimes of the template sources of `file_path` into `store`.
 
-        Taken whether or not the process watches template edits, because an
-        entry composed while the watch was off would otherwise hold nothing
-        to compare against and could never go stale once it comes on.
+        Taken whether or not the process watches edits, because an entry
+        composed with the watch off would hold nothing to compare against.
         """
         paths = self._get_template_source_paths(file_path)
         if not paths:
@@ -649,9 +641,8 @@ class Page:
     def _is_template_stale(self, file_path: Path, store: _SourceMtimes) -> bool:
         """Return whether any source tracked in `store` changed on disk.
 
-        A source that no longer stats reads as changed, because a deleted
-        `layout.djx` alters the composition exactly like an edited one. A
-        process that watches no edit answers no without a single stat.
+        A source that no longer stats reads as changed, and a process
+        watching no edit answers no without a single stat.
         """
         if not template_edits_watched():
             return False
