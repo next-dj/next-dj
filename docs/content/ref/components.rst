@@ -105,9 +105,10 @@ Renderers
    :members:
 
 ``ComponentsManager`` wires one ``CachedComponentTemplateLoader`` into its render pipeline, and the loader is fixed rather than configurable.
-It keeps the compiled ``Template`` of each component and revalidates it against the mtime of the file the body was read from, so a repeated render pays neither the read nor the parse.
-That mtime is taken before the body is read, so a save landing between the two expires the entry instead of hiding behind it.
-The cache holds the same 2048 entries the other path-keyed component caches do, and a ``TEMPLATES`` change drops it whole, because a compiled ``Template`` carries the engine that built it.
+It keeps the compiled ``Template`` of each component, so a repeated render pays neither the read nor the parse.
+Under ``DEBUG`` the entry is revalidated against the mtime of the file the body was read from, and an edit reaches the next render.
+With ``DEBUG`` off nothing stats that file, and the compilation stands until eviction drops it.
+The cache is bounded at 2048 compiled templates, the bound the visibility resolver also uses, and a ``TEMPLATES`` change drops it whole, because a compiled ``Template`` carries the engine that built it.
 A component backend reads template bodies through that shared loader rather than substituting its own.
 
 Internal infrastructure

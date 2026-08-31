@@ -122,7 +122,7 @@ A custom router that builds routes from another source rebuilds them through ``r
 
 A ``.djx`` edit triggers neither path.
 Templates are re-read on render, and under ``DEBUG`` the page and component layers invalidate their cached compilation against the source mtime.
-A saved edit shows up on the next request without a process restart, while a production process holds the compilation for its whole life.
+A saved edit shows up on the next request without a process restart, while with ``DEBUG`` off it takes one.
 
 Signals
 -------

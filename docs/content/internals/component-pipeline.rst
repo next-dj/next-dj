@@ -76,7 +76,7 @@ Modules
 ``next.components.manager``.
    ``ComponentsManager`` orchestrates the backends, shares one render pipeline between them, and builds the list with the shared ``load_backends`` helper.
    A ``settings_reloaded`` drops the cached backends, and the next access rebuilds them.
-   A Django ``TEMPLATES`` change drops the render pipeline the same way, because a compiled component template carries the engine that built it and would otherwise outlive the settings it was built under.
+   A Django ``TEMPLATES`` change drops the render pipeline the same way, because a compiled component template carries the engine that built it.
    ``next.components.watch`` resolves the same entries with ``resolve_backend_class`` and never instantiates them, because its scan is read-only.
 
 ``next.components.checks``.

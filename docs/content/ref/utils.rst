@@ -11,7 +11,7 @@ The rest of the module is framework machinery and is excluded from the listing b
 It backs decorator registration, attributing a decorated object to the file where it was declared, naming it for diagnostics, and collecting the registrations that landed on another file.
 It also holds ``walk_page_tree``, the depth-first page-tree walk the file router and the system checks both run, and ``page_roots_shape_error``, the shared shape probe a check runs over what a router reports.
 Both live here for the same reason ``PageRoot`` does.
-``template_edits_watched`` is here for the same reason, the ``DEBUG`` predicate the page, component, and static caches read before they stat anything.
+The ``DEBUG`` predicate ``template_edits_watched``, which the page, component, and static caches read before they stat anything, is here for the same reason.
 
 ``resolve_base_dir`` returns ``settings.BASE_DIR`` coerced to ``pathlib.Path``, or ``None`` when it is unset, for backends that resolve project-relative paths.
 ``classify_dirs_entries`` splits a backend ``DIRS`` list into existing directory roots and plain skip-name segments, the same split the file router applies.
