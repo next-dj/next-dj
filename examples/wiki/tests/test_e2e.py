@@ -82,6 +82,24 @@ class TestFileDocs:
         assert needle in response.content.decode()
 
 
+class TestDocFigureChildren:
+    """The docs figure splices its block body and escapes the caption prop."""
+
+    def test_children_render_as_markup_while_the_prop_escapes(
+        self, client: NextClient
+    ) -> None:
+        body = client.get(reverse("next:page_docs_components")).content.decode()
+        assert "this <em>emphasis</em> and this" in body
+        assert "<strong>bold run</strong>" in body
+        assert "&lt;em&gt;emphasis&lt;/em&gt;" in body
+        assert "<em>emphasis</em></figcaption>" not in body
+
+    def test_routing_page_reuses_the_figure(self, client: NextClient) -> None:
+        body = client.get(reverse("next:page_docs_routing")).content.decode()
+        assert "<figure" in body
+        assert "<li><code>routes/page.py</code> → <code>/</code></li>" in body
+
+
 class TestArticleCreation:
     """Posting the create form publishes a fresh `/wiki/<slug>/` URL."""
 

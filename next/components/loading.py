@@ -51,7 +51,11 @@ class ModuleCache:
         self._order.clear()
 
     def __len__(self) -> int:
-        """Return the number of cached entries."""
+        """Return the number of cached entries.
+
+        An empty cache is therefore falsy, so a caller taking one as an
+        argument checks it against `None` rather than for truth.
+        """
         return len(self._order)
 
     def __contains__(self, path: Path) -> bool:
@@ -64,7 +68,7 @@ class ModuleLoader:
 
     def __init__(self, cache: ModuleCache | None = None) -> None:
         """Bind the loader to a shared or new `ModuleCache`."""
-        self._cache = cache or ModuleCache()
+        self._cache = cache if cache is not None else ModuleCache()
 
     def load(self, path: Path) -> ModuleType | None:
         """Return the module for `path`, loading it on cache miss."""

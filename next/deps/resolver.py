@@ -19,7 +19,7 @@ from .providers import ParameterProvider, RegisteredParameterProvider
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     from django.http import HttpRequest
 
@@ -302,7 +302,7 @@ class DependencyResolver:
         func: Callable[..., Any],
         *,
         request: HttpRequest | None = None,
-        template_context: dict[str, Any] | None = None,
+        template_context: Mapping[str, Any] | None = None,
         _cache: dict[str, Any] | DependencyCache | None = None,
         _stack: list[str] | None = None,
     ) -> dict[str, Any]:
@@ -313,7 +313,7 @@ class DependencyResolver:
         providers such as `HttpRequestProvider` on a parameter literally
         named `request`.
         """
-        tc: dict[str, Any] = dict(template_context or {})
+        tc: Mapping[str, Any] = template_context or {}
         injectable = {
             k: v for k, v in tc.items() if k not in self.EXPLICIT_RESOLVE_KEYS
         }

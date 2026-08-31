@@ -41,6 +41,7 @@ from .manager import (
 )
 from .registry import ComponentRegistry, ComponentVisibilityResolver
 from .renderers import (
+    CachedComponentTemplateLoader,
     ComponentRenderer,
     ComponentRenderStrategy,
     ComponentTemplateLoader,
@@ -53,6 +54,7 @@ from .watch import get_component_paths_for_watch
 
 __all__ = [
     "BoomBackend",
+    "CachedComponentTemplateLoader",
     "ComponentContextManager",
     "ComponentContextRegistry",
     "ComponentInfo",

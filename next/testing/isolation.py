@@ -47,6 +47,16 @@ def reset_registries() -> None:
     reset_components()
 
 
+def reset_component_templates() -> None:
+    """Drop compiled component templates so the next render reads sources again.
+
+    Needed between renders against a component rewritten on disk (for
+    example in `tmp_path`), because outside `DEBUG` the loader reuses a
+    compiled template without checking its source for an edit.
+    """
+    components_manager.clear_template_caches()
+
+
 def reset_page_cache() -> None:
     """Drop the page template cache and source-mtime bookkeeping.
 
@@ -58,6 +68,7 @@ def reset_page_cache() -> None:
 
 
 __all__ = [
+    "reset_component_templates",
     "reset_components",
     "reset_form_actions",
     "reset_form_registration_state",

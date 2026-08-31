@@ -5,10 +5,26 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from django.test import override_settings
 
 from next.pages.loaders import _load_python_module
-from next.utils import callable_name, defining_file, resolve_base_dir
+from next.utils import (
+    callable_name,
+    defining_file,
+    resolve_base_dir,
+    template_edits_watched,
+)
 from tests.support import attribution, unwrapped_decorator, wraps_decorator
+
+
+class TestTemplateEditsWatched:
+    """Tests for ``template_edits_watched``."""
+
+    def test_the_gate_follows_the_debug_setting(self, watched_template_edits) -> None:
+        """The predicate is read per call, so an override takes effect at once."""
+        assert template_edits_watched() is True
+        with override_settings(DEBUG=False):
+            assert template_edits_watched() is False
 
 
 class TestResolveBaseDir:

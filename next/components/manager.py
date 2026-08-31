@@ -15,6 +15,7 @@ from next.conf.signals import settings_reloaded
 from .backends import _DEFAULT_BACKEND_PATH, ComponentsBackend
 from .loading import ModuleLoader
 from .renderers import (
+    CachedComponentTemplateLoader,
     ComponentRenderer,
     ComponentTemplateLoader,
     CompositeComponentRenderer,
@@ -48,7 +49,7 @@ class ComponentsManager:
 
         ml = ModuleLoader()
 
-        tl = ComponentTemplateLoader(ml)
+        tl = CachedComponentTemplateLoader(ml)
         self._template_loader = tl
         simple = SimpleComponentRenderer(tl)
         composite = CompositeComponentRenderer(ml, tl)
@@ -63,6 +64,14 @@ class ComponentsManager:
         """Return the shared `ComponentTemplateLoader` used for template reads."""
         self._ensure_render_pipeline()
         return cast("ComponentTemplateLoader", self._template_loader)
+
+    def clear_template_caches(self) -> None:
+        """Drop compiled component templates without rebuilding the pipeline.
+
+        Outside `DEBUG` the loader reuses a compiled template without checking its
+        source, so a caller that rewrote a component on disk drops it here.
+        """
+        self.template_loader.clear()
 
     @property
     def component_renderer(self) -> ComponentRenderer:

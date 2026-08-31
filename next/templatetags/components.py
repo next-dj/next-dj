@@ -10,6 +10,7 @@ short void ``{% set_slot "name" %}`` when there is no default slot body.
 from __future__ import annotations
 
 import difflib
+import functools
 import logging
 import re
 from dataclasses import dataclass
@@ -45,6 +46,10 @@ _COMPONENT_NAME_INDEX = 1
 _SLOT_ARG_COUNT = 2
 _COMPONENT_MIN_BITS = 2
 
+# Distinct ``current_template_path`` strings the process memoises, the same
+# bound the other path-keyed component caches use.
+_PATH_MEMO_MAX_ENTRIES = 2048
+
 _END_BLOCK_COMPONENT = ("/component",)
 _END_BLOCK_SLOT = ("/slot",)
 _END_BLOCK_SET_SLOT = ("/set_slot",)
@@ -65,6 +70,15 @@ _SLOT_MISSING: Any = object()
 
 def _strip_quotes(raw: str) -> str:
     return raw.strip("'\"").strip()
+
+
+@functools.lru_cache(maxsize=_PATH_MEMO_MAX_ENTRIES)
+def _resolve_template_path(raw: str) -> Path:
+    """Return the resolved file for a raw ``current_template_path`` string.
+
+    One page path reaches every node the page renders, so the memo is process-wide.
+    """
+    return Path(raw).resolve()
 
 
 def _comment_safe(text: str) -> str:
@@ -176,15 +190,13 @@ class ComponentNode(Node):
     def _template_path_from_context(self, context: template.Context) -> Path | None:
         """Return a resolved path from ``current_template_path``, or ``None``."""
         raw = context.get("current_template_path")
-        if raw is None:
-            return None
+        # A ``Path`` under this key was written by a render that already
+        # resolved it, so only the ``str`` spelling reaches the filesystem.
         if isinstance(raw, Path):
-            path = raw
-        elif isinstance(raw, str):
-            path = Path(raw)
-        else:
-            return None
-        return path.resolve()
+            return raw
+        if isinstance(raw, str):
+            return _resolve_template_path(raw)
+        return None
 
     def _close_match(self, path: Path) -> str | None:
         """Return the closest visible component name for a did-you-mean hint.
@@ -256,12 +268,17 @@ class ComponentNode(Node):
                 else:
                     child_chunks.append(node.render(context))
 
-        parent_flat = dict(cast("dict[str, Any]", context.flatten()))
+        # ``flatten`` returns a dict built for this call alone, so the render
+        # context is filled in place instead of through another copy.
+        render_ctx = cast("dict[str, Any]", context.flatten())
         for key in _INTERNAL_CONTEXT_KEYS:
-            parent_flat.pop(key, None)
-        render_ctx: dict[str, Any] = {**parent_flat, **self._resolved_props(context)}
+            render_ctx.pop(key, None)
+        render_ctx.update(self._resolved_props(context))
         render_ctx["current_template_path"] = path
-        render_ctx["children"] = "".join(child_chunks)
+        # Children arrive as finished markup, so the join is spliced in as
+        # written, the way slot content already is. Whether the values inside
+        # were escaped is the calling template's business.
+        render_ctx["children"] = SafeString("".join(child_chunks))
         render_ctx[COMPONENT_PROPS_CONTEXT_KEY] = self.prop_names
 
         for slot_name, content in slots.items():

@@ -8,7 +8,7 @@ A wiki served from two stores at once. Some pages live as files in `wiki/routes/
 | --- | --- |
 | `/` | Index with a curated list of file documentation and every article in the database. |
 | `/docs/routing/` | File-backed page describing how the file router works. |
-| `/docs/components/` | File-backed page describing the composite component pattern. |
+| `/docs/components/` | File-backed page describing the composite component pattern and the block children channel. |
 | `/articles/new/` | Create form with a live Markdown preview pane. |
 | `/articles/edit/<slug>/` | Edit form for the given article with a live Markdown preview. |
 | `/wiki/<slug>/` | Public article view rendered from the database row. |
@@ -74,7 +74,13 @@ The search form carries `data-next-target="search-results"`, `data-next-trigger=
 
 `Article` carries a `locked` boolean. The edit form in `wiki/routes/articles/edit/[slug]/page.py` declares `has_object_permission(self)`, an object-level hook that the framework resolves like `on_valid` and runs after the form binds, so `self.instance` is the loaded target row. The override reads only what it needs from `self.instance` and returns `not self.instance.locked`. A locked article short-circuits to a bare 403 before validation runs, so there is no form re-render. The create form has no such hook and stays open.
 
-### 8. No nested layout
+### 8. Free children in the documentation figure
+
+Both file-backed doc pages wrap examples in [`wiki/routes/docs/_blocks/doc_figure/`](wiki/routes/docs/_blocks/doc_figure/). The component sits inside the page tree, so it is visible from every template under `/docs/` and from nowhere else. It has exactly one insertion point, so a named slot would be ceremony: the caller writes markup between `{% #component "doc_figure" %}` and `{% /component %}`, the framework hands it over as `children`, and the template splices it with `{{ children }}`.
+
+The two channels differ, and `/docs/components/` shows the difference on one call. The block body is spliced as written, so the `<em>` and `<strong>` runs inside it reach the page as markup — whether the values interpolated there were escaped is the calling template's business, exactly as with `{% include %}`. The `caption` prop carries the same snippet from `markup_sample` in `page.py` and is escaped like every prop, so the figcaption shows `<em>emphasis</em>` as text.
+
+### 9. No nested layout
 
 The example wires only one `layout.djx` at the routes root. A nested layout is not needed and would add noise. Examples that do need nested layouts are `examples/multi-tenant` and `examples/markdown-blog`.
 
@@ -84,3 +90,4 @@ The example wires only one `layout.djx` at the routes root. A nested layout is n
 - [next/urls/backends.py](../../next/urls/backends.py) — `FileRouterBackend.generate_urls` is the public extension surface.
 - [next/deps/providers.py](../../next/deps/providers.py) — DI provider contract used by `ArticleProvider`.
 - [next/components/context.py](../../next/components/context.py) — `@component.context` wiring used by `markdown_preview`.
+- [next/templatetags/components.py](../../next/templatetags/components.py) — the `{% #component %}` tag that collects slots and free children.

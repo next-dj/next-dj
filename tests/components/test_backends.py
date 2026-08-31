@@ -568,6 +568,21 @@ class TestModuleLoader:
         m2 = loader.load(path)
         assert m1 is m2
 
+    def test_empty_shared_cache_is_kept(self, tmp_path: Path) -> None:
+        """An empty ``ModuleCache`` handed in stays the loader's cache.
+
+        ``ModuleCache`` defines ``__len__``, so a fresh one is falsy and a
+        truthiness check would silently unshare it from other loaders.
+        """
+        path = tmp_path / "mod.py"
+        path.write_text("x = 1\n")
+        shared = ModuleCache()
+        assert len(shared) == 0
+        loaded = ModuleLoader(shared).load(path)
+        assert loaded is not None
+        assert path in shared
+        assert ModuleLoader(shared).load(path) is loaded
+
     def test_load_returns_none_when_spec_missing(self, tmp_path: Path) -> None:
         """_load_from_disk returns None when spec_from_file_location returns None."""
         path = tmp_path / "empty.py"

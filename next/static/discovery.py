@@ -28,9 +28,8 @@ import os
 from collections import OrderedDict
 from typing import TYPE_CHECKING, NamedTuple, Protocol, runtime_checkable
 
-from django.conf import settings
-
 from next.pages import loaders as pages_loaders
+from next.utils import template_edits_watched
 
 from .assets import StaticAsset, default_kinds
 from .collector import default_placeholders
@@ -317,11 +316,10 @@ class AssetDiscovery:
     def _plan_stale(self, plan: _PageAssetPlan) -> bool:
         """Whether a directory the plan was read from has moved since.
 
-        Only `DEBUG` pays the stats. An asset created or deleted moves the
-        mtime of the directory holding it. Read per call, so an override
-        takes effect.
+        Only a process watching template edits pays the stats. An asset created or
+        deleted moves the mtime of the directory holding it.
         """
-        if not settings.DEBUG:
+        if not template_edits_watched():
             return False
         for directory, mtime in plan.directory_mtimes:
             try:

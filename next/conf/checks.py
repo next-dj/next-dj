@@ -38,11 +38,11 @@ _TYPED_LIST_KEYS: frozenset[str] = NextFrameworkSettings.LIST_KEYS - {
     "FORM_ANCHOR_FILES",
     "PARTIAL_BACKENDS",
 }
-_KEY_TYPES: dict[str, type] = dict.fromkeys(sorted(_TYPED_LIST_KEYS), list) | {
-    "URL_NAME_TEMPLATE": str,
-    "URL_RESOLVER": str,
-    "NEXT_JS_OPTIONS": dict,
-}
+_KEY_TYPES: dict[str, type] = (
+    dict.fromkeys(sorted(_TYPED_LIST_KEYS), list)
+    | dict.fromkeys(sorted(NextFrameworkSettings.STR_KEYS), str)
+    | {"NEXT_JS_OPTIONS": dict}
+)
 
 _SILENCE_HINT = (
     "Fix the value in settings.NEXT_FRAMEWORK, or silence this check by "

@@ -3,6 +3,11 @@ from pathlib import Path
 from django.http import HttpRequest, HttpResponse
 from django.template import Template
 
+from next.components import (
+    CachedComponentTemplateLoader,
+    ComponentInfo,
+    render_component,
+)
 from next.components.manager import components_manager
 from next.forms import ActionRegistration, RegistryFormActionBackend
 from next.forms.backends import FormActionBackend
@@ -10,6 +15,7 @@ from next.forms.diagnostics import registration_diagnostics
 from next.forms.manager import form_action_manager
 from next.pages.manager import page
 from next.testing import (
+    reset_component_templates,
     reset_components,
     reset_form_actions,
     reset_form_registration_state,
@@ -136,6 +142,25 @@ class TestResetFormRegistrationState:
         assert backend._name_index == {}
         assert registration_diagnostics.outside_base_dir == []
         assert registration_diagnostics.action_applied_to_class == []
+
+
+class TestResetComponentTemplates:
+    """reset_component_templates drops the compiled templates of the pipeline."""
+
+    def test_clears_the_compiled_templates(self, tmp_path: Path) -> None:
+        path = tmp_path / "card.djx"
+        path.write_text("<i>one</i>")
+        info = ComponentInfo("card", tmp_path, "", path, None, True)
+        assert render_component(info, {}) == "<i>one</i>"
+        loader = components_manager.template_loader
+        assert isinstance(loader, CachedComponentTemplateLoader)
+        assert loader._compiled
+
+        reset_component_templates()
+
+        assert loader._compiled == {}
+        path.write_text("<i>two</i>")
+        assert render_component(info, {}) == "<i>two</i>"
 
 
 class TestResetPageCache:

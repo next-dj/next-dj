@@ -1,11 +1,14 @@
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from django.template import Context, Template
 from django.test import RequestFactory, override_settings
 
 from next.components import (
+    CachedComponentTemplateLoader,
     ComponentInfo,
     ComponentRenderer,
     ComponentScanner,
@@ -24,13 +27,56 @@ from next.components import (
     render_component,
 )
 from next.components.manager import _on_settings_reloaded
-from next.components.renderers import _inject_component_context, _merge_csrf_context
+from next.components.renderers import (
+    TemplateSource,
+    _inject_component_context,
+    _merge_csrf_context,
+)
 from next.conf import next_framework_settings
 from tests.support import (
     RaisingRootsRouter,
     RootPagesRouter,
     next_framework_settings_component_backends_list as _next_framework_settings_component_backends_list,
 )
+
+
+def _bump_mtime(path: Path, seconds: int = 2) -> None:
+    """Move the file mtime forward so a same-second rewrite is still a change."""
+    shift = seconds * 1_000_000_000
+    stat = path.stat()
+    os.utime(path, ns=(stat.st_atime_ns + shift, stat.st_mtime_ns + shift))
+
+
+def _key(info: ComponentInfo) -> tuple[Path | None, Path | None]:
+    """Return the compiled-cache key of a component, its pair of source files."""
+    return (info.template_path, info.module_path)
+
+
+def _render_body(loader: ComponentTemplateLoader, info: ComponentInfo) -> str:
+    """Compile `info` through `loader` and render it against an empty context."""
+    template = loader.load_template(info)
+    assert template is not None
+    return template.render(Context({}))
+
+
+class CountingCachedLoader(CachedComponentTemplateLoader):
+    """Cached loader that records how often it read a source."""
+
+    def __init__(self, module_loader: ModuleLoader, maxsize: int = 128) -> None:
+        """Start with an empty compiled cache and a zeroed read counter."""
+        super().__init__(module_loader, maxsize)
+        self.reads = 0
+
+    def load_source(self, info: ComponentInfo) -> TemplateSource | None:
+        self.reads += 1
+        return super().load_source(info)
+
+
+class SyntheticSourceLoader(CachedComponentTemplateLoader):
+    """Cached loader whose bodies come from memory under a path that never stats."""
+
+    def load_source(self, info: ComponentInfo) -> TemplateSource | None:
+        return TemplateSource("<i>synthetic</i>", info.scope_root / "nowhere.djx")
 
 
 class TestComponentsManager:
@@ -639,7 +685,7 @@ class TestComponentRenderers:
         loader = ModuleLoader()
         tl = ComponentTemplateLoader(loader)
         r = CompositeComponentRenderer(loader, tl)
-        with patch.object(tl, "load", return_value=None):
+        with patch.object(tl, "load_template", return_value=None):
             assert r._render_with_template(info, {}, None) == ""
 
     def test_fallback_template_none_returns_empty(self, tmp_path: Path) -> None:
@@ -665,6 +711,273 @@ class TestComponentRenderers:
         html = sr.render(info, {}, request=req)
         assert "csrfmiddlewaretoken" in html
         assert "<b>" in html
+
+
+class TestComponentTemplateLoaderCompilation:
+    """``load_template`` on the plain loader compiles on every call."""
+
+    def test_compiles_a_fresh_template_per_call(self, tmp_path: Path) -> None:
+        """Without a cache each call parses the source again."""
+        (tmp_path / "card.djx").write_text("<i>{{ x }}</i>")
+        info = ComponentInfo("card", tmp_path, "", tmp_path / "card.djx", None, True)
+        loader = ComponentTemplateLoader(ModuleLoader())
+        first = loader.load_template(info)
+        second = loader.load_template(info)
+        assert first is not second
+        assert first is not None
+        assert first.render(Context({"x": 1})) == "<i>1</i>"
+
+    def test_returns_none_when_the_source_is_unavailable(self) -> None:
+        """A component with no readable source compiles nothing."""
+        info = ComponentInfo("x", Path("/none"), "", Path("/none/x.djx"), None, True)
+        assert ComponentTemplateLoader(ModuleLoader()).load_template(info) is None
+
+
+class TestCachedComponentTemplateLoader:
+    """Compiled templates are reused until the file they came from changes."""
+
+    @pytest.mark.usefixtures("watched_template_edits")
+    def test_second_render_reuses_the_compiled_template(self, tmp_path: Path) -> None:
+        """Two renders of one component read and compile the source once."""
+        (tmp_path / "card.djx").write_text("<h3>{{ title }}</h3>")
+        info = ComponentInfo("card", tmp_path, "", tmp_path / "card.djx", None, True)
+        loader = CountingCachedLoader(ModuleLoader())
+        renderer = SimpleComponentRenderer(loader)
+        with patch(
+            "next.components.renderers.Template", side_effect=Template
+        ) as compile_calls:
+            first = renderer.render(info, {"title": "one"}, None)
+            second = renderer.render(info, {"title": "two"}, None)
+        assert (first, second) == ("<h3>one</h3>", "<h3>two</h3>")
+        assert loader.reads == 1
+        assert compile_calls.call_count == 1
+
+    @pytest.mark.usefixtures("watched_template_edits")
+    def test_editing_the_djx_body_reaches_the_next_render(self, tmp_path: Path) -> None:
+        """A rewritten template renders its new body without a restart."""
+        path = tmp_path / "card.djx"
+        path.write_text("<h3>one</h3>")
+        info = ComponentInfo("card", tmp_path, "", path, None, True)
+        loader = CountingCachedLoader(ModuleLoader())
+        renderer = SimpleComponentRenderer(loader)
+        assert renderer.render(info, {}, None) == "<h3>one</h3>"
+        path.write_text("<h3>two</h3>")
+        _bump_mtime(path)
+        assert renderer.render(info, {}, None) == "<h3>two</h3>"
+        assert loader.reads == 2
+        assert loader._compiled[_key(info)].mtime_ns == path.stat().st_mtime_ns
+
+    @pytest.mark.usefixtures("watched_template_edits")
+    def test_a_module_string_follows_its_module(self, tmp_path: Path) -> None:
+        """An edited component.py expires the entry, so the body follows it.
+
+        The module cache has no mtime of its own, so the new body arrives with
+        the restart the autoreloader performs for a watched `component.py`.
+        """
+        module_dir = tmp_path / "mod"
+        module_dir.mkdir()
+        module = module_dir / "component.py"
+        module.write_text('component = "<i>one</i>"\n')
+        info = ComponentInfo("mod", tmp_path, "", None, module, False)
+        loader = CountingCachedLoader(ModuleLoader())
+        assert _render_body(loader, info) == "<i>one</i>"
+        module.write_text('component = "<b>two</b>"\n')
+        _bump_mtime(module)
+        assert _render_body(loader, info) == "<i>one</i>"
+        assert loader.reads == 2
+        restarted = CachedComponentTemplateLoader(ModuleLoader())
+        assert _render_body(restarted, info) == "<b>two</b>"
+
+    @pytest.mark.usefixtures("watched_template_edits")
+    def test_an_unreadable_djx_keys_the_cache_on_the_module(
+        self, tmp_path: Path
+    ) -> None:
+        """A body read from component.py is revalidated against component.py."""
+        module_dir = tmp_path / "mod"
+        module_dir.mkdir()
+        djx = module_dir / "component.djx"
+        djx.write_bytes(b"\xff\xfe not utf-8")
+        module = module_dir / "component.py"
+        module.write_text('component = "<b>one</b>"\n')
+        info = ComponentInfo("mod", tmp_path, "", djx, module, False)
+        loader = CountingCachedLoader(ModuleLoader())
+        assert _render_body(loader, info) == "<b>one</b>"
+        assert loader._compiled[_key(info)].source_path == module
+        module.write_text('component = "<b>two</b>"\n')
+        _bump_mtime(module)
+        assert _render_body(loader, info) == "<b>one</b>"
+        assert loader.reads == 2
+        restarted = CachedComponentTemplateLoader(ModuleLoader())
+        assert _render_body(restarted, info) == "<b>two</b>"
+
+    @pytest.mark.usefixtures("watched_template_edits")
+    def test_a_missing_djx_caches_the_module_string(self, tmp_path: Path) -> None:
+        """A declared but absent .djx leaves the module body cached, not re-read."""
+        module_dir = tmp_path / "mod"
+        module_dir.mkdir()
+        module = module_dir / "component.py"
+        module.write_text('component = "<i>from module</i>"\n')
+        info = ComponentInfo(
+            "mod", tmp_path, "", module_dir / "component.djx", module, False
+        )
+        loader = CountingCachedLoader(ModuleLoader())
+        renderer = SimpleComponentRenderer(loader)
+        assert renderer.render(info, {}, None) == "<i>from module</i>"
+        assert renderer.render(info, {}, None) == "<i>from module</i>"
+        assert loader.reads == 1
+        assert loader._compiled[_key(info)].source_path == module
+
+    def test_module_as_template_path_keys_the_cache_by_the_module(
+        self, tmp_path: Path
+    ) -> None:
+        """A component.py standing in for the template still keys on itself."""
+        module_dir = tmp_path / "mod"
+        module_dir.mkdir()
+        module = module_dir / "component.py"
+        module.write_text('component = "<i>x</i>"\n')
+        info = ComponentInfo("mod", tmp_path, "", module, module, False)
+        loader = CachedComponentTemplateLoader(ModuleLoader())
+        assert loader.load_template(info) is not None
+        assert loader._compiled[_key(info)].source_path == module
+
+    @pytest.mark.usefixtures("watched_template_edits")
+    def test_deleted_file_renders_empty_and_drops_the_entry(
+        self, tmp_path: Path
+    ) -> None:
+        """A template removed between renders falls back to an empty render."""
+        path = tmp_path / "card.djx"
+        path.write_text("<h3>one</h3>")
+        info = ComponentInfo("card", tmp_path, "", path, None, True)
+        loader = CachedComponentTemplateLoader(ModuleLoader())
+        renderer = SimpleComponentRenderer(loader)
+        assert renderer.render(info, {}, None) == "<h3>one</h3>"
+        path.unlink()
+        assert renderer.render(info, {}, None) == ""
+        assert loader._compiled == {}
+
+    @pytest.mark.usefixtures("watched_template_edits")
+    def test_unreadable_source_drops_a_stale_entry(self, tmp_path: Path) -> None:
+        """A body that stops decoding invalidates the compiled template."""
+        path = tmp_path / "card.djx"
+        path.write_text("<h3>one</h3>")
+        info = ComponentInfo("card", tmp_path, "", path, None, True)
+        loader = CachedComponentTemplateLoader(ModuleLoader())
+        assert loader.load_template(info) is not None
+        path.write_bytes(b"\xff\xfe broken")
+        _bump_mtime(path)
+        assert loader.load_template(info) is None
+        assert loader._compiled == {}
+
+    def test_component_without_files_caches_nothing(self, tmp_path: Path) -> None:
+        """No source file means no mtime to key on, so nothing is stored."""
+        info = ComponentInfo("ghost", tmp_path, "", None, None, True)
+        loader = CachedComponentTemplateLoader(ModuleLoader())
+        assert loader.load_template(info) is None
+        assert loader._compiled == {}
+
+    def test_a_source_that_does_not_stat_is_compiled_but_not_cached(
+        self, tmp_path: Path
+    ) -> None:
+        """A body under a path with no mtime has nothing to revalidate against."""
+        info = ComponentInfo("x", tmp_path, "", None, None, True)
+        loader = SyntheticSourceLoader(ModuleLoader())
+        assert _render_body(loader, info) == "<i>synthetic</i>"
+        assert loader._compiled == {}
+
+    def test_a_full_cache_evicts_the_least_recently_used_entry(
+        self, tmp_path: Path
+    ) -> None:
+        """Eviction follows use order and never hands out another component's body."""
+        infos = []
+        for name in ("a", "b", "c"):
+            (tmp_path / f"{name}.djx").write_text(f"<i>{name}</i>")
+            infos.append(
+                ComponentInfo(name, tmp_path, "", tmp_path / f"{name}.djx", None, True)
+            )
+        first, second, third = infos
+        loader = CachedComponentTemplateLoader(ModuleLoader(), maxsize=2)
+        assert _render_body(loader, first) == "<i>a</i>"
+        assert _render_body(loader, second) == "<i>b</i>"
+        assert _render_body(loader, first) == "<i>a</i>"
+        assert _render_body(loader, third) == "<i>c</i>"
+        assert list(loader._compiled) == [_key(first), _key(third)]
+        assert _render_body(loader, second) == "<i>b</i>"
+
+    def test_clear_drops_every_compiled_template(self, tmp_path: Path) -> None:
+        """The seam a test uses after rewriting a component on disk."""
+        path = tmp_path / "card.djx"
+        path.write_text("<i>one</i>")
+        info = ComponentInfo("card", tmp_path, "", path, None, True)
+        loader = CachedComponentTemplateLoader(ModuleLoader())
+        assert _render_body(loader, info) == "<i>one</i>"
+        loader.clear()
+        assert loader._compiled == {}
+        path.write_text("<i>two</i>")
+        assert _render_body(loader, info) == "<i>two</i>"
+
+
+class TestRevalidationFollowsWatchedEdits:
+    """Sources are stat-ed only where an edit can reach a render."""
+
+    @pytest.mark.usefixtures("watched_template_edits")
+    def test_edits_are_picked_up_only_where_they_are_watched(
+        self, tmp_path: Path
+    ) -> None:
+        """An unwatched process reuses the entry, and the watch takes the edit."""
+        path = tmp_path / "card.djx"
+        path.write_text("<h3>one</h3>")
+        info = ComponentInfo("card", tmp_path, "", path, None, True)
+        loader = CountingCachedLoader(ModuleLoader())
+        with override_settings(DEBUG=False):
+            assert _render_body(loader, info) == "<h3>one</h3>"
+            path.write_text("<h3>two</h3>")
+            _bump_mtime(path)
+            assert _render_body(loader, info) == "<h3>one</h3>"
+            assert loader.reads == 1
+        assert _render_body(loader, info) == "<h3>two</h3>"
+        assert loader.reads == 2
+
+
+class TestRenderPipelineCaching:
+    """The pipeline `components_manager` builds caches compilation end to end."""
+
+    @pytest.mark.parametrize("debug", [True, False], ids=["watched", "unwatched"])
+    def test_a_repeated_render_neither_reads_nor_compiles(
+        self, tmp_path: Path, *, debug: bool
+    ) -> None:
+        """A warm render through render_component costs no read and no parse."""
+        path = tmp_path / "card.djx"
+        path.write_text("<h3>{{ title }}</h3>")
+        info = ComponentInfo("card", tmp_path, "", path, None, True)
+        with override_settings(DEBUG=debug):
+            assert render_component(info, {"title": "one"}) == "<h3>one</h3>"
+            with (
+                patch(
+                    "next.components.renderers.Template", side_effect=Template
+                ) as compiles,
+                patch.object(
+                    Path, "read_text", autospec=True, side_effect=Path.read_text
+                ) as reads,
+                patch.object(
+                    Path, "stat", autospec=True, side_effect=Path.stat
+                ) as stats,
+            ):
+                html = render_component(info, {"title": "two"})
+        assert html == "<h3>two</h3>"
+        assert compiles.call_count == 0
+        assert reads.call_count == 0
+        assert stats.call_count == (1 if debug else 0)
+
+    @pytest.mark.usefixtures("watched_template_edits")
+    def test_an_edited_djx_reaches_the_next_render(self, tmp_path: Path) -> None:
+        """The live pipeline picks up a rewritten body while edits are watched."""
+        path = tmp_path / "card.djx"
+        path.write_text("<h3>one</h3>")
+        info = ComponentInfo("card", tmp_path, "", path, None, True)
+        assert render_component(info, {}) == "<h3>one</h3>"
+        path.write_text("<h3>two</h3>")
+        _bump_mtime(path)
+        assert render_component(info, {}) == "<h3>two</h3>"
 
 
 class TestInjectComponentContext:

@@ -121,8 +121,8 @@ The route set diff is taken by ``NextStatReloader`` from the configured page roo
 A custom router that builds routes from another source rebuilds them through ``router_manager.reload``, which is the public API covered in :doc:`/content/howto/reload-routes-from-code`.
 
 A ``.djx`` edit triggers neither path.
-Templates are re-read on render and their cached compilation is invalidated by source mtime inside the page and component layers.
-A saved edit shows up on the next request without a process restart.
+Templates are re-read on render, and under ``DEBUG`` the page and component layers invalidate their cached compilation against the source mtime.
+A saved edit shows up on the next request without a process restart, while a production process holds the compilation for its whole life.
 
 Signals
 -------

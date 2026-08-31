@@ -105,13 +105,15 @@ The `notes` Django app does not own its HTML shell. The root template lives unde
 "COMPONENT_BACKENDS": [
     {
         "BACKEND": "next.components.FileComponentsBackend",
-        "DIRS": [BASE_DIR / "root_blocks"],
+        "DIRS": [BASE_DIR / "root_blocks", SHARED_DIR / "_components"],
         "COMPONENTS_DIR": "_blocks",
     },
 ],
 ```
 
 This is the canonical way to share chrome across multiple Django apps. See [`docs/content/topics/project-layout.rst`](../../docs/content/topics/project-layout.rst) for the broader pattern.
+
+The `<main>` element in that layout delegates its width to the shared [`container`](../_shared/_components/container.djx) component. A wrapper with a single insertion point needs no named slot, so the layout calls it in block form. Everything between the opening and closing tag arrives as free children, which the component splices with `{{ children }}`. The `{% block template %}` of the page renders inside that call, so every page in the example lands in the same centred column.
 
 ### 4. Inherit context for the active tenant
 

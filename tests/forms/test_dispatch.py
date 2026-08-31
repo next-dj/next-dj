@@ -149,7 +149,7 @@ def _run_component_context(tmp_path: Path, request: object) -> object:
         _inject_component_context(info, context_data, request)
         return context_data["out"]
     finally:
-        component_ctx._registry._registry.pop(module_path.resolve(), None)
+        component_ctx._registry.unregister(module_path)
 
 
 def _run_page_context(tmp_path: Path, request: object) -> object:

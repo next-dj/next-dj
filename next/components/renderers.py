@@ -1,15 +1,17 @@
 """Component renderers and render-time helpers.
 
-`ComponentTemplateLoader` reads the raw source for a component. The
-Protocol `ComponentRenderStrategy` plus `SimpleComponentRenderer` and
-`CompositeComponentRenderer` are the two built-in renderers chosen by
-`ComponentRenderer`.
+`ComponentTemplateLoader` reads the raw source for a component and
+`CachedComponentTemplateLoader` keeps its compilation between renders.
+The Protocol `ComponentRenderStrategy` plus `SimpleComponentRenderer` and
+`CompositeComponentRenderer` are the two renderers `ComponentRenderer` picks.
 """
 
 from __future__ import annotations
 
 import contextlib
-from typing import TYPE_CHECKING, Any, Protocol
+from collections import OrderedDict
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Protocol, override
 
 from django.http import HttpResponse
 from django.middleware.csrf import get_token
@@ -18,12 +20,14 @@ from django.utils.functional import SimpleLazyObject
 
 from next.deps import get_request_dep_cache, resolver
 from next.deps.cache import DependencyCache
+from next.utils import template_edits_watched
 
 from .context import component
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
+    from pathlib import Path
 
     from django.http import HttpRequest
 
@@ -53,6 +57,14 @@ _RESERVED_CONTEXT_KEYS = frozenset(
 SLOT_KEY_PREFIX = "slot_"
 
 
+@dataclass(frozen=True, slots=True)
+class TemplateSource:
+    """Template text together with the file it was read from."""
+
+    text: str
+    path: Path
+
+
 class ComponentTemplateLoader:
     """Read template source from a `.djx` file or a `component` module string."""
 
@@ -60,22 +72,118 @@ class ComponentTemplateLoader:
         """Bind this loader to a shared `ModuleLoader`."""
         self._module_loader = module_loader
 
-    def load(self, info: ComponentInfo) -> str | None:
-        """Return raw template text for `info` or `None` when unavailable."""
+    def load_source(self, info: ComponentInfo) -> TemplateSource | None:
+        """Return the template text for `info` with the file it came from.
+
+        This is the one place that picks between the `.djx` body and the `component`
+        module string, so no caller has to guess which one a render used.
+        """
         if info.template_path is not None and info.template_path.suffix == ".djx":
             with contextlib.suppress(OSError, UnicodeDecodeError):
-                return info.template_path.read_text(encoding="utf-8")
+                text = info.template_path.read_text(encoding="utf-8")
+                return TemplateSource(text, info.template_path)
 
         if info.module_path is not None:
             module = self._module_loader.load(info.module_path)
-            if module is not None and hasattr(module, "component"):
-                return getattr(module, "component", None)
+            module_text: str | None = getattr(module, "component", None)
+            if module_text is not None:
+                return TemplateSource(module_text, info.module_path)
 
         return None
 
+    def load(self, info: ComponentInfo) -> str | None:
+        """Return raw template text for `info` or `None` when unavailable."""
+        source = self.load_source(info)
+        return source.text if source is not None else None
 
-def _render_template_string(template_str: str, context_dict: dict[str, Any]) -> str:
-    return Template(template_str).render(DjangoTemplateContext(context_dict))
+    def load_template(self, info: ComponentInfo) -> Template | None:
+        """Return the compiled template for `info` or `None` when unavailable."""
+        source = self.load_source(info)
+        if source is None:
+            return None
+        return Template(source.text)
+
+    def clear(self) -> None:
+        """Do nothing, because this loader holds no compiled state."""
+
+
+@dataclass(frozen=True, slots=True)
+class _CompiledTemplate:
+    """A compiled template with the file it came from and that file's mtime."""
+
+    source_path: Path
+    mtime_ns: int
+    template: Template
+
+
+# The template and module files that define one component.
+type _SourceKey = tuple[Path | None, Path | None]
+
+
+class CachedComponentTemplateLoader(ComponentTemplateLoader):
+    """Reuse a compiled template until the file it was read from changes.
+
+    A render then pays at most one `stat` instead of a read plus a full parse,
+    and an edited `.djx` still reaches the next render without a restart. A
+    `component` string comes from an already imported module, so its edit
+    arrives with the reload the autoreloader runs for `component.py`.
+    """
+
+    def __init__(self, module_loader: ModuleLoader, maxsize: int = 128) -> None:
+        """Bind this loader to a shared `ModuleLoader` with an empty LRU cache."""
+        super().__init__(module_loader)
+        self._maxsize = maxsize
+        self._compiled: OrderedDict[_SourceKey, _CompiledTemplate] = OrderedDict()
+
+    @override
+    def load_template(self, info: ComponentInfo) -> Template | None:
+        """Return the compiled template for `info` from the cache or a fresh read.
+
+        An entry is keyed by the files that define the component and
+        revalidated against the mtime of the one the body was read from.
+        """
+        key = (info.template_path, info.module_path)
+        entry = self._compiled.get(key)
+        if entry is not None and self._is_fresh(entry):
+            self._compiled.move_to_end(key)
+            return entry.template
+        return self._compile(key, info)
+
+    @override
+    def clear(self) -> None:
+        """Drop every compiled template."""
+        self._compiled.clear()
+
+    def _is_fresh(self, entry: _CompiledTemplate) -> bool:
+        if not template_edits_watched():
+            return True
+        try:
+            return entry.source_path.stat().st_mtime_ns == entry.mtime_ns
+        except OSError:
+            return False
+
+    def _compile(self, key: _SourceKey, info: ComponentInfo) -> Template | None:
+        source = self.load_source(info)
+        if source is None:
+            self._compiled.pop(key, None)
+            return None
+
+        template = Template(source.text)
+        try:
+            mtime_ns = source.path.stat().st_mtime_ns
+        except OSError:
+            # Without an mtime the entry could never expire, so it is not kept.
+            self._compiled.pop(key, None)
+            return template
+
+        self._store(key, _CompiledTemplate(source.path, mtime_ns, template))
+        return template
+
+    def _store(self, key: _SourceKey, entry: _CompiledTemplate) -> None:
+        if key not in self._compiled and len(self._compiled) >= self._maxsize:
+            self._compiled.popitem(last=False)
+        self._compiled[key] = entry
+        self._compiled.move_to_end(key)
 
 
 def _stamp_component_anchor(info: ComponentInfo, context_dict: dict[str, Any]) -> None:
@@ -188,7 +296,10 @@ class ComponentRenderStrategy(Protocol):
         context_data: Mapping[str, Any],
         request: HttpRequest | None,
     ) -> str:
-        """Return the rendered HTML for `info`."""
+        """Return the rendered HTML for `info`.
+
+        A strategy copies `context_data`, so the caller's mapping is left alone.
+        """
         raise NotImplementedError
 
 
@@ -210,15 +321,15 @@ class SimpleComponentRenderer:
         request: HttpRequest | None,
     ) -> str:
         """Render `info` by plain template string rendering."""
-        template_str = self._loader.load(info)
-        if template_str is None:
+        template = self._loader.load_template(info)
+        if template is None:
             return ""
         context_dict = dict(context_data)
         _stamp_component_anchor(info, context_dict)
         if request is not None:
             context_dict.setdefault("request", request)
             _merge_csrf_context(context_dict, request)
-        return _render_template_string(template_str, context_dict)
+        return template.render(DjangoTemplateContext(context_dict))
 
 
 class CompositeComponentRenderer:
@@ -264,10 +375,12 @@ class CompositeComponentRenderer:
         cache = DependencyCache()
         stack: list[str] = []
 
+        # Nothing here writes to the context, and the resolver copies what
+        # it injects, so this branch hands the mapping straight through.
         resolved = resolver.resolve_with_template_context(
             render_func,
             request=request,
-            template_context=dict(context_data),
+            template_context=context_data,
             _cache=cache,
             _stack=stack,
         )
@@ -284,8 +397,8 @@ class CompositeComponentRenderer:
         context_data: Mapping[str, Any],
         request: HttpRequest | None,
     ) -> str:
-        template_str = self._template_loader.load(info)
-        if template_str is None:
+        template = self._template_loader.load_template(info)
+        if template is None:
             return ""
 
         context_dict = dict(context_data)
@@ -296,17 +409,17 @@ class CompositeComponentRenderer:
 
         _inject_component_context(info, context_dict, request)
 
-        return _render_template_string(template_str, context_dict)
+        return template.render(DjangoTemplateContext(context_dict))
 
     def _fallback_to_template(
         self, info: ComponentInfo, context_data: Mapping[str, Any]
     ) -> str:
-        template_str = self._template_loader.load(info)
-        if template_str is None:
+        template = self._template_loader.load_template(info)
+        if template is None:
             return ""
         context_dict = dict(context_data)
         _stamp_component_anchor(info, context_dict)
-        return _render_template_string(template_str, context_dict)
+        return template.render(DjangoTemplateContext(context_dict))
 
 
 class ComponentRenderer:
@@ -331,9 +444,11 @@ class ComponentRenderer:
 
 
 __all__ = [
+    "CachedComponentTemplateLoader",
     "ComponentRenderStrategy",
     "ComponentRenderer",
     "ComponentTemplateLoader",
     "CompositeComponentRenderer",
     "SimpleComponentRenderer",
+    "TemplateSource",
 ]

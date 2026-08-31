@@ -69,6 +69,9 @@ class NextFrameworkSettings:
             "FORM_ANCHOR_FILES",
         }
     )
+    STR_KEYS: ClassVar[frozenset[str]] = frozenset(
+        {"URL_NAME_TEMPLATE", "URL_RESOLVER"}
+    )
     BOOL_KEYS: ClassVar[frozenset[str]] = frozenset(
         {
             "STRICT_CONTEXT",
@@ -89,7 +92,7 @@ class NextFrameworkSettings:
             if key not in user:
                 continue
             raw = user[key]
-            if key in {"URL_NAME_TEMPLATE", "URL_RESOLVER"} and isinstance(raw, str):
+            if key in self.STR_KEYS and isinstance(raw, str):
                 out[key] = raw
             elif key == "FORM_WIZARD_BACKEND" and isinstance(raw, dict):
                 out[key] = freeze({**self.DEFAULTS[key], **raw})

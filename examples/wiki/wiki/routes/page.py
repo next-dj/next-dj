@@ -11,7 +11,8 @@ def file_pages() -> list[dict[str, str]]:
         "How file paths map to URL patterns and how the unified view runs."
     )
     components_summary = (
-        "Composite components with co-located CSS and JS plus markdown_preview."
+        "Composite components, co-located assets, and a block component "
+        "whose body arrives as children."
     )
     return [
         {

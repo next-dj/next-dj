@@ -1,4 +1,4 @@
-"""Path helpers, the page-tree value object, and declaration-site attribution.
+"""Cross-area helpers for paths, page trees, edit watching, and declaration sites.
 
 Everything here sits below the subpackages that share it, so a value
 object two of them build travels through this module rather than closing
@@ -64,6 +64,15 @@ def resolve_base_dir() -> Path | None:
     if isinstance(raw, str):
         return Path(raw)
     return None
+
+
+def template_edits_watched() -> bool:
+    """Whether the composition caches stat their sources to notice an edit.
+
+    Autoreload leaves `.djx` alone, so under `DEBUG` the stat is the only
+    thing making an edit visible. Read per call, so an override takes effect.
+    """
+    return bool(settings.DEBUG)
 
 
 def _classify_one_dir_entry(

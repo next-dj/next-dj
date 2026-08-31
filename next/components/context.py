@@ -51,6 +51,18 @@ class ComponentContextRegistry:
         """Create an empty path-keyed context-function mapping."""
         self._registry: dict[Path, dict[str | None, ContextFunction]] = {}
         self._misattributions = MisattributionLog()
+        self._version = 0
+        self._lookup_cache: dict[Path, tuple[ContextFunction, ...]] = {}
+        self._lookup_version = 0
+
+    @property
+    def version(self) -> int:
+        """Monotonic counter bumped on every write to the registry."""
+        return self._version
+
+    def _bump(self) -> None:
+        """Invalidate the lookup memo by advancing the registry version."""
+        self._version += 1
 
     def misattributed(self) -> tuple[MisattributedContext, ...]:
         """Return every registration bound to a file other than the one running it."""
@@ -106,15 +118,38 @@ class ComponentContextRegistry:
                 )
                 raise ValueError(msg)
 
-        component_registry[key] = ContextFunction(
+        entry = ContextFunction(
             func=func, key=key, serialize=serialize, serializer=serializer
         )
+        if component_registry.get(key) == entry:
+            # Re-registering an identical entry leaves the memo valid.
+            return
+
+        component_registry[key] = entry
+        self._bump()
+
+    def unregister(self, component_path: Path) -> None:
+        """Drop every context function registered for `component_path`."""
+        if self._registry.pop(component_path.resolve(), None) is not None:
+            self._bump()
 
     def get_functions(self, component_path: Path) -> Sequence[ContextFunction]:
-        """Return a tuple of registered context functions for `component_path`."""
-        path = component_path.resolve()
-        registry = self._registry.get(path, {})
-        return tuple(registry.values())
+        """Return a tuple of registered context functions for `component_path`.
+
+        Results are memoised under the path as passed and thrown away when
+        the registry version moves, so a render pays neither the resolve nor
+        the tuple build twice. The empty result is memoised too, because most
+        components register no context function at all.
+        """
+        if self._lookup_version != self._version:
+            self._lookup_cache.clear()
+            self._lookup_version = self._version
+        cached = self._lookup_cache.get(component_path)
+        if cached is not None:
+            return cached
+        functions = tuple(self._registry.get(component_path.resolve(), {}).values())
+        self._lookup_cache[component_path] = functions
+        return functions
 
     def _is_same_function(
         self, func1: Callable[..., Any], func2: Callable[..., Any]

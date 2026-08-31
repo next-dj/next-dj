@@ -54,7 +54,8 @@ Modules
 
 ``next.components.renderers``.
    ``ComponentRenderStrategy`` plus the simple and composite implementations.
-   ``ComponentTemplateLoader`` reads the template body.
+   ``ComponentTemplateLoader`` reads the template body and compiles it on every render.
+   ``CachedComponentTemplateLoader``, the loader the manager wires in, keeps that compilation and revalidates it against the mtime of the file the body came from, so a repeated render costs one ``stat`` under ``DEBUG`` and nothing at all in production.
 
 ``next.components.facade``.
    Short helpers used from templates, including ``get_component``, ``load_component_template``, ``render_component``.

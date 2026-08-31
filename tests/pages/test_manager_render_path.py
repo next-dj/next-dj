@@ -9,7 +9,6 @@ from django.test import override_settings
 
 from next.pages import Page
 from next.pages.loaders import _load_python_module_memo
-from next.pages.manager import template_edits_watched
 from next.testing import envelope_of
 from tests.support import (
     build_nested_page,
@@ -573,12 +572,6 @@ class TestZoneTickOnTheResolvingBranch:
 
 class TestTemplateStalenessGate:
     """Source staleness is stat-checked only where template edits are watched."""
-
-    def test_the_gate_follows_the_debug_setting(self, watched_template_edits) -> None:
-        """The predicate is read per call, so an override takes effect at once."""
-        assert template_edits_watched() is True
-        with override_settings(DEBUG=False):
-            assert template_edits_watched() is False
 
     def test_a_production_process_still_records_a_snapshot(
         self, page_instance, tmp_path
