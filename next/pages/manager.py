@@ -16,7 +16,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast, overload
 
-from django.conf import settings
 from django.http import Http404, HttpRequest, HttpResponse
 from django.http.response import HttpResponseBase
 from django.template import Context as DjangoTemplateContext, Origin, Template
@@ -25,7 +24,7 @@ from django.urls import URLPattern, path
 from next.conf import fail_loudly, next_framework_settings
 from next.deps import DependencyResolver, resolver
 from next.ports import partial_shaper_slot
-from next.utils import defining_file
+from next.utils import defining_file, template_edits_watched
 
 from .loaders import (
     LayoutTemplateLoader,
@@ -56,15 +55,6 @@ logger = logging.getLogger(__name__)
 
 # Mtimes of every source behind one composition, keyed by its page path.
 type _SourceMtimes = dict[Path, dict[Path, float]]
-
-
-def template_edits_watched() -> bool:
-    """Whether the composition caches stat their sources to notice an edit.
-
-    Autoreload leaves `.djx` alone, so under `DEBUG` the stat is the only
-    thing making an edit visible. Read per call, so an override takes effect.
-    """
-    return bool(settings.DEBUG)
 
 
 class _RoutedPageView(Protocol):
@@ -259,13 +249,11 @@ class Page:
     ) -> str:
         """Return the static body for `file_path` without invoking `render()`.
 
-        The `module.template` attribute wins when set to a non-`None`
-        string. Otherwise the framework consults registered
-        `TemplateLoader` instances in the order declared under
-        `NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`. The first loader that can
-        load the path returns the body. An empty string is returned
-        when no source is present so an ancestor layout can still
-        render with an empty slot.
+        The `module.template` attribute wins when set to a non-`None` string. Otherwise
+        the framework consults registered `TemplateLoader` instances in the order
+        declared under `NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`. The first loader that can
+        load the path returns the body. An empty string is returned when no source is
+        present so an ancestor layout can still render with an empty slot.
         """
         if module is not None:
             template_attr = getattr(module, "template", None)

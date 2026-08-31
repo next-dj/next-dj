@@ -479,10 +479,9 @@ class FormWizard:
     def current_step(self) -> str:
         """Return the active step from the URL kwarg, defaulting to the first.
 
-        URL kwargs that exist but lack the `Meta.url_param` key signal a
-        route whose step segment is named differently, which would pin the
-        wizard to its first step forever, so that misconfiguration raises
-        instead of falling back.
+        URL kwargs that exist but lack the `Meta.url_param` key signal a route whose
+        step segment is named differently, which would pin the wizard to its first step
+        forever, so that misconfiguration raises instead of falling back.
         """
         names = self.step_names()
         raw = self.url_kwargs.get(self.url_param)

@@ -29,7 +29,9 @@ class ComponentScanner:
 
     def __init__(self, *, module_loader: ModuleLoader | None = None) -> None:
         """Wire a module loader for composite `component.py` files."""
-        self._module_loader = module_loader or ModuleLoader()
+        self._module_loader = (
+            module_loader if module_loader is not None else ModuleLoader()
+        )
 
     def scan_directory(
         self, directory: Path, scope_root: Path, scope_relative: str

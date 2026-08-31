@@ -69,11 +69,10 @@ def shape_partial(
 ) -> HttpResponse:
     """Shape one action outcome as a patch envelope for a partial request.
 
-    The CSRF rotation marker is read here, before any form or zone
-    re-render mints a token and sets the marker as a side effect, so a
-    login on the submit path stamps the fresh token onto whichever shape
-    the outcome takes. Reading it after a re-render would flag every
-    response as rotated.
+    The CSRF rotation marker is read here, before any form or zone re-render mints a
+    token and sets the marker as a side effect, so a login on the submit path stamps the
+    fresh token onto whichever shape the outcome takes. Reading it after a re-render
+    would flag every response as rotated.
     """
     rotated = _csrf_rotated(request)
     if outcome.kind == ActionOutcomeKind.INVALID:
@@ -127,9 +126,8 @@ def shape_validate(
 def drain_messages(request: "HttpRequest", patches: Patches) -> Patches:
     """Drain pending contrib.messages into toast patches.
 
-    Iterating `get_messages` marks the messages read, so a later full
-    navigation does not replay them. The success message of an action
-    becomes a toast for free.
+    Iterating `get_messages` marks the messages read, so a later full navigation does
+    not replay them. The success message of an action becomes a toast for free.
     """
     for message in get_messages(request):
         variant = _MESSAGE_VARIANTS.get(message.level_tag, "info")
@@ -287,12 +285,11 @@ def _redirect_as_visit(
 ) -> HttpResponse:
     """Pack a handler redirect into a `visit`, full-navigating external hosts.
 
-    A same-site URL travels as an internal visit the validator approves.
-    A server-authored external URL such as an OAuth or payment gateway
-    travels with a full-navigation marker so it is not rejected by the
-    same-host validator. The external branch trusts the handler's redirect
-    target, so a handler must never build it from user input or the page
-    becomes an open redirect.
+    A same-site URL travels as an internal visit the validator approves. A
+    server-authored external URL such as an OAuth or payment gateway travels with a
+    full-navigation marker so it is not rejected by the same-host validator. The
+    external branch trusts the handler's redirect target, so a handler must never build
+    it from user input or the page becomes an open redirect.
     """
     href = redirect["Location"]
     internal = url_has_allowed_host_and_scheme(

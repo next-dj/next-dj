@@ -61,9 +61,8 @@ def _bind_wizard_step(
 ) -> "HttpResponse | tuple[FormWizard, str, django_forms.Form]":
     """Authorize the step POST and bind its form, or return an early response.
 
-    Both permission layers and the validate-only short circuit run here
-    before any storage write, so a guarded validator never runs for an
-    unauthorized caller.
+    Both permission layers and the validate-only short circuit run here before any
+    storage write, so a guarded validator never runs for an unauthorized caller.
     """
     if state.origin_match is None:
         return HttpResponseBadRequest("Missing or invalid _next_form_origin")

@@ -164,8 +164,8 @@ _COMPONENTS_MANAGER_CACHE: dict[str, ComponentsManager | None] = {"value": None}
 class _ScannedTrees:
     """The pages and the component folders one walk of a router's trees found.
 
-    Both come out of the same walk, because a second walk could disagree
-    with the first about either.
+    Both come out of the same walk, because a second
+    walk could disagree with the first about either.
     """
 
     pairs: tuple[tuple[str, Path], ...]
@@ -236,9 +236,8 @@ def reset_router_manager_cache(**kwargs) -> None:
 def get_components_manager() -> ComponentsManager:
     """Return a per-run cached `ComponentsManager` holding every component source.
 
-    The manager is the checks' own, because the live registry holds only what
-    requests have already made the router walk. Invalidated like
-    `get_router_manager`.
+    The manager is the checks' own, because the live registry holds only what requests
+    have already made the router walk. Invalidated like `get_router_manager`.
     """
     cached = _COMPONENTS_MANAGER_CACHE["value"]
     if cached is not None:
@@ -300,10 +299,9 @@ class PageRootsError(Exception):
 def read_page_roots(router: RouterBackend) -> list[PageRoot]:
     """Return the page trees `router` reports, raising `PageRootsError` on failure.
 
-    `page_roots` is third-party code that can raise anything and answer any
-    shape, and a check run has to survive both with a message rather than a
-    traceback, so either outcome becomes one framework exception the callers
-    handle narrowly.
+    `page_roots` is third-party code that can raise anything and answer any shape, and a
+    check run has to survive both with a message rather than a traceback, so either
+    outcome becomes one framework exception the callers handle narrowly.
     """
     try:
         roots = list(router.page_roots())
@@ -364,9 +362,9 @@ def _read_components_folder_name(router: RouterBackend) -> str | None:
 def _read_skip_dir_names(router: RouterBackend) -> frozenset[str]:
     """Return the directory names `router` refuses, dropping anything but names.
 
-    `skip_dir_names` is third-party code that can raise or answer the wrong
-    shape, and a check run survives both by refusing no directory rather than
-    by ending in a traceback.
+    `skip_dir_names` is third-party code that can raise or
+    answer the wrong shape, and a check run survives both by
+    refusing no directory rather than by ending in a traceback.
     """
     try:
         names: object = router.skip_dir_names()

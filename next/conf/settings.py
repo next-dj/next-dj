@@ -1,10 +1,9 @@
 """Merged view of `settings.NEXT_FRAMEWORK` with framework defaults.
 
-The `NextFrameworkSettings` class reads the user mapping lazily and
-merges it with `DEFAULTS` on first access. Merge results are cached
-until `reload()` drops the cache and emits `settings_reloaded`. Package
-managers that depend on the merged values subscribe to that signal and
-reset their own state.
+The `NextFrameworkSettings` class reads the user mapping lazily and merges it with
+`DEFAULTS` on first access. Merge results are cached until `reload()` drops the cache
+and emits `settings_reloaded`. Package managers that depend on the merged values
+subscribe to that signal and reset their own state.
 """
 
 from __future__ import annotations
@@ -32,9 +31,8 @@ class NextFrameworkSettings:
     def reload(self) -> None:
         """Drop merge and import caches and emit the reload signal.
 
-        Package-level managers listen to `settings_reloaded` and reset
-        their own state. This method only clears caches owned by the
-        settings object itself.
+        Package-level managers listen to `settings_reloaded` and reset their own state.
+        This method only clears caches owned by the settings object itself.
         """
         self._merged_cache = None
         self._attr_value_cache.clear()
@@ -69,6 +67,9 @@ class NextFrameworkSettings:
             "FORM_ANCHOR_FILES",
         }
     )
+    STR_KEYS: ClassVar[frozenset[str]] = frozenset(
+        {"URL_NAME_TEMPLATE", "URL_RESOLVER"}
+    )
     BOOL_KEYS: ClassVar[frozenset[str]] = frozenset(
         {
             "STRICT_CONTEXT",
@@ -89,7 +90,7 @@ class NextFrameworkSettings:
             if key not in user:
                 continue
             raw = user[key]
-            if key in {"URL_NAME_TEMPLATE", "URL_RESOLVER"} and isinstance(raw, str):
+            if key in self.STR_KEYS and isinstance(raw, str):
                 out[key] = raw
             elif key == "FORM_WIZARD_BACKEND" and isinstance(raw, dict):
                 out[key] = freeze({**self.DEFAULTS[key], **raw})

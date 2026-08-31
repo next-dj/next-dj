@@ -100,7 +100,7 @@ A page whose body comes from ``render()`` resolves that body per request and cac
    No dynamic body enters the composed-source registry.
    Its own snapshot lives in ``_skeleton_source_mtimes``, so an eviction on the composed side never reads as freshness here.
 
-The snapshot is taken on every composition, and only the check reading it is gated on ``DEBUG`` through ``template_edits_watched``, read per call so an override takes effect at once and sees the sources of a composition built before it.
+The snapshot is taken on every composition, and only the check reading it is gated on ``DEBUG`` through ``next.utils.template_edits_watched``, read per call so an override takes effect at once and sees the sources of a composition built before it.
 The dev watcher deliberately ignores ``.djx``, so under ``DEBUG`` this is the only mechanism that makes a template edit visible without a restart, and with ``DEBUG`` off a warm read performs no stat and holds the composition for the life of the process.
 
 On each cache read ``_is_template_stale`` compares the current mtimes against the snapshot.

@@ -8,6 +8,14 @@
     <code>[slug]</code> map to typed Django path converters.
   </p>
 
+  {% #component "doc_figure" caption="Every directory under wiki/routes/ owns one URL." %}
+    <ul class="m-0 list-none space-y-1 p-0 font-mono text-xs">
+      <li><code>routes/page.py</code> → <code>/</code></li>
+      <li><code>routes/docs/routing/page.py</code> → <code>/docs/routing/</code></li>
+      <li><code>routes/wiki/[slug]/page.py</code> → <code>/wiki/&lt;slug&gt;/</code></li>
+    </ul>
+  {% /component %}
+
   <h2>Hybrid sources</h2>
   <p>
     The example registers a <code>HybridRouterBackend</code> that subclasses the

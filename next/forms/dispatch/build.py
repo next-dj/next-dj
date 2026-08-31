@@ -135,9 +135,8 @@ def _resolve_form_class(
 ) -> "tuple[type[django_forms.Form], dict[str, Any]]":
     """Return `(form_class, init_kwargs)` for the dispatch.
 
-    A factory may return a `Form` subclass or `(cls, init_kwargs)`. The
-    latter bypasses `get_initial` and passes `**init_kwargs` to the form
-    constructor.
+    A factory may return a `Form` subclass or `(cls, init_kwargs)`. The latter bypasses
+    `get_initial` and passes `**init_kwargs` to the form constructor.
     """
     if isinstance(form_class, type):
         return cast("type[django_forms.Form]", form_class), {}

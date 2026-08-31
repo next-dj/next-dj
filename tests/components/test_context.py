@@ -19,7 +19,7 @@ from next.components import (
 from next.components.context import iter_serialized_component_context_keys
 from next.components.renderers import _inject_component_context
 from next.static import StaticCollector
-from tests.support import attribution, handler_declared_here
+from tests.support import attribution, handler_declared_here, record_path_calls
 from tests.support.components import build_composite_component
 
 
@@ -527,3 +527,140 @@ class TestSerializedComponentContextKeys:
 
     def test_backend_without_component_files_is_skipped(self, tmp_path: Path) -> None:
         assert self._keys(DummyBackend({})) == []
+
+
+class TestComponentContextRegistryLookupCache:
+    """Tests for the version-keyed `get_functions` memo."""
+
+    def test_repeated_lookup_does_not_resolve_again(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A warm lookup returns the same tuple without touching the filesystem."""
+        reg = ComponentContextRegistry()
+        module_path = tmp_path / "component.py"
+
+        def provide() -> int:
+            return 1
+
+        reg.register(module_path, "n", provide)
+        first = reg.get_functions(module_path)
+        seen = record_path_calls(monkeypatch, "resolve")
+        second = reg.get_functions(module_path)
+        assert [entry.func for entry in first] == [provide]
+        assert second == first
+        assert seen == []
+
+    def test_empty_result_is_cached_and_invalidated_by_registration(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An empty result is cached too, until a registration moves the version."""
+        reg = ComponentContextRegistry()
+        module_path = tmp_path / "component.py"
+        assert reg.get_functions(module_path) == ()
+        seen = record_path_calls(monkeypatch, "resolve")
+        assert reg.get_functions(module_path) == ()
+        assert seen == []
+        monkeypatch.undo()
+
+        def provide() -> int:
+            return 1
+
+        reg.register(module_path, "n", provide)
+        assert [entry.func for entry in reg.get_functions(module_path)] == [provide]
+
+    def test_registration_during_warm_cache_is_visible(self, tmp_path: Path) -> None:
+        """A second function registered after a warm lookup joins the next result."""
+        reg = ComponentContextRegistry()
+        module_path = tmp_path / "component.py"
+
+        def first() -> int:
+            return 1
+
+        def second() -> int:
+            return 2
+
+        reg.register(module_path, "a", first)
+        assert [entry.func for entry in reg.get_functions(module_path)] == [first]
+        reg.register(module_path, "b", second)
+        assert [entry.func for entry in reg.get_functions(module_path)] == [
+            first,
+            second,
+        ]
+
+    def test_manager_passes_lookups_through(self, tmp_path: Path) -> None:
+        """The manager façade returns the registry tuple unchanged."""
+        mgr = ComponentContextManager()
+        module_path = tmp_path / "component.py"
+
+        def provide() -> int:
+            return 1
+
+        mgr._registry.register(module_path, "n", provide)
+        assert mgr.get_functions(module_path) == mgr._registry.get_functions(
+            module_path
+        )
+
+    def test_unregister_drops_the_path_and_invalidates_the_memo(
+        self, tmp_path: Path
+    ) -> None:
+        """Removing a path bumps the version so the warm memo cannot serve it."""
+        reg = ComponentContextRegistry()
+        module_path = tmp_path / "component.py"
+
+        def provide() -> int:
+            return 1
+
+        reg.register(module_path, "n", provide)
+        assert [entry.func for entry in reg.get_functions(module_path)] == [provide]
+        reg.unregister(module_path)
+        assert reg.get_functions(module_path) == ()
+        assert len(reg) == 0
+
+    def test_unregister_of_an_unknown_path_leaves_the_version_alone(
+        self, tmp_path: Path
+    ) -> None:
+        """Nothing moved, so the memo of every other path survives."""
+        reg = ComponentContextRegistry()
+        module_path = tmp_path / "component.py"
+
+        def provide() -> int:
+            return 1
+
+        reg.register(module_path, "n", provide)
+        warm = reg.get_functions(module_path)
+        version = reg.version
+        reg.unregister(tmp_path / "other" / "component.py")
+        assert reg.version == version
+        assert reg.get_functions(module_path) is warm
+
+    def test_identical_reregistration_keeps_the_memo(self, tmp_path: Path) -> None:
+        """Re-registering the same callable moves nothing, so the memo stands."""
+        reg = ComponentContextRegistry()
+        module_path = tmp_path / "component.py"
+
+        def provide() -> int:
+            return 1
+
+        reg.register(module_path, "n", provide)
+        warm = reg.get_functions(module_path)
+        version = reg.version
+        reg.register(module_path, "n", provide)
+        assert reg.version == version
+        assert reg.get_functions(module_path) is warm
+
+    def test_reregistration_with_new_flags_invalidates_the_memo(
+        self, tmp_path: Path
+    ) -> None:
+        """A changed `serialize` flag is a different entry, so the memo rebuilds."""
+        reg = ComponentContextRegistry()
+        module_path = tmp_path / "component.py"
+
+        def provide() -> int:
+            return 1
+
+        reg.register(module_path, "n", provide)
+        warm = reg.get_functions(module_path)
+        reg.register(module_path, "n", provide, serialize=True)
+        rebuilt = reg.get_functions(module_path)
+        assert rebuilt is not warm
+        assert [entry.serialize for entry in rebuilt] == [True]

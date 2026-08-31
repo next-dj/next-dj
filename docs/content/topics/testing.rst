@@ -81,6 +81,9 @@ The table below maps each testing goal to the helper and its import path.
    * - Drop the page template cache after rewriting template files on disk
      - ``reset_page_cache``
      - ``next.testing`` or ``next.testing.isolation``
+   * - Drop the compiled component templates after rewriting a component on disk
+     - ``reset_component_templates``
+     - ``next.testing`` or ``next.testing.isolation``
    * - Clear the form registries, diagnostics, and wizard backend
      - ``reset_form_registration_state``
      - ``next.testing`` or ``next.testing.isolation``
@@ -194,6 +197,10 @@ A third helper, ``reset_page_cache()``, resets no registry.
 It calls ``Page.clear_template_caches`` to drop the composed page template.
 The test environment runs with ``DEBUG`` off, and the composition cache stats its sources only under ``DEBUG``, so a template rewritten inside one process still renders from the composition built before the rewrite.
 Call ``reset_page_cache()`` after any such rewrite, or wrap the test in ``override_settings(DEBUG=True)`` to put the mtime check back on, which works on a composition built before the override because the snapshot it reads is taken either way.
+
+``reset_component_templates()`` is the component-side twin of that helper.
+It calls ``ComponentsManager.clear_template_caches`` to drop the compiled template of every component.
+A test that rewrites a ``.djx`` file or a ``component`` string in place needs that for the same reason.
 
 For tests that probe registration itself, ``reset_form_registration_state()`` clears every form registry, the registration diagnostics buffer, and resets the wizard backend in one call.
 

@@ -181,6 +181,11 @@ The component template renders ``{{ children }}`` to splice the content in.
 
 The ``card`` template renders this content wherever it places ``{{ children }}``.
 
+The markup is spliced in as written, exactly like slot content.
+Free children are finished HTML by the time the component runs, so escaping them a second time would only print the tags.
+The calling template, not the component, decides what happens to a variable inside that markup, so a caller that turns escaping off with ``{% autoescape off %}`` hands the component whatever the block produced.
+Values that arrive as props are a separate channel and stay autoescaped, so untrusted text belongs in a prop rather than in the child markup.
+
 .. _components-multiline-tags:
 
 Multiline tags

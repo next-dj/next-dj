@@ -12,10 +12,9 @@ if TYPE_CHECKING:
 def tenant_theme(request: HttpRequest) -> dict[str, object]:
     """Surface per-tenant CSS variables to every page template.
 
-    The middleware attaches the active `Tenant` to `request.tenant`.
-    On error pages where the middleware short-circuited, the attribute
-    is missing and we return an empty dict so templates can render
-    unbranded fallbacks.
+    The middleware attaches the active `Tenant` to `request.tenant`. On error pages
+    where the middleware short-circuited, the attribute is missing and we return an
+    empty dict so templates can render unbranded fallbacks.
     """
     tenant = get_active_tenant(request)
     if tenant is None:

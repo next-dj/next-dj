@@ -82,9 +82,9 @@ class ComponentsBackend(ABC):
     def global_component_roots(self) -> Iterable[Path]:
         """Return the scope roots whose root-scope components resolve everywhere.
 
-        A shared root makes its root-scope components visible from every
-        template, a page tree does not, and the cross-root name check reads
-        this to tell the two apart.
+        A shared root makes its root-scope components visible
+        from every template, a page tree does not, and the
+        cross-root name check reads this to tell the two apart.
         """
         return ()
 
@@ -95,9 +95,8 @@ class FileComponentsBackend(ComponentsBackend):
     def __init__(self, config: dict[str, Any]) -> None:
         """Build registry and scanner from the merged `DIRS` roots.
 
-        `COMPONENTS_DIR` is not read here. It names the folder the URL
-        router skips inside a page tree, and `FileRouterBackend` reads it
-        straight from the settings.
+        `COMPONENTS_DIR` is not read here. It names the folder the URL router skips
+        inside a page tree, and `FileRouterBackend` reads it straight from the settings.
         """
         self._extra_component_roots = component_extra_roots_from_config(config)
 

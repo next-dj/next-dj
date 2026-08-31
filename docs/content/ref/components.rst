@@ -101,8 +101,15 @@ Renderers
 .. autoclass:: next.components.ComponentTemplateLoader
    :members:
 
-``ComponentsManager`` wires a single ``ComponentTemplateLoader`` into its render pipeline.
-The loader is fixed and not pluggable, so a custom backend reads component template bodies through this class rather than substituting its own.
+.. autoclass:: next.components.CachedComponentTemplateLoader
+   :members:
+
+``ComponentsManager`` wires one ``CachedComponentTemplateLoader`` into its render pipeline, and the loader is fixed rather than configurable.
+It keeps the compiled ``Template`` of each component, so a repeated render pays neither the read nor the parse.
+Under ``DEBUG`` the entry is revalidated against the mtime of the file the body was read from, and an edit reaches the next render.
+With ``DEBUG`` off nothing stats that file, and the compilation stands until eviction drops it.
+The cache is bounded at 2048 compiled templates, the bound the visibility resolver also uses, and a ``TEMPLATES`` change drops it whole, because a compiled ``Template`` carries the engine that built it.
+A component backend reads template bodies through that shared loader rather than substituting its own.
 
 Internal infrastructure
 -----------------------

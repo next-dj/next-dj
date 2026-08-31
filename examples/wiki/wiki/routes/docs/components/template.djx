@@ -18,4 +18,22 @@
     wires the textarea to the preview pane for keystroke updates without leaving
     the page.
   </p>
+
+  <h2>Block children</h2>
+  <p>
+    A wrapper with a single insertion point needs no named slot. Everything
+    written between {% verbatim %}<code>{% #component "doc_figure" %}</code>{% endverbatim %}
+    and its closing tag reaches the component as <code>children</code>, and
+    {% verbatim %}<code>{{ children }}</code>{% endverbatim %} splices it into the
+    figure as written. Props travel the other channel and are always escaped, so
+    the caption below shows the same snippet as plain text.
+  </p>
+
+  {% #component "doc_figure" caption=markup_sample %}
+    <p>
+      The body is spliced as written, so this <em>emphasis</em> and this
+      <strong>bold run</strong> reach the page as markup.
+    </p>
+    <p>The caption carries the same snippet through the <code>caption</code> prop.</p>
+  {% /component %}
 </article>

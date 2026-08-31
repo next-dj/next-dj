@@ -1,7 +1,7 @@
 """Custom `StatReloader` that also watches the discovered route set.
 
-`.djx` templates are deliberately left out of the watch. They are re-read
-on render with mtime-based invalidation inside pages and components.
+`.djx` templates are deliberately left out of the watch. Under `DEBUG` they are
+re-read on render with mtime-based invalidation inside pages and components.
 """
 
 from __future__ import annotations

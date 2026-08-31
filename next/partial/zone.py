@@ -53,9 +53,8 @@ def _wrap_zone(tag: str, name: str, body: str, *, extra: str = "") -> SafeString
 class ZoneOptions:
     """Compile-time rendering options of one zone.
 
-    Both render paths derive their wrapper attributes from these options,
-    so a new mode cannot diverge the full render from the standalone
-    delivery.
+    Both render paths derive their wrapper attributes from these options, so a new mode
+    cannot diverge the full render from the standalone delivery.
     """
 
     tag: str = _DEFAULT_TAG

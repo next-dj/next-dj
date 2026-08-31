@@ -1,20 +1,18 @@
 """Pluggable backend contract and Django-staticfiles default implementation.
 
-A static backend turns co-located asset paths into public URLs and
-renders them through one of its named renderer methods. The default
-backend delegates URL resolution to Django staticfiles, so manifest
-hashing, S3 storage, and CDN configuration from Django settings apply
-automatically.
+A static backend turns co-located asset paths into public URLs and renders them through
+one of its named renderer methods. The default backend delegates URL resolution to
+Django staticfiles, so manifest hashing, S3 storage, and CDN configuration from Django
+settings apply automatically.
 
-The abstract `StaticBackend` only mandates `register_file`. Renderer
-methods are concrete on the default backend and selected per asset by
-`KindRegistry.renderer(kind)`. Custom backends extend the surface by
-adding more named methods such as `render_babel_script_tag` and
-registering kinds that point to them.
+The abstract `StaticBackend` only mandates `register_file`. Renderer methods are
+concrete on the default backend and selected per asset by `KindRegistry.renderer(kind)`.
+Custom backends extend the surface by adding more named methods such as
+`render_babel_script_tag` and registering kinds that point to them.
 
-Instances are built from `NEXT_FRAMEWORK['STATIC_BACKENDS']` entries by
-the static manager, which emits the `backend_loaded` signal for each one
-so user code may react to backend construction.
+Instances are built from `NEXT_FRAMEWORK['STATIC_BACKENDS']`
+entries by the static manager, which emits the `backend_loaded`
+signal for each one so user code may react to backend construction.
 """
 
 from __future__ import annotations
@@ -37,18 +35,15 @@ if TYPE_CHECKING:
 class StaticBackend(ABC):
     """Pluggable strategy for resolving asset files to URLs and rendering tags.
 
-    The constructor accepts the full backend entry from
-    `STATIC_BACKENDS`, which has the shape
-    `{"BACKEND": "...", "OPTIONS": {...}}`. The base class stores the
-    mapping on the `config` property. Subclasses are free to read any
-    keys they expose to users.
+    The constructor accepts the full backend entry from `STATIC_BACKENDS`, which has the
+    shape `{"BACKEND": "...", "OPTIONS": {...}}`. The base class stores the mapping on
+    the `config` property. Subclasses are free to read any keys they expose to users.
 
-    The only abstract requirement is `register_file`. Renderer methods
-    are added by subclasses and selected per asset through
+    The only abstract requirement is `register_file`. Renderer
+    methods are added by subclasses and selected per asset through
     `KindRegistry.renderer(kind)`. The default backend below ships
-    `render_link_tag` and `render_script_tag` for the built-in `css`
-    and `js` kinds. Custom backends register additional kinds and
-    expose matching methods.
+    `render_link_tag` and `render_script_tag` for the built-in `css` and `js`
+    kinds. Custom backends register additional kinds and expose matching methods.
     """
 
     def __init__(self, config: Mapping[str, Any] | None = None) -> None:
@@ -64,12 +59,11 @@ class StaticBackend(ABC):
     def register_file(self, source_path: Path, logical_name: str, kind: str) -> str:
         """Register a co-located asset file and return its public URL.
 
-        The `source_path` argument is the absolute path to the source
-        file on disk. The `logical_name` argument is the path without an
-        extension, for example `"about"` or `"components/card"`. The
-        `kind` argument must be a kind registered in the default kind
-        registry. The method raises `RuntimeError` when the asset
-        cannot be resolved to a URL.
+        The `source_path` argument is the absolute path to the source file on
+        disk. The `logical_name` argument is the path without an extension,
+        for example `"about"` or `"components/card"`. The `kind` argument
+        must be a kind registered in the default kind registry. The method
+        raises `RuntimeError` when the asset cannot be resolved to a URL.
         """
 
 
@@ -109,12 +103,11 @@ class StaticFilesBackend(StaticBackend):
         """Return the staticfiles URL for `next/<logical_name><suffix>`.
 
         The suffix is taken from `source_path.suffix`, so a single kind
-        can serve multiple file extensions if a custom backend wishes
-        to. Result is cached per `(logical_name, suffix)`. Missing
-        entries in the staticfiles manifest are reported as
-        `RuntimeError` with a hint about running `collectstatic`. The
-        `kind` argument is part of the contract and ignored here, the
-        suffix alone names the file.
+        can serve multiple file extensions if a custom backend wishes to.
+        Result is cached per `(logical_name, suffix)`. Missing entries
+        in the staticfiles manifest are reported as `RuntimeError` with
+        a hint about running `collectstatic`. The `kind` argument is part
+        of the contract and ignored here, the suffix alone names the file.
         """
         del kind
         suffix = source_path.suffix

@@ -26,9 +26,8 @@ _VERSION_HEADER = f"HTTP_{VERSION.upper().replace('-', '_')}"
 class PartialEnvelope:
     """Structural view over a decoded patch envelope for test assertions.
 
-    The helpers read the JSON envelope and answer questions about ops
-    and their targets without any HTML regex, so tests assert the server
-    contract on structure alone.
+    The helpers read the JSON envelope and answer questions about ops and their targets
+    without any HTML regex, so tests assert the server contract on structure alone.
     """
 
     def __init__(self, data: dict[str, Any]) -> None:
@@ -128,11 +127,10 @@ class NextClient(Client):
     ) -> HttpResponse:
         """Resolve `action_name` and POST `data` to the resulting URL.
 
-        `origin` fills the `_next_form_origin` hidden field the form tag
-        emits, unless `data` already carries one. `partial` turns the
-        POST into a patch request by stamping `X-Next-Request`, `zones`
-        names the zone the form lives in, and `version` sets the client
-        asset version.
+        `origin` fills the `_next_form_origin` hidden field the form tag emits, unless
+        `data` already carries one. `partial` turns the POST into a patch request by
+        stamping `X-Next-Request`, `zones` names the zone the form lives in, and
+        `version` sets the client asset version.
         """
         url = resolve_action_url(action_name)
         payload: dict[str, Any] = dict(data or {})

@@ -123,12 +123,11 @@ class PatchEventStream(StreamingHttpResponse):
     def _sync_stream(self, source: "Iterable[Patches]") -> "Iterator[bytes]":
         """Yield SSE bytes for a sync source, with no heartbeat.
 
-        A blocked `next()` on a sync source has nothing to interrupt it
-        without a thread, so a quiet sync stream sends no heartbeat. A
-        keepalive is the source's own job under WSGI. The close signal
-        fires once the source is exhausted or the client disconnects, after
-        the source generator is closed so it releases its resources like the
-        async path drives `aclose`.
+        A blocked `next()` on a sync source has nothing to interrupt it without a
+        thread, so a quiet sync stream sends no heartbeat. A keepalive is the source's
+        own job under WSGI. The close signal fires once the source is exhausted or the
+        client disconnects, after the source generator is closed so it releases its
+        resources like the async path drives `aclose`.
         """
         sent = 0
         yield self._retry_frame()
@@ -157,15 +156,13 @@ class PatchEventStream(StreamingHttpResponse):
     ) -> "AsyncIterator[bytes]":
         """Yield SSE bytes for an async source, interleaving heartbeats.
 
-        A single pull task is held across heartbeats so the source
-        generator is never re-entered while a pull is in flight and no
-        envelope is lost. A pull that outlasts `heartbeat_seconds`
-        yields a comment frame so a buffering proxy keeps the connection.
-        The close signal fires once the source is exhausted or the client
-        disconnects. A disconnect throws into the `await`, so the cleanup
-        cancels the in-flight pull and closes the source generator before
-        announcing the close, leaving no pending task or suspended
-        generator behind.
+        A single pull task is held across heartbeats so the source generator is never
+        re-entered while a pull is in flight and no envelope is lost. A pull that
+        outlasts `heartbeat_seconds` yields a comment frame so a buffering proxy keeps
+        the connection. The close signal fires once the source is exhausted or the
+        client disconnects. A disconnect throws into the `await`, so the cleanup cancels
+        the in-flight pull and closes the source generator before announcing the close,
+        leaving no pending task or suspended generator behind.
         """
         sent = 0
         yield self._retry_frame()

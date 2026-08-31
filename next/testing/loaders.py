@@ -3,8 +3,7 @@
 `eager_load_pages` walks a pages directory and imports every `page.py`
 file so that `@context` and `@forms.action` side effects register
 before a test dispatches HTTP requests. Results are memoised per
-absolute directory so repeated calls during a pytest session are
-cheap.
+absolute directory so repeated calls during a pytest session are cheap.
 """
 
 from __future__ import annotations
@@ -61,9 +60,8 @@ def _derive_module_name(path: Path) -> str:
 def clear_loaded_dirs() -> None:
     """Drop the memoisation cache so the next call reloads page modules.
 
-    Intended for self-tests of the loader. Production test suites do
-    not need to call this because each pytest session gets a fresh
-    interpreter.
+    Intended for self-tests of the loader. Production test suites do not need to call
+    this because each pytest session gets a fresh interpreter.
     """
     _loaded_dirs.clear()
 

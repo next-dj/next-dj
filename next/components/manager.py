@@ -1,4 +1,4 @@
-"""`ComponentsManager` and the settings_reloaded hook.
+"""`ComponentsManager` and the settings hooks that invalidate its caches.
 
 The manager loads configured backends lazily, shares a render pipeline
 between them, and subscribes to `settings_reloaded` so a fresh config
@@ -9,12 +9,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
+from django.core.signals import setting_changed
+
 from next.backends import backend_entries, load_backends
 from next.conf.signals import settings_reloaded
 
 from .backends import _DEFAULT_BACKEND_PATH, ComponentsBackend
 from .loading import ModuleLoader
 from .renderers import (
+    CachedComponentTemplateLoader,
     ComponentRenderer,
     ComponentTemplateLoader,
     CompositeComponentRenderer,
@@ -48,7 +51,7 @@ class ComponentsManager:
 
         ml = ModuleLoader()
 
-        tl = ComponentTemplateLoader(ml)
+        tl = CachedComponentTemplateLoader(ml)
         self._template_loader = tl
         simple = SimpleComponentRenderer(tl)
         composite = CompositeComponentRenderer(ml, tl)
@@ -64,6 +67,14 @@ class ComponentsManager:
         self._ensure_render_pipeline()
         return cast("ComponentTemplateLoader", self._template_loader)
 
+    def clear_template_caches(self) -> None:
+        """Drop compiled component templates without rebuilding the pipeline.
+
+        Outside `DEBUG` the loader reuses a compiled template without checking its
+        source, so a caller that rewrote a component on disk drops it here.
+        """
+        self.template_loader.clear()
+
     @property
     def component_renderer(self) -> ComponentRenderer:
         """Return the active `ComponentRenderer` with the configured strategies."""
@@ -73,9 +84,8 @@ class ComponentsManager:
     def _invalidate(self) -> None:
         """Drop cached backends and the render pipeline without rebuilding.
 
-        Settings reload far more often than a component renders, so the
-        rebuild waits for the next access instead of running in the
-        signal receiver.
+        Settings reload far more often than a component renders, so the rebuild waits
+        for the next access instead of running in the signal receiver.
         """
         self._reset_render_pipeline()
         self._backends = []
@@ -85,9 +95,8 @@ class ComponentsManager:
     def reload(self) -> None:
         """Rebuild the backends from the current `NEXT_FRAMEWORK` settings.
 
-        The render pipeline and the router-walk claims go with the old
-        backends, so the next render resolves against the freshly configured
-        sources.
+        The render pipeline and the router-walk claims go with the old backends, so the
+        next render resolves against the freshly configured sources.
         """
         self._invalidate()
         self._backends = load_backends(
@@ -175,7 +184,18 @@ def _on_settings_reloaded(**kwargs) -> None:
     components_manager._invalidate()
 
 
+def _on_setting_changed(*, setting: str, **kwargs) -> None:
+    """Drop the render pipeline when Django reports a `TEMPLATES` change.
+
+    A compiled template pins the engine that built it, and the `settings_reloaded`
+    hook beside this one fires for `NEXT_FRAMEWORK` alone.
+    """
+    if setting == "TEMPLATES":
+        components_manager._reset_render_pipeline()
+
+
 settings_reloaded.connect(_on_settings_reloaded)
+setting_changed.connect(_on_setting_changed)
 
 
 __all__ = [

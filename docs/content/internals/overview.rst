@@ -181,7 +181,7 @@ The set of submodules differs by area, and :doc:`adding-an-area` states the cont
      - A single flat module holding the protocols and slots one subsystem calls another through.
        ``PartialShaper`` and ``partial_shaper_slot`` let the page and form paths shape partial responses without importing ``next.partial``.
    * - ``next.utils``
-     - A single flat module holding the path helpers, the ``PageRoot`` value object, and the declaration-site attribution that several subsystems share.
+     - A single flat module holding the path helpers, the ``PageRoot`` value object, the ``template_edits_watched`` predicate, and the declaration-site attribution that several subsystems share.
    * - ``next.signals``
      - A single flat module that re-exports every signal its owning subpackage declares, for a receiver that subscribes across subsystems.
    * - ``next.checks``

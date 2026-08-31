@@ -1,9 +1,8 @@
 """Discovery helpers that list page roots and component folder pairs.
 
-`runserver`, `collectstatic` and the staticfiles finder all reach these
-helpers, so every read of third-party router code catches what that code
-raises and drops the backend from the answer rather than passing on a
-value of the wrong shape.
+`runserver`, `collectstatic` and the staticfiles finder all reach these helpers, so
+every read of third-party router code catches what that code raises and drops the
+backend from the answer rather than passing on a value of the wrong shape.
 """
 
 from __future__ import annotations

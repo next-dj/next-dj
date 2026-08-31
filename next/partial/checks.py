@@ -1,9 +1,8 @@
 """System checks for the partial-rendering subsystem.
 
-This module is excluded from coverage like every other area `checks.py`.
-The zone checks read the same compiled page templates the renderer uses,
-so a misconfigured zone is caught at `manage.py check` time rather than
-on a partial request.
+This module is excluded from coverage like every other area `checks.py`. The zone checks
+read the same compiled page templates the renderer uses, so a misconfigured zone is
+caught at `manage.py check` time rather than on a partial request.
 """
 
 import re
@@ -398,9 +397,8 @@ def _zones_directly_in_with(nodelist: NodeList) -> "Iterator[str]":
 def check_context_zone_names_exist(*args, **kwargs) -> list[CheckMessage]:
     """Error when a `@context(zone=)` names an undeclared zone (`next.E078`).
 
-    A full render runs every callable, so a misspelt zone name looks
-    healthy there and silently drops the callable from every zone
-    request instead.
+    A full render runs every callable, so a misspelt zone name looks healthy there and
+    silently drops the callable from every zone request instead.
     """
     messages: list[CheckMessage] = []
     # The composed-template walk imports each `page.py`, so read bindings after.
@@ -612,9 +610,9 @@ def _partial_backends_active() -> bool:
 def check_single_partial_backend(*args, **kwargs) -> list[CheckMessage]:
     """Warn when more than one partial protocol backend is configured (`next.W071`).
 
-    Partial rendering uses a single protocol backend. Only the first valid
-    PARTIAL_BACKENDS entry is instantiated, so a second entry is dead config
-    that silently never runs.
+    Partial rendering uses a single protocol backend. Only
+    the first valid PARTIAL_BACKENDS entry is instantiated,
+    so a second entry is dead config that silently never runs.
     """
     valid = [
         config for config in _partial_backend_configs() if isinstance(config, dict)

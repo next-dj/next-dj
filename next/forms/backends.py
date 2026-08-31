@@ -240,9 +240,9 @@ class RegistryBackendSnapshot:
 class ActionRegistration:
     """A form action to register with its name, declaration site, and target.
 
-    Exactly one of `handler`, `form_class`, or `wizard_class` is the action
-    target, except the `@action(form_class=...)` path which supplies a handler
-    and a form-factory together.
+    Exactly one of `handler`, `form_class`, or `wizard_class`
+    is the action target, except the `@action(form_class=...)`
+    path which supplies a handler and a form-factory together.
     """
 
     name: str

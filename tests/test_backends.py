@@ -142,8 +142,8 @@ class TestLoadBackends:
         [("type", TypeError), ("value", ValueError), ("import", ImportError)],
     )
     def test_other_errors_from_construction_escape(self, kind, error) -> None:
-        # a constructor failing for anything but its own config is a bug
-        # rather than an entry to skip
+        # a constructor failing for anything but its own
+        # config is a bug rather than an entry to skip
         with pytest.raises(error, match="boom"):
             load_backends(
                 [{"BACKEND": RAISING, "ERROR": kind}, {"BACKEND": ALPHA}],

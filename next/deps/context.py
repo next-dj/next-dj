@@ -1,10 +1,9 @@
 """Resolution-context snapshot passed to providers during DI resolution.
 
-`ResolutionContext` collects request, form, URL kwargs, and template
-context data into a single immutable view. Providers read from this
-object without mutating it. `RESERVED_KEYS` lists the kwarg names that
-`DependencyResolver.resolve_dependencies` treats as fixed inputs rather
-than URL kwargs.
+`ResolutionContext` collects request, form, URL kwargs, and template context data into a
+single immutable view. Providers read from this object without mutating it.
+`RESERVED_KEYS` lists the kwarg names that `DependencyResolver.resolve_dependencies`
+treats as fixed inputs rather than URL kwargs.
 """
 
 from __future__ import annotations

@@ -14,9 +14,8 @@ def next_client():
 def _isolate_form_registries():
     """Snapshot and restore the form registry around each test.
 
-    Compat modules register forms and actions at import time, so the
-    snapshot taken here always includes them. Fixture-registered actions
-    are dropped on restore.
+    Compat modules register forms and actions at import time, so the snapshot taken here
+    always includes them. Fixture-registered actions are dropped on restore.
     """
     with isolated_form_registries():
         yield

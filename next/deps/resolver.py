@@ -19,7 +19,7 @@ from .providers import ParameterProvider, RegisteredParameterProvider
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     from django.http import HttpRequest
 
@@ -131,9 +131,8 @@ class DependencyResolver:
     ) -> bool:
         """Return whether a registered provider fills `param` of `func` in `context`.
 
-        `func` travels along because a provider may read the callable to
-        resolve the annotation, and `EXPLICIT_RESOLVE_KEYS` is left to the
-        caller.
+        `func` travels along because a provider may read the callable to resolve the
+        annotation, and `EXPLICIT_RESOLVE_KEYS` is left to the caller.
         """
         self._ensure_providers()
         self._resolve_call_stack.append(func)
@@ -302,18 +301,17 @@ class DependencyResolver:
         func: Callable[..., Any],
         *,
         request: HttpRequest | None = None,
-        template_context: dict[str, Any] | None = None,
+        template_context: Mapping[str, Any] | None = None,
         _cache: dict[str, Any] | DependencyCache | None = None,
         _stack: list[str] | None = None,
     ) -> dict[str, Any]:
         """Resolve `func` for component callables using template context.
 
-        Keys from `EXPLICIT_RESOLVE_KEYS` are stripped from the context
-        data so that name-based providers cannot shadow dedicated
-        providers such as `HttpRequestProvider` on a parameter literally
-        named `request`.
+        Keys from `EXPLICIT_RESOLVE_KEYS` are stripped from the context data so that
+        name-based providers cannot shadow dedicated providers such as
+        `HttpRequestProvider` on a parameter literally named `request`.
         """
-        tc: dict[str, Any] = dict(template_context or {})
+        tc: Mapping[str, Any] = template_context or {}
         injectable = {
             k: v for k, v in tc.items() if k not in self.EXPLICIT_RESOLVE_KEYS
         }

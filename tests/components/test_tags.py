@@ -11,6 +11,9 @@ from django.utils.safestring import SafeString
 
 from next.components import ComponentInfo, components_manager
 from next.static import StaticCollector
+from next.templatetags import components as component_tags
+from next.templatetags.components import ComponentNode, _resolve_template_path
+from tests.support import record_path_calls
 
 
 class TestComponentTag:
@@ -339,6 +342,67 @@ class TestComponentTag:
             )
         assert "slot_image" in result or "<img" in result
         assert "kids" in result
+
+    def _render_box(self, tmp_path: Path, source: str, body: str) -> str:
+        """Render ``box`` with `source` as its template and `body` as the call site."""
+        (tmp_path / "box.djx").write_text(source)
+        info = ComponentInfo(
+            name="box",
+            scope_root=tmp_path,
+            scope_relative="",
+            template_path=tmp_path / "box.djx",
+            module_path=None,
+            is_simple=True,
+        )
+        with patch.object(components_manager, "get_component", return_value=info):
+            t = Template("{% load components %}" + body)
+            return t.render(
+                Context(
+                    {
+                        "current_template_path": str(tmp_path / "page.djx"),
+                        "hostile": "<script>alert(1)</script>",
+                    }
+                )
+            )
+
+    def test_free_children_splice_markup_while_props_stay_escaped(
+        self, tmp_path: Path
+    ) -> None:
+        """Children arrive as finished HTML while props of the same text do not.
+
+        The caller renders children before the component runs, so autoescaping
+        already happened there and a second pass would print the tags. Props
+        travel their own channel and keep escaping untrusted text.
+        """
+        result = self._render_box(
+            tmp_path,
+            "<div>{{ children }}|{{ note }}</div>",
+            '{% #component "box" note=hostile %}<b>kid</b>{% /component %}',
+        )
+        assert result == "<div><b>kid</b>|&lt;script&gt;alert(1)&lt;/script&gt;</div>"
+
+    def test_variables_inside_children_keep_their_escaping(
+        self, tmp_path: Path
+    ) -> None:
+        """A hostile value interpolated inside children stays escaped."""
+        result = self._render_box(
+            tmp_path,
+            "<div>{{ children }}</div>",
+            '{% #component "box" %}<b>{{ hostile }}</b>{% /component %}',
+        )
+        assert result == "<div><b>&lt;script&gt;alert(1)&lt;/script&gt;</b></div>"
+
+    @pytest.mark.parametrize(
+        "call_site",
+        ['{% component "box" %}', '{% #component "box" %}{% /component %}'],
+        ids=["void", "empty-block"],
+    )
+    def test_component_without_children_renders_nothing_for_them(
+        self, tmp_path: Path, call_site: str
+    ) -> None:
+        """The void form and an empty body both leave ``{{ children }}`` blank."""
+        result = self._render_box(tmp_path, "<div>{{ children }}</div>", call_site)
+        assert result == "<div></div>"
 
     def test_component_tag_with_props(self, tmp_path: Path) -> None:
         """Component tag parses key=val props."""
@@ -944,3 +1008,291 @@ class TestComponentMissReporting:
         assert [r.getMessage() for r in warnings] == [
             "component 'nvbar' skipped, no current_template_path in context"
         ]
+
+
+class TestComponentNodePathCache:
+    """Tests for the process-wide ``current_template_path`` resolve memo."""
+
+    def _node(self) -> ComponentNode:
+        t = Template('{% load components %}{% component "card" %}')
+        return next(n for n in t.nodelist if isinstance(n, ComponentNode))
+
+    def _noncanonical(self, tmp_path: Path, name: str) -> tuple[str, Path]:
+        scope = tmp_path / name
+        scope.mkdir()
+        page = scope / "page.djx"
+        return str(scope / ".." / name / "page.djx"), page.resolve()
+
+    def test_repeated_lookup_resolves_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A second lookup with the same raw path reuses the memo."""
+        node = self._node()
+        raw, expected = self._noncanonical(tmp_path, "scope")
+        ctx = Context({"current_template_path": raw})
+        _resolve_template_path.cache_clear()
+        seen = record_path_calls(monkeypatch, "resolve")
+        first = node._template_path_from_context(ctx)
+        second = node._template_path_from_context(ctx)
+        assert first == expected
+        assert second == first
+        assert len(seen) == 1
+
+    def test_changed_path_is_resolved_again(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A second raw path resolves on its own instead of reusing the memo."""
+        node = self._node()
+        raw_a, expected_a = self._noncanonical(tmp_path, "scope_a")
+        raw_b, expected_b = self._noncanonical(tmp_path, "scope_b")
+        _resolve_template_path.cache_clear()
+        seen = record_path_calls(monkeypatch, "resolve")
+        first = node._template_path_from_context(
+            Context({"current_template_path": raw_a})
+        )
+        second = node._template_path_from_context(
+            Context({"current_template_path": raw_b})
+        )
+        assert first == expected_a
+        assert second == expected_b
+        assert len(seen) == 2
+
+    def test_rotating_parents_each_resolve_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Twenty rotating parent pages resolve once each, not once per render."""
+        node = self._node()
+        cases = [self._noncanonical(tmp_path, f"scope{i}") for i in range(20)]
+        contexts = [Context({"current_template_path": raw}) for raw, _ in cases]
+        _resolve_template_path.cache_clear()
+        seen = record_path_calls(monkeypatch, "resolve")
+        for _ in range(3):
+            for ctx, (_raw, expected) in zip(contexts, cases, strict=True):
+                assert node._template_path_from_context(ctx) == expected
+        assert len(seen) == len(cases)
+
+    def test_second_node_reuses_the_shared_memo(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A path one node resolved costs a second node nothing."""
+        raw, expected = self._noncanonical(tmp_path, "scope")
+        ctx = Context({"current_template_path": raw})
+        _resolve_template_path.cache_clear()
+        seen = record_path_calls(monkeypatch, "resolve")
+        assert self._node()._template_path_from_context(ctx) == expected
+        assert self._node()._template_path_from_context(ctx) == expected
+        assert len(seen) == 1
+
+    def test_path_value_is_taken_as_resolved(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A ``Path`` under the key was already resolved by whoever wrote it."""
+        node = self._node()
+        raw = (tmp_path / "t.djx").resolve()
+        seen = record_path_calls(monkeypatch, "resolve")
+        result = node._template_path_from_context(
+            Context({"current_template_path": raw})
+        )
+        assert result is raw
+        assert seen == []
+
+    def test_nested_tag_does_not_resolve_the_parent_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A tag inside a component template reuses the path its parent resolved."""
+        (tmp_path / "outer.djx").write_text(
+            '{% load components %}<b>{% component "inner" %}</b>'
+        )
+        (tmp_path / "inner.djx").write_text("<i>deep</i>")
+        infos = {
+            name: ComponentInfo(
+                name=name,
+                scope_root=tmp_path,
+                scope_relative="",
+                template_path=tmp_path / f"{name}.djx",
+                module_path=None,
+                is_simple=True,
+            )
+            for name in ("outer", "inner")
+        }
+        raw = str(tmp_path / "page.djx")
+        resolved: list[str] = []
+
+        def counting(value: str) -> Path:
+            resolved.append(value)
+            return Path(value).resolve()
+
+        monkeypatch.setattr(component_tags, "_resolve_template_path", counting)
+        with patch.object(
+            components_manager,
+            "get_component",
+            side_effect=lambda name, _p: infos[name],
+        ):
+            result = Template('{% load components %}{% component "outer" %}').render(
+                Context({"current_template_path": raw})
+            )
+        assert result == "<b><i>deep</i></b>"
+        assert resolved == [raw]
+
+    def test_missing_path_resolves_nothing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A context without ``current_template_path`` touches no filesystem."""
+        node = self._node()
+        seen = record_path_calls(monkeypatch, "resolve")
+        assert node._template_path_from_context(Context({})) is None
+        assert seen == []
+
+    def test_unexpected_type_resolves_nothing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A raw value that is neither ``str`` nor ``Path`` touches no filesystem."""
+        node = self._node()
+        ctx = Context({"current_template_path": 42})
+        seen = record_path_calls(monkeypatch, "resolve")
+        assert node._template_path_from_context(ctx) is None
+        assert node._template_path_from_context(ctx) is None
+        assert seen == []
+
+    def test_warm_render_does_not_resolve(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The second render of a simple component resolves no path at all."""
+        (tmp_path / "card.djx").write_text("<div>ok</div>")
+        info = ComponentInfo(
+            name="card",
+            scope_root=tmp_path,
+            scope_relative="",
+            template_path=tmp_path / "card.djx",
+            module_path=None,
+            is_simple=True,
+        )
+        t = Template('{% load components %}{% component "card" %}')
+        ctx = Context({"current_template_path": str(tmp_path / "t.djx")})
+        with patch.object(components_manager, "get_component", return_value=info):
+            assert "ok" in t.render(ctx)
+            seen = record_path_calls(monkeypatch, "resolve")
+            assert "ok" in t.render(ctx)
+        assert seen == []
+
+
+_GOLDEN_COMPONENT = (
+    '<article data-title="{{ title }}">'
+    '{% #set_slot "header" %}<h2>default header</h2>{% /set_slot %}'
+    '{% #set_slot "description" %}<i>fallback</i>{% /set_slot %}'
+    "<p>{{ site }}</p>"
+    "<div>{{ children }}</div>"
+    "</article>"
+)
+
+_GOLDEN_PAGE = (
+    "{% load components %}"
+    "<main>"
+    '{% #component "card" title="Card title" description="prop value" %}'
+    '{% #slot "header" %}<h1>Injected</h1>{% /slot %}'
+    "<span>{{ title }}</span>"
+    "{% /component %}"
+    "</main>"
+)
+
+_GOLDEN_HTML = (
+    "<main>"
+    '<article data-title="Card title">'
+    "<h1>Injected</h1>"
+    "<i>fallback</i>"
+    "<p>next.dj</p>"
+    "<div><span>Page title</span></div>"
+    "</article>"
+    "</main>"
+)
+
+
+class TestComponentRenderGolden:
+    """The rendered page is pinned character for character."""
+
+    def test_page_with_slots_and_props_renders_the_pinned_html(
+        self, tmp_path: Path
+    ) -> None:
+        """Slots, the set_slot fallback, and prop shadowing produce one fixed string.
+
+        The context the tag hands to the renderer is built in place, so the
+        expectation is spelled out rather than asserted piecewise. Free
+        children and slot bodies both arrive marked safe, because the caller
+        already rendered and escaped them, while the ``title`` prop is the
+        escaping channel and reaches the component as plain text.
+        """
+        (tmp_path / "card.djx").write_text(_GOLDEN_COMPONENT)
+        info = ComponentInfo(
+            name="card",
+            scope_root=tmp_path,
+            scope_relative="",
+            template_path=tmp_path / "card.djx",
+            module_path=None,
+            is_simple=True,
+        )
+        context = Context(
+            {
+                "current_template_path": str(tmp_path / "page.djx"),
+                "title": "Page title",
+                "site": "next.dj",
+            }
+        )
+        with patch.object(components_manager, "get_component", return_value=info):
+            result = Template(_GOLDEN_PAGE).render(context)
+
+        assert result == _GOLDEN_HTML
+
+
+_ESCAPE_COMPONENT = '<div>{{ children }}{% #set_slot "body" %}{% /set_slot %}</div>'
+
+_FREE_CHILD_BODY = "{{ danger }}"
+_SLOT_CHILD_BODY = '{% #slot "body" %}{{ danger }}{% /slot %}'
+
+
+class TestCallerControlsChildEscaping:
+    """Free children and slot bodies carry whatever the caller rendered."""
+
+    def _render(self, tmp_path: Path, body: str, *, autoescape: bool) -> str:
+        (tmp_path / "card.djx").write_text(_ESCAPE_COMPONENT)
+        info = ComponentInfo(
+            name="card",
+            scope_root=tmp_path,
+            scope_relative="",
+            template_path=tmp_path / "card.djx",
+            module_path=None,
+            is_simple=True,
+        )
+        call = '{% #component "card" %}' + body + "{% /component %}"
+        if not autoescape:
+            call = "{% autoescape off %}" + call + "{% endautoescape %}"
+        with patch.object(components_manager, "get_component", return_value=info):
+            return Template("{% load components %}" + call).render(
+                Context(
+                    {
+                        "current_template_path": str(tmp_path / "page.djx"),
+                        "danger": "<script>alert(1)</script>",
+                    }
+                )
+            )
+
+    @pytest.mark.parametrize(
+        "body", [_FREE_CHILD_BODY, _SLOT_CHILD_BODY], ids=("children", "slot")
+    )
+    def test_escaping_caller_hands_over_escaped_markup(
+        self, tmp_path: Path, body: str
+    ) -> None:
+        """A caller with autoescaping on escapes the value before the tag sees it."""
+        assert self._render(tmp_path, body, autoescape=True) == (
+            "<div>&lt;script&gt;alert(1)&lt;/script&gt;</div>"
+        )
+
+    @pytest.mark.parametrize(
+        "body", [_FREE_CHILD_BODY, _SLOT_CHILD_BODY], ids=("children", "slot")
+    )
+    def test_autoescape_off_caller_hands_over_raw_markup(
+        self, tmp_path: Path, body: str
+    ) -> None:
+        """Under ``{% autoescape off %}`` the raw value reaches the component."""
+        assert self._render(tmp_path, body, autoescape=False) == (
+            "<div><script>alert(1)</script></div>"
+        )

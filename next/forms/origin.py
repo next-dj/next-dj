@@ -48,10 +48,9 @@ def resolve_url_to_match(
 ) -> "OriginMatch | None":
     """Resolve a same-site URL against the URLconf to a page identity.
 
-    The URL travels through the same URLconf the request uses, with the
-    script prefix stripped. Set `filter_reserved` to keep the captured URL
-    kwargs raw when the caller needs every captured parameter rather than
-    only the DI-safe ones.
+    The URL travels through the same URLconf the request uses, with the script prefix
+    stripped. Set `filter_reserved` to keep the captured URL kwargs raw when the caller
+    needs every captured parameter rather than only the DI-safe ones.
     """
     path = url.partition("?")[0]
     prefix = get_script_prefix()

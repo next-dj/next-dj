@@ -26,14 +26,12 @@ def extend_default_backend(
 ) -> list[dict[str, Any]]:
     """Return a `NEXT_FRAMEWORK[key]` list with one backend entry patched.
 
-    The returned list is a deep copy of the default entries with the
-    entry at `index` updated by `overrides`. Nested dicts such as
-    `OPTIONS` are merged instead of replaced so partial overrides do not
-    drop adjacent keys.
+    The returned list is a deep copy of the default entries with the entry at `index`
+    updated by `overrides`. Nested dicts such as `OPTIONS` are merged instead of
+    replaced so partial overrides do not drop adjacent keys.
 
-    Raises `ImproperlyConfigured` when `key` is not a known backend-list
-    setting. Raises `IndexError` when `index` is out of range for the
-    default list.
+    Raises `ImproperlyConfigured` when `key` is not a known backend-list setting. Raises
+    `IndexError` when `index` is out of range for the default list.
     """
     if key not in _BACKEND_LIST_KEYS:
         allowed = ", ".join(sorted(_BACKEND_LIST_KEYS))

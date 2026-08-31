@@ -18,12 +18,11 @@ UNSAFE_HREF = re.compile(
 def render_markdown(text: str) -> SafeString:
     """Render Markdown text to safe HTML for the page or preview pane.
 
-    Inline HTML in the source is neutralised by escaping the body
-    before it reaches the Markdown renderer. Markdown syntax such as
-    headings, lists, fenced code, and links still resolves. After
-    rendering, ``href`` values pointing at ``javascript:``, ``data:``,
-    or ``vbscript:`` URLs are stripped because Markdown auto-link
-    parsing accepts them.
+    Inline HTML in the source is neutralised by escaping the body before
+    it reaches the Markdown renderer. Markdown syntax such as headings,
+    lists, fenced code, and links still resolves. After rendering, ``href``
+    values pointing at ``javascript:``, ``data:``, or ``vbscript:``
+    URLs are stripped because Markdown auto-link parsing accepts them.
     """
     body = text or ""
     if not body.strip():

@@ -32,9 +32,8 @@ class Context:
 
     An empty `Context()` reads the parameter name from context_data. A
     string source reads that context key. A callable source is called
-    with DI-resolved arguments. Any other object becomes a constant.
-    The `default` keyword supplies a fallback when the context key is
-    missing.
+    with DI-resolved arguments. Any other object becomes a constant. The
+    `default` keyword supplies a fallback when the context key is missing.
     """
 
     source: object | None = None

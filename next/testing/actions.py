@@ -14,9 +14,8 @@ if TYPE_CHECKING:
 def resolve_action_url(action_name: str) -> str:
     """Return the reverse URL for a registered form action by name.
 
-    Wraps `form_action_manager.get_action_url` so tests do not need to
-    import the manager singleton directly. Raises `FormActionNotFoundError`
-    for unknown actions.
+    Wraps `form_action_manager.get_action_url` so tests do not need to import the
+    manager singleton directly. Raises `FormActionNotFoundError` for unknown actions.
     """
     return form_action_manager.get_action_url(action_name)
 
@@ -26,10 +25,9 @@ def build_form_for(
 ) -> django_forms.Form:
     """Instantiate the form class registered for `action_name`.
 
-    Useful for unit-testing form validation without dispatching an HTTP
-    request. Raises `FormActionNotFoundError` with close-match suggestions when
-    the action is unknown and `LookupError` when the action is registered
-    without a form class.
+    Useful for unit-testing form validation without dispatching an HTTP request. Raises
+    `FormActionNotFoundError` with close-match suggestions when the action is unknown
+    and `LookupError` when the action is registered without a form class.
     """
     meta = form_action_manager.require_action_meta(action_name)
     form_class = meta.get("form_class")

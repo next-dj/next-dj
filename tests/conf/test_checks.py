@@ -31,7 +31,7 @@ VALID_TYPED_VALUES: dict[str, object] = {
 class TestValueTypeErrors:
     """`check_next_framework_value_types` reports mistyped keys as next.E076."""
 
-    def test_key_types_map_covers_exactly_seven_keys(self) -> None:
+    def test_key_types_map_covers_exactly_the_typed_keys(self) -> None:
         assert set(_KEY_TYPES) == set(VALID_TYPED_VALUES)
 
     @pytest.mark.parametrize(
@@ -61,7 +61,7 @@ class TestValueTypeErrors:
         assert [m.id for m in messages] == ["next.E076"]
         assert f"NEXT_FRAMEWORK[{key!r}]" in messages[0].msg
 
-    def test_silent_on_valid_map_of_all_seven_keys(self) -> None:
+    def test_silent_on_valid_map_of_every_typed_key(self) -> None:
         with override_settings(NEXT_FRAMEWORK=dict(VALID_TYPED_VALUES)):
             assert check_next_framework_value_types() == []
 

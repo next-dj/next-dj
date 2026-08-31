@@ -140,10 +140,9 @@ def _nested_names(partial: "ZonePartial") -> frozenset[str]:
 def zones_of(template: "Template") -> "Mapping[str, ZoneInfo]":
     """Return the named zones of a compiled template, memoised per object.
 
-    The cache keys on the compiled template object, so a recompiled
-    page gets a fresh entry while the stale object is collected. The
-    first read of a template announces its zones through
-    `zone_registered`.
+    The cache keys on the compiled template object, so a recompiled page gets a fresh
+    entry while the stale object is collected. The first read of a template announces
+    its zones through `zone_registered`.
     """
     cached = _zone_cache.get(template)
     if cached is not None:

@@ -1,8 +1,7 @@
 """Framework-agnostic helpers for testing next-dj apps.
 
-The public surface is a small set of pure-Python utilities that work
-with Django `TestCase`, stdlib `unittest`, and pytest. Nothing in this
-package imports pytest.
+The public surface is a small set of pure-Python utilities that work with Django
+`TestCase`, stdlib `unittest`, and pytest. Nothing in this package imports pytest.
 """
 
 from __future__ import annotations
@@ -12,6 +11,7 @@ from .client import NextClient, PartialEnvelope, envelope_of
 from .deps import make_resolution_context, resolve_call
 from .html import assert_has_class, assert_missing_class, find_anchor
 from .isolation import (
+    reset_component_templates,
     reset_components,
     reset_form_actions,
     reset_form_registration_state,
@@ -62,6 +62,7 @@ __all__ = [
     "patch_static_collector",
     "render_component_by_name",
     "render_page",
+    "reset_component_templates",
     "reset_components",
     "reset_form_actions",
     "reset_form_registration_state",

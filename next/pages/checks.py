@@ -195,10 +195,9 @@ def _holds_a_page(directory: Path) -> bool:
 def check_unrouted_working_directory_pages(*args, **kwargs) -> list[CheckMessage]:
     """Warn when a pages tree beside the process is routed by nobody (`next.W002`).
 
-    A project that lists no root in `DIRS` keeps writing pages under a directory
-    the router never reaches, and the pages are never served. Nothing else
-    reports that, because the checks walk the trees the routers report and this
-    one is not among them.
+    A project that lists no root in `DIRS` keeps writing pages under a directory the
+    router never reaches, and the pages are never served. Nothing else reports that,
+    because the checks walk the trees the routers report and this one is not among them.
     """
     router_manager, _init_errors = get_router_manager()
     if router_manager is None:
@@ -605,11 +604,10 @@ def _check_context_function(
 ) -> CheckMessage | None:
     """Emit an error when keyless context callables are not annotated dict-like.
 
-    The check is static, because executing user code at ``manage.py check``
-    time is expensive and can hit databases that have not been migrated yet.
-    Callables without a return annotation are accepted.
-    The runtime emits a clear ``TypeError`` on first render if the result is
-    not a mapping.
+    The check is static, because executing user code at ``manage.py check`` time is
+    expensive and can hit databases that have not been migrated yet. Callables without a
+    return annotation are accepted. The runtime emits a clear ``TypeError`` on first
+    render if the result is not a mapping.
     """
     try:
         annotation = inspect.signature(func).return_annotation

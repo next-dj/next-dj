@@ -20,7 +20,7 @@ In addition to watching ``.py`` mtimes, it diffs the discovered route set on eve
 A per-tree signature of directory mtimes and directory count gates the rescan, so an unchanged tree reuses the cached route set.
 A reload triggers when pages appear or disappear from the routing tree, even when no file mtime changed.
 ``.djx`` templates are not watched.
-They are re-read on render with mtime-based invalidation.
+They are re-read on render with mtime-based invalidation under ``DEBUG``.
 
 .. automodule:: next.server.autoreload
    :members:

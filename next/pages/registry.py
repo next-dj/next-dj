@@ -51,10 +51,9 @@ class PageContextEntry(NamedTuple):
 class ZoneBinding(NamedTuple):
     """One registered `@context` seen through its zone binding.
 
-    The zone diagnostics pair a bound callable with the callables reading
-    its key, so the zones travel next to the callable while the rest of the
-    entry stays inside the registry. A `zones` of `None` marks a callable
-    every render runs.
+    The zone diagnostics pair a bound callable with the callables reading its key, so
+    the zones travel next to the callable while the rest of the entry stays inside the
+    registry. A `zones` of `None` marks a callable every render runs.
     """
 
     key: str | None
@@ -229,14 +228,13 @@ class PageContextRegistry:
         """Merge inherited ancestor page.py context with this file's context callables.
 
         Inherited context comes from ``@context(..., inherit_context=True)``
-        callables in ancestor ``page.py`` files, not from layout files.
-        The returned `ContextResult` separates the full template context
-        from the JavaScript-serializable subset. The js_context uses
-        first-registration semantics so that page-level values always
-        take priority over inherited ones. A `_requested_zones` batch narrows
-        this file's callables to the zone-less ones plus those bound to a
-        named zone in the batch, a full render passes no batch and runs
-        every callable.
+        callables in ancestor ``page.py`` files, not from layout files. The
+        returned `ContextResult` separates the full template context from the
+        JavaScript-serializable subset. The js_context uses first-registration
+        semantics so that page-level values always take priority over
+        inherited ones. A `_requested_zones` batch narrows this file's
+        callables to the zone-less ones plus those bound to a named zone in
+        the batch, a full render passes no batch and runs every callable.
         """
         context_data: dict[str, Any] = {}
         js_context: dict[str, Any] = {}

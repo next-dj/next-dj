@@ -1,15 +1,14 @@
 """Pluggable builder for the `next.min.js` preload, script, and init tags.
 
-The builder produces the three HTML fragments that wire `window.Next`
-into the rendered page. The first fragment is a preload hint injected
-before `</head>` so the browser starts downloading during HTML parsing.
-The second fragment is a blocking script tag for the compiled runtime.
-The third fragment is an inline script that feeds the serialized JS
-context into `Next._init`.
+The builder produces the three HTML fragments that wire `window.Next` into the rendered
+page. The first fragment is a preload hint injected before `</head>` so the browser
+starts downloading during HTML parsing. The second fragment is a blocking script tag for
+the compiled runtime. The third fragment is an inline script that feeds the serialized
+JS context into `Next._init`.
 
-Every template is an instance attribute, so users can override any
-single tag without subclassing. An injection policy controls whether
-the static manager emits those tags at all.
+Every template is an instance attribute, so users can override
+any single tag without subclassing. An injection policy
+controls whether the static manager emits those tags at all.
 """
 
 from __future__ import annotations
@@ -95,14 +94,12 @@ def csrf_payload_for(request: HttpRequest | None) -> dict[str, str] | None:
 class ScriptInjectionPolicy(enum.Enum):
     """Controls whether `next.min.js` is automatically injected.
 
-    The `AUTO` value is the default. Under `AUTO` the static manager
-    emits the preload hint, the `<script>` tag, and the `Next._init`
-    call into every rendered page. The `DISABLED` value skips injection
-    entirely and is useful when a page does not need `window.Next`, for
-    example a raw API response rendered through the page machinery. The
-    `MANUAL` value skips automatic injection but still builds the
-    fragments on request so users can emit the tags themselves from a
-    template.
+    The `AUTO` value is the default. Under `AUTO` the static manager emits the preload
+    hint, the `<script>` tag, and the `Next._init` call into every rendered page. The
+    `DISABLED` value skips injection entirely and is useful when a page does not need
+    `window.Next`, for example a raw API response rendered through the page machinery.
+    The `MANUAL` value skips automatic injection but still builds the fragments on
+    request so users can emit the tags themselves from a template.
     """
 
     AUTO = "auto"

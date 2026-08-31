@@ -13,8 +13,10 @@
   <div class="accent-bar h-1 w-full"></div>
   {% component "header" %}
 
-  <main class="mx-auto w-full max-w-container flex-1 px-4 py-8">
-    {% block template %}{% endblock template %}
+  <main class="flex flex-1 flex-col">
+    {% #component "container" extra="flex-1 py-8" %}
+      {% block template %}{% endblock template %}
+    {% /component %}
   </main>
 
   {% component "footer" %}

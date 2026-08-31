@@ -1,9 +1,8 @@
 """Development-server helpers and autoreload integration.
 
-This package replaces Django's default `StatReloader` with
-`NextStatReloader`, exposes helpers that contribute watch specs to the
-file watcher, and lists filesystem roots for tooling that needs stable
-paths.
+This package replaces Django's default `StatReloader` with `NextStatReloader`, exposes
+helpers that contribute watch specs to the file watcher, and lists filesystem roots for
+tooling that needs stable paths.
 """
 
 from __future__ import annotations

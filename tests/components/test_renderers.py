@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 import pytest
 from django.template import Context, Template
+from django.test import RequestFactory
 
 from next.components import (
     ComponentContextManager,
@@ -10,6 +11,7 @@ from next.components import (
     components_manager,
     render_component,
 )
+from next.components.loading import ModuleLoader
 from next.components.renderers import (
     _RESERVED_CONTEXT_KEYS,
     COMPONENT_PROPS_CONTEXT_KEY,
@@ -265,3 +267,82 @@ class TestComponentTagPropsChannel:
                 info,
                 '{% #component "card" %}{% #slot "body" %}ok{% /slot %}{% /component %}',
             )
+
+
+_RENDER_MODULE = """def render(title):
+    return f"<b>{title}</b>"
+"""
+
+
+class TestCallerContextOwnership:
+    """`render_component` reads the caller's mapping and never writes to it."""
+
+    def test_simple_render_leaves_the_caller_dict_untouched(
+        self, tmp_path: Path
+    ) -> None:
+        """The request and csrf keys land in the render copy, not in the argument."""
+        (tmp_path / "card.djx").write_text("<div>{{ title }} {{ csrf_token }}</div>")
+        info = ComponentInfo(
+            name="card",
+            scope_root=tmp_path,
+            scope_relative="",
+            template_path=tmp_path / "card.djx",
+            module_path=None,
+            is_simple=True,
+        )
+        context_data = {"title": "Hi"}
+        request = RequestFactory().get("/")
+
+        html = render_component(info, context_data, request=request)
+
+        assert "Hi" in html
+        assert context_data == {"title": "Hi"}
+
+    def test_composite_context_functions_write_to_the_render_copy(
+        self, tmp_path: Path
+    ) -> None:
+        """A `@component.context` merge stays inside the render copy."""
+        mgr, info, module_path = build_composite_component(
+            tmp_path, template="<div>{{ title }} {{ env }}</div>"
+        )
+        mgr._registry.register(module_path, None, lambda: {"env": "prod"})
+        context_data = {"title": "Hi"}
+
+        with patch("next.components.renderers.component", mgr):
+            html = render_component(info, context_data)
+
+        assert "prod" in html
+        assert context_data == {"title": "Hi"}
+
+    def test_composite_render_function_leaves_the_caller_dict_untouched(
+        self, tmp_path: Path
+    ) -> None:
+        """The `render()` branch resolves from the caller's mapping read-only."""
+        mgr, info, module_path = build_composite_component(tmp_path)
+        module_path.write_text(_RENDER_MODULE)
+        context_data = {"title": "Hi"}
+
+        with patch("next.components.renderers.component", mgr):
+            html = render_component(info, context_data)
+
+        assert html == "<b>Hi</b>"
+        assert context_data == {"title": "Hi"}
+
+    def test_fallback_to_template_leaves_the_caller_dict_untouched(
+        self, tmp_path: Path
+    ) -> None:
+        """The unloadable-module fallback stamps the anchor on its own copy."""
+        mgr, info, _module_path = build_composite_component(
+            tmp_path,
+            template="<div>{{ title }}|{{ current_component_module_path }}</div>",
+        )
+        context_data = {"title": "Hi"}
+
+        with (
+            patch("next.components.renderers.component", mgr),
+            patch.object(ModuleLoader, "load", return_value=None),
+        ):
+            html = render_component(info, context_data)
+
+        assert "Hi" in html
+        assert context_data == {"title": "Hi"}

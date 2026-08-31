@@ -1,0 +1,6 @@
+<figure class="my-6 rounded-lg border border-border bg-muted/40 p-4">
+  <div class="text-sm text-foreground">{{ children }}</div>
+  {% if caption %}
+    <figcaption class="mt-3 border-t border-border pt-2 text-xs text-muted-foreground">{{ caption }}</figcaption>
+  {% endif %}
+</figure>
