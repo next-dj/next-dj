@@ -179,7 +179,10 @@ class CachedComponentTemplateLoader(ComponentTemplateLoader):
         key = (info.template_path, info.module_path)
         entry = self._compiled.get(key)
         if entry is not None and self._is_fresh(entry):
-            self._mark_used(key)
+            # Use order decides only who is evicted, so a cache with room to
+            # spare skips the bookkeeping every hit would otherwise pay.
+            if len(self._compiled) >= self._maxsize:
+                self._mark_used(key)
             return entry.template
         return self._compile(key, info)
 

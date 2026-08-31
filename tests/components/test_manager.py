@@ -982,7 +982,7 @@ class TestCachedComponentTemplateLoader:
     def test_an_entry_dropped_while_it_is_checked_still_renders(
         self, tmp_path: Path
     ) -> None:
-        """An eviction racing the reorder costs the reorder, never the render."""
+        """An eviction racing the freshness check costs no render."""
         path = tmp_path / "card.djx"
         path.write_text("<i>one</i>")
         info = ComponentInfo("card", tmp_path, "", path, None, True)
@@ -990,6 +990,25 @@ class TestCachedComponentTemplateLoader:
         assert _render_body(loader, info) == "<i>one</i>"
         assert _render_body(loader, info) == "<i>one</i>"
         assert loader._compiled == {}
+
+    def test_marking_a_dropped_key_leaves_the_cache_alone(self) -> None:
+        """The reorder a concurrent eviction has already outrun does nothing."""
+        loader = CachedComponentTemplateLoader(ModuleLoader())
+        loader._mark_used((Path("/gone/card.djx"), None))
+        assert loader._compiled == {}
+
+    def test_use_order_is_tracked_only_once_the_cache_is_full(
+        self, tmp_path: Path
+    ) -> None:
+        """A cache with room to spare skips the reorder every hit would pay."""
+        path = tmp_path / "card.djx"
+        path.write_text("<i>one</i>")
+        info = ComponentInfo("card", tmp_path, "", path, None, True)
+        loader = CachedComponentTemplateLoader(ModuleLoader())
+        assert _render_body(loader, info) == "<i>one</i>"
+        with patch.object(loader, "_mark_used") as reorder:
+            assert _render_body(loader, info) == "<i>one</i>"
+        assert reorder.call_count == 0
 
 
 class TestTemplatesSettingInvalidation:
