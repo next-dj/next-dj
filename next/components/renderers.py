@@ -9,6 +9,7 @@ The Protocol `ComponentRenderStrategy` plus `SimpleComponentRenderer` and
 from __future__ import annotations
 
 import contextlib
+import threading
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, override
@@ -119,6 +120,33 @@ class _CompiledTemplate:
 # The template and module files that define one component.
 type _SourceKey = tuple[Path | None, Path | None]
 
+# Components one process keeps compiled, at the bound the path-keyed caches share.
+_COMPILED_TEMPLATE_CACHE_MAX_SIZE = 2048
+
+
+def _stat_ns(path: Path) -> int | None:
+    """Return the mtime of `path` in nanoseconds, or `None` when it does not stat."""
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return None
+
+
+def _source_mtimes(info: ComponentInfo) -> dict[Path, int]:
+    """Stat every file a load may read for `info`, before any of them is read.
+
+    Reading first and stat-ing after would file the old text under the mtime of
+    a save that landed in between, hiding that edit until the next one.
+    """
+    mtimes: dict[Path, int] = {}
+    for candidate in (info.template_path, info.module_path):
+        if candidate is None or candidate in mtimes:
+            continue
+        mtime_ns = _stat_ns(candidate)
+        if mtime_ns is not None:
+            mtimes[candidate] = mtime_ns
+    return mtimes
+
 
 class CachedComponentTemplateLoader(ComponentTemplateLoader):
     """Reuse a compiled template until the file it was read from changes.
@@ -129,11 +157,17 @@ class CachedComponentTemplateLoader(ComponentTemplateLoader):
     arrives with the reload the autoreloader runs for `component.py`.
     """
 
-    def __init__(self, module_loader: ModuleLoader, maxsize: int = 128) -> None:
+    def __init__(
+        self,
+        module_loader: ModuleLoader,
+        maxsize: int = _COMPILED_TEMPLATE_CACHE_MAX_SIZE,
+    ) -> None:
         """Bind this loader to a shared `ModuleLoader` with an empty LRU cache."""
         super().__init__(module_loader)
         self._maxsize = maxsize
         self._compiled: OrderedDict[_SourceKey, _CompiledTemplate] = OrderedDict()
+        # Taken around the cache mutations alone, never around a read or a parse.
+        self._lock = threading.Lock()
 
     @override
     def load_template(self, info: ComponentInfo) -> Template | None:
@@ -145,45 +179,59 @@ class CachedComponentTemplateLoader(ComponentTemplateLoader):
         key = (info.template_path, info.module_path)
         entry = self._compiled.get(key)
         if entry is not None and self._is_fresh(entry):
-            self._compiled.move_to_end(key)
+            self._mark_used(key)
             return entry.template
         return self._compile(key, info)
 
     @override
     def clear(self) -> None:
         """Drop every compiled template."""
-        self._compiled.clear()
+        with self._lock:
+            self._compiled.clear()
+
+    def _mark_used(self, key: _SourceKey) -> None:
+        """Move `key` to the fresh end, unless a concurrent store already dropped it."""
+        with self._lock:
+            if key in self._compiled:
+                self._compiled.move_to_end(key)
 
     def _is_fresh(self, entry: _CompiledTemplate) -> bool:
         if not template_edits_watched():
             return True
-        try:
-            return entry.source_path.stat().st_mtime_ns == entry.mtime_ns
-        except OSError:
-            return False
+        return _stat_ns(entry.source_path) == entry.mtime_ns
 
     def _compile(self, key: _SourceKey, info: ComponentInfo) -> Template | None:
+        mtimes = _source_mtimes(info)
         source = self.load_source(info)
         if source is None:
-            self._compiled.pop(key, None)
+            self._drop(key)
             return None
 
         template = Template(source.text)
-        try:
-            mtime_ns = source.path.stat().st_mtime_ns
-        except OSError:
+        # A subclass may read a file neither `ComponentInfo` field names, so a
+        # path the pre-read stat missed is stat-ed here rather than left uncached.
+        mtime_ns = mtimes.get(source.path)
+        if mtime_ns is None:
+            mtime_ns = _stat_ns(source.path)
+        if mtime_ns is None:
             # Without an mtime the entry could never expire, so it is not kept.
-            self._compiled.pop(key, None)
+            self._drop(key)
             return template
 
         self._store(key, _CompiledTemplate(source.path, mtime_ns, template))
         return template
 
+    def _drop(self, key: _SourceKey) -> None:
+        """Forget the entry under `key`, whether or not one is stored."""
+        with self._lock:
+            self._compiled.pop(key, None)
+
     def _store(self, key: _SourceKey, entry: _CompiledTemplate) -> None:
-        if key not in self._compiled and len(self._compiled) >= self._maxsize:
-            self._compiled.popitem(last=False)
-        self._compiled[key] = entry
-        self._compiled.move_to_end(key)
+        with self._lock:
+            if key not in self._compiled and len(self._compiled) >= self._maxsize:
+                self._compiled.popitem(last=False)
+            self._compiled[key] = entry
+            self._compiled.move_to_end(key)
 
 
 def _stamp_component_anchor(info: ComponentInfo, context_dict: dict[str, Any]) -> None:

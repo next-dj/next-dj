@@ -27,8 +27,11 @@ from next.components import (
     render_component,
 )
 from next.components.manager import _on_settings_reloaded
+from next.components.registry import _VISIBILITY_CACHE_MAX_SIZE
 from next.components.renderers import (
+    _COMPILED_TEMPLATE_CACHE_MAX_SIZE,
     TemplateSource,
+    _CompiledTemplate,
     _inject_component_context,
     _merge_csrf_context,
 )
@@ -62,7 +65,11 @@ def _render_body(loader: ComponentTemplateLoader, info: ComponentInfo) -> str:
 class CountingCachedLoader(CachedComponentTemplateLoader):
     """Cached loader that records how often it read a source."""
 
-    def __init__(self, module_loader: ModuleLoader, maxsize: int = 128) -> None:
+    def __init__(
+        self,
+        module_loader: ModuleLoader,
+        maxsize: int = _COMPILED_TEMPLATE_CACHE_MAX_SIZE,
+    ) -> None:
         """Start with an empty compiled cache and a zeroed read counter."""
         super().__init__(module_loader, maxsize)
         self.reads = 0
@@ -77,6 +84,44 @@ class SyntheticSourceLoader(CachedComponentTemplateLoader):
 
     def load_source(self, info: ComponentInfo) -> TemplateSource | None:
         return TemplateSource("<i>synthetic</i>", info.scope_root / "nowhere.djx")
+
+
+class RewritingSourceLoader(CachedComponentTemplateLoader):
+    """Cached loader that lets one save land while the first body is being read."""
+
+    def __init__(self, module_loader: ModuleLoader) -> None:
+        """Start with an empty compiled cache and no save queued."""
+        super().__init__(module_loader)
+        self.pending_save: str | None = None
+
+    def load_source(self, info: ComponentInfo) -> TemplateSource | None:
+        source = super().load_source(info)
+        if self.pending_save is not None and info.template_path is not None:
+            info.template_path.write_text(self.pending_save)
+            _bump_mtime(info.template_path)
+            self.pending_save = None
+        return source
+
+
+class EvictingFreshnessLoader(CachedComponentTemplateLoader):
+    """Cached loader whose freshness check drops the entry, as an eviction would."""
+
+    def _is_fresh(self, entry: _CompiledTemplate) -> bool:
+        self._compiled.clear()
+        return True
+
+
+_STRING_IF_INVALID_TEMPLATES = [
+    {
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [],
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": ["django.template.context_processors.request"],
+            "string_if_invalid": "MISSING",
+        },
+    }
+]
 
 
 class TestComponentsManager:
@@ -914,6 +959,57 @@ class TestCachedComponentTemplateLoader:
         assert loader._compiled == {}
         path.write_text("<i>two</i>")
         assert _render_body(loader, info) == "<i>two</i>"
+
+    def test_the_default_bound_matches_the_other_component_caches(self) -> None:
+        """One bound covers every path-keyed component cache in the process."""
+        loader = CachedComponentTemplateLoader(ModuleLoader())
+        assert loader._maxsize == _VISIBILITY_CACHE_MAX_SIZE
+
+    @pytest.mark.usefixtures("watched_template_edits")
+    def test_a_save_during_the_read_does_not_hide_the_edit(
+        self, tmp_path: Path
+    ) -> None:
+        """A rewrite landing between the stat and the read still expires the entry."""
+        path = tmp_path / "card.djx"
+        path.write_text("<i>one</i>")
+        info = ComponentInfo("card", tmp_path, "", path, None, True)
+        loader = RewritingSourceLoader(ModuleLoader())
+        loader.pending_save = "<i>two</i>"
+        assert _render_body(loader, info) == "<i>one</i>"
+        assert _render_body(loader, info) == "<i>two</i>"
+
+    @pytest.mark.usefixtures("watched_template_edits")
+    def test_an_entry_dropped_while_it_is_checked_still_renders(
+        self, tmp_path: Path
+    ) -> None:
+        """An eviction racing the reorder costs the reorder, never the render."""
+        path = tmp_path / "card.djx"
+        path.write_text("<i>one</i>")
+        info = ComponentInfo("card", tmp_path, "", path, None, True)
+        loader = EvictingFreshnessLoader(ModuleLoader())
+        assert _render_body(loader, info) == "<i>one</i>"
+        assert _render_body(loader, info) == "<i>one</i>"
+        assert loader._compiled == {}
+
+
+class TestTemplatesSettingInvalidation:
+    """A `TEMPLATES` change reaches a component whose template is already compiled."""
+
+    def test_an_engine_change_drops_the_compiled_templates(
+        self, tmp_path: Path
+    ) -> None:
+        """The new engine renders the component the old one had already compiled."""
+        path = tmp_path / "card.djx"
+        path.write_text("<i>{{ missing }}</i>")
+        info = ComponentInfo("card", tmp_path, "", path, None, True)
+        loader = components_manager.template_loader
+        assert SimpleComponentRenderer(loader).render(info, {}, None) == "<i></i>"
+        with override_settings(TEMPLATES=_STRING_IF_INVALID_TEMPLATES):
+            overridden = components_manager.template_loader
+            assert overridden is not loader
+            rendered = SimpleComponentRenderer(overridden).render(info, {}, None)
+            assert rendered == "<i>MISSING</i>"
+        assert components_manager.template_loader is not overridden
 
 
 class TestRevalidationFollowsWatchedEdits:

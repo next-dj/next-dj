@@ -56,6 +56,7 @@ Modules
    ``ComponentRenderStrategy`` plus the simple and composite implementations.
    ``ComponentTemplateLoader`` reads the template body and compiles it on every render.
    ``CachedComponentTemplateLoader``, the loader the manager wires in, keeps that compilation and revalidates it against the mtime of the file the body came from, so a repeated render costs one ``stat`` under ``DEBUG`` and nothing at all in production.
+   The mtime is read before the body is, so a save that lands between the two reaches the next render rather than being filed under the text it replaced.
 
 ``next.components.facade``.
    Short helpers used from templates, including ``get_component``, ``load_component_template``, ``render_component``.
@@ -75,6 +76,7 @@ Modules
 ``next.components.manager``.
    ``ComponentsManager`` orchestrates the backends, shares one render pipeline between them, and builds the list with the shared ``load_backends`` helper.
    A ``settings_reloaded`` drops the cached backends, and the next access rebuilds them.
+   A Django ``TEMPLATES`` change drops the render pipeline the same way, because a compiled component template carries the engine that built it and would otherwise outlive the settings it was built under.
    ``next.components.watch`` resolves the same entries with ``resolve_backend_class`` and never instantiates them, because its scan is read-only.
 
 ``next.components.checks``.

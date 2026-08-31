@@ -1,4 +1,4 @@
-"""`ComponentsManager` and the settings_reloaded hook.
+"""`ComponentsManager` and the settings hooks that invalidate its caches.
 
 The manager loads configured backends lazily, shares a render pipeline
 between them, and subscribes to `settings_reloaded` so a fresh config
@@ -8,6 +8,8 @@ drops the cached state without reimporting this module.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
+
+from django.core.signals import setting_changed
 
 from next.backends import backend_entries, load_backends
 from next.conf.signals import settings_reloaded
@@ -182,7 +184,18 @@ def _on_settings_reloaded(**kwargs) -> None:
     components_manager._invalidate()
 
 
+def _on_setting_changed(*, setting: str, **kwargs) -> None:
+    """Drop the render pipeline when Django reports a `TEMPLATES` change.
+
+    A compiled template pins the engine that built it, and the `settings_reloaded`
+    hook beside this one fires for `NEXT_FRAMEWORK` alone.
+    """
+    if setting == "TEMPLATES":
+        components_manager._reset_render_pipeline()
+
+
 settings_reloaded.connect(_on_settings_reloaded)
+setting_changed.connect(_on_setting_changed)
 
 
 __all__ = [
