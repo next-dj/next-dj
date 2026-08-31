@@ -39,11 +39,10 @@ def check_django_templates_backend_present(*args, **kwargs) -> list[CheckMessage
 def _iter_tag_library_modules() -> list[str]:
     """Return the dotted names of tag library modules under next.templatetags.
 
-    A module counts as a tag library when it exposes a `register` attribute
-    that is a Django `Library`, the same shape `get_installed_libraries`
-    loads. This walks the package only to discover the modules that exist
-    on disk, the builtin registration list itself stays the explicit
-    `_BUILTIN_MODULES` tuple.
+    A module counts as a tag library when it exposes a `register` attribute that is a
+    Django `Library`, the same shape `get_installed_libraries` loads. This walks the
+    package only to discover the modules that exist on disk, the builtin registration
+    list itself stays the explicit `_BUILTIN_MODULES` tuple.
     """
     found: list[str] = []
     package_path = next.templatetags.__path__
@@ -62,11 +61,10 @@ def _iter_tag_library_modules() -> list[str]:
 def check_builtin_tag_libraries_complete(*args, **kwargs) -> list[CheckMessage]:
     """Warn when a tag library is not registered as a builtin (`next.W063`).
 
-    The builtin registration list is the explicit `_BUILTIN_MODULES` tuple.
-    A tag library module added under `next.templatetags` but left out of
-    that tuple installs into no engine, so its tags silently fail to load.
-    This check pairs the explicit list with a completeness probe over the
-    modules that exist on disk.
+    The builtin registration list is the explicit `_BUILTIN_MODULES` tuple. A tag
+    library module added under `next.templatetags` but left out of that tuple installs
+    into no engine, so its tags silently fail to load. This check pairs the explicit
+    list with a completeness probe over the modules that exist on disk.
     """
     builtins = set(_BUILTIN_MODULES)
     return [

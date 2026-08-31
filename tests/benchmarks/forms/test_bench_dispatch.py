@@ -137,9 +137,9 @@ class TestBenchDispatchEndToEnd:
     def test_dispatch_unguarded_form_no_hook_overhead(self, benchmark) -> None:
         """A no-hook form pays no permission-hook resolve on the dispatch path.
 
-        Pins the zero-overhead promise that an undeclared check_permissions or
-        has_object_permission costs the dispatcher only the two ClassVar reads,
-        not a third resolver call.
+        Pins the zero-overhead promise that an undeclared
+        check_permissions or has_object_permission costs the dispatcher
+        only the two ClassVar reads, not a third resolver call.
         """
         backend = RegistryFormActionBackend()
         backend.register_action(
@@ -164,10 +164,9 @@ class TestBenchDispatchEndToEnd:
     def test_dispatch_through_subclassed_backend(self, benchmark) -> None:
         """Dispatch through a thin `RegistryFormActionBackend` subclass.
 
-        Pins the wrapper overhead for projects that inherit from the
-        registry backend (audit-trail, metrics, gating). Compare against
-        ``test_dispatch_valid_form`` to spot regressions in the
-        super-call path.
+        Pins the wrapper overhead for projects that inherit from the registry backend
+        (audit-trail, metrics, gating). Compare against ``test_dispatch_valid_form`` to
+        spot regressions in the super-call path.
         """
 
         class _SubclassedBackend(RegistryFormActionBackend):

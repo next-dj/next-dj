@@ -20,12 +20,11 @@ logger = logging.getLogger(__name__)
 class ViteManifestBackend(StaticFilesBackend):
     """Dev/prod-aware backend for Vite-bundled co-located JSX assets.
 
-    With DEV_ORIGIN set, jsx assets resolve to the Vite dev server so
-    HMR works. Without DEV_ORIGIN, the Vite manifest is read to find
-    hashed built output and URL resolution is delegated to Django
-    staticfiles. Rendering is handled by the framework built-in
-    `render_module_tag` because jsx is registered under the `module`
-    renderer in `apps.py`.
+    With DEV_ORIGIN set, jsx assets resolve to the Vite dev server so HMR
+    works. Without DEV_ORIGIN, the Vite manifest is read to find hashed
+    built output and URL resolution is delegated to Django staticfiles.
+    Rendering is handled by the framework built-in `render_module_tag`
+    because jsx is registered under the `module` renderer in `apps.py`.
     """
 
     def __init__(self, config: Mapping[str, Any] | None = None) -> None:

@@ -8,9 +8,8 @@ from next.components import components_manager
 def install() -> None:
     """Load backends and run component discovery on app ready.
 
-    Discovery populates each backend registry. Unless `LAZY_COMPONENT_MODULES`
-    is set it also imports every `component.py` so decorators run before the
-    first request.
+    Discovery populates each backend registry. Unless `LAZY_COMPONENT_MODULES` is set it
+    also imports every `component.py` so decorators run before the first request.
     """
     for backend in components_manager.backends:
         backend.discover()

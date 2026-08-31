@@ -1,9 +1,8 @@
 """Django signals emitted by the dependency-injection layer.
 
-`provider_registered` fires whenever a `RegisteredParameterProvider`
-subclass is added to the auto-registry. External code may listen to
-the signal to observe provider wiring, typically in tests or
-diagnostics.
+`provider_registered` fires whenever a `RegisteredParameterProvider` subclass is added
+to the auto-registry. External code may listen to the signal to observe provider wiring,
+typically in tests or diagnostics.
 """
 
 from django.dispatch import Signal

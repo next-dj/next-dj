@@ -33,9 +33,8 @@ if TYPE_CHECKING:
 class ContextFunction:
     """One function registered to add variables before a component template runs.
 
-    The optional `serializer` overrides the global JS context
-    serializer for the value this callable produces, but only when
-    `serialize` is true.
+    The optional `serializer` overrides the global JS context serializer for the value
+    this callable produces, but only when `serialize` is true.
     """
 
     func: Callable[..., Any]

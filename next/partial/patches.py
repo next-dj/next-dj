@@ -81,11 +81,10 @@ class Patches:
     def __init__(self, request: HttpRequest, *, echo_of: str | None = None) -> None:
         """Start an empty builder bound to the request.
 
-        Pass `echo_of` with the originating mutation's request id so the
-        envelope carries it as `request_id`, letting an SSE subscriber
-        suppress its own echo. Only the stream path passes it, the HTTP
-        response path leaves it unset since the answer already reaches the
-        initiator.
+        Pass `echo_of` with the originating mutation's request id so the envelope
+        carries it as `request_id`, letting an SSE subscriber suppress its own echo.
+        Only the stream path passes it, the HTTP response path leaves it unset since the
+        answer already reaches the initiator.
         """
         self._init_state(request, asset_version(), echo_of)
 
@@ -93,9 +92,8 @@ class Patches:
     def versioned(cls, version: str, *, echo_of: str | None = None) -> "Patches":
         """Start an empty request-free builder stamped with a literal version.
 
-        The builder stays a low-level envelope assembler with no request,
-        used by paths that already hold the version and render their own
-        HTML.
+        The builder stays a low-level envelope assembler with no request, used by paths
+        that already hold the version and render their own HTML.
         """
         builder = cls.__new__(cls)
         builder._init_state(None, version, echo_of)
@@ -162,9 +160,9 @@ class Patches:
     ) -> "Patches":
         """Route a zone-selected morph to its local or foreign per-verb method.
 
-        A `url_kwargs` without a `page` names a foreign page's URL with no
-        page to render, so it is refused rather than dropped into a local
-        zone render that ignores it.
+        A `url_kwargs` without a `page` names a foreign page's
+        URL with no page to render, so it is refused rather
+        than dropped into a local zone render that ignores it.
         """
         if "page" in select:
             self._reject_extra_morph_keys(select, _FOREIGN_ZONE_MORPH_KEYS)
@@ -217,15 +215,13 @@ class Patches:
     ) -> "Patches":
         """Render a zone of a foreign page out of band, re-running its guards.
 
-        The page is named by its page path or by a URL of it, which is
-        resolved through the URLconf to the page that serves it. The
-        foreign page's body resolution runs first, so a redirect or a
-        denial short-circuits before any zone renders and raises instead
-        of morphing an empty body. A `render()` string body has no zone to
-        render standalone, so it is refused the same way the OOB view
-        branch refuses it. With the page authorized, the named zone renders
-        standalone with the foreign page's URL kwargs and morphs in place
-        addressed by zone name.
+        The page is named by its page path or by a URL of it, which is resolved through
+        the URLconf to the page that serves it. The foreign page's body resolution runs
+        first, so a redirect or a denial short-circuits before any zone renders and
+        raises instead of morphing an empty body. A `render()` string body has no zone
+        to render standalone, so it is refused the same way the OOB view branch refuses
+        it. With the page authorized, the named zone renders standalone with the foreign
+        page's URL kwargs and morphs in place addressed by zone name.
         """
         request = self._require_request()
         foreign_path = self._foreign_page_path(page)
@@ -323,12 +319,11 @@ class Patches:
     def context(self, **names) -> "Patches":
         """Merge named serialize provider values into the client context.
 
-        Only the names of registered `serialize=True` providers on the
-        origin page are accepted. A framework-owned init-payload key raises
-        `ReservedContextKeyError` whether or not the origin page registered
-        it, so the refusal does not depend on the collision the check warns
-        about. The values are serialized through `resolve_serializer()` so
-        the wire carries plain data.
+        Only the names of registered `serialize=True` providers on the origin page are
+        accepted. A framework-owned init-payload key raises `ReservedContextKeyError`
+        whether or not the origin page registered it, so the refusal does not depend on
+        the collision the check warns about. The values are serialized through
+        `resolve_serializer()` so the wire carries plain data.
         """
         reserved = RESERVED_PAYLOAD_KEYS & names.keys()
         if reserved:

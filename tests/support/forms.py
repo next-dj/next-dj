@@ -18,10 +18,9 @@ from next.forms.wizard import wizard_backend_manager
 def isolated_form_registries() -> Generator[None, None, None]:
     """Snapshot the form registries on entry and put the baseline back on exit.
 
-    Actions registered inside the block are dropped, so a later suite sees
-    the registry exactly as import time left it. The manager API is what
-    moves `version` on restore, which reaching into the backend maps by
-    hand does not.
+    Actions registered inside the block are dropped, so a later suite sees the registry
+    exactly as import time left it. The manager API is what moves `version` on restore,
+    which reaching into the backend maps by hand does not.
     """
     actions = form_action_manager.snapshot_actions()
     diagnostics = registration_diagnostics.snapshot()

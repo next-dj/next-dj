@@ -1,14 +1,12 @@
 """Django staticfiles finder that exposes next-dj co-located assets.
 
-The finder surfaces every `template.css`, `layout.js`, and
-`component.css` plus any stems registered on the stem registry under
-the `next/` staticfiles namespace. The usual `{% static "next/about.css" %}`
-call works without the user configuring anything.
+The finder surfaces every `template.css`, `layout.js`, and `component.css` plus any
+stems registered on the stem registry under the `next/` staticfiles namespace. The usual
+`{% static "next/about.css" %}` call works without the user configuring anything.
 
-The logical-path and source-file mapping is computed by the
-co-located asset discovery helper below, which shares the same
-`PathResolver` used at request-time discovery. The two layers agree on
-every URL.
+The logical-path and source-file mapping is computed by the co-located asset discovery
+helper below, which shares the same `PathResolver` used at request-time discovery. The
+two layers agree on every URL.
 """
 
 from __future__ import annotations

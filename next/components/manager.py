@@ -82,9 +82,8 @@ class ComponentsManager:
     def _invalidate(self) -> None:
         """Drop cached backends and the render pipeline without rebuilding.
 
-        Settings reload far more often than a component renders, so the
-        rebuild waits for the next access instead of running in the
-        signal receiver.
+        Settings reload far more often than a component renders, so the rebuild waits
+        for the next access instead of running in the signal receiver.
         """
         self._reset_render_pipeline()
         self._backends = []
@@ -94,9 +93,8 @@ class ComponentsManager:
     def reload(self) -> None:
         """Rebuild the backends from the current `NEXT_FRAMEWORK` settings.
 
-        The render pipeline and the router-walk claims go with the old
-        backends, so the next render resolves against the freshly configured
-        sources.
+        The render pipeline and the router-walk claims go with the old backends, so the
+        next render resolves against the freshly configured sources.
         """
         self._invalidate()
         self._backends = load_backends(

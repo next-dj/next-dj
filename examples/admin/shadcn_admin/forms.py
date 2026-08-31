@@ -283,12 +283,11 @@ class AdminInlineSpec:
 def _build_form_class(spec: AdminFormSpec) -> type[django_forms.Form]:
     """Wrap `ModelAdmin.get_form` so inline-formset errors surface on the main form.
 
-    `AdminForm.clean()` builds the inline formsets a second time bound to
-    the same POST data, calls `is_valid()` on each, and raises
-    `ValidationError` if any inline row is broken. The dispatcher catches
-    that through `form.is_valid() == False` and re-renders the origin page
-    — `form_state` then rebuilds the formsets and shows the errors next to
-    the bad rows.
+    `AdminForm.clean()` builds the inline formsets a second time bound to the
+    same POST data, calls `is_valid()` on each, and raises `ValidationError`
+    if any inline row is broken. The dispatcher catches that through
+    `form.is_valid() == False` and re-renders the origin page — `form_state`
+    then rebuilds the formsets and shows the errors next to the bad rows.
     """
     base = spec.model_admin.get_form(spec.request, spec.instance, change=spec.is_change)
 
@@ -414,9 +413,8 @@ def admin_inline_add_form_factory(
 def _render_inline_row(inline: AdminInlineSpec, obj: Model) -> str:
     """Render one clean keyed inline row form for a replace patch.
 
-    The change template path travels as `current_template_path` so the
-    `inline_row` component resolves the same way the change view render
-    does.
+    The change template path travels as `current_template_path` so the `inline_row`
+    component resolves the same way the change view render does.
     """
     row = inline._row(obj, None)
     return _ROW_TEMPLATE.render(
@@ -485,11 +483,10 @@ def handle_inline_add(
 ) -> HttpResponse:
     """Create one inline row and open its own editor in a result layer.
 
-    A live runtime opens the new row's standalone change view `record` zone
-    in a result layer, so the client fetches that zone and morphs the editor
-    into the modal for immediate detail edits, then refreshes the parent's
-    row-count badge in place. Without the runtime the builder falls back to
-    the parent change view.
+    A live runtime opens the new row's standalone change view `record` zone in a result
+    layer, so the client fetches that zone and morphs the editor into the modal for
+    immediate detail edits, then refreshes the parent's row-count badge in place.
+    Without the runtime the builder falls back to the parent change view.
     """
     inline = AdminInlineSpec.for_request(spec)
     if not inline.has_add_permission():

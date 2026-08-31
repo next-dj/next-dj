@@ -61,11 +61,10 @@ class GuardedValidateForm(Form):
 class ViewGuardValidateForm(Form):
     """Form guarded by a view-level hook, with no action guard at all.
 
-    The denial must land in the view-permission layer before the form
-    binds, so the second authorization layer is proven independent of the
-    action guard. The unique-email validator only ever runs behind that
-    hook, so an authenticated blur can surface its error and an anonymous
-    blur cannot reach it.
+    The denial must land in the view-permission layer before the form binds, so the
+    second authorization layer is proven independent of the action guard. The
+    unique-email validator only ever runs behind that hook, so an authenticated blur can
+    surface its error and an anonymous blur cannot reach it.
     """
 
     email = forms.EmailField()

@@ -1,8 +1,8 @@
 """Aggregate re-export of every signal emitted by the framework.
 
-Signals also live on their owning subpackage (for example ``next.forms.signals``).
-Import from here when one module subscribes to several subsystems and prefers one
-import path.
+Signals also live on their owning subpackage (for example
+``next.forms.signals``). Import from here when one module
+subscribes to several subsystems and prefers one import path.
 """
 
 from next.components.signals import (

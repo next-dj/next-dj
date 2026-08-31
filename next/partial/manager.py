@@ -56,12 +56,11 @@ def asset_version() -> str:
 def _resolve_asset_version() -> str:
     """Resolve the asset version from the backend options and the manifest.
 
-    An explicit `VERSION` option wins so a deployment may pin the version
-    to a release tag. The `"manifest"` sentinel resolves to a stable hash
-    of the staticfiles manifest when the active staticfiles storage hashes
-    its files, so the deploy-mismatch guard works out of the box. Without
-    a manifest storage the sentinel falls back to a stable default and the
-    guard never fires.
+    An explicit `VERSION` option wins so a deployment may pin the version to a release
+    tag. The `"manifest"` sentinel resolves to a stable hash of the staticfiles manifest
+    when the active staticfiles storage hashes its files, so the deploy-mismatch guard
+    works out of the box. Without a manifest storage the sentinel falls back to a stable
+    default and the guard never fires.
     """
     options = partial_backend_manager.get().options
     configured = options.get(_VERSION_OPTION, _MANIFEST_VERSION)

@@ -1,15 +1,13 @@
 """Coordinate static backends, asset discovery, and placeholder injection.
 
-The static manager loads backends lazily on first use, owns the shared
-asset discovery instance, caches page-tree roots, and replaces every
-registered placeholder token with the rendered tags once rendering
-completes. It also injects the `next.min.js` wiring unless the
-injection policy is `DISABLED`.
+The static manager loads backends lazily on first use, owns the shared asset discovery
+instance, caches page-tree roots, and replaces every registered placeholder token with
+the rendered tags once rendering completes. It also injects the `next.min.js` wiring
+unless the injection policy is `DISABLED`.
 
-The module-level `default_manager` is a lazy handle around a single
-static manager instance, and `get_static_manager` hands out the instance
-it wraps. The settings-change hook in `next.conf` resets the wrapper when
-`NEXT_FRAMEWORK` changes.
+The module-level `default_manager` is a lazy handle around a single static manager
+instance, and `get_static_manager` hands out the instance it wraps. The settings-change
+hook in `next.conf` resets the wrapper when `NEXT_FRAMEWORK` changes.
 """
 
 from __future__ import annotations

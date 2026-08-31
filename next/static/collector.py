@@ -1,21 +1,18 @@
 """Collector, dedup strategies, JS context policies, and placeholder slots.
 
-Rendering flows are stateful. Every HTTP request spins up a fresh
-collector that rides along in the template context, absorbs every
-`{% use_style %}`, `{% #use_script %}`, co-located `template.css`, and
-`styles` or `scripts` list entry, then hands the accumulated set back to
-the static manager when the template finishes.
+Rendering flows are stateful. Every HTTP request spins up a fresh collector that rides
+along in the template context, absorbs every `{% use_style %}`, `{% #use_script %}`,
+co-located `template.css`, and `styles` or `scripts` list entry, then hands the
+accumulated set back to the static manager when the template finishes.
 
-The collector does not hardcode deduplication or merge semantics.
-Strategy objects plug in at construction time, so users can swap
-URL-based dedup for content-hash dedup or replace the default
-first-wins JS-context merge with a deep-merge policy without touching
-the collector source.
+The collector does not hardcode deduplication or merge semantics. Strategy objects plug
+in at construction time, so users can swap URL-based dedup for content-hash dedup or
+replace the default first-wins JS-context merge with a deep-merge policy without
+touching the collector source.
 
-The collector is also fully type-agnostic. Each asset routes to a
-slot named in `KindRegistry`, and the buckets live in a slot-keyed
-dictionary on the collector. There is no built-in knowledge of `css`,
-`js`, or any other specific kind here.
+The collector is also fully type-agnostic. Each asset routes to a slot named in
+`KindRegistry`, and the buckets live in a slot-keyed dictionary on the collector. There
+is no built-in knowledge of `css`, `js`, or any other specific kind here.
 """
 
 from __future__ import annotations
@@ -50,9 +47,8 @@ def _inline_dedup_key(asset: StaticAsset) -> tuple[str, str, str]:
 class DedupStrategy(Protocol):
     """Key-based dedup strategy consumed by the static collector.
 
-    Implementations return a hashable value that uniquely identifies an
-    asset for deduplication. The collector ignores any asset whose key
-    was already recorded.
+    Implementations return a hashable value that uniquely identifies an asset for
+    deduplication. The collector ignores any asset whose key was already recorded.
     """
 
     def key(self, asset: StaticAsset) -> Hashable:
@@ -77,10 +73,9 @@ class UrlDedup:
 class HashContentDedup:
     """Dedupe URL-form assets by sha256 of their disk content.
 
-    This is useful in production builds where identical CSS may be
-    emitted under different hashed filenames by a manifest storage. The
-    strategy falls back to URL-based dedup when the `source_path` is
-    missing.
+    This is useful in production builds where identical CSS may be emitted under
+    different hashed filenames by a manifest storage. The strategy falls back to
+    URL-based dedup when the `source_path` is missing.
     """
 
     def __init__(self) -> None:
@@ -201,10 +196,9 @@ class PlaceholderSlot:
     """Binding between a `{% collect_* %}` placeholder name and its token.
 
     The `name` field identifies the slot. Assets routed to this slot by
-    `KindRegistry.slot(asset.kind)` accumulate in the collector under
-    this name. The `token` field is the HTML comment marker emitted by
-    the matching template tag at render time and replaced by the static
-    manager during injection.
+    `KindRegistry.slot(asset.kind)` accumulate in the collector under this name. The
+    `token` field is the HTML comment marker emitted by the matching template tag at
+    render time and replaced by the static manager during injection.
     """
 
     name: str
@@ -214,10 +208,9 @@ class PlaceholderSlot:
 class PlaceholderRegistry:
     """Mutable registry of placeholder slots.
 
-    The registry ships empty. Framework bootstrap registers built-in
-    slots such as `styles` and `scripts`, and user code registers
-    additional slots with the same `register` call when introducing new
-    asset destinations.
+    The registry ships empty. Framework bootstrap registers built-in slots such as
+    `styles` and `scripts`, and user code registers additional slots with the same
+    `register` call when introducing new asset destinations.
     """
 
     def __init__(self) -> None:
@@ -227,9 +220,8 @@ class PlaceholderRegistry:
     def register(self, name: str, *, token: str) -> None:
         """Register the slot under its name with the given placeholder token.
 
-        A repeated call with the same token is idempotent. A repeated
-        call with a different token raises `ValueError` so silent
-        overrides cannot mask bugs.
+        A repeated call with the same token is idempotent. A repeated call with a
+        different token raises `ValueError` so silent overrides cannot mask bugs.
         """
         if not name:
             msg = "Slot name must be a non-empty string"
@@ -267,20 +259,18 @@ default_placeholders: PlaceholderRegistry = PlaceholderRegistry()
 class StaticCollector:
     """Accumulate static asset references during a single page render.
 
-    The optional `dedup` argument plugs in a custom dedup strategy. The
-    default is `UrlDedup`. The optional `js_context_policy` argument
-    plugs in a custom merge strategy for the JS context. The default is
-    `FirstWinsPolicy`, which ensures page-level context wins over
-    component-level context.
+    The optional `dedup` argument plugs in a custom dedup strategy. The default is
+    `UrlDedup`. The optional `js_context_policy` argument plugs in a custom merge
+    strategy for the JS context. The default is `FirstWinsPolicy`, which ensures
+    page-level context wins over component-level context.
 
-    Assets are added through the `add` method and later consumed by the
-    static manager during injection. The collector has no knowledge of
-    backends or rendering. It coordinates insertion order,
-    deduplication, and JS context merging.
+    Assets are added through the `add` method and later consumed by the static manager
+    during injection. The collector has no knowledge of backends or rendering. It
+    coordinates insertion order, deduplication, and JS context merging.
 
-    Buckets are keyed by slot name as resolved through `KindRegistry`.
-    The collector does not hardcode any specific slot, so adding new
-    asset kinds to the registry transparently produces new buckets.
+    Buckets are keyed by slot name as resolved through `KindRegistry`. The collector
+    does not hardcode any specific slot, so adding new asset kinds to the registry
+    transparently produces new buckets.
     """
 
     def __init__(
@@ -306,14 +296,12 @@ class StaticCollector:
     def add(self, asset: StaticAsset, *, prepend: bool = False) -> None:
         """Add the asset unless its dedup key was already recorded.
 
-        Inline assets always append because their dedup key derives
-        from the body. URL-form assets with `prepend=True` are inserted
-        before existing append entries while keeping registration
-        order among prepended items.
+        Inline assets always append because their dedup key derives from the body.
+        URL-form assets with `prepend=True` are inserted before existing append entries
+        while keeping registration order among prepended items.
 
-        The asset routes to the bucket named by
-        `KindRegistry.slot(asset.kind)`. Unregistered kinds raise
-        `KeyError` so misconfiguration surfaces immediately.
+        The asset routes to the bucket named by `KindRegistry.slot(asset.kind)`.
+        Unregistered kinds raise `KeyError` so misconfiguration surfaces immediately.
         """
         key = self._dedup.key(asset)
         if key in self._seen_keys:

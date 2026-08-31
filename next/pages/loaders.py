@@ -76,9 +76,8 @@ def has_load_errors() -> bool:
 def _record_load_error(file_path: Path, exc: Exception, mtime: float | None) -> None:
     """Remember the import failure keyed by the mtime taken before exec.
 
-    A `None` mtime means the file vanished before executing, so any
-    stale record is dropped instead of binding the failure to a file
-    that no longer exists.
+    A `None` mtime means the file vanished before executing, so any stale record is
+    dropped instead of binding the failure to a file that no longer exists.
     """
     if mtime is None:
         _LAST_LOAD_ERROR.pop(file_path, None)
@@ -116,9 +115,8 @@ def last_load_error(file_path: Path) -> PageModuleImportError | None:
 def _load_python_module(file_path: Path) -> types.ModuleType | None:
     """Load `file_path` as a module or return `None` on failure.
 
-    Whatever the module body raises is recorded through `_record_load_error`,
-    so callers tell a broken `page.py` from an absent one via
-    `last_load_error`.
+    Whatever the module body raises is recorded through `_record_load_error`, so callers
+    tell a broken `page.py` from an absent one via `last_load_error`.
     """
     try:
         spec = importlib.util.spec_from_file_location("page_module", file_path)
@@ -179,9 +177,8 @@ def _load_python_module_memo(file_path: Path) -> types.ModuleType | None:
 def reset_module_memo() -> None:
     """Drop every memoised module so the next load re-executes from disk.
 
-    The memo keys by mtime, so a rewrite landing on the same tick would
-    otherwise return a stale module. Recorded import failures share that
-    lifecycle and go with it.
+    The memo keys by mtime, so a rewrite landing on the same tick would otherwise return
+    a stale module. Recorded import failures share that lifecycle and go with it.
     """
     # Errors go first, so a load racing this reset can at worst leave a fresh
     # memo entry behind, never a memoised failure without its recorded error.
@@ -280,10 +277,9 @@ class TemplateLoader(ABC):
     def source_path(self, file_path: Path) -> Path | None:
         """Return the filesystem path this loader reads for `file_path`.
 
-        The page manager uses the result to snapshot file mtimes for
-        stale-cache detection. The default returns `None` for
-        non-file-based loaders. Subclasses override when they back a
-        sibling file.
+        The page manager uses the result to snapshot file mtimes for stale-cache
+        detection. The default returns `None` for non-file-based loaders. Subclasses
+        override when they back a sibling file.
         """
         del file_path
         return None
@@ -387,9 +383,8 @@ class LayoutTemplateLoader(TemplateLoader):
     def layout_sources(self, file_path: Path) -> tuple[list[Path], list[Path]]:
         """Return the layout files behind `file_path` and the directories watched.
 
-        A `layout.djx` appearing or disappearing moves the mtime of its
-        directory and of no tracked file, so a caller detecting change needs
-        the directories too.
+        A `layout.djx` appearing or disappearing moves the mtime of its directory and of
+        no tracked file, so a caller detecting change needs the directories too.
         """
         return self._walk_ancestors(
             file_path, self._watched_ancestor_depth(file_path.parent)

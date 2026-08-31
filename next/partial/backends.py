@@ -18,12 +18,11 @@ _SSE_EVENT_NAME = "next-patches"
 class PartialProtocolBackend:
     """Owner of the wire format for patch envelopes.
 
-    The default backend serialises envelopes as a compact JSON envelope
-    under `application/vnd.next.patches+json`. A third party may swap the
-    wire format, for example to emulate Turbo Streams, by registering a
-    different backend through `PARTIAL_BACKENDS` without touching shaping
-    or the registries. Both `serialize_envelope` and `sse_event` operate
-    over the same JSON envelope.
+    The default backend serialises envelopes as a compact JSON envelope under
+    `application/vnd.next.patches+json`. A third party may swap the wire format, for
+    example to emulate Turbo Streams, by registering a different backend through
+    `PARTIAL_BACKENDS` without touching shaping or the registries. Both
+    `serialize_envelope` and `sse_event` operate over the same JSON envelope.
     """
 
     content_type: str = CONTENT_TYPE

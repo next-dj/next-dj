@@ -1,14 +1,13 @@
 """Component registry and visibility resolver.
 
 `ComponentRegistry` is the ordered collection of discovered
-`ComponentInfo` entries used by a backend. It tracks which scope
-roots were registered as globally visible and exposes a version
-counter used by `ComponentVisibilityResolver` to invalidate its
-caches.
+`ComponentInfo` entries used by a backend. It tracks which scope roots
+were registered as globally visible and exposes a version counter
+used by `ComponentVisibilityResolver` to invalidate its caches.
 
-`ComponentVisibilityResolver` decides which component names are in
-scope for a given template file path. It lazily builds a scope index
-from the registry and caches per-template results.
+`ComponentVisibilityResolver` decides which component names
+are in scope for a given template file path. It lazily builds a
+scope index from the registry and caches per-template results.
 """
 
 from __future__ import annotations
@@ -57,11 +56,10 @@ class ComponentRegistry:
     def register_many(self, components: Iterable[ComponentInfo]) -> None:
         """Index every component from the iterable in order.
 
-        Follows the Django bulk convention (`bulk_create` skips
-        per-instance `post_save`). Receivers that need per-item
-        events should subscribe to `components_registered` and read
-        the `infos` tuple. The singular `component_registered` is
-        not fired from this path.
+        Follows the Django bulk convention (`bulk_create` skips per-instance
+        `post_save`). Receivers that need per-item events should subscribe to
+        `components_registered` and read the `infos` tuple. The singular
+        `component_registered` is not fired from this path.
         """
         added = tuple(components)
         if not added:

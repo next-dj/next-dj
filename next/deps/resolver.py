@@ -131,9 +131,8 @@ class DependencyResolver:
     ) -> bool:
         """Return whether a registered provider fills `param` of `func` in `context`.
 
-        `func` travels along because a provider may read the callable to
-        resolve the annotation, and `EXPLICIT_RESOLVE_KEYS` is left to the
-        caller.
+        `func` travels along because a provider may read the callable to resolve the
+        annotation, and `EXPLICIT_RESOLVE_KEYS` is left to the caller.
         """
         self._ensure_providers()
         self._resolve_call_stack.append(func)
@@ -308,10 +307,9 @@ class DependencyResolver:
     ) -> dict[str, Any]:
         """Resolve `func` for component callables using template context.
 
-        Keys from `EXPLICIT_RESOLVE_KEYS` are stripped from the context
-        data so that name-based providers cannot shadow dedicated
-        providers such as `HttpRequestProvider` on a parameter literally
-        named `request`.
+        Keys from `EXPLICIT_RESOLVE_KEYS` are stripped from the context data so that
+        name-based providers cannot shadow dedicated providers such as
+        `HttpRequestProvider` on a parameter literally named `request`.
         """
         tc: Mapping[str, Any] = template_context or {}
         injectable = {

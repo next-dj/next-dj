@@ -1,10 +1,9 @@
 """Aggregate system-check registration for all `next-dj` subpackages.
 
-Importing a helper from this module triggers registration of all
-`@register` side effects by loading each subpackage's `checks` module.
-Re-exports are resolved lazily so that subpackage checks modules can
-freely import from `next.checks.common` without cycling back through
-this package.
+Importing a helper from this module triggers registration of all `@register` side
+effects by loading each subpackage's `checks` module. Re-exports are resolved lazily so
+that subpackage checks modules can freely import from `next.checks.common` without
+cycling back through this package.
 """
 
 from __future__ import annotations

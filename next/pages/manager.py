@@ -249,13 +249,11 @@ class Page:
     ) -> str:
         """Return the static body for `file_path` without invoking `render()`.
 
-        The `module.template` attribute wins when set to a non-`None`
-        string. Otherwise the framework consults registered
-        `TemplateLoader` instances in the order declared under
-        `NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`. The first loader that can
-        load the path returns the body. An empty string is returned
-        when no source is present so an ancestor layout can still
-        render with an empty slot.
+        The `module.template` attribute wins when set to a non-`None` string. Otherwise
+        the framework consults registered `TemplateLoader` instances in the order
+        declared under `NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`. The first loader that can
+        load the path returns the body. An empty string is returned when no source is
+        present so an ancestor layout can still render with an empty slot.
         """
         if module is not None:
             template_attr = getattr(module, "template", None)

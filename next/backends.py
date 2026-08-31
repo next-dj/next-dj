@@ -45,9 +45,8 @@ def resolve_backend_class[T](
 def _instantiate_backend[T](klass: type[T], config: Mapping[str, Any]) -> T:
     """Build one backend from its config entry.
 
-    Every backend family takes the whole entry as its single argument, a
-    contract `type[T]` cannot express, so the class is called through a
-    factory signature.
+    Every backend family takes the whole entry as its single argument, a contract
+    `type[T]` cannot express, so the class is called through a factory signature.
     """
     factory = cast("Callable[[Mapping[str, Any]], T]", klass)
     return factory(config)
@@ -98,9 +97,8 @@ def load_backends[T](
 class SingleBackendManager[T]:
     """Instantiates the single backend named by one framework settings key.
 
-    A misconfigured entry raises out of `get()` rather than being logged
-    and skipped, because a family with one backend has nothing to fall
-    back to.
+    A misconfigured entry raises out of `get()` rather than being logged and skipped,
+    because a family with one backend has nothing to fall back to.
     """
 
     def __init__(
@@ -141,9 +139,8 @@ class SingleBackendManager[T]:
     def reset(self) -> None:
         """Drop the cached backend so the next `get()` rereads settings.
 
-        Invalidation only. The rebuild waits for a caller that asks for
-        the backend, so a settings reload nobody follows up on costs
-        nothing.
+        Invalidation only. The rebuild waits for a caller that asks for the backend, so
+        a settings reload nobody follows up on costs nothing.
         """
         self.__dict__.pop("_backend", None)
 

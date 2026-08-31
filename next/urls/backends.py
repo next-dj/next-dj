@@ -380,8 +380,8 @@ class RouterFactory:
     def is_registered(cls, name: str) -> bool:
         """Report whether `name` maps to a registered backend class.
 
-        Contract-only seam for system checks so adjacent areas never read
-        the class registry directly.
+        Contract-only seam for system checks so adjacent
+        areas never read the class registry directly.
         """
         return name in cls._backends
 

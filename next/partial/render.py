@@ -51,11 +51,10 @@ class ZoneRenderResult:
     """Rendered zones plus the assets their bodies collected.
 
     `html` maps each rendered zone name to its wrapped marker element and
-    `bodies` maps it to the bare inner body. A morph or replace addresses
-    the wrapped element, an append or prepend grafts the bare body into the
-    live zone. `collector` carries the co-located assets the bodies
-    registered so the caller can ship a manifest outward, past the no-op
-    inject.
+    `bodies` maps it to the bare inner body. A morph or replace addresses the
+    wrapped element, an append or prepend grafts the bare body into the live
+    zone. `collector` carries the co-located assets the bodies registered
+    so the caller can ship a manifest outward, past the no-op inject.
     """
 
     html: dict[str, str]
@@ -92,11 +91,10 @@ def render_zone(
 ) -> ZoneRenderResult:
     """Render the named zones of a page with the full page context.
 
-    The batch travels into the context build widened by the zones nested in
-    the requested bodies, so a `@context(zone=)` bound outside it never runs.
-    An unknown zone name is skipped so one stale name never poisons a batch,
-    while a batch of only unknown names raises and a single-zone request keeps
-    its 400.
+    The batch travels into the context build widened by the zones nested in the
+    requested bodies, so a `@context(zone=)` bound outside it never runs. An unknown
+    zone name is skipped so one stale name never poisons a batch, while a batch of only
+    unknown names raises and a single-zone request keeps its 400.
     """
     start = time.perf_counter()
     kwargs = url_kwargs or {}

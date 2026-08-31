@@ -1,16 +1,14 @@
 """Value objects and kind registry for static assets.
 
-This module holds the leaf building blocks of the static subsystem. It
-defines a frozen value object for a single asset reference and a mutable
-registry that maps asset kinds to file extensions, placeholder slots,
-and renderer method names. The module has no internal dependencies and
-is safe to import before the Django app registry is ready.
+This module holds the leaf building blocks of the static subsystem. It defines a frozen
+value object for a single asset reference and a mutable registry that maps asset kinds
+to file extensions, placeholder slots, and renderer method names. The module has no
+internal dependencies and is safe to import before the Django app registry is ready.
 
-The registry ships empty. Built-in kinds such as `css` and `js` are
-registered by the framework bootstrap layer through the same public
-`register` call that user code uses to teach the framework about new
-file types like `jsx` or `wasm`. Core code never special-cases any
-particular kind.
+The registry ships empty. Built-in kinds such as `css` and `js` are registered by the
+framework bootstrap layer through the same public `register` call that user code uses to
+teach the framework about new file types like `jsx` or `wasm`. Core code never
+special-cases any particular kind.
 """
 
 from __future__ import annotations
@@ -91,16 +89,14 @@ class KindRegistry:
     ) -> None:
         """Register an asset kind and its dispatch metadata.
 
-        The `kind` argument must be a non-empty Python identifier. The
-        `extension` argument must begin with a dot. The `slot` and
-        `renderer` arguments must be non-empty strings. Any other input
-        raises `ValueError`. The optional `inline_tag` names the HTML
-        element that wraps a co-located inline body for this kind, for
-        example `"style"` or `"script"`. When omitted, inline bodies of
-        this kind render verbatim. A repeated call with identical
-        parameters is idempotent. A repeated call with different
-        parameters raises `ValueError` so silent re-registrations cannot
-        mask bugs.
+        The `kind` argument must be a non-empty Python identifier. The `extension`
+        argument must begin with a dot. The `slot` and `renderer` arguments must be
+        non-empty strings. Any other input raises `ValueError`. The optional
+        `inline_tag` names the HTML element that wraps a co-located inline body for this
+        kind, for example `"style"` or `"script"`. When omitted, inline bodies of this
+        kind render verbatim. A repeated call with identical parameters is idempotent. A
+        repeated call with different parameters raises `ValueError` so silent
+        re-registrations cannot mask bugs.
         """
         if not kind or not kind.isidentifier():
             msg = f"Invalid kind {kind!r}: must be a non-empty identifier"

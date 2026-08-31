@@ -78,9 +78,8 @@ def _create_link_with_unique_slug(url: str, length: int = 6) -> Link:
 def _render_row(link: Link, request: HttpRequest) -> str:
     """Render one keyed `link_row` for a prepend patch.
 
-    The page template path travels as `current_template_path` so the
-    component resolver finds `link_row` next to the page, the same way
-    the page render does.
+    The page template path travels as `current_template_path` so the component resolver
+    finds `link_row` next to the page, the same way the page render does.
     """
     return _ROW_TEMPLATE.render(
         Context(

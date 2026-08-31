@@ -189,10 +189,9 @@ class TestWindowFilters:
 class TestJsxAssetPipeline:
     """`.jsx` files are emitted as `<script type="text/babel">` tags.
 
-    The overview page mounts the React sparkline through the custom
-    `BabelJsxBackend`. The Chart.js widget on `/stats/` continues to
-    travel through the regular `.js` path so both kinds coexist on the
-    same dashboard.
+    The overview page mounts the React sparkline through the custom `BabelJsxBackend`.
+    The Chart.js widget on `/stats/` continues to travel through the regular `.js` path
+    so both kinds coexist on the same dashboard.
     """
 
     def test_overview_emits_babel_script_tag(self, client) -> None:

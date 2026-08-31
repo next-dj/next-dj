@@ -93,9 +93,8 @@ class TestWizardAdvanceRendersZoneNotPageView:
     """The advance renders only the next step zone, never the step page view.
 
     The advance builds the next wizard and renders its master zone through
-    `render_zone`, so the step page view never runs and authorization stays
-    in the action guard. The zone render fires exactly once, for the next
-    step's page and zone.
+    `render_zone`, so the step page view never runs and authorization stays in the
+    action guard. The zone render fires exactly once, for the next step's page and zone.
     """
 
     def test_advance_renders_one_zone_and_no_page_view(

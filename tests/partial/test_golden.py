@@ -332,10 +332,9 @@ GOLDEN_CASES = [
 class TestGoldenFixturesArePinned:
     """The committed fixtures match a fresh serialisation, no silent drift.
 
-    The Python serialiser writes these bytes and vitest reads them back, so
-    a drift between the two toolchains would otherwise pass unnoticed. Run
-    `GOLDEN_UPDATE=1` to regenerate the committed fixtures after a
-    deliberate wire change.
+    The Python serialiser writes these bytes and vitest reads them back, so a drift
+    between the two toolchains would otherwise pass unnoticed. Run `GOLDEN_UPDATE=1` to
+    regenerate the committed fixtures after a deliberate wire change.
     """
 
     @pytest.mark.skipif(_UPDATE_GOLDEN, reason="GOLDEN_UPDATE regenerates instead")

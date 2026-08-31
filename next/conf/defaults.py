@@ -1,9 +1,8 @@
 """Framework-level defaults for the `settings.NEXT_FRAMEWORK` mapping.
 
-The values stored here are deep-copied into the merged view on every
-reload. Nothing in this module imports from the rest of the framework,
-which keeps the configuration layer at the bottom of the dependency
-graph.
+The values stored here are deep-copied into the merged view on every reload. Nothing in
+this module imports from the rest of the framework, which keeps the configuration layer
+at the bottom of the dependency graph.
 """
 
 from __future__ import annotations

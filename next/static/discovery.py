@@ -86,10 +86,9 @@ def _url_suffix(url: str) -> str:
 def _rel_path_str(child: Path, root: Path) -> str | None:
     """Return the forward-slashed path of `child` relative to `root`.
 
-    Both operands must already be resolved absolute paths. Returns an
-    empty string when `child == root`, and `None` when `child` is not
-    nested under `root`. Skips the per-segment work of
-    `Path.relative_to().parts`.
+    Both operands must already be resolved absolute paths. Returns an empty string when
+    `child == root`, and `None` when `child` is not nested under `root`. Skips the
+    per-segment work of `Path.relative_to().parts`.
     """
     child_str = os.fspath(child)
     root_str = os.fspath(root)
@@ -367,10 +366,9 @@ class AssetDiscovery:
     ) -> list[_FoundAsset]:
         """Return the `{stem}{ext}` files that exist in `directory` for the role.
 
-        The set of extensions probed comes from `KindRegistry.kinds()`, so
-        registering a new kind during `AppConfig.ready` is enough to teach
-        discovery about it. Each hit carries its resolved path, because the
-        collector dedups on it.
+        The set of extensions probed comes from `KindRegistry.kinds()`, so registering a
+        new kind during `AppConfig.ready` is enough to teach discovery about it. Each
+        hit carries its resolved path, because the collector dedups on it.
         """
         found: list[_FoundAsset] = []
         for stem in self._stems.stems(role):
@@ -450,9 +448,8 @@ class AssetDiscovery:
     def _register_file(self, found: _FoundAsset, collector: StaticCollector) -> None:
         """Register a file with the backend and add the result to the collector.
 
-        Warnings are logged for `OSError` and `ValueError`. All other
-        exception types propagate so bugs in custom backends surface
-        loudly.
+        Warnings are logged for `OSError` and `ValueError`. All other exception types
+        propagate so bugs in custom backends surface loudly.
         """
         backend = self._provider.default_backend
         try:
