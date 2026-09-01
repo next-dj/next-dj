@@ -8,7 +8,7 @@ from django.test import override_settings
 from next.static import AssetDiscovery, StaticCollector
 from next.static.discovery import PathResolver
 from tests.benchmarks.factories import build_layout_page
-from tests.support import RecordingStaticBackend, StaticAssetProvider, component_info
+from tests.support import PlainStaticBackend, StaticAssetProvider, component_info
 
 
 if TYPE_CHECKING:
@@ -25,7 +25,7 @@ def _discovery_for(tmp_path: Path, *, assets: bool) -> tuple[AssetDiscovery, Pat
         (page_file.parent / "template.js").write_text("/* js */")
         (tmp_path / "layout.css").write_text("body{}")
     discovery = AssetDiscovery(
-        StaticAssetProvider(RecordingStaticBackend(), (tmp_path.resolve(),))
+        StaticAssetProvider(PlainStaticBackend(), (tmp_path.resolve(),))
     )
     discovery.discover_page_assets(page_file, StaticCollector())
     return discovery, page_file
@@ -62,7 +62,7 @@ def _component_for(tmp_path: Path) -> tuple[AssetDiscovery, ComponentInfo]:
     (comp_dir / "component.js").write_text("/* widget */")
     info = component_info(comp_dir, template="<div>widget</div>")
     discovery = AssetDiscovery(
-        StaticAssetProvider(RecordingStaticBackend(), (tmp_path.resolve(),))
+        StaticAssetProvider(PlainStaticBackend(), (tmp_path.resolve(),))
     )
     discovery.discover_component_assets(info, StaticCollector())
     return discovery, info

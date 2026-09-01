@@ -19,8 +19,11 @@ if TYPE_CHECKING:
 
 
 def get_framework_filesystem_roots_for_linking() -> list[Path]:
-    """Return sorted unique roots from page trees and component `DIRS`."""
-    roots: set[Path] = {p.resolve() for p in get_pages_directories_for_watch()}
+    """Return sorted unique roots from page trees and component `DIRS`.
+
+    The page trees arrive resolved, so only the component roots are normalised.
+    """
+    roots: set[Path] = set(get_pages_directories_for_watch())
     for config in backend_entries("COMPONENT_BACKENDS"):
         roots.update(p.resolve() for p in component_extra_roots_from_config(config))
     return sorted(roots)

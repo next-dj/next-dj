@@ -15,6 +15,8 @@ from __future__ import annotations
 from collections import OrderedDict
 from typing import TYPE_CHECKING
 
+from next.utils import store_bounded
+
 from .signals import component_registered, components_registered
 
 
@@ -198,9 +200,9 @@ class ComponentVisibilityResolver:
                 result[name] = info
                 seen.add(name)
 
-        self._result_cache[template_path] = result
-        if len(self._result_cache) > _VISIBILITY_CACHE_MAX_SIZE:
-            self._result_cache.popitem(last=False)
+        store_bounded(
+            self._result_cache, template_path, result, _VISIBILITY_CACHE_MAX_SIZE
+        )
         return result
 
     def _calculate_visibility_score(
@@ -226,9 +228,7 @@ class ComponentVisibilityResolver:
             self._path_cache.move_to_end(cache_key)
             return self._path_cache[cache_key]
         value = self._compute_relative_parts(template_path, scope_root)
-        self._path_cache[cache_key] = value
-        if len(self._path_cache) > _VISIBILITY_CACHE_MAX_SIZE:
-            self._path_cache.popitem(last=False)
+        store_bounded(self._path_cache, cache_key, value, _VISIBILITY_CACHE_MAX_SIZE)
         return value
 
     def _compute_relative_parts(

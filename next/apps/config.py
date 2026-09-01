@@ -8,7 +8,11 @@ from django.apps import AppConfig
 
 from next.checks import register_all as _register_checks
 from next.forms.autodiscover import autodiscover_forms
+from next.pages.loaders import forget_page_roots
+from next.pages.watch import forget_watch_state
 from next.ports import partial_shaper_slot
+from next.static.manager import forget_manager_page_roots
+from next.urls.signals import router_reloaded
 
 from . import autoreload, components, staticfiles, templates
 
@@ -23,6 +27,12 @@ class NextFrameworkConfig(AppConfig):
     def ready(self) -> None:
         """Register checks, install every startup hook, and compose the ports."""
         _register_checks()
+        # A reload from code replaces the routers the URL resolver serves
+        # without touching settings, and every memo of what those routers
+        # report has to go with them or the layers answer for two generations.
+        router_reloaded.connect(forget_watch_state)
+        router_reloaded.connect(forget_page_roots)
+        router_reloaded.connect(forget_manager_page_roots)
         autoreload.install()
         templates.install()
         staticfiles.install()

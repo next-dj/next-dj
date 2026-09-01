@@ -13,8 +13,7 @@ def component_info(
 ) -> ComponentInfo:
     """Return the `ComponentInfo` a component living in `directory` scans as.
 
-    A `template` writes the `component.djx`, which a test holding the folder
-    off disk leaves out.
+    A `template` writes the `component.djx` a test with no folder on disk leaves out.
     """
     template_path = directory / "component.djx"
     if template is not None:

@@ -29,17 +29,66 @@ logger = logging.getLogger(__name__)
 # The bound every ancestor walk shares, so none reaches the filesystem root.
 MAX_ANCESTOR_WALK_DEPTH = 64
 
+_RESOLVED_TREES_MAX_SIZE = 2048
+
+
+@functools.lru_cache(maxsize=_RESOLVED_TREES_MAX_SIZE)
+def resolved_tree(path: Path) -> Path:
+    """Return the resolved form of a page tree, memoised across the process.
+
+    A router reports the same handful of trees on every read, and resolving one
+    costs more than everything else the read pays for it. The bound drops the
+    least recently read, so a router free to name a new tree per read grows the
+    memo no further while the steady set of a project stays in it.
+    """
+    return path.resolve()
+
+
+# Memos of resolved paths that a layer keys its own way, dropped with this one.
+_RESOLUTION_CLEARERS: list[Callable[[], None]] = []
+
+
+def on_forget_resolved_trees(clear: Callable[[], None]) -> None:
+    """Register a memo of resolved paths to drop whenever this module drops its own."""
+    _RESOLUTION_CLEARERS.append(clear)
+
+
+def forget_resolved_trees() -> None:
+    """Drop every memoised resolution, so a re-pointed tree is read again."""
+    resolved_tree.cache_clear()
+    for clear in _RESOLUTION_CLEARERS:
+        clear()
+
 
 def store_bounded[K, V](cache: OrderedDict[K, V], key: K, value: V, size: int) -> None:
     """Make `key` the freshest entry of a bounded cache and evict the stalest.
 
-    The pop before the write is what moves an existing key to the end, and it
-    leaves no window where a concurrent eviction could fail the reorder.
+    The write lands before the reorder, so a key already held never goes
+    missing for a concurrent reader. No caller holds a lock, so the two steps
+    after it tolerate another thread evicting the very key being written, which
+    costs a rebuild rather than an error out of a render.
     """
-    cache.pop(key, None)
     cache[key] = value
-    if len(cache) > size:
-        cache.popitem(last=False)
+    try:
+        cache.move_to_end(key)
+        if len(cache) > size:
+            cache.popitem(last=False)
+    except KeyError:
+        # The key is gone, so there is nothing left to reorder and the eviction
+        # that took it already brought the cache back inside the bound.
+        return
+
+
+def stat_mtime_ns(path: Path) -> int | None:
+    """Return the nanosecond mtime of `path`, or `None` when it does not stat.
+
+    Nanoseconds rather than a float, because a float timestamp rounds two
+    writes a filesystem told apart back into one value.
+    """
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,52 +133,50 @@ def resolve_base_dir() -> Path | None:
 
 
 def template_edits_watched() -> bool:
-    """Whether the composition caches stat their sources to notice an edit.
+    """Whether the caches re-read the disk to notice a change under way.
 
-    Autoreload leaves `.djx` alone, so under `DEBUG` the stat is the only
-    thing making an edit visible. Read per call, so an override takes effect.
+    Autoreload leaves `.djx` alone and restarts for no directory that appears,
+    so under `DEBUG` reading again is the only thing making either visible.
+    Read per call, so an override takes effect.
     """
     return bool(settings.DEBUG)
 
 
 def _dir_entry_candidate(item: Path, base_dir: Path | None) -> Path | None:
-    """Return the directory a ``DIRS`` entry could name, before any probe.
+    """Return the path a ``DIRS`` entry could name, before it is resolved.
 
-    A relative entry names one only against ``BASE_DIR``, so without one it
-    can only be a URL segment.
+    A relative entry names one only against ``BASE_DIR``, so without one the
+    entry can only be a URL segment.
     """
     if item.is_absolute():
         return item
-    if base_dir is None:
-        return None
-    return base_dir / item
+    return None if base_dir is None else base_dir / item
 
 
-def _dir_entry_segment_name(item: Path, text: str) -> str:
+def _dir_entry_segment_name(item: Path) -> str:
     """Return the URL segment name a ``DIRS`` entry that names no tree carries.
 
-    A Windows-style entry read on POSIX carries no separator of its own, so
-    the last component comes from the normalised text rather than the path.
+    A relative Windows-style entry read on POSIX carries no separator of its
+    own, so its last component comes from the forward-slashed text instead. An
+    absolute entry already separates, and a backslash in it is part of a name.
     """
+    if item.is_absolute():
+        return item.name
+    text = str(item).replace("\\", "/")
     return Path(text).name if "/" in text else item.name
 
 
 def _iter_dir_entries(
     entries: list[Any] | tuple[Any, ...] | None,
-) -> Generator[tuple[Path, str], None, None]:
-    """Yield every ``DIRS`` entry that names anything, as a path and its text.
-
-    The text is forward-slashed once here, because both readers below would
-    otherwise normalise the same entry again.
-    """
+) -> Generator[Path, None, None]:
+    """Yield every ``DIRS`` entry that names anything, as a path."""
     for raw in entries or ():
         if raw is None:
             continue
         item = Path(raw) if not isinstance(raw, Path) else raw
-        text = str(item).replace("\\", "/")
-        if not text or text == ".":
-            continue
-        yield item, text
+        # `Path("")` spells itself ".", so the one test covers the empty entry.
+        if str(item) != ".":
+            yield item
 
 
 def classify_dirs_entries(
@@ -138,12 +185,15 @@ def classify_dirs_entries(
     """Split ``DIRS`` into directory roots and URL segment names (file router)."""
     path_roots: list[Path] = []
     segments: set[str] = set()
-    for item, text in _iter_dir_entries(entries):
+    for item in _iter_dir_entries(entries):
         candidate = _dir_entry_candidate(item, base_dir)
-        if candidate is not None and candidate.is_dir():
-            path_roots.append(candidate.resolve())
+        # Resolved before the probe, so a `..` reaching past a directory that
+        # does not exist still names the tree the entry means.
+        resolved = None if candidate is None else resolved_tree(candidate)
+        if resolved is not None and resolved.is_dir():
+            path_roots.append(resolved)
         else:
-            name = _dir_entry_segment_name(item, text)
+            name = _dir_entry_segment_name(item)
             # An entry that is nothing but separators names no segment, and an
             # empty name would reach `skip_dir_names` as a directory to refuse.
             if name:

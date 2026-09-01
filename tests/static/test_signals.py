@@ -106,6 +106,24 @@ class TestAssetRegisteredSignal:
         assert warm_event.kwargs["collector"] is warm
         assert warm_event.kwargs["backend"] is file_backend
 
+    def test_a_component_mounted_twice_announces_each_asset_once(
+        self,
+        file_backend: StaticFilesBackend,
+        composite_component: ComponentInfo,
+        capture_asset_registered: SignalRecorder,
+    ) -> None:
+        """The signal follows the collector, which keeps the second instance out."""
+        discovery = AssetDiscovery(StaticAssetProvider(file_backend))
+        collector = StaticCollector()
+        discovery.discover_component_assets(composite_component, collector)
+        discovery.discover_component_assets(composite_component, collector)
+
+        assert len(capture_asset_registered) == 2
+        assert [e.kwargs["collector"] for e in capture_asset_registered.events] == [
+            collector,
+            collector,
+        ]
+
     def test_a_warm_component_render_fires_the_same_set_again(
         self,
         file_backend: StaticFilesBackend,

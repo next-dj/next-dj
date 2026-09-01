@@ -13,8 +13,11 @@ from django.utils.autoreload import (
 
 from next.apps import autoreload as next_autoreload, components as next_components
 from next.components import DummyBackend, FileComponentsBackend, components_manager
+from next.pages import loaders as pages_loaders
+from next.pages.watch import get_pages_directories_for_watch
 from next.server import NextStatReloader
-from next.urls import RouterFactory
+from next.static import get_static_manager
+from next.urls import RouterFactory, router_manager
 from tests.support import MalformedRootsRouter, RaisingRootsRouter, importable_dir
 
 
@@ -172,6 +175,34 @@ class TestNextFrameworkConfig:
         autoreload_started.send(sender=mock_autoreload_sender)
         for _path, glob in mock_autoreload_sender.watch_calls:
             assert ".djx" not in glob, f"unexpected djx glob: {glob!r}"
+
+
+class TestARouterReloadDropsThePageRootMemos:
+    """Three layers memoise what the routers report, and a reload moves all three."""
+
+    def test_every_page_root_memo_reads_the_tree_that_appeared(self, tmp_path) -> None:
+        """A reload from code touches no setting, so each memo needs the signal.
+
+        The watch layer holds the routers off `DEBUG`, and the loaders and the
+        static manager hold what those routers reported.
+        """
+        with override_settings(
+            BASE_DIR=tmp_path,
+            DEBUG=False,
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": [_page_backend_entry()]},
+        ):
+            manager = get_static_manager()
+            assert get_pages_directories_for_watch() == []
+            assert pages_loaders._page_roots() == ()
+            assert manager.page_roots() == ()
+
+            (tmp_path / "pages").mkdir()
+            router_manager.reload()
+            tree = (tmp_path / "pages").resolve()
+
+            assert get_pages_directories_for_watch() == [tree]
+            assert pages_loaders._page_roots() == (tree,)
+            assert manager.page_roots() == (tree,)
 
 
 class TestAutoreloadInstallIdempotent:

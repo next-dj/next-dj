@@ -27,8 +27,13 @@ def router():
 
 @pytest.fixture()
 def mock_settings():
-    """Patch the ``settings`` object ``resolve_base_dir`` reads."""
+    """Patch the ``settings`` object ``resolve_base_dir`` reads.
+
+    ``DEBUG`` starts off, because a bare ``Mock`` attribute reads as truthy and
+    would put every router that consults it on the disk-watching path.
+    """
     mock = Mock()
+    mock.DEBUG = False
     with patch("next.utils.settings", mock):
         yield mock
 

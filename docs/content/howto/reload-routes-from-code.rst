@@ -50,6 +50,7 @@ Import the receivers module from ``AppConfig.ready`` so the decorators run at st
            from notes import receivers  # imported for its receiver registrations
 
 Each call rebuilds the backend list from the current ``NEXT_FRAMEWORK`` configuration, clears Django's URL caches, and emits ``router_reloaded``.
+The framework listens to that signal itself, so the routers the development watcher and the staticfiles finder read are rebuilt with the ones the URL resolver serves.
 Receivers should tolerate being invoked more than once when several writes batch into one task.
 
 Observe the reload

@@ -118,6 +118,19 @@ class MockAutoreloadSender:
         self.watch_calls.append((path, glob))
 
 
+class PlainStaticBackend(StaticFilesBackend):
+    """Static backend with deterministic URLs and no bookkeeping of its own.
+
+    The counterpart of `RecordingStaticBackend` for a benchmark, where a list
+    growing inside the timed loop would be measured along with the framework.
+    """
+
+    def register_file(self, source_path: Path, logical_name: str, kind: str) -> str:
+        """Return the URL the logical name and kind spell."""
+        del source_path
+        return f"/static/next/{logical_name}{default_kinds.extension(kind)}"
+
+
 class RecordingStaticBackend(StaticFilesBackend):
     """Static backend with deterministic URLs that logs what it registered.
 

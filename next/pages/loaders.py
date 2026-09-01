@@ -20,6 +20,7 @@ import contextlib
 import importlib.util
 import logging
 from abc import ABC, abstractmethod
+from collections import OrderedDict
 from typing import TYPE_CHECKING, ClassVar, override
 
 from django.core.signals import setting_changed
@@ -27,7 +28,13 @@ from django.core.signals import setting_changed
 from next.conf import next_framework_settings
 from next.conf.imports import import_class_cached
 from next.conf.signals import settings_reloaded
-from next.utils import MAX_ANCESTOR_WALK_DEPTH, classify_dirs_entries, resolve_base_dir
+from next.utils import (
+    MAX_ANCESTOR_WALK_DEPTH,
+    classify_dirs_entries,
+    resolve_base_dir,
+    stat_mtime_ns,
+    store_bounded,
+)
 
 from .watch import get_pages_directories_for_watch
 
@@ -147,7 +154,8 @@ def _load_python_module(file_path: Path) -> types.ModuleType | None:
         return module
 
 
-_MODULE_MEMO: dict[Path, tuple[float, types.ModuleType | None]] = {}
+_MODULE_MEMO: OrderedDict[Path, tuple[int, types.ModuleType | None]] = OrderedDict()
+_MODULE_MEMO_MAX_SIZE = 2048
 
 
 def _load_python_module_memo(file_path: Path) -> types.ModuleType | None:
@@ -155,21 +163,24 @@ def _load_python_module_memo(file_path: Path) -> types.ModuleType | None:
 
     Different call sites (`PythonTemplateLoader.can_load`, `load_template`,
     and `Page._create_regular_page_pattern`) previously executed the
-    module up to three times per URL dispatch. The memo keys by mtime so
-    that autoreload and template-stale detection still pick up edits.
+    module up to three times per URL dispatch. The memo keys by nanosecond
+    mtime so that autoreload and template-stale detection still pick up an
+    edit a coarser timestamp would round away, and it is bounded because
+    every entry holds a whole executed module alive.
     """
-    try:
-        mtime = file_path.stat().st_mtime
-    except OSError:
+    mtime = stat_mtime_ns(file_path)
+    if mtime is None:
         _MODULE_MEMO.pop(file_path, None)
         return _load_python_module(file_path)
 
     cached = _MODULE_MEMO.get(file_path)
     if cached is not None and cached[0] == mtime:
+        # Left where it sits, because this answers up to three times per URL
+        # dispatch and the bound is there to cap memory, not to rank pages.
         return cached[1]
 
     module = _load_python_module(file_path)
-    _MODULE_MEMO[file_path] = (mtime, module)
+    store_bounded(_MODULE_MEMO, file_path, (mtime, module), _MODULE_MEMO_MAX_SIZE)
     return module
 
 
@@ -212,7 +223,7 @@ def _page_roots() -> tuple[Path, ...]:
     return cached
 
 
-def _reset_page_roots_cache(**kwargs) -> None:
+def forget_page_roots(**kwargs) -> None:
     """Drop the memoised page trees so the next walk asks the routers again."""
     _PAGE_ROOTS_CACHE["value"] = None
 
@@ -224,10 +235,10 @@ def _on_setting_changed(*, setting: str, **kwargs) -> None:
     of a router with `APP_DIRS` move with `INSTALLED_APPS`.
     """
     if setting == "INSTALLED_APPS":
-        _reset_page_roots_cache()
+        forget_page_roots()
 
 
-settings_reloaded.connect(_reset_page_roots_cache)
+settings_reloaded.connect(forget_page_roots)
 setting_changed.connect(_on_setting_changed)
 
 
@@ -248,8 +259,10 @@ def read_module_string_lists(
     absent or broken module apart from one that declares none of the names.
     Anything but a list or tuple of non-empty strings reads as an empty list,
     so a caller never has to type-check what a user module bound to the name.
+    Read through the mtime memo, so an edit is picked up while a re-read of the
+    same file executes no module body a second time.
     """
-    module = _load_python_module(file_path)
+    module = _load_python_module_memo(file_path)
     if module is None:
         return None
     return {attr: _read_string_list(module, attr) for attr in attrs}

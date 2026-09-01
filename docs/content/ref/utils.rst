@@ -12,7 +12,6 @@ It backs decorator registration, attributing a decorated object to the file wher
 It also holds ``walk_page_tree``, the depth-first page-tree walk the file router and the system checks both run, and ``page_roots_shape_error``, the shared shape probe a check runs over what a router reports.
 Both live here for the same reason ``PageRoot`` does.
 The ``DEBUG`` predicate ``template_edits_watched``, which the page, component, and static caches read before they stat anything, is here for the same reason.
-So are ``store_bounded``, the bounded write every per-path memo shares, and ``MAX_ANCESTOR_WALK_DEPTH``, the depth every ancestor walk stops at.
 
 ``resolve_base_dir`` returns ``settings.BASE_DIR`` coerced to ``pathlib.Path``, or ``None`` when it is unset, for backends that resolve project-relative paths.
 ``classify_dirs_entries`` splits a backend ``DIRS`` list into existing directory roots and plain skip-name segments, the same split the file router applies.
@@ -24,7 +23,7 @@ Public API
 
 .. automodule:: next.utils
    :members:
-   :exclude-members: callable_name, defining_file, walk_page_tree, page_roots_shape_error, template_edits_watched, store_bounded, MisattributedContext, MisattributionLog
+   :exclude-members: callable_name, defining_file, walk_page_tree, page_roots_shape_error, template_edits_watched, store_bounded, stat_mtime_ns, resolved_tree, forget_resolved_trees, MAX_ANCESTOR_WALK_DEPTH, MisattributedContext, MisattributionLog
 
 See also
 --------

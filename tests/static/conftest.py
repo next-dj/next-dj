@@ -6,7 +6,6 @@ import pytest
 
 from next.components import ComponentInfo
 from next.static import (
-    AssetDiscovery,
     StaticBackend,
     StaticCollector,
     StaticManager,
@@ -16,7 +15,7 @@ from tests.support import RecordingStaticBackend, component_info
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator
+    from collections.abc import Generator
     from pathlib import Path
 
 
@@ -71,19 +70,3 @@ def composite_component(tmp_path: Path) -> ComponentInfo:
     (comp_dir / "component.css").write_text(".widget {}")
     (comp_dir / "component.js").write_text("/* widget */")
     return component_info(comp_dir, module=module_path, template="<div>widget</div>")
-
-
-@pytest.fixture()
-def make_discovery() -> Callable[..., tuple[AssetDiscovery, StaticManager]]:
-    """Build an ``AssetDiscovery`` wired to a given backend and page roots."""
-
-    def _factory(
-        backend: StaticBackend, page_roots: tuple[Path, ...] = ()
-    ) -> tuple[AssetDiscovery, StaticManager]:
-        manager = StaticManager()
-        manager._backends = [backend]
-        manager._loaded = True
-        manager._cached_page_roots = page_roots
-        return AssetDiscovery(manager), manager
-
-    return _factory

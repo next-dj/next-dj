@@ -7,6 +7,7 @@ from tests.support.attribution import (
 )
 from tests.support.backends import (
     MockAutoreloadSender,
+    PlainStaticBackend,
     RecordingStaticBackend,
     StaticAssetProvider,
 )
@@ -58,6 +59,7 @@ from tests.support.patches import (
     patch_checks_components_manager,
     patch_checks_router_manager,
     patch_checks_router_manager_with_routers,
+    restored_static_registries,
 )
 from tests.support.ports import IntentOnlyShaper
 from tests.support.routers import (
@@ -86,6 +88,7 @@ __all__ = [
     "MockAutoreloadSender",
     "OddComponentsNameRouter",
     "OddSkipNamesRouter",
+    "PlainStaticBackend",
     "RaisingComponentsRouter",
     "RaisingRootsRouter",
     "RaisingSkipNamesRouter",
@@ -124,6 +127,7 @@ __all__ = [
     "plain_get",
     "plain_request",
     "record_path_calls",
+    "restored_static_registries",
     "tick_scenario",
     "unified_view",
     "unwrapped_decorator",

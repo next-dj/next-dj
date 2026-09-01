@@ -77,6 +77,12 @@ class KindRegistry:
         self._slots: dict[str, str] = {}
         self._renderers: dict[str, str] = {}
         self._inline_tags: dict[str, str] = {}
+        self._version = 0
+
+    @property
+    def version(self) -> int:
+        """Return a counter every registration bumps, so a cached answer can tell."""
+        return self._version
 
     def register(
         self,
@@ -133,6 +139,7 @@ class KindRegistry:
         self._renderers[kind] = renderer
         if inline_tag is not None:
             self._inline_tags[kind] = inline_tag
+        self._version += 1
 
     def extension(self, kind: str) -> str:
         """Return the file extension registered for the given kind.

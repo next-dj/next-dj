@@ -22,25 +22,30 @@ Asset plans
 An asset plan is what ``AssetDiscovery`` remembers about one page path or one component.
 It holds the co-located files the walk found, the assets built from the ``styles`` and ``scripts`` lists of the owning module, and the directories the walk read.
 A plan caches the disk, not the URLs.
-The stem probes, the layout walk, and the module import happen once, and every file the plan holds still goes to ``register_file`` on every render, so a backend whose answer changes is seen by the next request.
-The default backend answers those calls from its own ``(logical_name, suffix)`` memo, so the repeat costs a dictionary lookup.
+
+The stem probes, the layout walk, and the module import happen once, and every file the plan holds still goes to ``register_file`` on every render, so a backend free to resolve the same file to a different URL per request is asked every time.
+The default backend answers those calls from its own ``(logical_name, suffix)`` memo, which lives as long as the backend does.
+The repeat therefore costs it a dictionary lookup, and its answer changes only when ``StaticManager.reload`` builds a new backend.
 Module-level URLs are literals the backend is never asked about, so the plan keeps them as finished ``StaticAsset`` records, and the same frozen instance rides every render and every collector.
 
 The page plan is keyed by the page file path.
-The component plan is keyed by the component's ``template_path``, ``module_path``, and ``name``, which is everything the plan depends on, so a rescan that produces an equal ``ComponentInfo`` reuses the entry and a renamed or moved component gets its own.
+The component plan is keyed by the component's ``template_path``, ``module_path``, and ``name``, which is what identifies the component the plan was built for, so a rescan that produces an equal ``ComponentInfo`` reuses the entry and a renamed or moved component gets its own.
 A simple component owns no folder and reaches no plan at all, which keeps the entries the cache holds to the components that read the disk.
 Both caches are bounded and evict the least recently used entry.
 
-Two things invalidate a plan.
+Three things invalidate a plan.
 
 - A settings reload drops the whole static manager, and the discovery instance with its plans goes with it.
+- A registration in the stem, kind, or placeholder registry changes which filenames count as an asset without moving any file, so every plan carries the generation of those three registries and is rebuilt when it no longer matches.
+  This check runs whatever ``DEBUG`` is set to, because it costs three integer reads and no syscall.
 - Under ``DEBUG`` each render re-stats the directories the plan was read from and rebuilds when one of them has moved, appeared, or gone away.
+  The mtimes are read in nanoseconds and compared for inequality, so a directory restored from an archive with an older timestamp counts as changed too, and one that does not stat at all is recorded as absent rather than as a timestamp.
   For a page those directories are the whole walk from the page directory up to the page root, not only the ones that already hold a ``layout.djx``, so a layout added in between is visible on the next request.
   For a component they are the component folder and the folder holding its module.
 
 A backend that rejects a file needs no invalidation, because the next render offers the file to it again, the warning repeats, and a fixed backend takes effect at once.
 Outside ``DEBUG`` a warm render issues no ``stat`` call at all, because a production process does not mutate co-located files under a running server.
-The ``asset_registered`` signal fires once per file asset per render.
+The ``asset_registered`` signal follows the collector rather than the render, so a component mounted several times on one page announces each of its assets once.
 
 Discovery and injection
 -----------------------
@@ -145,7 +150,7 @@ Signals
 
 The pipeline fires four signals.
 
-- ``asset_registered`` fires once per co-located file registered through a backend.
+- ``asset_registered`` fires once per co-located file the collector accepts from a backend registration.
   Module-level ``styles`` and ``scripts`` lists, every ``{% use_style %}`` and ``{% use_script %}`` form, void or block, and the ``{% use_module %}`` tag call ``collector.add`` directly and do not emit it.
 - ``collector_finalized`` once per request after the collector closes its set.
 - ``html_injected`` once per request after the manager replaces the placeholder slots.

@@ -12,7 +12,8 @@ from django.utils.safestring import SafeString
 from next.components import ComponentInfo, components_manager
 from next.static import StaticCollector
 from next.templatetags import components as component_tags
-from next.templatetags.components import ComponentNode, _resolve_template_path
+from next.templatetags.components import ComponentNode
+from next.utils import forget_resolved_trees
 from tests.support import record_path_calls
 
 
@@ -1011,7 +1012,7 @@ class TestComponentMissReporting:
 
 
 class TestComponentNodePathCache:
-    """Tests for the process-wide ``current_template_path`` resolve memo."""
+    """Tests for the shared page-tree memo the tag resolves its path through."""
 
     def _node(self) -> ComponentNode:
         t = Template('{% load components %}{% component "card" %}')
@@ -1030,7 +1031,7 @@ class TestComponentNodePathCache:
         node = self._node()
         raw, expected = self._noncanonical(tmp_path, "scope")
         ctx = Context({"current_template_path": raw})
-        _resolve_template_path.cache_clear()
+        forget_resolved_trees()
         seen = record_path_calls(monkeypatch, "resolve")
         first = node._template_path_from_context(ctx)
         second = node._template_path_from_context(ctx)
@@ -1045,7 +1046,7 @@ class TestComponentNodePathCache:
         node = self._node()
         raw_a, expected_a = self._noncanonical(tmp_path, "scope_a")
         raw_b, expected_b = self._noncanonical(tmp_path, "scope_b")
-        _resolve_template_path.cache_clear()
+        forget_resolved_trees()
         seen = record_path_calls(monkeypatch, "resolve")
         first = node._template_path_from_context(
             Context({"current_template_path": raw_a})
@@ -1064,7 +1065,7 @@ class TestComponentNodePathCache:
         node = self._node()
         cases = [self._noncanonical(tmp_path, f"scope{i}") for i in range(20)]
         contexts = [Context({"current_template_path": raw}) for raw, _ in cases]
-        _resolve_template_path.cache_clear()
+        forget_resolved_trees()
         seen = record_path_calls(monkeypatch, "resolve")
         for _ in range(3):
             for ctx, (_raw, expected) in zip(contexts, cases, strict=True):
@@ -1077,11 +1078,39 @@ class TestComponentNodePathCache:
         """A path one node resolved costs a second node nothing."""
         raw, expected = self._noncanonical(tmp_path, "scope")
         ctx = Context({"current_template_path": raw})
-        _resolve_template_path.cache_clear()
+        forget_resolved_trees()
         seen = record_path_calls(monkeypatch, "resolve")
         assert self._node()._template_path_from_context(ctx) == expected
         assert self._node()._template_path_from_context(ctx) == expected
         assert len(seen) == 1
+
+    def test_the_tag_keeps_its_memo_keyed_by_the_raw_string(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The node carries a string, so building a path per read is what the memo saves."""
+        node = self._node()
+        raw, expected = self._noncanonical(tmp_path, "shared")
+        ctx = Context({"current_template_path": raw})
+        forget_resolved_trees()
+        assert node._template_path_from_context(ctx) == expected
+        seen = record_path_calls(monkeypatch, "resolve")
+
+        assert node._template_path_from_context(ctx) == expected
+        assert seen == []
+
+    def test_forgetting_the_trees_makes_the_tag_resolve_again(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A reconfigure invalidates this resolution along with every other."""
+        node = self._node()
+        raw, expected = self._noncanonical(tmp_path, "scope")
+        ctx = Context({"current_template_path": raw})
+        forget_resolved_trees()
+        seen = record_path_calls(monkeypatch, "resolve")
+        assert node._template_path_from_context(ctx) == expected
+        forget_resolved_trees()
+        assert node._template_path_from_context(ctx) == expected
+        assert len(seen) == 2
 
     def test_path_value_is_taken_as_resolved(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

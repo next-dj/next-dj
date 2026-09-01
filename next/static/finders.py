@@ -66,7 +66,8 @@ def discover_colocated_static_assets() -> dict[str, Path]:
     custom stems registered during `AppConfig.ready` are picked up.
     """
     out: dict[str, Path] = {}
-    page_roots = tuple(root.resolve() for root in get_pages_directories_for_watch())
+    # Resolved already, because that is what the watch layer promises.
+    page_roots = tuple(get_pages_directories_for_watch())
     resolver = PathResolver(lambda: page_roots)
 
     for template_path in get_template_djx_paths_for_watch():
