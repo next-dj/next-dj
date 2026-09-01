@@ -692,3 +692,28 @@ class TestSettingChangedReload:
             # override_settings fires setting_changed, which calls reload.
             # The first attribute access rebuilds the manager.
             assert isinstance(default_manager.default_backend, StaticFilesBackend)
+
+    def test_override_settings_drops_the_cached_asset_plans(
+        self, tmp_path: Path, reset_default: None
+    ) -> None:
+        """Asset plans die with the manager, so reloaded settings re-walk the disk."""
+        (tmp_path / "template.css").write_text("")
+        page_path = tmp_path / "page.djx"
+        page_path.write_text("")
+        manager = get_static_manager()
+        manager._cached_page_roots = (tmp_path.resolve(),)
+        with mock.patch(
+            "next.static.backends.staticfiles_storage.url",
+            return_value="/static/next/index.css",
+        ):
+            manager.discover_page_assets(page_path, StaticCollector())
+        assert manager.discovery._page_plan_cache
+
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "STATIC_BACKENDS": [{"BACKEND": "next.static.StaticFilesBackend"}]
+            }
+        ):
+            reloaded = get_static_manager()
+            assert reloaded is not manager
+            assert not reloaded.discovery._page_plan_cache

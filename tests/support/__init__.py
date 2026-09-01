@@ -5,7 +5,11 @@ from tests.support.attribution import (
     unwrapped_decorator,
     wraps_decorator,
 )
-from tests.support.backends import MockAutoreloadSender
+from tests.support.backends import (
+    MockAutoreloadSender,
+    RecordingStaticBackend,
+    StaticAssetProvider,
+)
 from tests.support.cases import (
     COERCE_URL_VALUE_CASES,
     URL_BY_ANNOTATION_RESOLVE_CASES,
@@ -14,6 +18,7 @@ from tests.support.cases import (
     UrlByAnnotationResolveCase,
     UrlKwargsResolveCase,
 )
+from tests.support.components import build_composite_component, component_info
 from tests.support.forms import (
     GuardedTenantForm,
     build_post_request,
@@ -84,8 +89,10 @@ __all__ = [
     "RaisingComponentsRouter",
     "RaisingRootsRouter",
     "RaisingSkipNamesRouter",
+    "RecordingStaticBackend",
     "RootPagesRouter",
     "SkippingRouter",
+    "StaticAssetProvider",
     "UrlByAnnotationResolveCase",
     "UrlKwargsResolveCase",
     "_ctx",

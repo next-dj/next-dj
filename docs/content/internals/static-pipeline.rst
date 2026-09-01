@@ -13,7 +13,34 @@ Overview
 --------
 
 The static pipeline runs entirely per request.
-``AssetDiscovery`` walks the page and component trees on each render, builds ``StaticAsset`` records, and feeds them to the request ``StaticCollector``.
+``AssetDiscovery`` walks the page and component trees, builds ``StaticAsset`` records, and feeds them to the request ``StaticCollector``.
+The walk itself happens once per page and once per component, and later renders reuse what it found on disk.
+
+Asset plans
+-----------
+
+An asset plan is what ``AssetDiscovery`` remembers about one page path or one component.
+It holds the co-located files the walk found, the assets built from the ``styles`` and ``scripts`` lists of the owning module, and the directories the walk read.
+A plan caches the disk, not the URLs.
+The stem probes, the layout walk, and the module import happen once, and every file the plan holds still goes to ``register_file`` on every render, so a backend whose answer changes is seen by the next request.
+The default backend answers those calls from its own ``(logical_name, suffix)`` memo, so the repeat costs a dictionary lookup.
+Module-level URLs are literals the backend is never asked about, so the plan keeps them as finished ``StaticAsset`` records, and the same frozen instance rides every render and every collector.
+
+The page plan is keyed by the page file path.
+The component plan is keyed by the component's ``template_path``, ``module_path``, and ``name``, which is everything the plan depends on, so a rescan that produces an equal ``ComponentInfo`` reuses the entry and a renamed or moved component gets its own.
+A simple component owns no folder and reaches no plan at all, which keeps the entries the cache holds to the components that read the disk.
+Both caches are bounded and evict the least recently used entry.
+
+Two things invalidate a plan.
+
+- A settings reload drops the whole static manager, and the discovery instance with its plans goes with it.
+- Under ``DEBUG`` each render re-stats the directories the plan was read from and rebuilds when one of them has moved, appeared, or gone away.
+  For a page those directories are the whole walk from the page directory up to the page root, not only the ones that already hold a ``layout.djx``, so a layout added in between is visible on the next request.
+  For a component they are the component folder and the folder holding its module.
+
+A backend that rejects a file needs no invalidation, because the next render offers the file to it again, the warning repeats, and a fixed backend takes effect at once.
+Outside ``DEBUG`` a warm render issues no ``stat`` call at all, because a production process does not mutate co-located files under a running server.
+The ``asset_registered`` signal fires once per file asset per render.
 
 Discovery and injection
 -----------------------

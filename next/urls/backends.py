@@ -131,21 +131,22 @@ class FileRouterBackend(RouterBackend):
         )
         if extra_root_paths is None or skip_dir_names is None:
             dirs_list = list(extra_root_paths or [])
-            path_roots, segment_names = classify_dirs_entries(dirs_list, base_dir)
-            roots: list[Path] = path_roots
+            roots, segment_names = classify_dirs_entries(dirs_list, base_dir)
             skip = frozenset({comp_name, *segment_names})
         else:
             roots = list(extra_root_paths)
             skip = skip_dir_names
-        self._extra_root_paths = roots
+        # `page_roots` promises resolved absolute trees, and a subclass is free
+        # to pass both keyword arguments and bypass the classification above.
+        self._extra_root_paths = [root.resolve() for root in roots if root.exists()]
         self._skip_dir_names = skip
         self._components_folder_name = comp_name
 
         self.options = _narrow_file_router_options(raw_opts)
         self._patterns_cache: dict[str, list[URLPattern | URLResolver]] = {}
         self._app_pages_path_cache: dict[str, tuple[Path, Path | None]] = {}
-        self._root_patterns_cache: list[URLPattern | URLResolver] | None = None
         self._root_pages_paths_cache: list[Path] | None = None
+        self._root_patterns_cache: list[URLPattern | URLResolver] | None = None
         self._url_parser = default_url_parser
 
     @override
@@ -282,9 +283,8 @@ class FileRouterBackend(RouterBackend):
     ) -> Path | None:
         """Return `<app>/pages_dir` when that directory exists.
 
-        The `exists()` answer is memoised per app directory, so an app that
-        moves is looked at again while a tree created after the first read
-        needs the fresh backend a settings reload builds.
+        The answer is memoised per app directory, so an app that moves is
+        looked at again while a static lookup pays no probe per call.
         """
         app_path = directories.get(app_name)
         if app_path is None:
@@ -294,28 +294,27 @@ class FileRouterBackend(RouterBackend):
         cached = self._app_pages_path_cache.get(app_name)
         if cached is not None and cached[0] == app_path:
             return cached[1]
-        pages_path = app_path / self.pages_dir
-        result = pages_path if pages_path.exists() else None
-        self._app_pages_path_cache[app_name] = (app_path, result)
-        return result
+        candidate = app_path / self.pages_dir
+        pages_path = candidate if candidate.exists() else None
+        self._app_pages_path_cache[app_name] = (app_path, pages_path)
+        return pages_path
 
     def _get_root_pages_paths(self) -> list[Path]:
         """Return paths from `DIRS` plus optional `BASE_DIR` / `pages_dir`.
 
-        Memoised per instance. A settings reload recreates the backend,
-        so the memo never outlives its configuration.
+        Memoised per instance, because the roots this router serves belong to
+        the configuration it was built for and every reader asks per call.
         """
-        if self._root_pages_paths_cache is not None:
-            return self._root_pages_paths_cache
-        result: list[Path] = [p.resolve() for p in self._extra_root_paths if p.exists()]
-        if not self.app_dirs and not result:
-            base_dir = resolve_base_dir()
-            if base_dir is not None:
-                pages_path = base_dir / self.pages_dir
-                if pages_path.exists():
-                    result.append(pages_path)
-        self._root_pages_paths_cache = result
-        return result
+        if self._root_pages_paths_cache is None:
+            result: list[Path] = list(self._extra_root_paths)
+            if not self.app_dirs and not result:
+                base_dir = resolve_base_dir()
+                if base_dir is not None:
+                    pages_path = base_dir / self.pages_dir
+                    if pages_path.exists():
+                        result.append(pages_path)
+            self._root_pages_paths_cache = result
+        return self._root_pages_paths_cache
 
     def _generate_urls_for_app(
         self, app_name: str, directories: Mapping[str, Path]

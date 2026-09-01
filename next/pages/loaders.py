@@ -27,9 +27,8 @@ from django.core.signals import setting_changed
 from next.conf import next_framework_settings
 from next.conf.imports import import_class_cached
 from next.conf.signals import settings_reloaded
-from next.utils import classify_dirs_entries, resolve_base_dir
+from next.utils import MAX_ANCESTOR_WALK_DEPTH, classify_dirs_entries, resolve_base_dir
 
-from .paths import _MAX_ANCESTOR_WALK_DEPTH
 from .watch import get_pages_directories_for_watch
 
 
@@ -204,7 +203,7 @@ _PAGE_ROOTS_CACHE: dict[str, tuple[Path, ...] | None] = {"value": None}
 def _page_roots() -> tuple[Path, ...]:
     """Return the resolved page trees the routers report, memoised.
 
-    Reading them builds every router backend, too much work to repeat per walk.
+    Reading them probes the trees of every router, too much work per walk.
     """
     cached = _PAGE_ROOTS_CACHE["value"]
     if cached is None:
@@ -398,7 +397,7 @@ class LayoutTemplateLoader(TemplateLoader):
         watched_dirs: list[Path] = []
         current_dir = file_path.parent
 
-        for depth in range(_MAX_ANCESTOR_WALK_DEPTH):
+        for depth in range(MAX_ANCESTOR_WALK_DEPTH):
             if current_dir == current_dir.parent:
                 break
             if depth < watched_depth:
@@ -427,8 +426,8 @@ class LayoutTemplateLoader(TemplateLoader):
             if resolved.is_relative_to(root)
         ]
         if not depths:
-            return _MAX_ANCESTOR_WALK_DEPTH
-        return min(*depths, _MAX_ANCESTOR_WALK_DEPTH)
+            return MAX_ANCESTOR_WALK_DEPTH
+        return min(*depths, MAX_ANCESTOR_WALK_DEPTH)
 
     def _find_layout_files(self, file_path: Path) -> list[Path]:
         """Return `layout.djx` paths from near to far plus global layouts.

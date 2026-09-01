@@ -120,6 +120,12 @@ Route set change.
 The route set diff is taken by ``NextStatReloader`` from the configured page roots.
 A custom router that builds routes from another source rebuilds them through ``router_manager.reload``, which is the public API covered in :doc:`/content/howto/reload-routes-from-code`.
 
+The routers behind that list are built once per configuration rather than once per tick, and a settings reload or a change of ``BASE_DIR`` builds them again.
+A build that dropped an entry is held by nothing, so a router that failed to build while the apps were still loading is tried again on the next read rather than staying out of the watch list for good.
+Each tick observes the trees the built routers reported, and the resolution of those trees is held with them.
+A page root created under a live server, or a root symlink re-pointed at another release, therefore reaches the watcher only after a restart.
+A page created inside a tree that is already watched needs no restart, because the reloader rescans the watched trees on every tick and notices the new route.
+
 A ``.djx`` edit triggers neither path.
 Templates are re-read on render, and under ``DEBUG`` the page and component layers invalidate their cached compilation against the source mtime.
 A saved edit shows up on the next request without a process restart, while with ``DEBUG`` off it takes one.

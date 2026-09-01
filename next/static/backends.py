@@ -64,6 +64,8 @@ class StaticBackend(ABC):
         for example `"about"` or `"components/card"`. The `kind` argument
         must be a kind registered in the default kind registry. The method
         raises `RuntimeError` when the asset cannot be resolved to a URL.
+        Discovery calls it once per discovered file per render, so a backend
+        whose answer changes takes effect without a restart.
         """
 
 

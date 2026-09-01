@@ -19,10 +19,27 @@ from django.conf import settings
 
 
 if TYPE_CHECKING:
+    from collections import OrderedDict
     from collections.abc import Callable, Generator, Iterable
 
 
 logger = logging.getLogger(__name__)
+
+
+# The bound every ancestor walk shares, so none reaches the filesystem root.
+MAX_ANCESTOR_WALK_DEPTH = 64
+
+
+def store_bounded[K, V](cache: OrderedDict[K, V], key: K, value: V, size: int) -> None:
+    """Make `key` the freshest entry of a bounded cache and evict the stalest.
+
+    The pop before the write is what moves an existing key to the end, and it
+    leaves no window where a concurrent eviction could fail the reorder.
+    """
+    cache.pop(key, None)
+    cache[key] = value
+    if len(cache) > size:
+        cache.popitem(last=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,28 +92,44 @@ def template_edits_watched() -> bool:
     return bool(settings.DEBUG)
 
 
-def _classify_one_dir_entry(
-    item: Path, base_dir: Path | None
-) -> tuple[str, Path | str | None]:
+def _dir_entry_candidate(item: Path, base_dir: Path | None) -> Path | None:
+    """Return the directory a ``DIRS`` entry could name, before any probe.
+
+    A relative entry names one only against ``BASE_DIR``, so without one it
+    can only be a URL segment.
+    """
     if item.is_absolute():
-        if item.exists() and item.is_dir():
-            return "path", item
-        return "segment", item.name
+        return item
+    if base_dir is None:
+        return None
+    return base_dir / item
 
-    s = str(item).replace("\\", "/")
-    if "/" in s:
-        if base_dir is not None:
-            cand = (base_dir / item).resolve()
-            if cand.exists() and cand.is_dir():
-                return "path", cand
-        return "segment", Path(s).name or None
 
-    if base_dir is not None:
-        cand = base_dir / item
-        if cand.exists() and cand.is_dir():
-            return "path", cand.resolve()
+def _dir_entry_segment_name(item: Path, text: str) -> str:
+    """Return the URL segment name a ``DIRS`` entry that names no tree carries.
 
-    return "segment", item.name
+    A Windows-style entry read on POSIX carries no separator of its own, so
+    the last component comes from the normalised text rather than the path.
+    """
+    return Path(text).name if "/" in text else item.name
+
+
+def _iter_dir_entries(
+    entries: list[Any] | tuple[Any, ...] | None,
+) -> Generator[tuple[Path, str], None, None]:
+    """Yield every ``DIRS`` entry that names anything, as a path and its text.
+
+    The text is forward-slashed once here, because both readers below would
+    otherwise normalise the same entry again.
+    """
+    for raw in entries or ():
+        if raw is None:
+            continue
+        item = Path(raw) if not isinstance(raw, Path) else raw
+        text = str(item).replace("\\", "/")
+        if not text or text == ".":
+            continue
+        yield item, text
 
 
 def classify_dirs_entries(
@@ -105,22 +138,16 @@ def classify_dirs_entries(
     """Split ``DIRS`` into directory roots and URL segment names (file router)."""
     path_roots: list[Path] = []
     segments: set[str] = set()
-    if not entries:
-        return path_roots, frozenset()
-
-    for raw in entries:
-        if raw is None:
-            continue
-        item = Path(raw) if not isinstance(raw, Path) else raw
-        s = str(item)
-        if not s or s == ".":
-            continue
-
-        kind, value = _classify_one_dir_entry(item, base_dir)
-        if kind == "path" and isinstance(value, Path):
-            path_roots.append(value.resolve())
-        elif kind == "segment" and isinstance(value, str) and value:
-            segments.add(value)
+    for item, text in _iter_dir_entries(entries):
+        candidate = _dir_entry_candidate(item, base_dir)
+        if candidate is not None and candidate.is_dir():
+            path_roots.append(candidate.resolve())
+        else:
+            name = _dir_entry_segment_name(item, text)
+            # An entry that is nothing but separators names no segment, and an
+            # empty name would reach `skip_dir_names` as a directory to refuse.
+            if name:
+                segments.add(name)
 
     return path_roots, frozenset(segments)
 

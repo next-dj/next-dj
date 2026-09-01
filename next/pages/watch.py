@@ -8,11 +8,12 @@ backend from the answer rather than passing on a value of the wrong shape.
 from __future__ import annotations
 
 import logging
+from collections import OrderedDict
 from typing import TYPE_CHECKING
 
 from next.backends import backend_entries
 from next.conf.signals import settings_reloaded
-from next.utils import page_roots_shape_error
+from next.utils import page_roots_shape_error, resolve_base_dir, store_bounded
 
 
 if TYPE_CHECKING:
@@ -41,9 +42,21 @@ _MALFORMED = (
     "watcher. The same failure is not logged again until the settings reload."
 )
 
-# The backends are rebuilt on every tick, so a per-instance flag cannot stop a
-# broken one from logging forever. One key per source and subject bounds the set.
+# A router that keeps raising is read once a second, so a report of the same
+# failure is kept to one per settings generation. One key per source and
+# subject bounds the set.
 _reported_failures: set[tuple[str, str]] = set()
+
+# The base directory rides along, because a router reads it while it is built
+# and a change to it alone emits no reload.
+_backends_memo: dict[str, tuple[Path | None, list[RouterBackend] | None] | None] = {
+    "value": None
+}
+
+# Held with the routers, so a re-pointed root symlink reaches the watcher only
+# after a restart.
+_resolved_roots: OrderedDict[Path, Path] = OrderedDict()
+_RESOLVED_ROOTS_MAX_SIZE = 2048
 
 
 def _first_failure(source: str, subject: str) -> bool:
@@ -55,33 +68,82 @@ def _first_failure(source: str, subject: str) -> bool:
     return True
 
 
-def _forget_reported_failures(**kwargs) -> None:
-    """Diagnose a failing backend again after the configuration changed."""
+def _forget_watch_state(**kwargs) -> None:
+    """Rebuild the routers and diagnose a failing one again after a reconfigure."""
     _reported_failures.clear()
+    _backends_memo["value"] = None
+    _resolved_roots.clear()
 
 
-settings_reloaded.connect(_forget_reported_failures)
+settings_reloaded.connect(_forget_watch_state)
 
 
-def iter_page_backends_for_watch() -> Iterator[RouterBackend]:
-    """Yield one router per `PAGE_BACKENDS` entry, skipping the ones that fail.
-
-    A backend that cannot be built costs its own trees and nothing else, so
-    the watcher keeps observing every tree the other entries report.
-    """
+def _build_page_backends_for_watch() -> tuple[list[RouterBackend], bool]:
+    """Build one router per `PAGE_BACKENDS` entry, telling whether all were built."""
     # next.urls imports next.pages, so the router import is deferred here to
     # break the next.pages <-> next.urls cycle.
     from next.urls import RouterFactory  # noqa: PLC0415
 
+    backends: list[RouterBackend] = []
+    complete = True
     for position, config in enumerate(backend_entries("PAGE_BACKENDS"), start=1):
         try:
             backend = RouterFactory.create_backend(config)
         except Exception:
+            complete = False
             # Keyed by position, because entries naming no BACKEND share a key.
             if _first_failure(str(position), "construction"):
                 logger.exception(_NOT_BUILT, position, config.get("BACKEND"))
             continue
-        yield backend
+        backends.append(backend)
+    return backends, complete
+
+
+def _page_backends_for_watch() -> list[RouterBackend]:
+    """Return the routers the watcher reads, building them when it has to.
+
+    A complete build is held until the configuration behind it changes, while
+    one that dropped an entry is tried again, because the entry can fail for a
+    reason the next read no longer has, such as an app that had yet to load.
+    """
+    base_dir = resolve_base_dir()
+    memo = _backends_memo["value"]
+    if memo is not None:
+        if memo[0] != base_dir:
+            # A change of BASE_DIR alone emits no reload, so the routers built
+            # against the previous one go, and their diagnostics with them.
+            _forget_watch_state()
+        elif memo[1] is not None:
+            return memo[1]
+    backends, complete = _build_page_backends_for_watch()
+    _backends_memo["value"] = (base_dir, backends if complete else None)
+    return backends
+
+
+def iter_page_backends_for_watch() -> Iterator[RouterBackend]:
+    """Return one router per `PAGE_BACKENDS` entry, skipping the ones that fail.
+
+    A backend that cannot be built costs its own trees and nothing else, so
+    the watcher keeps observing every tree the other entries report. The
+    routers are built before the iterator is handed back, because an abandoned
+    iterator would otherwise leave the held ones half a configuration behind.
+    """
+    return iter(_page_backends_for_watch())
+
+
+def _resolved_root_for_watch(path: Path) -> Path:
+    """Return the resolved form of a reported tree, memoised until a reload.
+
+    A router reports the same handful of trees every tick, and resolving one
+    costs more than everything else the tick pays for it.
+    """
+    resolved = _resolved_roots.get(path)
+    if resolved is None:
+        resolved = path.resolve()
+        # A router free to report a new tree per tick would otherwise grow the
+        # memo without bound, and dropping the stalest keeps the steady set.
+        store_bounded(_resolved_roots, path, resolved, _RESOLVED_ROOTS_MAX_SIZE)
+    return resolved
 
 
 def page_root_paths_for_watch(backend: RouterBackend) -> list[Path]:
@@ -104,7 +166,7 @@ def page_root_paths_for_watch(backend: RouterBackend) -> list[Path]:
         if _first_failure(source, subject):
             logger.error(_MALFORMED, source, subject)
         return []
-    return [root.path.resolve() for root in roots]
+    return [_resolved_root_for_watch(root.path) for root in roots]
 
 
 def components_folder_name_for_watch(backend: RouterBackend) -> str | None:

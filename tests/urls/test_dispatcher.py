@@ -107,8 +107,20 @@ class TestClassifyDirsEntries:
         assert roots == []
         assert "b" in segs
 
+    def test_a_relative_entry_without_a_base_dir_becomes_a_segment(self) -> None:
+        """Without a base dir a relative entry can only name a URL segment."""
+        roots, segs = classify_dirs_entries(["shop"], None)
+        assert roots == []
+        assert segs == frozenset({"shop"})
+
     def test_skips_empty_and_dot_entries(self) -> None:
         """Empty strings and dot entries are ignored."""
         roots, segs = classify_dirs_entries(["", ".", None], Path("/tmp"))
+        assert roots == []
+        assert segs == frozenset()
+
+    def test_an_entry_of_separators_alone_names_no_segment(self, tmp_path) -> None:
+        """A separator-only entry reaches `skip_dir_names` as nothing at all."""
+        roots, segs = classify_dirs_entries(["\\", "./"], tmp_path)
         assert roots == []
         assert segs == frozenset()

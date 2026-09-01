@@ -18,9 +18,12 @@ Signals and payloads
 asset_registered
 ~~~~~~~~~~~~~~~~
 
-Fires after a file is registered with a backend and added to the collector.
+Fires after a file asset is added to the collector, on every render that adds it.
 The sender is the asset instance.
 The payload carries ``collector`` and ``backend``.
+
+Registration with the backend is per render.
+Discovery asks ``register_file`` for the URL of every discovered file on every render, so a backend that resolves a URL differently is seen by the next request, and ``asset_registered`` carries the asset that registration produced.
 
 .. note::
 
