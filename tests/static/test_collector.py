@@ -69,6 +69,23 @@ class TestStaticCollectorDedup:
         collector.add(StaticAsset(url=CSS_URL, kind="css", source_path=Path("/a.css")))
         assert len(collector.assets_in_slot("styles")) == 1
 
+    def test_add_reports_whether_the_asset_landed(
+        self, collector: StaticCollector
+    ) -> None:
+        """A caller announcing an asset announces the one the collector kept."""
+        asset = StaticAsset(url=CSS_URL, kind="css")
+        assert collector.add(asset) is True
+        assert collector.add(asset) is False
+
+    def test_a_prepended_duplicate_reports_no_landing_either(
+        self, collector: StaticCollector
+    ) -> None:
+        """The dedup key decides before the bucket does, prepend or not."""
+        collector.add(StaticAsset(url=CSS_URL, kind="css"))
+        assert (
+            collector.add(StaticAsset(url=CSS_URL, kind="css"), prepend=True) is False
+        )
+
     def test_unregistered_kind_raises(self, collector: StaticCollector) -> None:
         with pytest.raises(KeyError, match="Unsupported asset kind"):
             collector.add(StaticAsset(url="weird://x", kind="weird"))

@@ -3,9 +3,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from django.test import override_settings
 
+from next.pages.watch import get_pages_directories_for_watch
 from next.server.autoreload import NextStatReloader, _tree_dir_signature
 from tests.benchmarks.factories import build_pages_tree
+from tests.support import file_router_config_entry
 
 
 if TYPE_CHECKING:
@@ -49,3 +52,18 @@ class TestBenchCollectRoutes:
             reloader._collect_routes()
 
         benchmark(run)
+
+
+class TestBenchWatchDirectories:
+    """The reloader asks for the watched page trees once a second."""
+
+    @pytest.mark.benchmark(group="server.autoreload")
+    def test_pages_directories_warm(self, tmp_path: Path, benchmark) -> None:
+        """The routers are held, so a tick pays the tree probes and nothing else."""
+        root = tmp_path / "shell"
+        root.mkdir()
+        with override_settings(
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": [file_router_config_entry(pages_dir=root)]}
+        ):
+            get_pages_directories_for_watch()
+            benchmark(get_pages_directories_for_watch)

@@ -13,6 +13,8 @@ import logging
 from collections import OrderedDict
 from typing import TYPE_CHECKING, cast
 
+from next.utils import store_bounded
+
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -41,10 +43,7 @@ class ModuleCache:
 
     def set(self, path: Path, module: ModuleType | None) -> None:
         """Store the module (or `None` on failure) under `path`, evicting when full."""
-        if path not in self._order and len(self._order) >= self._maxsize:
-            self._order.popitem(last=False)
-        self._order[path] = module
-        self._order.move_to_end(path)
+        store_bounded(self._order, path, module, self._maxsize)
 
     def clear(self) -> None:
         """Drop every entry from the cache."""

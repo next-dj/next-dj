@@ -1,24 +1,9 @@
-"""Discover co-located CSS/JS files and page and component module asset lists.
+"""Discover co-located CSS and JS files and the asset lists a module declares.
 
-This module owns the filesystem side of the static pipeline. It walks
-layout chains, reads `styles` and `scripts` module lists, and pushes
-results onto a collector via the active backend.
-
-The path-to-logical-name conversion lives on the `PathResolver` so both
-discovery and the staticfiles finder share the exact same mapping. The
-`StemRegistry` controls which filenames are auto-picked-up per role. It
-lets users teach the framework about new stems like `page.css` or
-`panel.js` without patching the core.
-
-The `BackendProvider` protocol inverts the dependency direction. The
-discovery layer does not import the static manager directly. Any object
-exposing `default_backend` and `page_roots` satisfies the protocol,
-which makes unit-testing without a full manager trivial.
-
-The provider contract requires that `page_roots` returns already
-resolved absolute paths. Both the static manager and the co-located
-finder satisfy this contract, which lets the discovery layer skip a
-round of resolution on every logical-name lookup.
+This module owns the filesystem side of the static pipeline. It walks layout
+chains, reads `styles` and `scripts` module lists, and feeds a collector
+through the active backend. Both entry points answer from an asset plan, which
+remembers what the disk held rather than what the backend answered.
 """
 
 from __future__ import annotations
@@ -29,7 +14,13 @@ from collections import OrderedDict
 from typing import TYPE_CHECKING, NamedTuple, Protocol, runtime_checkable
 
 from next.pages import loaders as pages_loaders
-from next.utils import template_edits_watched
+from next.utils import (
+    MAX_ANCESTOR_WALK_DEPTH,
+    resolved_tree,
+    stat_mtime_ns,
+    store_bounded,
+    template_edits_watched,
+)
 
 from .assets import StaticAsset, default_kinds
 from .collector import default_placeholders
@@ -37,7 +28,7 @@ from .signals import asset_registered
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
     from pathlib import Path
 
     from next.components import ComponentInfo
@@ -49,9 +40,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-_MODULE_LIST_CACHE_MAX_SIZE = 2048
-_LAYOUT_DIR_CACHE_MAX_SIZE = 2048
 _PAGE_PLAN_CACHE_MAX_SIZE = 2048
+_COMPONENT_PLAN_CACHE_MAX_SIZE = 2048
+
+# What identifies the component a plan was built for. The folder it reads comes
+# from one of the two paths, and the logical name comes from the component name.
+type _ComponentKey = tuple[Path | None, Path | None, str]
 
 
 class _FoundAsset(NamedTuple):
@@ -62,16 +56,27 @@ class _FoundAsset(NamedTuple):
     kind: str
 
 
-class _PageAssetPlan(NamedTuple):
-    """What one page path contributes, and the directories it was read from.
+class _AssetPlan(NamedTuple):
+    """What one page or component contributes, and where it was read from.
 
-    A warm render registers the files named here instead of probing every
-    stem again. `module_path` is the page itself, or `None` where it is gone.
+    A warm render skips the stem probes and the module import, and still
+    hands every found file to the backend. Module URLs are literals the
+    backend never sees, so they ride the plan as finished assets. The
+    registry generation rides along too, because which filenames count as
+    assets is answered from registries no directory mtime moves with.
     """
 
     files: tuple[_FoundAsset, ...]
-    module_path: Path | None
-    directory_mtimes: tuple[tuple[Path, float], ...]
+    module_assets: tuple[StaticAsset, ...]
+    directory_mtimes: tuple[tuple[Path, int | None], ...]
+    registries: tuple[int, int, int]
+
+
+class _LayoutWalk(NamedTuple):
+    """The directories holding a layout, and the mtimes of the watched ones."""
+
+    layouts: tuple[Path, ...]
+    mtimes: tuple[tuple[Path, int | None], ...]
 
 
 def _url_suffix(url: str) -> str:
@@ -103,19 +108,31 @@ def _rel_path_str(child: Path, root: Path) -> str | None:
     return rel
 
 
-def _directory_mtimes(directories: list[Path]) -> tuple[tuple[Path, float], ...]:
-    """Snapshot the mtime of each directory, dropping the ones that do not stat.
+def _directory_mtimes(
+    directories: Sequence[Path],
+) -> tuple[tuple[Path, int | None], ...]:
+    """Snapshot the mtime of every directory a plan is about to read.
 
-    Taken whether or not the process watches asset edits, so a plan built
-    with `DEBUG` off still has something to compare against once it comes on.
+    Taken whether or not the process watches asset edits, so a plan built with
+    `DEBUG` off still has something to compare against once it comes on. A
+    directory that does not stat is recorded as `None`, which no real mtime
+    equals, so one that appears later rebuilds the plan that walked past it.
     """
-    snapshot: list[tuple[Path, float]] = []
-    for directory in directories:
-        try:
-            snapshot.append((directory, directory.stat().st_mtime))
-        except OSError:
-            continue
-    return tuple(snapshot)
+    return tuple((directory, stat_mtime_ns(directory)) for directory in directories)
+
+
+def _resolved_parent(path: Path) -> Path:
+    """Return the resolved directory holding `path`, or its own spelling.
+
+    A relative path resolves through the working directory, which an atomic
+    deploy removes out from under a live worker, and a render is no place to
+    raise over the name of a folder.
+    """
+    parent = path.parent
+    try:
+        return resolved_tree(parent)
+    except OSError:
+        return parent
 
 
 @runtime_checkable
@@ -153,12 +170,19 @@ class StemRegistry:
             "layout": ["layout"],
             "component": ["component"],
         }
+        self._version = 0
+
+    @property
+    def version(self) -> int:
+        """Return a counter every registration bumps, so a cached answer can tell."""
+        return self._version
 
     def register(self, role: str, stem: str) -> None:
         """Add a stem under the given role, creating the role when missing."""
         stems = self._roles.setdefault(role, [])
         if stem not in stems:
             stems.append(stem)
+            self._version += 1
 
     def stems(self, role: str) -> tuple[str, ...]:
         """Return registered stems for the role in registration order."""
@@ -253,9 +277,10 @@ class AssetDiscovery:
         self._provider = provider
         self._resolver = resolver or PathResolver(provider.page_roots)
         self._stems = stems or default_stems
-        self._module_list_cache: OrderedDict[Path, dict[str, list[str]]] = OrderedDict()
-        self._layout_dir_cache: OrderedDict[Path, list[Path]] = OrderedDict()
-        self._page_plan_cache: OrderedDict[Path, _PageAssetPlan] = OrderedDict()
+        self._page_plan_cache: OrderedDict[Path, _AssetPlan] = OrderedDict()
+        self._component_plan_cache: OrderedDict[_ComponentKey, _AssetPlan] = (
+            OrderedDict()
+        )
 
     def discover_page_assets(self, file_path: Path, collector: StaticCollector) -> None:
         """Collect layout, template, and module-level assets for a page file.
@@ -264,32 +289,44 @@ class AssetDiscovery:
         the template directory, then from `styles` and `scripts`
         module lists declared in `page.py`.
         """
-        plan = self._page_asset_plan(file_path)
+        plan = self._page_plan_cache.get(file_path)
+        if plan is None or self._plan_stale(plan):
+            plan = self._build_page_asset_plan(file_path)
+        store_bounded(self._page_plan_cache, file_path, plan, _PAGE_PLAN_CACHE_MAX_SIZE)
+        self._apply_plan(plan, collector)
+
+    def _registry_generation(self) -> tuple[int, int, int]:
+        """Return the generation of every registry a plan reads while it is built.
+
+        Read before a plan probes anything, so a registration landing while the
+        probe runs leaves the plan stale rather than stamped as up to date. The
+        stem registry is this instance's own, because a caller is free to hand
+        `AssetDiscovery` one and the probe reads that one.
+        """
+        return (
+            self._stems.version,
+            default_kinds.version,
+            default_placeholders.version,
+        )
+
+    def _apply_plan(self, plan: _AssetPlan, collector: StaticCollector) -> None:
+        """Hand every file the plan found to the backend, then its module URLs."""
         for found in plan.files:
             self._register_file(found, collector)
-        if plan.module_path is not None:
-            self._collect_module_lists(plan.module_path, collector)
+        for asset in plan.module_assets:
+            collector.add(asset)
 
-    def _page_asset_plan(self, file_path: Path) -> _PageAssetPlan:
-        """Return the memoised plan of `file_path`, walking the disk on a miss."""
-        plan = self._page_plan_cache.get(file_path)
-        if plan is not None and not self._plan_stale(plan):
-            self._page_plan_cache.move_to_end(file_path)
-            return plan
-        plan = self._build_page_asset_plan(file_path)
-        self._page_plan_cache[file_path] = plan
-        if len(self._page_plan_cache) > _PAGE_PLAN_CACHE_MAX_SIZE:
-            self._page_plan_cache.popitem(last=False)
-        return plan
-
-    def _build_page_asset_plan(self, file_path: Path) -> _PageAssetPlan:
+    def _build_page_asset_plan(self, file_path: Path) -> _AssetPlan:
         """Probe every role directory behind `file_path` in one pass."""
         resolved = file_path.resolve()
+        registries = self._registry_generation()
         page_root = self._resolver.find_page_root(resolved)
+        # Imported before the walk stats anything, because the import writes
+        # `__pycache__` into the very directory the walk is about to snapshot.
+        lists = self._module_lists(resolved) if resolved.exists() else {}
+        walk = self._walk_layouts(resolved, page_root)
         files: list[_FoundAsset] = []
-        directories: list[Path] = []
-        for layout_dir in self._find_layout_directories(resolved, page_root):
-            directories.append(layout_dir)
+        for layout_dir in walk.layouts:
             files += self._find_role_files(
                 layout_dir,
                 logical_name=self._resolver.logical_name_for_layout(
@@ -298,7 +335,6 @@ class AssetDiscovery:
                 role="layout",
             )
         template_dir = resolved.parent
-        directories.append(template_dir)
         files += self._find_role_files(
             template_dir,
             logical_name=self._resolver.logical_name_for_template(
@@ -306,60 +342,83 @@ class AssetDiscovery:
             ),
             role="template",
         )
-        return _PageAssetPlan(
+        return _AssetPlan(
             files=tuple(files),
-            module_path=resolved if resolved.exists() else None,
-            directory_mtimes=_directory_mtimes(directories),
+            module_assets=self._module_assets(lists),
+            directory_mtimes=walk.mtimes,
+            registries=registries,
         )
 
-    def _plan_stale(self, plan: _PageAssetPlan) -> bool:
-        """Whether a directory the plan was read from has moved since.
+    def _plan_stale(self, plan: _AssetPlan) -> bool:
+        """Whether anything the plan was read from has changed since.
 
-        Only a process watching template edits pays the stats. An asset created or
-        deleted moves the mtime of the directory holding it.
+        A registration moves no file, so the registry generation is compared
+        whatever the process watches. Only a process watching template edits
+        pays the stats, and there an asset created or deleted moves the mtime
+        of the directory holding it, as does a directory that comes or goes.
         """
+        if plan.registries != self._registry_generation():
+            return True
         if not template_edits_watched():
             return False
-        for directory, mtime in plan.directory_mtimes:
-            try:
-                current = directory.stat().st_mtime
-            except OSError:
-                return True
-            if current > mtime:
-                return True
-        return False
+        return any(
+            stat_mtime_ns(directory) != mtime
+            for directory, mtime in plan.directory_mtimes
+        )
 
     def discover_component_assets(
         self, info: ComponentInfo, collector: StaticCollector
     ) -> None:
-        """Collect co-located CSS, JS, and module asset lists for a component."""
-        component_dir = self._component_directory(info)
-        if component_dir is None:
-            return
-        logical_name = f"components/{info.name}"
-        self._collect_role_directory(
-            component_dir,
-            logical_name=logical_name,
-            role="component",
-            collector=collector,
-        )
-        module_path = info.module_path
-        if module_path is not None and module_path.exists():
-            self._collect_module_lists(module_path, collector)
+        """Collect co-located CSS, JS, and module asset lists for a component.
 
-    def _collect_role_directory(
-        self,
-        directory: Path,
-        *,
-        logical_name: str,
-        role: str,
-        collector: StaticCollector,
-    ) -> None:
-        """Register every `{stem}{ext}` file the directory holds for the role."""
-        for found in self._find_role_files(
-            directory, logical_name=logical_name, role=role
-        ):
-            self._register_file(found, collector)
+        Every instance of a component on a page arrives here, so the plan is
+        what keeps the second instance from walking the folder again.
+        """
+        source = info.template_path or info.module_path
+        if info.is_simple or source is None:
+            # A simple component owns no folder, so it has nothing to plan and
+            # an entry per instance would only crowd out the plans that do.
+            return
+        key: _ComponentKey = (info.template_path, info.module_path, info.name)
+        plan = self._component_plan_cache.get(key)
+        if plan is None or self._plan_stale(plan):
+            plan = self._build_component_asset_plan(info, _resolved_parent(source))
+        store_bounded(
+            self._component_plan_cache, key, plan, _COMPONENT_PLAN_CACHE_MAX_SIZE
+        )
+        self._apply_plan(plan, collector)
+
+    def _build_component_asset_plan(
+        self, info: ComponentInfo, component_dir: Path
+    ) -> _AssetPlan:
+        """Probe the component folder once and note what it was read from."""
+        module_path = info.module_path
+        registries = self._registry_generation()
+        # Imported before the mtimes are taken, because the import writes
+        # `__pycache__` into the folder the snapshot is about to read.
+        lists = (
+            self._module_lists(module_path)
+            if module_path is not None and module_path.exists()
+            else {}
+        )
+        directories = [component_dir]
+        module_dir = None if module_path is None else _resolved_parent(module_path)
+        if module_dir is not None and module_dir != component_dir:
+            directories.append(module_dir)
+        # Stat before the probe, so a file landing between the two reads leaves
+        # the plan stale rather than invisible until a restart.
+        mtimes = _directory_mtimes(directories)
+        files = tuple(
+            self._find_role_files(
+                component_dir, logical_name=f"components/{info.name}", role="component"
+            )
+        )
+        return _AssetPlan(
+            files=files,
+            module_assets=self._module_assets(lists),
+            directory_mtimes=mtimes,
+            registries=registries,
+        )
 
     def _find_role_files(
         self, directory: Path, *, logical_name: str, role: str
@@ -368,7 +427,8 @@ class AssetDiscovery:
 
         The set of extensions probed comes from `KindRegistry.kinds()`, so registering a
         new kind during `AppConfig.ready` is enough to teach discovery about it. Each
-        hit carries its resolved path, because the collector dedups on it.
+        hit carries its resolved path, because the staticfiles finder spells it that way
+        and the two layers have to agree on which file a logical name means.
         """
         found: list[_FoundAsset] = []
         for stem in self._stems.stems(role):
@@ -379,46 +439,34 @@ class AssetDiscovery:
                     found.append(_FoundAsset(candidate.resolve(), logical_name, kind))
         return found
 
-    def _collect_module_lists(
-        self, module_path: Path, collector: StaticCollector
-    ) -> None:
-        """Read URL list variables matching every registered placeholder slot.
+    def _module_lists(self, module_path: Path) -> dict[str, list[str]]:
+        """Read the URL list variable named after every registered slot.
 
-        The discovery layer iterates over registered slots in
-        `default_placeholders` and reads the variable named after each
-        slot. Each URL gets a `kind` derived from its file extension via
-        `KindRegistry.kind_for_extension`. URLs whose suffix is not in
-        the registry are dropped with a debug log.
-
-        The caller in `discover_page_assets` passes a resolved module
-        path. The component entry point still calls with the raw path,
-        so the key is normalised here as a safety net.
+        Read while the plan is built rather than while it is applied, because
+        importing the module writes `__pycache__` beside it and that would
+        move a directory mtime the plan had already taken.
         """
-        cache_key = module_path if module_path.is_absolute() else module_path.resolve()
-        if cache_key in self._module_list_cache:
-            self._module_list_cache.move_to_end(cache_key)
-            cached = self._module_list_cache[cache_key]
-        else:
-            lists = pages_loaders.read_module_string_lists(
-                module_path, [slot.name for slot in default_placeholders]
-            )
-            if lists is None:
-                self._module_list_cache[cache_key] = {}
-                if len(self._module_list_cache) > _MODULE_LIST_CACHE_MAX_SIZE:
-                    self._module_list_cache.popitem(last=False)
-                return
-            cached = lists
-            self._module_list_cache[cache_key] = cached
-            if len(self._module_list_cache) > _MODULE_LIST_CACHE_MAX_SIZE:
-                self._module_list_cache.popitem(last=False)
-        for slot_name, urls in cached.items():
-            for url in urls:
-                self._register_module_url(url, slot_name, collector)
+        lists = pages_loaders.read_module_string_lists(
+            module_path, [slot.name for slot in default_placeholders]
+        )
+        return lists if lists is not None else {}
 
-    def _register_module_url(
-        self, url: str, slot_name: str, collector: StaticCollector
-    ) -> None:
-        """Resolve a module-level URL to a kind and add it to the collector.
+    def _module_assets(self, lists: dict[str, list[str]]) -> tuple[StaticAsset, ...]:
+        """Turn every URL the module lists name into an asset.
+
+        Built with the plan rather than on every render, because these URLs
+        are literals the backend is never asked about.
+        """
+        assets: list[StaticAsset] = []
+        for slot_name, urls in lists.items():
+            for url in urls:
+                asset = self._module_asset(url, slot_name)
+                if asset is not None:
+                    assets.append(asset)
+        return tuple(assets)
+
+    def _module_asset(self, url: str, slot_name: str) -> StaticAsset | None:
+        """Resolve a module-level URL to an asset of the kind its suffix names.
 
         The kind comes from `KindRegistry.kind_for_extension(suffix)`
         where suffix is the lowercase trailing dot-extension of the
@@ -428,11 +476,11 @@ class AssetDiscovery:
         suffix = _url_suffix(url)
         if not suffix:
             logger.debug("Module URL %r has no recognised extension", url)
-            return
+            return None
         kind = default_kinds.kind_for_extension(suffix)
         if kind is None:
             logger.debug("Module URL %r has unregistered extension %r", url, suffix)
-            return
+            return None
         kind_slot = default_kinds.slot(kind)
         if kind_slot != slot_name:
             logger.debug(
@@ -442,14 +490,16 @@ class AssetDiscovery:
                 kind_slot,
                 slot_name,
             )
-            return
-        collector.add(StaticAsset(url=url, kind=kind))
+            return None
+        return StaticAsset(url=url, kind=kind)
 
     def _register_file(self, found: _FoundAsset, collector: StaticCollector) -> None:
         """Register a file with the backend and add the result to the collector.
 
-        Warnings are logged for `OSError` and `ValueError`. All other exception types
-        propagate so bugs in custom backends surface loudly.
+        The signal follows the collector, so a component mounted many times on
+        one page announces each of its assets once. Warnings are logged for
+        `OSError` and `ValueError` and drop that one asset. All other exception
+        types propagate so bugs in custom backends surface loudly.
         """
         backend = self._provider.default_backend
         try:
@@ -466,45 +516,33 @@ class AssetDiscovery:
             )
             return
         asset = StaticAsset(url=url, kind=found.kind, source_path=found.source_path)
-        collector.add(asset)
-        asset_registered.send(sender=asset, collector=collector, backend=backend)
+        if collector.add(asset):
+            asset_registered.send(sender=asset, collector=collector, backend=backend)
 
-    def _component_directory(self, info: ComponentInfo) -> Path | None:
-        """Return the directory that holds a composite component, or None."""
-        if info.is_simple:
-            return None
-        if info.template_path is not None:
-            return info.template_path.parent
-        if info.module_path is not None:  # pragma: no cover
-            return info.module_path.parent
-        return None  # pragma: no cover
+    def _walk_layouts(self, file_path: Path, page_root: Path | None) -> _LayoutWalk:
+        """Walk up from the page directory, outermost first, and stat as it goes.
 
-    def _find_layout_directories(
-        self, file_path: Path, page_root: Path | None
-    ) -> list[Path]:
-        """Walk up from the page directory and return layout dirs outermost first.
-
-        The caller is expected to pass a resolved absolute `file_path`.
-        The resolver contract also guarantees that `page_root` is
-        resolved, which lets this loop compare paths with `==` without
-        issuing another filesystem call per iteration.
+        Inside a page tree every directory is watched, because a layout dropped
+        into an empty one has to invalidate the plan that walked past it, and
+        the tree root bounds what that costs. Outside one there is no boundary
+        between project and system directories, so the walk watches what it read.
         """
-        if file_path in self._layout_dir_cache:
-            self._layout_dir_cache.move_to_end(file_path)
-            return self._layout_dir_cache[file_path]
-        directories: list[Path] = []
+        layouts: list[Path] = []
+        watched: list[tuple[Path, int | None]] = []
+        inside_a_tree = page_root is not None
         current_dir = file_path.parent
-        while True:
-            if (current_dir / "layout.djx").exists():
-                directories.append(current_dir)
-            if page_root is not None and current_dir == page_root:
-                break
+        for depth in range(MAX_ANCESTOR_WALK_DEPTH):
+            # Stat first so a file landing between the two reads leaves the
+            # plan stale rather than invisible until a restart.
+            mtime = stat_mtime_ns(current_dir)
+            holds_layout = (current_dir / "layout.djx").exists()
+            if holds_layout:
+                layouts.append(current_dir)
+            if inside_a_tree or holds_layout or depth == 0:
+                watched.append((current_dir, mtime))
             parent = current_dir.parent
-            if parent == current_dir:
+            # The tree root ends the walk, and so does the filesystem root.
+            if current_dir in (page_root, parent):
                 break
             current_dir = parent
-        result = list(reversed(directories))
-        self._layout_dir_cache[file_path] = result
-        if len(self._layout_dir_cache) > _LAYOUT_DIR_CACHE_MAX_SIZE:
-            self._layout_dir_cache.popitem(last=False)
-        return result
+        return _LayoutWalk(tuple(reversed(layouts)), tuple(reversed(watched)))

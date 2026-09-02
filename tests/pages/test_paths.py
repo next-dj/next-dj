@@ -1,11 +1,7 @@
 from pathlib import Path
 
-from next.pages.paths import (
-    _MAX_ANCESTOR_WALK_DEPTH,
-    clear_page_path_info,
-    forget_page_path_info,
-    page_path_info,
-)
+from next.pages.paths import clear_page_path_info, forget_page_path_info, page_path_info
+from next.utils import MAX_ANCESTOR_WALK_DEPTH
 
 
 class TestPagePathInfo:
@@ -60,12 +56,12 @@ class TestPagePathInfo:
     def test_the_chain_is_bounded_by_the_walk_depth(self, tmp_path) -> None:
         """A tree deeper than the cap contributes no more than the cap."""
         deep = tmp_path
-        for i in range(_MAX_ANCESTOR_WALK_DEPTH + 6):
+        for i in range(MAX_ANCESTOR_WALK_DEPTH + 6):
             deep = deep / f"d{i}"
             deep.mkdir()
 
         assert (
-            len(page_path_info(deep / "page.py").ancestors) == _MAX_ANCESTOR_WALK_DEPTH
+            len(page_path_info(deep / "page.py").ancestors) == MAX_ANCESTOR_WALK_DEPTH
         )
 
 

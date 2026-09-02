@@ -18,9 +18,13 @@ Signals and payloads
 asset_registered
 ~~~~~~~~~~~~~~~~
 
-Fires after a file is registered with a backend and added to the collector.
+Fires after a file asset lands in the collector, once per asset per collector.
+An asset the collector deduplicates away, such as the second mount of the same component on one page, emits no signal.
 The sender is the asset instance.
 The payload carries ``collector`` and ``backend``.
+
+Registration with the backend is per render.
+Discovery asks ``register_file`` for the URL of every discovered file on every render, so a backend free to resolve the same file to a different URL per request is asked every time, and ``asset_registered`` carries the asset that registration produced.
 
 .. note::
 

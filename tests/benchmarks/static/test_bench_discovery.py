@@ -5,42 +5,16 @@ from typing import TYPE_CHECKING
 import pytest
 from django.test import override_settings
 
-from next.static import AssetDiscovery, StaticCollector, StaticFilesBackend
-from next.static.assets import default_kinds
+from next.static import AssetDiscovery, StaticCollector
 from next.static.discovery import PathResolver
 from tests.benchmarks.factories import build_layout_page
+from tests.support import PlainStaticBackend, StaticAssetProvider, component_info
 
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from next.static import StaticBackend
-
-
-class _StubBackend(StaticFilesBackend):
-    """Backend with deterministic URLs, so a run times discovery and nothing else."""
-
-    def register_file(self, source_path: Path, logical_name: str, kind: str) -> str:
-        """Return the URL the logical name and kind spell out."""
-        del source_path
-        return f"/static/next/{logical_name}{default_kinds.extension(kind)}"
-
-
-class _Provider:
-    """The narrow provider `AssetDiscovery` reads, holding resolved roots."""
-
-    def __init__(self, backend: StaticBackend, roots: tuple[Path, ...]) -> None:
-        self._backend = backend
-        self._roots = roots
-
-    @property
-    def default_backend(self) -> StaticBackend:
-        """Return the backend every registration goes through."""
-        return self._backend
-
-    def page_roots(self) -> tuple[Path, ...]:
-        """Return the resolved page trees the discovery walks within."""
-        return self._roots
+    from next.components import ComponentInfo
 
 
 def _discovery_for(tmp_path: Path, *, assets: bool) -> tuple[AssetDiscovery, Path]:
@@ -50,7 +24,9 @@ def _discovery_for(tmp_path: Path, *, assets: bool) -> tuple[AssetDiscovery, Pat
         (page_file.parent / "template.css").write_text("body{}")
         (page_file.parent / "template.js").write_text("/* js */")
         (tmp_path / "layout.css").write_text("body{}")
-    discovery = AssetDiscovery(_Provider(_StubBackend(), (tmp_path.resolve(),)))
+    discovery = AssetDiscovery(
+        StaticAssetProvider(PlainStaticBackend(), (tmp_path.resolve(),))
+    )
     discovery.discover_page_assets(page_file, StaticCollector())
     return discovery, page_file
 
@@ -76,6 +52,47 @@ class TestBenchPageAssetDiscovery:
         with override_settings(DEBUG=True):
             discovery.discover_page_assets(page_file, StaticCollector())
             benchmark(discovery.discover_page_assets, page_file, StaticCollector())
+
+
+def _component_for(tmp_path: Path) -> tuple[AssetDiscovery, ComponentInfo]:
+    """Build a warm discovery over a composite component with both asset kinds."""
+    comp_dir = tmp_path / "_components" / "widget"
+    comp_dir.mkdir(parents=True)
+    (comp_dir / "component.css").write_text(".widget{}")
+    (comp_dir / "component.js").write_text("/* widget */")
+    info = component_info(comp_dir, template="<div>widget</div>")
+    discovery = AssetDiscovery(
+        StaticAssetProvider(PlainStaticBackend(), (tmp_path.resolve(),))
+    )
+    discovery.discover_component_assets(info, StaticCollector())
+    return discovery, info
+
+
+class TestBenchComponentAssetDiscovery:
+    """Per-instance cost of `discover_component_assets`, paid by every tag render."""
+
+    @pytest.mark.benchmark(group="static.discovery")
+    def test_component_assets_warm(self, tmp_path: Path, benchmark) -> None:
+        discovery, info = _component_for(tmp_path)
+        benchmark(discovery.discover_component_assets, info, StaticCollector())
+
+    @pytest.mark.benchmark(group="static.discovery")
+    def test_component_assets_repeated_instance(
+        self, tmp_path: Path, benchmark
+    ) -> None:
+        """A second instance on the same page, sharing the request collector."""
+        discovery, info = _component_for(tmp_path)
+        collector = StaticCollector()
+        discovery.discover_component_assets(info, collector)
+        benchmark(discovery.discover_component_assets, info, collector)
+
+    @pytest.mark.benchmark(group="static.discovery")
+    def test_component_assets_warm_debug(self, tmp_path: Path, benchmark) -> None:
+        """The same component under `DEBUG`, where the plan stats its folder."""
+        discovery, info = _component_for(tmp_path)
+        with override_settings(DEBUG=True):
+            discovery.discover_component_assets(info, StaticCollector())
+            benchmark(discovery.discover_component_assets, info, StaticCollector())
 
 
 class TestBenchPathResolver:

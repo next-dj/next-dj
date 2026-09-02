@@ -4,10 +4,12 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from django.test import override_settings
 from django.utils.autoreload import StatReloader
 
 from next.server import NextStatReloader
 from next.server.autoreload import _tree_dir_signature
+from tests.support import file_router_config_entry
 
 
 def _paths_matched_by_reloader_globs(reloader: StatReloader) -> set[Path]:
@@ -180,3 +182,35 @@ class TestDjxNotInStatReloaderGlobMatches:
             next(gen)
 
         assert notified == []
+
+
+class TestTickReadsTheWatchedTrees:
+    """A real tick over the real watch helpers, whose routers outlive one tick."""
+
+    def test_a_page_created_between_ticks_notifies(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A page written under a watched tree restarts the server on the next tick."""
+        root = tmp_path / "shell"
+        root.mkdir()
+        reloader = NextStatReloader()
+        notified: list[Path] = []
+        monkeypatch.setattr(
+            reloader, "notify_file_changed", lambda p: notified.append(Path(p))
+        )
+
+        with (
+            override_settings(
+                NEXT_FRAMEWORK={
+                    "PAGE_BACKENDS": [file_router_config_entry(pages_dir=root)]
+                }
+            ),
+            patch.object(reloader, "snapshot_files", return_value=iter([])),
+        ):
+            gen = reloader.tick()
+            next(gen)
+            (root / "hello").mkdir()
+            (root / "hello" / "page.py").write_text("#")
+            next(gen)
+
+        assert notified == [(root / "hello" / "page.py").resolve()]

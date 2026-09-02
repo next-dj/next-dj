@@ -2,7 +2,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 from next.urls.dispatcher import scan_pages_tree
-from next.utils import classify_dirs_entries
 
 
 class TestScanPagesDirectory:
@@ -73,42 +72,3 @@ class TestScanPagesDirectory:
             )
         assert len(calls) == 1
         assert calls[0][0].name == "_components"
-
-
-class TestClassifyDirsEntries:
-    """Branch coverage for ``next.urls.classify_dirs_entries``."""
-
-    def test_segment_when_relative_name_only(self) -> None:
-        """A bare name becomes a segment when it is not a path under base_dir."""
-        roots, segs = classify_dirs_entries(["extras"], Path("/nonexistent"))
-        assert roots == []
-        assert "extras" in segs
-
-    def test_resolves_existing_dir_under_base(self, tmp_path: Path) -> None:
-        """A relative path that exists under base_dir is classified as a path root."""
-        sub = tmp_path / "nest"
-        sub.mkdir()
-        roots, _segs = classify_dirs_entries([Path("nest")], tmp_path)
-        assert roots == [sub.resolve()]
-
-    def test_resolves_nested_relative_path(self, tmp_path: Path) -> None:
-        """A path string with a slash can resolve under base_dir when it exists."""
-        nested = tmp_path / "x" / "y"
-        nested.mkdir(parents=True)
-        roots, _segs = classify_dirs_entries([Path("x/y")], tmp_path)
-        assert roots == [nested.resolve()]
-
-    def test_slash_path_that_is_file_becomes_segment(self, tmp_path: Path) -> None:
-        """When a path with a slash exists but is a file, it is treated as a segment name."""
-        f = tmp_path / "a" / "b"
-        f.parent.mkdir(parents=True)
-        f.write_text("x")
-        roots, segs = classify_dirs_entries([Path("a/b")], tmp_path)
-        assert roots == []
-        assert "b" in segs
-
-    def test_skips_empty_and_dot_entries(self) -> None:
-        """Empty strings and dot entries are ignored."""
-        roots, segs = classify_dirs_entries(["", ".", None], Path("/tmp"))
-        assert roots == []
-        assert segs == frozenset()

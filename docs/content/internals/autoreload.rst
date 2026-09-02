@@ -90,7 +90,7 @@ A ``pages`` directory beside the working directory that no router routes is neit
 Every read of a router here is guarded, and the guard drops a value of the wrong type instead of passing it on.
 ``runserver`` boots, ``collectstatic`` runs, and the staticfiles finder answers even when a backend raises from ``page_roots`` or ``components_folder_name``, and equally when it answers the wrong shape.
 The failure costs that backend its trees and nothing else.
-It is logged once per backend and subject rather than per tick, and again after a settings reload.
+It is logged once per backend and subject rather than per tick, and again once the framework is reconfigured.
 
 - Each page root contributes a ``**/page.py`` spec.
 - Each page root paired with the name its router returns from ``components_folder_name`` contributes a ``**/<components-folder>/**/component.py`` spec, ``_components`` by default.
@@ -119,6 +119,21 @@ Route set change.
 
 The route set diff is taken by ``NextStatReloader`` from the configured page roots.
 A custom router that builds routes from another source rebuilds them through ``router_manager.reload``, which is the public API covered in :doc:`/content/howto/reload-routes-from-code`.
+
+Router lifetime
+~~~~~~~~~~~~~~~
+
+Reading that list builds one router per ``PAGE_BACKENDS`` entry, and a router answers about the disk it probed while it was built.
+With ``DEBUG`` off the routers are held until the configuration behind them changes, so a static lookup and a reloader tick stop paying for a build per read.
+A settings reload, a change of ``BASE_DIR``, and ``router_manager.reload`` each build them again.
+A build that dropped an entry is held by nothing, so a router that failed while the apps were still loading is tried again on the next read rather than staying out of the watch list for good.
+
+With ``DEBUG`` on nothing is held.
+Every read builds the routers again, which is what makes a page tree created, moved, or removed under the development server reach the very next tick, whether it comes from ``DIRS``, from an application, or from ``BASE_DIR``.
+A page created inside a tree that is already watched needs no rebuild at all, because the reloader rescans the watched trees on every tick and notices the new route.
+
+What is held whatever ``DEBUG`` is set to is the resolution of the trees the routers report.
+A root symlink re-pointed at another release therefore reaches the watcher only after a restart or a reconfigure.
 
 A ``.djx`` edit triggers neither path.
 Templates are re-read on render, and under ``DEBUG`` the page and component layers invalidate their cached compilation against the source mtime.

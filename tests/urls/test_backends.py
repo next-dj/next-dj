@@ -4,16 +4,18 @@ from unittest.mock import Mock, patch
 
 import pytest
 from django.core.exceptions import AppRegistryNotReady
-from django.test import RequestFactory
+from django.test import RequestFactory, override_settings
 
 from next.pages import page
 from next.testing import override_next_settings
 from next.urls import FileRouterBackend, PageRoot, RouterBackend, RouterFactory
 from next.urls.backends import _installed_app_directories, _is_framework_app
+from next.utils import forget_resolved_trees
 from tests.support import (
     file_router_backend_from_params,
     file_router_config_entry,
     importable_dir,
+    record_path_calls,
 )
 
 
@@ -138,9 +140,7 @@ class TestFileRouterBackend:
             urls = router.generate_urls()
             assert urls == expected_urls
 
-    def test_get_app_pages_path_returns_cached_entry_without_a_lookup(
-        self, router
-    ) -> None:
+    def test_get_app_pages_path_answers_from_the_memo(self, router) -> None:
         """A second lookup answers from the memo without touching the disk."""
         app_dir = Path("/sentinel")
         sentinel = app_dir / "pages"
@@ -148,6 +148,38 @@ class TestFileRouterBackend:
         with patch.object(Path, "exists") as looked:
             result = router._get_app_pages_path("cached_app", {"cached_app": app_dir})
         assert result is sentinel
+        looked.assert_not_called()
+
+    def test_get_app_pages_path_memoises_a_missing_tree(self, tmp_path) -> None:
+        """An app without a pages tree is answered from the memo too.
+
+        The memo lives as long as this router, and a tree an app grows under
+        the development server reaches the watcher through a router built
+        after it, not through this one probing again.
+        """
+        app_dir = tmp_path / "shop"
+        app_dir.mkdir()
+        router = FileRouterBackend()
+        directories = {"shop": app_dir}
+
+        with override_settings(DEBUG=True):
+            assert router._get_app_pages_path("shop", directories) is None
+            (app_dir / "pages").mkdir()
+
+            assert router._get_app_pages_path("shop", directories) is None
+
+    def test_get_app_pages_path_memoises_a_tree_it_found(self, tmp_path) -> None:
+        """A tree that is there is looked up once and answered from the memo."""
+        app_dir = tmp_path / "shop"
+        (app_dir / "pages").mkdir(parents=True)
+        router = FileRouterBackend()
+        directories = {"shop": app_dir}
+
+        first = router._get_app_pages_path("shop", directories)
+        with patch.object(Path, "exists") as looked:
+            second = router._get_app_pages_path("shop", directories)
+        assert first == (app_dir / "pages").resolve()
+        assert second is first
         looked.assert_not_called()
 
     def test_get_app_pages_path_looks_again_when_the_app_moves(self, router) -> None:
@@ -192,7 +224,7 @@ class TestFileRouterBackend:
                 result = root_router._get_root_pages_paths()
             if exists:
                 assert len(result) == 1
-                assert result[0] is mock_pages_path
+                assert result[0] is mock_pages_path.resolve()
             else:
                 assert result == []
 
@@ -210,6 +242,62 @@ class TestFileRouterBackend:
         )
         result = router._get_root_pages_paths()
         assert result == []
+
+    def test_both_keywords_still_normalise_the_roots(self, tmp_path) -> None:
+        """A caller spelling out both keywords skips no part of the contract.
+
+        `page_roots` promises resolved absolute trees, and passing `skip_dir_names`
+        takes away the classification that normally does it. What the router keeps
+        is resolved once, and the trees that are not there drop out of the report
+        the same way a classified entry does.
+        """
+        tree = tmp_path / "tree"
+        tree.mkdir()
+        router = FileRouterBackend(
+            app_dirs=False,
+            extra_root_paths=[
+                tree / ".." / "tree",
+                Path("relative/pages"),
+                Path("/nope/does/not/exist"),
+            ],
+            skip_dir_names=frozenset(),
+        )
+        assert router._extra_root_paths == [
+            tree.resolve(),
+            Path("relative/pages").resolve(),
+            Path("/nope/does/not/exist"),
+        ]
+        assert [root.path for root in router.page_roots()] == [tree.resolve()]
+
+    def test_a_classified_dirs_entry_is_resolved_once(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """The classification resolves what it keeps, so the constructor need not."""
+        (tmp_path / "site").mkdir()
+        expected = (tmp_path / "site").resolve()
+        forget_resolved_trees()
+
+        with override_settings(BASE_DIR=tmp_path):
+            seen = record_path_calls(monkeypatch, "resolve")
+            router = FileRouterBackend(app_dirs=False, extra_root_paths=["site"])
+            held = list(router._extra_root_paths)
+
+        assert held == [expected]
+        assert seen == [tmp_path / "site"]
+
+    def test_a_root_created_later_leaves_two_routers_equal(self, tmp_path) -> None:
+        """Identical configuration compares equal whether or not the tree is there."""
+        tree = tmp_path / "late"
+        before = FileRouterBackend(
+            app_dirs=False, extra_root_paths=[tree], skip_dir_names=frozenset()
+        )
+        tree.mkdir()
+        after = FileRouterBackend(
+            app_dirs=False, extra_root_paths=[tree], skip_dir_names=frozenset()
+        )
+
+        assert before == after
+        assert hash(before) == hash(after)
 
     def test_get_root_pages_paths_fallback_when_app_dirs_false(
         self, mock_settings, tmp_path
@@ -263,18 +351,41 @@ class TestFileRouterBackend:
         assert first == ["p1", "extra"]
         assert second == ["p1", "extra"]
 
-    def test_get_root_pages_paths_memoised_per_instance(self, tmp_path) -> None:
-        """Repeated calls return the cached list without touching the filesystem."""
+    def test_get_root_pages_paths_answers_from_the_memo(self, tmp_path) -> None:
+        """A second call answers the held list without touching the disk."""
         router = FileRouterBackend(extra_root_paths=[tmp_path])
         first = router._get_root_pages_paths()
-        with (
-            patch.object(Path, "resolve") as mock_resolve,
-            patch.object(Path, "exists") as mock_exists,
-        ):
+        with patch.object(Path, "exists") as looked:
             second = router._get_root_pages_paths()
-        assert second is first
-        mock_resolve.assert_not_called()
-        mock_exists.assert_not_called()
+        assert first == [tmp_path.resolve()]
+        assert second == first
+        looked.assert_not_called()
+
+    def test_get_root_pages_paths_hands_back_a_copy(self, tmp_path) -> None:
+        """A caller appending to the answer moves no root this router serves."""
+        router = FileRouterBackend(extra_root_paths=[tmp_path])
+        first = router._get_root_pages_paths()
+        first.append(Path("/appended"))
+
+        assert first is not router._extra_root_paths
+        assert router._get_root_pages_paths() == [tmp_path.resolve()]
+
+    def test_get_root_pages_paths_memoises_the_base_dir(
+        self, mock_settings, tmp_path
+    ) -> None:
+        """The `BASE_DIR` fallback is probed once and answered from the memo.
+
+        A project growing its first page tree under the development server
+        reaches the watcher through the router built for the next read.
+        """
+        mock_settings.BASE_DIR = tmp_path
+        mock_settings.DEBUG = True
+        router = FileRouterBackend(app_dirs=False)
+
+        assert router._get_root_pages_paths() == []
+        (tmp_path / "pages").mkdir()
+
+        assert router._get_root_pages_paths() == []
 
     def test_generate_urls_includes_root_when_app_dirs_and_extra_roots(
         self, tmp_path
@@ -529,6 +640,28 @@ class TestSkipDirNames:
             router = RouterFactory.create_backend(entry)
 
             assert router.skip_dir_names() == frozenset({"_components", "_drafts"})
+
+    def test_a_skip_name_is_no_root_once_a_directory_of_that_name_appears(
+        self, tmp_path
+    ) -> None:
+        """One classification answers both, so a skip name never becomes a tree."""
+        (tmp_path / "pages").mkdir()
+        (tmp_path / "pages" / "page.py").write_text('template = "hi"\n')
+        entry = file_router_config_entry(dirs=["_drafts"])
+
+        with (
+            override_settings(BASE_DIR=tmp_path),
+            override_next_settings(PAGE_BACKENDS=[entry]),
+        ):
+            router = RouterFactory.create_backend(entry)
+            before = [root.path for root in router.page_roots()]
+            (tmp_path / "_drafts").mkdir()
+            after = [root.path for root in router.page_roots()]
+            urls = router.generate_urls()
+
+        assert router.skip_dir_names() == frozenset({"_components", "_drafts"})
+        assert before == after == [tmp_path / "pages"]
+        assert len(urls) == 1
 
 
 class TestInstalledAppSpellings:

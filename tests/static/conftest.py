@@ -6,30 +6,21 @@ import pytest
 
 from next.components import ComponentInfo
 from next.static import (
-    AssetDiscovery,
     StaticBackend,
     StaticCollector,
-    StaticFilesBackend,
     StaticManager,
-    default_kinds,
     reset_default_manager,
 )
+from tests.support import RecordingStaticBackend, component_info
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator
+    from collections.abc import Generator
     from pathlib import Path
 
 
 CSS_URL = "https://example.com/a.css"
 JS_URL = "https://example.com/a.js"
-
-
-class DeterministicBackend(StaticFilesBackend):
-    """Backend with stable deterministic URLs for discovery-order tests."""
-
-    def register_file(self, _source_path: Path, logical_name: str, kind: str) -> str:
-        return f"/static/next/{logical_name}{default_kinds.extension(kind)}"
 
 
 @pytest.fixture()
@@ -44,7 +35,7 @@ def collector() -> StaticCollector:
 
 @pytest.fixture()
 def file_backend() -> StaticBackend:
-    return DeterministicBackend()
+    return RecordingStaticBackend()
 
 
 @pytest.fixture()
@@ -71,8 +62,6 @@ def simple_component(tmp_path: Path) -> ComponentInfo:
 def composite_component(tmp_path: Path) -> ComponentInfo:
     comp_dir = tmp_path / "_components" / "widget"
     comp_dir.mkdir(parents=True)
-    template_path = comp_dir / "component.djx"
-    template_path.write_text("<div>widget</div>")
     module_path = comp_dir / "component.py"
     module_path.write_text(
         'styles = ["https://cdn.example.com/extra.css"]\n'
@@ -80,27 +69,4 @@ def composite_component(tmp_path: Path) -> ComponentInfo:
     )
     (comp_dir / "component.css").write_text(".widget {}")
     (comp_dir / "component.js").write_text("/* widget */")
-    return ComponentInfo(
-        name="widget",
-        scope_root=tmp_path,
-        scope_relative="",
-        template_path=template_path,
-        module_path=module_path,
-        is_simple=False,
-    )
-
-
-@pytest.fixture()
-def make_discovery() -> Callable[..., tuple[AssetDiscovery, StaticManager]]:
-    """Build an ``AssetDiscovery`` wired to a given backend and page roots."""
-
-    def _factory(
-        backend: StaticBackend, page_roots: tuple[Path, ...] = ()
-    ) -> tuple[AssetDiscovery, StaticManager]:
-        manager = StaticManager()
-        manager._backends = [backend]
-        manager._loaded = True
-        manager._cached_page_roots = page_roots
-        return AssetDiscovery(manager), manager
-
-    return _factory
+    return component_info(comp_dir, module=module_path, template="<div>widget</div>")

@@ -1,16 +1,51 @@
 from __future__ import annotations
 
+import copy
 import sys
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
+from next.static import default_kinds, default_placeholders
+from next.static.discovery import default_stems
 from tests.support.helpers import next_framework_settings_for_checks
 
 
 if TYPE_CHECKING:
     from collections.abc import Generator
     from pathlib import Path
+
+
+# The highest `_version` each registry has carried, so a restore can roll the
+# state back without rolling the counter every asset plan compares back with it.
+_REGISTRY_VERSION_HIGH_WATER: dict[int, int] = {}
+
+
+@contextmanager
+def restored_static_registries() -> Generator[None, None, None]:
+    """Put the stem, kind, and slot registries back the way the body found them.
+
+    All three are process globals whose generation every asset plan compares
+    against, so a test teaching the framework a new shape puts them back. The
+    state goes back but `_version` only moves forward, because two registry
+    states sharing a generation would make a genuinely stale plan read fresh.
+    """
+    registries = (default_stems, default_kinds, default_placeholders)
+    saved = [copy.deepcopy(registry.__dict__) for registry in registries]
+    try:
+        yield
+    finally:
+        for registry, state in zip(registries, saved, strict=True):
+            key = id(registry)
+            reached = max(
+                _REGISTRY_VERSION_HIGH_WATER.get(key, 0),
+                registry.version,
+                state["_version"],
+            )
+            registry.__dict__.clear()
+            registry.__dict__.update(state)
+            registry._version = reached + 1
+            _REGISTRY_VERSION_HIGH_WATER[key] = reached + 1
 
 
 @contextmanager

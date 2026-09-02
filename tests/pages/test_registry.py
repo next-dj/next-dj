@@ -175,7 +175,7 @@ class TestPageContextRegistry:
     def test_collect_inherited_context_bounded_depth(
         self, context_manager, tmp_path
     ) -> None:
-        """The ancestor walk is bounded by `_MAX_ANCESTOR_WALK_DEPTH`.
+        """The ancestor walk is bounded by `MAX_ANCESTOR_WALK_DEPTH`.
 
         This test fabricates a 70-level deep tree, past the 64 cap,
         and asserts the call returns in bounded time with an empty

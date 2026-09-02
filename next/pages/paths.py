@@ -9,13 +9,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from next.utils import MAX_ANCESTOR_WALK_DEPTH
+
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-
-# The bound every ancestor walk shares, so none reaches the filesystem root.
-_MAX_ANCESTOR_WALK_DEPTH = 64
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,7 +45,7 @@ def _build_page_path_info(file_path: Path) -> PagePathInfo:
     """Read every path fact of `file_path` in one pass over the disk."""
     ancestors: list[Path] = []
     current_dir = file_path.parent
-    for _ in range(_MAX_ANCESTOR_WALK_DEPTH):
+    for _ in range(MAX_ANCESTOR_WALK_DEPTH):
         if current_dir == current_dir.parent:
             break
         ancestors.append(current_dir / "page.py")

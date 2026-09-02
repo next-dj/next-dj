@@ -19,11 +19,14 @@ from next.static.signals import (
     html_injected,
 )
 from next.testing import SignalRecorder, capture_signals
+from tests.support import StaticAssetProvider
 
 
 if TYPE_CHECKING:
     from collections.abc import Generator
     from pathlib import Path
+
+    from next.components import ComponentInfo
 
 
 STYLES_PLACEHOLDER = "<!-- next:styles -->"
@@ -66,26 +69,78 @@ class TestAssetRegisteredSignal:
         capture_asset_registered: SignalRecorder,
     ) -> None:
 
-        class _P:
-            @property
-            def default_backend(self) -> StaticFilesBackend:
-                return file_backend
-
-            def page_roots(self) -> tuple[Path, ...]:
-                return (tmp_path.resolve(),)
-
         (tmp_path / "template.css").write_text("")
         page_path = tmp_path / "page.djx"
         page_path.write_text("")
 
+        provider = StaticAssetProvider(file_backend, (tmp_path.resolve(),))
         collector = StaticCollector()
-        AssetDiscovery(_P()).discover_page_assets(page_path, collector)
+        AssetDiscovery(provider).discover_page_assets(page_path, collector)
 
         assert len(capture_asset_registered) == 1
         event = capture_asset_registered.events[0]
         assert isinstance(event.sender, StaticAsset)
         assert event.kwargs["collector"] is collector
         assert event.kwargs["backend"] is file_backend
+
+    def test_a_warm_page_render_fires_the_same_set_again(
+        self,
+        tmp_path: Path,
+        file_backend: StaticFilesBackend,
+        capture_asset_registered: SignalRecorder,
+    ) -> None:
+        """A warm render re-emits per file asset, and never for a module URL."""
+        (tmp_path / "template.css").write_text("")
+        page_path = tmp_path / "page.py"
+        page_path.write_text('scripts = ["https://cdn.example.com/x.js"]\n')
+
+        provider = StaticAssetProvider(file_backend, (tmp_path.resolve(),))
+        discovery = AssetDiscovery(provider)
+        discovery.discover_page_assets(page_path, StaticCollector())
+        warm = StaticCollector()
+        discovery.discover_page_assets(page_path, warm)
+
+        assert len(capture_asset_registered) == 2
+        cold_event, warm_event = capture_asset_registered.events
+        assert warm_event.sender == cold_event.sender
+        assert warm_event.kwargs["collector"] is warm
+        assert warm_event.kwargs["backend"] is file_backend
+
+    def test_a_component_mounted_twice_announces_each_asset_once(
+        self,
+        file_backend: StaticFilesBackend,
+        composite_component: ComponentInfo,
+        capture_asset_registered: SignalRecorder,
+    ) -> None:
+        """The signal follows the collector, which keeps the second instance out."""
+        discovery = AssetDiscovery(StaticAssetProvider(file_backend))
+        collector = StaticCollector()
+        discovery.discover_component_assets(composite_component, collector)
+        discovery.discover_component_assets(composite_component, collector)
+
+        assert len(capture_asset_registered) == 2
+        assert [e.kwargs["collector"] for e in capture_asset_registered.events] == [
+            collector,
+            collector,
+        ]
+
+    def test_a_warm_component_render_fires_the_same_set_again(
+        self,
+        file_backend: StaticFilesBackend,
+        composite_component: ComponentInfo,
+        capture_asset_registered: SignalRecorder,
+    ) -> None:
+        discovery = AssetDiscovery(StaticAssetProvider(file_backend))
+        discovery.discover_component_assets(composite_component, StaticCollector())
+        warm = StaticCollector()
+        discovery.discover_component_assets(composite_component, warm)
+
+        assert len(capture_asset_registered) == 4
+        warmed = capture_asset_registered.events[2:]
+        assert [e.kwargs["collector"] for e in warmed] == [warm, warm]
+        assert [e.sender for e in warmed] == [
+            e.sender for e in capture_asset_registered.events[:2]
+        ]
 
 
 class TestCollectorFinalizedSignal:

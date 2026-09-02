@@ -45,7 +45,7 @@ jobs:
                && !contains(github.event.pull_request.title, '[skip bench]')))
           && !contains(github.event.head_commit.message, '[skip bench]') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 20
     steps:
       - name: Checkout HEAD with full history
         uses: actions/checkout@v6

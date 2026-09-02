@@ -21,7 +21,7 @@ from django.utils.functional import SimpleLazyObject
 
 from next.deps import get_request_dep_cache, resolver
 from next.deps.cache import DependencyCache
-from next.utils import template_edits_watched
+from next.utils import store_bounded, template_edits_watched
 
 from .context import component
 
@@ -231,10 +231,7 @@ class CachedComponentTemplateLoader(ComponentTemplateLoader):
 
     def _store(self, key: _SourceKey, entry: _CompiledTemplate) -> None:
         with self._lock:
-            if key not in self._compiled and len(self._compiled) >= self._maxsize:
-                self._compiled.popitem(last=False)
-            self._compiled[key] = entry
-            self._compiled.move_to_end(key)
+            store_bounded(self._compiled, key, entry, self._maxsize)
 
 
 def _stamp_component_anchor(info: ComponentInfo, context_dict: dict[str, Any]) -> None:

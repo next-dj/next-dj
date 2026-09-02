@@ -33,6 +33,7 @@ from next.components import collect_visible_components, get_component, render_co
 from next.components.renderers import COMPONENT_PROPS_CONTEXT_KEY, SLOT_KEY_PREFIX
 from next.conf import fail_loudly, next_framework_settings
 from next.static import collect_component_assets
+from next.utils import on_forget_resolved_trees
 
 
 # Component tags span several lines, which Django's tag regex refuses by default.
@@ -76,9 +77,14 @@ def _strip_quotes(raw: str) -> str:
 def _resolve_template_path(raw: str) -> Path:
     """Return the resolved file for a raw ``current_template_path`` string.
 
-    One page path reaches every node the page renders, so the memo is process-wide.
+    One page path reaches every node the page renders, so the memo is
+    process-wide and keyed by the string the node carries rather than by a path
+    built per read. It is dropped with the shared page-tree resolutions.
     """
     return Path(raw).resolve()
+
+
+on_forget_resolved_trees(_resolve_template_path.cache_clear)
 
 
 def _comment_safe(text: str) -> str:

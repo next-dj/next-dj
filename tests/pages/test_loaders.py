@@ -21,6 +21,7 @@ from next.pages.loaders import (
     _load_python_module_memo,
     _page_roots,
     build_registered_loaders,
+    forget_page_roots,
     has_load_errors,
     last_load_error,
     read_module_string_lists,
@@ -710,6 +711,28 @@ class TestLayoutTemplateLoader:
 
         with override_settings(INSTALLED_APPS=["django.contrib.contenttypes"]):
             assert loaders_module._PAGE_ROOTS_CACHE["value"] is None
+
+    def test_forgetting_the_page_roots_asks_the_routers_again(self, tmp_path) -> None:
+        """A reload from code moves what the routers report, memo and all."""
+        first = tmp_path / "one"
+        second = tmp_path / "two"
+        forget_page_roots()
+        try:
+            with patch.object(
+                loaders_module, "get_pages_directories_for_watch", return_value=[first]
+            ):
+                assert _page_roots() == (first,)
+            with patch.object(
+                loaders_module,
+                "get_pages_directories_for_watch",
+                return_value=[first, second],
+            ):
+                assert _page_roots() == (first,)
+                forget_page_roots()
+
+                assert _page_roots() == (first, second)
+        finally:
+            forget_page_roots()
 
     @pytest.mark.parametrize(
         "layouts",
@@ -1496,3 +1519,64 @@ class TestPageModuleImportErrors:
         assert isinstance(second, PageModuleImportError)
         assert first is not second
         assert first.__cause__ is second.__cause__
+
+
+class TestTheModuleMemoIsBounded:
+    """Every entry holds a whole executed module alive, so the memo has a bound."""
+
+    def _write_pages(self, tmp_path: Path, names: tuple[str, ...]) -> list[Path]:
+        """Write one importable `page.py` per name and return their paths."""
+        pages: list[Path] = []
+        for name in names:
+            page_dir = tmp_path / name
+            page_dir.mkdir()
+            page_file = page_dir / "page.py"
+            page_file.write_text(f'template = "{name}"\n')
+            pages.append(page_file)
+        return pages
+
+    def test_a_new_page_past_the_bound_drops_the_stalest(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """A project with more pages than the bound holds the ones it just read."""
+        monkeypatch.setattr(loaders_module, "_MODULE_MEMO_MAX_SIZE", 2)
+        reset_module_memo()
+        pages = self._write_pages(tmp_path, ("first", "second", "third"))
+
+        for page_file in pages:
+            assert _load_python_module_memo(page_file) is not None
+
+        assert list(loaders_module._MODULE_MEMO) == pages[1:]
+
+    def test_a_warm_read_neither_executes_nor_writes(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """A hit answers from the memo, so the entries keep the order they landed in."""
+        monkeypatch.setattr(loaders_module, "_MODULE_MEMO_MAX_SIZE", 2)
+        reset_module_memo()
+        first, second = self._write_pages(tmp_path, ("first", "second"))
+        _load_python_module_memo(first)
+        _load_python_module_memo(second)
+        executed: list[Path] = []
+        loaded = loaders_module._load_python_module
+
+        def counting(file_path: Path):
+            executed.append(file_path)
+            return loaded(file_path)
+
+        monkeypatch.setattr(loaders_module, "_load_python_module", counting)
+
+        assert _load_python_module_memo(first) is not None
+        assert executed == []
+        assert list(loaders_module._MODULE_MEMO) == [first, second]
+
+    def test_a_file_that_does_not_stat_leaves_no_entry(self, tmp_path) -> None:
+        """A page that vanished is loaded from disk again rather than memoised."""
+        reset_module_memo()
+        page_file = tmp_path / "page.py"
+        page_file.write_text('template = "gone soon"\n')
+        assert _load_python_module_memo(page_file) is not None
+        page_file.unlink()
+
+        assert _load_python_module_memo(page_file) is None
+        assert page_file not in loaders_module._MODULE_MEMO

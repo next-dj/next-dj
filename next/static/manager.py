@@ -12,7 +12,6 @@ hook in `next.conf` resets the wrapper when `NEXT_FRAMEWORK` changes.
 
 from __future__ import annotations
 
-import contextlib
 from typing import TYPE_CHECKING, Any, cast
 
 from django.conf import settings
@@ -309,15 +308,19 @@ class StaticManager:
         return StaticCollector(dedup=dedup, js_context_policy=policy)
 
     def page_roots(self) -> tuple[Path, ...]:
-        """Return absolute page-tree roots from configured page backends."""
-        if self._cached_page_roots is not None:
-            return self._cached_page_roots
-        roots: list[Path] = []
-        for root in get_pages_directories_for_watch():
-            with contextlib.suppress(OSError):
-                roots.append(root.resolve())
-        self._cached_page_roots = tuple(roots)
+        """Return absolute page-tree roots from configured page backends.
+
+        Taken as the watch layer spells them, already resolved, so a lookup
+        pays no second resolve per root.
+        """
+        if self._cached_page_roots is None:
+            self._cached_page_roots = tuple(get_pages_directories_for_watch())
         return self._cached_page_roots
+
+    def forget_page_roots(self) -> None:
+        """Read the page trees again, dropping what was derived from the old ones."""
+        self._cached_page_roots = None
+        self._discovery = None
 
 
 class DefaultStaticManager(LazyObject):
@@ -369,6 +372,16 @@ def reset_default_manager() -> None:
     fresh manager on the next access.
     """
     default_manager._wrapped = empty  # type: ignore[assignment]
+
+
+def forget_manager_page_roots(**kwargs) -> None:
+    """Tell the default manager a reload moved what the routers report.
+
+    A manager nothing has built yet reads them fresh anyway, so the lazy
+    handle is left alone rather than woken to be invalidated.
+    """
+    if default_manager._wrapped is not empty:
+        default_manager.forget_page_roots()
 
 
 def _on_settings_reloaded(**kwargs) -> None:

@@ -23,7 +23,7 @@ Public API
 
 .. automodule:: next.utils
    :members:
-   :exclude-members: _classify_one_dir_entry, callable_name, defining_file, walk_page_tree, page_roots_shape_error, template_edits_watched, MisattributedContext, MisattributionLog
+   :exclude-members: callable_name, defining_file, walk_page_tree, page_roots_shape_error, template_edits_watched, store_bounded, stat_mtime_ns, resolved_tree, forget_resolved_trees, MAX_ANCESTOR_WALK_DEPTH, MisattributedContext, MisattributionLog
 
 See also
 --------

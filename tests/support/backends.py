@@ -5,6 +5,8 @@ from typing import Any, ClassVar
 
 from django.core.exceptions import ImproperlyConfigured
 
+from next.static import StaticBackend, StaticFilesBackend, default_kinds
+
 
 class FakeBackend:
     """Base of the fake backend family the loader builds in these tests."""
@@ -114,3 +116,57 @@ class MockAutoreloadSender:
     def watch_dir(self, path: object, glob: str) -> None:
         """Record the directory and glob the framework asked to watch."""
         self.watch_calls.append((path, glob))
+
+
+class PlainStaticBackend(StaticFilesBackend):
+    """Static backend with deterministic URLs and no bookkeeping of its own.
+
+    The counterpart of `RecordingStaticBackend` for a benchmark, where a list
+    growing inside the timed loop would be measured along with the framework.
+    """
+
+    def register_file(self, source_path: Path, logical_name: str, kind: str) -> str:
+        """Return the URL the logical name and kind spell."""
+        del source_path
+        return f"/static/next/{logical_name}{default_kinds.extension(kind)}"
+
+
+class RecordingStaticBackend(StaticFilesBackend):
+    """Static backend with deterministic URLs that logs what it registered.
+
+    The URLs keep discovery-order assertions readable, and the log is what
+    tells a warm render that registered nothing from a cold one that did.
+    """
+
+    def __init__(self) -> None:
+        """Start with no recorded registration."""
+        super().__init__()
+        self.calls: list[tuple[str, str]] = []
+
+    def register_file(self, source_path: Path, logical_name: str, kind: str) -> str:
+        """Record the registration and return the URL the logical name spells."""
+        del source_path
+        self.calls.append((logical_name, kind))
+        return f"/static/next/{logical_name}{default_kinds.extension(kind)}"
+
+
+class StaticAssetProvider:
+    """The narrow ``BackendProvider`` the asset discovery layer reads.
+
+    Holds a backend and already resolved page roots, so a test wires discovery
+    up without standing a whole static manager behind it.
+    """
+
+    def __init__(self, backend: StaticBackend, roots: tuple[Path, ...] = ()) -> None:
+        """Keep the backend and the resolved page trees to report."""
+        self._backend = backend
+        self._roots = roots
+
+    @property
+    def default_backend(self) -> StaticBackend:
+        """Return the backend every registration goes through."""
+        return self._backend
+
+    def page_roots(self) -> tuple[Path, ...]:
+        """Return the resolved page trees discovery walks within."""
+        return self._roots

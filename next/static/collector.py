@@ -216,6 +216,12 @@ class PlaceholderRegistry:
     def __init__(self) -> None:
         """Initialise an empty slot registry."""
         self._slots: dict[str, PlaceholderSlot] = {}
+        self._version = 0
+
+    @property
+    def version(self) -> int:
+        """Return a counter every registration bumps, so a cached answer can tell."""
+        return self._version
 
     def register(self, name: str, *, token: str) -> None:
         """Register the slot under its name with the given placeholder token.
@@ -239,6 +245,7 @@ class PlaceholderRegistry:
             )
             raise ValueError(msg)
         self._slots[name] = PlaceholderSlot(name=name, token=token)
+        self._version += 1
 
     def get(self, name: str) -> PlaceholderSlot | None:
         """Return the slot registered under the given name or None."""
@@ -293,8 +300,8 @@ class StaticCollector:
         self._js_context_serializers: dict[str, JsContextSerializer] = {}
         self._js_context_encoded: dict[str, str] = {}
 
-    def add(self, asset: StaticAsset, *, prepend: bool = False) -> None:
-        """Add the asset unless its dedup key was already recorded.
+    def add(self, asset: StaticAsset, *, prepend: bool = False) -> bool:
+        """Add the asset unless its dedup key was already recorded, and report which.
 
         Inline assets always append because their dedup key derives from the body.
         URL-form assets with `prepend=True` are inserted before existing append entries
@@ -302,10 +309,11 @@ class StaticCollector:
 
         The asset routes to the bucket named by `KindRegistry.slot(asset.kind)`.
         Unregistered kinds raise `KeyError` so misconfiguration surfaces immediately.
+        The answer is what keeps a caller from announcing an asset that never landed.
         """
         key = self._dedup.key(asset)
         if key in self._seen_keys:
-            return
+            return False
         self._seen_keys.add(key)
         slot = default_kinds.slot(asset.kind)
         bucket = self._buckets.setdefault(slot, [])
@@ -317,6 +325,7 @@ class StaticCollector:
             self._prepend_idx[slot] = idx + 1
         else:
             bucket.append(asset)
+        return True
 
     def assets_in_slot(self, name: str) -> list[StaticAsset]:
         """Return collected assets for the named slot in insertion order.

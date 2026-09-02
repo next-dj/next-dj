@@ -164,3 +164,28 @@ PERMISSION_OUTCOME_CASES: tuple[PermissionHookCase, ...] = (
         raises_type_error=True,
     ),
 )
+
+
+@dataclass(frozen=True, slots=True)
+class WatchedBackendsCase:
+    """One ``PAGE_BACKENDS`` shape the watcher reads its page trees from.
+
+    ``entries`` names the entry shapes a test builds under its own ``tmp_path``,
+    because a configured tree only exists once a test has a directory to make.
+    """
+
+    id: str
+    entries: tuple[str, ...]
+
+
+WATCHED_BACKENDS_CASES: tuple[WatchedBackendsCase, ...] = (
+    WatchedBackendsCase("no_entry", ()),
+    WatchedBackendsCase("not_a_dict", ("not_a_dict",)),
+    WatchedBackendsCase("unimportable", ("unimportable",)),
+    WatchedBackendsCase("existing_root", ("existing",)),
+    WatchedBackendsCase("missing_root", ("missing",)),
+    WatchedBackendsCase("app_trees", ("app_dirs",)),
+    WatchedBackendsCase("skip_name_entry", ("skipping",)),
+    WatchedBackendsCase("existing_and_missing", ("existing", "missing")),
+    WatchedBackendsCase("unimportable_and_extra_root", ("unimportable", "extra_root")),
+)

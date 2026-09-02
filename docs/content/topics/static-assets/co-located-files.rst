@@ -81,6 +81,25 @@ A file is recognised only when its stem matches a registered stem for the owner'
 A file that does not match a registered stem and kind pair is ignored.
 Discovery does not warn on unknown files because the folder may hold documentation or fixtures.
 
+Editing during development
+--------------------------
+
+Discovery walks a page or a component folder once and reuses what it found there on later renders.
+Under ``DEBUG`` it re-checks the directories it read on every render, so an edit under the dev server takes effect the way it did before the plan existed.
+
+- A ``template.css``, ``layout.js``, or ``component.css`` added next to its owner is picked up by the next request.
+- Deleting one of those files removes it from the next request.
+- A ``layout.djx`` created in a directory between the page and the page root starts wrapping the page, and its co-located assets join on the same request.
+
+- A stem or a kind registered after the first render joins the probe on the next one, because every plan carries the generation of the registries it read.
+
+Module-level ``styles`` and ``scripts`` lists live in ``page.py`` and ``component.py``.
+Editing one under a watched tree restarts the dev server, and the new list is read on the way back up.
+Where no watch covers the module, the edit is read the next time the plan rebuilds.
+
+With ``DEBUG`` off the directory checks do not run, and only a registration still invalidates a plan.
+A production process is expected to publish assets with ``collectstatic`` and restart, so a file changed under a running server stays invisible until the next start.
+
 Asset ownership
 ---------------
 

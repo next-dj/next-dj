@@ -64,6 +64,8 @@ class StaticBackend(ABC):
         for example `"about"` or `"components/card"`. The `kind` argument
         must be a kind registered in the default kind registry. The method
         raises `RuntimeError` when the asset cannot be resolved to a URL.
+        Discovery asks on every render rather than remembering the answer, so a
+        backend is free to resolve the same file to a different URL per request.
         """
 
 
@@ -104,10 +106,12 @@ class StaticFilesBackend(StaticBackend):
 
         The suffix is taken from `source_path.suffix`, so a single kind
         can serve multiple file extensions if a custom backend wishes to.
-        Result is cached per `(logical_name, suffix)`. Missing entries
-        in the staticfiles manifest are reported as `RuntimeError` with
-        a hint about running `collectstatic`. The `kind` argument is part
-        of the contract and ignored here, the suffix alone names the file.
+        The answer is memoised per `(logical_name, suffix)` for the life of
+        this backend, which `StaticManager.reload()` ends, because staticfiles
+        itself reads its manifest once per process. Missing entries in that
+        manifest are reported as `RuntimeError` with a hint about running
+        `collectstatic`. The `kind` argument is part of the contract and
+        ignored here, the suffix alone names the file.
         """
         del kind
         suffix = source_path.suffix

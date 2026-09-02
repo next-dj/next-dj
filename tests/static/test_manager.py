@@ -19,7 +19,7 @@ from next.static import (
     reset_default_manager,
 )
 from next.static.collector import HEAD_CLOSE
-from next.static.manager import DefaultStaticManager
+from next.static.manager import DefaultStaticManager, forget_manager_page_roots
 from next.static.scripts import CSRF_PAYLOAD_KEY, DEV_PAYLOAD_KEY, NextScriptBuilder
 
 
@@ -50,6 +50,74 @@ class TestEnsureBackends:
         roots1 = fresh_manager.page_roots()
         roots2 = fresh_manager.page_roots()
         assert roots1 is roots2
+
+
+class TestPageRootsFollowTheRouters:
+    """The trees the manager serves come from the watch layer and go with it."""
+
+    def test_page_roots_are_taken_as_the_watch_layer_spells_them(
+        self, fresh_manager: StaticManager, tmp_path: Path
+    ) -> None:
+        """The watch layer answers resolved, so a lookup pays no second resolve."""
+        spelling = tmp_path / "site" / ".." / "site"
+        with mock.patch(
+            "next.static.manager.get_pages_directories_for_watch",
+            return_value=[spelling],
+        ):
+            assert fresh_manager.page_roots() == (spelling,)
+
+    def test_forgetting_the_page_roots_reads_them_again(
+        self, fresh_manager: StaticManager, tmp_path: Path
+    ) -> None:
+        """A tree that appeared reaches the manager, resolver memo and all."""
+        first = tmp_path / "one"
+        second = tmp_path / "two"
+        with mock.patch(
+            "next.static.manager.get_pages_directories_for_watch", return_value=[first]
+        ):
+            assert fresh_manager.page_roots() == (first,)
+            stale_discovery = fresh_manager.discovery
+        with mock.patch(
+            "next.static.manager.get_pages_directories_for_watch",
+            return_value=[first, second],
+        ):
+            assert fresh_manager.page_roots() == (first,)
+            fresh_manager.forget_page_roots()
+
+            assert fresh_manager.page_roots() == (first, second)
+        assert fresh_manager.discovery is not stale_discovery
+
+
+class TestForgetManagerPageRoots:
+    """The module-level hook a router reload sends the manager."""
+
+    def test_an_unbuilt_handle_is_left_alone(self, reset_default: None) -> None:
+        """A manager nothing has built yet reads the trees fresh anyway."""
+        reset_default_manager()
+
+        forget_manager_page_roots()
+
+        assert default_manager._wrapped is empty
+
+    def test_a_built_manager_reads_the_trees_again(
+        self, reset_default: None, tmp_path: Path
+    ) -> None:
+        """The live manager drops what it held without being replaced."""
+        reset_default_manager()
+        manager = get_static_manager()
+        with mock.patch(
+            "next.static.manager.get_pages_directories_for_watch", return_value=[]
+        ):
+            assert manager.page_roots() == ()
+
+        with mock.patch(
+            "next.static.manager.get_pages_directories_for_watch",
+            return_value=[tmp_path],
+        ):
+            forget_manager_page_roots()
+
+            assert manager.page_roots() == (tmp_path,)
+        assert get_static_manager() is manager
 
 
 class TestReloadConfig:
@@ -692,3 +760,28 @@ class TestSettingChangedReload:
             # override_settings fires setting_changed, which calls reload.
             # The first attribute access rebuilds the manager.
             assert isinstance(default_manager.default_backend, StaticFilesBackend)
+
+    def test_override_settings_drops_the_cached_asset_plans(
+        self, tmp_path: Path, reset_default: None
+    ) -> None:
+        """Asset plans die with the manager, so reloaded settings re-walk the disk."""
+        (tmp_path / "template.css").write_text("")
+        page_path = tmp_path / "page.djx"
+        page_path.write_text("")
+        manager = get_static_manager()
+        manager._cached_page_roots = (tmp_path.resolve(),)
+        with mock.patch(
+            "next.static.backends.staticfiles_storage.url",
+            return_value="/static/next/index.css",
+        ):
+            manager.discover_page_assets(page_path, StaticCollector())
+        assert manager.discovery._page_plan_cache
+
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "STATIC_BACKENDS": [{"BACKEND": "next.static.StaticFilesBackend"}]
+            }
+        ):
+            reloaded = get_static_manager()
+            assert reloaded is not manager
+            assert not reloaded.discovery._page_plan_cache

@@ -5,7 +5,12 @@ from tests.support.attribution import (
     unwrapped_decorator,
     wraps_decorator,
 )
-from tests.support.backends import MockAutoreloadSender
+from tests.support.backends import (
+    MockAutoreloadSender,
+    PlainStaticBackend,
+    RecordingStaticBackend,
+    StaticAssetProvider,
+)
 from tests.support.cases import (
     COERCE_URL_VALUE_CASES,
     URL_BY_ANNOTATION_RESOLVE_CASES,
@@ -14,6 +19,7 @@ from tests.support.cases import (
     UrlByAnnotationResolveCase,
     UrlKwargsResolveCase,
 )
+from tests.support.components import build_composite_component, component_info
 from tests.support.forms import (
     GuardedTenantForm,
     build_post_request,
@@ -53,6 +59,7 @@ from tests.support.patches import (
     patch_checks_components_manager,
     patch_checks_router_manager,
     patch_checks_router_manager_with_routers,
+    restored_static_registries,
 )
 from tests.support.ports import IntentOnlyShaper
 from tests.support.routers import (
@@ -81,11 +88,14 @@ __all__ = [
     "MockAutoreloadSender",
     "OddComponentsNameRouter",
     "OddSkipNamesRouter",
+    "PlainStaticBackend",
     "RaisingComponentsRouter",
     "RaisingRootsRouter",
     "RaisingSkipNamesRouter",
+    "RecordingStaticBackend",
     "RootPagesRouter",
     "SkippingRouter",
+    "StaticAssetProvider",
     "UrlByAnnotationResolveCase",
     "UrlKwargsResolveCase",
     "_ctx",
@@ -117,6 +127,7 @@ __all__ = [
     "plain_get",
     "plain_request",
     "record_path_calls",
+    "restored_static_registries",
     "tick_scenario",
     "unified_view",
     "unwrapped_decorator",

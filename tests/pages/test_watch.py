@@ -3,6 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import pytest
 from django.test import override_settings
 
 from next.checks.common import get_page_roots
@@ -15,7 +16,8 @@ from next.pages.watch import (
     iter_page_backends_for_watch,
     iter_pages_roots_with_components_folder_names,
 )
-from next.urls import RouterFactory
+from next.urls import RouterFactory, router_manager
+from next.utils import _RESOLVED_TREES_MAX_SIZE, resolved_tree
 from tests.support import (
     MalformedRootsRouter,
     OddComponentsNameRouter,
@@ -25,6 +27,11 @@ from tests.support import (
     file_router_config_entry,
     importable_dir,
 )
+from tests.support.cases import WATCHED_BACKENDS_CASES, WatchedBackendsCase
+
+
+# The promise every watcher diagnostic ends on, which a reload then keeps.
+_RECONFIGURE_PROMISE = "until the framework is reconfigured."
 
 
 def _write_app(root: Path, name: str) -> Path:
@@ -168,6 +175,8 @@ class TestIterPageBackendsForWatch:
             assert list(iter_page_backends_for_watch()) == []
 
         assert len(_watch_tracebacks(caplog)) == 2
+        for record in _watch_tracebacks(caplog):
+            assert record.getMessage().endswith(_RECONFIGURE_PROMISE)
 
 
 class TestWatchedRootsFollowThePageRoots:
@@ -327,6 +336,7 @@ class TestRouterFailuresNeverReachTheWatcher:
         # type rather than as a raise, and carries no traceback.
         assert _watch_tracebacks(caplog) == []
         assert "of the wrong type" in caplog.records[0].getMessage()
+        assert caplog.records[0].getMessage().endswith(_RECONFIGURE_PROMISE)
 
     def test_a_malformed_components_folder_name_costs_only_its_pairs(
         self, tmp_path, caplog
@@ -369,6 +379,7 @@ class TestRouterFailuresNeverReachTheWatcher:
                 get_pages_directories_for_watch()
 
         assert len(_watch_tracebacks(caplog)) == 1
+        assert _watch_tracebacks(caplog)[0].getMessage().endswith(_RECONFIGURE_PROMISE)
 
     def test_a_settings_reload_lets_the_failure_be_reported_again(
         self, tmp_path, caplog
@@ -450,3 +461,306 @@ class TestIterPagesRootsWithComponentsFolderNames:
         """Non-dict entries name no backend and produce no pair."""
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": ["not a dict"]}):
             assert iter_pages_roots_with_components_folder_names() == []
+
+
+def _watched_backends(case: WatchedBackendsCase, tmp_path: Path) -> list[object]:
+    """Return the `PAGE_BACKENDS` value one case spells out under `tmp_path`."""
+    existing = tmp_path / "existing"
+    existing.mkdir(exist_ok=True)
+    (tmp_path / "shop").mkdir(exist_ok=True)
+    entries: dict[str, object] = {
+        "not_a_dict": "not a dict",
+        "unimportable": {"BACKEND": "nonexistent.Backend"},
+        "existing": file_router_config_entry(pages_dir=existing),
+        "missing": file_router_config_entry(pages_dir=tmp_path / "missing"),
+        "app_dirs": file_router_config_entry(app_dirs=True),
+        "skipping": file_router_config_entry(pages_dir=existing, dirs=["_drafts"]),
+        "extra_root": file_router_config_entry(pages_dir=existing, dirs=["shop"]),
+    }
+    return [entries[name] for name in case.entries]
+
+
+class TestTheRoutersOutliveOneTick:
+    """Off `DEBUG` the reloader reads held routers, so they are built rarely."""
+
+    def test_a_second_read_builds_no_router_again(self, tmp_path) -> None:
+        """Two reads of one configuration go through one construction."""
+        root = tmp_path / "shell"
+        root.mkdir()
+        entry = file_router_config_entry(pages_dir=root)
+        with (
+            override_settings(DEBUG=False, NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}),
+            patch.object(
+                RouterFactory, "create_backend", wraps=RouterFactory.create_backend
+            ) as build,
+        ):
+            first = get_pages_directories_for_watch()
+            second = get_pages_directories_for_watch()
+
+            assert build.call_count == 1
+        assert first == second == [root.resolve()]
+
+    def test_a_settings_reload_builds_the_routers_again(self, tmp_path) -> None:
+        """A reconfigured project is read from its new routers, not the old ones."""
+        first_root = tmp_path / "one"
+        first_root.mkdir()
+        second_root = tmp_path / "two"
+        second_root.mkdir()
+
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "PAGE_BACKENDS": [file_router_config_entry(pages_dir=first_root)]
+            }
+        ):
+            first = get_pages_directories_for_watch()
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "PAGE_BACKENDS": [file_router_config_entry(pages_dir=second_root)]
+            }
+        ):
+            second = get_pages_directories_for_watch()
+
+        assert first == [first_root.resolve()]
+        assert second == [second_root.resolve()]
+
+    def test_the_resolution_memo_stays_bounded(self, tmp_path) -> None:
+        """A router free to report a new tree per tick cannot grow the memo."""
+        first_root = tmp_path / "one"
+        first_root.mkdir()
+        second_root = tmp_path / "two"
+        second_root.mkdir()
+        entry = file_router_config_entry(pages_dir=first_root, dirs=[second_root])
+
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}):
+            watched = get_pages_directories_for_watch()
+            info = resolved_tree.cache_info()
+
+        assert watched == [first_root.resolve(), second_root.resolve()]
+        assert info.maxsize == _RESOLVED_TREES_MAX_SIZE
+        assert info.currsize == 2
+
+    def test_a_repeated_tree_costs_one_resolution(self, tmp_path) -> None:
+        """The steady set of a project is resolved once, however often it is read."""
+        root = tmp_path / "one"
+        root.mkdir()
+        entry = file_router_config_entry(pages_dir=root)
+
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry, dict(entry)]}):
+            get_pages_directories_for_watch()
+            get_pages_directories_for_watch()
+            info = resolved_tree.cache_info()
+
+        assert info.misses == 1
+        assert info.currsize == 1
+
+    def test_a_new_base_dir_is_read_without_a_settings_reload(self, tmp_path) -> None:
+        """A relative `DIRS` entry follows `BASE_DIR`, whose change reloads nothing.
+
+        The routers read the base directory while they are built, so holding them
+        across a change to it alone would answer for the previous project root.
+        """
+        first_base = tmp_path / "a"
+        (first_base / "site").mkdir(parents=True)
+        second_base = tmp_path / "b"
+        (second_base / "site").mkdir(parents=True)
+
+        with override_settings(
+            DEBUG=False,
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": [file_router_config_entry(dirs=["site"])]},
+        ):
+            with override_settings(BASE_DIR=first_base):
+                first = get_pages_directories_for_watch()
+            with override_settings(BASE_DIR=second_base):
+                second = get_pages_directories_for_watch()
+                # The resolutions outlive the routers, because only a
+                # reconfigure can re-point a tree one of them names.
+                held = resolved_tree.cache_info().currsize
+
+        assert first == [(first_base / "site").resolve()]
+        assert second == [(second_base / "site").resolve()]
+        assert held == 2
+
+    def test_a_router_reload_rebuilds_the_held_routers(self, tmp_path) -> None:
+        """A reload from code replaces the routers the URL resolver serves."""
+        root = tmp_path / "shell"
+        root.mkdir()
+        entry = file_router_config_entry(pages_dir=root)
+
+        with (
+            override_settings(DEBUG=False, NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}),
+            patch.object(
+                RouterFactory, "create_backend", wraps=RouterFactory.create_backend
+            ) as build,
+        ):
+            get_pages_directories_for_watch()
+            router_manager.reload()
+            reloaded = build.call_count
+            watched = get_pages_directories_for_watch()
+
+            assert build.call_count == reloaded + 1
+        assert watched == [root.resolve()]
+
+    @pytest.mark.parametrize("case", WATCHED_BACKENDS_CASES, ids=lambda case: case.id)
+    def test_the_memo_answers_what_a_rebuild_answers(self, tmp_path, case) -> None:
+        """Across the configured shapes, held routers read like rebuilt ones.
+
+        A settings reload is what drops the held routers, so the comparison is
+        against the answer routers built for a fresh generation give.
+        """
+        backends = _watched_backends(case, tmp_path)
+        settings_value = {"PAGE_BACKENDS": backends}
+
+        with override_settings(
+            BASE_DIR=tmp_path, DEBUG=False, NEXT_FRAMEWORK=settings_value
+        ):
+            held = get_pages_directories_for_watch()
+            held_again = get_pages_directories_for_watch()
+        with override_settings(
+            BASE_DIR=tmp_path, DEBUG=False, NEXT_FRAMEWORK=settings_value
+        ):
+            rebuilt = get_pages_directories_for_watch()
+
+        assert held == held_again
+        assert held == rebuilt
+
+
+class TestAWatchingProcessHoldsNoRouter:
+    """Under `DEBUG` a router answers about trees it probed once, so none is held.
+
+    A page tree created, moved, or removed under the development server has to
+    reach the very next read, whichever of the three shapes names it.
+    """
+
+    def test_every_read_builds_the_routers_again(self, tmp_path) -> None:
+        """Two reads of one configuration go through two constructions."""
+        root = tmp_path / "shell"
+        root.mkdir()
+        entry = file_router_config_entry(pages_dir=root)
+        with (
+            override_settings(DEBUG=True, NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}),
+            patch.object(
+                RouterFactory, "create_backend", wraps=RouterFactory.create_backend
+            ) as build,
+        ):
+            first = get_pages_directories_for_watch()
+            second = get_pages_directories_for_watch()
+
+            assert build.call_count == 2
+        assert first == second == [root.resolve()]
+
+    def test_a_dirs_root_created_later_reaches_the_watcher(self, tmp_path) -> None:
+        """A `DIRS` entry that named a URL segment names a tree once one is there.
+
+        Nothing but a fresh classification can tell the two apart, so this is
+        the shape a router held across the change could never report.
+        """
+        entry = file_router_config_entry(dirs=["site"])
+
+        with override_settings(
+            BASE_DIR=tmp_path, DEBUG=True, NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}
+        ):
+            assert get_pages_directories_for_watch() == []
+
+            (tmp_path / "site").mkdir()
+            watched = get_pages_directories_for_watch()
+
+        assert watched == [(tmp_path / "site").resolve()]
+
+    def test_an_app_tree_created_later_reaches_the_watcher(self, tmp_path) -> None:
+        """A page tree an app grows under the dev server reaches the next read."""
+        app_dir = tmp_path / "shop"
+        app_dir.mkdir()
+        entry = file_router_config_entry(app_dirs=True)
+
+        with (
+            patch(
+                "next.urls.backends._installed_app_directories",
+                return_value={"shop": app_dir},
+            ),
+            override_settings(DEBUG=True, NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}),
+        ):
+            assert get_pages_directories_for_watch() == []
+
+            (app_dir / "pages").mkdir()
+            watched = get_pages_directories_for_watch()
+
+        assert watched == [(app_dir / "pages").resolve()]
+
+    def test_a_base_dir_tree_created_later_reaches_the_watcher(self, tmp_path) -> None:
+        """The `BASE_DIR` fallback is probed per read while the disk is watched."""
+        entry = file_router_config_entry(app_dirs=False)
+
+        with override_settings(
+            BASE_DIR=tmp_path, DEBUG=True, NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}
+        ):
+            assert get_pages_directories_for_watch() == []
+
+            (tmp_path / "pages").mkdir()
+            watched = get_pages_directories_for_watch()
+
+        assert watched == [(tmp_path / "pages").resolve()]
+
+    def test_a_tree_that_goes_away_leaves_the_watcher(self, tmp_path) -> None:
+        """A tree removed under the dev server stops being watched at once."""
+        root = tmp_path / "shell"
+        root.mkdir()
+        entry = file_router_config_entry(pages_dir=root)
+
+        with override_settings(DEBUG=True, NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}):
+            assert get_pages_directories_for_watch() == [root.resolve()]
+
+            root.rmdir()
+            watched = get_pages_directories_for_watch()
+
+        assert watched == []
+
+
+class TestABrokenEntryIsBuiltAgain:
+    """A construction that failed once is no permanent hole in the watch list."""
+
+    def test_a_failed_build_is_tried_again_and_a_healthy_one_is_not(
+        self, tmp_path, caplog
+    ) -> None:
+        """These helpers run before every app is loaded, so a failure can pass."""
+        root = tmp_path / "shell"
+        root.mkdir()
+        entry = file_router_config_entry(pages_dir=root)
+        build = RouterFactory.create_backend
+        attempts: list[dict] = []
+
+        def failing_first(config: dict) -> object:
+            attempts.append(config)
+            if len(attempts) == 1:
+                raise ImportError(config["BACKEND"])
+            return build(config)
+
+        with (
+            override_settings(DEBUG=False, NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}),
+            patch.object(RouterFactory, "create_backend", side_effect=failing_first),
+            caplog.at_level(logging.ERROR, logger="next.pages.watch"),
+        ):
+            first = get_pages_directories_for_watch()
+            second = get_pages_directories_for_watch()
+            third = get_pages_directories_for_watch()
+
+        assert first == []
+        assert second == third == [root.resolve()]
+        assert len(attempts) == 2
+        assert len(_watch_tracebacks(caplog)) == 1
+
+    def test_a_new_base_dir_diagnoses_the_failure_again(self, tmp_path, caplog) -> None:
+        """The rebuild a new base directory forces reports what it drops again."""
+        with (
+            override_settings(
+                DEBUG=False,
+                NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "nonexistent.Backend"}]},
+            ),
+            caplog.at_level(logging.ERROR, logger="next.pages.watch"),
+        ):
+            with override_settings(BASE_DIR=tmp_path / "a"):
+                get_pages_directories_for_watch()
+                get_pages_directories_for_watch()
+            with override_settings(BASE_DIR=tmp_path / "b"):
+                get_pages_directories_for_watch()
+
+        assert len(_watch_tracebacks(caplog)) == 2
