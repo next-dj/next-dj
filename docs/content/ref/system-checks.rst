@@ -18,7 +18,6 @@ The imported modules are ``next.conf.checks``, ``next.pages.checks``, ``next.url
 The list continues with ``next.static.checks``, ``next.partial.checks``, and ``next.apps.checks``.
 
 Each of these modules registers checks.
-The dependency injection layer contributes no Django system checks.
 
 Every next.dj check carries the ``next`` tag.
 Run ``uv run python manage.py check --tag next`` to execute only the framework checks and skip the built-in Django and third-party ones.
@@ -94,13 +93,13 @@ Configuration
 Dependency injection
 ~~~~~~~~~~~~~~~~~~~~
 
-The dependency injection layer does not contribute Django system checks.
-There is no ``next.ENNN`` code for a missing provider or a bad marker graph.
+The layer contributes no check, and there is no ``next.ENNN`` code for a missing provider, a bad marker graph, or an unregistered ``Depends`` name.
 
 .. note::
 
-   Expect misconfiguration at **runtime**.
-   Unresolved parameters become ``None``, and cycles raise ``DependencyCycleError``.
+   Expect this class of misconfiguration at **runtime**.
+   Unresolved parameters become ``None``, cycles raise ``DependencyCycleError``, and a ``Depends`` name nothing registered raises ``UnknownDependencyError`` with a ``Did you mean`` hint.
+   The exception reaches every injection site, which a check walking the page tree cannot.
    Troubleshooting lives in :doc:`/content/topics/dependency-injection` and :doc:`/content/faq/troubleshooting`.
 
 Check code reference

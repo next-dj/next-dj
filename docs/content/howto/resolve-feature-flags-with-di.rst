@@ -187,8 +187,8 @@ When the flag is off ``render`` returns an empty string, so the gated block coll
        )
 
 The component module does not start with ``from __future__ import annotations``.
-The resolver inspects the real annotation ``DFlag[Flag]``.
-PEP 563 would string-ify it and ``get_origin`` would return ``None``.
+The resolver matches the real annotation ``DFlag[Flag]``.
+PEP 563 would string-ify it, and the marker would then match only as far as the resolver can evaluate the string back into the class.
 
 Pass the flag name as a template prop
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

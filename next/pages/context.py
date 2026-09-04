@@ -13,17 +13,31 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, override
 
-from next.deps import DependencyResolver, RegisteredParameterProvider
+from next.deps import RESERVED_KEYS, DependencyResolver, RegisteredParameterProvider
 
 
 if TYPE_CHECKING:
     import inspect
+    from collections.abc import Mapping
 
     from next.deps import ResolutionContext
     from next.static.serializers import JsContextSerializer
 
 
 _CONTEXT_DEFAULT_UNSET: object = object()
+
+
+def _from_context_data(
+    context_data: Mapping[str, Any], key: str, default: object
+) -> object:
+    """Read `key` from context data, leaving the names dedicated providers own alone.
+
+    A reserved key reaches the context data untouched, because nothing copies
+    the mapping to strip it, so the marker stays blind to it here instead.
+    """
+    if key in RESERVED_KEYS:
+        return default
+    return context_data.get(key, default)
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,7 +83,12 @@ class ContextByDefaultProvider(RegisteredParameterProvider):
 
     @override
     def can_handle(self, param: inspect.Parameter, _context: ResolutionContext) -> bool:
-        """Return True when the parameter default is a `Context` instance."""
+        """Defer to the static verdict, which the context never changes."""
+        return self.static_can_handle(param) is True
+
+    @override
+    def static_can_handle(self, param: inspect.Parameter) -> bool:
+        """Settle on the default alone. The marker never depends on the context."""
         return isinstance(param.default, Context)
 
     @override
@@ -86,10 +105,10 @@ class ContextByDefaultProvider(RegisteredParameterProvider):
         )
 
         if source is None:
-            return context_data.get(param.name, default_value)
+            return _from_context_data(context_data, param.name, default_value)
 
         if isinstance(source, str):
-            return context_data.get(source, default_value)
+            return _from_context_data(context_data, source, default_value)
 
         if callable(source):
             resolved = self._resolver.resolve(source, context)
@@ -105,8 +124,14 @@ class ContextByNameProvider(RegisteredParameterProvider):
 
     @override
     def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:
-        """Return True when context_data already contains this parameter name."""
-        return param.name in context.context_data
+        """Return True when context_data holds this name and no provider owns it."""
+        name = param.name
+        return name not in RESERVED_KEYS and name in context.context_data
+
+    @override
+    def static_can_handle(self, param: inspect.Parameter) -> bool | None:
+        """Rule out the reserved names for good, so the plan drops this provider."""
+        return False if param.name in RESERVED_KEYS else None
 
     @override
     def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:

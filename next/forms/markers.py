@@ -1,7 +1,9 @@
 """Dependency injection markers and provider for form parameters."""
 
 import inspect
-from typing import get_args, get_origin, override
+from typing import Annotated, get_args, get_origin, override
+
+from django.forms import BaseForm
 
 from next.deps import DDependencyBase, RegisteredParameterProvider, ResolutionContext
 
@@ -13,6 +15,21 @@ class DForm[FormT](DDependencyBase[FormT]):
     """
 
     __slots__ = ()
+
+
+def _annotated_form_class(annotation: object) -> type | None:
+    """Return the form class an annotation names, past any `Annotated` wrapper."""
+    origin = get_origin(annotation)
+    if origin is Annotated:
+        annotation = get_args(annotation)[0]
+        origin = get_origin(annotation)
+    if origin is DForm:
+        args = get_args(annotation)
+        marked = args[0] if args else None
+        return marked if isinstance(marked, type) else None
+    if isinstance(annotation, type) and issubclass(annotation, BaseForm):
+        return annotation
+    return None
 
 
 class FormProvider(RegisteredParameterProvider):
@@ -28,18 +45,21 @@ class FormProvider(RegisteredParameterProvider):
             return False
         if param.name == "form":
             return True
-        ann = param.annotation
-        if ann is inspect.Parameter.empty:
-            return False
-        origin = get_origin(ann)
-        if origin is DForm:
-            args = get_args(ann)
-            if len(args) >= 1:
-                form_class = args[0]
-                if isinstance(form_class, type) and isinstance(form, form_class):
-                    return True
-            return False
-        return isinstance(ann, type) and isinstance(form, ann)
+        form_class = _annotated_form_class(param.annotation)
+        return form_class is not None and isinstance(form, form_class)
+
+    @override
+    def static_can_handle(self, param: inspect.Parameter) -> bool | None:
+        """Rule out every annotation no form can inhabit. The rest waits for context.
+
+        Even the `form` name stays open because the context may carry no form.
+        The plainest parameters leave here, which keeps the costliest provider
+        out of the candidate list of a signature that has nothing to do with
+        forms.
+        """
+        if param.name == "form":
+            return None
+        return None if _annotated_form_class(param.annotation) is not None else False
 
     @override
     def resolve(self, _param: inspect.Parameter, context: ResolutionContext) -> object:
@@ -58,6 +78,11 @@ class CleanedDataProvider(RegisteredParameterProvider):
         if param.name != "cleaned_data":
             return False
         return context.cleaned_data is not None
+
+    @override
+    def static_can_handle(self, param: inspect.Parameter) -> bool | None:
+        """Rule out every other name. A match still needs cleaned data present."""
+        return None if param.name == "cleaned_data" else False
 
     @override
     def resolve(self, _param: inspect.Parameter, context: ResolutionContext) -> object:

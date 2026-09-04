@@ -550,6 +550,8 @@ The helper wraps Django's ``override_settings``, so the ``settings_reloaded`` ch
 ``override_provider`` prepends a provider instance to the resolver's provider list for the block.
 The prepended provider wins over every auto-registered provider that would otherwise claim the same parameter.
 Implement the ``ParameterProvider`` protocol on a plain class for the stub, because subclassing ``RegisteredParameterProvider`` registers the provider globally.
+The protocol asks for ``static_can_handle`` beside ``can_handle`` and ``resolve``, and returning ``None`` from it keeps the stub a runtime candidate for every parameter.
+The method is mandatory, and a stub that omits it is refused with a ``TypeError`` naming the class as ``override_provider`` hands it to the resolver.
 
 .. code-block:: python
    :caption: prepending a stub provider
@@ -563,6 +565,9 @@ Implement the ``ParameterProvider`` protocol on a plain class for the stub, beca
 
        def resolve(self, param, context) -> int:
            return 7
+
+       def static_can_handle(self, param) -> bool | None:
+           return None
 
    def count_notes(limit: int) -> int:
        return limit
@@ -622,7 +627,7 @@ Resolution context doubles
 
 ``next.testing.deps.make_resolution_context`` builds a ``ResolutionContext`` for unit tests on providers.
 ``next.testing.deps.resolve_call`` resolves a callable's dependencies and returns the kwargs mapping.
-Both accept the same loose keyword arguments, ``request``, ``form``, ``url_kwargs``, and ``context_data``.
+Both accept ``request``, ``form``, ``url_kwargs``, and ``context_data``, and ``make_resolution_context`` also takes ``cleaned_data`` together with a prepared ``cache`` and ``stack`` when a test wants to read either afterwards.
 
 .. code-block:: python
    :caption: provider unit test

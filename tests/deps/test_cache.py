@@ -1,15 +1,9 @@
-from __future__ import annotations
-
-from typing import TYPE_CHECKING
-
 import pytest
+from django.http import HttpRequest
 
 from next.deps import DependencyResolver, Depends, resolver
 from next.deps.cache import _CACHE_MISS, _IN_PROGRESS, DependencyCache
-
-
-if TYPE_CHECKING:
-    from django.http import HttpRequest
+from tests.support import bound_dependency
 
 
 class TestDependencyCache:
@@ -55,30 +49,26 @@ class TestCallableDependencyCache:
             call_count += 1
             return "alice"
 
-        resolver.register_dependency("current_user", get_user)
-        try:
-            request = mock_http_request()
+        def view1(current_user: str = Depends("current_user")) -> str:
+            return current_user
 
-            def view1(current_user: str = Depends("current_user")) -> str:
-                return current_user
+        def view2(current_user: str = Depends("current_user")) -> str:
+            return current_user
 
-            def view2(current_user: str = Depends("current_user")) -> str:
-                return current_user
-
-            cache: dict = {}
-            stack: list[str] = []
+        request = mock_http_request()
+        cache: dict = {}
+        stack: list[str] = []
+        with bound_dependency("current_user", get_user):
             result1 = resolver.resolve_dependencies(
                 view1, request=request, _cache=cache, _stack=stack
             )
             result2 = resolver.resolve_dependencies(
                 view2, request=request, _cache=cache, _stack=stack
             )
-            assert result1["current_user"] == "alice"
-            assert result2["current_user"] == "alice"
-            assert call_count == 1
-            assert cache.get("current_user") == "alice"
-        finally:
-            resolver._dependency_callables.pop("current_user", None)
+        assert result1["current_user"] == "alice"
+        assert result2["current_user"] == "alice"
+        assert call_count == 1
+        assert cache.get("current_user") == "alice"
 
     def test_failed_dependency_is_retried_on_the_next_resolve(self) -> None:
         """A dependency that raised is retried, not read back as a false cycle."""
@@ -118,15 +108,32 @@ class TestCallableDependencyCache:
             call_count += 1
             return "alice"
 
-        resolver.register_dependency("current_user", get_user)
-        try:
-            request = mock_http_request()
+        def view(current_user: str = Depends("current_user")) -> str:
+            return current_user
 
-            def view(current_user: str = Depends("current_user")) -> str:
-                return current_user
-
+        request = mock_http_request()
+        with bound_dependency("current_user", get_user):
             resolver.resolve_dependencies(view, request=request)
             resolver.resolve_dependencies(view, request=request)
-            assert call_count == 2
-        finally:
-            resolver._dependency_callables.pop("current_user", None)
+        assert call_count == 2
+
+
+class TestDependencyCacheLayout:
+    """The cache is slotted and allocates its in-progress set on first use."""
+
+    def test_in_progress_set_is_allocated_on_first_mark(self) -> None:
+        cache = DependencyCache()
+        assert cache._in_progress is None
+        cache.unmark_in_progress("dep")
+        cache.set("dep", 1)
+        assert cache.get("dep") == 1
+        assert cache._in_progress is None
+        cache.mark_in_progress("other")
+        assert cache._in_progress == {"other"}
+        cache.set("other", 2)
+        assert cache._in_progress == set()
+
+    def test_slots_reject_foreign_attributes(self) -> None:
+        cache = DependencyCache()
+        with pytest.raises(AttributeError):
+            cache.extra = 1

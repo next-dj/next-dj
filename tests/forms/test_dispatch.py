@@ -38,6 +38,8 @@ from next.forms.signals import action_dispatched, wizard_completed
 from next.forms.wizard import FormWizard
 from next.pages import page
 from next.pages.registry import PageContextRegistry
+from next.testing import override_dependency
+from tests.support import DeferringProvider, bound_dependency
 
 
 PAGE_MODULE_FOR_FORM_TESTS = (
@@ -914,11 +916,6 @@ class TestDispatchSharedDepCache:
         self, mock_http_request
     ) -> None:
         """``action_dispatched`` payload includes a ``dep_cache`` snapshot."""
-
-        @resolver.dependency("greeting")
-        def greeting() -> str:
-            return "hi"
-
         backend = RegistryFormActionBackend()
 
         def handler(greeting: str = Depends("greeting")) -> str:
@@ -944,10 +941,10 @@ class TestDispatchSharedDepCache:
             request = mock_http_request(method="POST", POST=post)
             meta = backend.get_meta("dep_handler")
             assert meta is not None
-            FormActionDispatch.dispatch(backend, request, "dep_handler", meta)
+            with override_dependency("greeting", "hi"):
+                FormActionDispatch.dispatch(backend, request, "dep_handler", meta)
         finally:
             action_dispatched.disconnect(receiver)
-            resolver._dependency_callables.pop("greeting", None)
 
         assert "dep_cache" in seen
         assert isinstance(seen["dep_cache"], dict)
@@ -965,7 +962,6 @@ class TestDispatchSharedDepCache:
         """
         calls = {"n": 0}
 
-        @resolver.dependency("widget")
         def make_widget() -> str:
             calls["n"] += 1
             return "w"
@@ -984,14 +980,12 @@ class TestDispatchSharedDepCache:
         dep_cache: dict[str, object] = {}
         dep_stack: list[str] = []
 
-        try:
+        with bound_dependency("widget", make_widget):
             cls, _ = _resolve_form_class(factory, request, {}, (dep_cache, dep_stack))
             assert cls is WForm
             resolved = resolver.resolve_dependencies(
                 handler_like, request=request, _cache=dep_cache, _stack=dep_stack
             )
-        finally:
-            resolver._dependency_callables.pop("widget", None)
 
         assert resolved["widget"] == "w"
         assert calls["n"] == 1
@@ -1007,17 +1001,14 @@ class TestDispatchSharedDepCache:
         """Re-render consumers reuse ``request._next_dep_cache`` instead of re-resolving."""
         calls = {"n": 0}
 
-        @resolver.dependency("token")
         def make_token() -> str:
             calls["n"] += 1
             return "fresh"
 
-        try:
-            request = mock_http_request(method="POST")
-            setattr(request, REQUEST_DEP_CACHE_ATTR, {"token": "preloaded"})
+        request = mock_http_request(method="POST")
+        setattr(request, REQUEST_DEP_CACHE_ATTR, {"token": "preloaded"})
+        with bound_dependency("token", make_token):
             value = run_consumer(tmp_path, request)
-        finally:
-            resolver._dependency_callables.pop("token", None)
 
         assert value == "preloaded"
         assert calls["n"] == 0
@@ -1341,16 +1332,6 @@ class InjectedDoneWizard(FormWizard):
         return HttpResponseRedirect("/thanks/")
 
 
-class _CleanedDataHijackProvider:
-    """Test provider that claims the `cleaned_data` parameter by name."""
-
-    def can_handle(self, param, _context) -> bool:
-        return param.name == "cleaned_data"
-
-    def resolve(self, _param, _context) -> object:
-        return {"hijacked": True}
-
-
 @pytest.mark.django_db()
 class TestWizardDoneInjection:
     """`done` resolves through the dependency injector like other callbacks."""
@@ -1369,21 +1350,14 @@ class TestWizardDoneInjection:
 
     def test_done_resolves_named_dependencies(self, client_no_csrf) -> None:
         """A Depends default on done resolves through the shared dep cache."""
-
-        @resolver.dependency("token")
-        def make_token() -> str:
-            return "tkn"
-
         InjectedDoneWizard.seen.clear()
-        try:
+        with override_dependency("token", "tkn"):
             _post_wizard_step(
                 client_no_csrf, "injected_done_wizard", "identity", {"name": "Ada"}
             )
             resp = _post_wizard_step(
                 client_no_csrf, "injected_done_wizard", "scope", {"scope": "ops"}
             )
-        finally:
-            resolver._dependency_callables.pop("token", None)
         assert resp.status_code == 302
         assert InjectedDoneWizard.seen == [
             (True, {"name": "Ada", "scope": "ops"}, "tkn")
@@ -1393,7 +1367,7 @@ class TestWizardDoneInjection:
         self, client_no_csrf
     ) -> None:
         """The reserved cleaned_data context key wins over a same-named provider."""
-        provider = _CleanedDataHijackProvider()
+        provider = DeferringProvider("cleaned_data", {"hijacked": True})
         resolver.add_provider(provider)
         DispatchWizard.done_payloads.clear()
         try:
@@ -1404,7 +1378,7 @@ class TestWizardDoneInjection:
                 client_no_csrf, "dispatch_wizard", "scope", {"scope": "ops"}
             )
         finally:
-            resolver._providers.remove(provider)
+            resolver.remove_provider(provider)
         assert DispatchWizard.done_payloads == [{"name": "Ada", "scope": "ops"}]
 
     def test_cleaned_data_is_reserved_not_a_url_kwarg(self) -> None:

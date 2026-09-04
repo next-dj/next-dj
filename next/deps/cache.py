@@ -42,16 +42,23 @@ class DependencyCycleError(Exception):
 
 
 class DependencyCache:
-    """Store resolved dependency values and detect cycles via in-progress keys."""
+    """Store resolved dependency values and detect cycles via in-progress keys.
+
+    The in-progress set is allocated on first use, because every resolve builds
+    a cache while only a named `Depends` ever marks a key.
+    """
+
+    __slots__ = ("_cache", "_in_progress")
 
     def __init__(self, backing_dict: dict[str, Any] | None = None) -> None:
         """Initialise storage, optionally sharing an externally owned dict."""
         self._cache: dict[str, Any] = backing_dict if backing_dict is not None else {}
-        self._in_progress: set[str] = set()
+        self._in_progress: set[str] | None = None
 
     def get(self, key: str) -> object:
         """Return the cached value, `_IN_PROGRESS`, or `_CACHE_MISS`."""
-        if key in self._in_progress:
+        in_progress = self._in_progress
+        if in_progress is not None and key in in_progress:
             return _IN_PROGRESS
         if key in self._cache:
             return self._cache[key]
@@ -60,15 +67,19 @@ class DependencyCache:
     def set(self, key: str, value: object) -> None:
         """Store a finished resolution under the given key."""
         self._cache[key] = value
-        self._in_progress.discard(key)
+        if self._in_progress is not None:
+            self._in_progress.discard(key)
 
     def mark_in_progress(self, key: str) -> None:
         """Mark the key as currently being resolved for cycle detection."""
+        if self._in_progress is None:
+            self._in_progress = set()
         self._in_progress.add(key)
 
     def unmark_in_progress(self, key: str) -> None:
         """Clear the in-progress marker for the key."""
-        self._in_progress.discard(key)
+        if self._in_progress is not None:
+            self._in_progress.discard(key)
 
     def __len__(self) -> int:
         """Return the number of stored values."""

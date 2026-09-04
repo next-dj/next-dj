@@ -1,17 +1,17 @@
-import importlib.util
 import inspect
-from pathlib import Path
 from typing import ClassVar
 from unittest.mock import MagicMock
 
 import pytest
+from django.core.handlers.asgi import ASGIRequest
+from django.core.handlers.wsgi import WSGIRequest
 from django.http import HttpRequest
 
 from next.deps import DependencyResolver, resolver
 from next.deps.markers import DependsProvider
 from next.forms import DForm
 from next.forms.markers import FormProvider
-from next.pages.context import ContextByDefaultProvider, ContextByNameProvider
+from next.pages.context import Context, ContextByDefaultProvider, ContextByNameProvider
 from next.urls import (
     DUrl,
     HttpRequestProvider,
@@ -24,17 +24,24 @@ from tests.support import (
     COERCE_URL_VALUE_CASES,
     URL_BY_ANNOTATION_RESOLVE_CASES,
     URL_KWARGS_RESOLVE_CASES,
+    AForm,
     CoerceUrlValueCase,
+    OtherForm,
     UrlByAnnotationResolveCase,
     UrlKwargsResolveCase,
     _ctx,
     build_mock_http_request,
     inspect_parameter,
+    typing_optional,
 )
 
 
 def _mock_request_factory() -> MagicMock:
     return build_mock_http_request()
+
+
+def _mock_wsgi_request_factory() -> MagicMock:
+    return MagicMock(spec=WSGIRequest)
 
 
 def _no_request() -> None:
@@ -59,8 +66,15 @@ class TestHttpRequestProvider:
         [
             (_mock_request_factory, HttpRequest, True),
             (_mock_request_factory, HttpRequest | None, True),
+            (_mock_request_factory, typing_optional(HttpRequest), True),
+            (_mock_wsgi_request_factory, WSGIRequest, True),
+            (_mock_wsgi_request_factory, typing_optional(WSGIRequest), True),
+            (_mock_request_factory, WSGIRequest, False),
+            (_mock_wsgi_request_factory, ASGIRequest | None, False),
             (_mock_request_factory, HttpRequest | int, False),
             (_mock_request_factory, int | None, False),
+            (_mock_request_factory, "HttpRequest", False),
+            (_mock_request_factory, list[HttpRequest], False),
             (_no_request, HttpRequest, False),
             (_no_request, HttpRequest | None, False),
             (_mock_request_factory, inspect.Parameter.empty, False),
@@ -68,15 +82,22 @@ class TestHttpRequestProvider:
         ids=[
             "request_present",
             "pep604_optional",
+            "typing_optional",
+            "wsgi_subclass",
+            "wsgi_subclass_typing_optional",
+            "base_request_under_a_subclass_annotation",
+            "wsgi_request_under_an_asgi_annotation",
             "union_with_other_type",
             "int_or_none",
+            "string_annotation",
+            "generic_alias",
             "request_none",
             "request_none_optional_annotation",
             "annotation_empty",
         ],
     )
     def test_can_handle(self, request_obj, annotation, expected) -> None:
-        """can_handle matches request presence and HttpRequest-or-None annotation."""
+        """can_handle needs the request in context to inhabit the annotated class."""
         provider = HttpRequestProvider()
         param = inspect_parameter("request", annotation)
         req = request_obj()
@@ -91,89 +112,30 @@ class TestHttpRequestProvider:
         ctx = _ctx(request=request)
         assert provider.resolve(param, ctx) is request
 
-    @pytest.mark.parametrize(
-        ("source", "expected"),
-        [
-            (
-                (
-                    "from django.http import HttpRequest\n"
-                    "def handler(request: HttpRequest):\n"
-                    "    pass\n"
-                ),
-                True,
-            ),
-            (
-                (
-                    "from django.http import HttpRequest\n"
-                    "def handler(request: HttpRequest | None = None):\n"
-                    "    pass\n"
-                ),
-                True,
-            ),
-            (
-                (
-                    "from django.http import HttpRequest\n"
-                    "def handler(request: HttpRequest | int = 0):\n"
-                    "    pass\n"
-                ),
-                False,
-            ),
-        ],
-        ids=[
-            "type_hints_bare_request",
-            "type_hints_pep604_optional",
-            "type_hints_union_other_type",
-        ],
-    )
-    def test_can_handle_via_get_type_hints_branch(
-        self, tmp_path: Path, source, expected
+    def test_string_annotation_resolves_through_the_plan(
+        self, mock_http_request
     ) -> None:
-        """The `get_type_hints` branch accepts the same forms as the fallback."""
-        mod_path = tmp_path / "stack_ann.py"
-        mod_path.write_text(source, encoding="utf-8")
-        spec = importlib.util.spec_from_file_location("stack_ann", mod_path)
-        assert spec is not None
-        assert spec.loader is not None
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        handler = mod.handler
+        """The plan carries the resolved hint, so `can_handle` never reads the callable."""
 
-        provider = HttpRequestProvider()
-        param = inspect.signature(handler).parameters["request"]
-        ctx = _ctx(request=HttpRequest())
-        resolver._resolve_call_stack.append(handler)
-        try:
-            assert provider.can_handle(param, ctx) is expected
-        finally:
-            resolver._resolve_call_stack.pop()
+        def handler(request: "HttpRequest | None" = None) -> None:
+            return None
 
-    def test_can_handle_when_get_type_hints_raises_falls_back(
-        self, tmp_path: Path
-    ) -> None:
-        """If ``get_type_hints`` raises, the except branch runs and fallback applies."""
-        mod_path = tmp_path / "bad_ann.py"
-        mod_path.write_text(
-            "from __future__ import annotations\n"
-            "def handler(request: DoesNotExist):\n"
-            "    pass\n",
-            encoding="utf-8",
-        )
-        spec = importlib.util.spec_from_file_location("bad_ann", mod_path)
-        assert spec is not None
-        assert spec.loader is not None
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        handler = mod.handler
+        request = mock_http_request()
+        instance = DependencyResolver()
+        assert instance.resolve_dependencies(handler, request=request) == {
+            "request": request
+        }
 
-        provider = HttpRequestProvider()
-        req = HttpRequest()
-        ctx = _ctx(request=req)
-        param = inspect.signature(handler).parameters["request"]
-        resolver._resolve_call_stack.append(handler)
-        try:
-            assert provider.can_handle(param, ctx) is False
-        finally:
-            resolver._resolve_call_stack.pop()
+    def test_unresolvable_string_annotation_falls_back(self) -> None:
+        """A hint the module cannot resolve leaves the raw string, which claims nothing."""
+
+        def handler(request: "inspect.DoesNotExist | None" = None) -> None:
+            return None
+
+        instance = DependencyResolver()
+        assert instance.resolve_dependencies(handler, request=HttpRequest()) == {
+            "request": None
+        }
 
 
 class TestUrlKwargsProvider:
@@ -247,7 +209,7 @@ class TestFormProvider:
         """can_handle for name 'form', missing form, and non-form param names."""
         provider = FormProvider()
         param = inspect_parameter(param_name, inspect.Parameter.empty)
-        form = None if form_kind == "none" else MagicMock()
+        form = None if form_kind == "none" else AForm()
         ctx = _ctx(form=form)
         assert provider.can_handle(param, ctx) is expected
 
@@ -255,29 +217,29 @@ class TestFormProvider:
         self,
     ) -> None:
         """can_handle is True when param annotation matches form instance type."""
-
-        class MyForm:
-            pass
-
         provider = FormProvider()
-        form = MyForm()
-        param = inspect_parameter("f", MyForm)
+        form = AForm()
+        param = inspect_parameter("f", AForm)
         ctx = _ctx(form=form)
         assert provider.can_handle(param, ctx) is True
 
     def test_can_handle_false_when_annotation_not_matching_instance(self) -> None:
         """can_handle is False when form instance type does not match annotation."""
+        provider = FormProvider()
+        param = inspect_parameter("f", OtherForm)
+        ctx = _ctx(form=AForm())
+        assert provider.can_handle(param, ctx) is False
 
-        class FormA:
-            pass
+    def test_a_class_that_is_no_django_form_is_refused(self) -> None:
+        """An annotation outside `BaseForm` never claims the form in context."""
 
-        class FormB:
+        class NotAForm:
             pass
 
         provider = FormProvider()
-        param = inspect_parameter("f", FormB)
-        ctx = _ctx(form=FormA())
-        assert provider.can_handle(param, ctx) is False
+        param = inspect_parameter("f", NotAForm)
+        assert provider.static_can_handle(param) is False
+        assert provider.can_handle(param, _ctx(form=NotAForm())) is False
 
     def test_can_handle_true_when_annotation_is_dform_and_form_matches(self) -> None:
         """can_handle is True when param is DForm[FormClass] and form is that class."""
@@ -308,13 +270,13 @@ class TestFormProvider:
     def test_resolve_returns_form(self) -> None:
         """Resolve returns context.form."""
         provider = FormProvider()
-        form = MagicMock()
+        form = AForm()
         param = inspect_parameter("form", inspect.Parameter.empty)
         ctx = _ctx(form=form)
         assert provider.resolve(param, ctx) is form
 
 
-class TestProviderPriority:
+class TestBuiltinPriorityOrder:
     """Built-in providers are consulted in an explicit, pinned priority order."""
 
     EXPECTED_ORDER: ClassVar[list[str]] = [
@@ -342,7 +304,30 @@ class TestProviderPriority:
     def test_resolver_consults_builtins_in_priority_order(self) -> None:
         """The lazy auto-registry yields the built-in providers in priority order."""
         instance = DependencyResolver()
-        instance._ensure_providers()
+        instance._sync_providers()
         names = [type(p).__name__ for p in instance._providers]
         builtins = [name for name in names if name in self.EXPECTED_ORDER]
         assert builtins == self.EXPECTED_ORDER
+
+
+class TestReservedContextKeys:
+    """The context providers stay blind to the names dedicated providers own."""
+
+    def test_the_name_provider_rules_a_reserved_name_out_for_good(self) -> None:
+        provider = ContextByNameProvider()
+        reserved = inspect_parameter("request")
+        assert provider.static_can_handle(reserved) is False
+        assert (
+            provider.can_handle(reserved, _ctx(context_data={"request": "x"})) is False
+        )
+        free = inspect_parameter("other")
+        assert provider.static_can_handle(free) is None
+        assert provider.can_handle(free, _ctx(context_data={"other": "x"})) is True
+
+    @pytest.mark.parametrize("source", [None, "request"])
+    def test_the_default_marker_reads_no_reserved_key(self, source) -> None:
+        provider = ContextByDefaultProvider(resolver)
+        marker = Context(source, default="fallback")
+        param = inspect_parameter("request", default=marker)
+        ctx = _ctx(context_data={"request": "from-context"})
+        assert provider.resolve(param, ctx) == "fallback"

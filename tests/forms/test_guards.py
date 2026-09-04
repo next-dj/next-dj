@@ -15,7 +15,6 @@ from django.http import (
     QueryDict,
 )
 
-from next.deps import resolver
 from next.forms import (
     ActionGuard,
     ActionRegistration,
@@ -40,7 +39,7 @@ from next.forms.dispatch.permissions import (
 )
 from next.forms.manager import form_action_manager
 from next.forms.signals import action_dispatched, form_access_denied
-from tests.support import GuardedTenantForm, build_post_request
+from tests.support import GuardedTenantForm, bound_dependency, build_post_request
 from tests.support.cases import (
     PERMISSION_HOOK_BAD_TYPE,
     PERMISSION_HOOK_RAISE,
@@ -1096,7 +1095,6 @@ class TestDepCacheReuse:
             GuardedTenantForm.resolutions.append("tenant")
             return "acme"
 
-        resolver.register_dependency("tenant", tenant_provider)
         backend = RegistryFormActionBackend()
         _register_matrix_form(backend, GuardedTenantForm)
         meta = backend.get_meta("matrix_action")
@@ -1105,12 +1103,12 @@ class TestDepCacheReuse:
 
         action_dispatched.connect(receiver)
         try:
-            response = FormActionDispatch.dispatch(
-                backend, request, "matrix_action", meta
-            )
+            with bound_dependency("tenant", tenant_provider):
+                response = FormActionDispatch.dispatch(
+                    backend, request, "matrix_action", meta
+                )
         finally:
             action_dispatched.disconnect(receiver)
-            resolver._dependency_callables.pop("tenant", None)
 
         assert response.status_code == 302
         # The named provider ran exactly once for the whole dispatch.

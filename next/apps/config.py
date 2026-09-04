@@ -7,6 +7,7 @@ from typing import override
 from django.apps import AppConfig
 
 from next.checks import register_all as _register_checks
+from next.deps.resolver import forget_dep_caches
 from next.forms.autodiscover import autodiscover_forms
 from next.pages.loaders import forget_page_roots
 from next.pages.watch import forget_watch_state
@@ -33,6 +34,7 @@ class NextFrameworkConfig(AppConfig):
         router_reloaded.connect(forget_watch_state)
         router_reloaded.connect(forget_page_roots)
         router_reloaded.connect(forget_manager_page_roots)
+        router_reloaded.connect(forget_dep_caches)
         autoreload.install()
         templates.install()
         staticfiles.install()

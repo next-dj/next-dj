@@ -16,10 +16,12 @@ from tests.support.cases import (
     URL_BY_ANNOTATION_RESOLVE_CASES,
     URL_KWARGS_RESOLVE_CASES,
     CoerceUrlValueCase,
+    PlanCase,
     UrlByAnnotationResolveCase,
     UrlKwargsResolveCase,
 )
 from tests.support.components import build_composite_component, component_info
+from tests.support.deps import AForm, DeferringProvider, OtherForm
 from tests.support.forms import (
     GuardedTenantForm,
     build_post_request,
@@ -38,6 +40,7 @@ from tests.support.helpers import (
     named_temp_py,
     next_framework_settings_component_backends_list,
     next_framework_settings_for_checks_backends_value,
+    typing_optional,
 )
 from tests.support.pages import (
     build_nested_page,
@@ -55,10 +58,12 @@ from tests.support.partial_requests import (
     plain_request,
 )
 from tests.support.patches import (
+    bound_dependency,
     importable_dir,
     patch_checks_components_manager,
     patch_checks_router_manager,
     patch_checks_router_manager_with_routers,
+    restored_provider_registry,
     restored_static_registries,
 )
 from tests.support.ports import IntentOnlyShaper
@@ -80,15 +85,19 @@ __all__ = [
     "COERCE_URL_VALUE_CASES",
     "URL_BY_ANNOTATION_RESOLVE_CASES",
     "URL_KWARGS_RESOLVE_CASES",
+    "AForm",
     "CoerceUrlValueCase",
     "CountingWizardBackend",
+    "DeferringProvider",
     "GuardedTenantForm",
     "IntentOnlyShaper",
     "MalformedRootsRouter",
     "MockAutoreloadSender",
     "OddComponentsNameRouter",
     "OddSkipNamesRouter",
+    "OtherForm",
     "PlainStaticBackend",
+    "PlanCase",
     "RaisingComponentsRouter",
     "RaisingRootsRouter",
     "RaisingSkipNamesRouter",
@@ -102,6 +111,7 @@ __all__ = [
     "_minimal_resolver",
     "_resolver_with_form",
     "action_uid",
+    "bound_dependency",
     "build_mock_http_request",
     "build_nested_page",
     "build_page_request",
@@ -127,8 +137,10 @@ __all__ = [
     "plain_get",
     "plain_request",
     "record_path_calls",
+    "restored_provider_registry",
     "restored_static_registries",
     "tick_scenario",
+    "typing_optional",
     "unified_view",
     "unwrapped_decorator",
     "wraps_decorator",

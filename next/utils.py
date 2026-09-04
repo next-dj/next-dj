@@ -259,7 +259,7 @@ def _visit_page_dir(
 _CLASS_BODY_MEMBERS: tuple[str, ...] = ("__call__", "__init__")
 
 
-def _code_filename(func: object) -> str | None:
+def code_filename(func: object) -> str | None:
     """Return the source file behind ``func.__code__``, or ``None`` when it has none."""
     target = func
     if callable(func):
@@ -284,7 +284,7 @@ def _class_filename(cls: type) -> str | None:
         return inspect.getfile(cls)
     except (OSError, TypeError):
         for name in _CLASS_BODY_MEMBERS:
-            filename = _code_filename(cls.__dict__.get(name))
+            filename = code_filename(cls.__dict__.get(name))
             if filename is not None:
                 return filename
     return None
@@ -303,7 +303,7 @@ def defining_file(obj: object) -> Path:
     if inspect.isclass(obj):
         filename = _class_filename(obj)
     elif callable(obj):
-        filename = _code_filename(obj) or _code_filename(type(obj).__call__)
+        filename = code_filename(obj) or code_filename(type(obj).__call__)
     else:
         filename = None
     if filename is not None:

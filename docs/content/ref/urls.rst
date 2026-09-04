@@ -118,6 +118,7 @@ They are exported from ``next.urls`` for introspection and for authors writing c
      - What it supplies
    * - ``HttpRequestProvider``
      - Supplies the ``HttpRequest`` object for any parameter annotated ``HttpRequest`` or ``HttpRequest | None``.
+       The parameter is claimed only when the request in flight is an instance of the annotated class, so an annotation naming one concrete subclass falls back to the parameter default under a server that produces another.
    * - ``UrlByAnnotationProvider``
      - Supplies a URL kwarg value for parameters annotated with ``DUrl[...]``.
    * - ``UrlKwargsProvider``

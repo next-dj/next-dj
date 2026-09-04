@@ -51,15 +51,15 @@ class TestResetFormActions:
         assert any(name == "alpha" for _, name in backend._registry)
 
     def test_reset_form_actions_clears_global_manager(self) -> None:
-        saved_registry = dict(form_action_manager.default_backend._registry)
-        saved_uids = dict(form_action_manager.default_backend._uid_to_name)
+        original = form_action_manager.default_backend
         try:
             reset_form_actions()
             assert form_action_manager.default_backend._registry == {}
             assert form_action_manager.default_backend._uid_to_name == {}
         finally:
-            form_action_manager.default_backend._registry.update(saved_registry)
-            form_action_manager.default_backend._uid_to_name.update(saved_uids)
+            # The reload built fresh backends, so the populated one goes back
+            # in place of them rather than being restored in place.
+            form_action_manager._backends = [original]
 
     def test_clear_registries_accepts_a_stateless_backend(self) -> None:
         form_action_manager._ensure_backends()
@@ -67,13 +67,11 @@ class TestResetFormActions:
         stub = _StatelessBackend()
         form_action_manager._backends = [*manager_backends, stub]
         try:
-            saved = dict(form_action_manager.default_backend._registry)
-            saved_uids = dict(form_action_manager.default_backend._uid_to_name)
+            saved = form_action_manager.snapshot_actions()
             try:
                 form_action_manager.clear_registries()
             finally:
-                form_action_manager.default_backend._registry.update(saved)
-                form_action_manager.default_backend._uid_to_name.update(saved_uids)
+                form_action_manager.restore_actions(saved)
         finally:
             form_action_manager._backends = manager_backends
 
@@ -125,6 +123,7 @@ class TestResetFormRegistrationState:
     def test_reset_clears_all_buffers(self) -> None:
         """The aggregate reset empties the registry and every tracking list."""
         backend = form_action_manager.default_backend
+        saved = form_action_manager.snapshot_actions()
         backend.register_action(
             ActionRegistration(
                 name="reset_probe",
@@ -136,12 +135,15 @@ class TestResetFormRegistrationState:
         registration_diagnostics.outside_base_dir.append(("Probe", "/x/forms.py"))
         registration_diagnostics.action_applied_to_class.append("Probe")
 
-        reset_form_registration_state()
+        try:
+            reset_form_registration_state()
 
-        assert backend._registry == {}
-        assert backend._name_index == {}
-        assert registration_diagnostics.outside_base_dir == []
-        assert registration_diagnostics.action_applied_to_class == []
+            assert backend._registry == {}
+            assert backend._name_index == {}
+            assert registration_diagnostics.outside_base_dir == []
+            assert registration_diagnostics.action_applied_to_class == []
+        finally:
+            form_action_manager.restore_actions(saved)
 
 
 class TestResetComponentTemplates:

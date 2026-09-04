@@ -268,12 +268,20 @@ The resolver raises ``DependencyCycleError`` when two providers depend on each o
 Read the chain printed on the exception, remove one ``Depends`` edge, or merge providers.
 See :doc:`/content/topics/dependency-injection` for request-cache interactions during form re-renders.
 
+UnknownDependencyError
+~~~~~~~~~~~~~~~~~~~~~~
+
+The resolver raises ``UnknownDependencyError`` when ``Depends("name")`` or a bare ``Depends()`` names a dependency nothing has registered.
+The message carries the dependency name, the parameter, and the callable with its source path.
+When a registered name is close to the missing one, the message ends with a ``Did you mean`` hint naming it.
+Register the callable with ``resolver.dependency("name")`` from a module imported in ``AppConfig.ready``, or fix the name at the ``Depends`` site.
+
 DI parameter resolves to None
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Three common causes explain this.
+Four common causes explain this.
 
-- The parameter annotation is a forward-reference string (often from ``from __future__ import annotations`` in modules where the resolver cannot evaluate it).
+- The parameter annotation is a string the resolver cannot evaluate, which happens under ``from __future__ import annotations`` when the annotated type is not importable at runtime, a ``TYPE_CHECKING``-only import being the usual case.
   Drop that import in ``page.py``, the ``page.py`` modules that declare inherited context, ``component.py``, and provider modules if markers stop resolving.
 
 - No registered provider covers the marker type.
@@ -281,6 +289,9 @@ Three common causes explain this.
 
 - The callable asks for data that is not in the request-scoped cache yet (for example the wrong phase of a form re-render).
   Compare your scenario with the lifecycle discussion in :doc:`/content/topics/dependency-injection`.
+
+- The parameter names a request class the running server does not produce, such as ``request: ASGIRequest`` under a WSGI server.
+  The request provider claims the parameter only when the request in flight is an instance of the annotated class, so annotate ``HttpRequest`` unless the handler genuinely needs one concrete class.
 
 To inspect what the resolver would actually inject, use ``resolve_call`` from ``next.testing.deps`` in a shell or test.
 The snippet below uses ``fetch_note``, the ``@context("note")`` callable from the :doc:`tutorial </content/intro/tutorial02>` detail page.
@@ -304,7 +315,16 @@ Custom marker not handled
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Confirm that the provider class is imported during ``AppConfig.ready``.
-``RegisteredParameterProvider`` registers at class creation, so the import must happen before the resolver caches the provider list.
+``RegisteredParameterProvider`` registers at class creation, so a marker stays unhandled for exactly as long as the module defining its provider goes unimported.
+A class that registers after the first resolve joins the provider list by priority and the affected plans recompile, so a late import costs order predictability rather than correctness.
+
+Provider refused with a TypeError
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Handing the resolver a provider that defines no callable ``static_can_handle`` raises ``TypeError`` naming the class.
+The plan compiler calls that hook on every provider, so the resolver refuses the newcomer as it joins the list rather than failing later on an unrelated callable.
+Implement the method, return ``None`` for a verdict that only the resolution context settles, and return ``True`` or ``False`` when the signature alone settles it.
+A ``RegisteredParameterProvider`` subclass inherits a ``None`` default and never hits this error.
 
 Testing with custom providers
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -11,7 +11,7 @@ handles the `Depends` marker and registers itself through
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, Annotated, get_args, get_origin, override
 
 from .providers import RegisteredParameterProvider
 
@@ -27,6 +27,18 @@ class DDependencyBase[T]:
     """Shared base for annotation markers such as `DForm` and `DUrl`."""
 
     __slots__ = ()
+
+
+def marker_origin(annotation: object) -> object:
+    """Return the marker an annotation names, seeing through one `Annotated` layer.
+
+    The plan keeps the extras a resolved hint carries, so a provider matching
+    on `DUrl` has to look past the metadata a caller wrapped it in.
+    """
+    origin = get_origin(annotation)
+    if origin is Annotated:
+        return get_origin(get_args(annotation)[0])
+    return origin
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,7 +65,12 @@ class DependsProvider(RegisteredParameterProvider):
 
     @override
     def can_handle(self, param: inspect.Parameter, _context: ResolutionContext) -> bool:
-        """Return True when the parameter default is a `Depends` marker."""
+        """Defer to the static verdict, which the context never changes."""
+        return self.static_can_handle(param) is True
+
+    @override
+    def static_can_handle(self, param: inspect.Parameter) -> bool:
+        """Settle on the default alone. The marker never depends on the context."""
         return isinstance(param.default, Depends)
 
     @override
@@ -68,7 +85,9 @@ class DependsProvider(RegisteredParameterProvider):
             dep = param.name
 
         if isinstance(dep, str):
-            return self._resolver._resolve_callable_dependency(dep, context)
+            return self._resolver._resolve_callable_dependency(
+                dep, context, param=param
+            )
 
         if callable(dep):
             resolved = self._resolver.resolve(dep, context)

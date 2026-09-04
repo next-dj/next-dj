@@ -1,9 +1,7 @@
 """Resolution-context snapshot passed to providers during DI resolution.
 
-`ResolutionContext` collects request, form, URL kwargs, and template context data into a
-single immutable view. Providers read from this object without mutating it.
-`RESERVED_KEYS` lists the kwarg names that `DependencyResolver.resolve_dependencies`
-treats as fixed inputs rather than URL kwargs.
+`RESERVED_KEYS` lists the kwarg names that `DependencyResolver` treats as fixed
+inputs rather than URL kwargs, and that the name-based providers refuse.
 """
 
 from __future__ import annotations
@@ -25,9 +23,14 @@ RESERVED_KEYS: Final[frozenset[str]] = frozenset(
 )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True, eq=False)
 class ResolutionContext:
-    """Immutable snapshot of the inputs available during dependency resolution."""
+    """Per-call snapshot of the inputs available during dependency resolution.
+
+    Not frozen, because a frozen `__init__` is measurably slower on every
+    resolve while the mutable `stack` and `cache` it already carries make a
+    frozen guarantee hollow anyway.
+    """
 
     request: HttpRequest | None
     form: object | None
