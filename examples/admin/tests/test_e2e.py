@@ -3,6 +3,8 @@ from dataclasses import dataclass
 
 import pytest
 from admin_audit.models import AdminActivityLog
+from django.core.management import call_command
+from library.demo import DEMO_BOOKS, seed_demo
 from library.models import Book, Chapter, Tag
 
 from next.testing import envelope_of
@@ -42,13 +44,13 @@ def _extract_form_inputs(body: str) -> dict[str, str]:
 
 
 class TestDashboard:
-    def test_bare_root_redirects_to_admin(self, client):
-        r = client.get("/")
+    def test_bare_root_redirects_to_admin(self, next_client):
+        r = next_client.get("/")
         assert r.status_code == 302
         assert r["Location"] == "/admin/"
 
-    def test_unauthenticated_redirects_to_login(self, client):
-        r = client.get("/admin/")
+    def test_unauthenticated_redirects_to_login(self, next_client):
+        r = next_client.get("/admin/")
         assert r.status_code == 302
         assert r["Location"].startswith("/admin/login/")
 
@@ -71,21 +73,21 @@ class TestDashboard:
 
 
 class TestAuth:
-    def test_login_page_renders(self, client):
-        r = client.get("/admin/login/")
+    def test_login_page_renders(self, next_client):
+        r = next_client.get("/admin/login/")
         assert r.status_code == 200
         body = r.content.decode()
         assert 'name="username"' in body
         assert 'name="password"' in body
 
-    def test_login_post_redirects_and_authenticates(self, client, admin_user):
-        r = client.post_action(
+    def test_login_post_redirects_and_authenticates(self, next_client, admin_user):
+        r = next_client.post_action(
             "admin:login",
             {"username": "admin", "password": "admin-pass", "next": "/admin/"},
         )
         assert r.status_code == 302
         assert r["Location"] == "/admin/"
-        r2 = client.get("/admin/")
+        r2 = next_client.get("/admin/")
         assert r2.status_code == 200
 
     def test_logout_clears_session(self, admin_client):
@@ -102,9 +104,11 @@ class TestAuth:
         assert "You have been signed out." in body
         assert "Sign in again" in body
 
-    def test_bad_credentials_renders_form_error(self, client, admin_user):
-        rendered = _extract_form_inputs(client.get("/admin/login/").content.decode())
-        r = client.post_action(
+    def test_bad_credentials_renders_form_error(self, next_client, admin_user):
+        rendered = _extract_form_inputs(
+            next_client.get("/admin/login/").content.decode()
+        )
+        r = next_client.post_action(
             "admin:login",
             {**rendered, "username": "admin", "password": "wrong", "next": "/admin/"},
         )
@@ -116,8 +120,8 @@ class TestAuth:
 class TestActionGuards:
     """Mutating actions reject anonymous POSTs and unauthorized users."""
 
-    def test_anonymous_add_post_redirects_to_login(self, client):
-        r = client.post_action(
+    def test_anonymous_add_post_redirects_to_login(self, next_client):
+        r = next_client.post_action(
             "admin:add",
             {"name": "Sneaky", "slug": "sneaky"},
             origin="/admin/library/tag/add/",
@@ -126,9 +130,9 @@ class TestActionGuards:
         assert r["Location"].startswith("/admin/login/")
         assert not Tag.objects.filter(slug="sneaky").exists()
 
-    def test_anonymous_change_post_redirects_to_login(self, client, make_tag):
+    def test_anonymous_change_post_redirects_to_login(self, next_client, make_tag):
         tag = make_tag("Old")
-        r = client.post_action(
+        r = next_client.post_action(
             "admin:change",
             {"name": "Hacked", "slug": "hacked"},
             origin=f"/admin/library/tag/{tag.pk}/change/",
@@ -138,18 +142,20 @@ class TestActionGuards:
         tag.refresh_from_db()
         assert tag.name == "Old"
 
-    def test_anonymous_delete_post_redirects_to_login(self, client, make_tag):
+    def test_anonymous_delete_post_redirects_to_login(self, next_client, make_tag):
         tag = make_tag("Keep")
-        r = client.post_action(
+        r = next_client.post_action(
             "admin:delete", origin=f"/admin/library/tag/{tag.pk}/delete/"
         )
         assert r.status_code == 302
         assert r["Location"].startswith("/admin/login/")
         assert Tag.objects.filter(pk=tag.pk).exists()
 
-    def test_anonymous_bulk_action_post_redirects_to_login(self, client, make_book):
+    def test_anonymous_bulk_action_post_redirects_to_login(
+        self, next_client, make_book
+    ):
         book = make_book(status=Book.DRAFT)
-        r = client.post_action(
+        r = next_client.post_action(
             "admin:bulk_action",
             {"action": "mark_as_published", "_selected_action": [str(book.pk)]},
             origin="/admin/library/book/",
@@ -159,9 +165,9 @@ class TestActionGuards:
         book.refresh_from_db()
         assert book.status == Book.DRAFT
 
-    def test_non_staff_add_post_is_forbidden(self, client, django_user_model):
-        client.force_login(django_user_model.objects.create_user("intruder"))
-        r = client.post_action(
+    def test_non_staff_add_post_is_forbidden(self, next_client, django_user_model):
+        next_client.force_login(django_user_model.objects.create_user("intruder"))
+        r = next_client.post_action(
             "admin:add",
             {"name": "Sneaky", "slug": "sneaky"},
             origin="/admin/library/tag/add/",
@@ -170,11 +176,11 @@ class TestActionGuards:
         assert not Tag.objects.filter(slug="sneaky").exists()
 
     def test_non_staff_change_post_is_forbidden(
-        self, client, django_user_model, make_tag
+        self, next_client, django_user_model, make_tag
     ):
-        client.force_login(django_user_model.objects.create_user("intruder"))
+        next_client.force_login(django_user_model.objects.create_user("intruder"))
         tag = make_tag("Old")
-        r = client.post_action(
+        r = next_client.post_action(
             "admin:change",
             {"name": "Hacked", "slug": "hacked"},
             origin=f"/admin/library/tag/{tag.pk}/change/",
@@ -184,22 +190,22 @@ class TestActionGuards:
         assert tag.name == "Old"
 
     def test_non_staff_delete_post_is_forbidden(
-        self, client, django_user_model, make_tag
+        self, next_client, django_user_model, make_tag
     ):
-        client.force_login(django_user_model.objects.create_user("intruder"))
+        next_client.force_login(django_user_model.objects.create_user("intruder"))
         tag = make_tag("Keep")
-        r = client.post_action(
+        r = next_client.post_action(
             "admin:delete", origin=f"/admin/library/tag/{tag.pk}/delete/"
         )
         assert r.status_code == 403
         assert Tag.objects.filter(pk=tag.pk).exists()
 
     def test_non_staff_bulk_action_post_is_forbidden(
-        self, client, django_user_model, make_book
+        self, next_client, django_user_model, make_book
     ):
-        client.force_login(django_user_model.objects.create_user("intruder"))
+        next_client.force_login(django_user_model.objects.create_user("intruder"))
         book = make_book(status=Book.DRAFT)
-        r = client.post_action(
+        r = next_client.post_action(
             "admin:bulk_action",
             {"action": "mark_as_published", "_selected_action": [str(book.pk)]},
             origin="/admin/library/book/",
@@ -209,10 +215,25 @@ class TestActionGuards:
         assert book.status == Book.DRAFT
 
 
-class TestSeededCatalog:
-    """`library/migrations/0003_demo_catalog.py` fills every changelist feature."""
+class TestDemoSeed:
+    """The demo catalog loads from a seed module, never from a migration."""
 
-    def test_book_changelist_is_populated_without_manual_entry(self, admin_client):
+    def test_command_fills_the_catalog(self, db):
+        call_command("seed_demo")
+        assert Book.objects.count() == len(DEMO_BOOKS)
+        assert Chapter.objects.filter(book__title="Frankenstein").count() == 4
+
+    def test_seeding_twice_keeps_one_copy(self, demo_data):
+        seed_demo()
+        assert Book.objects.count() == len(DEMO_BOOKS)
+
+
+class TestSeededCatalog:
+    """`library/demo.py` fills every changelist feature once seeded."""
+
+    def test_book_changelist_is_populated_without_manual_entry(
+        self, admin_client, demo_data
+    ):
         r = admin_client.get("/admin/library/book/")
         assert r.status_code == 200
         body = r.content.decode()
@@ -220,7 +241,7 @@ class TestSeededCatalog:
         assert "Dracula" in body
         assert "Mary Shelley" in body
 
-    def test_book_changelist_spans_more_than_one_page(self, admin_client):
+    def test_book_changelist_spans_more_than_one_page(self, admin_client, demo_data):
         r = admin_client.get("/admin/library/book/")
         body = r.content.decode()
         assert "19 items" in body
@@ -251,12 +272,14 @@ class TestSeededCatalog:
             "search_matches_author_name",
         ),
     )
-    def test_every_advertised_facet_returns_rows(self, admin_client, query, title):
+    def test_every_advertised_facet_returns_rows(
+        self, admin_client, demo_data, query, title
+    ):
         r = admin_client.get(f"/admin/library/book/?{query}")
         assert r.status_code == 200
         assert title in r.content.decode()
 
-    def test_a_seeded_book_opens_with_a_filled_inline(self, admin_client):
+    def test_a_seeded_book_opens_with_a_filled_inline(self, admin_client, demo_data):
         book = Book.objects.get(title="Frankenstein")
         r = admin_client.get(f"/admin/library/book/{book.pk}/change/")
         assert r.status_code == 200
@@ -266,7 +289,7 @@ class TestSeededCatalog:
 
 
 class TestChangelist:
-    def test_changelist_lists_rows(self, admin_client, empty_library, make_book):
+    def test_changelist_lists_rows(self, admin_client, make_book):
         make_book("A Wizard of Earthsea", status="published")
         r = admin_client.get("/admin/library/book/")
         assert r.status_code == 200
@@ -287,7 +310,7 @@ class TestChangelist:
         r = admin_client.get("/admin/library/book/?o=1")
         assert r.status_code == 200
 
-    def test_list_filter_applies_status(self, admin_client, empty_library, make_book):
+    def test_list_filter_applies_status(self, admin_client, make_book):
         make_book("Drafted", status="draft")
         make_book("Published", status="published")
         r = admin_client.get("/admin/library/book/?status__exact=published")
@@ -734,11 +757,11 @@ class TestLiveInlines:
 
     @pytest.mark.parametrize("action", _INLINE_ACTIONS)
     def test_anonymous_submit_redirects_to_login(
-        self, client, action, book_with_two_chapters
+        self, next_client, action, book_with_two_chapters
     ):
         book, first, _ = book_with_two_chapters
         payload = self._payload(action, first.pk, title="Sneaky")
-        r = client.post_action(
+        r = next_client.post_action(
             action, payload, origin=f"/admin/library/book/{book.pk}/change/"
         )
         assert r.status_code == 302
@@ -749,12 +772,12 @@ class TestLiveInlines:
 
     @pytest.mark.parametrize("action", _INLINE_ACTIONS)
     def test_non_staff_submit_is_forbidden(
-        self, client, django_user_model, action, book_with_two_chapters
+        self, next_client, django_user_model, action, book_with_two_chapters
     ):
-        client.force_login(django_user_model.objects.create_user("intruder"))
+        next_client.force_login(django_user_model.objects.create_user("intruder"))
         book, first, _ = book_with_two_chapters
         payload = self._payload(action, first.pk, title="Sneaky")
-        r = client.post_action(
+        r = next_client.post_action(
             action, payload, origin=f"/admin/library/book/{book.pk}/change/"
         )
         assert r.status_code == 403
@@ -1064,8 +1087,8 @@ class TestFlashMessages:
         body = r.content.decode()
         assert "marked as published" in body.lower()
 
-    def test_login_success_flashes_welcome(self, client, admin_user):
-        r = client.post_action(
+    def test_login_success_flashes_welcome(self, next_client, admin_user):
+        r = next_client.post_action(
             "admin:login",
             {"username": "admin", "password": "admin-pass", "next": "/admin/"},
             follow=True,

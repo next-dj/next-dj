@@ -74,13 +74,13 @@ def lifecycle_doc(make_article: Callable[..., Article]) -> Article:
 
 
 @pytest.fixture()
-def submit_from_page(client: NextClient) -> Callable[..., HttpResponse]:
+def submit_from_page(next_client: NextClient) -> Callable[..., HttpResponse]:
     """Post an action carrying the origin the given page rendered."""
 
     def _submit(action: str, *, page: str, data: dict[str, str]) -> HttpResponse:
-        rendered = client.get(page).content.decode()
-        return client.post(
-            client.get_action_url(action),
+        rendered = next_client.get(page).content.decode()
+        return next_client.post(
+            next_client.get_action_url(action),
             {"_next_form_origin": _origin_field(rendered), **data},
         )
 
@@ -91,9 +91,9 @@ class TestIndex:
     """The index page lists file-backed docs alongside DB-backed articles."""
 
     def test_index_lists_file_docs_and_articles(
-        self, client: NextClient, routing_doc: Article, lifecycle_doc: Article
+        self, next_client: NextClient, routing_doc: Article, lifecycle_doc: Article
     ) -> None:
-        response = client.get(reverse("next:page_"))
+        response = next_client.get(reverse("next:page_"))
         body = response.content.decode()
         assert response.status_code == 200
         assert ">\n            Routing\n          <" in body
@@ -113,9 +113,9 @@ class TestFileDocs:
         ],
     )
     def test_file_doc_pages_render(
-        self, client: NextClient, name: str, needle: str
+        self, next_client: NextClient, name: str, needle: str
     ) -> None:
-        response = client.get(reverse(name))
+        response = next_client.get(reverse(name))
         assert response.status_code == 200
         assert needle in response.content.decode()
 
@@ -124,16 +124,16 @@ class TestDocFigureChildren:
     """The docs figure splices its block body and escapes the caption prop."""
 
     def test_children_render_as_markup_while_the_prop_escapes(
-        self, client: NextClient
+        self, next_client: NextClient
     ) -> None:
-        body = client.get(reverse("next:page_docs_components")).content.decode()
+        body = next_client.get(reverse("next:page_docs_components")).content.decode()
         assert "this <em>emphasis</em> and this" in body
         assert "<strong>bold run</strong>" in body
         assert "&lt;em&gt;emphasis&lt;/em&gt;" in body
         assert "<em>emphasis</em></figcaption>" not in body
 
-    def test_routing_page_reuses_the_figure(self, client: NextClient) -> None:
-        body = client.get(reverse("next:page_docs_routing")).content.decode()
+    def test_routing_page_reuses_the_figure(self, next_client: NextClient) -> None:
+        body = next_client.get(reverse("next:page_docs_routing")).content.decode()
         assert "<figure" in body
         assert "<li><code>routes/page.py</code> → <code>/</code></li>" in body
 
@@ -141,9 +141,9 @@ class TestDocFigureChildren:
 class TestArticleCreation:
     """Posting the create form publishes a fresh `/wiki/<slug>/` URL."""
 
-    def test_creating_article_publishes_url(self, client: NextClient) -> None:
-        url = client.get_action_url("article_create_form")
-        response = client.post(
+    def test_creating_article_publishes_url(self, next_client: NextClient) -> None:
+        url = next_client.get_action_url("article_create_form")
+        response = next_client.post(
             url,
             {
                 "slug": "freshly-baked",
@@ -154,7 +154,7 @@ class TestArticleCreation:
         assert response.status_code in (302, 303)
         assert Article.objects.filter(slug="freshly-baked").exists()
 
-        article_response = client.get("/wiki/freshly-baked/")
+        article_response = next_client.get("/wiki/freshly-baked/")
         article_body = article_response.content.decode()
         assert article_response.status_code == 200
         assert "Freshly baked" in article_body
@@ -176,9 +176,9 @@ class TestArticleEdit:
     """Saving the edit form replaces the persisted body."""
 
     def test_editing_article_changes_body(
-        self, client: NextClient, routing_doc: Article
+        self, next_client: NextClient, routing_doc: Article
     ) -> None:
-        response = client.post_action(
+        response = next_client.post_action(
             "article_edit_form",
             {
                 "slug": routing_doc.slug,
@@ -194,13 +194,13 @@ class TestArticleEdit:
         routing_doc.refresh_from_db()
         assert routing_doc.body_md == "Rewritten body of the article."
 
-        article_response = client.get(routing_doc.url)
+        article_response = next_client.get(routing_doc.url)
         assert "Rewritten body of the article." in article_response.content.decode()
 
     def test_get_edit_page_shows_article(
-        self, client: NextClient, routing_doc: Article
+        self, next_client: NextClient, routing_doc: Article
     ) -> None:
-        response = client.get(
+        response = next_client.get(
             reverse("next:page_articles_edit_slug", kwargs={"slug": routing_doc.slug})
         )
         assert response.status_code == 200
@@ -260,12 +260,12 @@ class TestArticleObjectPermission:
     """The edit form denies a locked article through has_object_permission."""
 
     def test_locked_article_edit_denied(
-        self, client: NextClient, make_article: Callable[..., Article]
+        self, next_client: NextClient, make_article: Callable[..., Article]
     ) -> None:
         locked = make_article(
             "locked-page", title="Locked page", body_md="Original body.", locked=True
         )
-        response = client.post_action(
+        response = next_client.post_action(
             "article_edit_form",
             {
                 "slug": locked.slug,
@@ -285,14 +285,14 @@ class TestArticleDeletion:
     """Deleting an article removes its dynamic URL within the same process."""
 
     def test_deleting_article_removes_url(
-        self, client: NextClient, routing_doc: Article
+        self, next_client: NextClient, routing_doc: Article
     ) -> None:
-        first = client.get(routing_doc.url)
+        first = next_client.get(routing_doc.url)
         assert first.status_code == 200
 
         slug = routing_doc.slug
         routing_doc.delete()
-        gone = client.get(f"/wiki/{slug}/")
+        gone = next_client.get(f"/wiki/{slug}/")
         assert gone.status_code == 404
 
 
@@ -300,9 +300,9 @@ class TestSearch:
     """Search returns matches from both the file catalogue and the database."""
 
     def test_search_returns_both_kinds(
-        self, client: NextClient, routing_doc: Article, lifecycle_doc: Article
+        self, next_client: NextClient, routing_doc: Article, lifecycle_doc: Article
     ) -> None:
-        response = client.get(reverse("next:page_search"), {"q": "routing"})
+        response = next_client.get(reverse("next:page_search"), {"q": "routing"})
         body = response.content.decode()
         assert response.status_code == 200
         assert "/docs/routing/" in body
@@ -310,9 +310,9 @@ class TestSearch:
         assert lifecycle_doc.title not in body
 
     def test_search_with_no_query_returns_empty_results(
-        self, client: NextClient
+        self, next_client: NextClient
     ) -> None:
-        response = client.get(reverse("next:page_search"))
+        response = next_client.get(reverse("next:page_search"))
         assert response.status_code == 200
 
 
@@ -320,18 +320,18 @@ class TestSearchAutoSubmit:
     """The search box auto-submits into a results zone with debounce."""
 
     def test_search_form_carries_auto_submit_attributes(
-        self, client: NextClient
+        self, next_client: NextClient
     ) -> None:
-        body = client.get(reverse("next:page_search")).content.decode()
+        body = next_client.get(reverse("next:page_search")).content.decode()
         assert 'data-next-target="search-results"' in body
         assert 'data-next-trigger="input"' in body
         assert 'data-next-debounce="300"' in body
         assert 'data-next-zone="search-results"' in body
 
     def test_zone_request_morphs_only_the_results(
-        self, client: NextClient, routing_doc: Article, lifecycle_doc: Article
+        self, next_client: NextClient, routing_doc: Article, lifecycle_doc: Article
     ) -> None:
-        response = client.get_zones(
+        response = next_client.get_zones(
             reverse("next:page_search") + "?q=routing", "search-results"
         )
         assert response.status_code == 200
@@ -343,8 +343,10 @@ class TestSearchAutoSubmit:
         assert lifecycle_doc.title not in html
         assert "Search" not in html
 
-    def test_empty_zone_request_prompts_for_a_query(self, client: NextClient) -> None:
-        response = client.get_zones(reverse("next:page_search"), "search-results")
+    def test_empty_zone_request_prompts_for_a_query(
+        self, next_client: NextClient
+    ) -> None:
+        response = next_client.get_zones(reverse("next:page_search"), "search-results")
         html = envelope_of(response).html_for_zone("search-results")
         assert "Type a query" in html
 
@@ -353,9 +355,9 @@ class TestMarkdownPreviewMount:
     """The preview pane is rebindable through the mount registry."""
 
     def test_new_article_form_carries_the_preview_root_and_script(
-        self, client: NextClient
+        self, next_client: NextClient
     ) -> None:
-        body = client.get(reverse("next:page_articles_new")).content.decode()
+        body = next_client.get(reverse("next:page_articles_new")).content.decode()
         assert "data-markdown-preview" in body
         assert "components/markdown_preview.mjs" in body
         assert "marked.min.js" in body

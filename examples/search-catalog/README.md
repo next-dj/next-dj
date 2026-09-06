@@ -27,10 +27,13 @@ The user flow:
 
 ```bash
 cd examples/search-catalog
-uv run python manage.py migrate        # schema + demo data in one step
+uv run python manage.py migrate        # schema only
+uv run python manage.py seed_demo      # four categories and 25 products
 uv run python manage.py runserver      # http://127.0.0.1:8000/
 uv run pytest
 ```
+
+`seed_demo` writes the demo catalog from [`catalog/demo.py`](catalog/demo.py) — four categories, 24 numbered products, and one `iPhone 15` row the routing walkthrough links to. Migrations carry schema only, so the listing is empty until the command runs.
 
 Tailwind loads via the Play CDN in [`marketplace/layout.djx`](marketplace/layout.djx). No Node, no build step. Components carry co-located CSS and JS that the static collector picks up, deduplicates, and emits exactly once per page. Each listing publishes the set of zones its filter may re-render, so the filter panel auto-submits as you type, the results, the count, the pager, and the chip strip refresh together, and the listing grows on scroll without a full reload. The `filter_panel` component ships a small `component.js` that runs live constraint validation on the search field (minimum 3 characters) through the native Constraint Validation API, rewired through `Next.partial.onMount` so it survives a morphed panel. Every behaviour degrades to a plain GET when the runtime is absent.
 

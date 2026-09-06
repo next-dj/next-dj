@@ -407,11 +407,11 @@ class TestLandingPage:
     """The landing page exposes the most recent requests and audit rows."""
 
     def test_landing_lists_recent_request_and_audit_summaries(
-        self, client, create_access_request, create_audit_entry
+        self, next_client, create_access_request, create_audit_entry
     ) -> None:
         create_access_request()
         create_audit_entry(action_name="access_request_wizard")
-        response = client.get("/")
+        response = next_client.get("/")
         body = response.content.decode()
         assert response.status_code == 200
         assert "Grace Hopper" in body
@@ -419,7 +419,7 @@ class TestLandingPage:
         assert "access_request_wizard" in body
 
     def test_landing_lists_newest_requests_first(
-        self, client, create_access_request
+        self, next_client, create_access_request
     ) -> None:
         for index in range(6):
             create_access_request(
@@ -427,7 +427,7 @@ class TestLandingPage:
                 email=f"person{index}@example.com",
                 project_slug=f"proj-{index}",
             )
-        body = client.get("/").content.decode()
+        body = next_client.get("/").content.decode()
         assert "Requester 5" in body
         assert "Requester 0" not in body
 

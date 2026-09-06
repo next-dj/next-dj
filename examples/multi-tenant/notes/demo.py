@@ -1,4 +1,4 @@
-from django.db import migrations
+from notes.models import Note, Tenant
 
 
 DEMO_TENANTS = [
@@ -20,6 +20,7 @@ DEMO_TENANTS = [
             {
                 "title": "Status update",
                 "body": "Quarterly metrics are looking healthy across the board.",
+                "locked": True,
             },
         ],
     },
@@ -31,18 +32,20 @@ DEMO_TENANTS = [
             {
                 "title": "Globex roadmap",
                 "body": "## Roadmap\n\n1. Phase one\n2. Phase two\n3. Phase three\n",
-            },
+            }
         ],
     },
 ]
 
 
-def seed(apps, _schema_editor):
-    """Insert demo tenants and notes for both browser and curl walkthroughs."""
-    tenant_model = apps.get_model("notes", "Tenant")
-    note_model = apps.get_model("notes", "Note")
+def seed_demo() -> None:
+    """Create the demo tenants and notes for the browser and curl walkthroughs.
+
+    One Acme note ships locked so the editor has a row that exercises the
+    object-level guard.
+    """
     for tenant_data in DEMO_TENANTS:
-        tenant_obj, _ = tenant_model.objects.get_or_create(
+        tenant, _ = Tenant.objects.get_or_create(
             slug=tenant_data["slug"],
             defaults={
                 "name": tenant_data["name"],
@@ -50,26 +53,11 @@ def seed(apps, _schema_editor):
             },
         )
         for note_data in tenant_data["notes"]:
-            note_model.objects.get_or_create(
-                tenant=tenant_obj,
+            Note.objects.get_or_create(
+                tenant=tenant,
                 title=note_data["title"],
-                defaults={"body": note_data["body"]},
+                defaults={
+                    "body": note_data["body"],
+                    "locked": note_data.get("locked", False),
+                },
             )
-
-
-def unseed(apps, _schema_editor):
-    """Remove demo tenants on rollback (cascade clears their notes)."""
-    tenant_model = apps.get_model("notes", "Tenant")
-    tenant_model.objects.filter(
-        slug__in=[t["slug"] for t in DEMO_TENANTS]
-    ).delete()
-
-
-class Migration(migrations.Migration):
-    dependencies = [
-        ("notes", "0001_initial"),
-    ]
-
-    operations = [
-        migrations.RunPython(seed, unseed),
-    ]

@@ -15,18 +15,19 @@ A drag-and-drop Kanban board powered by co-located React components and a Vite b
 | `POST rename_board_form` | Update the board title. |
 | `POST archive_board_form` | Toggle the archived flag. Archived boards drop out of the index. |
 
-Three demo boards seed via a data migration. Two are active (`engineering-roadmap` and `marketing-launch`) and one is archived (`old-experiments`). Several seeded columns carry a `wip_limit`, so the limit badge and the rejected-create path have data behind them on a fresh database.
+Three demo boards live in `kanban/demo.py` and load through `manage.py seed_demo`. Two are active (`engineering-roadmap` and `marketing-launch`) and one is archived (`old-experiments`). Several seeded columns carry a `wip_limit`, so the limit badge and the rejected-create path have data behind them on a fresh database.
 
 ## How to run
 
 ```bash
 cd examples/kanban
 uv run python manage.py migrate
+uv run python manage.py seed_demo
 uv run python manage.py runserver     # http://127.0.0.1:8000/
 uv run pytest
 ```
 
-The first `migrate` run seeds three demo boards. Open the index to land on the board list.
+`seed_demo` writes the three demo boards. Migrations carry schema only, so a database without that command is empty and the index shows its empty state. Open the index to land on the board list.
 
 The React layer loads from the Vite dev server, so start it next to Django:
 

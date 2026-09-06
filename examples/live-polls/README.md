@@ -12,7 +12,7 @@ A polling app where the results on every open tab refresh the moment someone vot
 | `/polls/<id>/stream/` | The patch event stream. Each poll change emits a `next-patches` event carrying a `refresh` of the `poll-results` zone. |
 | `POST vote_form` | Atomically increments a choice via `F("votes") + 1`, then morphs the `poll-results` zone and pushes the fresh counts to `window.Next.context.live_results`. A signal receiver publishes the change to the broker with the request id. |
 
-Two demo polls seed via a data migration ("Tabs or spaces?" and "Vim or Emacs?", two choices each) so the index page is never empty on a fresh database.
+Two demo polls live in [`polls/demo.py`](polls/demo.py) and load through `manage.py seed_demo` ("Tabs or spaces?" and "Vim or Emacs?", two choices each) so the index page is never empty once seeded.
 
 ## How the live update works
 
@@ -46,12 +46,13 @@ Local development (HMR for Vue, autoreload for Django):
 ```bash
 cd examples/live-polls
 uv run python manage.py migrate
+uv run python manage.py seed_demo
 npm install
 npm run dev                            # terminal A: http://localhost:5173
 uv run python manage.py runserver     # terminal B: http://127.0.0.1:8000/polls/
 ```
 
-`migrate` seeds two demo polls. Editing `component.vue` then hot-reloads in the browser without restarts, and the `@vite/client` script loads through the `collector_finalized` signal on every page that carries Vue assets. The Django reloader picks up Python edits on its own.
+`seed_demo` writes the two demo polls, and migrations carry schema only. Editing `component.vue` then hot-reloads in the browser without restarts, and the `@vite/client` script loads through the `collector_finalized` signal on every page that carries Vue assets. The Django reloader picks up Python edits on its own.
 
 [`config/settings.py`](config/settings.py) picks the asset mode without asking the operator for a flag, in this order:
 

@@ -33,6 +33,8 @@ This tutorial drives it with pytest and pytest-django, which you install separat
    uv add --dev pytest pytest-django
 
 Add the pytest configuration.
+It names ``next.testing.plugin`` in ``addopts``, which loads the framework plugin for this suite, and points ``next_pages`` at the page root so the actions declared there register before the tests run.
+The ``next_pages`` value resolves relative to ``pytest.ini``, so a project that did not name its app ``notes`` adjusts the path accordingly.
 
 .. code-block:: ini
    :caption: pytest.ini
@@ -40,38 +42,17 @@ Add the pytest configuration.
    [pytest]
    DJANGO_SETTINGS_MODULE = config.settings
    python_files = tests.py test_*.py *_tests.py
-   addopts = --tb=short
+   addopts = --tb=short -p next.testing.plugin
+   next_pages = notes/pages
 
-Add a ``conftest.py`` at the project root.
-The conftest imports every ``page.py`` so the actions declared there register before the tests run.
-The ``PAGES_DIR`` path must match the actual app and page-root names, so a project that did not name its app ``notes`` adjusts the path accordingly.
-
-.. code-block:: python
-   :caption: conftest.py
-
-   from pathlib import Path
-   import pytest
-   from next.testing.client import NextClient
-   from next.testing.loaders import eager_load_pages
-
-   PAGES_DIR = Path(__file__).resolve().parent / "notes" / "pages"
-
-   @pytest.fixture(autouse=True, scope="session")
-   def _next_dj_registration():
-       eager_load_pages(PAGES_DIR)
-       yield
-
-   @pytest.fixture
-   def next_client() -> NextClient:
-       return NextClient()
-
-The fixture is named ``next_client`` rather than ``client`` so it sits next to pytest-django's own ``client`` fixture instead of replacing it.
+The project needs no ``conftest.py``.
+The plugin imports every ``page.py`` under ``notes/pages`` once per session and hands out a ``next_client`` fixture, a fresh ``NextClient`` per test.
+That fixture is named ``next_client`` rather than ``client`` so it sits next to pytest-django's own ``client`` fixture instead of replacing it.
 A test that wants Django's plain client asks for ``client`` and a test that wants the framework client asks for ``next_client``.
 
-The forms in ``notes/forms.py`` need no conftest wiring.
+The forms in ``notes/forms.py`` need no wiring at all.
 The ``next`` app runs form autodiscovery at startup, and pytest-django boots Django before any fixture runs, so ``CreateNoteForm`` and ``DeleteNoteForm`` are already registered.
-``eager_load_pages`` walks ``notes/pages`` and imports every ``page.py``, which runs the page decorators.
-The call is idempotent, so the session-scoped fixture runs the registration once.
+The page import is idempotent, so the session-scoped fixture behind ``next_pages`` runs the registration once.
 Database access uses the standard ``db`` fixture from pytest-django, no extra fixture is needed.
 
 .. note::
@@ -239,7 +220,6 @@ The project now has tests.
      test_notes_e2e.py
      test_notes_actions.py
      test_notes_signals.py
-   conftest.py
    pytest.ini
 
 The full test suite covers the index, the detail page, the create action, the create validation failure, and the ``action_dispatched`` signal.
@@ -250,11 +230,11 @@ Common pitfalls
 
 ``post_action`` raises ``FormActionNotFoundError``.
    A form class registers only when its module is imported.
-   Call ``eager_load_pages`` in the test setup so every form and handler registers before the first dispatch.
+   Check that ``next_pages`` covers the page root so every form and handler registers before the first dispatch.
    For forms in ``forms.py``, also import that module explicitly or rely on ``autodiscover_forms()``.
 
 Tests that rewrite page files on disk see stale handlers.
-   ``eager_load_pages`` memoises each directory it has already imported.
+   The page loader memoises each directory it has already imported.
    Call ``clear_loaded_dirs()`` from ``next.testing.loaders`` to drop that memo when a test edits ``page.py`` files between runs.
 
 Autoreloader does not pick up a change.

@@ -1,4 +1,4 @@
-from django.db import migrations
+from kanban.models import Board, Card, Column
 
 
 DEMO_BOARDS = [
@@ -11,7 +11,10 @@ DEMO_BOARDS = [
                 "title": "Backlog",
                 "wip_limit": None,
                 "cards": [
-                    {"title": "Audit static pipeline", "body": "Review collector + manager."},
+                    {
+                        "title": "Audit static pipeline",
+                        "body": "Review collector + manager.",
+                    },
                     {"title": "Document KindRegistry", "body": "Public API guide."},
                 ],
             },
@@ -19,19 +22,15 @@ DEMO_BOARDS = [
                 "title": "In progress",
                 "wip_limit": 2,
                 "cards": [
-                    {"title": "Refactor discovery", "body": "Iterate over kinds."},
+                    {"title": "Refactor discovery", "body": "Iterate over kinds."}
                 ],
             },
-            {
-                "title": "Review",
-                "wip_limit": 3,
-                "cards": [],
-            },
+            {"title": "Review", "wip_limit": 3, "cards": []},
             {
                 "title": "Done",
                 "wip_limit": None,
                 "cards": [
-                    {"title": "Wire defaults bootstrap", "body": "register_defaults()."},
+                    {"title": "Wire defaults bootstrap", "body": "register_defaults()."}
                 ],
             },
         ],
@@ -44,9 +43,7 @@ DEMO_BOARDS = [
             {
                 "title": "Ideas",
                 "wip_limit": None,
-                "cards": [
-                    {"title": "Tagline draft", "body": "Pithy and informative."},
-                ],
+                "cards": [{"title": "Tagline draft", "body": "Pithy and informative."}],
             },
             {
                 "title": "Scheduled",
@@ -67,50 +64,26 @@ DEMO_BOARDS = [
 ]
 
 
-def seed(apps, _schema_editor):
-    """Insert two active demo boards plus one archived board."""
-    board_model = apps.get_model("kanban", "Board")
-    column_model = apps.get_model("kanban", "Column")
-    card_model = apps.get_model("kanban", "Card")
+def seed_demo() -> None:
+    """Create two active demo boards plus one archived board."""
     for board_data in DEMO_BOARDS:
-        board, created = board_model.objects.get_or_create(
+        board, created = Board.objects.get_or_create(
             slug=board_data["slug"],
-            defaults={
-                "title": board_data["title"],
-                "archived": board_data["archived"],
-            },
+            defaults={"title": board_data["title"], "archived": board_data["archived"]},
         )
         if not created:
             continue
         for col_index, col_data in enumerate(board_data["columns"]):
-            column = column_model.objects.create(
+            column = Column.objects.create(
                 board=board,
                 title=col_data["title"],
                 position=col_index,
                 wip_limit=col_data["wip_limit"],
             )
             for card_index, card_data in enumerate(col_data["cards"]):
-                card_model.objects.create(
+                Card.objects.create(
                     column=column,
                     title=card_data["title"],
                     body=card_data["body"],
                     position=card_index,
                 )
-
-
-def unseed(apps, _schema_editor):
-    """Remove demo boards on rollback (cascade clears columns and cards)."""
-    board_model = apps.get_model("kanban", "Board")
-    board_model.objects.filter(
-        slug__in=[b["slug"] for b in DEMO_BOARDS]
-    ).delete()
-
-
-class Migration(migrations.Migration):
-    dependencies = [
-        ("kanban", "0001_initial"),
-    ]
-
-    operations = [
-        migrations.RunPython(seed, unseed),
-    ]

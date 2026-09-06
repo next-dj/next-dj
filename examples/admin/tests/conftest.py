@@ -1,5 +1,6 @@
 import pytest
 from django.utils.text import slugify
+from library.demo import seed_demo
 from library.models import Author, Book, Chapter, Tag
 
 
@@ -7,11 +8,9 @@ CHAPTER_ROWS = ((1, "Intro", 100), (2, "Rising", 200))
 
 
 @pytest.fixture()
-def empty_library(db):
-    """Drop the seeded demo catalog for tests that read a whole changelist."""
-    Book.objects.all().delete()
-    Author.objects.all().delete()
-    Tag.objects.all().delete()
+def demo_data(db):
+    """Seed the shipped demo catalog for tests that read a whole changelist."""
+    seed_demo()
 
 
 @pytest.fixture()

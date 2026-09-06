@@ -287,4 +287,4 @@ The test suite asserts the server contract — the envelopes, the zone targets, 
 - [`next/forms/dispatch/`](../../next/forms/dispatch/) — where `action_dispatched`, `form_validation_failed`, `wizard_step_submitted`, `wizard_completed`, and `form_access_denied` are sent, and where the `check_permissions` / `has_object_permission` hooks run.
 - [`next/forms/checks.py`](../../next/forms/checks.py) — `next.E041` (duplicate handlers), `next.E044` (bad backend config), `next.E045` (wrong backend type).
 - [`next/testing/signals.py`](../../next/testing/signals.py) — `SignalRecorder` and `capture_signals` helpers used in the tests.
-- [`docs/content/topics/testing.rst`](../../docs/content/topics/testing.rst) — canonical conftest scaffold mirrored in this example.
+- [`next/testing/plugin.py`](../../next/testing/plugin.py) — the pytest plugin behind the `next_pages`, `next_clear_cache`, and `next_client` entries this example's `pytest.ini` uses.

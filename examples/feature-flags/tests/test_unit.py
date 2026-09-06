@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import importlib
 from pathlib import Path
 
 import pytest
-from django.apps import apps as django_apps
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied
+from django.core.management import call_command
 from flags.cache import FLAG_PREFIX, MISSING_SENTINEL, get_cached_flag, invalidate_flag
+from flags.demo import DEMO_FLAGS, seed_demo
 from flags.metrics import RENDER_INDEX_KEY, record_render, render_counts
 from flags.models import Flag
 from flags.panels._chunks.feature_guard import component as guard
@@ -21,13 +21,10 @@ from next.testing import resolve_call
 pytestmark = pytest.mark.django_db
 
 
-_SEED_MIGRATION = importlib.import_module("flags.migrations.0002_demo_flags")
-
-
 class TestDemoFlags:
-    """The data migration seeds the documented flags and reverses cleanly."""
+    """The seed module creates the documented flags and stays idempotent."""
 
-    def test_every_demo_flag_is_seeded(self) -> None:
+    def test_every_demo_flag_is_seeded(self, demo_data) -> None:
         assert dict(Flag.objects.values_list("name", "enabled")) == {
             "beta_checkout": True,
             "dark_sidebar": False,
@@ -35,13 +32,18 @@ class TestDemoFlags:
             "admin_writes": True,
         }
 
-    def test_write_gate_starts_open(self) -> None:
+    def test_write_gate_starts_open(self, demo_data) -> None:
         assert FlagService().is_enabled(WRITE_GATE_FLAG) is True
 
-    def test_reverse_removes_only_the_seeded_names(self, make_flag) -> None:
+    def test_command_leaves_hand_made_flags_alone(self, make_flag) -> None:
         make_flag("house_flag", label="House", enabled=True)
-        _SEED_MIGRATION.unseed(django_apps, None)
-        assert list(Flag.objects.values_list("name", flat=True)) == ["house_flag"]
+        call_command("seed_demo")
+        assert Flag.objects.filter(name="house_flag").exists()
+        assert Flag.objects.count() == len(DEMO_FLAGS) + 1
+
+    def test_seeding_twice_keeps_one_copy(self, demo_data) -> None:
+        seed_demo()
+        assert Flag.objects.count() == len(DEMO_FLAGS)
 
 
 class TestFlagModel:
@@ -156,7 +158,6 @@ class TestWriteGateHook:
             BulkToggleForm.check_permissions(**kwargs)
 
     def test_hook_denies_when_gate_absent(self) -> None:
-        Flag.objects.filter(name=WRITE_GATE_FLAG).delete()
         kwargs = resolve_call(BulkToggleForm.check_permissions)
         with pytest.raises(PermissionDenied):
             BulkToggleForm.check_permissions(**kwargs)

@@ -12,7 +12,7 @@ A workspace for two independent tenants (Acme and Globex) that share the same Dj
 | `/notes/<id>/edit/` | Note editor with title and body inputs and a `markdown_preview` pane. |
 | `/_t/<slug>/static/<path>` | The per-tenant asset prefix every `<link>` and `<script>` URL carries, forwarded to Django staticfiles by [`config/urls.py`](config/urls.py). |
 
-Two tenants ship with the example via a data migration:
+Two tenants ship with the example in [`notes/demo.py`](notes/demo.py):
 
 | slug     | name               | accent            |
 | -------- | ------------------ | ----------------- |
@@ -26,11 +26,12 @@ The header pill carries the tenant name, the accent strip and accent text use th
 ```bash
 cd examples/multi-tenant
 uv run python manage.py migrate
+uv run python manage.py seed_demo
 uv run python manage.py runserver     # http://127.0.0.1:8000/
 uv run pytest
 ```
 
-The migration step seeds two tenants and three demo notes through [`notes/migrations/0002_demo_data.py`](notes/migrations/0002_demo_data.py). A later migration ([`notes/migrations/0004_lock_demo_note.py`](notes/migrations/0004_lock_demo_note.py)) locks the Acme `Status update` note so the editor's object-level guard has something to refuse.
+`seed_demo` writes two tenants and three demo notes from [`notes/demo.py`](notes/demo.py). The Acme `Status update` note is seeded locked, so the editor's object-level guard has something to refuse. Migrations carry schema only, so a database without that command has no tenant and every request answers `400`.
 
 There are two ways to drive the app:
 

@@ -21,22 +21,21 @@ Load the components
 ~~~~~~~~~~~~~~~~~~~
 
 Component discovery is a side effect, so import the components before a test resolves one.
-A session-scoped pytest fixture calls ``eager_load_components`` once.
+``next_components = true`` in ``pytest.ini`` calls ``eager_load_components`` once per session through ``next.testing.plugin``.
 
-.. code-block:: python
-   :caption: conftest.py
+.. code-block:: ini
+   :caption: pytest.ini
 
-   import pytest
-   from next.testing import eager_load_components
-
-   @pytest.fixture(autouse=True, scope="session")
-   def _load_components() -> None:
-       eager_load_components()
+   [pytest]
+   DJANGO_SETTINGS_MODULE = config.settings
+   pythonpath = .
+   addopts = -p next.testing.plugin
+   next_components = true
 
 ``eager_load_components`` covers the roots configured through ``COMPONENT_BACKENDS``.
 Component folders inside a page tree register during the URL router walk instead, which runs when the URLconf first loads.
 A suite whose other tests issue ``NextClient`` requests has already triggered the walk.
-A suite that renders components without any HTTP triggers it by reversing one route in the same fixture, for example with ``page_reverse()`` from ``next.urls``.
+A suite that renders components without any HTTP triggers it by reversing one route in a session fixture, for example with ``page_reverse()`` from ``next.urls``.
 
 Render the component
 ~~~~~~~~~~~~~~~~~~~~

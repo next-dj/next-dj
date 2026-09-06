@@ -8,9 +8,11 @@ from pathlib import Path
 
 import pytest
 from django.conf import settings
+from django.core.management import call_command
 from django.http import Http404, HttpRequest
 from django.test import override_settings
 from kanban.backends import ViteManifestBackend
+from kanban.demo import seed_demo
 from kanban.forms import CreateCardForm, MoveCardForm
 from kanban.models import Board, Card, Column
 from kanban.providers import BoardProvider, CardProvider, DBoard, DCard
@@ -142,7 +144,6 @@ class TestBoardProvider:
         assert provider.resolve(_param(DBoard[Board]), _context()) is None
 
     def test_resolve_raises_404_for_missing_id(self, board: Board) -> None:
-        del board
         provider = BoardProvider()
         ctx = _context(url_kwargs={"id": 99999})
         with pytest.raises(Http404):
@@ -457,3 +458,21 @@ class TestCreateCardHandlerRace:
         request = HttpRequest()
         response = form.on_valid(request)
         assert response.status_code == 400
+
+
+class TestDemoSeed:
+    """The demo dataset lives in a seed module rather than a data migration."""
+
+    def test_command_creates_the_demo_boards(self) -> None:
+        call_command("seed_demo")
+        assert set(Board.objects.values_list("slug", flat=True)) == {
+            "engineering-roadmap",
+            "marketing-launch",
+            "old-experiments",
+        }
+        cards = Card.objects.filter(column__board__slug="engineering-roadmap")
+        assert cards.count() == 4
+
+    def test_seeding_twice_keeps_one_copy(self, demo_data: None) -> None:
+        seed_demo()
+        assert Board.objects.count() == 3

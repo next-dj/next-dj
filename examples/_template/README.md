@@ -12,8 +12,8 @@ The scaffold ships deliberately generic names. Each rename touches more than one
 
 | Rename | Also update |
 | --- | --- |
-| `myapp/` | `INSTALLED_APPS` in [`config/settings.py`](config/settings.py), and `eager_load_pages(...)` in [`conftest.py`](conftest.py) |
-| `myapp/routes/` | `PAGES_DIR` in `PAGE_BACKENDS`, and `eager_load_pages(...)` in `conftest.py` |
+| `myapp/` | `INSTALLED_APPS` in [`config/settings.py`](config/settings.py), and `next_pages` in [`pytest.ini`](pytest.ini) |
+| `myapp/routes/` | `PAGES_DIR` in `PAGE_BACKENDS`, and `next_pages` in `pytest.ini` |
 | `myapp/routes/_widgets/` | `COMPONENTS_DIR` in `COMPONENT_BACKENDS` |
 | `chrome/` | `PAGE_BACKENDS["DIRS"]` |
 
@@ -22,7 +22,7 @@ Pick names that fit the domain rather than reusing `routes` and `_widgets`. Ever
 ## Conventions
 
 - Tailwind loads from the Play CDN through the shared `page_head` component. No build step, no Node.
-- `conftest.py` is the canonical test scaffold. `eager_load_pages` imports the page tree once per session so the router is populated before the first request, and `NextClient` is the test client that speaks the partial protocol.
+- `pytest.ini` is the whole test scaffold. `addopts` opts into the framework's pytest plugin with `-p next.testing.plugin`, `next_pages` points it at the page tree it imports once per session so the router is populated before the first request, `next_clear_cache` empties the cache between tests, and the `next_client` fixture is the test client that speaks the partial protocol.
 - `PARTIAL_BACKENDS` pins an explicit asset `VERSION`, and every example inherits that line from here. The [examples README](../README.md#conventions-every-example-follows) explains why it is pinned and what `next.W069` checks.
 - Every file is intentionally short. Fill in what you need, drop what you do not.
 

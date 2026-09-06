@@ -1,8 +1,8 @@
-import importlib
 from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
+from catalog.demo import seed_demo
 from catalog.forms import PRESETS, PresetFilterForm
 from catalog.models import Category, Product
 from catalog.providers import (
@@ -14,13 +14,10 @@ from catalog.providers import (
 )
 from catalog.templatetags.catalog_qs import querystring
 from catalog.zones import CATEGORY_ZONES, LISTING_ZONES, zone_target
-from django.apps import apps as django_apps
+from django.core.management import call_command
 
 
 pytestmark = pytest.mark.django_db
-
-
-_SEED_MIGRATION = importlib.import_module("catalog.migrations.0002_seed_catalog")
 
 
 class _PageParam:
@@ -37,20 +34,21 @@ def _resolve_page(rf, query: str) -> PageRequest:
 
 
 class TestDemoData:
-    """Confirm the pre-loaded demo catalog is present out of the box."""
+    """The demo catalog comes from a seed module rather than a migration."""
 
     @pytest.mark.django_db()
-    def test_demo_catalog_is_pre_loaded(self) -> None:
-        """The data migration creates four categories and 25 products."""
+    def test_seed_command_creates_the_catalog(self) -> None:
+        """`seed_demo` creates four categories and 25 products."""
+        call_command("seed_demo")
         assert Category.objects.count() == 4
         assert Product.objects.count() == 25
 
     @pytest.mark.django_db()
-    def test_reverse_migration_drops_every_row(self) -> None:
-        """Reversing the data migration removes both products and categories."""
-        _SEED_MIGRATION.unseed(django_apps, None)
-        assert Product.objects.count() == 0
-        assert Category.objects.count() == 0
+    def test_seeding_twice_keeps_one_copy(self, demo_data) -> None:
+        """A second run adds nothing, so the command stays safe to repeat."""
+        seed_demo()
+        assert Category.objects.count() == 4
+        assert Product.objects.count() == 25
 
 
 class TestModelStr:

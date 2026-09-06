@@ -1,4 +1,4 @@
-from django.db import migrations
+from flags.models import Flag
 
 
 DEMO_FLAGS = [
@@ -29,11 +29,10 @@ DEMO_FLAGS = [
 ]
 
 
-def seed(apps, _schema_editor):
-    """Insert the demo flags so a fresh database has something to toggle."""
-    flag_model = apps.get_model("flags", "Flag")
+def seed_demo() -> None:
+    """Create the demo flags so a fresh database has something to toggle."""
     for flag_data in DEMO_FLAGS:
-        flag_model.objects.get_or_create(
+        Flag.objects.get_or_create(
             name=flag_data["name"],
             defaults={
                 "label": flag_data["label"],
@@ -41,19 +40,3 @@ def seed(apps, _schema_editor):
                 "enabled": flag_data["enabled"],
             },
         )
-
-
-def unseed(apps, _schema_editor):
-    """Remove exactly the seeded flags on rollback and leave the rest alone."""
-    flag_model = apps.get_model("flags", "Flag")
-    flag_model.objects.filter(name__in=[f["name"] for f in DEMO_FLAGS]).delete()
-
-
-class Migration(migrations.Migration):
-    dependencies = [
-        ("flags", "0001_initial"),
-    ]
-
-    operations = [
-        migrations.RunPython(seed, unseed),
-    ]

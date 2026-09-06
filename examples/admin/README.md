@@ -21,7 +21,7 @@ The example shows seven reusable patterns. A request-aware `@action(form_class=.
 
 A `library` app ships demo models. `Author`, `Tag`, `Book` (FK to Author, M2M to Tag, `autocomplete_fields=("author",)`, `filter_horizontal=("tags",)`, `is_featured: BooleanField` for the checkbox flow, custom `mark_as_published` action), and `Chapter` (inline under Book). The combination exercises every flow above — text inputs, textarea, selects single and multi, checkbox, date, number, autocomplete, and tabular inlines.
 
-`migrate` also runs [`library/migrations/0003_demo_catalog.py`](library/migrations/0003_demo_catalog.py), a `RunPython` data migration that fills the catalog so every row of the table above has data behind it on a fresh database. It seeds 19 public-domain books by 7 authors under 6 tags, spread across all three `status` values, featured and plain, tagged and untagged, with and without a publication date, and chapters on two of them. `BookAdmin.list_per_page` is 12, so the book changelist opens on page 1 of 2 and every `list_filter` facet — including the `tags` "empty" branch — resolves to a non-empty result. No account is seeded, so `createsuperuser` remains the step that gives you a login. Reversing the migration (`uv run python manage.py migrate library 0002`) removes exactly the seeded rows and keeps anything entered by hand.
+[`library/demo.py`](library/demo.py) holds the demo catalog and the `seed_demo` management command writes it, so every row of the table above has data behind it. It seeds 19 public-domain books by 7 authors under 6 tags, spread across all three `status` values, featured and plain, tagged and untagged, with and without a publication date, and chapters on two of them. `BookAdmin.list_per_page` is 12, so the book changelist opens on page 1 of 2 and every `list_filter` facet — including the `tags` "empty" branch — resolves to a non-empty result. Migrations carry schema only, so the catalog stays empty until you run the command, and a second run adds nothing. No account is seeded either, so `createsuperuser` remains the step that gives you a login.
 
 A second Django app `admin_audit` ships one model (`AdminActivityLog`) and one signal receiver. It hangs off the framework's `action_dispatched` signal and writes a row per dispatch. No change to `library` or `shadcn_admin` is required for it to work.
 
@@ -29,7 +29,8 @@ A second Django app `admin_audit` ships one model (`AdminActivityLog`) and one s
 
 ```bash
 cd examples/admin
-uv run python manage.py migrate          # builds the schema and seeds the demo catalog
+uv run python manage.py migrate          # builds the schema
+uv run python manage.py seed_demo        # fills the demo catalog
 uv run python manage.py createsuperuser  # no account is seeded
 uv run python manage.py runserver        # http://127.0.0.1:8000/admin/
 uv run pytest

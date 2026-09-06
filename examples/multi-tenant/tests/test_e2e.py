@@ -16,12 +16,12 @@ if TYPE_CHECKING:
 
 
 @pytest.fixture()
-def acme(db) -> Tenant:
+def acme(demo_data) -> Tenant:
     return Tenant.objects.get(slug="acme")
 
 
 @pytest.fixture()
-def globex(db) -> Tenant:
+def globex(demo_data) -> Tenant:
     return Tenant.objects.get(slug="globex")
 
 
@@ -39,8 +39,8 @@ class TestTenantContract:
     """Production contract is the X-Tenant header."""
 
     @override_settings(DEBUG=False)
-    def test_missing_header_returns_400(self, client: NextClient) -> None:
-        response = client.get("/notes/")
+    def test_missing_header_returns_400(self, next_client: NextClient) -> None:
+        response = next_client.get("/notes/")
         assert response.status_code == 400
 
     @pytest.mark.parametrize(
@@ -53,9 +53,9 @@ class TestTenantContract:
     )
     @override_settings(DEBUG=False)
     def test_header_lists_only_that_tenants_notes(
-        self, client: NextClient, db, slug, visible, hidden
+        self, next_client: NextClient, demo_data, slug, visible, hidden
     ) -> None:
-        response = client.get("/notes/", HTTP_X_TENANT=slug)
+        response = next_client.get("/notes/", HTTP_X_TENANT=slug)
         assert response.status_code == 200
         body = response.content.decode()
         assert visible in body
@@ -63,10 +63,10 @@ class TestTenantContract:
 
     @override_settings(DEBUG=False)
     def test_landing_page_renders_with_recent_notes(
-        self, client: NextClient, acme: Tenant
+        self, next_client: NextClient, acme: Tenant
     ) -> None:
         """`recent_notes` populates the landing card for the active tenant."""
-        response = client.get("/", HTTP_X_TENANT="acme")
+        response = next_client.get("/", HTTP_X_TENANT="acme")
         assert response.status_code == 200
         body = response.content.decode()
         assert "Welcome to Acme" in body
@@ -82,9 +82,9 @@ class TestTenantTheme:
     )
     @override_settings(DEBUG=False)
     def test_tenant_color_present_in_html(
-        self, client: NextClient, db, slug, accent
+        self, next_client: NextClient, demo_data, slug, accent
     ) -> None:
-        response = client.get("/notes/", HTTP_X_TENANT=slug)
+        response = next_client.get("/notes/", HTTP_X_TENANT=slug)
         body = response.content.decode()
         assert f"--tenant-accent:{accent}" in body
 
@@ -95,9 +95,9 @@ class TestTenantPrefixStatic:
     @pytest.mark.parametrize("slug", ["acme", "globex"])
     @override_settings(DEBUG=False)
     def test_static_urls_carry_the_tenant_prefix(
-        self, client: NextClient, db, slug
+        self, next_client: NextClient, demo_data, slug
     ) -> None:
-        response = client.get("/notes/", HTTP_X_TENANT=slug)
+        response = next_client.get("/notes/", HTTP_X_TENANT=slug)
         body = response.content.decode()
         assert f"/_t/{slug}/static/next/" in body
 
@@ -106,8 +106,10 @@ class TestRootBlocks:
     """Header from `root_blocks/` renders the tenant name."""
 
     @override_settings(DEBUG=False)
-    def test_header_carries_tenant_name(self, client: NextClient, acme: Tenant) -> None:
-        response = client.get("/notes/", HTTP_X_TENANT="acme")
+    def test_header_carries_tenant_name(
+        self, next_client: NextClient, acme: Tenant
+    ) -> None:
+        response = next_client.get("/notes/", HTTP_X_TENANT="acme")
         body = response.content.decode()
         assert "Acme Industries" in body
         assert 'class="rounded-full' in body
@@ -118,9 +120,9 @@ class TestNoteEditForm:
 
     @override_settings(DEBUG=False)
     def test_acme_can_save_their_own_note(
-        self, client: NextClient, acme_note: Note
+        self, next_client: NextClient, acme_note: Note
     ) -> None:
-        response = client.post_action(
+        response = next_client.post_action(
             "note_edit_form",
             {"title": acme_note.title, "body": "edited body content"},
             origin=f"/notes/{acme_note.pk}/edit/",
@@ -132,9 +134,9 @@ class TestNoteEditForm:
 
     @override_settings(DEBUG=False)
     def test_globex_cannot_edit_acme_note(
-        self, client: NextClient, acme_note: Note
+        self, next_client: NextClient, acme_note: Note
     ) -> None:
-        response = client.post_action(
+        response = next_client.post_action(
             "note_edit_form",
             {"title": "hijack", "body": "should not save"},
             origin=f"/notes/{acme_note.pk}/edit/",
@@ -150,9 +152,9 @@ class TestNoteEditFormPermissionHooks:
 
     @override_settings(DEBUG=False)
     def test_active_tenant_edits_unlocked_note(
-        self, client: NextClient, acme_note: Note
+        self, next_client: NextClient, acme_note: Note
     ) -> None:
-        response = client.post_action(
+        response = next_client.post_action(
             "note_edit_form",
             {"title": acme_note.title, "body": "passed both hooks"},
             origin=f"/notes/{acme_note.pk}/edit/",
@@ -164,9 +166,9 @@ class TestNoteEditFormPermissionHooks:
 
     @override_settings(DEBUG=False)
     def test_locked_note_is_denied_with_403(
-        self, client: NextClient, locked_acme_note: Note
+        self, next_client: NextClient, locked_acme_note: Note
     ) -> None:
-        response = client.post_action(
+        response = next_client.post_action(
             "note_edit_form",
             {"title": locked_acme_note.title, "body": "should not persist"},
             origin=f"/notes/{locked_acme_note.pk}/edit/",
@@ -178,9 +180,9 @@ class TestNoteEditFormPermissionHooks:
 
     @override_settings(DEBUG=False)
     def test_locked_note_editor_announces_the_denial_up_front(
-        self, client: NextClient, locked_acme_note: Note
+        self, next_client: NextClient, locked_acme_note: Note
     ) -> None:
-        response = client.get(
+        response = next_client.get(
             f"/notes/{locked_acme_note.pk}/edit/", HTTP_X_TENANT="acme"
         )
         body = response.content.decode()
@@ -189,19 +191,19 @@ class TestNoteEditFormPermissionHooks:
 
     @override_settings(DEBUG=False)
     def test_unlocked_note_editor_keeps_the_save_button_live(
-        self, client: NextClient, acme_note: Note
+        self, next_client: NextClient, acme_note: Note
     ) -> None:
-        response = client.get(f"/notes/{acme_note.pk}/edit/", HTTP_X_TENANT="acme")
+        response = next_client.get(f"/notes/{acme_note.pk}/edit/", HTTP_X_TENANT="acme")
         body = response.content.decode()
         assert "Locked note" not in body
         assert re.search(r"<button[^>]*\sdisabled(?=[\s>])", body) is None
 
     @override_settings(DEBUG=False)
     def test_suspended_tenant_is_denied_with_403(
-        self, client: NextClient, acme: Tenant, acme_note: Note
+        self, next_client: NextClient, acme: Tenant, acme_note: Note
     ) -> None:
         Tenant.objects.filter(pk=acme.pk).update(is_active=False)
-        response = client.post_action(
+        response = next_client.post_action(
             "note_edit_form",
             {"title": acme_note.title, "body": "tenant is suspended"},
             origin=f"/notes/{acme_note.pk}/edit/",
@@ -213,10 +215,10 @@ class TestNoteEditFormPermissionHooks:
 
     @override_settings(DEBUG=False)
     def test_view_hook_denies_before_get_initial_404(
-        self, client: NextClient, acme_note: Note, globex: Tenant
+        self, next_client: NextClient, acme_note: Note, globex: Tenant
     ) -> None:
         Tenant.objects.filter(pk=globex.pk).update(is_active=False)
-        response = client.post_action(
+        response = next_client.post_action(
             "note_edit_form",
             {"title": "hijack", "body": "cross tenant"},
             origin=f"/notes/{acme_note.pk}/edit/",
@@ -232,9 +234,9 @@ class TestNoteEditFormErrorRerender:
 
     @override_settings(DEBUG=False)
     def test_invalid_submit_keeps_static_pipeline(
-        self, client: NextClient, acme_note: Note
+        self, next_client: NextClient, acme_note: Note
     ) -> None:
-        response = client.post_action(
+        response = next_client.post_action(
             "note_edit_form",
             {"title": "", "body": "x"},
             origin=f"/notes/{acme_note.pk}/edit/",
@@ -252,9 +254,9 @@ class TestNoteCreate:
 
     @override_settings(DEBUG=False)
     def test_new_page_renders_empty_form(
-        self, client: NextClient, acme: Tenant
+        self, next_client: NextClient, acme: Tenant
     ) -> None:
-        response = client.get("/notes/new/", HTTP_X_TENANT="acme")
+        response = next_client.get("/notes/new/", HTTP_X_TENANT="acme")
         assert response.status_code == 200
         body = response.content.decode()
         assert "Create note" in body
@@ -262,10 +264,10 @@ class TestNoteCreate:
 
     @override_settings(DEBUG=False)
     def test_post_creates_note_and_redirects_to_edit(
-        self, client: NextClient, acme: Tenant
+        self, next_client: NextClient, acme: Tenant
     ) -> None:
         existing = set(Note.objects.filter(tenant=acme).values_list("pk", flat=True))
-        response = client.post_action(
+        response = next_client.post_action(
             "note_create_form",
             {"title": "Fresh idea", "body": "## body"},
             HTTP_X_TENANT="acme",
@@ -284,9 +286,9 @@ class TestNoteCreate:
 
     @override_settings(DEBUG=False)
     def test_create_is_tenant_scoped(
-        self, client: NextClient, acme: Tenant, globex: Tenant
+        self, next_client: NextClient, acme: Tenant, globex: Tenant
     ) -> None:
-        client.post_action(
+        next_client.post_action(
             "note_create_form",
             {"title": "Globex only", "body": ""},
             HTTP_X_TENANT="globex",
@@ -300,19 +302,19 @@ class TestTenantStaticServe:
 
     @override_settings(DEBUG=True)
     def test_tenant_static_url_serves_collected_asset(
-        self, client: NextClient, acme: Tenant
+        self, next_client: NextClient, acme: Tenant
     ) -> None:
-        response = client.get("/_t/acme/static/next/components/header.css")
+        response = next_client.get("/_t/acme/static/next/components/header.css")
         assert response.status_code == 200
         body = b"".join(response.streaming_content)
         assert len(body) > 0
 
     @override_settings(DEBUG=True)
     def test_tenant_static_url_works_without_tenant_header(
-        self, client: NextClient, db
+        self, next_client: NextClient, db
     ) -> None:
         """Static path bypasses TenantMiddleware so no header is required."""
-        response = client.get("/_t/acme/static/next/components/header.css")
+        response = next_client.get("/_t/acme/static/next/components/header.css")
         assert response.status_code == 200
 
 
@@ -321,9 +323,9 @@ class TestNoteEditPage:
 
     @override_settings(DEBUG=False)
     def test_edit_page_renders_with_seeded_form(
-        self, client: NextClient, acme_note: Note
+        self, next_client: NextClient, acme_note: Note
     ) -> None:
-        response = client.get(f"/notes/{acme_note.pk}/edit/", HTTP_X_TENANT="acme")
+        response = next_client.get(f"/notes/{acme_note.pk}/edit/", HTTP_X_TENANT="acme")
         assert response.status_code == 200
         body = response.content.decode()
         assert acme_note.title in body
@@ -331,9 +333,9 @@ class TestNoteEditPage:
 
     @override_settings(DEBUG=False)
     def test_edit_page_prefixes_component_module(
-        self, client: NextClient, acme_note: Note
+        self, next_client: NextClient, acme_note: Note
     ) -> None:
-        response = client.get(f"/notes/{acme_note.pk}/edit/", HTTP_X_TENANT="acme")
+        response = next_client.get(f"/notes/{acme_note.pk}/edit/", HTTP_X_TENANT="acme")
         body = response.content.decode()
         assert (
             '<script type="module" '
@@ -347,39 +349,41 @@ class TestDebugAffordance:
 
     @override_settings(DEBUG=True)
     def test_query_param_redirects_with_cookie(
-        self, client: NextClient, acme: Tenant
+        self, next_client: NextClient, acme: Tenant
     ) -> None:
-        response = client.get("/notes/?tenant=acme")
+        response = next_client.get("/notes/?tenant=acme")
         assert response.status_code == 302
         assert response.url == "/notes/"
         assert response.cookies["next_tenant"].value == "acme"
 
     @override_settings(DEBUG=True)
     def test_query_param_preserves_other_query_params(
-        self, client: NextClient, acme: Tenant
+        self, next_client: NextClient, acme: Tenant
     ) -> None:
-        response = client.get("/notes/?tenant=acme&keep=1")
+        response = next_client.get("/notes/?tenant=acme&keep=1")
         assert response.status_code == 302
         assert response.url == "/notes/?keep=1"
 
     @override_settings(DEBUG=True)
-    def test_debug_without_any_tenant_returns_400(self, client: NextClient, db) -> None:
-        response = client.get("/notes/")
+    def test_debug_without_any_tenant_returns_400(
+        self, next_client: NextClient, db
+    ) -> None:
+        response = next_client.get("/notes/")
         assert response.status_code == 400
 
     @override_settings(DEBUG=True)
     def test_cookie_lets_subsequent_requests_pass_without_header(
-        self, client: NextClient, acme: Tenant
+        self, next_client: NextClient, acme: Tenant
     ) -> None:
-        client.cookies["next_tenant"] = "acme"
-        response = client.get("/notes/")
+        next_client.cookies["next_tenant"] = "acme"
+        response = next_client.get("/notes/")
         assert response.status_code == 200
         assert "Welcome to Acme" in response.content.decode()
 
     @override_settings(DEBUG=False)
     def test_cookie_ignored_in_production(
-        self, client: NextClient, acme: Tenant
+        self, next_client: NextClient, acme: Tenant
     ) -> None:
-        client.cookies["next_tenant"] = "acme"
-        response = client.get("/notes/")
+        next_client.cookies["next_tenant"] = "acme"
+        response = next_client.get("/notes/")
         assert response.status_code == 400

@@ -30,8 +30,8 @@ from next.testing import (
 pytestmark = pytest.mark.django_db
 
 
-def _detail_html(client: NextClient, poll: Poll) -> str:
-    response = client.get(f"/polls/{poll.pk}/")
+def _detail_html(next_client: NextClient, poll: Poll) -> str:
+    response = next_client.get(f"/polls/{poll.pk}/")
     assert response.status_code == 200
     return response.content.decode()
 
@@ -82,8 +82,8 @@ def primed_broker(poll: Poll) -> PollBroker:
 class TestRootRedirect:
     """The bare site root sends visitors to the polls list."""
 
-    def test_root_redirects_to_polls(self, client: NextClient) -> None:
-        response = client.get("/")
+    def test_root_redirects_to_polls(self, next_client: NextClient) -> None:
+        response = next_client.get("/")
         assert response.status_code == 302
         assert response["Location"] == "/polls/"
 
@@ -92,34 +92,32 @@ class TestPollIndex:
     """The index page lists polls and renders the poll_card composite."""
 
     def test_renders_each_poll(
-        self, client: NextClient, poll: Poll, second_poll: Poll
+        self, next_client: NextClient, poll: Poll, second_poll: Poll
     ) -> None:
-        response = client.get("/polls/")
+        response = next_client.get("/polls/")
         body = response.content.decode()
         assert response.status_code == 200
         assert poll.question in body
         assert second_poll.question in body
 
     def test_poll_card_shows_choice_count_and_total(
-        self, client: NextClient, poll: Poll
+        self, next_client: NextClient, poll: Poll
     ) -> None:
         Choice.objects.filter(poll=poll, text="Tabs").update(votes=4)
         Choice.objects.filter(poll=poll, text="Spaces").update(votes=3)
-        response = client.get("/polls/")
+        response = next_client.get("/polls/")
         body = response.content.decode()
         assert "2 choices · 7 total votes" in body
 
     def test_inherit_context_renders_active_polls_count(
-        self, client: NextClient, poll: Poll, second_poll: Poll
+        self, next_client: NextClient, poll: Poll, second_poll: Poll
     ) -> None:
-        del poll, second_poll
-        response = client.get("/polls/")
+        response = next_client.get("/polls/")
         body = response.content.decode()
         assert "2 open polls" in body
 
-    def test_empty_state(self, client: NextClient) -> None:
-        Poll.objects.all().delete()
-        response = client.get("/polls/")
+    def test_empty_state(self, next_client: NextClient) -> None:
+        response = next_client.get("/polls/")
         body = response.content.decode()
         assert response.status_code == 200
         assert "No polls yet" in body
@@ -128,33 +126,37 @@ class TestPollIndex:
 class TestPollDetailPage:
     """The detail page renders the chart, the form, and the layout chain."""
 
-    def test_renders_question_and_choices(self, client: NextClient, poll: Poll) -> None:
-        body = _detail_html(client, poll)
+    def test_renders_question_and_choices(
+        self, next_client: NextClient, poll: Poll
+    ) -> None:
+        body = _detail_html(next_client, poll)
         assert poll.question in body
         for choice in poll.choices.all():
             assert choice.text in body
 
-    def test_nested_layout_chain_visible(self, client: NextClient, poll: Poll) -> None:
-        body = _detail_html(client, poll)
+    def test_nested_layout_chain_visible(
+        self, next_client: NextClient, poll: Poll
+    ) -> None:
+        body = _detail_html(next_client, poll)
         assert "🗳️ next.dj Live polls" in body
         assert "← All polls" in body
         assert f"Poll #{poll.pk}" in body
 
     def test_poll_chart_mount_point_present(
-        self, client: NextClient, poll: Poll
+        self, next_client: NextClient, poll: Poll
     ) -> None:
-        body = _detail_html(client, poll)
+        body = _detail_html(next_client, poll)
         assert f'data-poll-chart="{poll.pk}"' in body
         assert "data-poll-chart-app" in body
         assert 'id="poll-chart-app"' in body
         assert "data-next-keep" in body
 
     def test_poll_chart_data_block_carries_fresh_counts(
-        self, client: NextClient, poll: Poll
+        self, next_client: NextClient, poll: Poll
     ) -> None:
         Choice.objects.filter(poll=poll, text="Tabs").update(votes=4)
         Choice.objects.filter(poll=poll, text="Spaces").update(votes=3)
-        body = _detail_html(client, poll)
+        body = _detail_html(next_client, poll)
         tabs = poll.choices.get(text="Tabs")
         assert 'data-poll-chart-data data-total-votes="7"' in body
         assert f'data-choice-id="{tabs.pk}"' in body
@@ -162,34 +164,35 @@ class TestPollDetailPage:
         assert 'data-choice-votes="4"' in body
 
     def test_inherit_context_carries_active_polls_count(
-        self, client: NextClient, poll: Poll, second_poll: Poll
+        self, next_client: NextClient, poll: Poll, second_poll: Poll
     ) -> None:
-        del second_poll
-        body = _detail_html(client, poll)
+        body = _detail_html(next_client, poll)
         assert "2 open polls" in body
 
     def test_initial_results_in_window_next_context(
-        self, client: NextClient, poll: Poll
+        self, next_client: NextClient, poll: Poll
     ) -> None:
-        body = _detail_html(client, poll)
+        body = _detail_html(next_client, poll)
         payload = _next_init_payload(body)
         assert payload["results"]["poll_id"] == poll.pk
         assert payload["results"]["total_votes"] == 0
         assert {c["text"] for c in payload["results"]["choices"]} == {"Tabs", "Spaces"}
 
     def test_page_declares_the_sse_connection(
-        self, client: NextClient, poll: Poll
+        self, next_client: NextClient, poll: Poll
     ) -> None:
-        body = _detail_html(client, poll)
+        body = _detail_html(next_client, poll)
         assert f'data-next-sse="/polls/{poll.pk}/stream/"' in body
 
 
 class TestVoteAction:
     """Voting increments the chosen counter and emits action_dispatched."""
 
-    def test_post_increments_choice_votes(self, client: NextClient, poll: Poll) -> None:
+    def test_post_increments_choice_votes(
+        self, next_client: NextClient, poll: Poll
+    ) -> None:
         choice = poll.choices.get(text="Tabs")
-        response = client.post_action(
+        response = next_client.post_action(
             "vote_form", {"poll": poll.pk, "choice": choice.pk}
         )
         assert response.status_code == 302
@@ -198,11 +201,11 @@ class TestVoteAction:
 
     @pytest.mark.parametrize("rounds", [1, 3, 7])
     def test_repeated_votes_sum_correctly(
-        self, client: NextClient, poll: Poll, rounds: int
+        self, next_client: NextClient, poll: Poll, rounds: int
     ) -> None:
         choice = poll.choices.get(text="Spaces")
         for _ in range(rounds):
-            response = client.post_action(
+            response = next_client.post_action(
                 "vote_form", {"poll": poll.pk, "choice": choice.pk}
             )
             assert response.status_code == 302
@@ -210,11 +213,11 @@ class TestVoteAction:
         assert choice.votes == rounds
 
     def test_signal_payload_carries_form_and_url_kwargs(
-        self, client: NextClient, poll: Poll
+        self, next_client: NextClient, poll: Poll
     ) -> None:
         choice = poll.choices.get(text="Tabs")
         with SignalRecorder(action_dispatched) as recorder:
-            response = client.post_action(
+            response = next_client.post_action(
                 "vote_form", {"poll": poll.pk, "choice": choice.pk}
             )
         assert response.status_code == 302
@@ -228,12 +231,12 @@ class TestVoteAction:
         assert kwargs["form"].cleaned_data["choice"].pk == choice.pk
 
     def test_cross_poll_choice_rejected(
-        self, client: NextClient, poll: Poll, second_poll: Poll
+        self, next_client: NextClient, poll: Poll, second_poll: Poll
     ) -> None:
         """A choice from a different poll fails validation and is not counted."""
         foreign_choice = second_poll.choices.first()
         with SignalRecorder(form_validation_failed) as recorder:
-            response = client.post_action(
+            response = next_client.post_action(
                 "vote_form", {"poll": poll.pk, "choice": foreign_choice.pk}
             )
         assert response.status_code in (200, 400)
@@ -252,10 +255,10 @@ class TestPartialVote:
     """A partial vote answers the voter, the zone re-renders on a bad choice."""
 
     def test_valid_partial_vote_morphs_the_zone_and_pushes_context(
-        self, client: NextClient, poll: Poll
+        self, next_client: NextClient, poll: Poll
     ) -> None:
         choice = poll.choices.get(text="Tabs")
-        response = client.post_action(
+        response = next_client.post_action(
             "vote_form",
             {"poll": poll.pk, "choice": choice.pk},
             origin=f"/polls/{poll.pk}/",
@@ -270,10 +273,10 @@ class TestPartialVote:
         assert choice.votes == 1
 
     def test_valid_partial_vote_context_op_carries_fresh_counts(
-        self, client: NextClient, poll: Poll
+        self, next_client: NextClient, poll: Poll
     ) -> None:
         choice = poll.choices.get(text="Tabs")
-        response = client.post_action(
+        response = next_client.post_action(
             "vote_form",
             {"poll": poll.pk, "choice": choice.pk},
             origin=f"/polls/{poll.pk}/",
@@ -290,18 +293,18 @@ class TestPartialVote:
         assert votes_by_text["Spaces"] == 0
 
     def test_pushed_context_name_is_a_serialize_provider_of_the_origin(
-        self, client: NextClient, poll: Poll
+        self, next_client: NextClient, poll: Poll
     ) -> None:
-        body = _detail_html(client, poll)
+        body = _detail_html(next_client, poll)
         payload = _next_init_payload(body)
         assert "live_results" in payload
         assert payload["live_results"]["poll_id"] == poll.pk
 
     def test_invalid_partial_vote_morphs_the_results_zone(
-        self, client: NextClient, poll: Poll, second_poll: Poll
+        self, next_client: NextClient, poll: Poll, second_poll: Poll
     ) -> None:
         foreign_choice = second_poll.choices.first()
-        response = client.post_action(
+        response = next_client.post_action(
             "vote_form",
             {"poll": poll.pk, "choice": foreign_choice.pk},
             origin=f"/polls/{poll.pk}/",
@@ -324,11 +327,11 @@ class TestPartialVote:
         assert foreign_choice.votes == 0
 
     def test_winning_choice_count_rides_the_zone_morph(
-        self, client: NextClient, poll: Poll, second_poll: Poll
+        self, next_client: NextClient, poll: Poll, second_poll: Poll
     ) -> None:
         Choice.objects.filter(poll=poll, text="Tabs").update(votes=4)
         foreign_choice = second_poll.choices.first()
-        response = client.post_action(
+        response = next_client.post_action(
             "vote_form",
             {"poll": poll.pk, "choice": foreign_choice.pk},
             origin=f"/polls/{poll.pk}/",
@@ -351,10 +354,10 @@ class TestZoneAssetsCarryInsertionVerbs:
     and the shared stylesheet with `load: "link"`.
     """
 
-    def _vote_envelope(self, client: NextClient, poll: Poll) -> PartialEnvelope:
+    def _vote_envelope(self, next_client: NextClient, poll: Poll) -> PartialEnvelope:
         choice = poll.choices.get(text="Tabs")
         return envelope_of(
-            client.post_action(
+            next_client.post_action(
                 "vote_form",
                 {"poll": poll.pk, "choice": choice.pk},
                 origin=f"/polls/{poll.pk}/",
@@ -364,23 +367,25 @@ class TestZoneAssetsCarryInsertionVerbs:
         )
 
     def test_every_asset_declares_a_load_verb(
-        self, client: NextClient, poll: Poll
+        self, next_client: NextClient, poll: Poll
     ) -> None:
-        assets = self._vote_envelope(client, poll).assets
+        assets = self._vote_envelope(next_client, poll).assets
         assert assets
         assert all("load" in asset for asset in assets)
 
-    def test_vue_assets_load_as_modules(self, client: NextClient, poll: Poll) -> None:
-        assets = self._vote_envelope(client, poll).assets
+    def test_vue_assets_load_as_modules(
+        self, next_client: NextClient, poll: Poll
+    ) -> None:
+        assets = self._vote_envelope(next_client, poll).assets
         vue = [asset for asset in assets if asset["kind"] == "vue"]
         assert vue
         assert {asset["load"] for asset in vue} == {"module"}
         assert any("poll_chart/component.vue" in asset["url"] for asset in vue)
 
     def test_stylesheet_asset_loads_as_a_link(
-        self, client: NextClient, poll: Poll
+        self, next_client: NextClient, poll: Poll
     ) -> None:
-        assets = self._vote_envelope(client, poll).assets
+        assets = self._vote_envelope(next_client, poll).assets
         css = [asset for asset in assets if asset["kind"] == "css"]
         assert [asset["load"] for asset in css] == ["link"]
         assert css[0]["url"].endswith("poll_chart.css")
@@ -389,7 +394,9 @@ class TestZoneAssetsCarryInsertionVerbs:
 class TestBroadcastReceiver:
     """The action_dispatched listener is the single publish point for the broker."""
 
-    def test_snapshot_cached_after_vote(self, client: NextClient, poll: Poll) -> None:
+    def test_snapshot_cached_after_vote(
+        self, next_client: NextClient, poll: Poll
+    ) -> None:
         """A vote ends with a fresh snapshot in cache, written by the receiver alone.
 
         The vote handler no longer writes to the cache so the cached
@@ -397,7 +404,7 @@ class TestBroadcastReceiver:
         executed and called `broker.publish`.
         """
         choice = poll.choices.get(text="Tabs")
-        client.post_action("vote_form", {"poll": poll.pk, "choice": choice.pk})
+        next_client.post_action("vote_form", {"poll": poll.pk, "choice": choice.pk})
         snapshot = read_snapshot(poll.pk)
         assert snapshot is not None
         votes_by_text = {row["text"]: row["votes"] for row in snapshot["choices"]}
@@ -406,7 +413,7 @@ class TestBroadcastReceiver:
         assert snapshot["total_votes"] == 1
 
     def test_receiver_invokes_broker_publish_with_new_snapshot(
-        self, client: NextClient, poll: Poll, monkeypatch: pytest.MonkeyPatch
+        self, next_client: NextClient, poll: Poll, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A spy on `broker.publish` confirms the receiver is the publish source.
 
@@ -424,7 +431,7 @@ class TestBroadcastReceiver:
 
         monkeypatch.setattr(broker, "publish", spy)
         choice = poll.choices.get(text="Tabs")
-        client.post_action("vote_form", {"poll": poll.pk, "choice": choice.pk})
+        next_client.post_action("vote_form", {"poll": poll.pk, "choice": choice.pk})
         assert len(captured) == 1
         assert captured[0].poll_id == poll.pk
         votes_by_text = {row.text: row.votes for row in captured[0].choices}
@@ -432,10 +439,12 @@ class TestBroadcastReceiver:
         assert votes_by_text["Spaces"] == 0
 
     def test_invalid_vote_does_not_publish_snapshot(
-        self, client: NextClient, poll: Poll, second_poll: Poll
+        self, next_client: NextClient, poll: Poll, second_poll: Poll
     ) -> None:
         foreign_choice = second_poll.choices.first()
-        client.post_action("vote_form", {"poll": poll.pk, "choice": foreign_choice.pk})
+        next_client.post_action(
+            "vote_form", {"poll": poll.pk, "choice": foreign_choice.pk}
+        )
         assert read_snapshot(poll.pk) is None
 
 
@@ -443,9 +452,9 @@ class TestStreamEndpoint:
     """The SSE endpoint opens a polite patch event stream over the broker."""
 
     def test_response_uses_event_stream_content_type(
-        self, client: NextClient, poll: Poll
+        self, next_client: NextClient, poll: Poll
     ) -> None:
-        response = client.get(f"/polls/{poll.pk}/stream/")
+        response = next_client.get(f"/polls/{poll.pk}/stream/")
         try:
             assert response.status_code == 200
             assert response["Content-Type"].startswith("text/event-stream")
@@ -455,7 +464,7 @@ class TestStreamEndpoint:
             response.close()
 
     def test_http_endpoint_leads_with_retry_frame(
-        self, client: NextClient, poll: Poll
+        self, next_client: NextClient, poll: Poll
     ) -> None:
         """The first byte frame is the retry hint, proving the page wires the stream.
 
@@ -464,7 +473,7 @@ class TestStreamEndpoint:
         frame is consumed in a `try/finally` so the response closes even if the
         assertion fails before the read.
         """
-        response = client.get(f"/polls/{poll.pk}/stream/")
+        response = next_client.get(f"/polls/{poll.pk}/stream/")
         try:
             first = next(iter(response.streaming_content))
             assert first.startswith(b"retry: ")
@@ -512,8 +521,8 @@ class TestStreamEndpoint:
             }
             assert votes_by_text["Tabs"] == 3
 
-    def test_unknown_poll_returns_404(self, client: NextClient) -> None:
-        response = client.get("/polls/999/stream/")
+    def test_unknown_poll_returns_404(self, next_client: NextClient) -> None:
+        response = next_client.get("/polls/999/stream/")
         try:
             assert response.status_code == 404
         finally:
@@ -524,7 +533,7 @@ class TestEchoThreading:
     """The vote's request id rides the change so the initiator drops its echo."""
 
     def test_request_id_header_reaches_the_change(
-        self, client: NextClient, poll: Poll
+        self, next_client: NextClient, poll: Poll
     ) -> None:
         choice = poll.choices.get(text="Tabs")
         captured: list[Change] = []
@@ -536,7 +545,7 @@ class TestEchoThreading:
         worker = threading.Thread(target=drain)
         worker.start()
         time.sleep(0.05)
-        client.post_action(
+        next_client.post_action(
             "vote_form",
             {"poll": poll.pk, "choice": choice.pk},
             **{f"HTTP_{REQUEST_ID.upper().replace('-', '_')}": "vote-1"},
@@ -556,11 +565,13 @@ class TestStreamPatchFrame:
     change's request id so the initiator's own tab drops the echo.
     """
 
-    def test_change_frame_carries_refresh_and_echo(self, client: NextClient) -> None:
+    def test_change_frame_carries_refresh_and_echo(
+        self, next_client: NextClient
+    ) -> None:
         poll = Poll.objects.create(question="Streamed?")
         Choice.objects.create(poll=poll, text="Yes", votes=0)
         try:
-            response = client.get(f"/polls/{poll.pk}/stream/")
+            response = next_client.get(f"/polls/{poll.pk}/stream/")
             frames: list[bytes] = []
             iterator = iter(response.streaming_content)
 

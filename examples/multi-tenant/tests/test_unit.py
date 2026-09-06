@@ -6,10 +6,12 @@ from types import ModuleType
 from unittest.mock import Mock
 
 import pytest
+from django.core.management import call_command
 from django.http import HttpRequest, QueryDict
 from django.test import override_settings
 from notes.backends import TenantPrefixStaticBackend
 from notes.context_processors import tenant_theme
+from notes.demo import DEMO_TENANTS, seed_demo
 from notes.markdown_render import render_markdown
 from notes.middleware import TenantMiddleware
 from notes.models import Note, Tenant
@@ -329,3 +331,19 @@ class TestMarkdownRender:
         assert "<h1>Heading</h1>" in rendered
         assert "<pre>" in rendered
         assert 'href="https://example.com"' in rendered
+
+
+class TestDemoSeed:
+    """The demo dataset lives in a seed module rather than a data migration."""
+
+    def test_command_creates_tenants_notes_and_the_lock(self) -> None:
+        call_command("seed_demo")
+        assert set(Tenant.objects.values_list("slug", flat=True)) == {"acme", "globex"}
+        assert Note.objects.count() == 3
+        locked = Note.objects.get(tenant__slug="acme", title="Status update")
+        assert locked.locked is True
+
+    def test_seeding_twice_keeps_one_copy(self, demo_data) -> None:
+        seed_demo()
+        assert Tenant.objects.count() == len(DEMO_TENANTS)
+        assert Note.objects.count() == 3

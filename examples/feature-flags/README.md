@@ -17,14 +17,15 @@ The example focuses on the signal / receiver / cache layer of the framework: a c
 
 ```bash
 cd examples/feature-flags
-uv run python manage.py migrate        # schema + demo flags in one step
+uv run python manage.py migrate        # schema only
+uv run python manage.py seed_demo      # the four demo flags
 uv run python manage.py runserver      # http://127.0.0.1:8000/
 uv run pytest
 ```
 
 Tailwind loads via the Play CDN in [`frame/layout.djx`](frame/layout.djx). No Node, no build step.
 
-The migrate step seeds four flags through [`flags/migrations/0002_demo_flags.py`](flags/migrations/0002_demo_flags.py), so no page is empty on the first request:
+`seed_demo` writes four flags from [`flags/demo.py`](flags/demo.py), so no page is empty on the first request:
 
 | name             | label          | start state |
 | ---------------- | -------------- | ----------- |
@@ -33,7 +34,7 @@ The migrate step seeds four flags through [`flags/migrations/0002_demo_flags.py`
 | `ai_suggestions` | AI suggestions | off         |
 | `admin_writes`   | Admin writes   | on          |
 
-`admin_writes` gates the bulk-toggle action and ships **on**, so the one interactive button of the example works straight after `migrate`. Switching it off is what the guard demonstrates. Uncheck `admin_writes` on `/admin/`, save, and the next submit comes back as `403` because the form just closed its own gate. See section 7 for the `check_permissions` hook. To reopen the gate, edit the row outside the form and restart the server so the per-process `LocMemCache` starts cold:
+`admin_writes` gates the bulk-toggle action and ships **on**, so the one interactive button of the example works straight after `seed_demo`. Switching it off is what the guard demonstrates. Uncheck `admin_writes` on `/admin/`, save, and the next submit comes back as `403` because the form just closed its own gate. See section 7 for the `check_permissions` hook. To reopen the gate, edit the row outside the form and restart the server so the per-process `LocMemCache` starts cold:
 
 ```bash
 uv run python manage.py shell -c "
@@ -68,7 +69,7 @@ Both keys are strings (not paths). The file router and components backend look u
 
 ### 2. `Flag` model and cache-through lookup
 
-[`flags/models.py`](flags/models.py) holds a tiny `Flag(name, label, description, enabled, updated_at)` table, filled by the data migration with the four rows listed above. [`flags/cache.py`](flags/cache.py) wraps the model with a read-through `LocMemCache` layer:
+[`flags/models.py`](flags/models.py) holds a tiny `Flag(name, label, description, enabled, updated_at)` table, filled by `seed_demo` with the four rows listed above. [`flags/cache.py`](flags/cache.py) wraps the model with a read-through `LocMemCache` layer:
 
 ```python
 def get_cached_flag(name: str) -> Flag | None:

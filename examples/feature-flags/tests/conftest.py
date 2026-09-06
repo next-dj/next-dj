@@ -1,14 +1,19 @@
 from collections.abc import Callable
 
 import pytest
+from flags.demo import seed_demo
 from flags.models import Flag
 from flags.providers import WRITE_GATE_FLAG
 
 
 @pytest.fixture()
+def demo_data(db) -> None:
+    """Seed the shipped demo flags for tests that read them."""
+    seed_demo()
+
+
+@pytest.fixture()
 def make_flag() -> Callable[..., Flag]:
-    # `update_or_create` so a test can restate one of the migration-seeded flags
-    # without caring whether the row already exists.
     def _make(
         name: str,
         *,
@@ -16,15 +21,12 @@ def make_flag() -> Callable[..., Flag]:
         description: str = "",
         enabled: bool = False,
     ) -> Flag:
-        flag, _ = Flag.objects.update_or_create(
+        return Flag.objects.create(
             name=name,
-            defaults={
-                "label": label or name.replace("_", " ").capitalize(),
-                "description": description,
-                "enabled": enabled,
-            },
+            label=label or name.replace("_", " ").capitalize(),
+            description=description,
+            enabled=enabled,
         )
-        return flag
 
     return _make
 
@@ -35,8 +37,3 @@ def write_gate(make_flag) -> Callable[..., Flag]:
         return make_flag(WRITE_GATE_FLAG, label="Admin writes", enabled=enabled)
 
     return _set
-
-
-@pytest.fixture()
-def no_flags() -> None:
-    Flag.objects.all().delete()

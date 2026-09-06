@@ -5,10 +5,12 @@ from pathlib import Path
 
 import pytest
 from django.core.cache import cache
+from django.core.management import call_command
 from django.http import Http404
 from polls import broker as broker_module
 from polls.backends import ViteManifestBackend
 from polls.broker import SNAPSHOT_KEY, PollBroker, build_snapshot, store_snapshot
+from polls.demo import DEMO_POLLS, seed_demo
 from polls.forms import VoteForm
 from polls.models import Choice, Poll
 from polls.providers import DPoll
@@ -387,3 +389,19 @@ class TestBrokerChangeLoop:
         stream.close()
         assert captured
         assert captured[0].snapshot["poll_id"] == poll.pk
+
+
+class TestDemoSeed:
+    """The demo dataset lives in a seed module rather than a data migration."""
+
+    def test_command_creates_the_demo_polls(self) -> None:
+        call_command("seed_demo")
+        assert set(Poll.objects.values_list("question", flat=True)) == {
+            "Tabs or spaces?",
+            "Vim or Emacs?",
+        }
+        assert Choice.objects.count() == 4
+
+    def test_seeding_twice_keeps_one_copy(self, demo_data: None) -> None:
+        seed_demo()
+        assert Poll.objects.count() == len(DEMO_POLLS)

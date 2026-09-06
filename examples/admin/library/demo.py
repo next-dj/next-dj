@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
-from django.db import migrations
+from library.models import Author, Book, Chapter, Tag
 
 
 DEMO_TAGS = [
@@ -266,53 +266,35 @@ DEMO_CHAPTERS = {
 }
 
 
-def seed(apps, _schema_editor):
-    """Fill the catalog so every changelist feature has data on a fresh database."""
-    tag_model = apps.get_model("library", "Tag")
-    author_model = apps.get_model("library", "Author")
-    book_model = apps.get_model("library", "Book")
-    chapter_model = apps.get_model("library", "Chapter")
-
+def seed_demo() -> None:
+    """Fill the catalog so every changelist feature has data to show."""
     tags = {
-        slug: tag_model.objects.create(slug=slug, name=name) for slug, name in DEMO_TAGS
+        slug: Tag.objects.get_or_create(slug=slug, defaults={"name": name})[0]
+        for slug, name in DEMO_TAGS
     }
     authors = {
-        data["full_name"]: author_model.objects.create(**data) for data in DEMO_AUTHORS
+        data["full_name"]: Author.objects.get_or_create(
+            full_name=data["full_name"],
+            defaults={k: v for k, v in data.items() if k != "full_name"},
+        )[0]
+        for data in DEMO_AUTHORS
     }
     for data in DEMO_BOOKS:
-        book = book_model.objects.create(
+        book, created = Book.objects.get_or_create(
             title=data["title"],
-            author=authors[data["author"]],
-            status=data["status"],
-            summary=data["summary"],
-            published_at=data["published_at"],
-            price=data["price"],
-            is_featured=data["is_featured"],
+            defaults={
+                "author": authors[data["author"]],
+                "status": data["status"],
+                "summary": data["summary"],
+                "published_at": data["published_at"],
+                "price": data["price"],
+                "is_featured": data["is_featured"],
+            },
         )
+        if not created:
+            continue
         book.tags.set([tags[slug] for slug in data["tags"]])
         for number, title, word_count in DEMO_CHAPTERS.get(data["title"], []):
-            chapter_model.objects.create(
+            Chapter.objects.create(
                 book=book, number=number, title=title, word_count=word_count
             )
-
-
-def unseed(apps, _schema_editor):
-    """Remove exactly the demo catalog on rollback, leaving hand-entered rows."""
-    book_model = apps.get_model("library", "Book")
-    author_model = apps.get_model("library", "Author")
-    tag_model = apps.get_model("library", "Tag")
-    book_model.objects.filter(title__in=[b["title"] for b in DEMO_BOOKS]).delete()
-    author_model.objects.filter(
-        full_name__in=[a["full_name"] for a in DEMO_AUTHORS], books__isnull=True
-    ).delete()
-    tag_model.objects.filter(slug__in=[slug for slug, _ in DEMO_TAGS]).delete()
-
-
-class Migration(migrations.Migration):
-    dependencies = [
-        ("library", "0002_book_is_featured"),
-    ]
-
-    operations = [
-        migrations.RunPython(seed, unseed),
-    ]
