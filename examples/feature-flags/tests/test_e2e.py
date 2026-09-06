@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 
+import pytest
 from django.core.cache import cache
 from flags.cache import FLAG_PREFIX, get_cached_flag
 from flags.models import Flag
@@ -10,16 +11,46 @@ from flags.providers import WRITE_GATE_FLAG
 from next.testing import assert_has_class, assert_missing_class, find_anchor
 
 
-def _open_write_gate() -> None:
-    Flag.objects.create(name=WRITE_GATE_FLAG, label="Admin writes", enabled=True)
+pytestmark = pytest.mark.django_db
+
+
+class TestSeededDatabase:
+    """The seeded flags leave every page populated and the toggle gate open."""
+
+    def test_home_lists_the_seeded_flags(self, client) -> None:
+        body = client.get("/").content.decode()
+        assert "beta_checkout" in body
+        assert "dark_sidebar" in body
+        assert "No flags are enabled" not in body
+        assert "Nothing disabled" not in body
+
+    def test_admin_lists_every_seeded_flag(self, client) -> None:
+        body = client.get("/admin/").content.decode()
+        assert "No flags defined yet" not in body
+        for name in ("beta_checkout", "dark_sidebar", "ai_suggestions", "admin_writes"):
+            assert f'value="{name}"' in body
+
+    def test_demo_shows_the_seeded_guarded_content(self, client) -> None:
+        body = client.get("/demo/").content.decode()
+        assert 'data-feature-guard="beta_checkout"' in body
+        assert 'data-feature-guard="dark_sidebar"' not in body
+
+    def test_bulk_toggle_is_allowed_out_of_the_box(self, client) -> None:
+        response = client.post_action(
+            "bulk_toggle_form", {"enabled_names": [WRITE_GATE_FLAG, "dark_sidebar"]}
+        )
+
+        assert response.status_code == 302
+        assert Flag.objects.get(name="dark_sidebar").enabled is True
+        assert Flag.objects.get(name="beta_checkout").enabled is False
 
 
 class TestHome:
     """The index lists enabled and disabled flags in two columns."""
 
-    def test_enabled_and_disabled_are_partitioned(self, client) -> None:
-        Flag.objects.create(name="on_flag", label="Enabled", enabled=True)
-        Flag.objects.create(name="off_flag", label="Disabled", enabled=False)
+    def test_enabled_and_disabled_are_partitioned(self, client, make_flag) -> None:
+        make_flag("on_flag", label="Enabled", enabled=True)
+        make_flag("off_flag", label="Disabled", enabled=False)
         response = client.get("/")
         assert response.status_code == 200
         body = response.content.decode()
@@ -28,7 +59,7 @@ class TestHome:
         assert "on_flag" in body
         assert "off_flag" in body
 
-    def test_empty_state_renders_both_placeholders(self, client) -> None:
+    def test_empty_state_renders_both_placeholders(self, client, no_flags) -> None:
         response = client.get("/")
         body = response.content.decode()
         assert "No flags are enabled" in body
@@ -38,8 +69,8 @@ class TestHome:
 class TestAdminBulkToggle:
     """Bulk-toggle form updates flags and invalidates each cached entry on save."""
 
-    def test_admin_renders_form_with_checkboxes(self, client) -> None:
-        Flag.objects.create(name="beta", label="Beta", enabled=False)
+    def test_admin_renders_form_with_checkboxes(self, client, make_flag) -> None:
+        make_flag("beta", label="Beta")
         response = client.get("/admin/")
         body = response.content.decode()
         assert "Flag administration" in body
@@ -47,18 +78,20 @@ class TestAdminBulkToggle:
         assert 'value="beta"' in body
         assert "data-next-form" in body or 'method="post"' in body.lower()
 
-    def test_admin_shows_on_and_off_toggle_preview(self, client) -> None:
-        Flag.objects.create(name="on_flag", label="On", enabled=True)
-        Flag.objects.create(name="off_flag", label="Off", enabled=False)
+    def test_admin_shows_on_and_off_toggle_preview(self, client, make_flag) -> None:
+        make_flag("on_flag", label="On", enabled=True)
+        make_flag("off_flag", label="Off")
         response = client.get("/admin/")
         body = response.content.decode()
         assert "bg-emerald-100" in body
         assert "bg-slate-100" in body
 
-    def test_posting_toggles_on_and_off(self, client) -> None:
-        _open_write_gate()
-        Flag.objects.create(name="beta", label="Beta", enabled=False)
-        Flag.objects.create(name="alpha", label="Alpha", enabled=True)
+    def test_posting_toggles_on_and_off(
+        self, client, no_flags, write_gate, make_flag
+    ) -> None:
+        write_gate(enabled=True)
+        make_flag("beta", label="Beta")
+        make_flag("alpha", label="Alpha", enabled=True)
 
         response = client.post_action("bulk_toggle_form", {"enabled_names": ["beta"]})
 
@@ -67,9 +100,9 @@ class TestAdminBulkToggle:
         assert Flag.objects.get(name="beta").enabled is True
         assert Flag.objects.get(name="alpha").enabled is False
 
-    def test_save_flashes_success_message(self, client) -> None:
-        _open_write_gate()
-        Flag.objects.create(name="beta", label="Beta", enabled=False)
+    def test_save_flashes_success_message(self, client, write_gate, make_flag) -> None:
+        write_gate(enabled=True)
+        make_flag("beta", label="Beta")
 
         response = client.post_action(
             "bulk_toggle_form", {"enabled_names": ["beta"]}, follow=True
@@ -77,9 +110,9 @@ class TestAdminBulkToggle:
 
         assert "Flag toggles saved." in response.content.decode()
 
-    def test_save_invalidates_cache(self, client) -> None:
-        _open_write_gate()
-        Flag.objects.create(name="beta", label="Beta", enabled=True)
+    def test_save_invalidates_cache(self, client, write_gate, make_flag) -> None:
+        write_gate(enabled=True)
+        make_flag("beta", label="Beta", enabled=True)
         assert get_cached_flag("beta").enabled is True
         assert cache.get(f"{FLAG_PREFIX}beta") is not None
 
@@ -88,14 +121,14 @@ class TestAdminBulkToggle:
         assert cache.get(f"{FLAG_PREFIX}beta") is None
         assert get_cached_flag("beta").enabled is False
 
-    def test_empty_admin_shows_empty_state(self, client) -> None:
+    def test_empty_admin_shows_empty_state(self, client, no_flags) -> None:
         response = client.get("/admin/")
         body = response.content.decode()
         assert "No flags defined yet" in body
 
-    def test_unchanged_flag_is_not_resaved(self, client) -> None:
-        _open_write_gate()
-        flag = Flag.objects.create(name="beta", label="Beta", enabled=True)
+    def test_unchanged_flag_is_not_resaved(self, client, write_gate, make_flag) -> None:
+        write_gate(enabled=True)
+        flag = make_flag("beta", label="Beta", enabled=True)
         original_updated = flag.updated_at
 
         client.post_action("bulk_toggle_form", {"enabled_names": ["beta"]})
@@ -107,33 +140,38 @@ class TestAdminBulkToggle:
 class TestWriteGate:
     """The check_permissions hook gates the toggle action on the admin_writes flag."""
 
-    def test_gate_off_denies_toggle(self, client) -> None:
-        Flag.objects.create(name="beta", label="Beta", enabled=False)
+    def test_gate_off_denies_toggle(self, client, write_gate, make_flag) -> None:
+        write_gate(enabled=False)
+        make_flag("beta", label="Beta")
 
         response = client.post_action("bulk_toggle_form", {"enabled_names": ["beta"]})
 
         assert response.status_code == 403
         assert Flag.objects.get(name="beta").enabled is False
 
-    def test_gate_absent_denies_toggle(self, client) -> None:
-        Flag.objects.create(name="beta", label="Beta", enabled=True)
+    def test_gate_absent_denies_toggle(self, client, make_flag) -> None:
+        Flag.objects.filter(name=WRITE_GATE_FLAG).delete()
+        make_flag("beta", label="Beta", enabled=True)
 
         response = client.post_action("bulk_toggle_form", {"enabled_names": []})
 
         assert response.status_code == 403
         assert Flag.objects.get(name="beta").enabled is True
 
-    def test_gate_on_allows_toggle(self, client) -> None:
-        _open_write_gate()
-        Flag.objects.create(name="beta", label="Beta", enabled=False)
+    def test_gate_on_allows_toggle(self, client, write_gate, make_flag) -> None:
+        write_gate(enabled=True)
+        make_flag("beta", label="Beta")
 
         response = client.post_action("bulk_toggle_form", {"enabled_names": ["beta"]})
 
         assert response.status_code == 302
         assert Flag.objects.get(name="beta").enabled is True
 
-    def test_denial_is_counted_on_metrics_page(self, client) -> None:
-        Flag.objects.create(name="beta", label="Beta", enabled=False)
+    def test_denial_is_counted_on_metrics_page(
+        self, client, write_gate, make_flag
+    ) -> None:
+        write_gate(enabled=False)
+        make_flag("beta", label="Beta")
         client.post_action("bulk_toggle_form", {"enabled_names": ["beta"]})
 
         body = client.get("/admin/metrics/").content.decode()
@@ -145,9 +183,9 @@ class TestWriteGate:
 class TestDemoPage:
     """The demo page renders `feature_guard` components for several flags."""
 
-    def test_enabled_flag_renders_banner(self, client) -> None:
-        Flag.objects.create(
-            name="beta_checkout",
+    def test_enabled_flag_renders_banner(self, client, make_flag) -> None:
+        make_flag(
+            "beta_checkout",
             label="Beta checkout",
             description="Use the new checkout flow.",
             enabled=True,
@@ -159,25 +197,26 @@ class TestDemoPage:
         assert "Beta checkout" in body
         assert "Use the new checkout flow." in body
 
-    def test_disabled_flag_renders_empty(self, client) -> None:
-        Flag.objects.create(name="beta_checkout", label="Beta", enabled=False)
+    def test_disabled_flag_renders_empty(self, client, make_flag) -> None:
+        make_flag("beta_checkout", label="Beta")
         response = client.get("/demo/")
         body = response.content.decode()
         assert 'data-feature-guard="beta_checkout"' not in body
 
     def test_unknown_flag_is_treated_as_disabled(self, client) -> None:
+        Flag.objects.filter(name="ai_suggestions").delete()
         response = client.get("/demo/")
         body = response.content.decode()
         assert 'data-feature-guard="ai_suggestions"' not in body
 
-    def test_enabled_without_description_falls_back(self, client) -> None:
-        Flag.objects.create(name="dark_sidebar", label="Dark sidebar", enabled=True)
+    def test_enabled_without_description_falls_back(self, client, make_flag) -> None:
+        make_flag("dark_sidebar", label="Dark sidebar", enabled=True)
         response = client.get("/demo/")
         body = response.content.decode()
         assert "No description provided." in body
 
-    def test_demo_lists_all_known_flag_states(self, client) -> None:
-        Flag.objects.create(name="beta_checkout", label="Beta checkout", enabled=True)
+    def test_demo_lists_all_known_flag_states(self, client, make_flag) -> None:
+        make_flag("beta_checkout", label="Beta checkout", enabled=True)
         response = client.get("/demo/")
         body = response.content.decode()
         assert "beta_checkout" in body
@@ -236,8 +275,8 @@ class TestActiveNav:
 class TestPostDeleteReceiver:
     """Deleting a flag invalidates its cache entry too."""
 
-    def test_delete_drops_cached_entry(self) -> None:
-        flag = Flag.objects.create(name="beta", label="Beta", enabled=True)
+    def test_delete_drops_cached_entry(self, make_flag) -> None:
+        flag = make_flag("beta", label="Beta", enabled=True)
         get_cached_flag("beta")
         assert cache.get(f"{FLAG_PREFIX}beta") is not None
 

@@ -68,6 +68,49 @@ describe("Column", () => {
     expect(document.querySelector("[data-kanban-wip]")).toBeNull();
   });
 
+  it("renders the create-card input and button", () => {
+    render(<Column column={makeColumn()} onDrop={vi.fn()} onCreate={vi.fn()} />);
+    expect(screen.getByPlaceholderText("New card")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add" })).toBeInTheDocument();
+  });
+
+  it("calls onCreate with the column id and the trimmed title", () => {
+    const onCreate = vi.fn();
+    render(<Column column={makeColumn()} onDrop={vi.fn()} onCreate={onCreate} />);
+    fireEvent.change(screen.getByPlaceholderText("New card"), {
+      target: { value: "  Write docs  " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect(onCreate).toHaveBeenCalledWith(1, "Write docs");
+  });
+
+  it("clears the input after a submit", () => {
+    render(<Column column={makeColumn()} onDrop={vi.fn()} onCreate={vi.fn()} />);
+    const input = screen.getByPlaceholderText("New card");
+    fireEvent.change(input, { target: { value: "Write docs" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect(input.value).toBe("");
+  });
+
+  it("ignores a submit with a blank title", () => {
+    const onCreate = vi.fn();
+    render(<Column column={makeColumn()} onDrop={vi.fn()} onCreate={onCreate} />);
+    fireEvent.change(screen.getByPlaceholderText("New card"), {
+      target: { value: "   " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect(onCreate).not.toHaveBeenCalled();
+  });
+
+  it("submits without an onCreate handler", () => {
+    render(<Column column={makeColumn()} onDrop={vi.fn()} />);
+    fireEvent.change(screen.getByPlaceholderText("New card"), {
+      target: { value: "Write docs" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect(screen.getByPlaceholderText("New card").value).toBe("");
+  });
+
   it("highlights WIP badge in red when over the limit", () => {
     const col = {
       id: 1,

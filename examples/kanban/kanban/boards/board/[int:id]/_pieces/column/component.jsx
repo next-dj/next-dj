@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { Card } from "../card/component";
 
-export function Column({ column, onDrop }) {
+export function Column({ column, onDrop, onCreate }) {
   const [dropActive, setDropActive] = useState(false);
-  const overLimit =
-    column.wip_limit != null && column.cards.length > column.wip_limit;
+  const [draft, setDraft] = useState("");
+  const overLimit = column.wip_limit != null && column.cards.length > column.wip_limit;
 
   return (
     <div
@@ -28,9 +28,7 @@ export function Column({ column, onDrop }) {
           <span
             data-kanban-wip
             className={`rounded px-2 py-0.5 text-xs ${
-              overLimit
-                ? "bg-rose-200 text-rose-800"
-                : "bg-slate-200 text-slate-700"
+              overLimit ? "bg-rose-200 text-rose-800" : "bg-slate-200 text-slate-700"
             }`}
           >
             {column.cards.length}/{column.wip_limit}
@@ -42,6 +40,34 @@ export function Column({ column, onDrop }) {
           <Card key={card.id} {...card} />
         ))}
       </div>
+      {/* mt-1 lands on the same gap the server markup gets from mt-3, because
+          the React column already spaces its children with gap-2. */}
+      <form
+        className="mt-1 flex gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const title = draft.trim();
+          if (!title) return;
+          setDraft("");
+          onCreate?.(column.id, title);
+        }}
+      >
+        <input
+          type="text"
+          name="title"
+          value={draft}
+          placeholder="New card"
+          aria-label={`New card in ${column.title}`}
+          onChange={(event) => setDraft(event.target.value)}
+          className="flex-1 rounded border border-slate-300 bg-white px-2 py-1 text-xs"
+        />
+        <button
+          type="submit"
+          className="rounded bg-slate-900 px-2 py-1 text-xs font-medium text-white"
+        >
+          Add
+        </button>
+      </form>
     </div>
   );
 }

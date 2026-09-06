@@ -9,6 +9,7 @@
     {% if info.kind == "textarea" %}
       <textarea name="{{ info.bound.html_name }}" id="{{ info.bound.id_for_label }}" rows="4"
                 class="block w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                {{ widget_attrs }}
                 {% if required and not info.is_extra %}required{% endif %}>{% if not info.is_extra %}{{ field_value|default_if_none:'' }}{% endif %}</textarea>
     {% elif info.kind == "checkbox" %}
       <label class="inline-flex items-center gap-2 text-sm">
@@ -36,6 +37,7 @@
              name="{{ info.bound.html_name }}" id="{{ info.bound.id_for_label }}"
              value="{% if not info.is_extra %}{{ field_value|default_if_none:'' }}{% endif %}"
              class="block w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+             {{ widget_attrs }}
              {% if required and not info.is_extra %}required{% endif %}>
     {% endif %}
   </div>

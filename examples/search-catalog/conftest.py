@@ -30,7 +30,7 @@ def _load_pages() -> None:
 
 
 @pytest.fixture(autouse=True)
-def _isolate(db) -> None:
+def _isolate() -> None:
     """Reset the LocMem cache between tests so cache-hit checks are reliable."""
     cache.clear()
 
@@ -39,9 +39,3 @@ def _isolate(db) -> None:
 def client() -> NextClient:
     """Return a fresh `NextClient` for each test."""
     return NextClient()
-
-
-@pytest.fixture()
-def catalog_db(db) -> None:
-    """Mark a test as depending on the pre-loaded demo catalog."""
-    return

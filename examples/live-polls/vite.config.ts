@@ -14,6 +14,9 @@ const entries = Object.fromEntries(
 export default defineConfig({
   plugins: [vue()],
   root: path.resolve(__dirname),
+  // A typed route segment is spelled [int:id], and the dev server refuses a path
+  // with a colon before it consults server.fs.allow. vitest.config.ts matches.
+  server: { fs: { strict: false } },
   build: {
     outDir: "polls/static/polls/dist",
     emptyOutDir: true,

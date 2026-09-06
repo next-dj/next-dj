@@ -1,17 +1,17 @@
 # Markdown blog
 
-A tiny blog built on **next-dj**. Every article is a plain `template.md` file next to a `page.py`, and a custom `MarkdownTemplateLoader` registered under `NEXT_FRAMEWORK["TEMPLATE_LOADERS"]` teaches the framework to read `.md` files as page bodies and renders them to HTML on request.
+A blog whose articles are plain `template.md` files on disk. A custom `MarkdownTemplateLoader` registered under `NEXT_FRAMEWORK["TEMPLATE_LOADERS"]` teaches the framework to read those files as page bodies and renders them to HTML on request.
 
-The example focuses on the reading side of the framework: custom `TemplateLoader` plug-in, nested layouts, `@context(serialize=True)` feeding `window.Next.context` for a share button, co-located `component.js`, a Django context processor, virtual pages, bodyless composite components, and shared nav components.
+The example covers the reading side of the framework: a custom `TemplateLoader` plug-in, the `template_loaded` signal, a two-root page layout, `@context(serialize=True)` feeding `window.Next.context` for a share button, a co-located `component.js`, a Django context processor wired through the router, and virtual pages.
 
 ## What you will see
 
-| URL                   | Description                                                 |
-| --------------------- | ----------------------------------------------------------- |
-| `/`                   | Latest posts — one entry per folder under `screens/posts/`. |
-| `/posts/welcome/`     | A longer post. Headings, lists, and reading-time meta.      |
-| `/posts/hello-world/` | A minimal post with a fenced code block.                    |
-| `/about/`             | Virtual "about" page (no `page.py`, only `template.djx`).   |
+| URL                   | Description                                                |
+| --------------------- | ---------------------------------------------------------- |
+| `/`                   | Latest posts, one entry per folder under `screens/posts/`. |
+| `/posts/welcome/`     | A longer post. Headings, lists, and reading-time meta.     |
+| `/posts/hello-world/` | A minimal post with a fenced code block.                   |
+| `/about/`             | Virtual page. Only `template.djx`, no `page.py`.           |
 
 ## How to run
 
@@ -22,19 +22,21 @@ uv run python manage.py runserver     # http://127.0.0.1:8000/
 uv run pytest
 ```
 
-Tailwind loads via the Play CDN in [`site/layout.djx`](site/layout.djx). No Node, no build step.
+Nothing is stored in the database, so `migrate` only builds Django's own tables. Tailwind loads via the Play CDN inside the shared [`page_head`](../_shared/_components/page_head/component.djx) component, which [`site/layout.djx`](site/layout.djx) calls with `tailwind_plugins="typography"` so the `prose` classes wrapping the rendered Markdown resolve. No Node, no build step.
 
 ## Walking the code
 
-### 1. Rename directories to fit the domain
+### 1. Two page roots and two component roots
 
-[`config/settings.py`](config/settings.py) renames the conventional folders, wires a per-router context processor, and registers the custom Markdown loader alongside the built-in djx loader:
+[`config/settings.py`](config/settings.py) renames the conventional folders, adds a project-level root beside the app tree, wires a per-router context processor, and registers the custom Markdown loader alongside the built-in djx loader:
 
 ```python
 NEXT_FRAMEWORK = {
     "PAGE_BACKENDS": [
         {
             "BACKEND": "next.urls.FileRouterBackend",
+            "APP_DIRS": True,
+            "DIRS": [str(BASE_DIR / "site")],
             "PAGES_DIR": "screens",
             "OPTIONS": {
                 "context_processors": [
@@ -45,7 +47,14 @@ NEXT_FRAMEWORK = {
         }
     ],
     "COMPONENT_BACKENDS": [
-        {"BACKEND": "next.components.FileComponentsBackend", "COMPONENTS_DIR": "_parts"}
+        {
+            "BACKEND": "next.components.FileComponentsBackend",
+            "DIRS": [
+                str(SHARED_DIR / "_components"),
+                str(BASE_DIR / "site" / "_parts"),
+            ],
+            "COMPONENTS_DIR": "_parts",
+        }
     ],
     "TEMPLATE_LOADERS": [
         "blog.loaders.MarkdownTemplateLoader",
@@ -54,21 +63,19 @@ NEXT_FRAMEWORK = {
 }
 ```
 
-`OPTIONS.context_processors` is the Next-router extension point for per-page context processors. It is merged with Django's own `TEMPLATES[0].OPTIONS.context_processors`, where entries from the Next router take priority and duplicates are dropped.
+`DIRS` names the project-level page root [`site/`](site/), which holds the single outer [`layout.djx`](site/layout.djx) with `<!DOCTYPE html>`, the `page_head` call, and `{% collect_scripts %}`. `APP_DIRS = True` plus `PAGES_DIR = "screens"` picks up the routable pages from [`blog/screens/`](blog/screens/). Neither root knows about the other, and every page in the app is wrapped by the project envelope first.
 
-`TEMPLATE_LOADERS` is a list of dotted paths to `next.pages.loaders.TemplateLoader` subclasses. When the user supplies this key, it **replaces** the default `["next.pages.loaders.DjxTemplateLoader"]` — keep the djx loader in the list if you still want `template.djx` support.
+The component backend gets `site/_parts` as a second `DIRS` entry. A component root listed in `DIRS` resolves at the empty route scope, so [`site_footer`](site/_parts/site_footer/component.djx) is visible from every template in the project without living next to any page. The shared shadcn kit in [`../_shared/_components/`](../_shared/_components/) is the first entry and supplies `page_head`, `app_shell`, `nav_link`, and `page_header`.
+
+`OPTIONS.context_processors` is the router's own extension point for per-page context processors. It merges with Django's `TEMPLATES[0].OPTIONS.context_processors`, entries from the router take priority, and duplicates are dropped.
+
+`TEMPLATE_LOADERS` is a list of dotted paths to `next.pages.loaders.TemplateLoader` subclasses. Supplying the key **replaces** the default `["next.pages.loaders.DjxTemplateLoader"]`, so the djx loader is listed explicitly to keep `template.djx` support.
 
 ### 2. Custom `MarkdownTemplateLoader`
 
-[`blog/loaders.py`](blog/loaders.py) subclasses `TemplateLoader` and teaches the framework to treat a sibling `template.md` as the page body:
+[`blog/loaders.py`](blog/loaders.py) subclasses `TemplateLoader` and treats a sibling `template.md` as the page body:
 
 ```python
-from pathlib import Path
-
-from blog.markdown_template import render_markdown
-from next.pages.loaders import TemplateLoader
-
-
 class MarkdownTemplateLoader(TemplateLoader):
     source_name = "template.md"
 
@@ -89,41 +96,23 @@ class MarkdownTemplateLoader(TemplateLoader):
 
 Three methods, three responsibilities:
 
-- **`can_load`** — cheap check that returns `True` when the file this loader backs is present next to `page.py`.
-- **`load_template`** — reads the file and returns the rendered body string. Returning `None` lets the chain fall through to the next loader.
-- **`source_path`** — points at the on-disk file for the framework's stale-cache detector. When the file's mtime changes, the composed template is recomputed on the next request.
+- **`can_load`** — cheap existence check, so the chain can skip this loader without touching the disk twice.
+- **`load_template`** — reads the file and returns the rendered body string. Returning `None` on a read error lets the chain fall through to the next loader instead of raising mid-request.
+- **`source_path`** — points at the on-disk file for the stale-cache detector, so editing a `.md` file recomposes the template on the next request without a server restart.
 
-`source_name = "template.md"` is the human label surfaced in [`next.W043`](../../docs/content/ref/system-checks.rst) when a page declares both `template.md` and, say, a `template` module attribute.
+`source_name = "template.md"` is the label the framework prints in `next.W043` when a page declares this source alongside a higher-priority one.
 
-### 3. Markdown helpers — pure, still used for metadata and reading-time
+### 3. Markdown helpers
 
-The loader handles the body. Post metadata (title, slug, URL name) and reading time are still computed per-request by the per-post `page.py`:
+[`blog/markdown_template.py`](blog/markdown_template.py) holds what the loader does not. `render_markdown` runs the `markdown` package with the `fenced_code` extension, which is what turns the code block in `hello-world` into `<pre><code class="language-python">`. `post_metadata` scans the body for the first line starting with `# ` and falls back to the title-cased folder name when there is none, so a post without a heading still lists correctly on the index. `reading_minutes` counts whitespace-separated words at 200 wpm and never returns less than one minute.
 
-```python
-def post_metadata(post_path: Path) -> dict[str, str]:
-    body = post_path.read_text(encoding="utf-8")
-    first_line = body.splitlines()[0]
-    slug = post_path.parent.name
-    return {
-        "slug": slug,
-        "url_name": f"next:page_posts_{slug.replace('-', '_')}",
-        "title": first_line.removeprefix("# ").strip(),
-    }
-```
+The URL name is derived, not stored. `post_metadata` builds `next:page_posts_<slug>` with hyphens replaced by underscores, matching the name the file router generates for the folder.
 
-### 4. Per-post `page.py` — two `@context` callables, no Markdown logic
+### 4. Per-post `page.py`
 
-Thanks to the loader, each post module is **tiny**:
+Each post module registers metadata and nothing else, because the loader owns the body:
 
 ```python
-# screens/posts/welcome/page.py
-from pathlib import Path
-
-from blog.markdown_template import post_metadata, read_post_body, reading_minutes
-
-from next import context
-
-
 _POST = Path(__file__).parent / "template.md"
 
 
@@ -137,51 +126,40 @@ def read() -> int:
     return reading_minutes(read_post_body(_POST))
 ```
 
-No `template = "..."`, no `@context("post_html")`, no `render_markdown` call. The body comes from the loader, and this module only exposes metadata for the layout chrome and the JS share button.
+No `template = "..."`, no `render()`, no `render_markdown` call. `post` carries `serialize=True` so `{slug, url_name, title}` lands in `window.Next.context.post` for the share button. `reading_minutes` stays server-only and feeds the meta bar. Import time computes a `Path` and nothing more, the file is read when a request arrives.
 
-- `post` (`serialize=True`) lands in `window.Next.context.post` for the share button — `{slug, url_name, title}`, small JSON payload.
-- `reading_minutes` is server-only, shown in the meta bar.
+### 5. Nested layout wraps the rendered Markdown
 
-Import is cheap — only a `Path` is computed. No file is opened until a request comes in.
+[`screens/posts/layout.djx`](blog/screens/posts/layout.djx) adds the back link, the meta bar with the reading time and the share button, and a `prose` container that receives the article HTML through `{% block template %}`. The loader returns the body with no wrapper of its own, so the chrome lives entirely in the layout and every post under `screens/posts/` inherits it.
 
-### 5. Nested layout provides the chrome and wraps the Markdown HTML
+The outer [`site/layout.djx`](site/layout.djx) wraps that article in turn, which makes the post pages a two-level layout composition across two page roots.
 
-[`screens/posts/layout.djx`](blog/screens/posts/layout.djx) wraps every article with the back link, meta bar, share button, and a `prose` container that receives the rendered Markdown:
-
-```djx
-<article class="space-y-6">
-  <a href="{% url 'next:page_' %}">← Back to posts</a>
-  <header>
-    <h1>{{ post.title }}</h1>
-    <div class="flex items-center justify-between text-sm text-slate-500">
-      <span>~ {{ reading_minutes }} min read · /posts/{{ post.slug }}/</span>
-      {% component "share_button" %}
-    </div>
-  </header>
-
-  <div class="prose prose-slate max-w-none">
-    {% block template %}{% endblock template %}
-  </div>
-</article>
-```
-
-The `MarkdownTemplateLoader` returns raw HTML (no wrapper) and the layout puts that HTML inside the `prose` container. This is the cleanest split — the loader does one thing (Markdown → HTML), the layout does one thing (chrome).
-
-The outer `screens/layout.djx` wraps this article in turn — `screens/posts/layout.djx` is the _inner_ layout in a two-level composition.
-
-### 6. Page body priority — `render()` > `template` attr > registered loaders
+### 6. Page body priority
 
 next.dj resolves the page body in this order:
 
-1. A `render(request, ...)` function returning `str` (composed through the layout) or any `HttpResponse` subclass (returned verbatim — escape hatch for redirects, JSON, streaming).
+1. A `render(request, ...)` function returning `str` (composed through the layout) or any `HttpResponse` subclass (returned verbatim, the escape hatch for redirects, JSON, streaming).
 2. A `template = "..."` module attribute on the page.
-3. First registered `TemplateLoader` whose `can_load(page)` returns `True`. In this blog that is `MarkdownTemplateLoader` (followed by the built-in `DjxTemplateLoader`). Used by the home index and `/about/` (`template.djx`) and by every post (`template.md`).
+3. The first registered `TemplateLoader` whose `can_load(page)` returns `True`.
 
-The highest-priority present source wins. If a page declares more than one, `manage.py check` emits [`next.W043`](../../docs/content/ref/system-checks.rst) naming the winner so the shadow is never silent. Misconfigured loaders surface as `next.E042` / `next.E043` at check time.
+Only step 3 is used here, and both loaders take part. `MarkdownTemplateLoader` backs the two posts, `DjxTemplateLoader` backs the index (`screens/page.py` beside `screens/template.djx`) and the virtual `/about/` page. The highest-priority present source wins, and a page declaring more than one gets [`next.W043`](../../docs/content/ref/system-checks.rst) at `manage.py check` time naming the winner. A `TEMPLATE_LOADERS` entry that is not a string surfaces as `next.E042`, one that cannot be imported or is not a `TemplateLoader` subclass as `next.E043`.
 
-### 7. `{% url %}` with a variable name
+### 7. Tracing which loader won through `template_loaded`
 
-The index template links to each post dynamically:
+The framework sends `next.pages.signals.template_loaded` after a page registers its template source, with the page `file_path` as the only payload. [`blog/receivers.py`](blog/receivers.py) uses it to answer the question the priority list above raises in practice — which source actually backed a given page:
+
+```python
+@receiver(template_loaded)
+def _on_template_loaded(file_path: Path, **kwargs) -> None:
+    with _lock:
+        _loader_hits[str(file_path)] = _detect_source(file_path)
+```
+
+`_detect_source` looks for a sibling `template.md`, then a sibling `template.djx`, and reports `page.py` when neither is present. The map is guarded by a `threading.Lock` because pages load lazily on first request and the dev server serves those requests on several threads. `loader_hits()` returns a copy, so a caller never iterates the live dictionary while another thread writes to it. [`BlogConfig.ready`](blog/apps.py) imports the module so the connection exists before the first page loads.
+
+### 8. `{% url %}` with a variable name
+
+The index links each post through the derived name rather than a hard-coded path:
 
 ```djx
 {% for post in posts %}
@@ -189,99 +167,60 @@ The index template links to each post dynamically:
 {% endfor %}
 ```
 
-Django's `{% url %}` accepts a **variable** name (unquoted). `post.url_name` is computed inside `post_metadata` as `"next:page_posts_<slug_with_underscores>"` and matches the file-router-generated URL name. Renaming a folder becomes a search-and-replace in one file — templates stay correct.
+Django's `{% url %}` accepts an unquoted variable as the name. Renaming a post folder changes the route, the generated URL name, and `post.url_name` together, so no template edit follows.
 
-### 8. Share button composite — bodyless, reads `window.Next.context`
+### 9. Share button, a component with no Python side
 
-[`_parts/share_button/`](blog/screens/_parts/share_button/) has no Python side:
+[`_parts/share_button/`](blog/screens/_parts/share_button/) is a directory with `component.djx` and `component.js` and no `component.py`. A directory holding a `component.djx` is already a component, so nothing has to be added to make the framework find it.
 
-```
-share_button/
-├── component.djx    # button markup with a data-share hook
-└── component.js     # click handler, attached on page load
-```
-
-A composite component without `component.py` is fine — the framework treats any directory with a `component.djx` as a component. The click handler reads the serialized post meta:
+The click handler reads the serialized post metadata the page put on the window:
 
 ```js
 const post = window.Next?.context?.post;
 await navigator.clipboard.writeText(`${post.title} — ${location.href}`);
 ```
 
-`component.js` is auto-collected by `{% collect_scripts %}` in the root layout only on pages that actually render the component — the homepage does not ship this script.
+`component.js` is collected by `{% collect_scripts %}` in the root layout only on pages that render the component. The index and `/about/` never call `share_button`, so its script is absent from their HTML. The handler bails out when `window.Next.context.post` is missing, which is what happens if the component is ever rendered outside a post page, and it reports a failed `navigator.clipboard` write on the button itself rather than throwing.
 
-### 9. Context processor — site-wide template variables
+### 10. Context processor for site-wide chrome
 
-[`blog/context_processors.py`](blog/context_processors.py) is a standard Django context processor. It receives `request` and returns a dict that is merged into every template context:
-
-```python
-def site_nav(request: HttpRequest) -> dict[str, object]:
-    return {
-        "site_tagline": SITE_TAGLINE,
-        "site_year": datetime.now(tz=UTC).year,
-        "site_path": request.path,
-    }
-```
-
-Wired under `NEXT_FRAMEWORK["PAGE_BACKENDS"][0]["OPTIONS"]["context_processors"]`. The framework's [`next.E040`](../../docs/content/ref/system-checks.rst) check fails at `manage.py check` time if the processor signature does not accept `request`.
-
-The processor reads `request.path` and exposes it as `site_path`, which the footer renders. Using the argument keeps the signature honest — there is no unused parameter to suppress, and the `request`-named parameter still satisfies the `next.E040` contract.
-
-### 10. Shared `nav_link` component
-
-Same idiom as the URL shortener: a composite component that reads `request.resolver_match.view_name` and toggles classes.
-
-```djx
-{% component "nav_link" url_name="next:page_" label="Home" %}
-{% component "nav_link" url_name="next:page_about" label="About" %}
-```
-
-The Python side resolves `href` via `reverse()` and compares the current view name exactly:
-
-```python
-@component.context("is_active")
-def _is_active(url_name: str, request: HttpRequest) -> bool:
-    return request.resolver_match.view_name == url_name
-```
-
-This blog only needs exact match — the shortener example shows the prefix-match variant via an `active_when` prop.
+[`blog/context_processors.py`](blog/context_processors.py) returns `site_tagline`, `site_year`, and `site_path` for every template rendered through the router. `site_path` is read straight off `request.path` and rendered by the footer, so the processor uses the argument the `next.E040` check requires it to accept instead of ignoring it.
 
 ### 11. URL names from the file router
 
 | File | URL | Name |
 | --- | --- | --- |
-| `screens/page.py` | `/` | `next:page_` |
+| `screens/page.py` + `screens/template.djx` | `/` | `next:page_` |
 | `screens/about/template.djx` (virtual) | `/about/` | `next:page_about` |
-| `screens/posts/welcome/page.py` | `/posts/welcome/` | `next:page_posts_welcome` |
-| `screens/posts/hello-world/page.py` | `/posts/hello-world/` | `next:page_posts_hello_world` |
+| `screens/posts/welcome/page.py` + `template.md` | `/posts/welcome/` | `next:page_posts_welcome` |
+| `screens/posts/hello-world/page.py` + `template.md` | `/posts/hello-world/` | `next:page_posts_hello_world` |
 
-Hyphens in folder names become underscores in the name: `hello-world` → `page_posts_hello_world`.
+Hyphens in folder names become underscores in the name, so `hello-world` routes as `/posts/hello-world/` and reverses as `page_posts_hello_world`. `screens/posts/` itself holds only `layout.djx`, so it contributes chrome without becoming a route.
 
 ## Gotchas
 
-### `{% component %}` props resolve against the template context
+### A page needs a body source, and a sibling layout counts
 
-`{% component "nav_link" url_name="next:page_about" %}` passes a quoted literal, which is what the root nav in [`site/layout.djx`](site/layout.djx) needs. An unquoted `url_name=some_var` is compiled as a Django `FilterExpression` and resolved at render time, so a loop variable reaches the component the same way it reaches `{{ some_var }}`. A name missing from the context resolves to `string_if_invalid` rather than raising.
+`next.E012` fails when a `page.py` has none of a `render()` function, a `template` attribute, a loader that can load it, or a sibling `layout.djx`. An _ancestor_ layout does not satisfy it. Every post directory here passes through its `template.md`.
 
-### `manage.py check` warns if a page has no body source
+### The nav components resolve against `resolver_match`
 
-`next.E012` fails when a `page.py` has none of: `render()`, `template` attribute, or a registered `TemplateLoader` that can load it. An **ancestor** `layout.djx` alone is not enough. In this blog `MarkdownTemplateLoader` satisfies the check for every post directory that has a `template.md`.
+The header calls the shared [`nav_link`](../_shared/_components/nav_link/component.py) component with `variant="bar"`, and its `is_active` callable compares `request.resolver_match.view_name` with the `url_name` prop. This blog only needs the exact match. The `active_when` prop for a substring match is exercised by [`examples/shortener`](../shortener/).
 
-If you declare more than one source on the same page, `manage.py check` emits [`next.W043`](../../docs/content/ref/system-checks.rst) naming the winner: `render()` > `template` > (registered loaders in declaration order). Misconfigured loader dotted paths surface as `next.E042` / `next.E043`.
+### The asset-version guard needs an explicit version
 
-### Virtual pages and bodyless components
+The example pins an explicit asset `VERSION` in `PARTIAL_BACKENDS`, the shared convention explained in the [examples README](../README.md#conventions-every-example-follows).
 
-The file router routes a directory that contains only a `template.djx` (no `page.py`) as a **virtual page** — see `/about/` in this example. Likewise, a component directory with just `component.djx` is a **composite component** and the framework does not require an empty `component.py`. Skip any file that would hold no code.
+### Loader output is a template body, not a variable
 
-### Loader output is trusted — no `|safe` needed
-
-`MarkdownTemplateLoader.load_template` returns HTML, and that HTML is the **template body**. The framework places it inside the `posts/layout.djx` slot and hands the composed string to Django's template engine, which treats it as part of the template source — not as a Django variable — so there is no double escaping. Never register a loader that returns user-supplied HTML without sanitising — this example trusts the files on disk.
+`MarkdownTemplateLoader.load_template` returns HTML and the framework splices it into the composed template source, which Django's engine then parses. There is no `|safe` and no double escaping, and by the same token a loader must never return user-supplied HTML unsanitised. This example trusts the files in its own repository.
 
 ## Further reading
 
-- [next/pages/manager.py](../../next/pages/manager.py) — unified view, body resolution (`_resolve_page_body`), layout composition entry point.
-- [next/pages/loaders.py](../../next/pages/loaders.py) — `TemplateLoader` ABC, `build_registered_loaders`, `compose_body`, and layout discovery.
-- [next/pages/processors.py](../../next/pages/processors.py) — context-processor discovery (Next router + Django `TEMPLATES`).
-- [next/static/serializers.py](../../next/static/serializers.py) — how `@context(serialize=True)` values reach `window.Next.context`.
-- [next/components/context.py](../../next/components/context.py) — `@component.context` and prop/parent flattening rules.
-- [docs/content/topics/pages.rst](../../docs/content/topics/pages.rst) — "Custom Template Loaders" section with a more detailed loader walkthrough.
+- [`next/pages/loaders.py`](../../next/pages/loaders.py) — the `TemplateLoader` ABC, `build_registered_loaders`, `compose_body`, and layout discovery.
+- [`next/pages/manager.py`](../../next/pages/manager.py) — `_resolve_page_body` and the layout composition entry point.
+- [`next/pages/signals.py`](../../next/pages/signals.py) — the `template_loaded` payload contract used in section 7.
+- [`next/pages/processors.py`](../../next/pages/processors.py) — context-processor discovery across the router and Django `TEMPLATES`.
+- [`next/static/serializers.py`](../../next/static/serializers.py) — how `@context(serialize=True)` values reach `window.Next.context`.
+- [`docs/content/topics/pages.rst`](../../docs/content/topics/pages.rst) — the "Custom template loaders" section this example anchors.
+- [`docs/content/ref/system-checks.rst`](../../docs/content/ref/system-checks.rst) — `next.E012`, `next.E040`, `next.E042`, `next.E043`, `next.W043`, and `next.W069`.

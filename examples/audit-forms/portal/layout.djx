@@ -1,11 +1,16 @@
 <!DOCTYPE html>
 <html lang="en">
-{% component "page_head" title="next.dj — Audit-trail forms" %}
+{% component "page_head" title="next.dj — Audit-trail forms" icon="🛂" %}
 <body class="min-h-screen flex flex-col">
   {% #component "app_shell" brand="next.dj access requests" brand_href="/" brand_icon="🛂" %}
     {% #slot "actions" %}
       {% component "nav_link" url_name="next:page_" label="Home" variant="bar" %}
-      {% component "nav_link" url="/request/identity/" active_when="page_request_step" label="Start request" variant="bar" %}
+      {# Same layer opener as the landing page, so both entry points run the wizard as a modal. #}
+      <a href="{% url 'next:page_request_step' step='identity' %}"
+         data-next-layer="access-wizard" data-next-accepted="request-list"
+         class="inline-flex items-center text-sm font-medium text-muted-foreground transition-colors hover:text-foreground">
+        Start request
+      </a>
       {% component "nav_link" url_name="next:page_admin_audit" label="Audit log" variant="bar" %}
     {% /slot %}
     {% #slot "content" %}

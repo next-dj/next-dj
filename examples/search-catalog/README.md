@@ -1,14 +1,14 @@
 # Search catalog
 
-A faceted product catalog with search, brand filters, price range, in-stock toggle, sort, and pagination. The listing renders six cards per page with deduplicated co-located CSS, the category and product detail routes thread an inherited `Category` instance through the `[category]/[slug]/` chain without re-querying, and identical search requests share a single `LocMemCache` entry through the lifetime of one process.
+A faceted product catalog with search, brand filters, price range, in-stock toggle, sort, and pagination. The listing renders six cards per page with deduplicated co-located CSS, the category and product detail routes thread an inherited `Category` instance through the `[category]/[slug]/` chain without re-querying, and identical search requests share one `LocMemCache` entry for 60 seconds.
 
-The example focuses on the file-router and DI subsystems of next-dj. It dogfoods the core `DQuery[T]` provider that mirrors `DUrl[T]` for query-string parameters. Two domain providers, `DFilters` and `DPage`, build typed snapshots from `request.GET` with `DFilters` reusing `QueryParamProvider` for the brand list. A `cached_search` helper is keyed by a stable hash of the filter set. An `active_filters` context processor surfaces a chip strip with a precomputed drop URL per chip. A three-level nested layout chain (`storefront` then `catalog` then `[category]`) wires the rest of the page tree.
+The example focuses on the file-router and DI subsystems of next-dj. It dogfoods the core `DQuery[T]` provider that mirrors `DUrl[T]` for query-string parameters. Two domain providers, `DFilters` and `DPage`, build typed snapshots from `request.GET`, with `DFilters` reading the brand list through the same `get_multi_values` helper `DQuery[list[str]]` resolution uses. A `cached_search` helper is keyed by a stable hash of the filter set. An `active_filters` context processor registered on the page backend surfaces a chip strip with a precomputed drop URL per chip. A three-layout chain (`marketplace` then `catalog` then `[category]`) wires the rest of the page tree.
 
 ## What you will see
 
 | URL | Description |
 | --- | --- |
-| `/` | Landing. Three featured products plus a category grid. |
+| `/` | Landing. Three featured products plus a category grid. `?show=N` widens the featured grid, clamped to 12. |
 | `/catalog/` | All products with sidebar filters, chips, and pagination. |
 | `/catalog/?brand=Acme&brand=Globex` | Plain repeated-key brand filter. |
 | `/catalog/?brand[]=Acme&brand[]=Globex` | qs-style bracket-suffix filter for axios clients. |
@@ -32,7 +32,7 @@ uv run python manage.py runserver      # http://127.0.0.1:8000/
 uv run pytest
 ```
 
-Tailwind loads via the Play CDN in [`marketplace/layout.djx`](marketplace/layout.djx). No Node, no build step. Components carry co-located CSS and JS that the static collector picks up, deduplicates, and emits exactly once per page. The results list lives in a `catalog-results` zone, so the filter panel auto-submits as you type and the listing grows on scroll without a full reload. The `filter_panel` component ships a small `component.js` that runs live constraint validation on the search field (minimum 3 characters) through the native Constraint Validation API, rewired through `Next.partial.onMount` so it survives a morphed panel. Every behaviour degrades to a plain GET when the runtime is absent.
+Tailwind loads via the Play CDN in [`marketplace/layout.djx`](marketplace/layout.djx). No Node, no build step. Components carry co-located CSS and JS that the static collector picks up, deduplicates, and emits exactly once per page. Each listing publishes the set of zones its filter may re-render, so the filter panel auto-submits as you type, the results, the count, the pager, and the chip strip refresh together, and the listing grows on scroll without a full reload. The `filter_panel` component ships a small `component.js` that runs live constraint validation on the search field (minimum 3 characters) through the native Constraint Validation API, rewired through `Next.partial.onMount` so it survives a morphed panel. Every behaviour degrades to a plain GET when the runtime is absent.
 
 ## Walking the code
 
@@ -78,9 +78,9 @@ class DFilters(DDependencyBase["Filters"]): ...
 class DPage(DDependencyBase["PageRequest"]): ...
 ```
 
-`FiltersProvider.resolve` runs `parse_filters(request)` which is also reused by the active-filter context processor. The brand list inside `parse_filters` delegates to `QueryParamProvider`, so all three wire formats supported by `DQuery` (plain repeated, bracket suffix, comma-delimited) flow through one helper. `PageProvider.resolve` returns a clamped `PageRequest` whose `per_page` is bounded by `MAX_PER_PAGE = 60`.
+`FiltersProvider.resolve` runs `parse_filters(request)` which is also reused by the active-filter context processor. The brand list inside `parse_filters` calls `next.urls.get_multi_values`, the public helper `QueryParamProvider` reads its own list values through, so all three wire formats (plain repeated, bracket suffix, comma-delimited) reach a hand-written parser exactly as they reach `DQuery[list[str]]`. `PageProvider.resolve` returns a clamped `PageRequest` whose `per_page` is bounded by `MAX_PER_PAGE = 60` and whose page number falls back to 1 on anything unparsable.
 
-The landing page exercises `DQuery` directly. The `featured` callable in [`catalog/storefront/page.py`](catalog/storefront/page.py) accepts an optional `?show=N` parameter through `show: DQuery[int] = 3`, with no manual `request.GET.get` plumbing.
+The landing page exercises `DQuery` directly. The `featured` callable in [`catalog/storefront/page.py`](catalog/storefront/page.py) accepts an optional `?show=N` parameter through `show: DQuery[int] = DEFAULT_FEATURED`, with no manual `request.GET.get` plumbing. The resolved value is clamped to `MAX_FEATURED = 12`, because a query parameter that sizes a query is user input like any other.
 
 ### 4. Three-level nested layouts
 
@@ -88,16 +88,16 @@ The compose chain is automatic. When a listing is rendered the body is substitut
 
 ```
 catalog/storefront/catalog/[category]/[slug]/template.djx
-  └─ catalog/storefront/catalog/[category]/layout.djx     # category banner
+  └─ catalog/storefront/catalog/[category]/layout.djx     # category banner + breadcrumb
       └─ catalog/storefront/catalog/layout.djx            # filter sidebar + chip strip
-          └─ catalog/storefront/layout.djx                # Tailwind chrome
+          └─ marketplace/layout.djx                       # project-level HTML envelope
 ```
 
 Each layer contributes a meaningful piece of UI. None of the layouts are decorative wrappers added "in case we need them later".
 
 ### 5. `inherit_context=True` in a real flow
 
-[`catalog/storefront/catalog/[category]/page.py`](catalog/storefront/catalog/%5Bcategory%5D/page.py) registers `category` as inherit-context. Three downstream callables on the same page (`page_obj`, `all_brands`, plus the breadcrumb on the template) receive the same `Category` instance through DI.
+[`catalog/storefront/catalog/[category]/page.py`](catalog/storefront/catalog/%5Bcategory%5D/page.py) registers `category` as inherit-context. Everything downstream reads that one instance: `page_obj` and `all_brands` on the same page take it as a DI parameter, the breadcrumb in [`[category]/layout.djx`](catalog/storefront/catalog/%5Bcategory%5D/layout.djx) reads it from the template context, and `submit_url` in the `filter_panel` component takes it to decide whether the filter form posts back to a category listing.
 
 ```python
 @context("category", inherit_context=True)
@@ -120,46 +120,60 @@ The product detail page in [`catalog/storefront/catalog/[category]/[slug]/page.p
 
 `pagination` is a template-only component — it has `component.djx` but no `component.py`. It reads `page_obj` directly from template context without any Python-side registration. This is valid: a `component.py` is only needed when the component must compute derived values or perform DI lookups.
 
-`filter_panel` lives at [`storefront/catalog/_cards/filter_panel/`](catalog/storefront/catalog/_cards/filter_panel/) — a nested `_cards/` folder inside the `catalog/` subtree. The framework's dispatcher registers any `_cards/` directory it encounters during the route tree walk, scoping each to its containing subtree. `filter_panel` is therefore visible to `/catalog/` and `/catalog/<category>/` but invisible on the landing page. The [`test_filter_panel_scoped_to_catalog`](tests/test_e2e.py) test verifies that `filter_panel` CSS appears in catalog pages but not on the landing page.
+`filter_panel` lives at [`storefront/catalog/_cards/filter_panel/`](catalog/storefront/catalog/_cards/filter_panel/) — a nested `_cards/` folder inside the `catalog/` subtree. The file router's page-tree walk offers every folder named by `COMPONENTS_DIR` to the components backend, which registers it scoped to the subtree that contains it. `filter_panel` is therefore visible to `/catalog/` and `/catalog/<category>/` but invisible on the landing page. The [`test_filter_panel_scoped_to_catalog`](tests/test_e2e.py) test verifies that `filter_panel` CSS appears in catalog pages but not on the landing page.
 
-`filter_panel` also ships [`component.js`](catalog/storefront/catalog/_cards/filter_panel/component.js). It runs live validation on the query field using the native Constraint Validation API. The `<input>` declares `minlength="3"`, so the browser already enforces the rule on submit and shows the `invalid:` Tailwind variant (rose border on a red-tinted background). The script layers a contextual help message on top: it reads `data-help-default` and `data-help-tooshort` from the input, calls `setCustomValidity()` with a tailored message ("Need 2 more — at least 3 characters in total"), and updates the help paragraph with three colour states (`text-slate-500` idle, `text-rose-600` too short, `text-emerald-600` valid). The empty string is treated as "no filter" so the user can clear the field without seeing an error.
+`filter_panel` also ships [`component.js`](catalog/storefront/catalog/_cards/filter_panel/component.js). It runs live validation on the query field using the native Constraint Validation API. The `<input>` declares `minlength="3"`, so the browser already enforces the rule on submit and paints the field with the `invalid:border-destructive` Tailwind variant. The script layers a contextual help message on top: it reads `data-help-default` and `data-help-tooshort` from the input, calls `setCustomValidity()` with a tailored message ("Need 2 more — at least 3 characters in total"), and updates the help paragraph with three colour states (`text-slate-500` idle, `text-rose-600` too short, `text-emerald-600` valid). The empty string is treated as "no filter" so the user can clear the field without seeing an error.
 
 The script registers its work through `Next.partial.onMount`, not a `document.querySelectorAll` scan at load. The runtime runs the callback over the initial DOM and over every subtree it later inserts, so a panel that arrives in a morphed zone is wired the same way the first render was, with no listener orphaned by the swap. The script is injected via `{% collect_scripts %}` in [`marketplace/layout.djx`](marketplace/layout.djx).
 
-### 7. Auto-submit and infinite scroll on the results zone
+### 7. The zone set a page publishes, auto-submit, and infinite scroll
 
-[`catalog/storefront/catalog/template.djx`](catalog/storefront/catalog/template.djx) wraps the product grid in `{% zone "catalog-results" tag="ul" %}` and the "Show more" sentinel in a second, sibling `{% zone "catalog-more" %}` right after it. The `tag="ul"` keeps the results wrapper a real list element so the `<li>` rows stay valid children — a `<div>` would be dropped by the parser. The filter form carries `data-next-target="catalog-results,catalog-more"`, `data-next-trigger="input"`, and `data-next-debounce="300"`, and the sort `<select>` adds `data-next-trigger="change"`. As you type, the runtime debounces, issues a GET for both zones, morphs the list and the sentinel in place, and syncs the query string with `replaceState`. The catalog page never changed: the `page_obj` provider still reads `request.GET` through `DFilters`/`DPage`, so the same view answers both the full page and the zone request.
+The filter panel is rendered by [`catalog/storefront/catalog/layout.djx`](catalog/storefront/catalog/layout.djx), the layout every page under `/catalog/` shares, product detail included. A target hardcoded in the panel would therefore ask the detail page for zones only a listing declares, so the zone set is page state rather than component state. Each listing page publishes it as a page-local `@context` named `filter_zones`, and the panel renders its partial attributes only when that key is set.
 
-When the listing has another page the `catalog-more` zone renders a sentinel `<a id="results-sentinel">` with `data-next-merge="append"` and `data-next-lazy="revealed"`. The sentinel lives outside the results zone on purpose: an `append` patch grows a zone by adding its incoming children at the end, so a marker that must stay last cannot ride inside the appended list. The runtime fires the GET when the sentinel scrolls into view, targeting both zones with the append intent. The server answers with one `append` per zone: the `catalog-results` patch carries only the next page of rows, deduplicated by their `data-next-key`, and the `catalog-more` patch replaces the single `results-sentinel` link in place so its `href` advances to the following page. The rows therefore always land after the accumulated list and the sentinel always trails them. The `Vary` header always lists `X-Next-Merge`, so a shared cache never hands an append envelope to a client that asked for a morph. Changing the search term re-morphs both zones and the accumulated list resets on its own. On the last page the `catalog-more` body renders empty, so a morph clears the sentinel.
+```python
+@context("filter_zones")
+def filter_zones() -> str:
+    return zone_target(LISTING_ZONES)
+```
 
-Without the runtime the form is a plain `<form method="get">` and the sentinel is an honest pagination link, so the catalog stays bookmarkable and crawlable. The grid styling lives in [`catalog/layout.css`](catalog/storefront/catalog/layout.css) keyed by `ul[data-next-zone="catalog-results"]`, so it applies whether the list renders inline or arrives as a zone patch.
+`inherit_context` stays off, so the value stops at the page that declares it. [`catalog/storefront/catalog/page.py`](catalog/storefront/catalog/page.py) publishes `catalog-results,catalog-more,catalog-count,catalog-pager,catalog-chips`, [`[category]/page.py`](catalog/storefront/catalog/%5Bcategory%5D/page.py) drops `catalog-more` because that listing paginates instead of growing on scroll, and [`[category]/[slug]/page.py`](catalog/storefront/catalog/%5Bcategory%5D/%5Bslug%5D/page.py) publishes nothing. On the product detail page the same panel therefore renders without `data-next-target`, `data-next-trigger`, or `data-next-debounce` and submits as a plain GET that navigates to the listing. The names live once in [`catalog/zones.py`](catalog/zones.py) so the preset form of section 8 morphs exactly the set the filter asks for.
 
-[`catalog/layout.css`](catalog/storefront/catalog/layout.css) is a co-located layout stylesheet. It applies `position: sticky; top: 1rem` to the sidebar on large screens, keeping the filter panel in view as the product grid scrolls. This style belongs in `layout.css` rather than a utility class because the `top` offset must be a concrete pixel value that Tailwind's `top-*` utilities do not express cleanly. The file is injected automatically for every page in the `catalog/` subtree through the layout chain and is absent on the landing page, as the [`test_catalog_layout_css_absent_on_landing`](tests/test_e2e.py) test verifies.
+Zone by zone, [`catalog/storefront/catalog/template.djx`](catalog/storefront/catalog/template.djx) wraps the product grid in `{% zone "catalog-results" tag="ul" %}`, the "Show more" sentinel in a sibling `{% zone "catalog-more" %}`, the header count in `{% zone "catalog-count" %}`, and the pagination component in `{% zone "catalog-pager" %}`. The `tag="ul"` keeps the results wrapper a real list element so the `<li>` rows stay valid children — a `<div>` would be dropped by the parser. The chip strip sits in `{% zone "catalog-chips" %}` inside the shared layout, and the zone wraps the whole `{% if active_filters %}` rather than its body: a zone nested inside a conditional disappears from the first render, and the filter would then target a zone the page never emitted. An unfiltered listing renders the wrapper empty, which [`catalog/layout.css`](catalog/storefront/catalog/layout.css) collapses with `:not(:has(ul))`. [`[category]/template.djx`](catalog/storefront/catalog/%5Bcategory%5D/template.djx) mirrors the results, count, and pager zones without the sentinel, and its rows carry the same `data-next-key` so a morph re-uses the DOM nodes it can.
+
+As you type, the runtime debounces, issues one GET for the whole published set, morphs the list, the sentinel, the count, the pager, and the chips in place, and syncs the query string with `replaceState`. Narrowing to `?q=iphone` therefore leaves no stale "25 products" in the header and no "Page 1 of 5" under a single card. The catalog page never changed: the `page_obj` provider still reads `request.GET` through `DFilters`/`DPage` and the chips still come from the context processor, so the same view answers both the full page and the zone request.
+
+When the listing has another page the `catalog-more` zone renders a sentinel `<a id="results-sentinel">` with `data-next-merge="append"` and `data-next-lazy="revealed"`. The sentinel lives outside the results zone on purpose: an `append` patch grows a zone by adding its incoming children at the end, so a marker that must stay last cannot ride inside the appended list. The sentinel targets only `catalog-results` and `catalog-more`, not the full published set, because an append merge grafts incoming children onto a zone and appending a second count or pager would duplicate it. The runtime fires the GET when the sentinel scrolls into view, targeting those two zones with the append intent. The server answers with one `append` per zone: the `catalog-results` patch carries only the next page of rows, deduplicated by their `data-next-key`, and the `catalog-more` patch replaces the single `results-sentinel` link in place so its `href` advances to the following page. The rows therefore always land after the accumulated list and the sentinel always trails them. The `Vary` header always lists `X-Next-Merge`, so a shared cache never hands an append envelope to a client that asked for a morph. Changing the search term re-morphs both zones and the accumulated list resets on its own. On the last page the `catalog-more` body renders empty, so a morph clears the sentinel.
+
+Without the runtime the form is a plain `<form method="get">` and the sentinel is an honest pagination link, so the catalog stays bookmarkable and crawlable.
+
+[`catalog/layout.css`](catalog/storefront/catalog/layout.css) is co-located with the layout, so it loads for every page in the `catalog/` subtree and for none outside it, which [`test_catalog_layout_css_absent_on_landing`](tests/test_e2e.py) pins. It holds the two rules that have no element to hang a utility class on: the results grid, keyed by `ul[data-next-zone="catalog-results"]` so it styles the list whether it renders inline or arrives as a zone patch, and the `:not(:has(ul))` collapse that hides the empty chip strip. The sticky sidebar rule sits beside them, next to the layout that renders the sidebar.
 
 ### 8. Preset filters that push history
 
-The live filter syncs the query string with `replaceState`, the right choice for a value that changes on every keystroke. A preset filter is the opposite, a single deliberate jump to a named view, so it earns a real history entry the back button can return from. That is the one place the catalog reaches for a POST `@action`. [`catalog/forms.py`](catalog/forms.py) registers `preset_filter_form`, a `Form` whose `preset` field maps to a canonical querystring such as `?sort=price_asc`. The preset bar in [`catalog/storefront/catalog/template.djx`](catalog/storefront/catalog/template.djx) renders the form with `zone="catalog-results,catalog-more"` so it applies as a partial.
+The live filter syncs the query string with `replaceState`, the right choice for a value that changes on every keystroke. A preset filter is the opposite, a single deliberate jump to a named view, so it earns a real history entry the back button can return from. That is the one place the catalog reaches for a POST `@action`. [`catalog/forms.py`](catalog/forms.py) registers `preset_filter_form`, a `Form` whose `preset` field maps to a canonical querystring such as `?sort=price_asc`. The preset bar in [`catalog/storefront/catalog/template.djx`](catalog/storefront/catalog/template.djx) renders the form with `zone=filter_zones`, the same page-local key the live filter reads, so an apply refreshes the listing exactly as far as a keystroke does.
 
 ```python
-request.GET = QueryDict(mutable=False).copy()
+request.GET = QueryDict(mutable=True)
 request.GET.update(params)
 patches = Patches(request).push_url(target)
-for zone in RESULT_ZONES:
+for zone in LISTING_ZONES:
     patches.morph(zone=zone)
 return patches.response()
 ```
 
-The handler points `request.GET` at the preset's params before morphing, so the cached search, the active-filter chips, and the pagination sentinel all agree with the URL `push_url` writes to history. `push_url` validates the href against the request host, so the envelope carries a `url` op with `action: "push"` and a same-site target. Without the runtime the apply falls back to a redirect to the same canonical URL, so the preset stays a plain link.
+The handler points `request.GET` at the preset's params before morphing, so the cached search, the product count, the active-filter chips, and the pagination all agree with the URL `push_url` writes to history. `push_url` validates the href against the request host, so the envelope carries a `url` op with `action: "push"` and a same-site target. Without the runtime the apply falls back to a redirect to the same canonical URL, so the preset stays a plain link.
 
 ### 9. `cached_search` and the LocMem hit path
 
-[`catalog/queries.py`](catalog/queries.py) materialises the page slice into a list so the cached payload does not depend on a queryset closure that can grow stale across requests. The cache key is a stable blake2b hash of a sorted JSON encoding of the filter set, page number, page size, and category PK. Two identical GETs produce one cache key and serve the second request from memory, which the [`tests/test_e2e.py::TestCacheHit`](tests/test_e2e.py) tests verify through the cache backend's internal map.
+[`catalog/queries.py`](catalog/queries.py) materialises the page slice into a list so the cached payload does not depend on a queryset closure that can grow stale across requests. The cache key is a stable blake2b hash of a sorted JSON encoding of the filter set, page number, page size, and category PK. Two identical GETs produce one cache key and serve the second request from memory for `CACHE_TTL = 60` seconds, which the [`tests/test_e2e.py::TestCacheHit`](tests/test_e2e.py) tests verify through the cache backend's internal map.
+
+The database carries the same filter set. `Product` declares `db_index=True` on `brand` and two composite indexes, `product_cat_stock_idx` over `(category, in_stock)` and `product_price_idx` over `price`, which is what the category listing and the price range read. Both names are spelled out rather than left to Django, because the auto-generated name is truncated to a cap that moved between Django versions and an unnamed index would drift under `makemigrations --check` on part of the support matrix. [`0003_explicit_index_names`](catalog/migrations/0003_explicit_index_names.py) renames the two indexes an older run had created.
 
 ### 10. Active filter chips
 
-[`catalog/context_processors.py`](catalog/context_processors.py) returns a `chips` list and a `drop_filter_qs` map keyed by `"key=value"`. The map stores the query string with that one pair removed, which the layout consumes through the `kv` template filter. Clicking a chip drops one filter at a time without disturbing the rest.
+[`catalog/context_processors.py`](catalog/context_processors.py) returns an `active_filters` list where every chip carries its `label`, `key`, `value`, and a precomputed `drop_url`. It is registered on the page backend, under `PAGE_BACKENDS[0]["OPTIONS"]["context_processors"]` in [`config/settings.py`](config/settings.py), so it runs for file-routed pages and zone renders alike while Django's own `TEMPLATES` list stays untouched. The `drop_url` is the current query string with that one pair removed, so the layout renders the anchor as `href="?{{ chip.drop_url }}"` and never looks a URL up by hand. Clicking a chip drops one filter at a time without disturbing the rest. The strip lives in the `catalog-chips` zone, so a live filter grows and shrinks it in place.
 
-The default `sort=newest` is filtered out of the chip list to avoid permanent noise.
+The `sort` key never becomes a chip. It always carries a value, so a chip for it would be permanent noise rather than something a click can drop.
 
 ## Further reading
 

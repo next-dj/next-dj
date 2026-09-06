@@ -84,6 +84,22 @@ def _init_payload(html: str) -> dict:
     return json.loads(match.group(1))
 
 
+@pytest.fixture()
+def apply_window(client):
+    """Submit the window filter as a partial aimed at the live totals zone."""
+
+    def apply(window: str):
+        return client.post_action(
+            "window_filter_form",
+            {"window": window},
+            origin="/stats/",
+            partial=True,
+            zones="live-totals",
+        )
+
+    return apply
+
+
 class TestOverview:
     """Overview page exposes headline counters that match metric reads."""
 
@@ -115,6 +131,13 @@ class TestStatsTreeRendersEachSubpage:
             ("/stats/forms/", "Form actions"),
             ("/stats/static/", "Static asset pipeline"),
         ],
+        ids=(
+            "live_distribution",
+            "per_page_counts",
+            "per_component_counts",
+            "form_actions",
+            "static_pipeline",
+        ),
     )
     def test_subpage(self, client, url, needle) -> None:
         response = client.get(url)
@@ -328,56 +351,35 @@ class TestLazyLoadZone:
 class TestMetricPulseVerb:
     """A partial apply morphs the totals zone and emits the custom verb."""
 
-    def test_partial_apply_morphs_zone_and_emits_metric_pulse(self, client) -> None:
-        response = client.post_action(
-            "window_filter_form",
-            {"window": "1h"},
-            origin="/stats/",
-            partial=True,
-            zones="live-totals",
-        )
+    def test_partial_apply_morphs_zone_and_emits_metric_pulse(
+        self, apply_window
+    ) -> None:
+        response = apply_window("1h")
         assert response.status_code == 200
         envelope = envelope_of(response)
-        assert envelope.op_verbs() == ["morph", "metric-pulse"]
-        assert envelope.zone_targets() == ["live-totals"]
+        assert envelope.op_verbs() == ["morph", "morph", "metric-pulse"]
+        assert envelope.zone_targets() == ["live-totals", "stats-window"]
 
-    def test_metric_pulse_op_carries_window_and_selector(self, client) -> None:
-        response = client.post_action(
-            "window_filter_form",
-            {"window": "1h"},
-            origin="/stats/",
-            partial=True,
-            zones="live-totals",
-        )
-        envelope = envelope_of(response)
+    def test_partial_apply_morphs_the_window_label_beside_the_totals(
+        self, apply_window
+    ) -> None:
+        envelope = envelope_of(apply_window("1h"))
+        assert "Window: 1h" in envelope.html_for_zone("stats-window")
+
+    def test_metric_pulse_op_carries_window_and_selector(self, apply_window) -> None:
+        envelope = envelope_of(apply_window("1h"))
         pulse = next(op for op in envelope.ops if op["op"] == "metric-pulse")
         assert pulse["window"] == "1h"
         assert pulse["selector"] == "[data-metric-pulse-target]"
 
     def test_partial_apply_reaggregates_under_the_chosen_window(
-        self, client, frozen_now
+        self, apply_window, frozen_now
     ) -> None:
         with frozen_now("2026-05-08T12:00:00+00:00") as traveller:
             metrics.incr("pages.rendered", "/old", by=40)
             traveller.move_to("2026-05-08T12:30:00+00:00")
-            narrow = envelope_of(
-                client.post_action(
-                    "window_filter_form",
-                    {"window": "1m"},
-                    origin="/stats/",
-                    partial=True,
-                    zones="live-totals",
-                )
-            ).html_for_zone("live-totals")
-            wide = envelope_of(
-                client.post_action(
-                    "window_filter_form",
-                    {"window": "1h"},
-                    origin="/stats/",
-                    partial=True,
-                    zones="live-totals",
-                )
-            ).html_for_zone("live-totals")
+            narrow = envelope_of(apply_window("1m")).html_for_zone("live-totals")
+            wide = envelope_of(apply_window("1h")).html_for_zone("live-totals")
         assert "40" not in narrow
         assert "40" in wide
 

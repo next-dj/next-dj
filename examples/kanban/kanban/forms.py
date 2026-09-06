@@ -111,13 +111,15 @@ class CreateCardForm(Form):
             count = locked.cards.count()
             if locked.wip_limit is not None and count >= locked.wip_limit:
                 return HttpResponseBadRequest("Column has reached its WIP limit.")
-            Card.objects.create(
+            card = Card.objects.create(
                 column=locked,
                 title=self.cleaned_data["title"],
                 body=self.cleaned_data.get("body", ""),
                 position=count,
             )
-        return HttpResponseRedirect(f"/board/{column.board_id}/")
+        # The redirect names the new row the same way move_card names the moved
+        # one, so a fetch that follows it learns the id from the final URL.
+        return HttpResponseRedirect(f"/board/{column.board_id}/?created={card.pk}")
 
 
 class CreateColumnForm(Form):

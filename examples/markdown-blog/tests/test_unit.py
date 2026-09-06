@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from blog import receivers
 from blog.loaders import MarkdownTemplateLoader
 from blog.markdown_template import (
@@ -16,15 +17,20 @@ from next.pages.signals import template_loaded
 class TestRenderMarkdown:
     """`render_markdown` wraps python-markdown with sensible extensions."""
 
-    def test_headings_and_paragraphs(self) -> None:
-        html = render_markdown("# Hi\n\nbody")
-        assert "<h1>Hi</h1>" in html
-        assert "<p>body</p>" in html
-
-    def test_fenced_code_block(self) -> None:
-        html = render_markdown("```python\nx = 1\n```")
-        assert "<code" in html
-        assert "x = 1" in html
+    @pytest.mark.parametrize(
+        ("source", "needles"),
+        [
+            ("# Hi\n\nbody", ("<h1>Hi</h1>", "<p>body</p>")),
+            ("```python\nx = 1\n```", ("<code", "x = 1")),
+        ],
+        ids=["headings-and-paragraphs", "fenced-code"],
+    )
+    def test_extensions_produce_html(
+        self, source: str, needles: tuple[str, ...]
+    ) -> None:
+        html = render_markdown(source)
+        for needle in needles:
+            assert needle in html
 
 
 class TestPostMetadata:
@@ -54,12 +60,13 @@ class TestReadPostBody:
 class TestReadingMinutes:
     """`reading_minutes` estimates at ~200 words per minute."""
 
-    def test_short_text_is_one_minute(self) -> None:
-        assert reading_minutes("one two three") == 1
-
-    def test_long_text_rounds(self) -> None:
-        body = "word " * 500
-        assert reading_minutes(body) == 2
+    @pytest.mark.parametrize(
+        ("body", "expected"),
+        [("one two three", 1), ("word " * 500, 2)],
+        ids=["short", "long"],
+    )
+    def test_estimate_scales_with_word_count(self, body: str, expected: int) -> None:
+        assert reading_minutes(body) == expected
 
 
 class TestMarkdownTemplateLoader:
@@ -99,16 +106,21 @@ class TestReceivers:
         """Clear the loader hits map before each test."""
         receivers._loader_hits.clear()
 
-    def test_detect_source_markdown(self, tmp_path: Path) -> None:
-        (tmp_path / "template.md").write_text("# x")
-        assert _detect_source(tmp_path / "page.py").startswith("template.md")
-
-    def test_detect_source_djx(self, tmp_path: Path) -> None:
-        (tmp_path / "template.djx").write_text("<p>x</p>")
-        assert _detect_source(tmp_path / "page.py").startswith("template.djx")
-
-    def test_detect_source_inline(self, tmp_path: Path) -> None:
-        assert _detect_source(tmp_path / "page.py").startswith("page.py")
+    @pytest.mark.parametrize(
+        ("siblings", "expected"),
+        [
+            (("template.md",), "template.md"),
+            (("template.djx",), "template.djx"),
+            ((), "page.py"),
+        ],
+        ids=["markdown", "djx", "inline"],
+    )
+    def test_detect_source_names_the_backing_file(
+        self, tmp_path: Path, siblings: tuple[str, ...], expected: str
+    ) -> None:
+        for name in siblings:
+            (tmp_path / name).write_text("x")
+        assert _detect_source(tmp_path / "page.py").startswith(expected)
 
     def test_on_template_loaded_records_hit(self, tmp_path: Path) -> None:
         page_file = tmp_path / "page.py"

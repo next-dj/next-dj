@@ -1,12 +1,16 @@
 <header class="flex items-baseline justify-between">
   <h2 class="text-lg font-semibold">{{ category.name }} products</h2>
-  <p class="text-sm text-muted-foreground">{{ page_obj.total }} products</p>
+  {% zone "catalog-count" %}
+    <p class="text-sm text-muted-foreground">{{ page_obj.total }} products</p>
+  {% endzone %}
 </header>
 
-<ul class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+{% zone "catalog-results" tag="ul" %}
   {% for product in page_obj.products %}
-    <li>{% component "product_card" %}</li>
+    <li data-next-key="{{ product.pk }}">{% component "product_card" %}</li>
   {% endfor %}
-</ul>
+{% endzone %}
 
-{% component "pagination" %}
+{% zone "catalog-pager" %}
+  {% component "pagination" %}
+{% endzone %}

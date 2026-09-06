@@ -6,8 +6,8 @@ from django.urls import reverse
 from next.forms import Form
 from next.partial import Patches, is_partial_request
 
+from .zones import LISTING_ZONES
 
-RESULT_ZONES = ("catalog-results", "catalog-more")
 
 # Each preset is a canonical querystring the storefront could also reach by
 # a plain link. Applying one is a discrete jump, unlike the debounced live
@@ -23,7 +23,7 @@ class PresetFilterForm(Form):
     """Apply a named preset filter to the all-products listing.
 
     A preset is a deliberate choice that should sit in browser history, so
-    a partial apply morphs the result zones and pushes the canonical URL.
+    a partial apply morphs every listing zone and pushes the canonical URL.
     Without the runtime the apply falls back to a plain navigation.
     """
 
@@ -45,8 +45,8 @@ class PresetFilterForm(Form):
 
         Pointing `request.GET` at the preset's querystring makes the zones
         re-render exactly as a navigation to that URL would, so the cached
-        search, the active-filter chips, and the pagination sentinel all
-        agree with the URL push_url writes to history.
+        search, the product count, the active-filter chips, and the
+        pagination all agree with the URL push_url writes to history.
         """
         params = PRESETS[self.cleaned_data["preset"]]
         target = self._target()
@@ -55,6 +55,6 @@ class PresetFilterForm(Form):
         request.GET = QueryDict(mutable=True)
         request.GET.update(params)
         patches = Patches(request).push_url(target)
-        for zone in RESULT_ZONES:
+        for zone in LISTING_ZONES:
             patches.morph(zone=zone)
         return patches.response()

@@ -1,5 +1,6 @@
 import importlib.util
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 from unittest.mock import Mock
@@ -14,6 +15,9 @@ from notes.middleware import TenantMiddleware
 from notes.models import Note, Tenant
 from notes.providers import DTenant, TenantProvider
 from notes.receivers import _on_form_access_denied
+
+
+pytestmark = pytest.mark.django_db
 
 
 EXAMPLE_ROOT = Path(__file__).resolve().parent.parent
@@ -32,6 +36,32 @@ def _load(path: Path, name: str) -> ModuleType:
 _note_card = _load(
     PAGES_ROOT / "notes" / "_blocks" / "note_card" / "component.py", "mt_note_card"
 )
+
+
+def _tenant_request(**overrides) -> HttpRequest:
+    request = HttpRequest()
+    request.tenant = Tenant(**{"slug": "acme", "name": "Acme", **overrides})  # type: ignore[attr-defined]
+    return request
+
+
+def _capturing_next() -> tuple[dict[str, object], Callable[[HttpRequest], object]]:
+    captured: dict[str, object] = {}
+
+    def _next(request: HttpRequest) -> object:
+        captured["tenant"] = request.tenant  # type: ignore[attr-defined]
+        return Mock(status_code=200)
+
+    return captured, _next
+
+
+@pytest.fixture()
+def tenant_request() -> Callable[..., HttpRequest]:
+    return _tenant_request
+
+
+@pytest.fixture()
+def payer_tenant() -> Tenant:
+    return Tenant.objects.create(slug="payer", name="Payer")
 
 
 class TestTenantModelStr:
@@ -77,52 +107,38 @@ class TestTenantMiddleware:
 
     @pytest.mark.django_db()
     @override_settings(DEBUG=False)
-    def test_header_attaches_tenant_and_calls_next(self) -> None:
-        Tenant.objects.create(slug="payer", name="Payer")
-        captured: dict[str, object] = {}
-
-        def _next(request: HttpRequest) -> object:
-            captured["tenant"] = request.tenant  # type: ignore[attr-defined]
-            return Mock(status_code=200)
-
+    def test_header_attaches_tenant_and_calls_next(self, payer_tenant: Tenant) -> None:
+        captured, _next = _capturing_next()
         middleware = TenantMiddleware(_next)
-        middleware(self._request(meta={"HTTP_X_TENANT": "payer"}))
+        middleware(self._request(meta={"HTTP_X_TENANT": payer_tenant.slug}))
         assert isinstance(captured["tenant"], Tenant)
-        assert captured["tenant"].slug == "payer"  # type: ignore[union-attr]
+        assert captured["tenant"] == payer_tenant
 
     @pytest.mark.django_db()
     @override_settings(DEBUG=False)
-    def test_query_fallback_disabled_in_production(self) -> None:
-        Tenant.objects.create(slug="payer", name="Payer")
-        request = self._request(get=QueryDict("tenant=payer"))
+    def test_query_fallback_disabled_in_production(self, payer_tenant: Tenant) -> None:
+        request = self._request(get=QueryDict(f"tenant={payer_tenant.slug}"))
         middleware = TenantMiddleware(Mock())
         response = middleware(request)
         assert response.status_code == 400
 
     @pytest.mark.django_db()
     @override_settings(DEBUG=True)
-    def test_debug_query_redirects_with_cookie(self) -> None:
-        Tenant.objects.create(slug="payer", name="Payer")
-        request = self._request(get=QueryDict("tenant=payer"))
+    def test_debug_query_redirects_with_cookie(self, payer_tenant: Tenant) -> None:
+        request = self._request(get=QueryDict(f"tenant={payer_tenant.slug}"))
         middleware = TenantMiddleware(Mock())
         response = middleware(request)
         assert response.status_code == 302
         assert response.url == "/notes/"
-        assert response.cookies["next_tenant"].value == "payer"
+        assert response.cookies["next_tenant"].value == payer_tenant.slug
 
     @pytest.mark.django_db()
     @override_settings(DEBUG=True)
-    def test_debug_cookie_used_when_header_missing(self) -> None:
-        Tenant.objects.create(slug="payer", name="Payer")
-        captured: dict[str, object] = {}
-
-        def _next(request: HttpRequest) -> object:
-            captured["tenant"] = request.tenant  # type: ignore[attr-defined]
-            return Mock(status_code=200)
-
+    def test_debug_cookie_used_when_header_missing(self, payer_tenant: Tenant) -> None:
+        captured, _next = _capturing_next()
         middleware = TenantMiddleware(_next)
-        middleware(self._request(cookies={"next_tenant": "payer"}))
-        assert captured["tenant"].slug == "payer"  # type: ignore[union-attr]
+        middleware(self._request(cookies={"next_tenant": payer_tenant.slug}))
+        assert captured["tenant"] == payer_tenant
 
     @pytest.mark.django_db()
     @override_settings(DEBUG=True)
@@ -147,33 +163,33 @@ class TestTenantProvider:
         param.annotation = annotation
         return param
 
-    def test_can_handle_matches_dtenant_with_request_tenant(self) -> None:
+    @pytest.mark.parametrize(
+        ("annotation", "http_request", "expected"),
+        [
+            (DTenant, _tenant_request(), True),
+            (int, _tenant_request(), False),
+            (DTenant, HttpRequest(), False),
+            (DTenant, None, False),
+        ],
+        ids=[
+            "dtenant_with_request_tenant",
+            "other_annotation",
+            "request_without_tenant",
+            "no_request",
+        ],
+    )
+    def test_can_handle(self, annotation, http_request, expected) -> None:
         provider = TenantProvider()
-        request = HttpRequest()
-        request.tenant = Tenant(slug="acme", name="Acme")  # type: ignore[attr-defined]
-        assert provider.can_handle(self._param(DTenant), self._context(request))
+        context = self._context(http_request)
+        assert provider.can_handle(self._param(annotation), context) is expected
 
-    def test_can_handle_rejects_other_annotations(self) -> None:
+    def test_resolve_returns_request_tenant(
+        self, tenant_request: Callable[..., HttpRequest]
+    ) -> None:
         provider = TenantProvider()
-        request = HttpRequest()
-        request.tenant = Tenant(slug="acme", name="Acme")  # type: ignore[attr-defined]
-        assert not provider.can_handle(self._param(int), self._context(request))
-
-    def test_can_handle_rejects_missing_tenant(self) -> None:
-        provider = TenantProvider()
-        request = HttpRequest()
-        assert not provider.can_handle(self._param(DTenant), self._context(request))
-
-    def test_can_handle_rejects_missing_request(self) -> None:
-        provider = TenantProvider()
-        assert not provider.can_handle(self._param(DTenant), self._context(None))
-
-    def test_resolve_returns_request_tenant(self) -> None:
-        provider = TenantProvider()
-        request = HttpRequest()
-        tenant = Tenant(slug="acme", name="Acme")
-        request.tenant = tenant  # type: ignore[attr-defined]
-        assert provider.resolve(self._param(DTenant), self._context(request)) is tenant
+        request = tenant_request()
+        resolved = provider.resolve(self._param(DTenant), self._context(request))
+        assert resolved is request.tenant
 
 
 class TestTenantTheme:
@@ -183,11 +199,10 @@ class TestTenantTheme:
         request = HttpRequest()
         assert tenant_theme(request) == {"tenant_theme": {}, "tenant_theme_css": ""}
 
-    def test_returns_css_variables_for_known_tenant(self) -> None:
-        request = HttpRequest()
-        request.tenant = Tenant(  # type: ignore[attr-defined]
-            slug="acme", name="Acme", primary_color="#2563eb"
-        )
+    def test_returns_css_variables_for_known_tenant(
+        self, tenant_request: Callable[..., HttpRequest]
+    ) -> None:
+        request = tenant_request(primary_color="#2563eb")
         result = tenant_theme(request)
         assert result["tenant_theme"] == {"--tenant-accent": "#2563eb"}
         assert "#2563eb" in result["tenant_theme_css"]
@@ -202,29 +217,31 @@ class TestTenantPrefixStaticBackend:
             '<link rel="stylesheet" href="/static/next/a.css">'
         )
 
-    def test_request_with_tenant_prepends_prefix(self) -> None:
+    def test_request_with_tenant_prepends_prefix(
+        self, tenant_request: Callable[..., HttpRequest]
+    ) -> None:
         backend = TenantPrefixStaticBackend()
-        request = HttpRequest()
-        request.tenant = Tenant(slug="acme", name="Acme")  # type: ignore[attr-defined]
-        rendered = backend.render_script_tag("/static/next/a.js", request=request)
+        rendered = backend.render_script_tag(
+            "/static/next/a.js", request=tenant_request()
+        )
         assert 'src="/_t/acme/static/next/a.js"' in rendered
 
-    def test_module_tag_prepends_prefix(self) -> None:
+    def test_module_tag_prepends_prefix(
+        self, tenant_request: Callable[..., HttpRequest]
+    ) -> None:
         backend = TenantPrefixStaticBackend()
-        request = HttpRequest()
-        request.tenant = Tenant(slug="acme", name="Acme")  # type: ignore[attr-defined]
         rendered = backend.render_module_tag(
-            "/static/next/components/markdown_preview.mjs", request=request
+            "/static/next/components/markdown_preview.mjs", request=tenant_request()
         )
         assert 'type="module"' in rendered
         assert 'src="/_t/acme/static/next/components/markdown_preview.mjs"' in rendered
 
-    def test_absolute_external_url_passes_through(self) -> None:
+    def test_absolute_external_url_passes_through(
+        self, tenant_request: Callable[..., HttpRequest]
+    ) -> None:
         backend = TenantPrefixStaticBackend()
-        request = HttpRequest()
-        request.tenant = Tenant(slug="acme", name="Acme")  # type: ignore[attr-defined]
         rendered = backend.render_link_tag(
-            "https://cdn.example.com/x.css", request=request
+            "https://cdn.example.com/x.css", request=tenant_request()
         )
         assert "https://cdn.example.com/x.css" in rendered
         assert "/_t/" not in rendered
@@ -245,10 +262,11 @@ class TestFormAccessDeniedReceiver:
     """`_on_form_access_denied` logs the denied action, layer, reason, and tenant."""
 
     def test_receiver_logs_tenant_slug_from_request(
-        self, caplog: pytest.LogCaptureFixture
+        self,
+        caplog: pytest.LogCaptureFixture,
+        tenant_request: Callable[..., HttpRequest],
     ) -> None:
-        request = HttpRequest()
-        request.tenant = Tenant(slug="acme", name="Acme")  # type: ignore[attr-defined]
+        request = tenant_request()
         with caplog.at_level(logging.WARNING, logger="notes.access"):
             _on_form_access_denied(
                 action_name="note_edit_form",

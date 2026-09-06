@@ -2,7 +2,9 @@
   <section class="flex flex-col gap-3 border-b border-border pb-6 sm:flex-row sm:items-end sm:justify-between">
     <div class="space-y-1">
       <h1 class="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">Stats</h1>
-      <p class="text-sm text-muted-foreground">Window: {{ window }}</p>
+      {% zone "stats-window" %}
+        <p class="text-sm text-muted-foreground">Window: {{ window }}</p>
+      {% endzone %}
     </div>
     {% component "filter_window" live_zone=live_zone %}
   </section>

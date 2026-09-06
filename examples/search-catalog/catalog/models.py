@@ -42,9 +42,12 @@ class Product(models.Model):
                 fields=["category", "slug"], name="uniq_product_per_cat"
             )
         ]
+        # An auto-generated index name is cut to a length cap that moved
+        # between Django versions, so an unnamed index drifts under
+        # `makemigrations --check` on part of the support matrix.
         indexes: ClassVar = [
-            models.Index(fields=["category", "in_stock"]),
-            models.Index(fields=["price"]),
+            models.Index(fields=["category", "in_stock"], name="product_cat_stock_idx"),
+            models.Index(fields=["price"], name="product_price_idx"),
         ]
 
     def __str__(self) -> str:

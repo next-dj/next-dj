@@ -14,11 +14,11 @@
       {% endif %}
       <div class="space-y-1.5">
         <label for="id_username" class="block text-sm font-medium">Username</label>
-        {% component "input" name="username" id="id_username" required=True autofocus=True %}
+        {% component "input" name="username" id="id_username" autocomplete="username" required=True autofocus=True %}
       </div>
       <div class="space-y-1.5">
         <label for="id_password" class="block text-sm font-medium">Password</label>
-        {% component "input" name="password" id="id_password" type="password" required=True %}
+        {% component "input" name="password" id="id_password" type="password" autocomplete="current-password" required=True %}
       </div>
       {% component "button" type="submit" text="Sign in" variant="default" extra="w-full" %}
     </div>

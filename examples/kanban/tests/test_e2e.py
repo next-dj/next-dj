@@ -35,6 +35,21 @@ def archived_board(db) -> Board:
     return Board.objects.create(title="Archived", slug="archived", archived=True)
 
 
+@pytest.fixture()
+def backlog(board: Board) -> Column:
+    return board.columns.get(title="Backlog")
+
+
+@pytest.fixture()
+def progress(board: Board) -> Column:
+    return board.columns.get(title="In Progress")
+
+
+@pytest.fixture()
+def done(board: Board) -> Column:
+    return board.columns.get(title="Done")
+
+
 def _board_html(client: NextClient, board: Board) -> str:
     response = client.get(f"/board/{board.pk}/")
     assert response.status_code == 200
@@ -106,6 +121,13 @@ class TestBoardView:
         assert "Done" in body
         assert "Plan" in body
         assert "Ship" in body
+
+    def test_every_column_renders_a_create_card_form(
+        self, client: NextClient, board: Board
+    ) -> None:
+        body = _board_html(client, board)
+        assert body.count('placeholder="New card"') == board.columns.count()
+        assert 'name="column_id"' in body
 
     def test_nested_layout_chain(self, client: NextClient, board: Board) -> None:
         body = _board_html(client, board)
@@ -211,10 +233,8 @@ class TestMoveCard:
     """The move_card form action moves cards between columns."""
 
     def test_post_moves_card_between_columns(
-        self, client: NextClient, board: Board
+        self, client: NextClient, backlog: Column, done: Column
     ) -> None:
-        backlog = board.columns.get(title="Backlog")
-        done = board.columns.get(title="Done")
         card = backlog.cards.first()
         response = client.post_action(
             "move_card_form",
@@ -224,9 +244,9 @@ class TestMoveCard:
         card.refresh_from_db()
         assert card.column_id == done.pk
 
-    def test_post_normalises_positions(self, client: NextClient, board: Board) -> None:
-        backlog = board.columns.get(title="Backlog")
-        done = board.columns.get(title="Done")
+    def test_post_normalises_positions(
+        self, client: NextClient, backlog: Column, done: Column
+    ) -> None:
         card = backlog.cards.first()
         client.post_action(
             "move_card_form",
@@ -255,9 +275,9 @@ class TestMoveCard:
         card.refresh_from_db()
         assert card.column.board_id == board.pk
 
-    def test_negative_position_rejected(self, client: NextClient, board: Board) -> None:
-        backlog = board.columns.get(title="Backlog")
-        done = board.columns.get(title="Done")
+    def test_negative_position_rejected(
+        self, client: NextClient, backlog: Column, done: Column
+    ) -> None:
         card = backlog.cards.first()
         response = client.post_action(
             "move_card_form",
@@ -270,10 +290,8 @@ class TestPreviewComponent:
     """The preview composite renders after a successful move."""
 
     def test_preview_appears_with_moved_query(
-        self, client: NextClient, board: Board
+        self, client: NextClient, board: Board, backlog: Column, done: Column
     ) -> None:
-        backlog = board.columns.get(title="Backlog")
-        done = board.columns.get(title="Done")
         card = backlog.cards.first()
         client.post_action(
             "move_card_form",
@@ -284,25 +302,23 @@ class TestPreviewComponent:
         assert "Move complete" in body
         assert f'data-kanban-preview="{card.pk}"' in body
 
-    def test_preview_hidden_without_moved_query(
-        self, client: NextClient, board: Board
+    @pytest.mark.parametrize(
+        "query", ["", "?moved=99999"], ids=["no_moved_query", "unknown_card_id"]
+    )
+    def test_preview_hidden_without_a_moved_card(
+        self, client: NextClient, board: Board, query
     ) -> None:
-        body = _board_html(client, board)
-        assert "Move complete" not in body
-
-    def test_preview_skips_unknown_card_id(
-        self, client: NextClient, board: Board
-    ) -> None:
-        response = client.get(f"/board/{board.pk}/?moved=99999")
-        body = response.content.decode()
-        assert "Move complete" not in body
+        response = client.get(f"/board/{board.pk}/{query}")
+        assert response.status_code == 200
+        assert "Move complete" not in response.content.decode()
 
 
 class TestCreateCard:
     """The create_card form action appends cards and respects WIP limits."""
 
-    def test_post_appends_card_at_tail(self, client: NextClient, board: Board) -> None:
-        backlog = board.columns.get(title="Backlog")
+    def test_post_appends_card_at_tail(
+        self, client: NextClient, backlog: Column
+    ) -> None:
         before = backlog.cards.count()
         response = client.post_action(
             "create_card_form", {"column_id": backlog.pk, "title": "Extra"}
@@ -314,8 +330,18 @@ class TestCreateCard:
         assert new.title == "Extra"
         assert new.position == before
 
-    def test_wip_limit_blocks_creation(self, client: NextClient, board: Board) -> None:
-        progress = board.columns.get(title="In Progress")
+    def test_redirect_names_the_new_card(
+        self, client: NextClient, board: Board, backlog: Column
+    ) -> None:
+        response = client.post_action(
+            "create_card_form", {"column_id": backlog.pk, "title": "Extra"}
+        )
+        new = backlog.cards.order_by("-position").first()
+        assert response["Location"] == f"/board/{board.pk}/?created={new.pk}"
+
+    def test_wip_limit_blocks_creation(
+        self, client: NextClient, progress: Column
+    ) -> None:
         Card.objects.create(column=progress, title="Second", position=1)
         response = client.post_action(
             "create_card_form", {"column_id": progress.pk, "title": "Over the limit"}
@@ -324,9 +350,8 @@ class TestCreateCard:
         assert progress.cards.filter(title="Over the limit").count() == 0
 
     def test_wip_limit_none_allows_unlimited(
-        self, client: NextClient, board: Board
+        self, client: NextClient, backlog: Column
     ) -> None:
-        backlog = board.columns.get(title="Backlog")
         for index in range(5):
             response = client.post_action(
                 "create_card_form", {"column_id": backlog.pk, "title": f"Card {index}"}
@@ -363,6 +388,13 @@ class TestJsContext:
         assert payload["board"]["title"] == board.title
         assert "csrf" in payload["board"]
 
+    def test_next_init_carries_both_action_urls(
+        self, client: NextClient, board: Board
+    ) -> None:
+        payload = _next_init_payload(_board_html(client, board))
+        assert payload["board"]["move_card_url"]
+        assert payload["board"]["create_card_url"]
+
     def test_deep_merge_columns_present(self, client: NextClient, board: Board) -> None:
         body = _board_html(client, board)
         payload = _next_init_payload(body)
@@ -383,15 +415,13 @@ class TestInheritedHeaderCount:
         assert match is not None
         assert int(match.group(1)) >= 1
 
-    def test_board_detail_inherits_count(
-        self, client: NextClient, board: Board
+    @pytest.mark.parametrize("suffix", ["", "settings/"], ids=["detail", "settings"])
+    def test_board_pages_inherit_count(
+        self, client: NextClient, board: Board, suffix
     ) -> None:
-        body = _board_html(client, board)
-        assert "active boards" in body
-
-    def test_settings_inherits_count(self, client: NextClient, board: Board) -> None:
-        body = _settings_html(client, board)
-        assert "active boards" in body
+        response = client.get(f"/board/{board.pk}/{suffix}")
+        assert response.status_code == 200
+        assert "active boards" in response.content.decode()
 
 
 class TestCdnCachePolicy:
@@ -451,9 +481,8 @@ class TestPayloadEnrichment:
         assert in_progress["wip_limit"] == 2
 
     def test_payload_includes_card_excerpt(
-        self, client: NextClient, board: Board
+        self, client: NextClient, board: Board, backlog: Column
     ) -> None:
-        backlog = board.columns.get(title="Backlog")
         long_card = backlog.cards.first()
         long_card.body = "y" * 200
         long_card.save(update_fields=["body"])

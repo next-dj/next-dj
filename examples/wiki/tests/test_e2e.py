@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import re
+from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import pytest
@@ -20,6 +21,12 @@ from next.testing import (
 from next.urls.signals import router_reloaded
 
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from django.http import HttpResponse
+
+
 pytestmark = pytest.mark.django_db
 
 
@@ -30,23 +37,54 @@ def _origin_field(html: str) -> str:
 
 
 @pytest.fixture()
-def routing_doc() -> Article:
+def make_article() -> Callable[..., Article]:
+    """Return a factory building articles with a slug-derived title."""
+
+    def _make(
+        slug: str, *, title: str | None = None, body_md: str = "", locked: bool = False
+    ) -> Article:
+        return Article.objects.create(
+            slug=slug,
+            title=title or slug.replace("-", " ").capitalize(),
+            body_md=body_md,
+            locked=locked,
+        )
+
+    return _make
+
+
+@pytest.fixture()
+def routing_doc(make_article: Callable[..., Article]) -> Article:
     """Seed an article whose body matches the routing query for searches."""
-    return Article.objects.create(
-        slug="routing-internals",
+    return make_article(
+        "routing-internals",
         title="Routing internals",
         body_md="# Routing internals\n\nDeep dive on the URL pipeline.",
     )
 
 
 @pytest.fixture()
-def lifecycle_doc() -> Article:
+def lifecycle_doc(make_article: Callable[..., Article]) -> Article:
     """Seed an unrelated article so listings have at least two rows."""
-    return Article.objects.create(
-        slug="lifecycle",
+    return make_article(
+        "lifecycle",
         title="Request lifecycle",
         body_md="Discusses every middleware stage.",
     )
+
+
+@pytest.fixture()
+def submit_from_page(client: NextClient) -> Callable[..., HttpResponse]:
+    """Post an action carrying the origin the given page rendered."""
+
+    def _submit(action: str, *, page: str, data: dict[str, str]) -> HttpResponse:
+        rendered = client.get(page).content.decode()
+        return client.post(
+            client.get_action_url(action),
+            {"_next_form_origin": _origin_field(rendered), **data},
+        )
+
+    return _submit
 
 
 class TestIndex:
@@ -123,17 +161,12 @@ class TestArticleCreation:
         assert "<h2>Hello</h2>" in article_body
 
     def test_create_duplicate_slug_shows_error(
-        self, client: NextClient, routing_doc: Article
+        self, submit_from_page: Callable[..., HttpResponse], routing_doc: Article
     ) -> None:
-        new_page = client.get(reverse("next:page_articles_new"))
-        response = client.post(
-            client.get_action_url("article_create_form"),
-            {
-                "_next_form_origin": _origin_field(new_page.content.decode()),
-                "slug": routing_doc.slug,
-                "title": "Duplicate",
-                "body_md": "",
-            },
+        response = submit_from_page(
+            "article_create_form",
+            page=reverse("next:page_articles_new"),
+            data={"slug": routing_doc.slug, "title": "Duplicate", "body_md": ""},
         )
         assert response.status_code == 200
         assert "already taken" in response.content.decode()
@@ -185,39 +218,34 @@ class TestArticleEdit:
     )
     def test_edit_invalid_slug_shows_error(
         self,
-        client: NextClient,
+        submit_from_page: Callable[..., HttpResponse],
+        make_article: Callable[..., Article],
         routing_doc: Article,
         clash_slug: str | None,
         bad_slug: str,
         expected_error: str,
     ) -> None:
         if clash_slug is not None:
-            Article.objects.create(slug=clash_slug, title="Other article", body_md="")
-        edit_page = client.get(
-            reverse("next:page_articles_edit_slug", kwargs={"slug": routing_doc.slug})
-        )
-        response = client.post(
-            client.get_action_url("article_edit_form"),
-            {
-                "_next_form_origin": _origin_field(edit_page.content.decode()),
-                "slug": bad_slug,
-                "title": routing_doc.title,
-                "body_md": "",
-            },
+            make_article(clash_slug, title="Other article")
+        response = submit_from_page(
+            "article_edit_form",
+            page=reverse(
+                "next:page_articles_edit_slug", kwargs={"slug": routing_doc.slug}
+            ),
+            data={"slug": bad_slug, "title": routing_doc.title, "body_md": ""},
         )
         assert response.status_code == 200
         assert expected_error in response.content.decode()
 
     def test_edit_validation_error_shows_preview(
-        self, client: NextClient, routing_doc: Article
+        self, submit_from_page: Callable[..., HttpResponse], routing_doc: Article
     ) -> None:
-        edit_page = client.get(
-            reverse("next:page_articles_edit_slug", kwargs={"slug": routing_doc.slug})
-        )
-        response = client.post(
-            client.get_action_url("article_edit_form"),
-            {
-                "_next_form_origin": _origin_field(edit_page.content.decode()),
+        response = submit_from_page(
+            "article_edit_form",
+            page=reverse(
+                "next:page_articles_edit_slug", kwargs={"slug": routing_doc.slug}
+            ),
+            data={
                 "slug": "docs",
                 "title": routing_doc.title,
                 "body_md": "**posted preview**",
@@ -231,12 +259,11 @@ class TestArticleEdit:
 class TestArticleObjectPermission:
     """The edit form denies a locked article through has_object_permission."""
 
-    def test_locked_article_edit_denied(self, client: NextClient) -> None:
-        locked = Article.objects.create(
-            slug="locked-page",
-            title="Locked page",
-            body_md="Original body.",
-            locked=True,
+    def test_locked_article_edit_denied(
+        self, client: NextClient, make_article: Callable[..., Article]
+    ) -> None:
+        locked = make_article(
+            "locked-page", title="Locked page", body_md="Original body.", locked=True
         )
         response = client.post_action(
             "article_edit_form",
@@ -341,13 +368,11 @@ class TestRouterReloadSignal:
         "trigger", ["save", "delete"], ids=["on-save", "on-delete"]
     )
     def test_router_reload_signal_fires(
-        self, routing_doc: Article, trigger: str
+        self, make_article: Callable[..., Article], routing_doc: Article, trigger: str
     ) -> None:
         with SignalRecorder(router_reloaded) as recorder:
             if trigger == "save":
-                Article.objects.create(
-                    slug="signal-trigger", title="Signal", body_md=""
-                )
+                make_article("signal-trigger", title="Signal")
             else:
                 routing_doc.delete()
         assert len(recorder.events_for(router_reloaded)) >= 1
@@ -383,13 +408,13 @@ class TestUnits:
 class TestValidationPreservesPreview:
     """A validation error re-renders the form with the markdown preview pane."""
 
-    def test_form_validation_error_shows_preview(self, client: NextClient) -> None:
-        new_page = client.get(reverse("next:page_articles_new"))
-        action_url = client.get_action_url("article_create_form")
-        response = client.post(
-            action_url,
-            {
-                "_next_form_origin": _origin_field(new_page.content.decode()),
+    def test_form_validation_error_shows_preview(
+        self, submit_from_page: Callable[..., HttpResponse]
+    ) -> None:
+        response = submit_from_page(
+            "article_create_form",
+            page=reverse("next:page_articles_new"),
+            data={
                 "slug": "docs",
                 "title": "Reserved slug",
                 "body_md": "**bold** preview",

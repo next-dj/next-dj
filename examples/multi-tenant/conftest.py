@@ -31,7 +31,7 @@ def _load_pages() -> None:
 
 
 @pytest.fixture(autouse=True)
-def _isolate(db) -> None:
+def _isolate() -> None:
     cache.clear()
 
 

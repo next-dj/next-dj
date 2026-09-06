@@ -1,4 +1,26 @@
+from dataclasses import dataclass
+
+import pytest
+
 from next.testing import assert_has_class, assert_missing_class, find_anchor
+
+
+@dataclass(frozen=True, slots=True)
+class NavCase:
+    """One top-nav row (visited page, highlighted anchor, dim anchor)."""
+
+    id: str
+    path: str
+    active_href: str
+    active_text: str
+    inactive_href: str
+    inactive_text: str
+
+
+NAV_CASES: tuple[NavCase, ...] = (
+    NavCase("on-home", "/", "/", "Home", "/about/", "About"),
+    NavCase("on-about", "/about/", "/about/", "About", "/", "Home"),
+)
 
 
 class TestIndex:
@@ -74,16 +96,14 @@ class TestShareButton:
 class TestActiveNav:
     """The shared nav_link component toggles active state via request.resolver_match."""
 
-    def test_home_link_active_on_home(self, client) -> None:
-        body = client.get("/").content.decode()
-        assert_has_class(find_anchor(body, href="/", text="Home"), "font-semibold")
-        assert_missing_class(
-            find_anchor(body, href="/about/", text="About"), "font-semibold"
-        )
-
-    def test_about_link_active_on_about(self, client) -> None:
-        body = client.get("/about/").content.decode()
+    @pytest.mark.parametrize("case", NAV_CASES, ids=lambda case: case.id)
+    def test_nav_highlights_the_visited_page(self, client, case: NavCase) -> None:
+        body = client.get(case.path).content.decode()
         assert_has_class(
-            find_anchor(body, href="/about/", text="About"), "font-semibold"
+            find_anchor(body, href=case.active_href, text=case.active_text),
+            "font-semibold",
         )
-        assert_missing_class(find_anchor(body, href="/", text="Home"), "font-semibold")
+        assert_missing_class(
+            find_anchor(body, href=case.inactive_href, text=case.inactive_text),
+            "font-semibold",
+        )

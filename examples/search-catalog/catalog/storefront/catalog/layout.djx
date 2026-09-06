@@ -4,21 +4,23 @@
   </aside>
 
   <div class="space-y-4">
-    {% if active_filters %}
-      <ul class="flex flex-wrap gap-2">
-        {% for chip in active_filters %}
-          <li>
-            <a class="active-filter inline-flex items-center gap-1 rounded-full bg-slate-200 px-3 py-1 text-xs font-medium text-slate-800 hover:bg-slate-300"
-               data-active-filter="{{ chip.key }}"
-               data-active-filter-value="{{ chip.value }}"
-               href="?{{ chip.drop_url }}">
-              <span>{{ chip.label }}</span>
-              <span aria-hidden="true">x</span>
-            </a>
-          </li>
-        {% endfor %}
-      </ul>
-    {% endif %}
+    {% zone "catalog-chips" %}
+      {% if active_filters %}
+        <ul class="flex flex-wrap gap-2">
+          {% for chip in active_filters %}
+            <li>
+              <a class="active-filter inline-flex items-center gap-1 rounded-full bg-slate-200 px-3 py-1 text-xs font-medium text-slate-800 hover:bg-slate-300"
+                 data-active-filter="{{ chip.key }}"
+                 data-active-filter-value="{{ chip.value }}"
+                 href="?{{ chip.drop_url }}">
+                <span>{{ chip.label }}</span>
+                <span aria-hidden="true">x</span>
+              </a>
+            </li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+    {% endzone %}
 
     {% block template %}{% endblock %}
   </div>

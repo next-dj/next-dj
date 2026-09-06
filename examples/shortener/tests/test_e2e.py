@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import io
+from dataclasses import dataclass
 
+import pytest
 from django.core.cache import cache
 from django.core.management import call_command
 from shortener.cache import CLICK_PREFIX, increment_clicks, pending_clicks
@@ -12,6 +14,29 @@ from next.testing import (
     assert_missing_class,
     envelope_of,
     find_anchor,
+)
+
+
+pytestmark = pytest.mark.django_db
+
+
+@dataclass(frozen=True, slots=True)
+class SubnavCase:
+    """One admin subnav row (visited page, highlighted anchor, dim anchor)."""
+
+    id: str
+    path: str
+    active_href: str
+    active_text: str
+    inactive_href: str
+    inactive_text: str
+
+
+SUBNAV_CASES: tuple[SubnavCase, ...] = (
+    SubnavCase("on-index", "/admin/", "/admin/", "Links", "/admin/stats/", "Stats"),
+    SubnavCase(
+        "on-stats", "/admin/stats/", "/admin/stats/", "Stats", "/admin/", "Links"
+    ),
 )
 
 
@@ -45,8 +70,8 @@ class TestShorten:
 class TestSlugRedirect:
     """Visiting /s/<slug>/ redirects to the original URL and bumps the counter."""
 
-    def test_slug_redirects_and_counts_click(self, client) -> None:
-        Link.objects.create(slug="abc123", url="https://example.com/real")
+    def test_slug_redirects_and_counts_click(self, client, make_link) -> None:
+        make_link("abc123", url="https://example.com/real")
         response = client.get("/s/abc123/")
         assert response.status_code == 302
         assert response["Location"] == "https://example.com/real"
@@ -60,8 +85,8 @@ class TestSlugRedirect:
 class TestAdminLinkDetail:
     """The admin link detail page uses DLink to resolve by slug."""
 
-    def test_detail_renders_link_via_dlink_provider(self, client) -> None:
-        Link.objects.create(slug="detailed", url="https://example.com/d", clicks=12)
+    def test_detail_renders_link_via_dlink_provider(self, client, make_link) -> None:
+        make_link("detailed", url="https://example.com/d", clicks=12)
         response = client.get("/admin/links/detailed/")
         assert response.status_code == 200
         body = response.content.decode()
@@ -78,9 +103,9 @@ class TestAdminLinkDetail:
 class TestFlushClicks:
     """The management command persists cached counters."""
 
-    def test_flush_transfers_pending_clicks_to_db(self) -> None:
-        Link.objects.create(slug="abc123", url="https://example.com/a")
-        Link.objects.create(slug="def456", url="https://example.com/b")
+    def test_flush_transfers_pending_clicks_to_db(self, make_link) -> None:
+        make_link("abc123")
+        make_link("def456")
         increment_clicks("abc123")
         increment_clicks("abc123")
         increment_clicks("def456")
@@ -97,26 +122,22 @@ class TestFlushClicks:
 class TestActiveNav:
     """Active link highlighting uses `request.resolver_match.view_name`."""
 
-    def test_admin_subnav_highlights_links_when_on_admin_index(self, client) -> None:
-        body = client.get("/admin/").content.decode()
+    @pytest.mark.parametrize("case", SUBNAV_CASES, ids=lambda case: case.id)
+    def test_admin_subnav_highlights_the_visited_section(
+        self, client, case: SubnavCase
+    ) -> None:
+        body = client.get(case.path).content.decode()
         assert_has_class(
-            find_anchor(body, href="/admin/", text="Links"), "font-semibold"
+            find_anchor(body, href=case.active_href, text=case.active_text),
+            "font-semibold",
         )
         assert_missing_class(
-            find_anchor(body, href="/admin/stats/", text="Stats"), "font-semibold"
+            find_anchor(body, href=case.inactive_href, text=case.inactive_text),
+            "font-semibold",
         )
 
-    def test_admin_subnav_highlights_stats_when_on_stats(self, client) -> None:
-        body = client.get("/admin/stats/").content.decode()
-        assert_missing_class(
-            find_anchor(body, href="/admin/", text="Links"), "font-semibold"
-        )
-        assert_has_class(
-            find_anchor(body, href="/admin/stats/", text="Stats"), "font-semibold"
-        )
-
-    def test_root_admin_link_is_active_on_detail_page(self, client) -> None:
-        Link.objects.create(slug="deep", url="https://example.com/d")
+    def test_root_admin_link_is_active_on_detail_page(self, client, make_link) -> None:
+        make_link("deep")
         body = client.get("/admin/links/deep/").content.decode()
         assert_has_class(
             find_anchor(body, href="/admin/", text="admin"), "font-semibold"
@@ -132,8 +153,10 @@ class TestActiveNav:
 class TestAdminSurface:
     """The nested admin layout renders the subnav and the link_card component."""
 
-    def test_admin_shows_recent_links_and_nested_toolbar(self, client) -> None:
-        Link.objects.create(slug="xyz789", url="https://example.com/c", clicks=7)
+    def test_admin_shows_recent_links_and_nested_toolbar(
+        self, client, make_link
+    ) -> None:
+        make_link("xyz789", clicks=7)
         response = client.get("/admin/")
         assert response.status_code == 200
         body = response.content.decode()
@@ -142,9 +165,9 @@ class TestAdminSurface:
         assert "/s/xyz789/" in body
         assert "7 clicks" in body
 
-    def test_admin_stats_shows_totals(self, client) -> None:
-        Link.objects.create(slug="one", url="https://example.com/1", clicks=3)
-        Link.objects.create(slug="two", url="https://example.com/2", clicks=4)
+    def test_admin_stats_shows_totals(self, client, make_link) -> None:
+        make_link("one", clicks=3)
+        make_link("two", clicks=4)
         response = client.get("/admin/stats/")
         assert response.status_code == 200
         body = response.content.decode()
@@ -152,8 +175,8 @@ class TestAdminSurface:
         assert "Total clicks" in body
         assert ">7<" in body
 
-    def test_admin_link_detail_inherits_nested_layout(self, client) -> None:
-        Link.objects.create(slug="nested", url="https://example.com/n", clicks=2)
+    def test_admin_link_detail_inherits_nested_layout(self, client, make_link) -> None:
+        make_link("nested", clicks=2)
         response = client.get("/admin/links/nested/")
         assert response.status_code == 200
         body = response.content.decode()
@@ -161,8 +184,8 @@ class TestAdminSurface:
         assert "Back to links" in body
         assert "Persisted clicks" in body
 
-    def test_home_renders_root_layout_and_link_card(self, client) -> None:
-        Link.objects.create(slug="home1", url="https://example.com/home")
+    def test_home_renders_root_layout_and_link_card(self, client, make_link) -> None:
+        make_link("home1")
         response = client.get("/")
         assert response.status_code == 200
         body = response.content.decode()
@@ -174,17 +197,17 @@ class TestAdminSurface:
 class TestAdminInlineEdit:
     """Each admin row carries a per-link inline edit form keyed by slug."""
 
-    def test_rows_render_edit_forms_keyed_by_slug(self, client) -> None:
-        Link.objects.create(slug="alpha", url="https://example.com/a")
-        Link.objects.create(slug="bravo", url="https://example.com/b")
+    def test_rows_render_edit_forms_keyed_by_slug(self, client, make_link) -> None:
+        alpha = make_link("alpha")
+        make_link("bravo")
         body = client.get("/admin/").content.decode()
         assert 'data-next-key="alpha"' in body
         assert 'data-next-key="bravo"' in body
-        assert 'value="https://example.com/a"' in body
+        assert f'value="{alpha.url}"' in body
 
-    def test_inline_edit_saves_the_addressed_link(self, client) -> None:
-        Link.objects.create(slug="alpha", url="https://example.com/a")
-        Link.objects.create(slug="bravo", url="https://example.com/b")
+    def test_inline_edit_saves_the_addressed_link(self, client, make_link) -> None:
+        alpha = make_link("alpha")
+        make_link("bravo")
         response = client.post_action(
             "edit_link_form",
             {"slug": "bravo", "url": "https://example.com/updated"},
@@ -192,20 +215,22 @@ class TestAdminInlineEdit:
         )
         assert response.status_code == 302
         assert Link.objects.get(slug="bravo").url == "https://example.com/updated"
-        assert Link.objects.get(slug="alpha").url == "https://example.com/a"
+        assert Link.objects.get(slug="alpha").url == alpha.url
 
-    def test_inline_edit_invalid_keeps_the_link(self, client) -> None:
-        Link.objects.create(slug="alpha", url="https://example.com/a")
+    def test_inline_edit_invalid_keeps_the_link(self, client, make_link) -> None:
+        alpha = make_link("alpha")
         response = client.post_action(
             "edit_link_form", {"slug": "alpha", "url": "not-a-url"}, origin="/admin/"
         )
         assert response.status_code == 200
         assert b"Enter a valid URL" in response.content
-        assert Link.objects.get(slug="alpha").url == "https://example.com/a"
+        assert Link.objects.get(slug="alpha").url == alpha.url
 
-    def test_invalid_partial_edit_morphs_the_keyed_row_form(self, client) -> None:
-        Link.objects.create(slug="alpha", url="https://example.com/a")
-        Link.objects.create(slug="bravo", url="https://example.com/b")
+    def test_invalid_partial_edit_morphs_the_keyed_row_form(
+        self, client, make_link
+    ) -> None:
+        make_link("alpha")
+        bravo = make_link("bravo")
         response = client.post_action(
             "edit_link_form",
             {"slug": "bravo", "url": "not-a-url"},
@@ -224,15 +249,15 @@ class TestAdminInlineEdit:
         assert meta["errors"]["url"] == ["Enter a valid URL."]
         html = envelope.ops[0]["html"]
         assert 'data-next-key="bravo"' in html
-        assert Link.objects.get(slug="bravo").url == "https://example.com/b"
+        assert Link.objects.get(slug="bravo").url == bravo.url
 
 
 class TestDeleteRemovesRow:
     """Deleting an admin link patches its keyed row out of the list."""
 
-    def test_partial_delete_removes_the_addressed_row(self, client) -> None:
-        Link.objects.create(slug="alpha", url="https://example.com/a")
-        Link.objects.create(slug="bravo", url="https://example.com/b")
+    def test_partial_delete_removes_the_addressed_row(self, client, make_link) -> None:
+        make_link("alpha")
+        make_link("bravo")
         response = client.post_action(
             "delete_link", {"slug": "bravo"}, origin="/admin/", partial=True
         )
@@ -243,8 +268,8 @@ class TestDeleteRemovesRow:
         assert not Link.objects.filter(slug="bravo").exists()
         assert Link.objects.filter(slug="alpha").exists()
 
-    def test_no_runtime_delete_redirects_to_admin(self, client) -> None:
-        Link.objects.create(slug="alpha", url="https://example.com/a")
+    def test_no_runtime_delete_redirects_to_admin(self, client, make_link) -> None:
+        make_link("alpha")
         response = client.post_action(
             "delete_link", {"slug": "alpha"}, origin="/admin/"
         )
@@ -267,8 +292,8 @@ class TestLatestLinksZoneOwnsItsCondition:
         assert envelope.zone_targets() == ["latest-links"]
         assert "No links yet" in envelope.html_for_zone("latest-links")
 
-    def test_zone_render_lists_rows_once_links_exist(self, client) -> None:
-        Link.objects.create(slug="alpha", url="https://example.com/a")
+    def test_zone_render_lists_rows_once_links_exist(self, client, make_link) -> None:
+        make_link("alpha")
         envelope = envelope_of(client.get_zones("/", "latest-links"))
         html = envelope.html_for_zone("latest-links")
         assert 'data-next-key="alpha"' in html
@@ -307,9 +332,11 @@ class TestCreatePrependsRow:
 class TestResetClicksMorphsForeignBadge:
     """Resetting clicks from the detail page morphs the home badge zone OOB."""
 
-    def test_partial_reset_morphs_the_home_links_badge_zone(self, client) -> None:
-        link = Link.objects.create(slug="hot", url="https://example.com/h")
-        Link.objects.create(slug="cold", url="https://example.com/c")
+    def test_partial_reset_morphs_the_home_links_badge_zone(
+        self, client, make_link
+    ) -> None:
+        link = make_link("hot")
+        make_link("cold")
         increment_clicks("hot")
         increment_clicks("cold")
         response = client.post_action(
@@ -322,8 +349,8 @@ class TestResetClicksMorphsForeignBadge:
         assert cache.get(f"{CLICK_PREFIX}hot") is None
         assert "1 pending clicks" in envelope.html_for_zone("links-badge")
 
-    def test_no_runtime_reset_redirects_to_detail(self, client) -> None:
-        link = Link.objects.create(slug="hot", url="https://example.com/h")
+    def test_no_runtime_reset_redirects_to_detail(self, client, make_link) -> None:
+        link = make_link("hot")
         increment_clicks("hot")
         response = client.post_action(
             "reset_clicks", {}, origin=f"/admin/links/{link.slug}/"

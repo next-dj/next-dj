@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
-{% component "page_head" title="next.dj — Kanban" %}
+{% component "page_head" title="next.dj — Kanban" icon="📋" %}
 <body class="min-h-screen flex flex-col">
   {% #component "app_shell" brand="🗂️ next.dj Kanban" brand_href="/" %}
     {% #slot "actions" %}

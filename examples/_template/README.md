@@ -1,13 +1,29 @@
 # `_template` — starter scaffold for a next.dj example
 
-This folder is not a working example. It is the canonical skeleton copied for every new example in this repository. Copy it, rename, and fill in.
+The skeleton copied for every new example in this repository. It runs and its test passes, but it demonstrates nothing on its own. Copy the folder, work through the rename checklist, then fill in the feature you want to show.
+
+## Layout
+
+Two page roots feed one file router. `chrome/` is the project-level root listed in `PAGE_BACKENDS["DIRS"]`, and its `layout.djx` is the outermost HTML envelope wrapped around every page. `myapp/routes/` is the per-app root the router finds through `APP_DIRS=True`, and it holds the pages themselves. Components resolve the same way, from the app's `_widgets/` and from the shared kit in [`../_shared/_components/`](../_shared/_components/) listed in `COMPONENT_BACKENDS["DIRS"]`. `STATICFILES_DIRS` picks up `../_shared/static` alongside the example's own `static/`, which is how the shadcn palette and its tokens arrive.
+
+## Rename checklist
+
+The scaffold ships deliberately generic names. Each rename touches more than one file, so change them together.
+
+| Rename | Also update |
+| --- | --- |
+| `myapp/` | `INSTALLED_APPS` in [`config/settings.py`](config/settings.py), and `eager_load_pages(...)` in [`conftest.py`](conftest.py) |
+| `myapp/routes/` | `PAGES_DIR` in `PAGE_BACKENDS`, and `eager_load_pages(...)` in `conftest.py` |
+| `myapp/routes/_widgets/` | `COMPONENTS_DIR` in `COMPONENT_BACKENDS` |
+| `chrome/` | `PAGE_BACKENDS["DIRS"]` |
+
+Pick names that fit the domain rather than reusing `routes` and `_widgets`. Every example renames both, which is what shows the naming is yours and not the framework's.
 
 ## Conventions
 
-- `PAGES_DIR` is set to `routes`, `COMPONENTS_DIR` is set to `_widgets`. Every example overrides both to show that the naming is user-controlled. Pick names that fit the domain.
-- Tailwind is loaded via the Play CDN in the root layout. No build step.
-- `conftest.py` uses `next.testing.eager_load_pages` and `NextClient`.
-- `PARTIAL_BACKENDS` pins an explicit asset `VERSION` through `next.conf.extend_default_backend`. Static files are served straight from disk in an example, so the default `"manifest"` sentinel has no hashed manifest to read and the deploy-mismatch guard would stay dead — `next.W069` says so. Bump the tag when assets change and the runtime asks open clients to reload.
+- Tailwind loads from the Play CDN through the shared `page_head` component. No build step, no Node.
+- `conftest.py` is the canonical test scaffold. `eager_load_pages` imports the page tree once per session so the router is populated before the first request, and `NextClient` is the test client that speaks the partial protocol.
+- `PARTIAL_BACKENDS` pins an explicit asset `VERSION`, and every example inherits that line from here. The [examples README](../README.md#conventions-every-example-follows) explains why it is pinned and what `next.W069` checks.
 - Every file is intentionally short. Fill in what you need, drop what you do not.
 
 ## How to run
@@ -19,4 +35,9 @@ uv run python manage.py runserver
 uv run pytest
 ```
 
-The default smoke test in `tests/test_e2e.py` fetches `/` and asserts the welcome banner renders.
+The smoke test in `tests/test_e2e.py` fetches `/` and asserts the welcome banner renders. Keep it green while you fill the scaffold in, then grow it into the example's own suite. Every example is gated at 100% coverage by `make test-examples`.
+
+## Further reading
+
+- [`../README.md`](../README.md) — the catalog of finished examples and the conventions they share.
+- [`../shortener/README.md`](../shortener/README.md) — the walkthrough example to read first. It covers routing, context callables, forms, and components end to end.

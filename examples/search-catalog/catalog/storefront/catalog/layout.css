@@ -27,3 +27,8 @@ ul[data-next-zone="catalog-results"] {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
+
+/* The chip zone must exist even with no active filters, otherwise a live filter would target a zone the first render never emitted, so an empty strip collapses instead of holding a gap in the stacked column. */
+div[data-next-zone="catalog-chips"]:not(:has(ul)) {
+  display: none;
+}

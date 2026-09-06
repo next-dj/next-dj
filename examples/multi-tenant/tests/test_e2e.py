@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 import pytest
 from django.test import override_settings
 from notes.models import Note, Tenant
+
+
+pytestmark = pytest.mark.django_db
 
 
 if TYPE_CHECKING:
@@ -21,15 +25,13 @@ def globex(db) -> Tenant:
     return Tenant.objects.get(slug="globex")
 
 
-def _acme_note(acme: Tenant) -> Note:
+@pytest.fixture()
+def acme_note(acme: Tenant) -> Note:
     return Note.objects.get(tenant=acme, title="Welcome to Acme")
 
 
-def _globex_note(globex: Tenant) -> Note:
-    return Note.objects.get(tenant=globex, title="Globex roadmap")
-
-
-def _locked_acme_note(acme: Tenant) -> Note:
+@pytest.fixture()
+def locked_acme_note(acme: Tenant) -> Note:
     return Note.objects.get(tenant=acme, title="Status update")
 
 
@@ -41,14 +43,23 @@ class TestTenantContract:
         response = client.get("/notes/")
         assert response.status_code == 400
 
+    @pytest.mark.parametrize(
+        ("slug", "visible", "hidden"),
+        [
+            ("acme", "Welcome to Acme", "Globex roadmap"),
+            ("globex", "Globex roadmap", "Welcome to Acme"),
+        ],
+        ids=["acme", "globex"],
+    )
     @override_settings(DEBUG=False)
-    def test_acme_header_lists_acme_notes(
-        self, client: NextClient, acme: Tenant
+    def test_header_lists_only_that_tenants_notes(
+        self, client: NextClient, db, slug, visible, hidden
     ) -> None:
-        response = client.get("/notes/", HTTP_X_TENANT="acme")
+        response = client.get("/notes/", HTTP_X_TENANT=slug)
         assert response.status_code == 200
-        assert "Welcome to Acme" in response.content.decode()
-        assert "Globex roadmap" not in response.content.decode()
+        body = response.content.decode()
+        assert visible in body
+        assert hidden not in body
 
     @override_settings(DEBUG=False)
     def test_landing_page_renders_with_recent_notes(
@@ -60,50 +71,35 @@ class TestTenantContract:
         body = response.content.decode()
         assert "Welcome to Acme" in body
 
-    @override_settings(DEBUG=False)
-    def test_globex_header_lists_globex_notes(
-        self, client: NextClient, globex: Tenant
-    ) -> None:
-        response = client.get("/notes/", HTTP_X_TENANT="globex")
-        body = response.content.decode()
-        assert "Globex roadmap" in body
-        assert "Welcome to Acme" not in body
-
 
 class TestTenantTheme:
     """The tenant_theme context processor surfaces the primary color."""
 
+    @pytest.mark.parametrize(
+        ("slug", "accent"),
+        [("acme", "#2563eb"), ("globex", "#16a34a")],
+        ids=["acme", "globex"],
+    )
     @override_settings(DEBUG=False)
-    def test_acme_color_present_in_html(self, client: NextClient, acme: Tenant) -> None:
-        response = client.get("/notes/", HTTP_X_TENANT="acme")
-        body = response.content.decode()
-        assert "--tenant-accent:#2563eb" in body
-
-    @override_settings(DEBUG=False)
-    def test_globex_color_present_in_html(
-        self, client: NextClient, globex: Tenant
+    def test_tenant_color_present_in_html(
+        self, client: NextClient, db, slug, accent
     ) -> None:
-        response = client.get("/notes/", HTTP_X_TENANT="globex")
+        response = client.get("/notes/", HTTP_X_TENANT=slug)
         body = response.content.decode()
-        assert "--tenant-accent:#16a34a" in body
+        assert f"--tenant-accent:{accent}" in body
 
 
 class TestTenantPrefixStatic:
     """Static asset URLs are rewritten with the per-tenant prefix."""
 
+    @pytest.mark.parametrize("slug", ["acme", "globex"])
     @override_settings(DEBUG=False)
-    def test_acme_prefixes_static_urls(self, client: NextClient, acme: Tenant) -> None:
-        response = client.get("/notes/", HTTP_X_TENANT="acme")
-        body = response.content.decode()
-        assert "/_t/acme/static/next/" in body
-
-    @override_settings(DEBUG=False)
-    def test_globex_prefixes_static_urls(
-        self, client: NextClient, globex: Tenant
+    def test_static_urls_carry_the_tenant_prefix(
+        self, client: NextClient, db, slug
     ) -> None:
-        response = client.get("/notes/", HTTP_X_TENANT="globex")
+        response = client.get("/notes/", HTTP_X_TENANT=slug)
         body = response.content.decode()
-        assert "/_t/globex/static/next/" in body
+        assert f"/_t/{slug}/static/next/" in body
 
 
 class TestRootBlocks:
@@ -122,33 +118,31 @@ class TestNoteEditForm:
 
     @override_settings(DEBUG=False)
     def test_acme_can_save_their_own_note(
-        self, client: NextClient, acme: Tenant
+        self, client: NextClient, acme_note: Note
     ) -> None:
-        note = _acme_note(acme)
         response = client.post_action(
             "note_edit_form",
-            {"title": note.title, "body": "edited body content"},
-            origin=f"/notes/{note.pk}/edit/",
+            {"title": acme_note.title, "body": "edited body content"},
+            origin=f"/notes/{acme_note.pk}/edit/",
             HTTP_X_TENANT="acme",
         )
         assert response.status_code == 302
-        note.refresh_from_db()
-        assert note.body == "edited body content"
+        acme_note.refresh_from_db()
+        assert acme_note.body == "edited body content"
 
     @override_settings(DEBUG=False)
     def test_globex_cannot_edit_acme_note(
-        self, client: NextClient, acme: Tenant
+        self, client: NextClient, acme_note: Note
     ) -> None:
-        note = _acme_note(acme)
         response = client.post_action(
             "note_edit_form",
             {"title": "hijack", "body": "should not save"},
-            origin=f"/notes/{note.pk}/edit/",
+            origin=f"/notes/{acme_note.pk}/edit/",
             HTTP_X_TENANT="globex",
         )
         assert response.status_code == 404
-        note.refresh_from_db()
-        assert note.title != "hijack"
+        acme_note.refresh_from_db()
+        assert acme_note.title != "hijack"
 
 
 class TestNoteEditFormPermissionHooks:
@@ -156,65 +150,81 @@ class TestNoteEditFormPermissionHooks:
 
     @override_settings(DEBUG=False)
     def test_active_tenant_edits_unlocked_note(
-        self, client: NextClient, acme: Tenant
+        self, client: NextClient, acme_note: Note
     ) -> None:
-        note = _acme_note(acme)
         response = client.post_action(
             "note_edit_form",
-            {"title": note.title, "body": "passed both hooks"},
-            origin=f"/notes/{note.pk}/edit/",
+            {"title": acme_note.title, "body": "passed both hooks"},
+            origin=f"/notes/{acme_note.pk}/edit/",
             HTTP_X_TENANT="acme",
         )
         assert response.status_code == 302
-        note.refresh_from_db()
-        assert note.body == "passed both hooks"
+        acme_note.refresh_from_db()
+        assert acme_note.body == "passed both hooks"
 
     @override_settings(DEBUG=False)
     def test_locked_note_is_denied_with_403(
-        self, client: NextClient, acme: Tenant
+        self, client: NextClient, locked_acme_note: Note
     ) -> None:
-        note = _locked_acme_note(acme)
         response = client.post_action(
             "note_edit_form",
-            {"title": note.title, "body": "should not persist"},
-            origin=f"/notes/{note.pk}/edit/",
+            {"title": locked_acme_note.title, "body": "should not persist"},
+            origin=f"/notes/{locked_acme_note.pk}/edit/",
             HTTP_X_TENANT="acme",
         )
         assert response.status_code == 403
-        note.refresh_from_db()
-        assert note.body != "should not persist"
+        locked_acme_note.refresh_from_db()
+        assert locked_acme_note.body != "should not persist"
+
+    @override_settings(DEBUG=False)
+    def test_locked_note_editor_announces_the_denial_up_front(
+        self, client: NextClient, locked_acme_note: Note
+    ) -> None:
+        response = client.get(
+            f"/notes/{locked_acme_note.pk}/edit/", HTTP_X_TENANT="acme"
+        )
+        body = response.content.decode()
+        assert "Locked note" in body
+        assert re.search(r"<button[^>]*\sdisabled(?=[\s>])", body) is not None
+
+    @override_settings(DEBUG=False)
+    def test_unlocked_note_editor_keeps_the_save_button_live(
+        self, client: NextClient, acme_note: Note
+    ) -> None:
+        response = client.get(f"/notes/{acme_note.pk}/edit/", HTTP_X_TENANT="acme")
+        body = response.content.decode()
+        assert "Locked note" not in body
+        assert re.search(r"<button[^>]*\sdisabled(?=[\s>])", body) is None
 
     @override_settings(DEBUG=False)
     def test_suspended_tenant_is_denied_with_403(
-        self, client: NextClient, acme: Tenant
+        self, client: NextClient, acme: Tenant, acme_note: Note
     ) -> None:
         Tenant.objects.filter(pk=acme.pk).update(is_active=False)
-        note = _acme_note(acme)
         response = client.post_action(
             "note_edit_form",
-            {"title": note.title, "body": "tenant is suspended"},
-            origin=f"/notes/{note.pk}/edit/",
+            {"title": acme_note.title, "body": "tenant is suspended"},
+            origin=f"/notes/{acme_note.pk}/edit/",
             HTTP_X_TENANT="acme",
         )
         assert response.status_code == 403
-        note.refresh_from_db()
-        assert note.body != "tenant is suspended"
+        acme_note.refresh_from_db()
+        assert acme_note.body != "tenant is suspended"
 
     @override_settings(DEBUG=False)
     def test_view_hook_denies_before_get_initial_404(
-        self, client: NextClient, acme: Tenant, globex: Tenant
+        self, client: NextClient, acme_note: Note, globex: Tenant
     ) -> None:
         Tenant.objects.filter(pk=globex.pk).update(is_active=False)
-        note = _acme_note(acme)
         response = client.post_action(
             "note_edit_form",
             {"title": "hijack", "body": "cross tenant"},
-            origin=f"/notes/{note.pk}/edit/",
+            origin=f"/notes/{acme_note.pk}/edit/",
             HTTP_X_TENANT="globex",
         )
         assert response.status_code == 403
-        note.refresh_from_db()
-        assert note.title != "hijack"
+        acme_note.refresh_from_db()
+        assert acme_note.title != "hijack"
 
 
 class TestNoteEditFormErrorRerender:
@@ -222,13 +232,12 @@ class TestNoteEditFormErrorRerender:
 
     @override_settings(DEBUG=False)
     def test_invalid_submit_keeps_static_pipeline(
-        self, client: NextClient, acme: Tenant
+        self, client: NextClient, acme_note: Note
     ) -> None:
-        note = _acme_note(acme)
         response = client.post_action(
             "note_edit_form",
             {"title": "", "body": "x"},
-            origin=f"/notes/{note.pk}/edit/",
+            origin=f"/notes/{acme_note.pk}/edit/",
             HTTP_X_TENANT="acme",
         )
         body = response.content.decode()
@@ -312,21 +321,19 @@ class TestNoteEditPage:
 
     @override_settings(DEBUG=False)
     def test_edit_page_renders_with_seeded_form(
-        self, client: NextClient, acme: Tenant
+        self, client: NextClient, acme_note: Note
     ) -> None:
-        note = _acme_note(acme)
-        response = client.get(f"/notes/{note.pk}/edit/", HTTP_X_TENANT="acme")
+        response = client.get(f"/notes/{acme_note.pk}/edit/", HTTP_X_TENANT="acme")
         assert response.status_code == 200
         body = response.content.decode()
-        assert note.title in body
+        assert acme_note.title in body
         assert "Preview" in body
 
     @override_settings(DEBUG=False)
     def test_edit_page_prefixes_component_module(
-        self, client: NextClient, acme: Tenant
+        self, client: NextClient, acme_note: Note
     ) -> None:
-        note = _acme_note(acme)
-        response = client.get(f"/notes/{note.pk}/edit/", HTTP_X_TENANT="acme")
+        response = client.get(f"/notes/{acme_note.pk}/edit/", HTTP_X_TENANT="acme")
         body = response.content.decode()
         assert (
             '<script type="module" '

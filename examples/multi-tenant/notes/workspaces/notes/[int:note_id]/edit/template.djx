@@ -4,6 +4,10 @@
     ← Back to notes
   </a>
 
+  {% if note.locked %}
+    {% component "alert" variant="warning" title="Locked note" text="This note is read-only. The object-level guard on the edit action refuses every save." %}
+  {% endif %}
+
   {% form "note_edit_form" %}
     <div class="space-y-3">
       {% #component "field" label="Title" for_id="id_title" %}
@@ -14,8 +18,8 @@
       {% /component %}
       <div class="flex items-center justify-between pt-2">
         <span class="text-xs text-muted-foreground">tenant: {{ tenant.slug }}</span>
-        <button type="submit"
-                class="rounded-md accent-bar px-4 py-2 text-sm font-medium text-white hover:opacity-90">
+        <button type="submit" {% if note.locked %}disabled{% endif %}
+                class="rounded-md accent-bar px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50">
           Save note
         </button>
       </div>

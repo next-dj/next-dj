@@ -30,31 +30,6 @@ from next.testing import (
 pytestmark = pytest.mark.django_db
 
 
-@pytest.fixture()
-def poll(db) -> Poll:
-    """Return the first demo poll with two choices for the happy-path flow.
-
-    The fixture dedupes against rows seeded by the data migration so the
-    total poll count stays at two and assertions on the inherited
-    `active_polls_count` stay deterministic.
-    """
-    del db
-    poll, _ = Poll.objects.get_or_create(question="Tabs or spaces?")
-    Choice.objects.get_or_create(poll=poll, text="Tabs", defaults={"votes": 0})
-    Choice.objects.get_or_create(poll=poll, text="Spaces", defaults={"votes": 0})
-    return poll
-
-
-@pytest.fixture()
-def second_poll(db) -> Poll:
-    """Return the second seeded poll, used to exercise cross-poll validation."""
-    del db
-    poll, _ = Poll.objects.get_or_create(question="Vim or Emacs?")
-    Choice.objects.get_or_create(poll=poll, text="Vim", defaults={"votes": 0})
-    Choice.objects.get_or_create(poll=poll, text="Emacs", defaults={"votes": 0})
-    return poll
-
-
 def _detail_html(client: NextClient, poll: Poll) -> str:
     response = client.get(f"/polls/{poll.pk}/")
     assert response.status_code == 200
@@ -221,11 +196,9 @@ class TestVoteAction:
         choice.refresh_from_db()
         assert choice.votes == 1
 
-    @pytest.mark.parametrize(
-        ("rounds", "expected"), [(1, 1), (3, 3), (7, 7)], ids=["once", "three", "seven"]
-    )
+    @pytest.mark.parametrize("rounds", [1, 3, 7])
     def test_repeated_votes_sum_correctly(
-        self, client: NextClient, poll: Poll, rounds: int, expected: int
+        self, client: NextClient, poll: Poll, rounds: int
     ) -> None:
         choice = poll.choices.get(text="Spaces")
         for _ in range(rounds):
@@ -234,7 +207,7 @@ class TestVoteAction:
             )
             assert response.status_code == 302
         choice.refresh_from_db()
-        assert choice.votes == expected
+        assert choice.votes == rounds
 
     def test_signal_payload_carries_form_and_url_kwargs(
         self, client: NextClient, poll: Poll

@@ -50,39 +50,47 @@ The next request observes the fresh URL tree without a process restart. Tests co
 
 ### 3. DI provider for the slug
 
-`wiki.providers.ArticleProvider` claims any parameter annotated as `DArticle[Article]`. It reads `context.url_kwargs["slug"]` and either returns the matching row or raises `Http404`. The catchall page, the edit form, and the preview context all use the same provider, so the slug-to-row lookup lives in one place.
+`wiki.providers.ArticleProvider` claims any parameter annotated as `DArticle[Article]`. It reads `context.url_kwargs["slug"]` and either returns the matching row or raises `Http404`. The catchall page and both contexts of the edit page use it, so the slug-to-row lookup lives in one place.
 
-### 4. Live preview through the shared component
+The edit form does not go through the provider. A `ModelForm` names the URL kwarg that identifies its row with `Meta.instance_from_url = "slug"`, and the framework loads that row onto `self.instance` when it builds the form, which is what the object-level permission hook in section 8 reads.
+
+### 4. Form fields rendered by the shared kit
+
+Both forms declare their widgets as `ComponentWidget("input")` and `ComponentWidget("textarea", ...)`, so `{{ form.body_md }}` renders the shared `textarea` component instead of Django's stock widget HTML. Extra keyword arguments travel as component props: `rows=12` sets the `rows` attribute and `markdown_source=True` reaches the template as an arbitrary prop it turns into `data-markdown-source="true"`. Around each control the shared `field` component supplies the label, the `for_id`, and the error slot.
+
+### 5. Live preview through the shared component
 
 `articles/new/page.py` and `articles/edit/[slug]/page.py` both register a context entry named `preview_html` that runs the form body through `render_markdown` and returns the safe HTML. The template passes it to the shared `markdown_preview` component as `rendered_html=preview_html`, so the preview pane is filled server-side on first paint and on every re-render after a failed submission. The JavaScript layer then wires the textarea to the pane for keystroke updates without round-tripping the server.
+
+`render_markdown` escapes the body before handing it to the Markdown renderer, so inline HTML in an article reaches the page as text while headings, lists, fenced code, and links still resolve. It then rewrites `href` values pointing at `javascript:`, `data:`, or `vbscript:`, which Markdown auto-link parsing otherwise accepts. The co-located `component.mjs` repeats both steps against `marked`, so the pane the browser paints matches the one the server would have sent.
 
 `markdown_preview` lives in [`examples/_shared/_components/markdown_preview/`](../_shared/_components/markdown_preview/) as a pure presentation shell. Its `component.py` declares only the `marked` CDN, its co-located `component.mjs` ships the client behaviour, and its `component.css` styles code and pre blocks. The framework auto-discovers the co-located assets and dedupes them into the page slots, so this example never names a static path. Only the server-side render stays local — this example reuses its own `render_markdown` helper and injects the result through the prop.
 
 The script registers its work through `Next.partial.onMount("[data-markdown-preview]", ...)` rather than a `document.querySelectorAll` scan at load. The runtime runs the callback over the initial DOM and over every subtree it later inserts, so a preview pane that re-renders inside a morphed form is rebound the same way the first render was, with no stale listener left behind by a swap. The callback walks up to the enclosing `<form>` to find its textarea, so the one shell powers both the wiki form and the near-identical multi-tenant note form without hardcoding a field name.
 
-### 5. Slug reservations
+### 6. Slug reservations
 
 `Article.clean()` rejects slugs that collide with file-route prefixes (`docs`, `articles`, `search`, `wiki`). Both forms enforce the same rule plus a uniqueness check against `Article.slug`. A reserved slug re-renders the form with the error message and the live preview pane intact.
 
-### 6. LIKE search across two stores
+### 7. LIKE search across two stores
 
 `wiki/routes/search/page.py` runs two scans for each query. A literal substring match against a curated catalogue surfaces matching file pages. A `Q(title__icontains) | Q(body_md__icontains)` query against `Article` surfaces matching rows. The same template renders both lists side by side inside a `search-results` zone.
 
 The search form carries `data-next-target="search-results"`, `data-next-trigger="input"`, and `data-next-debounce="300"`, so the runtime debounces keystrokes, issues a GET for the `search-results` zone, and morphs the two result lists in place. `page.py` does not change: the same view answers the full page and the zone request, reading `?q=` from `request.GET` either way. Without the runtime the form is a plain `<form method="get">` and the Search button reloads the page, so a bookmark of `/search/?q=routing` still reproduces the listing.
 
-### 7. Object-level edit permission
+### 8. Object-level edit permission
 
 `Article` carries a `locked` boolean. The edit form in `wiki/routes/articles/edit/[slug]/page.py` declares `has_object_permission(self)`, an object-level hook that the framework resolves like `on_valid` and runs after the form binds, so `self.instance` is the loaded target row. The override reads only what it needs from `self.instance` and returns `not self.instance.locked`. A locked article short-circuits to a bare 403 before validation runs, so there is no form re-render. The create form has no such hook and stays open.
 
-### 8. Free children in the documentation figure
+### 9. Free children in the documentation figure
 
 Both file-backed doc pages wrap examples in [`wiki/routes/docs/_blocks/doc_figure/`](wiki/routes/docs/_blocks/doc_figure/). The component sits inside the page tree, so it is visible from every template under `/docs/` and from nowhere else. It has exactly one insertion point, so a named slot would be ceremony: the caller writes markup between `{% #component "doc_figure" %}` and `{% /component %}`, the framework hands it over as `children`, and the template splices it with `{{ children }}`.
 
 The two channels differ, and `/docs/components/` shows the difference on one call. The block body is spliced as written, so the `<em>` and `<strong>` runs inside it reach the page as markup — whether the values interpolated there were escaped is the calling template's business, exactly as with `{% include %}`. The `caption` prop carries the same snippet from `markup_sample` in `page.py` and is escaped like every prop, so the figcaption shows `<em>emphasis</em>` as text.
 
-### 9. No nested layout
+### 10. One layout, two page roots
 
-The example wires only one `layout.djx` at the routes root. A nested layout is not needed and would add noise. Examples that do need nested layouts are `examples/multi-tenant` and `examples/markdown-blog`.
+The router walks two roots. `PAGE_BACKENDS["DIRS"]` lists `shell/`, a project-level page root whose only file is [`shell/layout.djx`](shell/layout.djx) with the outer HTML envelope. `APP_DIRS = True` plus `PAGES_DIR = "routes"` picks up `wiki/routes/`, which owns every page and ships no `layout.djx` of its own. One wrapper covers the whole site, so nothing here needs a nested layout. Examples that do are `examples/multi-tenant` and `examples/markdown-blog`.
 
 ## Further reading
 

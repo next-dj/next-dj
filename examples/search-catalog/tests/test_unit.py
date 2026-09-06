@@ -1,5 +1,6 @@
 import importlib
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 from catalog.forms import PRESETS, PresetFilterForm
@@ -12,17 +13,27 @@ from catalog.providers import (
     parse_filters,
 )
 from catalog.templatetags.catalog_qs import querystring
+from catalog.zones import CATEGORY_ZONES, LISTING_ZONES, zone_target
 from django.apps import apps as django_apps
-from django.test import RequestFactory
+
+
+pytestmark = pytest.mark.django_db
 
 
 _SEED_MIGRATION = importlib.import_module("catalog.migrations.0002_seed_catalog")
 
 
-@pytest.fixture()
-def rf() -> RequestFactory:
-    """Return a request factory used to build query-string requests."""
-    return RequestFactory()
+class _PageParam:
+    """Stand-in for the `page` parameter the provider is asked to resolve."""
+
+    name = "page"
+    annotation = None
+
+
+def _resolve_page(rf, query: str) -> PageRequest:
+    """Run `PageProvider` against a request carrying `query`."""
+    request = rf.get("/" + (f"?{query}" if query else ""))
+    return PageProvider().resolve(_PageParam(), SimpleNamespace(request=request))
 
 
 class TestDemoData:
@@ -75,6 +86,15 @@ class TestFiltersDataclass:
             (Filters(in_stock=True), True),
             (Filters(sort="price_asc"), True),
         ],
+        ids=(
+            "all_defaults",
+            "search_term",
+            "brand_selection",
+            "price_floor",
+            "price_ceiling",
+            "in_stock_only",
+            "non_default_sort",
+        ),
     )
     def test_is_active(self, filters, expected) -> None:
         """Treat any non-default field as an active filter."""
@@ -111,44 +131,28 @@ class TestParseFilters:
 class TestPageProvider:
     """Cover the `PageProvider` value clamping and fallbacks."""
 
-    def _build_request(self, rf, query: str = ""):
-        return rf.get("/" + ("?" + query if query else ""))
-
-    def test_page_request_has_defaults(self, rf) -> None:
-        """Default to page 1 with the configured page size."""
-        request = self._build_request(rf)
-        ctx = type("ctx", (), {"request": request})()
-        provider = PageProvider()
-
-        class Param:
-            name = "page"
-            annotation = None
-
-        assert provider.resolve(Param(), ctx) == PageRequest(number=1, per_page=6)
-
-    def test_invalid_page_falls_back_to_one(self, rf) -> None:
-        """Treat an unparsable page parameter as page 1."""
-        request = self._build_request(rf, "page=abc")
-        ctx = type("ctx", (), {"request": request})()
-        provider = PageProvider()
-
-        class Param:
-            name = "page"
-            annotation = None
-
-        assert provider.resolve(Param(), ctx).number == 1
-
-    def test_invalid_per_page_falls_back_to_default(self, rf) -> None:
-        """Treat an unparsable per_page parameter as the default page size."""
-        request = self._build_request(rf, "per_page=oops")
-        ctx = type("ctx", (), {"request": request})()
-        provider = PageProvider()
-
-        class Param:
-            name = "page"
-            annotation = None
-
-        assert provider.resolve(Param(), ctx).per_page == 6
+    @pytest.mark.parametrize(
+        ("query", "expected"),
+        [
+            ("", PageRequest(number=1, per_page=6)),
+            ("page=abc", PageRequest(number=1, per_page=6)),
+            ("per_page=oops", PageRequest(number=1, per_page=6)),
+            ("page=0", PageRequest(number=1, per_page=6)),
+            ("per_page=999", PageRequest(number=1, per_page=60)),
+            ("page=3&per_page=12", PageRequest(number=3, per_page=12)),
+        ],
+        ids=(
+            "empty_query_string",
+            "unparsable_page",
+            "unparsable_per_page",
+            "page_below_one",
+            "per_page_above_max",
+            "both_values_honoured",
+        ),
+    )
+    def test_resolve_clamps_and_falls_back(self, rf, query, expected) -> None:
+        """Clamp both paging values and fall back on anything unparsable."""
+        assert _resolve_page(rf, query) == expected
 
 
 class TestPresetFilterForm:
@@ -168,6 +172,7 @@ class TestPresetFilterForm:
             ("cheapest", "/catalog/?sort=price_asc"),
             ("newest", "/catalog/?sort=newest"),
         ],
+        ids=("in_stock", "cheapest", "newest"),
     )
     def test_target_maps_preset_to_canonical_url(self, preset, expected) -> None:
         """Build the canonical listing URL for each preset."""
@@ -201,3 +206,23 @@ class TestQuerystringTemplateTag:
         assert "page=2" in result
         assert "brand=Acme" in result
         assert "page=1" not in result
+
+
+class TestZoneSets:
+    """Cover the zone names the listings publish to their filter form."""
+
+    def test_listing_zones_join_into_a_partial_target(self) -> None:
+        """Encode the all-products set as one comma-delimited target value."""
+        assert zone_target(LISTING_ZONES) == (
+            "catalog-results,catalog-more,catalog-count,catalog-pager,catalog-chips"
+        )
+
+    def test_category_zones_drop_the_append_sentinel(self) -> None:
+        """Leave `catalog-more` out of the paginated category listing."""
+        assert zone_target(CATEGORY_ZONES) == (
+            "catalog-results,catalog-count,catalog-pager,catalog-chips"
+        )
+
+    def test_category_set_is_a_subset_of_the_listing_set(self) -> None:
+        """Keep both listings on the same zone vocabulary."""
+        assert set(CATEGORY_ZONES) < set(LISTING_ZONES)

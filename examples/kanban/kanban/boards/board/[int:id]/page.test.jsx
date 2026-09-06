@@ -28,6 +28,15 @@ const mockBoard = {
   ],
   csrf: "test-csrf-token",
   move_card_url: "/actions/kanban/move_card",
+  create_card_url: "/actions/kanban/create_card",
+};
+
+const submitNewCard = (columnId, title) => {
+  const column = document.querySelector(`[data-kanban-column='${columnId}']`);
+  fireEvent.change(column.querySelector("input[name='title']"), {
+    target: { value: title },
+  });
+  fireEvent.submit(column.querySelector("form"));
 };
 
 beforeEach(() => {
@@ -76,9 +85,7 @@ describe("Board", () => {
 
   it("applies the move optimistically before the fetch resolves", () => {
     let resolveFetch;
-    globalThis.fetch = vi.fn(
-      () => new Promise((resolve) => (resolveFetch = resolve)),
-    );
+    globalThis.fetch = vi.fn(() => new Promise((resolve) => (resolveFetch = resolve)));
 
     render(<Board />);
 
@@ -159,6 +166,136 @@ describe("Board", () => {
     expect(document.querySelector("[data-kanban-error]")).toBeNull();
   });
 
+  it("posts to create_card_url with the column id and title", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValue({ ok: true, url: "/board/1/?created=77" });
+    globalThis.fetch = mockFetch;
+
+    render(<Board />);
+    submitNewCard(2, "Write docs");
+
+    await waitFor(() => expect(mockFetch).toHaveBeenCalled());
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/actions/kanban/create_card");
+    expect(opts.method).toBe("POST");
+
+    const body = new URLSearchParams(opts.body);
+    expect(body.get("column_id")).toBe("2");
+    expect(body.get("title")).toBe("Write docs");
+    expect(body.get("csrfmiddlewaretoken")).toBe("test-csrf-token");
+  });
+
+  it("shows the card as pending before the fetch resolves", () => {
+    let resolveFetch;
+    globalThis.fetch = vi.fn(() => new Promise((resolve) => (resolveFetch = resolve)));
+
+    render(<Board />);
+    submitNewCard(2, "Write docs");
+
+    const pending = document.querySelector(
+      "[data-kanban-column='2'] [data-kanban-card-pending]",
+    );
+    expect(pending).toBeTruthy();
+    expect(pending.textContent).toContain("Write docs");
+
+    resolveFetch({ ok: true, url: "/board/1/?created=77" });
+  });
+
+  it("adopts the card id the redirect carries", async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue({ ok: true, url: "/board/1/?created=77" });
+
+    render(<Board />);
+    submitNewCard(2, "Write docs");
+
+    await waitFor(() =>
+      expect(
+        document.querySelector("[data-kanban-column='2'] [data-kanban-card='77']"),
+      ).toBeTruthy(),
+    );
+    expect(document.querySelector("[data-kanban-card-pending]")).toBeNull();
+  });
+
+  it("rolls back the new card when the server rejects it", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, url: "/board/1/" });
+
+    render(<Board />);
+    submitNewCard(2, "Over the limit");
+
+    await waitFor(() =>
+      expect(document.querySelector("[data-kanban-error]")).toBeTruthy(),
+    );
+    expect(screen.queryByText("Over the limit")).toBeNull();
+    expect(
+      document.querySelector("[data-kanban-column='2'] [data-kanban-card]"),
+    ).toBeNull();
+  });
+
+  it("rolls back a success the redirect never named", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, url: "/board/1/" });
+
+    render(<Board />);
+    submitNewCard(2, "Write docs");
+
+    await waitFor(() =>
+      expect(document.querySelector("[data-kanban-error]")).toBeTruthy(),
+    );
+    expect(document.querySelector("[data-kanban-card-pending]")).toBeNull();
+    expect(screen.queryByText("Write docs")).toBeNull();
+  });
+
+  it("keeps a move that landed while a rejected create was in flight", async () => {
+    let rejectCreate;
+    globalThis.fetch = vi.fn((url) =>
+      url === "/actions/kanban/create_card"
+        ? new Promise((resolve) => {
+            rejectCreate = () => resolve({ ok: false, url: "/board/1/" });
+          })
+        : Promise.resolve({ ok: true }),
+    );
+
+    render(<Board />);
+    submitNewCard(2, "Write docs");
+    fireEvent.drop(document.querySelector("[data-kanban-column='2']"), {
+      dataTransfer: { getData: () => "10" },
+    });
+
+    await act(async () => rejectCreate());
+
+    expect(
+      document.querySelector("[data-kanban-column='2'] [data-kanban-card='10']"),
+    ).toBeTruthy();
+    expect(screen.queryByText("Write docs")).toBeNull();
+  });
+
+  it("rolls back the new card on a network failure", async () => {
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error("offline"));
+
+    render(<Board />);
+    submitNewCard(2, "Write docs");
+
+    await waitFor(() =>
+      expect(document.querySelector("[data-kanban-error]")).toBeTruthy(),
+    );
+    expect(screen.getByText(/rolled back/i)).toBeInTheDocument();
+    expect(screen.queryByText("Write docs")).toBeNull();
+  });
+
+  it("skips the create request when the context carries no action url", () => {
+    delete globalThis.window.Next.context.board.create_card_url;
+    const mockFetch = vi.fn();
+    globalThis.fetch = mockFetch;
+
+    render(<Board />);
+    submitNewCard(2, "Write docs");
+
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(screen.queryByText("Write docs")).toBeNull();
+  });
+
   it("renders empty board gracefully when context is missing", () => {
     delete globalThis.window.Next;
     render(<Board />);
@@ -209,9 +346,7 @@ describe("board island lifecycle", () => {
     expect(
       el.querySelector("[data-kanban-column='2'] [data-kanban-card='10']"),
     ).toBeTruthy();
-    expect(
-      el.querySelector("[data-kanban-column='1'] [data-kanban-card]"),
-    ).toBeNull();
+    expect(el.querySelector("[data-kanban-column='1'] [data-kanban-card]")).toBeNull();
   });
 
   it("unmounts the root when next:removed fires on the mount point", () => {

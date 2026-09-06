@@ -16,6 +16,9 @@ from next.forms.signals import (
 from next.testing import SignalRecorder, envelope_of, resolve_action_url
 
 
+pytestmark = pytest.mark.django_db
+
+
 WIZARD_ACTION = "access_request_wizard"
 
 _STEP_PAGE_PATH = (
@@ -89,6 +92,12 @@ def _walk_three_steps(client) -> None:
     _post_step(client, "identity", IDENTITY)
     _post_step(client, "scope", SCOPE)
     _post_step(client, "approval", APPROVAL)
+
+
+@pytest.fixture()
+def submitted_request(client) -> AccessRequest:
+    _walk_three_steps(client)
+    return AccessRequest.objects.get()
 
 
 def _wizard_form_block(html: str) -> str:
@@ -416,13 +425,13 @@ class TestUnknownUid:
 
 
 class TestRequestCorrelation:
-    def test_backend_dispatched_row_links_to_request_when_created(self, client) -> None:
-        _walk_three_steps(client)
-        ar = AccessRequest.objects.get()
+    def test_backend_dispatched_row_links_to_request_when_created(
+        self, submitted_request: AccessRequest
+    ) -> None:
         attached = AuditEntry.objects.filter(
             source=AuditEntry.SOURCE_BACKEND,
             kind=AuditEntry.KIND_DISPATCHED,
-            request_id=ar.pk,
+            request_id=submitted_request.pk,
         )
         assert attached.count() == 1
 
@@ -439,9 +448,10 @@ class TestRequestCorrelation:
 
 
 class TestPerRequestAuditPage:
-    def test_renders_only_owned_rows(self, client) -> None:
-        _walk_three_steps(client)
-        first = AccessRequest.objects.get()
+    def test_renders_only_owned_rows(
+        self, client, submitted_request: AccessRequest
+    ) -> None:
+        first = submitted_request
 
         client.cookies.clear()
         _walk_three_steps(client)
@@ -458,12 +468,11 @@ class TestPerRequestAuditPage:
         response = client.get("/request/9999/audit/")
         assert response.status_code == 404
 
-    def test_just_submitted_banner_appears_only_with_query(self, client) -> None:
-        _walk_three_steps(client)
-        ar = AccessRequest.objects.get()
-
-        without = client.get(f"/request/{ar.pk}/audit/")
-        with_flag = client.get(f"/request/{ar.pk}/audit/?just=1")
+    def test_just_submitted_banner_appears_only_with_query(
+        self, client, submitted_request: AccessRequest
+    ) -> None:
+        without = client.get(f"/request/{submitted_request.pk}/audit/")
+        with_flag = client.get(f"/request/{submitted_request.pk}/audit/?just=1")
         assert "data-just-submitted" not in without.content.decode()
         assert "data-just-submitted" in with_flag.content.decode()
 
@@ -507,6 +516,15 @@ class TestModalWizardFlagship:
         assert 'data-next-accepted="request-list"' in body
         assert 'href="/request/identity/"' in body
         assert 'data-next-zone="request-list"' in body
+
+    def test_the_topbar_entry_opens_the_same_layer(self, client) -> None:
+        body = client.get("/admin/audit/").content.decode()
+        opener = re.search(
+            r'<a[^>]*href="/request/identity/"[^>]*>\s*Start request', body
+        )
+        assert opener is not None
+        assert 'data-next-layer="access-wizard"' in opener.group(0)
+        assert 'data-next-accepted="request-list"' in opener.group(0)
 
     def test_landing_request_list_marks_each_row_with_its_key(self, client) -> None:
         ar = AccessRequest.objects.create(

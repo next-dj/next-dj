@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 
 import pytest
+from django.apps import apps as django_apps
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied
 from flags.cache import FLAG_PREFIX, MISSING_SENTINEL, get_cached_flag, invalidate_flag
@@ -16,12 +18,42 @@ from flags.receivers import DENIED_COUNT_KEY, _page_key, access_denied_count
 from next.testing import resolve_call
 
 
+pytestmark = pytest.mark.django_db
+
+
+_SEED_MIGRATION = importlib.import_module("flags.migrations.0002_demo_flags")
+
+
+class TestDemoFlags:
+    """The data migration seeds the documented flags and reverses cleanly."""
+
+    def test_every_demo_flag_is_seeded(self) -> None:
+        assert dict(Flag.objects.values_list("name", "enabled")) == {
+            "beta_checkout": True,
+            "dark_sidebar": False,
+            "ai_suggestions": False,
+            "admin_writes": True,
+        }
+
+    def test_write_gate_starts_open(self) -> None:
+        assert FlagService().is_enabled(WRITE_GATE_FLAG) is True
+
+    def test_reverse_removes_only_the_seeded_names(self, make_flag) -> None:
+        make_flag("house_flag", label="House", enabled=True)
+        _SEED_MIGRATION.unseed(django_apps, None)
+        assert list(Flag.objects.values_list("name", flat=True)) == ["house_flag"]
+
+
 class TestFlagModel:
     """Pure-Python behaviour of the `Flag` model."""
 
-    def test_str_shows_on_or_off(self) -> None:
-        assert str(Flag(name="beta", enabled=True)) == "beta [on]"
-        assert str(Flag(name="beta", enabled=False)) == "beta [off]"
+    @pytest.mark.parametrize(
+        ("enabled", "expected"),
+        [(True, "beta [on]"), (False, "beta [off]")],
+        ids=["on", "off"],
+    )
+    def test_str_shows_the_state(self, enabled, expected) -> None:
+        assert str(Flag(name="beta", enabled=enabled)) == expected
 
 
 class TestFlagCache:
@@ -31,14 +63,14 @@ class TestFlagCache:
         assert get_cached_flag("unknown") is None
         assert cache.get(f"{FLAG_PREFIX}unknown") == MISSING_SENTINEL
 
-    def test_hit_is_cached_and_returned(self) -> None:
-        flag = Flag.objects.create(name="beta", label="Beta", enabled=True)
+    def test_hit_is_cached_and_returned(self, make_flag) -> None:
+        flag = make_flag("beta", label="Beta", enabled=True)
         assert get_cached_flag("beta").pk == flag.pk
         assert cache.get(f"{FLAG_PREFIX}beta").pk == flag.pk
         assert get_cached_flag("beta").pk == flag.pk
 
-    def test_invalidate_drops_entry(self) -> None:
-        Flag.objects.create(name="beta", label="Beta", enabled=True)
+    def test_invalidate_drops_entry(self, make_flag) -> None:
+        make_flag("beta", label="Beta", enabled=True)
         get_cached_flag("beta")
         invalidate_flag("beta")
         assert cache.get(f"{FLAG_PREFIX}beta") is None
@@ -79,29 +111,28 @@ class TestRenderCounts:
 class TestPageKey:
     """`_page_key` derives a stable per-page identifier from the full path."""
 
-    def test_root_page_is_slash(self) -> None:
-        assert _page_key(Path("/src/flags/panels/page.py")) == "/"
-
-    def test_nested_page_joins_segments(self) -> None:
-        assert (
-            _page_key(Path("/src/flags/panels/admin/metrics/page.py"))
-            == "admin/metrics"
-        )
-
-    def test_path_without_anchor_falls_back_to_stem(self) -> None:
-        assert _page_key(Path("/elsewhere/page.py")) == "page"
+    @pytest.mark.parametrize(
+        ("path", "expected"),
+        [
+            ("/src/flags/panels/page.py", "/"),
+            ("/src/flags/panels/admin/metrics/page.py", "admin/metrics"),
+            ("/elsewhere/page.py", "page"),
+        ],
+        ids=["root", "nested", "outside-the-panels-anchor"],
+    )
+    def test_key_is_derived_from_the_path(self, path: str, expected: str) -> None:
+        assert _page_key(Path(path)) == expected
 
 
 class TestFlagService:
     """`FlagService.is_enabled` reads through the flag cache."""
 
-    def test_enabled_flag_is_true(self) -> None:
-        Flag.objects.create(name="beta", label="Beta", enabled=True)
-        assert FlagService().is_enabled("beta") is True
-
-    def test_disabled_flag_is_false(self) -> None:
-        Flag.objects.create(name="beta", label="Beta", enabled=False)
-        assert FlagService().is_enabled("beta") is False
+    @pytest.mark.parametrize(
+        ("enabled", "expected"), [(True, True), (False, False)], ids=["on", "off"]
+    )
+    def test_stored_state_is_reported(self, make_flag, enabled, expected) -> None:
+        make_flag("beta", label="Beta", enabled=enabled)
+        assert FlagService().is_enabled("beta") is expected
 
     def test_absent_flag_is_false(self) -> None:
         assert FlagService().is_enabled("unknown") is False
@@ -113,18 +144,19 @@ class TestFlagService:
 class TestWriteGateHook:
     """`BulkToggleForm.check_permissions` denies while the gate flag is off."""
 
-    def test_hook_allows_when_gate_on(self) -> None:
-        Flag.objects.create(name=WRITE_GATE_FLAG, label="Writes", enabled=True)
+    def test_hook_allows_when_gate_on(self, write_gate) -> None:
+        write_gate(enabled=True)
         kwargs = resolve_call(BulkToggleForm.check_permissions)
         assert BulkToggleForm.check_permissions(**kwargs) is None
 
-    def test_hook_denies_when_gate_off(self) -> None:
-        Flag.objects.create(name=WRITE_GATE_FLAG, label="Writes", enabled=False)
+    def test_hook_denies_when_gate_off(self, write_gate) -> None:
+        write_gate(enabled=False)
         kwargs = resolve_call(BulkToggleForm.check_permissions)
         with pytest.raises(PermissionDenied):
             BulkToggleForm.check_permissions(**kwargs)
 
     def test_hook_denies_when_gate_absent(self) -> None:
+        Flag.objects.filter(name=WRITE_GATE_FLAG).delete()
         kwargs = resolve_call(BulkToggleForm.check_permissions)
         with pytest.raises(PermissionDenied):
             BulkToggleForm.check_permissions(**kwargs)
