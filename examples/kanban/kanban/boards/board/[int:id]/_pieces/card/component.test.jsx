@@ -52,6 +52,18 @@ describe("Card", () => {
     );
   });
 
+  it("marks a pending card and keeps it undraggable", () => {
+    render(<Card id="pending-1" title="Write docs" pending />);
+    const el = document.querySelector("[data-kanban-card='pending-1']");
+    expect(el).toHaveAttribute("data-kanban-card-pending");
+    expect(el).toHaveAttribute("draggable", "false");
+  });
+
+  it("leaves the pending marker off a confirmed card", () => {
+    render(<Card id={1} title="Write docs" />);
+    expect(document.querySelector("[data-kanban-card-pending]")).toBeNull();
+  });
+
   it("does not render an excerpt node when excerpt is empty", () => {
     render(<Card id={1} title="Fix login bug" />);
     expect(document.querySelector("[data-kanban-card-excerpt]")).toBeNull();

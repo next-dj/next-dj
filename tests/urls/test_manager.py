@@ -23,7 +23,12 @@ from next.urls import (
     router_manager,
     urlpatterns,
 )
-from next.urls.manager import _build_url_resolver, _LazyUrlPatterns
+from next.urls.manager import (
+    _build_url_resolver,
+    _LazyResolverSlot,
+    _LazyUrlPatterns,
+    _on_settings_reloaded,
+)
 from tests.support import named_temp_py
 
 
@@ -338,7 +343,7 @@ class TestGlobalInstances:
 
     def test_urlpatterns_dynamic(self) -> None:
         """``urlpatterns`` is one TrieURLResolver over the lazy pattern sequence."""
-        assert isinstance(urlpatterns, list)
+        assert isinstance(urlpatterns, _LazyResolverSlot)
         assert len(urlpatterns) == 1
         assert isinstance(urlpatterns[0], TrieURLResolver)
         assert isinstance(urlpatterns[0].urlconf_name, _LazyUrlPatterns)
@@ -831,3 +836,48 @@ class TestRouterManagerNextPagesConfig:
             mgr = RouterManager()
             assert mgr._get_next_pages_config() == []
             assert mgr._get_next_pages_config() == []
+
+
+class TestLazyResolverSlot:
+    """One-slot sequence protocol, deferred build, and reset on settings reload."""
+
+    def test_build_deferred_until_first_read(self) -> None:
+        """A fresh slot holds nothing until something reads it."""
+        slot = _LazyResolverSlot()
+        with patch(
+            "next.urls.manager._build_url_resolver", return_value="resolver"
+        ) as mock_build:
+            assert mock_build.call_count == 0
+            assert slot[0] == "resolver"
+            assert slot[0] == "resolver"
+        assert mock_build.call_count == 1
+
+    def test_sequence_protocol_without_list_inheritance(self) -> None:
+        """Iteration, len, indexing, and slicing work without list inheritance."""
+        slot = _LazyResolverSlot()
+        with patch("next.urls.manager._build_url_resolver", return_value="resolver"):
+            assert not isinstance(slot, list)
+            assert list(slot) == ["resolver"]
+            assert len(slot) == 1
+            assert slot[-1] == "resolver"
+            assert slot[:] == ["resolver"]
+
+    def test_reset_forces_a_rebuild(self) -> None:
+        """`reset()` drops the built resolver so the next read builds again."""
+        slot = _LazyResolverSlot()
+        with patch(
+            "next.urls.manager._build_url_resolver", side_effect=["first", "second"]
+        ):
+            assert slot[0] == "first"
+            slot.reset()
+            assert slot[0] == "second"
+
+    def test_settings_reload_resets_the_module_slot(self) -> None:
+        """The settings-reload receiver reloads routers and clears the slot."""
+        with (
+            patch.object(router_manager, "reload") as mock_reload,
+            patch.object(_LazyResolverSlot, "reset") as mock_reset,
+        ):
+            _on_settings_reloaded()
+        assert mock_reload.call_count == 1
+        assert mock_reset.call_count == 1

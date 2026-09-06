@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import re
+from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import pytest
@@ -20,6 +21,12 @@ from next.testing import (
 from next.urls.signals import router_reloaded
 
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from django.http import HttpResponse
+
+
 pytestmark = pytest.mark.django_db
 
 
@@ -30,32 +37,63 @@ def _origin_field(html: str) -> str:
 
 
 @pytest.fixture()
-def routing_doc() -> Article:
+def make_article() -> Callable[..., Article]:
+    """Return a factory building articles with a slug-derived title."""
+
+    def _make(
+        slug: str, *, title: str | None = None, body_md: str = "", locked: bool = False
+    ) -> Article:
+        return Article.objects.create(
+            slug=slug,
+            title=title or slug.replace("-", " ").capitalize(),
+            body_md=body_md,
+            locked=locked,
+        )
+
+    return _make
+
+
+@pytest.fixture()
+def routing_doc(make_article: Callable[..., Article]) -> Article:
     """Seed an article whose body matches the routing query for searches."""
-    return Article.objects.create(
-        slug="routing-internals",
+    return make_article(
+        "routing-internals",
         title="Routing internals",
         body_md="# Routing internals\n\nDeep dive on the URL pipeline.",
     )
 
 
 @pytest.fixture()
-def lifecycle_doc() -> Article:
+def lifecycle_doc(make_article: Callable[..., Article]) -> Article:
     """Seed an unrelated article so listings have at least two rows."""
-    return Article.objects.create(
-        slug="lifecycle",
+    return make_article(
+        "lifecycle",
         title="Request lifecycle",
         body_md="Discusses every middleware stage.",
     )
+
+
+@pytest.fixture()
+def submit_from_page(next_client: NextClient) -> Callable[..., HttpResponse]:
+    """Post an action carrying the origin the given page rendered."""
+
+    def _submit(action: str, *, page: str, data: dict[str, str]) -> HttpResponse:
+        rendered = next_client.get(page).content.decode()
+        return next_client.post(
+            next_client.get_action_url(action),
+            {"_next_form_origin": _origin_field(rendered), **data},
+        )
+
+    return _submit
 
 
 class TestIndex:
     """The index page lists file-backed docs alongside DB-backed articles."""
 
     def test_index_lists_file_docs_and_articles(
-        self, client: NextClient, routing_doc: Article, lifecycle_doc: Article
+        self, next_client: NextClient, routing_doc: Article, lifecycle_doc: Article
     ) -> None:
-        response = client.get(reverse("next:page_"))
+        response = next_client.get(reverse("next:page_"))
         body = response.content.decode()
         assert response.status_code == 200
         assert ">\n            Routing\n          <" in body
@@ -75,9 +113,9 @@ class TestFileDocs:
         ],
     )
     def test_file_doc_pages_render(
-        self, client: NextClient, name: str, needle: str
+        self, next_client: NextClient, name: str, needle: str
     ) -> None:
-        response = client.get(reverse(name))
+        response = next_client.get(reverse(name))
         assert response.status_code == 200
         assert needle in response.content.decode()
 
@@ -86,16 +124,16 @@ class TestDocFigureChildren:
     """The docs figure splices its block body and escapes the caption prop."""
 
     def test_children_render_as_markup_while_the_prop_escapes(
-        self, client: NextClient
+        self, next_client: NextClient
     ) -> None:
-        body = client.get(reverse("next:page_docs_components")).content.decode()
+        body = next_client.get(reverse("next:page_docs_components")).content.decode()
         assert "this <em>emphasis</em> and this" in body
         assert "<strong>bold run</strong>" in body
         assert "&lt;em&gt;emphasis&lt;/em&gt;" in body
         assert "<em>emphasis</em></figcaption>" not in body
 
-    def test_routing_page_reuses_the_figure(self, client: NextClient) -> None:
-        body = client.get(reverse("next:page_docs_routing")).content.decode()
+    def test_routing_page_reuses_the_figure(self, next_client: NextClient) -> None:
+        body = next_client.get(reverse("next:page_docs_routing")).content.decode()
         assert "<figure" in body
         assert "<li><code>routes/page.py</code> → <code>/</code></li>" in body
 
@@ -103,9 +141,9 @@ class TestDocFigureChildren:
 class TestArticleCreation:
     """Posting the create form publishes a fresh `/wiki/<slug>/` URL."""
 
-    def test_creating_article_publishes_url(self, client: NextClient) -> None:
-        url = client.get_action_url("article_create_form")
-        response = client.post(
+    def test_creating_article_publishes_url(self, next_client: NextClient) -> None:
+        url = next_client.get_action_url("article_create_form")
+        response = next_client.post(
             url,
             {
                 "slug": "freshly-baked",
@@ -116,24 +154,19 @@ class TestArticleCreation:
         assert response.status_code in (302, 303)
         assert Article.objects.filter(slug="freshly-baked").exists()
 
-        article_response = client.get("/wiki/freshly-baked/")
+        article_response = next_client.get("/wiki/freshly-baked/")
         article_body = article_response.content.decode()
         assert article_response.status_code == 200
         assert "Freshly baked" in article_body
         assert "<h2>Hello</h2>" in article_body
 
     def test_create_duplicate_slug_shows_error(
-        self, client: NextClient, routing_doc: Article
+        self, submit_from_page: Callable[..., HttpResponse], routing_doc: Article
     ) -> None:
-        new_page = client.get(reverse("next:page_articles_new"))
-        response = client.post(
-            client.get_action_url("article_create_form"),
-            {
-                "_next_form_origin": _origin_field(new_page.content.decode()),
-                "slug": routing_doc.slug,
-                "title": "Duplicate",
-                "body_md": "",
-            },
+        response = submit_from_page(
+            "article_create_form",
+            page=reverse("next:page_articles_new"),
+            data={"slug": routing_doc.slug, "title": "Duplicate", "body_md": ""},
         )
         assert response.status_code == 200
         assert "already taken" in response.content.decode()
@@ -143,9 +176,9 @@ class TestArticleEdit:
     """Saving the edit form replaces the persisted body."""
 
     def test_editing_article_changes_body(
-        self, client: NextClient, routing_doc: Article
+        self, next_client: NextClient, routing_doc: Article
     ) -> None:
-        response = client.post_action(
+        response = next_client.post_action(
             "article_edit_form",
             {
                 "slug": routing_doc.slug,
@@ -161,13 +194,13 @@ class TestArticleEdit:
         routing_doc.refresh_from_db()
         assert routing_doc.body_md == "Rewritten body of the article."
 
-        article_response = client.get(routing_doc.url)
+        article_response = next_client.get(routing_doc.url)
         assert "Rewritten body of the article." in article_response.content.decode()
 
     def test_get_edit_page_shows_article(
-        self, client: NextClient, routing_doc: Article
+        self, next_client: NextClient, routing_doc: Article
     ) -> None:
-        response = client.get(
+        response = next_client.get(
             reverse("next:page_articles_edit_slug", kwargs={"slug": routing_doc.slug})
         )
         assert response.status_code == 200
@@ -185,39 +218,34 @@ class TestArticleEdit:
     )
     def test_edit_invalid_slug_shows_error(
         self,
-        client: NextClient,
+        submit_from_page: Callable[..., HttpResponse],
+        make_article: Callable[..., Article],
         routing_doc: Article,
         clash_slug: str | None,
         bad_slug: str,
         expected_error: str,
     ) -> None:
         if clash_slug is not None:
-            Article.objects.create(slug=clash_slug, title="Other article", body_md="")
-        edit_page = client.get(
-            reverse("next:page_articles_edit_slug", kwargs={"slug": routing_doc.slug})
-        )
-        response = client.post(
-            client.get_action_url("article_edit_form"),
-            {
-                "_next_form_origin": _origin_field(edit_page.content.decode()),
-                "slug": bad_slug,
-                "title": routing_doc.title,
-                "body_md": "",
-            },
+            make_article(clash_slug, title="Other article")
+        response = submit_from_page(
+            "article_edit_form",
+            page=reverse(
+                "next:page_articles_edit_slug", kwargs={"slug": routing_doc.slug}
+            ),
+            data={"slug": bad_slug, "title": routing_doc.title, "body_md": ""},
         )
         assert response.status_code == 200
         assert expected_error in response.content.decode()
 
     def test_edit_validation_error_shows_preview(
-        self, client: NextClient, routing_doc: Article
+        self, submit_from_page: Callable[..., HttpResponse], routing_doc: Article
     ) -> None:
-        edit_page = client.get(
-            reverse("next:page_articles_edit_slug", kwargs={"slug": routing_doc.slug})
-        )
-        response = client.post(
-            client.get_action_url("article_edit_form"),
-            {
-                "_next_form_origin": _origin_field(edit_page.content.decode()),
+        response = submit_from_page(
+            "article_edit_form",
+            page=reverse(
+                "next:page_articles_edit_slug", kwargs={"slug": routing_doc.slug}
+            ),
+            data={
                 "slug": "docs",
                 "title": routing_doc.title,
                 "body_md": "**posted preview**",
@@ -231,14 +259,13 @@ class TestArticleEdit:
 class TestArticleObjectPermission:
     """The edit form denies a locked article through has_object_permission."""
 
-    def test_locked_article_edit_denied(self, client: NextClient) -> None:
-        locked = Article.objects.create(
-            slug="locked-page",
-            title="Locked page",
-            body_md="Original body.",
-            locked=True,
+    def test_locked_article_edit_denied(
+        self, next_client: NextClient, make_article: Callable[..., Article]
+    ) -> None:
+        locked = make_article(
+            "locked-page", title="Locked page", body_md="Original body.", locked=True
         )
-        response = client.post_action(
+        response = next_client.post_action(
             "article_edit_form",
             {
                 "slug": locked.slug,
@@ -258,14 +285,14 @@ class TestArticleDeletion:
     """Deleting an article removes its dynamic URL within the same process."""
 
     def test_deleting_article_removes_url(
-        self, client: NextClient, routing_doc: Article
+        self, next_client: NextClient, routing_doc: Article
     ) -> None:
-        first = client.get(routing_doc.url)
+        first = next_client.get(routing_doc.url)
         assert first.status_code == 200
 
         slug = routing_doc.slug
         routing_doc.delete()
-        gone = client.get(f"/wiki/{slug}/")
+        gone = next_client.get(f"/wiki/{slug}/")
         assert gone.status_code == 404
 
 
@@ -273,9 +300,9 @@ class TestSearch:
     """Search returns matches from both the file catalogue and the database."""
 
     def test_search_returns_both_kinds(
-        self, client: NextClient, routing_doc: Article, lifecycle_doc: Article
+        self, next_client: NextClient, routing_doc: Article, lifecycle_doc: Article
     ) -> None:
-        response = client.get(reverse("next:page_search"), {"q": "routing"})
+        response = next_client.get(reverse("next:page_search"), {"q": "routing"})
         body = response.content.decode()
         assert response.status_code == 200
         assert "/docs/routing/" in body
@@ -283,9 +310,9 @@ class TestSearch:
         assert lifecycle_doc.title not in body
 
     def test_search_with_no_query_returns_empty_results(
-        self, client: NextClient
+        self, next_client: NextClient
     ) -> None:
-        response = client.get(reverse("next:page_search"))
+        response = next_client.get(reverse("next:page_search"))
         assert response.status_code == 200
 
 
@@ -293,18 +320,18 @@ class TestSearchAutoSubmit:
     """The search box auto-submits into a results zone with debounce."""
 
     def test_search_form_carries_auto_submit_attributes(
-        self, client: NextClient
+        self, next_client: NextClient
     ) -> None:
-        body = client.get(reverse("next:page_search")).content.decode()
+        body = next_client.get(reverse("next:page_search")).content.decode()
         assert 'data-next-target="search-results"' in body
         assert 'data-next-trigger="input"' in body
         assert 'data-next-debounce="300"' in body
         assert 'data-next-zone="search-results"' in body
 
     def test_zone_request_morphs_only_the_results(
-        self, client: NextClient, routing_doc: Article, lifecycle_doc: Article
+        self, next_client: NextClient, routing_doc: Article, lifecycle_doc: Article
     ) -> None:
-        response = client.get_zones(
+        response = next_client.get_zones(
             reverse("next:page_search") + "?q=routing", "search-results"
         )
         assert response.status_code == 200
@@ -316,8 +343,10 @@ class TestSearchAutoSubmit:
         assert lifecycle_doc.title not in html
         assert "Search" not in html
 
-    def test_empty_zone_request_prompts_for_a_query(self, client: NextClient) -> None:
-        response = client.get_zones(reverse("next:page_search"), "search-results")
+    def test_empty_zone_request_prompts_for_a_query(
+        self, next_client: NextClient
+    ) -> None:
+        response = next_client.get_zones(reverse("next:page_search"), "search-results")
         html = envelope_of(response).html_for_zone("search-results")
         assert "Type a query" in html
 
@@ -326,9 +355,9 @@ class TestMarkdownPreviewMount:
     """The preview pane is rebindable through the mount registry."""
 
     def test_new_article_form_carries_the_preview_root_and_script(
-        self, client: NextClient
+        self, next_client: NextClient
     ) -> None:
-        body = client.get(reverse("next:page_articles_new")).content.decode()
+        body = next_client.get(reverse("next:page_articles_new")).content.decode()
         assert "data-markdown-preview" in body
         assert "components/markdown_preview.mjs" in body
         assert "marked.min.js" in body
@@ -341,13 +370,11 @@ class TestRouterReloadSignal:
         "trigger", ["save", "delete"], ids=["on-save", "on-delete"]
     )
     def test_router_reload_signal_fires(
-        self, routing_doc: Article, trigger: str
+        self, make_article: Callable[..., Article], routing_doc: Article, trigger: str
     ) -> None:
         with SignalRecorder(router_reloaded) as recorder:
             if trigger == "save":
-                Article.objects.create(
-                    slug="signal-trigger", title="Signal", body_md=""
-                )
+                make_article("signal-trigger", title="Signal")
             else:
                 routing_doc.delete()
         assert len(recorder.events_for(router_reloaded)) >= 1
@@ -383,13 +410,13 @@ class TestUnits:
 class TestValidationPreservesPreview:
     """A validation error re-renders the form with the markdown preview pane."""
 
-    def test_form_validation_error_shows_preview(self, client: NextClient) -> None:
-        new_page = client.get(reverse("next:page_articles_new"))
-        action_url = client.get_action_url("article_create_form")
-        response = client.post(
-            action_url,
-            {
-                "_next_form_origin": _origin_field(new_page.content.decode()),
+    def test_form_validation_error_shows_preview(
+        self, submit_from_page: Callable[..., HttpResponse]
+    ) -> None:
+        response = submit_from_page(
+            "article_create_form",
+            page=reverse("next:page_articles_new"),
+            data={
                 "slug": "docs",
                 "title": "Reserved slug",
                 "body_md": "**bold** preview",

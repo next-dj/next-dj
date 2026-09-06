@@ -2,17 +2,17 @@
 
 A bit.ly-style mini-product built on **next-dj**. Paste a long URL, get a short slug, share it. Every visit to `/s/<slug>/` is counted in `LocMemCache`, and a management command flushes the counters into SQLite.
 
-The example is small on purpose. It is a tour of the framework surface you will use 90% of the time: the file router, layouts, context functions, forms, components, a custom DI provider, URL reversing, active-link highlighting, and a cache-backed hot path.
+This is the example to read first. It is the smallest complete project in the catalog and doubles as a walkthrough of the surface every other example builds on: the file router, layouts, context functions, forms, components, patch envelopes, a custom DI provider, URL reversing, active-link highlighting, and a cache-backed hot path.
 
 ## What you will see
 
 | URL | Description |
 | --- | --- |
-| `/` | Form to shorten a URL, list of the latest entries. |
+| `/` | Form to shorten a URL, badge with the unflushed click total, list of the latest five entries. |
 | `/s/<slug>/` | 302 redirect to the original URL, bumps the click counter. |
-| `/admin/` | Top links and unflushed click counters. Nested admin layout with a subnav. |
-| `/admin/stats/` | Totals: links, persisted clicks, pending clicks. |
-| `/admin/links/<slug>/` | Link detail, resolved through a custom `DLink[Link]` DI provider. |
+| `/admin/` | Top ten links with an inline edit form and a delete button per row, plus the unflushed click counters. Nested admin layout with a subnav. |
+| `/admin/stats/` | Totals for links, persisted clicks, and pending clicks, plus the live per-action dispatch counters. |
+| `/admin/links/<slug>/` | Link detail, resolved through a custom `DLink[Link]` DI provider. Resets the cached clicks for that slug. |
 
 ## How to run
 
@@ -23,13 +23,13 @@ uv run python manage.py runserver     # http://127.0.0.1:8000/
 uv run pytest
 ```
 
-Tailwind loads via the Play CDN in [`host/layout.djx`](host/layout.djx). No Node, no build step.
+Tailwind loads via the Play CDN in the shared [`page_head`](../_shared/_components/page_head/component.djx) component that [`host/layout.djx`](host/layout.djx) pulls in. No Node, no build step.
 
 ## Walking the code
 
-### 1. Rename `pages/` and `_components/` to fit your domain
+### 1. Two page roots, and directory names you pick
 
-[`config/settings.py`](config/settings.py) sets both directory names under `NEXT_FRAMEWORK`:
+[`config/settings.py`](config/settings.py) configures both backends under `NEXT_FRAMEWORK`:
 
 ```python
 NEXT_FRAMEWORK = {
@@ -37,19 +37,24 @@ NEXT_FRAMEWORK = {
         {
             "BACKEND": "next.urls.FileRouterBackend",
             "APP_DIRS": True,
+            "DIRS": [str(BASE_DIR / "host")],
             "PAGES_DIR": "routes",
+            "OPTIONS": {"context_processors": []},
         }
     ],
     "COMPONENT_BACKENDS": [
         {
             "BACKEND": "next.components.FileComponentsBackend",
+            "DIRS": [str(SHARED_DIR / "_components")],
             "COMPONENTS_DIR": "_widgets",
         }
     ],
 }
 ```
 
-The framework does not hardcode the names. `routes/` could be `screens/`, `views/`, `panels/` — pick what matches your product.
+The router walks two roots. `DIRS` names the project-level page root [`host/`](host/), which owns the single outermost `layout.djx`. `APP_DIRS = True` adds the `routes/` tree of every installed app, so the pages themselves live in [`shortener/routes/`](shortener/routes/). Component lookup is layered the same way: the shared shadcn kit in [`../_shared/_components/`](../_shared/_components/) through `DIRS`, plus any `_widgets/` folder the page walk meets inside a page tree.
+
+The framework hardcodes neither name. `routes/` could be `screens/` or `panels/`, `_widgets/` could be `_cards/` — the other examples rename both on purpose.
 
 ### 2. Page, template, layout — how a URL is rendered
 
@@ -59,7 +64,7 @@ A directory under `routes/` with a `page.py` becomes a URL. The framework compos
 - **`template.djx`** (sibling of `page.py`) — the page body. Just HTML. No `{% block template %}` wrapping needed because the framework handles substitution.
 - **`page.py`** — Python side: context functions (`@context`), optional self-registering form classes (`next.forms.Form`/`ModelForm`), optional `template = "..."` module attribute, optional `render(request, ...) -> HttpResponse`.
 
-Ancestor layouts cascade: `routes/admin/stats/` inherits `routes/admin/layout.djx`, which itself is wrapped by the project-level [`host/layout.djx`](host/layout.djx). Look at the nested toolbar in [`admin/layout.djx`](shortener/routes/admin/layout.djx):
+Ancestor layouts cascade: `routes/admin/stats/` inherits `routes/admin/layout.djx`, which itself is wrapped by [`host/layout.djx`](host/layout.djx). Look at the nested toolbar in [`admin/layout.djx`](shortener/routes/admin/layout.djx):
 
 ```djx
 <div class="space-y-6">
@@ -132,18 +137,22 @@ Declared once in [`admin/page.py`](shortener/routes/admin/page.py), available in
 
 ```python
 class CreateLinkForm(Form):
-    url = forms.URLField(max_length=2000, assume_scheme="https")
+    url = forms.URLField(
+        max_length=2000,
+        assume_scheme="https",
+        widget=ComponentWidget(
+            "input", type="url", placeholder="https://example.com/very/long/path"
+        ),
+    )
 
     class Meta:
         success_url = "/"
         success_message = "Short link created for %(url)s."
-
-    def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
-        _create_link_with_unique_slug(self.cleaned_data["url"])
-        return super().on_valid(request)
 ```
 
-`on_valid` receives only the parameters it declares — the DI resolver fills what the signature asks for. Delegating to `super().on_valid(request)` follows `Meta.success_url`, and the dispatcher flashes `Meta.success_message` (interpolated over `cleaned_data` with `%` formatting) through `django.contrib.messages`. The home page drains the queue in a `flash_messages` context callable and renders each entry through the shared `alert` component. In the real `page.py` the `url` field uses a `ComponentWidget("input", type="url", ...)`, so `{{ form.url }}` renders through the next `input` component rather than Django's default widget.
+`on_valid` receives only the parameters it declares — the DI resolver fills what the signature asks for. Delegating to `super().on_valid(request)` follows `Meta.success_url`, and the dispatcher flashes `Meta.success_message` (interpolated over `cleaned_data` with `%` formatting) through `django.contrib.messages`. The home page drains the queue in a `flash_messages` context callable and renders each entry through the shared `alert` component. `ComponentWidget("input", type="url", ...)` makes `{{ form.url }}` render through the shared `input` component instead of Django's default widget, so a form field and a hand-written control look identical.
+
+Creating the row is its own problem: [`_create_link_with_unique_slug`](shortener/routes/page.py) tries random six-character slugs inside `transaction.atomic()` and catches `IntegrityError` from the unique constraint, widening the slug by one character every ten collisions. The database decides uniqueness, so two concurrent submissions cannot both win a slug.
 
 [`routes/template.djx`](shortener/routes/template.djx) renders the form by its auto-name:
 
@@ -174,9 +183,9 @@ The admin list edits each link inline. The same form renders once per row, so ea
 {% endform %}
 ```
 
-[`EditLinkForm`](shortener/routes/admin/page.py) resolves the link from the posted `slug` in `get_initial`. A looped `{% form %}` without `key=` or `zone=` raises `next.W070`.
+[`EditLinkForm`](shortener/routes/admin/page.py) is a `ModelForm` over `Link` and resolves the edited row from the posted `slug` in `get_initial`, so one registered form serves every row. A looped `{% form %}` without `key=` or `zone=` raises `next.W070`.
 
-### 5a. Patch envelopes — `prepend`, `remove`, and an out-of-band foreign morph
+### 6. Patch envelopes — `prepend`, `remove`, and an out-of-band foreign morph
 
 Three actions author their own patch envelopes through `Patches(request)` and fall back to a redirect when no runtime is present, so each works the same with or without JS.
 
@@ -184,7 +193,11 @@ Three actions author their own patch envelopes through `Patches(request)` and fa
 - **`remove`.** Each admin row is a `<li data-next-key="{{ link.slug }}">`. The [`delete_link`](shortener/routes/admin/page.py) action drops the row in place: `Patches(request).remove({"css": 'li[data-next-key="..."]'}).response(fallback="/admin/")`.
 - **`morph_foreign_zone` (out of band).** The home page owns a `{% zone "links-badge" %}` that totals unflushed clicks. Both home-page providers are bound to their own zone — `@context("pending_total_label", zone="links-badge")` and `@context("recent_links", zone="latest-links")` — so the badge morph never lists the links and a `latest-links` render never totals the click cache, while the full page render still runs both. The [`reset_clicks`](shortener/routes/admin/links/[slug]/page.py) action on the detail page re-renders that zone of the _foreign_ home page out of band: `Patches(request).morph_foreign_zone("links-badge", "/")`. The home page's body resolution re-runs first, so the zone travels only when that page would have served the request.
 
-### 6. Components — simple, composite, and shared
+The row markup ships from one place. `on_valid` renders the same [`link_row`](shortener/routes/_widgets/link_row/component.djx) component the page render uses, passing the page's `template.djx` path as `current_template_path` so the component resolver finds a page-scoped `_widgets/` name outside a page render.
+
+Every partial response carries the asset version so the client can tell a stale tab from a fresh deploy. These examples serve assets straight off disk with no hashed manifest to derive a version from, so `config/settings.py` pins one explicitly with `extend_default_backend("PARTIAL_BACKENDS", OPTIONS={"VERSION": "v1"})`. The default `"manifest"` sentinel would resolve to a constant here and leave the guard silent.
+
+### 7. Components — simple, composite, and shared
 
 A component lives in `_widgets/<name>/`:
 
@@ -209,7 +222,9 @@ Usage in a loop:
 
 Every `{% component %}` prop compiles as a Django `FilterExpression`, so `title="Hello"` passes a literal while `link=link` passes the loop variable. The tag also forwards the parent template's flattened context, which is why the bare call above still lands the `link` loop variable inside the component and lets `ContextByNameProvider` fill the `link: Link` parameter of `short_url`. [`link_row`](shortener/routes/_widgets/link_row/component.djx) takes the explicit route and writes `{% component "link_card" link=link %}`.
 
-### 7. Shared `nav_link` — DRY the active-state logic
+The card also ships a co-located [`component.css`](shortener/routes/_widgets/link_card/component.css). The collector emits it once per page no matter how many cards render.
+
+### 8. Shared `nav_link` — DRY the active-state logic
 
 Root nav and admin subnav both need the same active-state rule. The logic lives once in the shared kit at [`_shared/_components/nav_link/component.py`](../_shared/_components/nav_link/component.py), registered as a global component root through `COMPONENT_BACKENDS[0]["DIRS"]` in [`config/settings.py`](config/settings.py):
 
@@ -237,7 +252,7 @@ Usage:
 
 No `request.path` string-munging, no custom template tag, no context processor. Django populates `request.resolver_match.view_name` and the component reads it.
 
-### 8. URL names and `{% url %}`
+### 9. URL names and `{% url %}`
 
 Every anchor in the project goes through `{% url %}`. File-router URLs sit under the `next` namespace. The name format is `page_<prepare_url_name(url_path)>`:
 
@@ -250,7 +265,7 @@ Every anchor in the project goes through `{% url %}`. File-router URLs sit under
 
 Use them as `{% url 'next:page_admin' %}` or with args: `{% url 'next:page_admin_links_slug' slug=link.slug %}`. Rename files freely — templates stay correct because they never hardcode paths.
 
-### 9. Custom DI provider — `DLink[Link]`
+### 10. Custom DI provider — `DLink[Link]`
 
 [`providers.py`](shortener/providers.py) implements a typed injection marker that fetches the matching `Link` from the URL `slug`:
 
@@ -281,18 +296,13 @@ Use it anywhere:
 
 ```python
 @context("link")
-def _link(link: DLink[Link]) -> Link:
+def current_link(link: DLink[Link]) -> Link:
     return link
 ```
 
-### 10. Interop with a plain Django view — `/s/<slug>/`
+### 11. A plain Django view beside the file router — `/s/<slug>/`
 
-The file router composes a template for every page, and the router prefers the template path over a module-level `render()` function. A redirect-only endpoint therefore cannot live under `routes/`: the root layout would wrap it in HTML and the `render()` function would never be invoked.
-
-The clean split:
-
-- Navigable pages → [`routes/`](shortener/routes/) under the layout.
-- The pure redirect → a plain Django view in [`views.py`](shortener/views.py), mounted in [`config/urls.py`](config/urls.py) **before** `include('next.urls')`:
+`/s/<slug>/` answers with a redirect and never renders HTML. It could live under `routes/`: a module-level `render()` outranks the composed template, and returning any `HttpResponseBase` from it short-circuits the layout and static pipelines entirely. The example keeps the redirect as a plain view in [`views.py`](shortener/views.py) instead, to show that both routing styles share one URLconf:
 
 ```python
 urlpatterns = [
@@ -301,9 +311,9 @@ urlpatterns = [
 ]
 ```
 
-The file router never forces you to route everything through it.
+The project route comes first, so a hand-written path always wins over a page route of the same shape. Its `name="slug_redirect"` is a normal URL name, which is why the `link_card` component reverses it exactly like a file-router name.
 
-### 11. Hot-path cache + flush command
+### 12. Hot-path cache + flush command
 
 The redirect bumps a counter in `LocMemCache` rather than SQLite:
 
@@ -315,18 +325,31 @@ def increment_clicks(slug: str) -> int:
     return cache.incr(key)
 ```
 
-The in-process counter is later persisted in one transaction:
+The in-process counters are later persisted in one transaction:
 
 ```bash
 uv run python manage.py flush_clicks
 # flushed 42 clicks
 ```
 
-[`flush_clicks`](shortener/management/commands/flush_clicks.py) is a standard Django management command that calls `shortener.cache.flush_clicks()`.
+[`flush_clicks`](shortener/management/commands/flush_clicks.py) is a standard Django management command that calls [`shortener.cache.flush_clicks()`](shortener/cache.py). The flush subtracts its snapshot with `cache.decr` instead of deleting the key, so a click that lands between the snapshot and the write survives for the next flush.
+
+### 13. Counting dispatched actions with `action_dispatched`
+
+[`receivers.py`](shortener/receivers.py) hangs one receiver off the framework's `action_dispatched` signal, bumps a per-action counter in the cache, and keeps an index of the names seen so far:
+
+```python
+@receiver(action_dispatched)
+def _on_action_dispatched(action_name: str, **kwargs) -> None:
+    key = _key(action_name)
+    cache.add(key, 0)
+    cache.incr(key)
+    _remember(action_name)
+```
+
+`AppConfig.ready()` imports the module so the receiver connects at startup, and [`admin/stats/page.py`](shortener/routes/admin/stats/page.py) exposes `action_counts()` as the `form_actions` context. Submitting the create form, an inline edit, a delete, or a clicks reset moves a row in that card without any of those handlers knowing the counter exists.
 
 ## Gotchas
-
-Three framework-specific pitfalls you will hit on your first project.
 
 ### PEP 563 and DI annotations
 
@@ -341,10 +364,6 @@ Two rules:
 
 `{% component "card" title=some_var %}` resolves `some_var` against the template context. A name that is not there resolves to Django's `string_if_invalid` instead of raising, so a typo in a prop name shows up as a blank slot rather than an error. Quoted literals are demoted from `SafeString` to plain `str` so `{{ prop }}` autoescapes — opt back in with `prop=value|safe`.
 
-### Template wins over `render()` for file-routed pages
-
-If any `layout.djx` applies to a `page.py`, the framework renders a template and ignores a top-level `render()` in the module. To write a pure-response view, use a plain Django URL in `config/urls.py` (see `views.py` / `/s/<slug>/`).
-
 ## Further reading
 
 - [next/urls/backends.py](../../next/urls/backends.py) — file router implementation.
@@ -352,3 +371,4 @@ If any `layout.djx` applies to a `page.py`, the framework renders a template and
 - [next/forms/dispatch/](../../next/forms/dispatch/) — form action dispatch pipeline.
 - [next/components/context.py](../../next/components/context.py) — `@component.context` mechanics.
 - [next/pages/loaders.py](../../next/pages/loaders.py) — layout composition logic.
+- [next/partial/](../../next/partial/) — zones, patch envelopes, and the fallback contract used in section 6.

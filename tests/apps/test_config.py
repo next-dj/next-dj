@@ -13,6 +13,8 @@ from django.utils.autoreload import (
 
 from next.apps import autoreload as next_autoreload, components as next_components
 from next.components import DummyBackend, FileComponentsBackend, components_manager
+from next.deps import resolver
+from next.deps.resolver import _signature_cache
 from next.pages import loaders as pages_loaders
 from next.pages.watch import get_pages_directories_for_watch
 from next.server import NextStatReloader
@@ -203,6 +205,19 @@ class TestARouterReloadDropsThePageRootMemos:
             assert get_pages_directories_for_watch() == [tree]
             assert pages_loaders._page_roots() == (tree,)
             assert manager.page_roots() == (tree,)
+
+    def test_a_reload_drops_the_memos_keyed_by_a_callable(self) -> None:
+        """A saved `page.py` mints new functions, so the DI memos go with it."""
+
+        def fn(a: int = 1) -> None:
+            return None
+
+        resolver.resolve_dependencies(fn)
+        assert _signature_cache
+        assert resolver._plan_cache
+        router_manager.reload()
+        assert not _signature_cache
+        assert not resolver._plan_cache
 
 
 class TestAutoreloadInstallIdempotent:

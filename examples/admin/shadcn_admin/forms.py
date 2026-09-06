@@ -243,11 +243,23 @@ class AdminInlineSpec:
         """Return whether the request may add a row to this inline."""
         return self.inline.has_add_permission(self.spec.request, self.spec.instance)
 
+    def _auto_id(self, instance: Model) -> str:
+        """Return the id template that keeps every row's fields addressable.
+
+        A keyed row form posts under the plain field names, so a `prefix=`
+        would rewrite the wire and break the handlers. `auto_id` touches
+        only the rendered ids, and without it every row on a change page
+        repeats `id_title` and steals the parent form's label.
+        """
+        suffix = instance.pk if instance.pk is not None else "add"
+        return f"id_{self.token}_{suffix}_%s"
+
     def _bind(self, instance: Model, post: QueryDict | None) -> django_forms.ModelForm:
         form_cls = self._formset.form
+        auto_id = self._auto_id(instance)
         if post is None:
-            return form_cls(instance=instance)
-        form = form_cls(post, instance=instance)
+            return form_cls(instance=instance, auto_id=auto_id)
+        form = form_cls(post, instance=instance, auto_id=auto_id)
         form.is_valid()
         return form
 

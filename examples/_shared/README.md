@@ -11,14 +11,14 @@ Without one, every page tree copypastes utility classes for buttons, cards, badg
 ```
 examples/_shared/
 ├── _components/
-│   ├── page_head/{component.djx}        # <head>, Tailwind CDN + inline config, tokens
+│   ├── page_head/{component.djx,component.py}   # <head>, Tailwind CDN + inline config, tokens, favicon
 │   ├── app_shell/{component.djx}
 │   ├── button/{component.djx,component.py}
 │   ├── card/{component.djx}
 │   ├── badge/{component.djx,component.py}
 │   ├── input/    textarea/    label/    field/
-│   ├── alert/
-│   ├── table/    nav/    nav_link/
+│   ├── alert/{component.djx,component.py}
+│   ├── table/    nav/    nav_link/{component.djx,component.py}
 │   ├── page_header/    container.djx    section/    separator.djx
 │   ├── empty_state/    skeleton/    avatar/    stat_card/
 │   ├── dropdown/{component.djx,component.mjs}
@@ -67,7 +67,7 @@ Each example houses the shared HTML envelope in a project-level page root listed
 ```django
 <!DOCTYPE html>
 <html lang="en">
-{% component "page_head" title="My app" %}
+{% component "page_head" title="My app" icon="🔗" %}
 <body class="min-h-screen flex flex-col">
   {% #component "app_shell" brand="🔗 My app" brand_href="/" %}
     {% #slot "content" %}
@@ -79,7 +79,7 @@ Each example houses the shared HTML envelope in a project-level page root listed
 </html>
 ```
 
-`page_head` owns the entire `<head>`. It pulls in the Tailwind Play CDN, inlines a `tailwind.config` that maps the design tokens to short colour names (`bg-primary`, `text-muted-foreground`, `border-border`, …), and registers `tokens.css` plus `base.css`. Pass `tailwind_plugins="typography"` to add the matching CDN plugin parameter, or use the `extra` slot to inject extra `<link>`/`<meta>`/`<style>` tags.
+`page_head` owns the entire `<head>`. It pulls in the Tailwind Play CDN, inlines a `tailwind.config` that maps the design tokens to short colour names (`bg-primary`, `text-muted-foreground`, `border-border`, …), and registers `tokens.css` plus `base.css`. Pass `tailwind_plugins="typography"` to add the matching CDN plugin parameter, or use the `extra` slot to inject extra `<link>`/`<meta>`/`<style>` tags. It also draws the `icon` emoji into an inline SVG data URI and links it as the favicon, so an example ships a tab icon without a binary asset and without a 404 on every page load.
 
 To register the project-level root, list it in both backends' `DIRS` when you also want components to live there:
 
@@ -150,7 +150,7 @@ Every entry below is a void call (`{% component "name" prop=value %}`) or a bloc
 
 | Component | Props | Slots |
 | --- | --- | --- |
-| `page_head` | `title`, `tailwind_plugins` | `extra` (extra `<link>`/`<meta>`/`<style>` injected before `</head>`) |
+| `page_head` | `title`, `tailwind_plugins`, `icon` (emoji drawn as the favicon) | `extra` (extra `<link>`/`<meta>`/`<style>` injected before `</head>`) |
 | `button` | `variant` (default/secondary/outline/ghost/destructive/link), `size` (sm/md/lg/icon), `type`, `href`, `target`, `name`/`value`, `disabled`, `text`, `extra` | `content` (falls back to `{{ text }}`) |
 | `card` | `title`, `description`, `extra` | `content`, `footer` |
 | `badge` | `variant` (default/secondary/outline/destructive/success/warning/info/muted), `text`, `extra` | `content` (falls back to `{{ text }}`) |
@@ -239,5 +239,5 @@ When you move an existing project onto the shared kit:
 
 - Wire `SHARED_DIR`, `STATICFILES_DIRS`, and `COMPONENT_BACKENDS["DIRS"]` once in `settings.py`.
 - Remove any per-app `nav_link` / `stat_card` / `card` that now duplicates a shared component, otherwise `manage.py check` raises `next.E034` (root namespace collision).
-- Replace the `<head>` boilerplate (CDN script, two `{% use_style %}` lines, the `{% use_module %}` line, `{% collect_styles %}`) with `{% component "page_head" title="…" %}`.
+- Replace the `<head>` boilerplate (CDN script, two `{% use_style %}` lines, the `{% use_module %}` line, `{% collect_styles %}`) with `{% component "page_head" title="…" icon="…" %}`.
 - Replace bespoke colour classes (`bg-slate-50`, `text-slate-900`, `bg-indigo-600`, …) with the short token aliases (`bg-background`, `text-foreground`, `bg-primary`, …) so per-tenant overrides cascade correctly.

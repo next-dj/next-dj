@@ -2,6 +2,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ title|default:'next.dj' }}</title>
+  <link rel="icon" href="data:image/svg+xml,{{ favicon_href }}">
   <script src="https://cdn.tailwindcss.com{% if tailwind_plugins %}?plugins={{ tailwind_plugins }}{% endif %}"></script>
   <script>
     tailwind.config = {

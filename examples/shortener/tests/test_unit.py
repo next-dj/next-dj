@@ -3,7 +3,6 @@ from __future__ import annotations
 from unittest import mock
 
 import pytest
-from django.core.cache import cache
 from django.db import IntegrityError
 from shortener import cache as cache_module
 from shortener.cache import flush_clicks, increment_clicks
@@ -18,6 +17,9 @@ from shortener.routes.page import (
 from next.forms.signals import action_dispatched
 
 
+pytestmark = pytest.mark.django_db
+
+
 class TestLinkModel:
     """Pure-Python behaviour of the `Link` model."""
 
@@ -29,8 +31,8 @@ class TestLinkModel:
 class TestFlushClicksNoPending:
     """`flush_clicks` is a no-op when the cache has nothing to persist."""
 
-    def test_returns_zero_when_cache_empty(self) -> None:
-        Link.objects.create(slug="idle", url="https://example.com/i")
+    def test_returns_zero_when_cache_empty(self, make_link) -> None:
+        make_link("idle")
         assert flush_clicks() == 0
         assert Link.objects.get(slug="idle").clicks == 0
 
@@ -38,8 +40,8 @@ class TestFlushClicksNoPending:
 class TestFlushClicksDecrMissing:
     """`flush_clicks` tolerates a cache key vanishing between snapshot and decr."""
 
-    def test_missing_key_is_swallowed(self) -> None:
-        Link.objects.create(slug="gone", url="https://example.com/g")
+    def test_missing_key_is_swallowed(self, make_link) -> None:
+        make_link("gone")
         increment_clicks("gone")
         with mock.patch.object(
             cache_module.cache, "decr", side_effect=ValueError("missing")
@@ -51,8 +53,8 @@ class TestFlushClicksDecrMissing:
 class TestGenerateSlugIntegrityRetry:
     """`_create_link_with_unique_slug` retries on IntegrityError."""
 
-    def test_retries_until_unique(self) -> None:
-        Link.objects.create(slug="abcdef", url="https://example.com/first")
+    def test_retries_until_unique(self, make_link) -> None:
+        make_link("abcdef")
         # Force the first attempt to collide with the existing slug so the
         # retry uses the next random slug from `secrets.choice`.
         candidates = iter(["abcdef", "xyz123"])
@@ -63,8 +65,8 @@ class TestGenerateSlugIntegrityRetry:
             link = _create_link_with_unique_slug("https://example.com/second")
         assert link.slug == "xyz123"
 
-    def test_raises_when_slug_space_exhausted(self) -> None:
-        Link.objects.create(slug="fixed", url="https://example.com/s")
+    def test_raises_when_slug_space_exhausted(self, make_link) -> None:
+        make_link("fixed")
         total = SLUG_ATTEMPTS_PER_LENGTH * (SLUG_MAX_LENGTH - 6 + 1)
         with (
             mock.patch("shortener.routes.page._random_slug", return_value="fixed"),
@@ -79,10 +81,6 @@ class TestGenerateSlugIntegrityRetry:
 
 class TestReceivers:
     """`shortener.receivers` observes `action_dispatched` and exposes counts."""
-
-    def setup_method(self) -> None:
-        """Clear the action counter cache before each test."""
-        cache.clear()
 
     def test_action_counts_empty_when_nothing_dispatched(self) -> None:
         assert action_counts() == {}

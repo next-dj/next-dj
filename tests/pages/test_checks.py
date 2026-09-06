@@ -17,7 +17,7 @@ from next.checks import (
     reset_check_caches,
 )
 from next.conf import next_framework_settings as s
-from next.deps import RegisteredParameterProvider, resolver
+from next.deps import RegisteredParameterProvider
 from next.pages.checks import (
     check_context_processor_signature,
     check_context_reads_foreign_zone,
@@ -36,6 +36,7 @@ from tests.support import (
     importable_dir,
     patch_checks_router_manager,
     patch_checks_router_manager_with_routers,
+    restored_provider_registry,
 )
 
 
@@ -1052,28 +1053,24 @@ class TestContextReadsForeignZone:
             assert check_context_reads_foreign_zone(None) == []
 
     def test_a_registered_provider_silences_w077(self, tmp_path) -> None:
-        class EntriesProvider(RegisteredParameterProvider):
-            priority = 5
-
-            def can_handle(self, param, context) -> bool:
-                return param.name == "entries"
-
-            def resolve(self, param, context) -> object:
-                return []
-
         page_file = tmp_path / "page.py"
         self._write_page(
             page_file,
             "@page.context('count')\ndef count(entries):\n    return len(entries)\n",
         )
-        provider = EntriesProvider()
-        resolver.prepend_provider(provider)
-        try:
+        with restored_provider_registry():
+
+            class EntriesProvider(RegisteredParameterProvider):
+                priority = 5
+
+                def can_handle(self, param, context) -> bool:
+                    return param.name == "entries"
+
+                def resolve(self, param, context) -> object:
+                    return []
+
             with patch_checks_router_manager(pages_directory=tmp_path):
                 assert check_context_reads_foreign_zone(None) == []
-        finally:
-            resolver.remove_provider(provider)
-            RegisteredParameterProvider._registry.remove(EntriesProvider)
 
     def test_page_without_a_zone_bound_context_is_silent(self, tmp_path) -> None:
         self._write_page(

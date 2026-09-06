@@ -1,3 +1,6 @@
+from pathlib import Path
+
+from django.conf import settings
 from django.dispatch import receiver
 
 from next.components.signals import (
@@ -26,6 +29,19 @@ from next.urls.signals import route_registered, router_reloaded
 from .metrics import incr
 
 
+def page_key(file_path: object) -> str:
+    """Return the page path relative to the project root.
+
+    The signal carries an absolute path, and a metric label built from it
+    would put the machine's home directory on the dashboard.
+    """
+    raw = Path(str(file_path))
+    try:
+        return str(raw.relative_to(settings.BASE_DIR))
+    except ValueError:
+        return str(raw)
+
+
 @receiver(settings_reloaded)
 def on_settings_reloaded(**kwargs) -> None:
     """Conf group: bump on every framework settings reload."""
@@ -41,13 +57,13 @@ def on_provider_registered(**kwargs) -> None:
 @receiver(template_loaded)
 def on_template_loaded(file_path: object = None, **kwargs) -> None:
     """Pages group: count distinct page templates loaded."""
-    incr("pages.template", str(file_path))
+    incr("pages.template", page_key(file_path))
 
 
 @receiver(context_registered)
 def on_context_registered(file_path: object = None, **kwargs) -> None:
     """Pages group: count `@context` registrations."""
-    incr("pages.context", str(file_path))
+    incr("pages.context", page_key(file_path))
 
 
 @receiver(page_rendered)
@@ -55,9 +71,9 @@ def on_page_rendered(
     file_path: object = None, duration_ms: float | None = None, **kwargs
 ) -> None:
     """Pages group: count renders and accumulate render-time milliseconds."""
-    incr("pages.rendered", str(file_path))
+    incr("pages.rendered", page_key(file_path))
     if duration_ms is not None:
-        incr("pages.duration_ms_total", str(file_path), by=int(duration_ms) or 1)
+        incr("pages.duration_ms_total", page_key(file_path), by=int(duration_ms) or 1)
 
 
 @receiver(route_registered)

@@ -70,10 +70,10 @@ _INIT_PAYLOAD = re.compile(r"Next\._init\((.*?)\);</script>")
 _ZONE_ATTR = re.compile(r'data-next-zone="([^"]+)"')
 
 
-def _walk_dashboard(client) -> None:
+def _walk_dashboard(next_client) -> None:
     """Hit every observability page so receivers accumulate counters."""
     for url in DASHBOARD_PATHS:
-        response = client.get(url)
+        response = next_client.get(url)
         assert response.status_code == 200
 
 
@@ -84,20 +84,36 @@ def _init_payload(html: str) -> dict:
     return json.loads(match.group(1))
 
 
+@pytest.fixture()
+def apply_window(next_client):
+    """Submit the window filter as a partial aimed at the live totals zone."""
+
+    def apply(window: str):
+        return next_client.post_action(
+            "window_filter_form",
+            {"window": window},
+            origin="/stats/",
+            partial=True,
+            zones="live-totals",
+        )
+
+    return apply
+
+
 class TestOverview:
     """Overview page exposes headline counters that match metric reads."""
 
-    def test_overview_renders_with_zero_counters(self, client) -> None:
-        response = client.get("/")
+    def test_overview_renders_with_zero_counters(self, next_client) -> None:
+        response = next_client.get("/")
         assert response.status_code == 200
         assert b"Pages rendered" in response.content
         assert b"Components rendered" in response.content
         assert b"Actions dispatched" in response.content
 
-    def test_overview_counters_advance_after_warmup(self, client) -> None:
-        client.get("/stats/")
-        client.get("/stats/pages/")
-        response = client.get("/")
+    def test_overview_counters_advance_after_warmup(self, next_client) -> None:
+        next_client.get("/stats/")
+        next_client.get("/stats/pages/")
+        response = next_client.get("/")
         body = response.content.decode()
         assert "Pages rendered" in body
         assert metrics.total_for_kind("pages.rendered") >= 2
@@ -115,9 +131,16 @@ class TestStatsTreeRendersEachSubpage:
             ("/stats/forms/", "Form actions"),
             ("/stats/static/", "Static asset pipeline"),
         ],
+        ids=(
+            "live_distribution",
+            "per_page_counts",
+            "per_component_counts",
+            "form_actions",
+            "static_pipeline",
+        ),
     )
-    def test_subpage(self, client, url, needle) -> None:
-        response = client.get(url)
+    def test_subpage(self, next_client, url, needle) -> None:
+        response = next_client.get(url)
         assert response.status_code == 200
         assert needle.encode() in response.content
 
@@ -130,25 +153,29 @@ class TestLiveStatsSerializerOverride:
     granularity the framework guarantees.
     """
 
-    def test_live_stats_carries_envelope(self, client) -> None:
-        response = client.get("/stats/")
+    def test_live_stats_carries_envelope(self, next_client) -> None:
+        response = next_client.get("/stats/")
         body = response.content.decode()
         assert '"live_stats":{"v":1,"data":{' in body
 
-    def test_render_rates_stays_flat_through_global_serializer(self, client) -> None:
+    def test_render_rates_stays_flat_through_global_serializer(
+        self, next_client
+    ) -> None:
         """`render_chart` declares no `serializer=`, so its key lands flat."""
-        response = client.get("/stats/")
+        response = next_client.get("/stats/")
         body = response.content.decode()
         assert '"render_rates":{' in body
         assert '"render_rates":{"v":1' not in body
 
-    def test_overview_totals_chart_carries_envelope(self, client) -> None:
-        response = client.get("/")
+    def test_overview_totals_chart_carries_envelope(self, next_client) -> None:
+        response = next_client.get("/")
         body = response.content.decode()
         assert '"totals_chart":{"v":1,"data":{' in body
 
-    def test_window_querystring_propagates_to_inherit_context(self, client) -> None:
-        response = client.get("/stats/?window=1h")
+    def test_window_querystring_propagates_to_inherit_context(
+        self, next_client
+    ) -> None:
+        response = next_client.get("/stats/?window=1h")
         body = response.content.decode()
         assert "Window: 1h" in body
 
@@ -159,7 +186,7 @@ class TestWindowFilters:
     BASE = "2026-05-08T12:00:00+00:00"
 
     def test_only_recent_buckets_count_under_one_minute_window(
-        self, client, frozen_now
+        self, next_client, frozen_now
     ) -> None:
         """A bucket 30 minutes old falls outside the one-minute read window.
 
@@ -170,18 +197,18 @@ class TestWindowFilters:
             metrics.incr("pages.rendered", "/old", by=99)
             traveller.move_to("2026-05-08T12:30:00+00:00")
             metrics.incr("pages.rendered", "/recent", by=2)
-            response = client.get("/stats/?window=1m")
+            response = next_client.get("/stats/?window=1m")
             body = response.content.decode()
             assert '"window":"1m"' in body or '"window": "1m"' in body
             recent = metrics.read_window("pages.rendered", minutes=1)
             assert "/old" not in recent
             assert recent.get("/recent", 0) >= 2
 
-    def test_wider_window_reaches_older_buckets(self, client, frozen_now) -> None:
+    def test_wider_window_reaches_older_buckets(self, next_client, frozen_now) -> None:
         with frozen_now(self.BASE) as traveller:
             metrics.incr("pages.rendered", "/old", by=99)
             traveller.move_to("2026-05-08T12:30:00+00:00")
-            client.get("/stats/?window=1h")
+            next_client.get("/stats/?window=1h")
             wide = metrics.read_window("pages.rendered", minutes=60)
             assert wide["/old"] == 99
 
@@ -194,20 +221,20 @@ class TestJsxAssetPipeline:
     so both kinds coexist on the same dashboard.
     """
 
-    def test_overview_emits_babel_script_tag(self, client) -> None:
-        response = client.get("/")
+    def test_overview_emits_babel_script_tag(self, next_client) -> None:
+        response = next_client.get("/")
         body = response.content.decode()
         assert '<script type="text/babel"' in body
         assert "sparkline" in body
 
-    def test_overview_loads_react_and_babel_cdn_scripts(self, client) -> None:
-        response = client.get("/")
+    def test_overview_loads_react_and_babel_cdn_scripts(self, next_client) -> None:
+        response = next_client.get("/")
         body = response.content.decode()
         assert "react@18" in body
         assert "babel/standalone" in body
 
-    def test_stats_keeps_chart_js_on_regular_script_path(self, client) -> None:
-        response = client.get("/stats/")
+    def test_stats_keeps_chart_js_on_regular_script_path(self, next_client) -> None:
+        response = next_client.get("/stats/")
         body = response.content.decode()
         assert "chart.umd.min.js" in body
         assert body.index("chart.umd.min.js") < body.index(
@@ -219,21 +246,21 @@ class TestDevFlagChannel:
     """The framework owns `$dev` in the init payload and gates it on DEBUG."""
 
     @override_settings(DEBUG=True)
-    def test_debug_render_announces_the_dev_flag(self, client) -> None:
-        payload = _init_payload(client.get("/").content.decode())
+    def test_debug_render_announces_the_dev_flag(self, next_client) -> None:
+        payload = _init_payload(next_client.get("/").content.decode())
         assert payload["$dev"] is True
 
     @override_settings(DEBUG=False)
-    def test_production_render_omits_the_dev_flag(self, client) -> None:
-        payload = _init_payload(client.get("/").content.decode())
+    def test_production_render_omits_the_dev_flag(self, next_client) -> None:
+        payload = _init_payload(next_client.get("/").content.decode())
         assert "$dev" not in payload
         assert "$csrf" in payload
 
     @override_settings(DEBUG=True)
     def test_dashboard_context_keys_travel_beside_the_reserved_ones(
-        self, client
+        self, next_client
     ) -> None:
-        payload = _init_payload(client.get("/stats/").content.decode())
+        payload = _init_payload(next_client.get("/stats/").content.decode())
         assert "live_stats" in payload
         assert payload["$dev"] is True
 
@@ -246,15 +273,15 @@ class TestSparklineStaysOutsideEveryZone:
     so this walk fails the moment the widget is pulled into a zone.
     """
 
-    def test_full_render_owns_the_sparkline(self, client) -> None:
-        assert "sparkline-mount" in client.get("/").content.decode()
+    def test_full_render_owns_the_sparkline(self, next_client) -> None:
+        assert "sparkline-mount" in next_client.get("/").content.decode()
 
-    def test_no_zone_body_carries_the_sparkline_mount(self, client) -> None:
+    def test_no_zone_body_carries_the_sparkline_mount(self, next_client) -> None:
         checked: list[str] = []
         for url in DASHBOARD_PATHS:
-            body = client.get(url).content.decode()
+            body = next_client.get(url).content.decode()
             for zone in sorted(set(_ZONE_ATTR.findall(body))):
-                html = envelope_of(client.get_zones(url, zone)).html_for_zone(zone)
+                html = envelope_of(next_client.get_zones(url, zone)).html_for_zone(zone)
                 assert "sparkline-mount" not in html
                 checked.append(zone)
         assert set(checked) >= {"overview-totals", "busiest-pages", "live-totals"}
@@ -263,14 +290,14 @@ class TestSparklineStaysOutsideEveryZone:
 class TestFilterFormDispatch:
     """Submitting the filter form fires `action_dispatched` and redirects."""
 
-    def test_select_renders_with_seeded_window(self, client) -> None:
-        body = client.get("/stats/?window=1h").content.decode()
+    def test_select_renders_with_seeded_window(self, next_client) -> None:
+        body = next_client.get("/stats/?window=1h").content.decode()
         assert '<select name="window"' in body
         assert 'value="1h" selected' in body
 
-    def test_post_redirects_with_window_querystring(self, client) -> None:
+    def test_post_redirects_with_window_querystring(self, next_client) -> None:
         with SignalRecorder(action_dispatched) as recorder:
-            response = client.post_action("window_filter_form", {"window": "1m"})
+            response = next_client.post_action("window_filter_form", {"window": "1m"})
         assert response.status_code == 302
         assert "window=1m" in response["Location"]
         events = recorder.events_for(action_dispatched)
@@ -281,13 +308,13 @@ class TestFilterFormDispatch:
 class TestPollZone:
     """The overview totals zone carries a poll interval and still morphs."""
 
-    def test_overview_zone_carries_poll_interval(self, client) -> None:
-        body = client.get("/").content.decode()
+    def test_overview_zone_carries_poll_interval(self, next_client) -> None:
+        body = next_client.get("/").content.decode()
         assert 'data-next-poll="5000"' in body
         assert 'data-next-zone="overview-totals"' in body
 
-    def test_overview_zone_get_still_morphs(self, client) -> None:
-        response = client.get_zones("/", "overview-totals")
+    def test_overview_zone_get_still_morphs(self, next_client) -> None:
+        response = next_client.get_zones("/", "overview-totals")
         envelope = envelope_of(response)
         assert envelope.zone_targets() == ["overview-totals"]
         assert "Pages rendered" in envelope.html_for_zone("overview-totals")
@@ -296,16 +323,16 @@ class TestPollZone:
 class TestLazyLoadZone:
     """The busiest-pages widget ships a placeholder and loads its body lazily."""
 
-    def test_overview_lazy_load_widget_renders_hint(self, client) -> None:
-        body = client.get("/").content.decode()
+    def test_overview_lazy_load_widget_renders_hint(self, next_client) -> None:
+        body = next_client.get("/").content.decode()
         assert 'data-next-lazy="load"' in body
         assert 'data-next-zone="busiest-pages"' in body
         assert "Busiest pages" in body
         assert "Loading the busiest pages" in body
 
-    def test_lazy_zone_get_delivers_the_body(self, client) -> None:
-        client.get("/stats/pages/")
-        response = client.get_zones("/", "busiest-pages")
+    def test_lazy_zone_get_delivers_the_body(self, next_client) -> None:
+        next_client.get("/stats/pages/")
+        response = next_client.get_zones("/", "busiest-pages")
         envelope = envelope_of(response)
         assert envelope.zone_targets() == ["busiest-pages"]
         html = envelope.html_for_zone("busiest-pages")
@@ -313,7 +340,9 @@ class TestLazyLoadZone:
         assert "No pages have been rendered yet." not in html
         assert "Loading the busiest pages" not in html
 
-    def test_lazy_zone_get_skips_the_totals_provider(self, client, monkeypatch) -> None:
+    def test_lazy_zone_get_skips_the_totals_provider(
+        self, next_client, monkeypatch
+    ) -> None:
         calls: list[str] = []
 
         def _record(kind: str) -> int:
@@ -321,74 +350,53 @@ class TestLazyLoadZone:
             return 0
 
         monkeypatch.setattr(metrics, "total_for_kind", _record)
-        client.get_zones("/", "busiest-pages")
+        next_client.get_zones("/", "busiest-pages")
         assert calls == []
 
 
 class TestMetricPulseVerb:
     """A partial apply morphs the totals zone and emits the custom verb."""
 
-    def test_partial_apply_morphs_zone_and_emits_metric_pulse(self, client) -> None:
-        response = client.post_action(
-            "window_filter_form",
-            {"window": "1h"},
-            origin="/stats/",
-            partial=True,
-            zones="live-totals",
-        )
+    def test_partial_apply_morphs_zone_and_emits_metric_pulse(
+        self, apply_window
+    ) -> None:
+        response = apply_window("1h")
         assert response.status_code == 200
         envelope = envelope_of(response)
-        assert envelope.op_verbs() == ["morph", "metric-pulse"]
-        assert envelope.zone_targets() == ["live-totals"]
+        assert envelope.op_verbs() == ["morph", "morph", "metric-pulse"]
+        assert envelope.zone_targets() == ["live-totals", "stats-window"]
 
-    def test_metric_pulse_op_carries_window_and_selector(self, client) -> None:
-        response = client.post_action(
-            "window_filter_form",
-            {"window": "1h"},
-            origin="/stats/",
-            partial=True,
-            zones="live-totals",
-        )
-        envelope = envelope_of(response)
+    def test_partial_apply_morphs_the_window_label_beside_the_totals(
+        self, apply_window
+    ) -> None:
+        envelope = envelope_of(apply_window("1h"))
+        assert "Window: 1h" in envelope.html_for_zone("stats-window")
+
+    def test_metric_pulse_op_carries_window_and_selector(self, apply_window) -> None:
+        envelope = envelope_of(apply_window("1h"))
         pulse = next(op for op in envelope.ops if op["op"] == "metric-pulse")
         assert pulse["window"] == "1h"
         assert pulse["selector"] == "[data-metric-pulse-target]"
 
     def test_partial_apply_reaggregates_under_the_chosen_window(
-        self, client, frozen_now
+        self, apply_window, frozen_now
     ) -> None:
         with frozen_now("2026-05-08T12:00:00+00:00") as traveller:
             metrics.incr("pages.rendered", "/old", by=40)
             traveller.move_to("2026-05-08T12:30:00+00:00")
-            narrow = envelope_of(
-                client.post_action(
-                    "window_filter_form",
-                    {"window": "1m"},
-                    origin="/stats/",
-                    partial=True,
-                    zones="live-totals",
-                )
-            ).html_for_zone("live-totals")
-            wide = envelope_of(
-                client.post_action(
-                    "window_filter_form",
-                    {"window": "1h"},
-                    origin="/stats/",
-                    partial=True,
-                    zones="live-totals",
-                )
-            ).html_for_zone("live-totals")
+            narrow = envelope_of(apply_window("1m")).html_for_zone("live-totals")
+            wide = envelope_of(apply_window("1h")).html_for_zone("live-totals")
         assert "40" not in narrow
         assert "40" in wide
 
-    def test_live_page_carries_the_pulse_target_and_handler(self, client) -> None:
-        body = client.get("/stats/").content.decode()
+    def test_live_page_carries_the_pulse_target_and_handler(self, next_client) -> None:
+        body = next_client.get("/stats/").content.decode()
         assert "data-metric-pulse-target" in body
         assert 'data-next-zone="live-totals"' in body
         assert "/static/next/stats.js" in body
 
-    def test_pulse_handler_is_scoped_to_the_live_page(self, client) -> None:
-        body = client.get("/stats/pages/").content.decode()
+    def test_pulse_handler_is_scoped_to_the_live_page(self, next_client) -> None:
+        body = next_client.get("/stats/pages/").content.decode()
         assert "/static/next/stats.js" not in body
         assert "data-next-target" not in body
 
@@ -396,7 +404,7 @@ class TestMetricPulseVerb:
 class TestSignalGroupsCovered:
     """A walk through the dashboard increments every signal group at least once."""
 
-    def test_each_group_increments(self, client) -> None:
+    def test_each_group_increments(self, next_client) -> None:
         """Lifecycle-only signals are provoked inside the recorder window.
 
         `settings_reloaded`, `provider_registered`, and `watch_specs_ready`
@@ -419,8 +427,8 @@ class TestSignalGroupsCovered:
 
             iter_all_autoreload_watch_specs()
 
-            _walk_dashboard(client)
-            client.post_action("window_filter_form", {"window": "5m"})
+            _walk_dashboard(next_client)
+            next_client.post_action("window_filter_form", {"window": "5m"})
 
         for group, signals in GROUP_SAMPLES.items():
             hits = sum(len(recorder.events_for(sig)) for sig in signals)
@@ -432,8 +440,8 @@ class TestSignalGroupsCovered:
 class TestFlushMetricsCommand:
     """`flush_metrics` drains the cache and writes one row per counter."""
 
-    def test_flush_persists_counters_and_clears_cache(self, client) -> None:
-        _walk_dashboard(client)
+    def test_flush_persists_counters_and_clears_cache(self, next_client) -> None:
+        _walk_dashboard(next_client)
         before = len(metrics.read_all())
         assert before > 0
 
@@ -450,8 +458,8 @@ class TestFlushMetricsCommand:
         assert "nothing to flush" in captured.out
         assert MetricSnapshot.objects.count() == 0
 
-    def test_flush_command_announces_count(self, client, capsys) -> None:
-        _walk_dashboard(client)
+    def test_flush_command_announces_count(self, next_client, capsys) -> None:
+        _walk_dashboard(next_client)
         before = len(metrics.read_all())
         call_command("flush_metrics")
         captured = capsys.readouterr()

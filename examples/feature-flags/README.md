@@ -2,7 +2,7 @@
 
 A small feature-flag console built on **next-dj**. Toggle flags in an admin panel and watch them gate content on a demo page. Values live in `LocMemCache` with a `post_save` receiver invalidating each entry on write, and every page render bumps a counter so you can see the `page_rendered` signal firing in real time.
 
-The example focuses on the signal / receiver / cache layer of the framework: a composite component with a Python `render()` that returns empty to hide gated content, a custom DI provider that resolves a `Flag` by name, a bulk-toggle form whose view-level `check_permissions` hook is gated by a feature flag and whose success redirect and flash use the declarative `success_url` / `success_message` contract, a nested admin layout, and signal receivers (`post_save` for cache invalidation, `page_rendered` for metrics, `form_access_denied` for the gated action).
+The example focuses on the signal / receiver / cache layer of the framework: a composite component with a Python `render()` that returns empty to hide gated content, a custom DI provider that resolves a `Flag` by name, a bulk-toggle form whose view-level `check_permissions` hook is gated by a feature flag and whose success redirect and flash use the declarative `success_url` / `success_message` contract, a nested admin layout, and four kinds of receiver (`post_save` / `post_delete` for cache invalidation, `page_rendered` and `component_rendered` for metrics, `form_access_denied` for the gated action).
 
 ## What you will see
 
@@ -10,37 +10,40 @@ The example focuses on the signal / receiver / cache layer of the framework: a c
 | --- | --- |
 | `/` | Two columns — enabled flags on the left, disabled on the right. |
 | `/admin/` | Bulk-toggle form, gated by the `admin_writes` flag. Each row shows a live "on/off" preview component, and a success banner confirms each save. |
-| `/admin/metrics/` | Per-page render counters from the `page_rendered` receiver plus the `form_access_denied` denial count. |
-| `/demo/` | `feature_guard` components for three demo flags. Disabled flags render nothing. |
+| `/admin/metrics/` | Three counters — per-page renders from `page_rendered`, `feature_guard` renders from `component_rendered`, and permission denials from `form_access_denied`. |
+| `/demo/` | `feature_guard` components for three demo flags. Out of the box only `beta_checkout` is on, so it is the only block that renders. |
 
 ## How to run
 
 ```bash
 cd examples/feature-flags
-uv run python manage.py migrate
-uv run python manage.py runserver     # http://127.0.0.1:8000/
+uv run python manage.py migrate        # schema only
+uv run python manage.py seed_demo      # the four demo flags
+uv run python manage.py runserver      # http://127.0.0.1:8000/
 uv run pytest
 ```
 
 Tailwind loads via the Play CDN in [`frame/layout.djx`](frame/layout.djx). No Node, no build step.
 
-Seed a few flags from the Django shell:
+`seed_demo` writes four flags from [`flags/demo.py`](flags/demo.py), so no page is empty on the first request:
+
+| name             | label          | start state |
+| ---------------- | -------------- | ----------- |
+| `beta_checkout`  | Beta checkout  | on          |
+| `dark_sidebar`   | Dark sidebar   | off         |
+| `ai_suggestions` | AI suggestions | off         |
+| `admin_writes`   | Admin writes   | on          |
+
+`admin_writes` gates the bulk-toggle action and ships **on**, so the one interactive button of the example works straight after `seed_demo`. Switching it off is what the guard demonstrates. Uncheck `admin_writes` on `/admin/`, save, and the next submit comes back as `403` because the form just closed its own gate. See section 7 for the `check_permissions` hook. To reopen the gate, edit the row outside the form and restart the server so the per-process `LocMemCache` starts cold:
 
 ```bash
 uv run python manage.py shell -c "
 from flags.models import Flag
-Flag.objects.create(name='beta_checkout', label='Beta checkout',
-                    description='Use the new checkout flow.', enabled=True)
-Flag.objects.create(name='dark_sidebar', label='Dark sidebar',
-                    description='Experimental dark-mode navigation.', enabled=False)
-Flag.objects.create(name='ai_suggestions', label='AI suggestions',
-                    description='Recommendations powered by the v2 model.', enabled=False)
-Flag.objects.create(name='admin_writes', label='Admin writes',
-                    description='Gate for the bulk-toggle action.', enabled=True)
+gate = Flag.objects.get(name='admin_writes')
+gate.enabled = True
+gate.save(update_fields=['enabled', 'updated_at'])
 "
 ```
-
-The `admin_writes` flag gates the bulk-toggle action. Leave it off and the admin form returns `403` on submit. See section 7 for the `check_permissions` hook.
 
 ## Walking the code
 
@@ -66,7 +69,7 @@ Both keys are strings (not paths). The file router and components backend look u
 
 ### 2. `Flag` model and cache-through lookup
 
-[`flags/models.py`](flags/models.py) holds a tiny `Flag(name, label, description, enabled, updated_at)` table. [`flags/cache.py`](flags/cache.py) wraps the model with a read-through `LocMemCache` layer:
+[`flags/models.py`](flags/models.py) holds a tiny `Flag(name, label, description, enabled, updated_at)` table, filled by `seed_demo` with the four rows listed above. [`flags/cache.py`](flags/cache.py) wraps the model with a read-through `LocMemCache` layer:
 
 ```python
 def get_cached_flag(name: str) -> Flag | None:
@@ -139,7 +142,7 @@ The admin form uses a second composite to show an "on / off" badge next to every
 ```python
 # _chunks/toggle_preview/component.py
 @component.context("state")
-def _state(flag: DFlag[Flag]) -> dict[str, str]:
+def state(flag: DFlag[Flag]) -> dict[str, str]:
     if flag.enabled:
         return {"label": "on", "classes": "bg-emerald-100 text-emerald-800"}
     return {"label": "off", "classes": "bg-slate-100 text-slate-600"}
@@ -206,7 +209,7 @@ class BulkToggleForm(Form):
             raise PermissionDenied
 ```
 
-`WRITE_GATE_FLAG` is `"admin_writes"`. When that flag is absent or off the hook raises `PermissionDenied` and the action returns `403`, so no flag is touched. Enable `admin_writes` and the same POST succeeds and redirects. The gate uses the example's own flag mechanism — the same `Flag` rows and the same read-through cache — so toggling the gate is itself an ordinary flag edit.
+`WRITE_GATE_FLAG` is `"admin_writes"`. The seed ships it enabled, so the first POST passes the hook, saves, and redirects. Turn the row off (or delete it) and the hook raises `PermissionDenied`, the action returns `403`, and no flag is touched. The gate uses the example's own flag mechanism — the same `Flag` rows and the same read-through cache — so toggling the gate is itself an ordinary flag edit.
 
 [`flags/providers.py`](flags/providers.py) registers the injected service as a named dependency:
 
@@ -222,29 +225,40 @@ The return contract mirrors a Django permission check. `None` or `True` allows. 
 
 A denial emits `next.signals.form_access_denied` with `action_name`, `uid`, `request`, `layer` (`"view"` here), and `reason` (`"raised"` for the `PermissionDenied` path). The `_count_access_denied` receiver in [`flags/receivers.py`](flags/receivers.py) bumps a counter, and the `/admin/metrics/` page surfaces it as a stat card next to the render counters.
 
-### 8. Receivers — `post_save`, `post_delete`, `page_rendered`
+### 8. Receivers — `post_save`, `post_delete`, `page_rendered`, `component_rendered`
 
 [`flags/receivers.py`](flags/receivers.py) wires its database and render receivers at app ready time:
 
 ```python
 @receiver(post_save, sender=Flag)
-def _invalidate_on_save(sender, instance, **kwargs):
+def _invalidate_on_save(instance: Flag, **kwargs) -> None:
     invalidate_flag(instance.name)
 
 
 @receiver(post_delete, sender=Flag)
-def _invalidate_on_delete(sender, instance, **kwargs):
+def _invalidate_on_delete(instance: Flag, **kwargs) -> None:
     invalidate_flag(instance.name)
 
 
 @receiver(page_rendered)
-def _count_page_render(sender, file_path, **kwargs):
+def _count_page_render(file_path: Path, **kwargs) -> None:
     record_render(_page_key(file_path))
+
+
+@receiver(component_rendered)
+def _count_feature_guard(info: object, **kwargs) -> None:
+    if getattr(info, "name", None) != "feature_guard":
+        return
+    _bump(GUARD_COUNT_KEY, _guard_lock)
 ```
+
+Django sends `sender` as a keyword like every other argument, so a receiver that does not use it simply lets `**kwargs` absorb it and declares only the fields it reads.
 
 The two database receivers mean the cache and the DB can never drift apart. Toggle a flag, the row saves, the cache entry disappears, the next read refetches — in that order, in under a millisecond.
 
 `page_rendered` is a `next.pages.signals` signal, not a Django one. It fires at the end of every page render and carries the full `file_path` of the `page.py` that produced it. Because every page file is literally named `page.py`, the receiver derives the key from the path segments _under_ `panels/` — the root page becomes `"/"`, `admin/page.py` becomes `"admin"`, `admin/metrics/page.py` becomes `"admin/metrics"`. The `/admin/metrics/` page reads the counters through `render_counts()`, and because the signal fires _after_ rendering, the metrics page's own entry only appears on the next visit.
+
+`component_rendered` is the components-area counterpart, sent from `next.components` once per component render with the `ComponentInfo` in `info`. `_count_feature_guard` filters on `info.name` and bumps a second counter. The signal fires after the render regardless of what came back, so a `feature_guard` whose `render()` returned an empty string still counts — the number answers how often the gate was consulted, not how often it let something through. `/admin/metrics/` shows it as a stat card beside the per-page table.
 
 ### 9. Shared `nav_link` component — active state from `request.resolver_match`
 
@@ -252,8 +266,11 @@ Same pattern as the other examples — no duplication, no manual "current page" 
 
 ```python
 @component.context("is_active")
-def _is_active(url_name: str, request: HttpRequest, active_when: str = "") -> bool:
-    view_name = request.resolver_match.view_name
+def is_active(request: HttpRequest, url_name: str = "", active_when: str = "") -> bool:
+    match = getattr(request, "resolver_match", None)
+    if match is None:
+        return False
+    view_name = match.view_name
     if active_when:
         return active_when in view_name
     return view_name == url_name

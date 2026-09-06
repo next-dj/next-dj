@@ -61,6 +61,7 @@ def board_payload(
         "archived": active_board.archived,
         "csrf": get_token(request),
         "move_card_url": form_action_manager.get_action_url("move_card_form"),
+        "create_card_url": form_action_manager.get_action_url("create_card_form"),
         "columns": [
             {
                 "id": col.id,

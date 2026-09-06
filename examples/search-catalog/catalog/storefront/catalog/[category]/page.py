@@ -1,9 +1,21 @@
 from catalog.models import Category, Product
 from catalog.providers import DFilters, DPage
 from catalog.queries import cached_search
+from catalog.zones import CATEGORY_ZONES, zone_target
 from django.http import Http404
 
 from next import context
+
+
+@context("filter_zones")
+def filter_zones() -> str:
+    """Name every zone the live filter re-renders on a category listing.
+
+    The category listing paginates instead of growing on scroll, so the set
+    drops `catalog-more` and keeps the count, the pager, and the chip strip
+    beside the results.
+    """
+    return zone_target(CATEGORY_ZONES)
 
 
 @context("category", inherit_context=True)

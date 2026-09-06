@@ -55,7 +55,7 @@ Annotations
 
 Modules that participate in dependency resolution never use ``from __future__ import annotations``.
 This applies to ``page.py``, ``component.py``, every action handler, and every ``get_initial`` callable.
-The DI resolver inspects real annotations, not strings, and ``typing.get_origin`` returns ``None`` on stringified generics.
+The DI resolver resolves the hints of a callable once through ``typing.get_type_hints``, and a stringified generic it cannot evaluate stays a string that ``typing.get_origin`` reads as ``None``.
 The provider contracts in ``next/deps/providers.py`` are exempt, because the resolver never introspects their annotations, so that module keeps the future import to defer its ``TYPE_CHECKING`` imports.
 
 Public callables

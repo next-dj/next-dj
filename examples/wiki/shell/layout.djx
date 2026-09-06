@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
-{% component "page_head" title="next.dj — Wiki" tailwind_plugins="typography" %}
+{% component "page_head" title="next.dj — Wiki" tailwind_plugins="typography" icon="📚" %}
 <body class="min-h-screen flex flex-col">
   {% #component "app_shell" brand="Wiki" brand_href="/" brand_icon="📚" %}
     {% #slot "actions" %}
@@ -12,7 +12,7 @@
     {% /slot %}
     {% #slot "page_footer" %}
       <footer class="border-t border-border bg-background py-4 text-center text-xs text-muted-foreground">
-        Built with next.dj. File routes plus a `HybridRouterBackend`.
+        Built with next.dj. File routes plus a <code>HybridRouterBackend</code>.
       </footer>
     {% /slot %}
   {% /component %}

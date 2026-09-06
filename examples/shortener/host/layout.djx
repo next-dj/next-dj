@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
-{% component "page_head" title="next.dj — URL shortener" %}
+{% component "page_head" title="next.dj — URL shortener" icon="🔗" %}
 <body class="min-h-screen flex flex-col">
   {% #component "app_shell" brand="next.dj shortener" brand_href="/" brand_icon="🔗" %}
     {% #slot "actions" %}

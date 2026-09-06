@@ -37,7 +37,7 @@ Each one carries an explicit ``priority`` value, the resolver consults them from
 5. Cleaned data provider (priority 40).
    A parameter named ``cleaned_data`` receives the merged wizard cleaned data on a wizard ``done()`` handler.
 6. HttpRequest provider (priority 50).
-   A parameter annotated ``HttpRequest`` or ``HttpRequest | None`` receives the current request.
+   A parameter annotated ``HttpRequest`` or ``HttpRequest | None`` receives the current request, and one annotated with a concrete subclass receives it only when the request is an instance of that subclass.
 7. URL annotation provider (priority 60).
    A parameter annotated ``DUrl[T]`` reads the captured URL segment and coerces it to ``T``.
 8. URL kwargs provider (priority 70).
@@ -49,7 +49,12 @@ The order makes the default-driven and marker-driven providers decisive.
 ``Depends`` and ``Context`` look only at the parameter default.
 ``DUrl`` and ``DQuery`` look only at the annotation.
 The context-by-name provider sits ahead of the form, URL, and query providers because a context key under the same name is considered a deliberate publication.
-The form provider matches the parameter name ``form``, the marker ``DForm[FormClass]``, and any plain class annotation whose type the bound form is an instance of.
+
+The form provider matches the parameter name ``form``, the marker ``DForm[FormClass]``, and a plain annotation naming a ``django.forms.BaseForm`` or ``django.forms.BaseFormSet`` subclass the bound form is an instance of.
+An annotation that names anything else is ruled out before the form is even consulted, so a parameter typed ``int`` or ``MyService`` never reaches this provider.
+The request provider tests a concrete subclass annotation against the request in flight, so ``request: ASGIRequest`` under a WSGI server receives the parameter default instead of a request whose interface it would go on to call.
+The bare ``HttpRequest`` annotation names no subclass and takes whatever the context carries.
+
 The URL-kwargs provider is the by-name fallback after the ``Depends``, ``Context``, form, request, and ``DUrl`` providers.
 It runs before the ``DQuery`` provider, so a ``DQuery`` parameter that shares a captured segment name receives the URL value, not the query value.
 
@@ -216,6 +221,8 @@ Two markers fill parameters from distinct data sources.
 ``Depends("name")``.
    The argument is a string.
    The resolver looks up the callable registered under that name through ``resolver.dependency`` and invokes it with its own parameters resolved.
+   A name nothing has registered raises ``UnknownDependencyError`` at resolve time rather than injecting ``None``, and the message carries the dependency name, the parameter name, and the name and source path of the callable that asked for it.
+   When a registered name is close to the missing one, the message ends with a ``Did you mean`` hint naming it.
 
 ``Depends(callable)``.
    The argument is a callable.
@@ -228,7 +235,9 @@ Two markers fill parameters from distinct data sources.
 ``Depends()``.
    No argument.
    The marker falls back to the parameter name and resolves it as the named form.
+   An unregistered parameter name raises the same ``UnknownDependencyError``.
 
+Import the exception from ``next.deps`` as ``from next.deps import UnknownDependencyError``.
 See :doc:`/content/internals/di-resolver` for the cycle and cache mechanics.
 
 .. code-block:: python
@@ -333,6 +342,9 @@ The base classes are ``RegisteredParameterProvider`` and ``DDependencyBase``.
        def can_handle(self, param, _context) -> bool:
            return get_origin(param.annotation) is DNote
 
+       def static_can_handle(self, param) -> bool | None:
+           return get_origin(param.annotation) is DNote
+
        def resolve(self, param, context):
            (model_cls,) = get_args(param.annotation)
            pk = context.url_kwargs.get("id")
@@ -368,14 +380,28 @@ Python 3.12 generic syntax.
    ``class DNote[T](DDependencyBase[T])`` makes ``DNote[Note]`` a parameterised generic whose ``get_origin`` is ``DNote``.
    A non generic ``class DNote(DDependencyBase[Note])`` does not behave like a parameter marker.
 
-Import before resolution.
-   Register the provider before the resolver caches its provider list.
-   The natural place is ``AppConfig.ready`` of the application that owns the provider.
+Import the provider module.
+   A provider class registers itself when its module is imported, and the natural place to force that import is ``AppConfig.ready`` of the application that owns the provider.
+   A class that registers later still joins the provider list by priority, and the plans compiled without it are recompiled.
 
 A custom provider that does not declare ``priority`` inherits the ``RegisteredParameterProvider`` default of ``100``.
 The nine built-in providers occupy the range ``10`` (named dependency) through ``80`` (query string), so the default keeps a custom provider after every built-in.
 ``FormProvider`` and ``CleanedDataProvider`` share priority ``40``.
 Set ``priority`` on the subclass when the new provider has to claim a parameter the built-ins would otherwise match, for example a value below ``60`` for an annotation that should outrank ``DUrl``.
+
+Static verdicts
+~~~~~~~~~~~~~~~
+
+The resolver asks each provider ``static_can_handle(param)`` once per callable and compiles the answers into that callable's injection plan.
+``True`` claims the parameter in every context and ends the walk, ``False`` rules the provider out for that parameter for good, and ``None`` keeps ``can_handle`` running on every resolve.
+``NoteProvider`` above answers from the annotation alone, so its marker parameters are settled at compile time and no ``can_handle`` runs per request.
+
+The parameter reaches the hook with its type hint already resolved through ``typing.get_type_hints``, extras included, so a hook compares real types even where the annotation was written as a string and can match on the metadata of an ``Annotated[...]`` hint.
+A hint the framework cannot evaluate falls back to the raw annotation as written, and the plan built from it is not cached, so an annotation that only a later import can resolve takes effect on the next resolve.
+A provider that implements the ``ParameterProvider`` protocol directly declares the method itself, while a ``RegisteredParameterProvider`` subclass inherits the ``None`` default.
+The method is not optional.
+A provider handed to ``add_provider``, ``prepend_provider``, ``register``, or the resolver constructor without a callable ``static_can_handle`` is refused with a ``TypeError`` naming the class, rather than failing later from inside the plan compiler.
+See :doc:`/content/internals/di-resolver` for how a plan is compiled, cached, and invalidated.
 
 Resolution cache
 ----------------
@@ -412,8 +438,9 @@ More recipes for diagnosing missing markers and CSRF or dispatch errors live in 
 Avoid ``from __future__ import annotations`` in DI modules
 ----------------------------------------------------------
 
-The resolver inspects real annotations, not strings.
-A ``from __future__ import annotations`` import in a ``page.py`` or ``component.py`` turns every annotation into a string and ``typing.get_origin`` returns ``None``.
+The resolver resolves the annotations of each callable once through :func:`typing.get_type_hints`, so a string annotation carries only as far as its names are importable at runtime.
+A hint that fails to evaluate leaves the raw string in the injection plan, and a marker such as ``DUrl[int]`` stops matching, because ``typing.get_origin`` returns ``None`` for a string.
+Real annotations remove that failure mode outright, which is why a ``page.py`` or a ``component.py`` never carries the future import.
 
 Two rules.
 
@@ -422,14 +449,14 @@ Do not use future annotations in modules with DI parameters.
    Plain Python files that only import the framework can use future annotations freely.
 
 Keep DI types runtime importable.
-   Most providers compare annotations through ``typing.get_origin``, which returns ``None`` for string annotations and never imports the target type.
-   The ``HttpRequest`` provider evaluates annotations through ``typing.get_type_hints`` first and falls back to the raw annotation, and the ``get_type_hints`` call evaluates string annotations.
-   Types hidden behind ``if TYPE_CHECKING`` are not visible to either path, so keep DI-touching annotations on classes that import at module top level.
+   A hint the resolver cannot evaluate never becomes the type a provider matches on.
+   Types hidden behind ``if TYPE_CHECKING``, and types defined inside a function body, are invisible to that evaluation.
+   Keep DI-touching annotations on classes that import at module top level.
 
 Resolver lifecycle
 ------------------
 
-The resolver builds its provider registry on first use and reuses it, so register custom providers from ``AppConfig.ready``.
+The resolver instantiates the registered provider classes on first use and catches up with the ones that register later, so importing a custom provider from ``AppConfig.ready`` keeps its place in the order predictable.
 See :doc:`/content/internals/di-resolver` for the full lifecycle.
 
 See also

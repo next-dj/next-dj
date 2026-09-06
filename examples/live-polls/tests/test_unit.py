@@ -5,10 +5,12 @@ from pathlib import Path
 
 import pytest
 from django.core.cache import cache
+from django.core.management import call_command
 from django.http import Http404
 from polls import broker as broker_module
 from polls.backends import ViteManifestBackend
 from polls.broker import SNAPSHOT_KEY, PollBroker, build_snapshot, store_snapshot
+from polls.demo import DEMO_POLLS, seed_demo
 from polls.forms import VoteForm
 from polls.models import Choice, Poll
 from polls.providers import DPoll
@@ -52,37 +54,45 @@ def _backend(options: dict[str, str]) -> ViteManifestBackend:
     )
 
 
+ASSET_RELATIVE_PATH = "polls/screens/polls/[int:id]/_widgets/poll_chart/component.vue"
+
+
+def _root_holding_the_asset(vite_root: Path, _tmp_path: Path) -> Path:
+    """Point VITE_ROOT at the directory the co-located asset lives under."""
+    return vite_root
+
+
+def _root_beside_the_asset(_vite_root: Path, tmp_path: Path) -> Path:
+    """Point VITE_ROOT at a sibling directory that does not contain the asset."""
+    unrelated = tmp_path / "other"
+    unrelated.mkdir()
+    return unrelated
+
+
 class TestDevOriginRouting:
     """When DEV_ORIGIN is set, .vue assets resolve to the Vite dev server."""
 
     @pytest.mark.parametrize(
-        ("root_strategy", "expected_url_suffix"),
+        ("root_factory", "expected_url_suffix"),
         [
-            (
-                "matching",
-                "polls/screens/polls/[int:id]/_widgets/poll_chart/component.vue",
-            ),
-            ("unrelated", "component.vue"),
+            (_root_holding_the_asset, ASSET_RELATIVE_PATH),
+            (_root_beside_the_asset, "component.vue"),
         ],
         ids=["under_vite_root", "outside_vite_root"],
     )
     def test_dev_url_keys_off_root_relationship(
         self,
-        root_strategy: str,
+        root_factory,
         expected_url_suffix: str,
         vite_root: Path,
         asset_path: Path,
         tmp_path: Path,
     ) -> None:
         """The dev URL is `{origin}/{relative}` under VITE_ROOT, `{origin}/{name}` outside."""
-        configured_root = vite_root
-        if root_strategy == "unrelated":
-            configured_root = tmp_path / "other"
-            configured_root.mkdir()
         backend = _backend(
             {
                 "DEV_ORIGIN": "http://localhost:5173",
-                "VITE_ROOT": str(configured_root),
+                "VITE_ROOT": str(root_factory(vite_root, tmp_path)),
                 "MANIFEST_PATH": "",
             }
         )
@@ -107,20 +117,20 @@ class TestManifestRouting:
     """Without DEV_ORIGIN, the manifest maps source files to hashed bundles."""
 
     @pytest.mark.parametrize(
-        ("root_strategy", "manifest_key", "built_file"),
+        ("root_factory", "manifest_key", "built_file"),
         [
             (
-                "matching",
-                "polls/screens/polls/[int:id]/_widgets/poll_chart/component.vue",
+                _root_holding_the_asset,
+                ASSET_RELATIVE_PATH,
                 "assets/component-abc123.js",
             ),
-            ("unrelated", "component.vue", "assets/component-xyz.js"),
+            (_root_beside_the_asset, "component.vue", "assets/component-xyz.js"),
         ],
         ids=["key_is_relative_path", "key_falls_back_to_filename"],
     )
     def test_manifest_hit_returns_static_url(
         self,
-        root_strategy: str,
+        root_factory,
         manifest_key: str,
         built_file: str,
         vite_root: Path,
@@ -128,14 +138,13 @@ class TestManifestRouting:
         tmp_path: Path,
     ) -> None:
         """Manifest lookup uses the relative path under VITE_ROOT or the filename outside."""
-        configured_root = vite_root
-        if root_strategy == "unrelated":
-            configured_root = tmp_path / "other"
-            configured_root.mkdir()
         manifest_path = tmp_path / "manifest.json"
         manifest_path.write_text(json.dumps({manifest_key: {"file": built_file}}))
         backend = _backend(
-            {"VITE_ROOT": str(configured_root), "MANIFEST_PATH": str(manifest_path)}
+            {
+                "VITE_ROOT": str(root_factory(vite_root, tmp_path)),
+                "MANIFEST_PATH": str(manifest_path),
+            }
         )
         url = backend.register_file(asset_path, "component", "vue")
         assert f"polls/dist/{built_file}" in url
@@ -193,14 +202,6 @@ class TestRefusalWithoutBuildOrDevServer:
         backend = _backend(options_factory(vite_root, tmp_path))
         with pytest.raises(RuntimeError, match=expected_match):
             backend.register_file(asset_path, "component", "vue")
-
-
-@pytest.fixture()
-def poll(db) -> Poll:
-    """Return the seeded demo poll, deduped against the data migration."""
-    del db
-    poll, _ = Poll.objects.get_or_create(question="Tabs or spaces?")
-    return poll
 
 
 def consume(active: DPoll[Poll]) -> Poll | None:
@@ -312,14 +313,18 @@ def _form_without_poll() -> VoteForm:
     return form
 
 
+def _no_form() -> None:
+    """Stand in for a dispatch that carried no form at all."""
+
+
 class TestBroadcastReceiverGuards:
     """The receiver bails out cleanly on payloads it cannot act on."""
 
     @pytest.mark.parametrize(
         ("action_name", "form_factory"),
         [
-            ("other:action", lambda: None),
-            (VOTE_ACTION_NAME, lambda: None),
+            ("other:action", _no_form),
+            (VOTE_ACTION_NAME, _no_form),
             (VOTE_ACTION_NAME, _form_without_poll),
         ],
         ids=["wrong_action_name", "handler_only_action", "form_missing_poll"],
@@ -384,3 +389,19 @@ class TestBrokerChangeLoop:
         stream.close()
         assert captured
         assert captured[0].snapshot["poll_id"] == poll.pk
+
+
+class TestDemoSeed:
+    """The demo dataset lives in a seed module rather than a data migration."""
+
+    def test_command_creates_the_demo_polls(self) -> None:
+        call_command("seed_demo")
+        assert set(Poll.objects.values_list("question", flat=True)) == {
+            "Tabs or spaces?",
+            "Vim or Emacs?",
+        }
+        assert Choice.objects.count() == 4
+
+    def test_seeding_twice_keeps_one_copy(self, demo_data: None) -> None:
+        seed_demo()
+        assert Poll.objects.count() == len(DEMO_POLLS)

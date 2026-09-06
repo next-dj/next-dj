@@ -1,8 +1,11 @@
 import re
+from dataclasses import dataclass
 
 import pytest
 from admin_audit.models import AdminActivityLog
-from library.models import Author, Book, Chapter, Tag
+from django.core.management import call_command
+from library.demo import DEMO_BOOKS, seed_demo
+from library.models import Book, Chapter, Tag
 
 from next.testing import envelope_of
 
@@ -41,13 +44,13 @@ def _extract_form_inputs(body: str) -> dict[str, str]:
 
 
 class TestDashboard:
-    def test_bare_root_redirects_to_admin(self, client):
-        r = client.get("/")
+    def test_bare_root_redirects_to_admin(self, next_client):
+        r = next_client.get("/")
         assert r.status_code == 302
         assert r["Location"] == "/admin/"
 
-    def test_unauthenticated_redirects_to_login(self, client):
-        r = client.get("/admin/")
+    def test_unauthenticated_redirects_to_login(self, next_client):
+        r = next_client.get("/admin/")
         assert r.status_code == 302
         assert r["Location"].startswith("/admin/login/")
 
@@ -70,21 +73,21 @@ class TestDashboard:
 
 
 class TestAuth:
-    def test_login_page_renders(self, client):
-        r = client.get("/admin/login/")
+    def test_login_page_renders(self, next_client):
+        r = next_client.get("/admin/login/")
         assert r.status_code == 200
         body = r.content.decode()
         assert 'name="username"' in body
         assert 'name="password"' in body
 
-    def test_login_post_redirects_and_authenticates(self, client, admin_user):
-        r = client.post_action(
+    def test_login_post_redirects_and_authenticates(self, next_client, admin_user):
+        r = next_client.post_action(
             "admin:login",
             {"username": "admin", "password": "admin-pass", "next": "/admin/"},
         )
         assert r.status_code == 302
         assert r["Location"] == "/admin/"
-        r2 = client.get("/admin/")
+        r2 = next_client.get("/admin/")
         assert r2.status_code == 200
 
     def test_logout_clears_session(self, admin_client):
@@ -101,9 +104,11 @@ class TestAuth:
         assert "You have been signed out." in body
         assert "Sign in again" in body
 
-    def test_bad_credentials_renders_form_error(self, client, admin_user):
-        rendered = _extract_form_inputs(client.get("/admin/login/").content.decode())
-        r = client.post_action(
+    def test_bad_credentials_renders_form_error(self, next_client, admin_user):
+        rendered = _extract_form_inputs(
+            next_client.get("/admin/login/").content.decode()
+        )
+        r = next_client.post_action(
             "admin:login",
             {**rendered, "username": "admin", "password": "wrong", "next": "/admin/"},
         )
@@ -115,19 +120,19 @@ class TestAuth:
 class TestActionGuards:
     """Mutating actions reject anonymous POSTs and unauthorized users."""
 
-    def test_anonymous_add_post_redirects_to_login(self, client):
-        r = client.post_action(
+    def test_anonymous_add_post_redirects_to_login(self, next_client):
+        r = next_client.post_action(
             "admin:add",
             {"name": "Sneaky", "slug": "sneaky"},
             origin="/admin/library/tag/add/",
         )
         assert r.status_code == 302
         assert r["Location"].startswith("/admin/login/")
-        assert not Tag.objects.exists()
+        assert not Tag.objects.filter(slug="sneaky").exists()
 
-    def test_anonymous_change_post_redirects_to_login(self, client):
-        tag = Tag.objects.create(name="Old", slug="old")
-        r = client.post_action(
+    def test_anonymous_change_post_redirects_to_login(self, next_client, make_tag):
+        tag = make_tag("Old")
+        r = next_client.post_action(
             "admin:change",
             {"name": "Hacked", "slug": "hacked"},
             origin=f"/admin/library/tag/{tag.pk}/change/",
@@ -137,19 +142,20 @@ class TestActionGuards:
         tag.refresh_from_db()
         assert tag.name == "Old"
 
-    def test_anonymous_delete_post_redirects_to_login(self, client):
-        tag = Tag.objects.create(name="Keep", slug="keep")
-        r = client.post_action(
+    def test_anonymous_delete_post_redirects_to_login(self, next_client, make_tag):
+        tag = make_tag("Keep")
+        r = next_client.post_action(
             "admin:delete", origin=f"/admin/library/tag/{tag.pk}/delete/"
         )
         assert r.status_code == 302
         assert r["Location"].startswith("/admin/login/")
         assert Tag.objects.filter(pk=tag.pk).exists()
 
-    def test_anonymous_bulk_action_post_redirects_to_login(self, client):
-        author = Author.objects.create(full_name="A")
-        book = Book.objects.create(title="B", author=author, status=Book.DRAFT)
-        r = client.post_action(
+    def test_anonymous_bulk_action_post_redirects_to_login(
+        self, next_client, make_book
+    ):
+        book = make_book(status=Book.DRAFT)
+        r = next_client.post_action(
             "admin:bulk_action",
             {"action": "mark_as_published", "_selected_action": [str(book.pk)]},
             origin="/admin/library/book/",
@@ -159,20 +165,22 @@ class TestActionGuards:
         book.refresh_from_db()
         assert book.status == Book.DRAFT
 
-    def test_non_staff_add_post_is_forbidden(self, client, django_user_model):
-        client.force_login(django_user_model.objects.create_user("intruder"))
-        r = client.post_action(
+    def test_non_staff_add_post_is_forbidden(self, next_client, django_user_model):
+        next_client.force_login(django_user_model.objects.create_user("intruder"))
+        r = next_client.post_action(
             "admin:add",
             {"name": "Sneaky", "slug": "sneaky"},
             origin="/admin/library/tag/add/",
         )
         assert r.status_code == 403
-        assert not Tag.objects.exists()
+        assert not Tag.objects.filter(slug="sneaky").exists()
 
-    def test_non_staff_change_post_is_forbidden(self, client, django_user_model):
-        client.force_login(django_user_model.objects.create_user("intruder"))
-        tag = Tag.objects.create(name="Old", slug="old")
-        r = client.post_action(
+    def test_non_staff_change_post_is_forbidden(
+        self, next_client, django_user_model, make_tag
+    ):
+        next_client.force_login(django_user_model.objects.create_user("intruder"))
+        tag = make_tag("Old")
+        r = next_client.post_action(
             "admin:change",
             {"name": "Hacked", "slug": "hacked"},
             origin=f"/admin/library/tag/{tag.pk}/change/",
@@ -181,20 +189,23 @@ class TestActionGuards:
         tag.refresh_from_db()
         assert tag.name == "Old"
 
-    def test_non_staff_delete_post_is_forbidden(self, client, django_user_model):
-        client.force_login(django_user_model.objects.create_user("intruder"))
-        tag = Tag.objects.create(name="Keep", slug="keep")
-        r = client.post_action(
+    def test_non_staff_delete_post_is_forbidden(
+        self, next_client, django_user_model, make_tag
+    ):
+        next_client.force_login(django_user_model.objects.create_user("intruder"))
+        tag = make_tag("Keep")
+        r = next_client.post_action(
             "admin:delete", origin=f"/admin/library/tag/{tag.pk}/delete/"
         )
         assert r.status_code == 403
         assert Tag.objects.filter(pk=tag.pk).exists()
 
-    def test_non_staff_bulk_action_post_is_forbidden(self, client, django_user_model):
-        client.force_login(django_user_model.objects.create_user("intruder"))
-        author = Author.objects.create(full_name="A")
-        book = Book.objects.create(title="B", author=author, status=Book.DRAFT)
-        r = client.post_action(
+    def test_non_staff_bulk_action_post_is_forbidden(
+        self, next_client, django_user_model, make_book
+    ):
+        next_client.force_login(django_user_model.objects.create_user("intruder"))
+        book = make_book(status=Book.DRAFT)
+        r = next_client.post_action(
             "admin:bulk_action",
             {"action": "mark_as_published", "_selected_action": [str(book.pk)]},
             origin="/admin/library/book/",
@@ -202,41 +213,106 @@ class TestActionGuards:
         assert r.status_code == 403
         book.refresh_from_db()
         assert book.status == Book.DRAFT
+
+
+class TestDemoSeed:
+    """The demo catalog loads from a seed module, never from a migration."""
+
+    def test_command_fills_the_catalog(self, db):
+        call_command("seed_demo")
+        assert Book.objects.count() == len(DEMO_BOOKS)
+        assert Chapter.objects.filter(book__title="Frankenstein").count() == 4
+
+    def test_seeding_twice_keeps_one_copy(self, demo_data):
+        seed_demo()
+        assert Book.objects.count() == len(DEMO_BOOKS)
+
+
+class TestSeededCatalog:
+    """`library/demo.py` fills every changelist feature once seeded."""
+
+    def test_book_changelist_is_populated_without_manual_entry(
+        self, admin_client, demo_data
+    ):
+        r = admin_client.get("/admin/library/book/")
+        assert r.status_code == 200
+        body = r.content.decode()
+        assert "Frankenstein" in body
+        assert "Dracula" in body
+        assert "Mary Shelley" in body
+
+    def test_book_changelist_spans_more_than_one_page(self, admin_client, demo_data):
+        r = admin_client.get("/admin/library/book/")
+        body = r.content.decode()
+        assert "19 items" in body
+        assert "page 1 of 2" in body
+        assert "?p=2" in body
+        second = admin_client.get("/admin/library/book/?p=2")
+        assert second.status_code == 200
+        assert "The Invisible Man" in second.content.decode()
+
+    @pytest.mark.parametrize(
+        ("query", "title"),
+        [
+            ("status__exact=draft", "The Invisible Man"),
+            ("status__exact=published", "Dracula"),
+            ("status__exact=archived", "Villette"),
+            ("is_featured__exact=1", "The Time Machine"),
+            ("is_featured__exact=0", "Emma"),
+            ("tags__isnull=True", "Mathilda"),
+            ("q=Verne", "Around the World in Eighty Days"),
+        ],
+        ids=(
+            "status_draft",
+            "status_published",
+            "status_archived",
+            "featured_only",
+            "unfeatured_only",
+            "untagged_only",
+            "search_matches_author_name",
+        ),
+    )
+    def test_every_advertised_facet_returns_rows(
+        self, admin_client, demo_data, query, title
+    ):
+        r = admin_client.get(f"/admin/library/book/?{query}")
+        assert r.status_code == 200
+        assert title in r.content.decode()
+
+    def test_a_seeded_book_opens_with_a_filled_inline(self, admin_client, demo_data):
+        book = Book.objects.get(title="Frankenstein")
+        r = admin_client.get(f"/admin/library/book/{book.pk}/change/")
+        assert r.status_code == 200
+        body = r.content.decode()
+        assert 'value="Ingolstadt"' in body
+        assert 'value="The creature speaks"' in body
 
 
 class TestChangelist:
-    def test_changelist_lists_rows(self, admin_client):
-        author = Author.objects.create(full_name="Ursula K. Le Guin")
-        Book.objects.create(
-            title="A Wizard of Earthsea", author=author, status="published"
-        )
+    def test_changelist_lists_rows(self, admin_client, make_book):
+        make_book("A Wizard of Earthsea", status="published")
         r = admin_client.get("/admin/library/book/")
         assert r.status_code == 200
         body = r.content.decode()
         assert "A Wizard of Earthsea" in body
 
-    def test_search_filters_rows(self, admin_client):
-        author = Author.objects.create(full_name="Ursula K. Le Guin")
-        Book.objects.create(
-            title="A Wizard of Earthsea", author=author, status="published"
-        )
-        Book.objects.create(title="The Dispossessed", author=author, status="published")
+    def test_search_filters_rows(self, admin_client, author, make_book):
+        make_book("A Wizard of Earthsea", author=author, status="published")
+        make_book("The Dispossessed", author=author, status="published")
         r = admin_client.get("/admin/library/book/?q=Wizard")
         body = r.content.decode()
         assert "A Wizard of Earthsea" in body
         assert "The Dispossessed" not in body
 
-    def test_sort_by_column_returns_200(self, admin_client):
-        author = Author.objects.create(full_name="A. Author")
-        Book.objects.create(title="Z book", author=author)
-        Book.objects.create(title="A book", author=author)
+    def test_sort_by_column_returns_200(self, admin_client, author, make_book):
+        make_book("Z book", author=author)
+        make_book("A book", author=author)
         r = admin_client.get("/admin/library/book/?o=1")
         assert r.status_code == 200
 
-    def test_list_filter_applies_status(self, admin_client):
-        author = Author.objects.create(full_name="A. Author")
-        Book.objects.create(title="Drafted", author=author, status="draft")
-        Book.objects.create(title="Published", author=author, status="published")
+    def test_list_filter_applies_status(self, admin_client, make_book):
+        make_book("Drafted", status="draft")
+        make_book("Published", status="published")
         r = admin_client.get("/admin/library/book/?status__exact=published")
         body = r.content.decode()
         assert "Published" in body
@@ -254,8 +330,8 @@ class TestChangelist:
     def test_changelist_unknown_target_returns_404(self, admin_client, path):
         assert admin_client.get(path).status_code == 404
 
-    def test_renders_none_value_as_dash(self, admin_client):
-        Author.objects.create(full_name="Anon", email="a@a.com", born_in=None)
+    def test_renders_none_value_as_dash(self, admin_client, make_author):
+        make_author("Anon", email="a@a.com", born_in=None)
         r = admin_client.get("/admin/library/author/")
         assert r.status_code == 200
         assert "&mdash;" in r.content.decode()
@@ -271,9 +347,9 @@ class TestChangelist:
         assert "Filters" not in body
         assert "md:w-60" not in body
 
-    def test_pagination_links_render_on_overflow(self, admin_client):
+    def test_pagination_links_render_on_overflow(self, admin_client, make_tag):
         for i in range(120):
-            Tag.objects.create(name=f"t{i:03d}", slug=f"t{i:03d}")
+            make_tag(f"t{i:03d}")
         r = admin_client.get("/admin/library/tag/")
         body = r.content.decode()
         assert "page 1 of" in body
@@ -335,20 +411,114 @@ class TestAddView:
         assert r.status_code == 200
         body = r.content.decode()
         assert "This field is required" in body
-        assert not Tag.objects.exists()
+        assert not Tag.objects.filter(name="").exists()
+
+
+@dataclass(frozen=True, slots=True)
+class WidgetAttributeCase:
+    field: str
+    present: tuple[str, ...]
+    absent: tuple[str, ...] = ()
+
+
+WIDGET_ATTRIBUTE_CASES = (
+    pytest.param(
+        WidgetAttributeCase(field="price", present=('step="0.01"',)),
+        id="decimal_field_keeps_its_computed_step",
+    ),
+    pytest.param(
+        WidgetAttributeCase(field="title", present=('maxlength="200"',)),
+        id="char_field_keeps_its_maxlength",
+    ),
+    pytest.param(
+        WidgetAttributeCase(
+            field="title",
+            present=("rounded-md border border-input",),
+            absent=("vTextField",),
+        ),
+        id="shadcn_class_replaces_the_django_one",
+    ),
+)
+
+
+class TestWidgetAttributes:
+    @pytest.mark.parametrize("case", WIDGET_ATTRIBUTE_CASES)
+    def test_add_form_input_carries_the_expected_attributes(self, admin_client, case):
+        r = admin_client.get("/admin/library/book/add/")
+        assert r.status_code == 200
+        field = re.search(rf'<input[^>]*name="{case.field}"[^>]*>', r.content.decode())
+        assert field is not None
+        for fragment in case.present:
+            assert fragment in field.group(0)
+        for fragment in case.absent:
+            assert fragment not in field.group(0)
+
+    def test_a_decimal_price_saves_through_the_add_action(self, admin_client, author):
+        r = admin_client.post_action(
+            "admin:add",
+            {
+                "title": "Priced",
+                "author": str(author.pk),
+                "status": "draft",
+                "price": "12.50",
+                "chapters-TOTAL_FORMS": "0",
+                "chapters-INITIAL_FORMS": "0",
+                "chapters-MIN_NUM_FORMS": "0",
+                "chapters-MAX_NUM_FORMS": "1000",
+            },
+            origin="/admin/library/book/add/",
+        )
+        assert r.status_code == 302
+        assert str(Book.objects.get(title="Priced").price) == "12.50"
+
+
+class TestInlineFieldIds:
+    def test_every_rendered_id_on_a_change_page_is_unique(
+        self, admin_client, book_with_two_chapters
+    ):
+        book, *_ = book_with_two_chapters
+        r = admin_client.get(f"/admin/library/book/{book.pk}/change/")
+        ids = re.findall(r'\sid="([^"]+)"', r.content.decode())
+        assert len(ids) == len(set(ids))
+
+    def test_a_keyed_row_namespaces_its_ids_by_primary_key(
+        self, admin_client, book_with_one_chapter
+    ):
+        book, chapter = book_with_one_chapter
+        r = admin_client.get(f"/admin/library/book/{book.pk}/change/")
+        body = r.content.decode()
+        assert f'id="id_chapter_{chapter.pk}_title"' in body
+        assert 'id="id_chapter_add_title"' in body
+
+    def test_the_wire_names_stay_unprefixed(self, admin_client, book_with_one_chapter):
+        book, chapter = book_with_one_chapter
+        r = admin_client.post_action(
+            "admin:inline_change",
+            {
+                "_inline": "chapter",
+                "_inline_pk": str(chapter.pk),
+                "number": "1",
+                "title": "Renamed",
+                "word_count": "150",
+            },
+            origin=f"/admin/library/book/{book.pk}/change/",
+        )
+        assert r.status_code == 302
+        chapter.refresh_from_db()
+        assert chapter.title == "Renamed"
 
 
 class TestChangeView:
-    def test_change_get_renders_form(self, admin_client):
-        tag = Tag.objects.create(name="Old", slug="old")
+    def test_change_get_renders_form(self, admin_client, make_tag):
+        tag = make_tag("Old", slug="old")
         r = admin_client.get(f"/admin/library/tag/{tag.pk}/change/")
         assert r.status_code == 200
         body = r.content.decode()
         assert 'value="Old"' in body
         assert 'value="old"' in body
 
-    def test_change_post_updates_record(self, admin_client):
-        tag = Tag.objects.create(name="Old", slug="old")
+    def test_change_post_updates_record(self, admin_client, make_tag):
+        tag = make_tag("Old")
         r = admin_client.post_action(
             "admin:change",
             {"name": "New", "slug": "new"},
@@ -365,16 +535,16 @@ class TestChangeView:
 
 
 class TestDeleteView:
-    def test_delete_get_renders_confirmation(self, admin_client):
-        tag = Tag.objects.create(name="Doomed", slug="doomed")
+    def test_delete_get_renders_confirmation(self, admin_client, make_tag):
+        tag = make_tag("Doomed")
         r = admin_client.get(f"/admin/library/tag/{tag.pk}/delete/")
         assert r.status_code == 200
         body = r.content.decode()
         assert "Yes, delete" in body
         assert "Doomed" in body
 
-    def test_delete_post_removes_record(self, admin_client):
-        tag = Tag.objects.create(name="Doomed", slug="doomed")
+    def test_delete_post_removes_record(self, admin_client, make_tag):
+        tag = make_tag("Doomed")
         r = admin_client.post_action(
             "admin:delete", origin=f"/admin/library/tag/{tag.pk}/delete/"
         )
@@ -393,30 +563,27 @@ class TestDeleteView:
 
 
 class TestInlines:
-    def test_change_book_renders_keyed_chapter_rows(self, admin_client):
-        author = Author.objects.create(full_name="A. Author")
-        book = Book.objects.create(title="With chapters", author=author)
-        c1 = Chapter.objects.create(book=book, number=1, title="Intro", word_count=100)
-        c2 = Chapter.objects.create(book=book, number=2, title="Rising", word_count=200)
+    def test_change_book_renders_keyed_chapter_rows(
+        self, admin_client, book_with_two_chapters
+    ):
+        book, first, second = book_with_two_chapters
         r = admin_client.get(f"/admin/library/book/{book.pk}/change/")
         assert r.status_code == 200
         body = r.content.decode()
         assert "chapters" in body.lower()
-        assert f'data-next-key="{c1.pk}"' in body
-        assert f'data-next-key="{c2.pk}"' in body
+        assert f'data-next-key="{first.pk}"' in body
+        assert f'data-next-key="{second.pk}"' in body
         assert 'value="Intro"' in body
         assert "Add chapter" in body
 
-    def test_change_book_autocomplete_field_renders_select(self, admin_client):
-        author = Author.objects.create(full_name="A. Author")
-        book = Book.objects.create(title="With autocomplete", author=author)
+    def test_change_book_autocomplete_field_renders_select(self, admin_client, book):
         r = admin_client.get(f"/admin/library/book/{book.pk}/change/")
         assert r.status_code == 200
         body = r.content.decode()
         assert 'name="author"' in body
         assert '<select name="author"' in body
 
-    def test_add_book_through_browser_flow(self, admin_client):
+    def test_add_book_through_browser_flow(self, admin_client, author, make_tag):
         """Mirrors a browser: GET the form, copy every rendered input, POST.
 
         Catches regressions where the GET page omits a hidden field the
@@ -425,8 +592,7 @@ class TestInlines:
         make the formset look "changed" and trigger validation against
         otherwise-skipped empty required fields.
         """
-        author = Author.objects.create(full_name="A. Author")
-        tag = Tag.objects.create(name="Fantasy", slug="fantasy")
+        tag = make_tag("Fantasy")
 
         get = admin_client.get("/admin/library/book/add/")
         assert get.status_code == 200
@@ -448,15 +614,15 @@ class TestInlines:
         assert r.status_code == 302, r.content.decode()[:1500]
         assert Book.objects.filter(title="Browser-flow book").exists()
 
-    def test_change_book_main_save_ignores_absent_inlines(self, admin_client):
-        author = Author.objects.create(full_name="A. Author")
-        book = Book.objects.create(title="Book", author=author)
-        Chapter.objects.create(book=book, number=1, title="Intro", word_count=100)
+    def test_change_book_main_save_ignores_absent_inlines(
+        self, admin_client, book, make_chapter
+    ):
+        make_chapter(book)
         r = admin_client.post_action(
             "admin:change",
             {
                 "title": "Renamed",
-                "author": str(author.pk),
+                "author": str(book.author.pk),
                 "status": "draft",
                 "summary": "",
                 "price": "0",
@@ -471,25 +637,9 @@ class TestInlines:
 
 _INLINE_ACTIONS = ("admin:inline_change", "admin:inline_add")
 
-_CHAPTER_ROWS = ((1, "Intro", 100), (2, "Rising", 200))
-
-
-def _book_with_chapters(count=1):
-    author = Author.objects.create(full_name="A. Author")
-    book = Book.objects.create(title="Book", author=author)
-    chapters = [
-        Chapter.objects.create(book=book, number=number, title=title, word_count=words)
-        for number, title, words in _CHAPTER_ROWS[:count]
-    ]
-    return book, chapters
-
 
 class TestLiveInlines:
     """Each existing related row is its own keyed `admin:inline_change` form."""
-
-    def _book(self):
-        book, (first, second) = _book_with_chapters(2)
-        return book, first, second
 
     @staticmethod
     def _payload(action: str, pk: object, **fields: str) -> dict[str, str]:
@@ -498,8 +648,10 @@ class TestLiveInlines:
             base["_inline_pk"] = str(pk)
         return {**base, **fields}
 
-    def test_inline_change_saves_the_addressed_row(self, admin_client):
-        book, first, second = self._book()
+    def test_inline_change_saves_the_addressed_row(
+        self, admin_client, book_with_two_chapters
+    ):
+        book, first, second = book_with_two_chapters
         r = admin_client.post_action(
             "admin:inline_change",
             {
@@ -519,8 +671,8 @@ class TestLiveInlines:
         assert second.word_count == 250
         assert first.title == "Intro"
 
-    def test_inline_add_creates_a_row(self, admin_client):
-        book, *_ = self._book()
+    def test_inline_add_creates_a_row(self, admin_client, book_with_two_chapters):
+        book, *_ = book_with_two_chapters
         r = admin_client.post_action(
             "admin:inline_add",
             {
@@ -536,8 +688,10 @@ class TestLiveInlines:
         assert Chapter.objects.filter(book=book, number=3, title="Climax").exists()
 
     @pytest.mark.parametrize("action", _INLINE_ACTIONS)
-    def test_invalid_submit_rerenders_and_persists_nothing(self, admin_client, action):
-        book, first, _ = self._book()
+    def test_invalid_submit_rerenders_and_persists_nothing(
+        self, admin_client, action, book_with_two_chapters
+    ):
+        book, first, _ = book_with_two_chapters
         before = Chapter.objects.filter(book=book).count()
         payload = self._payload(action, first.pk, title="")
         r = admin_client.post_action(
@@ -549,8 +703,10 @@ class TestLiveInlines:
         first.refresh_from_db()
         assert first.title == "Intro"
 
-    def test_invalid_partial_change_morphs_the_keyed_row_form(self, admin_client):
-        book, _first, second = self._book()
+    def test_invalid_partial_change_morphs_the_keyed_row_form(
+        self, admin_client, book_with_two_chapters
+    ):
+        book, _first, second = book_with_two_chapters
         response = admin_client.post_action(
             "admin:inline_change",
             {
@@ -579,16 +735,18 @@ class TestLiveInlines:
         assert second.title == "Rising"
 
     @pytest.mark.parametrize("action", _INLINE_ACTIONS)
-    def test_unknown_inline_token_404(self, admin_client, action):
-        book, first, _ = self._book()
+    def test_unknown_inline_token_404(
+        self, admin_client, action, book_with_two_chapters
+    ):
+        book, first, _ = book_with_two_chapters
         payload = self._payload(action, first.pk, _inline="nope")
         r = admin_client.post_action(
             action, payload, origin=f"/admin/library/book/{book.pk}/change/"
         )
         assert r.status_code == 404
 
-    def test_inline_change_unknown_pk_404(self, admin_client):
-        book, *_ = self._book()
+    def test_inline_change_unknown_pk_404(self, admin_client, book_with_two_chapters):
+        book, *_ = book_with_two_chapters
         payload = self._payload("admin:inline_change", "99999")
         r = admin_client.post_action(
             "admin:inline_change",
@@ -598,10 +756,12 @@ class TestLiveInlines:
         assert r.status_code == 404
 
     @pytest.mark.parametrize("action", _INLINE_ACTIONS)
-    def test_anonymous_submit_redirects_to_login(self, client, action):
-        book, first, _ = self._book()
+    def test_anonymous_submit_redirects_to_login(
+        self, next_client, action, book_with_two_chapters
+    ):
+        book, first, _ = book_with_two_chapters
         payload = self._payload(action, first.pk, title="Sneaky")
-        r = client.post_action(
+        r = next_client.post_action(
             action, payload, origin=f"/admin/library/book/{book.pk}/change/"
         )
         assert r.status_code == 302
@@ -611,11 +771,13 @@ class TestLiveInlines:
         assert not Chapter.objects.filter(title="Sneaky").exists()
 
     @pytest.mark.parametrize("action", _INLINE_ACTIONS)
-    def test_non_staff_submit_is_forbidden(self, client, django_user_model, action):
-        client.force_login(django_user_model.objects.create_user("intruder"))
-        book, first, _ = self._book()
+    def test_non_staff_submit_is_forbidden(
+        self, next_client, django_user_model, action, book_with_two_chapters
+    ):
+        next_client.force_login(django_user_model.objects.create_user("intruder"))
+        book, first, _ = book_with_two_chapters
         payload = self._payload(action, first.pk, title="Sneaky")
-        r = client.post_action(
+        r = next_client.post_action(
             action, payload, origin=f"/admin/library/book/{book.pk}/change/"
         )
         assert r.status_code == 403
@@ -627,12 +789,10 @@ class TestLiveInlines:
 class TestInlinePartialPatches:
     """Inline saves author replace, inner, and server-opened layer patches."""
 
-    def _book(self):
-        book, (chapter,) = _book_with_chapters()
-        return book, chapter
-
-    def test_partial_inline_change_replaces_row_and_inners_count(self, admin_client):
-        book, chapter = self._book()
+    def test_partial_inline_change_replaces_row_and_inners_count(
+        self, admin_client, book_with_one_chapter
+    ):
+        book, chapter = book_with_one_chapter
         response = admin_client.post_action(
             "admin:inline_change",
             {
@@ -659,8 +819,10 @@ class TestInlinePartialPatches:
         assert chapter.title == "Introduction"
         assert chapter.word_count == 120
 
-    def test_partial_inline_add_opens_layer_and_inners_count(self, admin_client):
-        book, _chapter = self._book()
+    def test_partial_inline_add_opens_layer_and_inners_count(
+        self, admin_client, book_with_one_chapter
+    ):
+        book, _chapter = book_with_one_chapter
         response = admin_client.post_action(
             "admin:inline_add",
             {
@@ -688,12 +850,10 @@ class TestInlinePartialPatches:
 class TestLayerDismiss:
     """The chapter editor layer offers a server-side discard dismissal."""
 
-    def _chapter(self):
-        _book, (chapter,) = _book_with_chapters()
-        return chapter
-
-    def test_layer_zone_render_offers_discard(self, admin_client):
-        chapter = self._chapter()
+    def test_layer_zone_render_offers_discard(
+        self, admin_client, book_with_one_chapter
+    ):
+        _book, chapter = book_with_one_chapter
         response = admin_client.get_zones(
             f"/admin/library/chapter/{chapter.pk}/change/", "record"
         )
@@ -703,8 +863,10 @@ class TestLayerDismiss:
         assert f'action="{discard_url}" method="post" data-next-action=' in html
         assert "Discard" in html
 
-    def test_discard_form_is_scoped_to_the_dialog_by_css(self, admin_client):
-        chapter = self._chapter()
+    def test_discard_form_is_scoped_to_the_dialog_by_css(
+        self, admin_client, book_with_one_chapter
+    ):
+        _book, chapter = book_with_one_chapter
         response = admin_client.get(f"/admin/library/chapter/{chapter.pk}/change/")
         assert response.status_code == 200
         body = response.content.decode()
@@ -727,8 +889,8 @@ class TestLayerDismiss:
 
 
 class TestHistoryView:
-    def test_history_renders_after_change(self, admin_client):
-        tag = Tag.objects.create(name="Old", slug="old")
+    def test_history_renders_after_change(self, admin_client, make_tag):
+        tag = make_tag("Old")
         admin_client.post_action(
             "admin:change",
             {"name": "New", "slug": "new"},
@@ -754,8 +916,7 @@ class TestInlineValidationFailure:
     the bound form, so the user keeps their typed data and sees the row error.
     """
 
-    def test_inline_invalid_rerenders_with_errors(self, admin_client):
-        author = Author.objects.create(full_name="A. Author")
+    def test_inline_invalid_rerenders_with_errors(self, admin_client, author):
         get = admin_client.get("/admin/library/book/add/")
         rendered = _extract_form_inputs(get.content.decode())
         payload = {
@@ -799,8 +960,8 @@ class TestSaveContinue:
         assert r["Location"] == "/admin/library/tag/add/"
         assert Tag.objects.filter(slug="comedy").exists()
 
-    def test_save_continue_on_change_keeps_pk(self, admin_client):
-        tag = Tag.objects.create(name="Old", slug="old")
+    def test_save_continue_on_change_keeps_pk(self, admin_client, make_tag):
+        tag = make_tag("Old")
         r = admin_client.post_action(
             "admin:change",
             {"name": "Renamed", "slug": "renamed", "_save_continue": "1"},
@@ -821,10 +982,9 @@ class TestCustomBulkAction:
         assert 'value="mark_as_published"' in body
         assert "Mark selected books as published" in body
 
-    def test_action_updates_status(self, admin_client):
-        author = Author.objects.create(full_name="A")
-        b1 = Book.objects.create(title="One", author=author, status=Book.DRAFT)
-        b2 = Book.objects.create(title="Two", author=author, status=Book.DRAFT)
+    def test_action_updates_status(self, admin_client, author, make_book):
+        b1 = make_book("One", author=author, status=Book.DRAFT)
+        b2 = make_book("Two", author=author, status=Book.DRAFT)
         r = admin_client.post_action(
             "admin:bulk_action",
             {
@@ -858,9 +1018,7 @@ class TestActivityLog:
         assert entry.object_repr == "Thriller"
         assert entry.user is not None
 
-    def test_bulk_action_records_entry_without_user(self, admin_client):
-        author = Author.objects.create(full_name="A")
-        book = Book.objects.create(title="B", author=author)
+    def test_bulk_action_records_entry_without_user(self, admin_client, book):
         admin_client.post_action(
             "admin:bulk_action",
             {"action": "mark_as_published", "_selected_action": [str(book.pk)]},
@@ -898,8 +1056,8 @@ class TestFlashMessages:
         body = r.content.decode()
         assert "The tag Mystery was added successfully." in body
 
-    def test_change_flashes_success(self, admin_client):
-        tag = Tag.objects.create(name="Old", slug="old")
+    def test_change_flashes_success(self, admin_client, make_tag):
+        tag = make_tag("Old")
         r = admin_client.post_action(
             "admin:change",
             {"name": "New", "slug": "new"},
@@ -909,32 +1067,28 @@ class TestFlashMessages:
         body = r.content.decode()
         assert "The tag New was updated successfully." in body
 
-    def test_delete_flashes_success(self, admin_client):
-        tag = Tag.objects.create(name="Doomed", slug="doomed")
+    def test_delete_flashes_success(self, admin_client, make_tag):
+        tag = make_tag("Doomed")
         r = admin_client.post_action(
             "admin:delete", origin=f"/admin/library/tag/{tag.pk}/delete/", follow=True
         )
         body = r.content.decode()
         assert "The tag Doomed was deleted successfully." in body
 
-    def test_bulk_action_flashes_message_user(self, admin_client):
+    def test_bulk_action_flashes_message_user(self, admin_client, make_book):
         """Django's `ModelAdmin.message_user` writes via the messages framework."""
-        author = Author.objects.create(full_name="A")
-        Book.objects.create(title="X", author=author, status=Book.DRAFT)
+        book = make_book("X", status=Book.DRAFT)
         r = admin_client.post_action(
             "admin:bulk_action",
-            {
-                "action": "mark_as_published",
-                "_selected_action": [str(Book.objects.get(title="X").pk)],
-            },
+            {"action": "mark_as_published", "_selected_action": [str(book.pk)]},
             origin="/admin/library/book/",
             follow=True,
         )
         body = r.content.decode()
         assert "marked as published" in body.lower()
 
-    def test_login_success_flashes_welcome(self, client, admin_user):
-        r = client.post_action(
+    def test_login_success_flashes_welcome(self, next_client, admin_user):
+        r = next_client.post_action(
             "admin:login",
             {"username": "admin", "password": "admin-pass", "next": "/admin/"},
             follow=True,

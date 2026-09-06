@@ -23,7 +23,6 @@ The Notes project from the tutorial demonstrates the full layout.
      manage.py
      pyproject.toml
      pytest.ini
-     conftest.py
      config/
        __init__.py
        settings.py
@@ -61,7 +60,6 @@ The Notes project from the tutorial demonstrates the full layout.
        favicon.ico
      tests/
        __init__.py
-       conftest.py
        test_e2e.py
 
 Three things are special about this tree.
@@ -180,7 +178,8 @@ Tests
 -----
 
 Place tests under ``tests/`` at the project root.
-The root ``conftest.py`` holds pytest collection settings, while ``tests/conftest.py`` activates registry isolation through ``reset_registries`` (see :doc:`/content/topics/testing`).
+``pytest.ini`` holds the collection settings and loads ``next.testing.plugin``, which imports the page tree once per session and supplies the ``next_client`` fixture, so the project needs no ``conftest.py`` of its own (see :doc:`/content/topics/testing`).
+A suite with wiring beyond the plugin options adds a ``conftest.py`` for that wiring alone.
 
 A per application ``tests/`` directory works for projects with several applications.
 See :doc:`multi-project` for the layered layout.

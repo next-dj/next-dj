@@ -1,5 +1,5 @@
 import ReactDOM from "react-dom/client";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Column } from "./_pieces/column/component";
 
 function applyMoveLocally(columns, cardId, targetColumnId, targetPosition) {
@@ -30,10 +30,51 @@ function applyMoveLocally(columns, cardId, targetColumnId, targetPosition) {
   });
 }
 
+function appendCardLocally(columns, columnId, card) {
+  const targetId = Number(columnId);
+  return columns.map((col) =>
+    col.id === targetId
+      ? { ...col, cards: [...col.cards, { ...card, position: col.cards.length }] }
+      : col,
+  );
+}
+
+function dropCardLocally(columns, cardId) {
+  return columns.map((col) =>
+    col.cards.some((card) => card.id === cardId)
+      ? {
+          ...col,
+          cards: col.cards
+            .filter((card) => card.id !== cardId)
+            .map((card, index) => ({ ...card, position: index })),
+        }
+      : col,
+  );
+}
+
+function namePendingCard(columns, pendingId, cardId) {
+  return columns.map((col) => ({
+    ...col,
+    cards: col.cards.map((card) =>
+      card.id === pendingId ? { ...card, id: cardId, pending: false } : card,
+    ),
+  }));
+}
+
+// The create action answers with a redirect that carries the new row id, so the
+// followed response URL is where the client learns which card it just drew.
+function readCreatedId(responseUrl) {
+  if (!responseUrl) return null;
+  const raw = new URL(responseUrl, window.location.href).searchParams.get("created");
+  const id = Number(raw);
+  return raw && Number.isInteger(id) ? id : null;
+}
+
 export function Board() {
   const ctx = window.Next?.context?.board ?? {};
   const [columns, setColumns] = useState(ctx.columns ?? []);
   const [errorMsg, setErrorMsg] = useState(null);
+  const pendingSeq = useRef(0);
 
   async function moveCard(cardId, targetColumnId, targetPosition) {
     if (!ctx.move_card_url) return;
@@ -61,6 +102,44 @@ export function Board() {
     }
   }
 
+  async function createCard(columnId, title) {
+    const text = title.trim();
+    if (!ctx.create_card_url || !text) return;
+    const pendingId = `pending-${(pendingSeq.current += 1)}`;
+    setColumns((cols) =>
+      appendCardLocally(cols, columnId, {
+        id: pendingId,
+        title: text,
+        excerpt: "",
+        pending: true,
+      }),
+    );
+    setErrorMsg(null);
+    try {
+      const response = await fetch(ctx.create_card_url, {
+        method: "POST",
+        headers: { "X-CSRFToken": ctx.csrf ?? "" },
+        body: new URLSearchParams({
+          column_id: String(columnId),
+          title: text,
+          csrfmiddlewaretoken: ctx.csrf ?? "",
+        }),
+      });
+      const cardId = response.ok ? readCreatedId(response.url) : null;
+      // Dropping the one pending card rather than restoring a snapshot keeps
+      // a move that landed while the post was in flight.
+      if (cardId === null) {
+        setColumns((cols) => dropCardLocally(cols, pendingId));
+        setErrorMsg("Card rejected by server.");
+        return;
+      }
+      setColumns((cols) => namePendingCard(cols, pendingId, cardId));
+    } catch {
+      setColumns((cols) => dropCardLocally(cols, pendingId));
+      setErrorMsg("Network error. The card was rolled back.");
+    }
+  }
+
   return (
     <div className="space-y-3">
       {errorMsg && (
@@ -82,7 +161,7 @@ export function Board() {
       )}
       <div className="flex gap-4 overflow-x-auto pb-4">
         {columns.map((col) => (
-          <Column key={col.id} column={col} onDrop={moveCard} />
+          <Column key={col.id} column={col} onDrop={moveCard} onCreate={createCard} />
         ))}
       </div>
     </div>

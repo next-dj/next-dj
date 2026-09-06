@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
-{% component "page_head" title="next.dj — Feature flags admin" %}
+{% component "page_head" title="next.dj — Feature flags admin" icon="🚩" %}
 <body class="min-h-screen flex flex-col">
   {% #component "app_shell" brand="next.dj flags" brand_href="/" brand_icon="🚩" %}
     {% #slot "actions" %}

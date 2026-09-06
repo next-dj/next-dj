@@ -1,8 +1,7 @@
 """Cross-area helpers for paths, page trees, edit watching, and declaration sites.
 
-Everything here sits below the subpackages that share it, so a value
-object two of them build travels through this module rather than closing
-an import cycle between them.
+Everything here sits below the subpackages that share it, so a value object
+two of them build travels through this module rather than closing a cycle.
 """
 
 from __future__ import annotations
@@ -76,6 +75,18 @@ def store_bounded[K, V](cache: OrderedDict[K, V], key: K, value: V, size: int) -
     except KeyError:
         # The key is gone, so there is nothing left to reorder and the eviction
         # that took it already brought the cache back inside the bound.
+        return
+
+
+def touch_bounded[K](cache: OrderedDict[K, Any], key: K) -> None:
+    """Move `key` to the fresh end, tolerating a concurrent eviction of it.
+
+    The read side of `store_bounded`. No reader holds a lock, so a concurrent
+    clear or eviction of this very key costs a rebuild rather than a raised error.
+    """
+    try:
+        cache.move_to_end(key)
+    except KeyError:
         return
 
 
@@ -259,7 +270,7 @@ def _visit_page_dir(
 _CLASS_BODY_MEMBERS: tuple[str, ...] = ("__call__", "__init__")
 
 
-def _code_filename(func: object) -> str | None:
+def code_filename(func: object) -> str | None:
     """Return the source file behind ``func.__code__``, or ``None`` when it has none."""
     target = func
     if callable(func):
@@ -284,7 +295,7 @@ def _class_filename(cls: type) -> str | None:
         return inspect.getfile(cls)
     except (OSError, TypeError):
         for name in _CLASS_BODY_MEMBERS:
-            filename = _code_filename(cls.__dict__.get(name))
+            filename = code_filename(cls.__dict__.get(name))
             if filename is not None:
                 return filename
     return None
@@ -303,7 +314,7 @@ def defining_file(obj: object) -> Path:
     if inspect.isclass(obj):
         filename = _class_filename(obj)
     elif callable(obj):
-        filename = _code_filename(obj) or _code_filename(type(obj).__call__)
+        filename = code_filename(obj) or code_filename(type(obj).__call__)
     else:
         filename = None
     if filename is not None:

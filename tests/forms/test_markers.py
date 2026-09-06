@@ -7,6 +7,13 @@ from next.forms import Form
 from next.forms.markers import CleanedDataProvider, DForm, FormProvider
 
 
+class _RowForm(Form):
+    name = django_forms.CharField()
+
+
+_RowFormset = django_forms.formset_factory(_RowForm, extra=1)
+
+
 class TestDFormAndFormProvider:
     """DForm marker and FormProvider DI provider."""
 
@@ -118,6 +125,28 @@ class TestDFormAndFormProvider:
             annotation=DForm[FormB],
         )
         assert provider.can_handle(param, context) is False
+
+    def test_form_provider_handles_formset_class_annotation(self) -> None:
+        """A bound formset fills a parameter annotated with its own class."""
+        provider = FormProvider()
+        formset = _RowFormset()
+        context = MagicMock()
+        context.form = formset
+
+        param = inspect.Parameter(
+            "rows", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=_RowFormset
+        )
+        assert provider.static_can_handle(param) is None
+        assert provider.can_handle(param, context) is True
+        assert provider.resolve(param, context) is formset
+
+    def test_form_provider_rules_out_a_class_no_form_inhabits(self) -> None:
+        """A plain class that is neither a form nor a formset leaves the plan."""
+        provider = FormProvider()
+        param = inspect.Parameter(
+            "service", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=int
+        )
+        assert provider.static_can_handle(param) is False
 
 
 class TestCleanedDataProvider:

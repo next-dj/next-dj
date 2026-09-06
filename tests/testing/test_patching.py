@@ -1,11 +1,8 @@
-import inspect
-
 import pytest
 from django.conf import settings as django_settings
 
 from next.components.manager import components_manager
-from next.deps.providers import ParameterProvider
-from next.deps.resolver import resolver
+from next.deps import Depends, UnknownDependencyError, resolver
 from next.forms import ActionRegistration, FormActionNotFoundError
 from next.forms.manager import form_action_manager
 from next.static.collector import StaticCollector
@@ -19,6 +16,7 @@ from next.testing.patching import (
     override_provider,
     patch_static_collector,
 )
+from tests.support import DeferringProvider, bound_dependency
 
 
 _BOOM = RuntimeError("boom")
@@ -61,8 +59,7 @@ class TestOverrideDependency:
         assert resolver.get_dependency("x_value") is None
 
     def test_preserves_existing_binding(self) -> None:
-        resolver.register_dependency("y_value", lambda: "orig")
-        try:
+        with bound_dependency("y_value", lambda: "orig"):
             with override_dependency("y_value", "temp"):
                 inside = resolver.get_dependency("y_value")
                 assert inside is not None
@@ -70,8 +67,6 @@ class TestOverrideDependency:
             after = resolver.get_dependency("y_value")
             assert after is not None
             assert after() == "orig"
-        finally:
-            resolver.unregister_dependency("y_value")
 
     def test_restores_on_exception(self) -> None:
         resolver.unregister_dependency("z")
@@ -79,13 +74,16 @@ class TestOverrideDependency:
             raise _BOOM
         assert resolver.get_dependency("z") is None
 
+    def test_resolves_inside_the_block_and_raises_outside(self) -> None:
+        resolver.unregister_dependency("w_value")
 
-class _StubProvider(ParameterProvider):
-    def can_handle(self, param: inspect.Parameter, context: object) -> bool:
-        return param.name == "flag"
+        def view(w_value: int = Depends("w_value")) -> int:
+            return w_value
 
-    def resolve(self, param: inspect.Parameter, context: object) -> object:
-        return "STUB"
+        with override_dependency("w_value", 7):
+            assert resolver.resolve_dependencies(view) == {"w_value": 7}
+        with pytest.raises(UnknownDependencyError):
+            resolver.resolve_dependencies(view)
 
 
 def _takes_flag(flag: str = "") -> None:
@@ -96,16 +94,23 @@ class TestOverrideProvider:
     """`override_provider` prepends a provider for the block."""
 
     def test_wins_over_default(self) -> None:
-        stub = _StubProvider()
+        stub = DeferringProvider()
         with override_provider(stub):
             assert resolver.resolve_dependencies(_takes_flag) == {"flag": "STUB"}
         assert resolver.resolve_dependencies(_takes_flag) == {"flag": ""}
 
     def test_restores_on_exception(self) -> None:
-        stub = _StubProvider()
+        stub = DeferringProvider()
         with pytest.raises(RuntimeError), override_provider(stub):
             raise _BOOM
         assert resolver.resolve_dependencies(_takes_flag) == {"flag": ""}
+
+    def test_bumps_the_providers_version_on_enter_and_exit(self) -> None:
+        resolver._sync_providers()
+        version = resolver._providers_version
+        with override_provider(DeferringProvider()):
+            assert resolver._providers_version == version + 1
+        assert resolver._providers_version == version + 2
 
 
 class TestOverrideFormAction:

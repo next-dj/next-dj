@@ -11,6 +11,9 @@ from django.contrib.sessions.backends.db import SessionStore
 from django.http import HttpRequest, QueryDict
 
 
+pytestmark = pytest.mark.django_db
+
+
 EXAMPLE_ROOT = Path(__file__).resolve().parent.parent
 VIEWS_ROOT = EXAMPLE_ROOT / "access" / "views"
 
@@ -60,6 +63,49 @@ def _wizard(step: str, stored: dict[str, dict[str, object]] | None = None):
     return wizard
 
 
+@pytest.fixture()
+def make_audit_entry():
+    def _make(**fields) -> AuditEntry:
+        return AuditEntry(
+            **{
+                "action_name": "x",
+                "kind": AuditEntry.KIND_DISPATCHED,
+                "source": AuditEntry.SOURCE_BACKEND,
+                **fields,
+            }
+        )
+
+    return _make
+
+
+@pytest.fixture()
+def create_audit_entry(make_audit_entry):
+    def _create(**fields) -> AuditEntry:
+        entry = make_audit_entry(**fields)
+        entry.save()
+        return entry
+
+    return _create
+
+
+@pytest.fixture()
+def create_access_request():
+    def _create(**fields) -> AccessRequest:
+        return AccessRequest.objects.create(
+            **{
+                "full_name": "Grace Hopper",
+                "email": "grace@example.com",
+                "team": "Compilers",
+                "project_slug": "compilers",
+                "reason": "docs",
+                "expires_in_days": 3,
+                **fields,
+            }
+        )
+
+    return _create
+
+
 class TestSafeFormPayload:
     """`_safe_form_payload` keeps real fields and drops framework-internal keys."""
 
@@ -88,25 +134,27 @@ class TestStepFromOrigin:
         request.POST = QueryDict(query)
         return request
 
-    def test_resolves_step_kwarg_from_origin_path(self) -> None:
-        assert _step_from_origin(self._request("/request/scope/")) == "scope"
-
-    def test_ignores_query_string_on_the_origin(self) -> None:
-        assert _step_from_origin(self._request("/request/identity/?just=1")) == (
-            "identity"
-        )
-
-    def test_missing_origin_yields_empty_step(self) -> None:
-        assert _step_from_origin(self._request(None)) == ""
-
-    def test_relative_origin_yields_empty_step(self) -> None:
-        assert _step_from_origin(self._request("request/identity/")) == ""
-
-    def test_unroutable_origin_yields_empty_step(self) -> None:
-        assert _step_from_origin(self._request("/no/such/page/")) == ""
-
-    def test_origin_without_step_kwarg_yields_empty_step(self) -> None:
-        assert _step_from_origin(self._request("/")) == ""
+    @pytest.mark.parametrize(
+        ("origin", "expected"),
+        [
+            ("/request/scope/", "scope"),
+            ("/request/identity/?just=1", "identity"),
+            (None, ""),
+            ("request/identity/", ""),
+            ("/no/such/page/", ""),
+            ("/", ""),
+        ],
+        ids=[
+            "step_kwarg_from_path",
+            "query_string_ignored",
+            "missing_origin",
+            "relative_origin",
+            "unroutable_origin",
+            "origin_without_step_kwarg",
+        ],
+    )
+    def test_step_from_origin(self, origin, expected) -> None:
+        assert _step_from_origin(self._request(origin)) == expected
 
 
 class TestModelStr:
@@ -128,12 +176,8 @@ class TestModelStr:
         assert "engine" in rendered
         assert "pending" in rendered
 
-    def test_audit_entry_str_carries_source_and_kind(self) -> None:
-        entry = AuditEntry(
-            action_name="access_request_wizard",
-            kind=AuditEntry.KIND_DISPATCHED,
-            source=AuditEntry.SOURCE_BACKEND,
-        )
+    def test_audit_entry_str_carries_source_and_kind(self, make_audit_entry) -> None:
+        entry = make_audit_entry(action_name="access_request_wizard")
         entry.created_at = datetime(2026, 4, 25, 12, 30, 0, tzinfo=UTC)
         rendered = str(entry)
         assert "backend/dispatched" in rendered
@@ -144,22 +188,17 @@ class TestModelStr:
 class TestWizardSteps:
     """The three wizard steps map onto disjoint slices of the model fields."""
 
-    def test_identity_step_owns_the_applicant_fields(self) -> None:
-        assert list(_step_page.IdentityStep.base_fields) == [
-            "full_name",
-            "email",
-            "team",
-        ]
-
-    def test_scope_step_owns_the_request_fields(self) -> None:
-        assert list(_step_page.ScopeStep.base_fields) == [
-            "project_slug",
-            "reason",
-            "expires_in_days",
-        ]
-
-    def test_approval_step_has_no_fields(self) -> None:
-        assert list(_step_page.ApprovalStep.base_fields) == []
+    @pytest.mark.parametrize(
+        ("step", "expected_fields"),
+        [
+            (_step_page.IdentityStep, ["full_name", "email", "team"]),
+            (_step_page.ScopeStep, ["project_slug", "reason", "expires_in_days"]),
+            (_step_page.ApprovalStep, []),
+        ],
+        ids=["identity", "scope", "approval"],
+    )
+    def test_step_owns_its_own_fields(self, step, expected_fields) -> None:
+        assert list(step.base_fields) == expected_fields
 
     def test_wizard_declares_three_ordered_steps(self) -> None:
         names = [name for name, _ in _step_page.AccessRequestWizard.Meta.steps]
@@ -170,26 +209,26 @@ class TestWizardPermissionHook:
     """`check_permissions` gates each step POST on the acknowledgement field."""
 
     @staticmethod
-    def _request(*, acknowledged: bool) -> HttpRequest:
+    def _request(*, acknowledged: bool, validation_probe: bool = False) -> HttpRequest:
         request = HttpRequest()
         request.method = "POST"
         query = "policy_acknowledged=on" if acknowledged else ""
         request.POST = QueryDict(query)
+        if validation_probe:
+            request.META["HTTP_X_NEXT_REQUEST"] = "1"
+            request.META["HTTP_X_NEXT_VALIDATE"] = "name"
         return request
 
-    def test_unacknowledged_request_is_denied(self) -> None:
-        request = self._request(acknowledged=False)
-        assert _step_page.AccessRequestWizard.check_permissions(request) is False
-
-    def test_acknowledged_request_is_allowed(self) -> None:
-        request = self._request(acknowledged=True)
-        assert _step_page.AccessRequestWizard.check_permissions(request) is True
-
-    def test_validation_probe_is_allowed_without_acknowledgement(self) -> None:
-        request = self._request(acknowledged=False)
-        request.META["HTTP_X_NEXT_REQUEST"] = "1"
-        request.META["HTTP_X_NEXT_VALIDATE"] = "name"
-        assert _step_page.AccessRequestWizard.check_permissions(request) is True
+    @pytest.mark.parametrize(
+        ("acknowledged", "validation_probe", "expected"),
+        [(False, False, False), (True, False, True), (False, True, True)],
+        ids=["unacknowledged", "acknowledged", "validation_probe"],
+    )
+    def test_check_permissions(self, acknowledged, validation_probe, expected) -> None:
+        request = self._request(
+            acknowledged=acknowledged, validation_probe=validation_probe
+        )
+        assert _step_page.AccessRequestWizard.check_permissions(request) is expected
 
 
 @pytest.mark.django_db()
@@ -206,8 +245,8 @@ class TestAccessDeniedReceiver:
         assert row.access_reason == "denied"
         assert row.action_name == "access_request_wizard"
 
-    def test_access_denied_str_carries_source_and_kind(self) -> None:
-        entry = AuditEntry(
+    def test_access_denied_str_carries_source_and_kind(self, make_audit_entry) -> None:
+        entry = make_audit_entry(
             action_name="access_request_wizard",
             kind=AuditEntry.KIND_ACCESS_DENIED,
             source=AuditEntry.SOURCE_SIGNAL,
@@ -241,36 +280,39 @@ class TestProgressBarSteps:
 class TestAuditRowHelpers:
     """`payload_keys` and `summary` derive admin row fields from `AuditEntry`."""
 
-    def test_payload_keys_returns_dict_keys_excluding_redirect(self) -> None:
-        entry = AuditEntry(
-            action_name="x",
-            kind=AuditEntry.KIND_REQUEST_STARTED,
-            source=AuditEntry.SOURCE_BACKEND,
-            payload={"redirect": "/", "team": "Computing", "email": "a@b"},
-        )
-        assert sorted(_audit_row.payload_keys(entry)) == ["email", "team"]
+    @pytest.mark.parametrize(
+        ("payload", "expected"),
+        [
+            ({"redirect": "/", "team": "Computing", "email": "a@b"}, ["email", "team"]),
+            (None, []),
+        ],
+        ids=["dict_payload_drops_redirect", "non_dict_payload"],
+    )
+    def test_payload_keys(self, make_audit_entry, payload, expected) -> None:
+        entry = make_audit_entry(kind=AuditEntry.KIND_REQUEST_STARTED, payload=payload)
+        assert sorted(_audit_row.payload_keys(entry)) == expected
 
-    def test_payload_keys_returns_empty_for_non_dict_payload(self) -> None:
-        entry = AuditEntry(
-            action_name="x",
-            kind=AuditEntry.KIND_DISPATCHED,
-            source=AuditEntry.SOURCE_BACKEND,
-        )
-        entry.payload = None  # type: ignore[assignment]
-        assert _audit_row.payload_keys(entry) == []
+    @pytest.mark.parametrize(
+        ("fields", "expected"),
+        [
+            ({"payload": {}}, "—"),
+            (
+                {
+                    "kind": AuditEntry.KIND_ACCESS_DENIED,
+                    "source": AuditEntry.SOURCE_SIGNAL,
+                    "access_layer": "view",
+                    "access_reason": "denied",
+                },
+                "view/denied",
+            ),
+        ],
+        ids=["no_metrics", "access_denial_layer_and_reason"],
+    )
+    def test_summary(self, make_audit_entry, fields, expected) -> None:
+        assert _audit_row.summary(make_audit_entry(**fields)) == expected
 
-    def test_summary_falls_back_to_dash_when_no_metrics(self) -> None:
-        entry = AuditEntry(
-            action_name="x",
-            kind=AuditEntry.KIND_DISPATCHED,
-            source=AuditEntry.SOURCE_BACKEND,
-            payload={},
-        )
-        assert _audit_row.summary(entry) == "—"
-
-    def test_summary_pluralisation_matches_error_count(self) -> None:
-        entry = AuditEntry(
-            action_name="x",
+    def test_summary_pluralisation_matches_error_count(self, make_audit_entry) -> None:
+        entry = make_audit_entry(
             kind=AuditEntry.KIND_VALIDATION_FAILED,
             source=AuditEntry.SOURCE_SIGNAL,
             error_count=1,
@@ -281,21 +323,9 @@ class TestAuditRowHelpers:
         assert "errors" not in rendered
         assert "email" in rendered
 
-    def test_summary_surfaces_access_denial_layer_and_reason(self) -> None:
-        entry = AuditEntry(
-            action_name="x",
-            kind=AuditEntry.KIND_ACCESS_DENIED,
-            source=AuditEntry.SOURCE_SIGNAL,
-            access_layer="view",
-            access_reason="denied",
-        )
-        assert _audit_row.summary(entry) == "view/denied"
-
-    def test_kind_class_marks_access_denied_as_rose(self) -> None:
-        entry = AuditEntry(
-            action_name="x",
-            kind=AuditEntry.KIND_ACCESS_DENIED,
-            source=AuditEntry.SOURCE_SIGNAL,
+    def test_kind_class_marks_access_denied_as_rose(self, make_audit_entry) -> None:
+        entry = make_audit_entry(
+            kind=AuditEntry.KIND_ACCESS_DENIED, source=AuditEntry.SOURCE_SIGNAL
         )
         assert _audit_row.kind_class(entry) == "bg-rose-100 text-rose-800"
 
@@ -376,38 +406,28 @@ class TestStepSectionRenderPaths:
 class TestLandingPage:
     """The landing page exposes the most recent requests and audit rows."""
 
-    def test_landing_lists_recent_request_and_audit_summaries(self, client) -> None:
-        AccessRequest.objects.create(
-            full_name="Grace Hopper",
-            email="grace@example.com",
-            team="Compilers",
-            project_slug="compilers",
-            reason="docs",
-            expires_in_days=3,
-        )
-        AuditEntry.objects.create(
-            action_name="access_request_wizard",
-            kind=AuditEntry.KIND_DISPATCHED,
-            source=AuditEntry.SOURCE_BACKEND,
-        )
-        response = client.get("/")
+    def test_landing_lists_recent_request_and_audit_summaries(
+        self, next_client, create_access_request, create_audit_entry
+    ) -> None:
+        create_access_request()
+        create_audit_entry(action_name="access_request_wizard")
+        response = next_client.get("/")
         body = response.content.decode()
         assert response.status_code == 200
         assert "Grace Hopper" in body
         assert "compilers" in body
         assert "access_request_wizard" in body
 
-    def test_landing_lists_newest_requests_first(self, client) -> None:
+    def test_landing_lists_newest_requests_first(
+        self, next_client, create_access_request
+    ) -> None:
         for index in range(6):
-            AccessRequest.objects.create(
+            create_access_request(
                 full_name=f"Requester {index}",
                 email=f"person{index}@example.com",
-                team="Compilers",
                 project_slug=f"proj-{index}",
-                reason="docs",
-                expires_in_days=3,
             )
-        body = client.get("/").content.decode()
+        body = next_client.get("/").content.decode()
         assert "Requester 5" in body
         assert "Requester 0" not in body
 
@@ -416,31 +436,21 @@ class TestLandingPage:
 class TestLazyAuditEntries:
     """The `entries` provider runs its query only for the lazy zone request."""
 
-    def test_full_render_request_returns_none_without_querying(self) -> None:
-        AuditEntry.objects.create(
-            action_name="x",
-            kind=AuditEntry.KIND_DISPATCHED,
-            source=AuditEntry.SOURCE_BACKEND,
-        )
+    def test_full_render_request_returns_none_without_querying(
+        self, create_audit_entry
+    ) -> None:
+        create_audit_entry()
         assert _admin_audit.entries(_audit_request(zone=None)) is None
 
-    def test_zone_request_loads_the_rows(self) -> None:
-        AuditEntry.objects.create(
-            action_name="x",
-            kind=AuditEntry.KIND_DISPATCHED,
-            source=AuditEntry.SOURCE_BACKEND,
-        )
+    def test_zone_request_loads_the_rows(self, create_audit_entry) -> None:
+        create_audit_entry()
         rows = _admin_audit.entries(_audit_request(zone="audit-table"))
         assert rows is not None
         assert len(rows) == 1
 
-    def test_zone_request_applies_the_kind_filter(self) -> None:
-        AuditEntry.objects.create(
-            action_name="x",
-            kind=AuditEntry.KIND_DISPATCHED,
-            source=AuditEntry.SOURCE_BACKEND,
-        )
-        AuditEntry.objects.create(
+    def test_zone_request_applies_the_kind_filter(self, create_audit_entry) -> None:
+        create_audit_entry()
+        create_audit_entry(
             action_name="y",
             kind=AuditEntry.KIND_VALIDATION_FAILED,
             source=AuditEntry.SOURCE_SIGNAL,

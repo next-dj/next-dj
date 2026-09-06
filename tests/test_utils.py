@@ -18,6 +18,7 @@ from next.utils import (
     stat_mtime_ns,
     store_bounded,
     template_edits_watched,
+    touch_bounded,
 )
 from tests.support import attribution, unwrapped_decorator, wraps_decorator
 
@@ -73,6 +74,22 @@ class TestStoreBounded:
         store_bounded(cache, "first", 10, 1)
         assert cache["first"] == 10
         assert len(cache) == 2
+
+
+class TestTouchBounded:
+    """Tests for ``touch_bounded``."""
+
+    def test_a_held_key_moves_to_the_fresh_end(self) -> None:
+        """The read side of the bound keeps a served entry from being evicted."""
+        cache: OrderedDict[str, int] = OrderedDict(first=1, second=2)
+        touch_bounded(cache, "first")
+        assert list(cache) == ["second", "first"]
+
+    def test_a_reorder_tolerates_an_entry_another_thread_took(self) -> None:
+        """A key a concurrent eviction took costs a rebuild rather than an error."""
+        cache: OrderedDict[str, int] = OrderedDict()
+        touch_bounded(cache, "gone")
+        assert not cache
 
 
 class TestStatMtimeNs:

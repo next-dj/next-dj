@@ -4,9 +4,14 @@ import inspect
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from next.urls import DUrl
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 _UUID_TEXT = "12345678-1234-5678-1234-567812345678"
@@ -119,6 +124,20 @@ URL_BY_ANNOTATION_RESOLVE_CASES: tuple[UrlByAnnotationResolveCase, ...] = (
         "coerce_uuid_from_text", "pk", DUrl[UUID], {"pk": _UUID_TEXT}, _UUID_VALUE
     ),
 )
+
+
+@dataclass(frozen=True, slots=True)
+class PlanCase:
+    """One callable resolved in one context, pinned to the literal it must yield.
+
+    `kwargs` is the loose mapping `resolve_dependencies` takes, and `expected`
+    the mapping a compile and a replay of the plan both have to produce.
+    """
+
+    id: str
+    func: Callable[..., object]
+    kwargs: dict[str, object]
+    expected: dict[str, object]
 
 
 # Sentinels the matrix reads specially: RAISE makes the hook raise

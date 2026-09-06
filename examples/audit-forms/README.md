@@ -2,7 +2,7 @@
 
 A three-step access-request workflow whose every dispatch and validation failure is recorded by **two parallel audit channels**: a custom `FormActionBackend` that writes synchronously inside `dispatch`, and signal receivers reacting to `action_dispatched`, `form_validation_failed`, and `form_access_denied`. The admin page interleaves rows from both channels so you can compare them side by side.
 
-The example focuses on the form-action subsystem of next-dj: a custom backend wired through `NEXT_FRAMEWORK["FORM_ACTION_BACKENDS"]`, a declarative `FormWizard` that routes all three steps from one class, three composite components (`progress_bar` and `step_section` inside the form, `audit_row` shared between the admin and per-request audit pages), session-backed step state with a `request_id` correlation column on `AuditEntry`, and full coverage of the `next.testing` `SignalRecorder` API.
+The example focuses on the form-action subsystem of next-dj: a custom backend wired through `NEXT_FRAMEWORK["FORM_ACTION_BACKENDS"]`, a declarative `FormWizard` that routes all three steps from one class, three composite components (`progress_bar` and `step_section` inside the form, `audit_row` shared between the admin and per-request audit pages), step drafts held in a cache alias of their own through `FORM_WIZARD_BACKEND`, a `request_id` correlation column on `AuditEntry`, and full coverage of the `next.testing` `SignalRecorder` API.
 
 ## What you will see
 
@@ -34,7 +34,7 @@ uv run python manage.py runserver     # http://127.0.0.1:8000/
 uv run pytest
 ```
 
-Tailwind loads via the Play CDN in [`portal/layout.djx`](portal/layout.djx). No Node, no build step. The wizard threads step data across requests through the configured `FORM_WIZARD_BACKEND`, which defaults to the session-backed `SessionFormWizardBackend`, so keep `SessionMiddleware` in `MIDDLEWARE` (it is by default in [`config/settings.py`](config/settings.py)).
+Tailwind loads via the Play CDN in [`portal/layout.djx`](portal/layout.djx). No Node, no build step. The wizard threads step data across requests through `FORM_WIZARD_BACKEND`, configured in [`config/settings.py`](config/settings.py) as `CacheFormWizardBackend` over a dedicated cache alias (section 7). Keep `SessionMiddleware` in `MIDDLEWARE`: the draft bucket is keyed by session key, and `done` hands the new request id to the audit backend through the session.
 
 ## Walking the code
 
@@ -87,14 +87,9 @@ class AccessRequestWizard(next.forms.FormWizard):
             ("approval", ApprovalStep),
         ]
         url_param = "step"
-
-    def done(self, request: HttpRequest, cleaned_data):
-        access_request = AccessRequest.objects.create(**cleaned_data)
-        request.session["access_request_just_created"] = access_request.pk
-        return HttpResponseRedirect(f"/request/{access_request.pk}/audit/?just=1")
 ```
 
-The class declares itself as one action through `__init_subclass__`, so the auto-name `access_request_wizard` resolves with `resolve_action_url("access_request_wizard")`. A namespaced name does not — see `tests/test_e2e.py::TestNamespacedAction`. Adding a step is one edit to `Meta.steps`.
+The class declares itself as one action through `__init_subclass__`, so the auto-name `access_request_wizard` resolves with `resolve_action_url("access_request_wizard")`. A namespaced name does not — see `tests/test_e2e.py::TestNamespacedAction`. Adding a step is one edit to `Meta.steps`. The `done` hook that runs on the final step is shown in full in section 10.
 
 ### 3a. A dynamic permission gate on the wizard
 
@@ -103,12 +98,16 @@ The class declares itself as one action through `__init_subclass__`, so the auto
 class AccessRequestWizard(next.forms.FormWizard):
     @classmethod
     def check_permissions(cls, request):
+        if partial_intent(request).validate_fields:
+            return True
         return request.POST.get("policy_acknowledged") == "on"
 ```
 
 `check_permissions` is a DI-resolved classmethod the framework runs on **every step POST, before the step form binds**. It declares only what it reads — here the `request` and its POST data. Return `None` or `True` to allow, `False` or `raise PermissionDenied` to deny with a 403, or return an `HttpResponse` to short-circuit verbatim. A denied step writes no draft, so the wizard storage stays untouched.
 
 The gate is the retention-policy acknowledgement. The step template renders a checked `policy_acknowledged` checkbox inside the form (the `data-policy-notice` block), so a normal submission carries the field and passes, while a replayed or forged action URL that never rendered the form omits it and is denied. The acknowledgement field is a control field, not user data, so `_RESERVED_FORM_KEYS` in `access/backends.py` strips it from the captured payload. That denial is exactly the kind of event an audit example should capture.
+
+One kind of POST passes ahead of the gate. A blur-validation probe (`validate="blur"` on the `{% form %}` tag, section 10) asks only whether one named field is well formed and binds no step data, so the hook returns early when `partial_intent(request).validate_fields` is set. Denying it would break inline validation on the very first field, long before the user has scrolled to the acknowledgement.
 
 The framework fires `next.forms.signals.form_access_denied` **only** on a dynamic-hook denial, never on the static `ActionGuard` fast-path. The sender is `FormActionDispatch` and the kwargs are `action_name`, `uid`, `request`, `layer` (`"view"` for `check_permissions`, `"object"` for `has_object_permission`), and `reason` (`"denied"` when the hook returned `False`, `"raised"` on `PermissionDenied`, `"response"` on an `HttpResponse` short-circuit). The receiver in [`access/receivers.py`](access/receivers.py) records one signal-sourced `AuditEntry` per denial with `kind="access_denied"`, storing `layer` and `reason` in the dedicated `access_layer` / `access_reason` columns:
 
@@ -155,7 +154,19 @@ The correlation column on `AuditEntry.request` is **only** populated by the back
 
 ### 7. Wizard backend, not hidden form fields
 
-Each step posts only its visible fields plus the framework's hidden `_next_form_origin` (emitted by the `{% form %}` tag). The dispatcher resolves that origin URL against the URLconf to recover the typed `step` kwarg, and `_step_from_origin` in the audit backend does the same for the audit rows. The wizard saves the cleaned data through the configured `FORM_WIZARD_BACKEND` (the session-backed `SessionFormWizardBackend` by default), so on `GET` of step 2 you can see "Computing" already filled into the team summary — that is what `tests/test_e2e.py::TestSessionResume` asserts. Point `FORM_WIZARD_BACKEND` at `CacheFormWizardBackend` when drafts need their own TTL or a Redis-backed cache, or at a custom backend, without touching any view code.
+Each step posts only its visible fields plus the framework's hidden `_next_form_origin` (emitted by the `{% form %}` tag). The dispatcher resolves that origin URL against the URLconf to recover the typed `step` kwarg, and `_step_from_origin` in the audit backend does the same for the audit rows. The cleaned data goes to the configured `FORM_WIZARD_BACKEND`. The framework default is the session-backed `SessionFormWizardBackend`, and this example points the setting elsewhere:
+
+```python
+# config/settings.py
+"FORM_WIZARD_BACKEND": {
+    "BACKEND": "next.forms.CacheFormWizardBackend",
+    "OPTIONS": {"CACHE_ALIAS": "wizards", "TIMEOUT": 1800},
+},
+```
+
+Two options earn the swap for a flow that carries names, emails, and free-text reasons. `CACHE_ALIAS` sends drafts to `CACHES["wizards"]`, a store of their own rather than the application cache, so clearing one does not clear the other. `TIMEOUT` gives every draft a half-hour lifetime that a session cookie would not enforce on its own. Draft keys are `next_wizard:<session key>:<storage id>`, so `SessionMiddleware` still names the bucket even though nothing is stored in the session itself.
+
+The effect on the page is the same either way: on `GET` of step 2 the team summary already reads "Computing", which is what `tests/test_e2e.py::TestSessionResume` asserts. `TestCacheBackedDrafts` adds the storage half — the bucket lands in the `wizards` alias, stays out of `default`, and is emptied once `done` runs.
 
 ### 8. Admin filter by GET query, plus a lazy audit table
 
@@ -249,6 +260,8 @@ def done(self, request, cleaned_data):
 
 The session key threads the request id to the backend audit row, so the correlation column stays populated.
 
+Both entry points into the wizard carry the same opener attributes — the landing page's `Start a new request` button and the topbar's `Start request` link. A plain link to `/request/identity/` would run the wizard as its own page, and there the final step's `layer.close` has no modal to close, so the operator would stay on step three with the request already created. The standalone page stays the no-JS path, where the fallback redirect lands the same flow on the result.
+
 **With the runtime.** The link opens a native `<dialog>` and creates an empty `access-wizard` container before the request, then GETs the step page for that zone alone. Each step submits inside the modal: an invalid step morphs only the `access-wizard` zone and the modal stays open, a valid non-final step morphs the zone to the next step with no redirect, and the final step's `done` returns `layer.close` plus a toast. The runtime closes the modal and, because the opening link named `data-next-accepted`, re-GETs the `request-list` zone of the landing page with its own cookies, so the list authorizes and renders in its own view before morphing under the now-closed modal.
 
 **Without the runtime.** Every attribute degrades to a plain link or form. The link navigates to the full `/request/identity/` page, each step posts and `302`-redirects to the next step's page, and the final step's `done` falls back to a `303` redirect to `/request/<id>/audit/?just=1` — the same result page the workflow always landed on. The `data-next-*` attributes are inert without a runtime, so the no-JS path is byte-for-byte the original flow with one status code changed from `302` to `303`. The `tests/test_e2e.py` suite asserts both paths: `TestModalWizardFlagship` walks the partial envelopes, the no-runtime regression lives in `TestSuccessRedirect`.
@@ -274,4 +287,4 @@ The test suite asserts the server contract — the envelopes, the zone targets, 
 - [`next/forms/dispatch/`](../../next/forms/dispatch/) — where `action_dispatched`, `form_validation_failed`, `wizard_step_submitted`, `wizard_completed`, and `form_access_denied` are sent, and where the `check_permissions` / `has_object_permission` hooks run.
 - [`next/forms/checks.py`](../../next/forms/checks.py) — `next.E041` (duplicate handlers), `next.E044` (bad backend config), `next.E045` (wrong backend type).
 - [`next/testing/signals.py`](../../next/testing/signals.py) — `SignalRecorder` and `capture_signals` helpers used in the tests.
-- [`docs/content/topics/testing.rst`](../../docs/content/topics/testing.rst) — canonical conftest scaffold mirrored in this example.
+- [`next/testing/plugin.py`](../../next/testing/plugin.py) — the pytest plugin behind the `next_pages`, `next_clear_cache`, and `next_client` entries this example's `pytest.ini` uses.

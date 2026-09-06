@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
-{% component "page_head" title="next.dj — Live polls" %}
+{% component "page_head" title="next.dj — Live polls" icon="🗳️" %}
 <body class="min-h-screen flex flex-col">
   {% #component "app_shell" brand="🗳️ next.dj Live polls" brand_href="/polls/" %}
     {% #slot "actions" %}

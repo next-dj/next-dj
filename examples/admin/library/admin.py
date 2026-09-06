@@ -34,6 +34,7 @@ class BookAdmin(admin.ModelAdmin):
     search_fields = ("title", "summary", "author__full_name")
     autocomplete_fields = ("author",)
     filter_horizontal = ("tags",)
+    list_per_page = 12
     inlines: ClassVar = [ChapterInline]
     date_hierarchy = "published_at"
     actions: ClassVar = ["mark_as_published"]

@@ -109,6 +109,8 @@ DQuery
 Type annotation that injects a query string value.
 Supports ``DQuery[str]``, ``DQuery[int]``, ``DQuery[bool]``, ``DQuery[float]``, ``DQuery[UUID]``, ``DQuery[Decimal]``, ``DQuery[date]``, and ``DQuery[datetime]``.
 ``DQuery[list[T]]`` accepts any of those scalars as the element type.
+The list form reads three wire formats, in order: the plain repeated key ``?brand=a&brand=b``, the bracket suffix ``?brand[]=a&brand[]=b`` that axios and other front-end clients emit, and the comma-delimited ``?brand=a,b`` that ``qs.stringify`` produces with the comma array format.
+A parameter whose key is absent from all three receives its default, or ``None`` where no default is given.
 
 DForm
 ~~~~~
@@ -117,6 +119,7 @@ DForm
    :no-index:
 
 Type annotation that injects a form instance during action dispatch.
+``DForm[MyForm]`` names the class directly and ``DForm["MyForm"]`` names it as a string, which keeps a page free of an import it needs for nothing else.
 
 The nine built-in providers are listed with their priorities in :doc:`/content/topics/dependency-injection`.
 

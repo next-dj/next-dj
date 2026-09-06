@@ -34,7 +34,7 @@
           {% component "button" type="submit" text="Save toggles" variant="default" %}
         {% endform %}
       {% else %}
-        {% component "empty_state" title="No flags defined yet" description="Create a few via `manage.py shell` or the Django admin." icon="📭" %}
+        {% component "empty_state" title="No flags defined yet" description="The demo flags arrive with migrate. Add more from manage.py shell." icon="📭" %}
       {% endif %}
     {% /slot %}
   {% /component %}

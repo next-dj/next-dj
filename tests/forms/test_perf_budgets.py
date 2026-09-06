@@ -15,7 +15,12 @@ from next.forms.wizard import (
     wizard_backend_manager,
 )
 from tests.forms.actions import SimpleForm
-from tests.support import CountingWizardBackend, GuardedTenantForm, build_post_request
+from tests.support import (
+    CountingWizardBackend,
+    GuardedTenantForm,
+    bound_dependency,
+    build_post_request,
+)
 
 
 class BudgetIdentityStep(Form):
@@ -260,13 +265,10 @@ class TestPermissionHookResolveBudgets:
             GuardedTenantForm.resolutions.append("tenant")
             return "acme"
 
-        resolver.register_dependency("tenant", tenant_provider)
-        try:
+        with bound_dependency("tenant", tenant_provider):
             response, count = self._dispatch_counting(
                 GuardedTenantForm, mock_http_request, monkeypatch
             )
-        finally:
-            resolver._dependency_callables.pop("tenant", None)
         assert response.status_code == 302
         # Exact count today: 3, check_permissions plus get_initial plus on_valid.
         assert count == 3

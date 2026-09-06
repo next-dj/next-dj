@@ -3,9 +3,10 @@
 `RouterManager` owns the list of active `RouterBackend` instances and
 rebuilds it from `NEXT_FRAMEWORK["PAGE_BACKENDS"]` whenever framework
 settings change. `_LazyUrlPatterns` is the sequence wrapped by the
-module-level resolver built from `NEXT_FRAMEWORK["URL_RESOLVER"]` so the
-first resolve triggers router and form-action resolution without walking
-the page tree at import time.
+resolver built from `NEXT_FRAMEWORK["URL_RESOLVER"]`, which
+`_LazyResolverSlot` holds back until first read so the first resolve
+triggers router and form-action resolution without walking the page tree
+or reading settings at import time.
 """
 
 from __future__ import annotations
@@ -151,14 +152,14 @@ router_manager = RouterManager()
 
 
 def _on_settings_reloaded(**kwargs) -> None:
-    """Rebuild router backends and the URL resolver on settings reload.
+    """Rebuild router backends and drop the built URL resolver on settings reload.
 
-    The resolver is swapped in place so `urlpatterns` keeps its identity
-    for the outer include resolver, which iterates the list on every
-    resolve and picks up the replacement.
+    The slot keeps its identity so the outer include resolver, which
+    iterates it on every resolve, picks the replacement up on its next
+    read.
     """
     router_manager.reload()
-    urlpatterns[0] = _build_url_resolver()
+    urlpatterns.reset()
 
 
 settings_reloaded.connect(_on_settings_reloaded)
@@ -251,8 +252,56 @@ def _build_url_resolver() -> URLResolver:
     return cls(RoutePattern(""), _LazyUrlPatterns())
 
 
+class _LazyResolverSlot(Sequence["URLPattern | URLResolver"]):
+    """Hold the outer resolver in one slot and build it on first read.
+
+    Building at import time would read `NEXT_FRAMEWORK` before Django
+    settings are configured, which keeps `next.urls` and everything
+    importing it out of reach of a pytest plugin, loaded before
+    pytest-django exports `DJANGO_SETTINGS_MODULE` from the ini file.
+    """
+
+    def __init__(self) -> None:
+        """Empty slot until the first resolver build."""
+        self._slot: tuple[URLPattern | URLResolver, ...] = ()
+
+    def reset(self) -> None:
+        """Drop the built resolver so the next read rebuilds it from settings."""
+        self._slot = ()
+
+    def _built(self) -> tuple[URLPattern | URLResolver, ...]:
+        # Held as a ready one-tuple rather than rebuilt per read, because
+        # every URL resolve iterates this sequence once.
+        slot = self._slot
+        if not slot:
+            slot = self._slot = (_build_url_resolver(),)
+        return slot
+
+    @override
+    def __iter__(self) -> Iterator[URLPattern | URLResolver]:
+        return iter(self._built())
+
+    @override
+    def __len__(self) -> int:
+        return 1
+
+    @overload
+    def __getitem__(self, key: int, /) -> URLPattern | URLResolver: ...
+
+    @overload
+    def __getitem__(self, key: slice, /) -> list[URLPattern | URLResolver]: ...
+
+    @override
+    def __getitem__(
+        self, key: int | slice, /
+    ) -> URLPattern | URLResolver | list[URLPattern | URLResolver]:
+        if isinstance(key, slice):
+            return list(self._built()[key])
+        return self._built()[key]
+
+
 app_name = "next"
-urlpatterns = [_build_url_resolver()]
+urlpatterns = _LazyResolverSlot()
 
 
 __all__ = ["RouterManager", "app_name", "router_manager", "urlpatterns"]

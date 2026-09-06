@@ -8,6 +8,7 @@ from next.partial import Patches, is_partial_request
 WINDOW_CHOICES = (("1m", "Last minute"), ("5m", "Last 5 minutes"), ("1h", "Last hour"))
 DEFAULT_WINDOW = "5m"
 LIVE_TOTALS_ZONE = "live-totals"
+WINDOW_LABEL_ZONE = "stats-window"
 METRIC_PULSE_OP = "metric-pulse"
 
 
@@ -35,10 +36,11 @@ class WindowFilterForm(Form):
         """Re-aggregate the totals under the picked window and pulse the change.
 
         A partial apply from the live page morphs the `live-totals` zone
-        with the re-aggregated cards and emits the custom `metric-pulse`
-        verb so the co-located handler flashes the refreshed numbers.
-        Without the runtime the apply falls back to a redirect that carries
-        the window in the querystring.
+        with the re-aggregated cards and the `stats-window` label beside
+        it, so the heading never names a window the cards no longer show,
+        and emits the custom `metric-pulse` verb so the co-located handler
+        flashes the refreshed numbers. Without the runtime the apply falls
+        back to a redirect that carries the window in the querystring.
         """
         # Pick the literal out of WINDOW_CHOICES so the redirect target is
         # built from trusted constants, with request data used only to compare.
@@ -50,6 +52,7 @@ class WindowFilterForm(Form):
         return (
             Patches(request)
             .morph(zone=LIVE_TOTALS_ZONE)
+            .morph(zone=WINDOW_LABEL_ZONE)
             .op(METRIC_PULSE_OP, window=chosen, selector="[data-metric-pulse-target]")
             .response()
         )

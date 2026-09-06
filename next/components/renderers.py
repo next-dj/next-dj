@@ -423,8 +423,8 @@ class CompositeComponentRenderer:
         cache = DependencyCache()
         stack: list[str] = []
 
-        # Nothing here writes to the context, and the resolver copies what
-        # it injects, so this branch hands the mapping straight through.
+        # Nothing here writes to the context, and no provider writes to the
+        # mapping it reads, so this branch hands it straight through.
         resolved = resolver.resolve_with_template_context(
             render_func,
             request=request,

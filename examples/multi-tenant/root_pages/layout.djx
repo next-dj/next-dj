@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
-{% #component "page_head" title="next.dj — Multi-tenant notes" tailwind_plugins="typography" %}
+{% #component "page_head" title="next.dj — Multi-tenant notes" tailwind_plugins="typography" icon="🏢" %}
   {% #slot "extra" %}
     <style>
       .accent-bar { background: var(--tenant-accent, hsl(var(--primary))); }

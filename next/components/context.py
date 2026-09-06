@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, overload
 
 from next.checks.common import get_components_manager
-from next.deps import resolver
+from next.deps import RESERVED_KEYS
 from next.utils import (
     MisattributedContext,
     MisattributionLog,
@@ -96,10 +96,10 @@ class ComponentContextRegistry:
         """Register `func` under `key` for `component_path`, rejecting reserved keys."""
         path = component_path.resolve()
 
-        if isinstance(key, str) and key in resolver.EXPLICIT_RESOLVE_KEYS:
+        if isinstance(key, str) and key in RESERVED_KEYS:
             msg = (
                 f"Component context key {key!r} is reserved for dependency injection. "
-                f"Use another name. Reserved: {sorted(resolver.EXPLICIT_RESOLVE_KEYS)}."
+                f"Use another name. Reserved: {sorted(RESERVED_KEYS)}."
             )
             raise ValueError(msg)
 

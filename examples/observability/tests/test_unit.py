@@ -1,8 +1,11 @@
 import json
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from django.conf import settings
 from django.core.cache import cache
 from django.db import IntegrityError, transaction
 from obs import metrics
@@ -36,6 +39,7 @@ from obs.receivers import (
     on_static_backend_loaded,
     on_template_loaded,
     on_watch_specs_ready,
+    page_key,
 )
 from obs.serializers import PydanticJsContextSerializer, WrappedJsContextSerializer
 from obs.static_policies import InstrumentedDedup
@@ -157,7 +161,11 @@ class TestForm:
         form = WindowFilterForm(data={"window": value})
         assert form.is_valid()
 
-    @pytest.mark.parametrize("value", ["1y", "", "30s", "5"])
+    @pytest.mark.parametrize(
+        "value",
+        ["1y", "", "30s", "5"],
+        ids=("unknown_unit", "blank", "sub_minute_unit", "bare_number"),
+    )
     def test_unknown_windows_fail_validation(self, value: str) -> None:
         form = WindowFilterForm(data={"window": value})
         assert not form.is_valid()
@@ -246,70 +254,119 @@ class TestCountingComponentsBackend:
         assert metrics.read_kind("components.lookup") == {}
 
 
+@dataclass(frozen=True, slots=True)
+class ReceiverCase:
+    """One receiver call and the counter cell it is expected to bump."""
+
+    receiver: Callable[..., None]
+    kind: str
+    key: str
+    kwargs: dict[str, object] = field(default_factory=dict)
+    value: int = 1
+
+
+PAGE_PATH = "/tmp/page.py"
+WINDOW_ACTION = "obs:filter_window"
+
+RECEIVER_CASES = (
+    pytest.param(
+        ReceiverCase(on_settings_reloaded, "conf", "settings_reloaded"),
+        id="conf_settings_reloaded",
+    ),
+    pytest.param(
+        ReceiverCase(on_provider_registered, "deps", "provider_registered"),
+        id="deps_provider_registered",
+    ),
+    pytest.param(
+        ReceiverCase(
+            on_template_loaded, "pages.template", PAGE_PATH, {"file_path": PAGE_PATH}
+        ),
+        id="pages_template_loaded",
+    ),
+    pytest.param(
+        ReceiverCase(
+            on_context_registered, "pages.context", PAGE_PATH, {"file_path": PAGE_PATH}
+        ),
+        id="pages_context_registered",
+    ),
+    pytest.param(
+        ReceiverCase(
+            on_page_rendered,
+            "pages.rendered",
+            PAGE_PATH,
+            {"file_path": PAGE_PATH, "duration_ms": None},
+        ),
+        id="pages_rendered_without_duration",
+    ),
+    pytest.param(
+        ReceiverCase(
+            on_route_registered, "urls.route", "/stats/", {"url_path": "/stats/"}
+        ),
+        id="urls_route_registered",
+    ),
+    pytest.param(
+        ReceiverCase(on_router_reloaded, "urls", "router_reloaded"),
+        id="urls_router_reloaded",
+    ),
+    pytest.param(
+        ReceiverCase(on_component_backend_loaded, "components", "backend_loaded"),
+        id="components_backend_loaded",
+    ),
+    pytest.param(
+        ReceiverCase(
+            on_action_registered,
+            "forms.action_registered",
+            WINDOW_ACTION,
+            {"action_name": WINDOW_ACTION},
+        ),
+        id="forms_action_registered",
+    ),
+    pytest.param(
+        ReceiverCase(
+            on_action_dispatched,
+            "forms.action_dispatched",
+            WINDOW_ACTION,
+            {"action_name": WINDOW_ACTION},
+        ),
+        id="forms_action_dispatched",
+    ),
+    pytest.param(
+        ReceiverCase(
+            on_form_validation_failed,
+            "forms.validation_failed",
+            WINDOW_ACTION,
+            {"action_name": WINDOW_ACTION},
+        ),
+        id="forms_validation_failed",
+    ),
+    pytest.param(
+        ReceiverCase(on_asset_registered, "static", "asset_registered"),
+        id="static_asset_registered",
+    ),
+    pytest.param(
+        ReceiverCase(on_static_backend_loaded, "static", "backend_loaded"),
+        id="static_backend_loaded",
+    ),
+    pytest.param(
+        ReceiverCase(
+            on_html_injected, "static", "html_injected", {"injected_bytes": None}
+        ),
+        id="static_html_injected_without_size",
+    ),
+    pytest.param(
+        ReceiverCase(on_watch_specs_ready, "server", "watch_specs_ready"),
+        id="server_watch_specs_ready",
+    ),
+)
+
+
 class TestReceiverDirectInvocation:
     """Exhaustive direct-call coverage for every signal-group receiver."""
 
-    @pytest.mark.parametrize(
-        ("receiver", "kwargs", "expected_kind", "expected_key", "expected_value"),
-        [
-            (on_settings_reloaded, {}, "conf", "settings_reloaded", 1),
-            (on_provider_registered, {}, "deps", "provider_registered", 1),
-            (
-                on_template_loaded,
-                {"file_path": "/tmp/page.py"},
-                "pages.template",
-                "/tmp/page.py",
-                1,
-            ),
-            (
-                on_context_registered,
-                {"file_path": "/tmp/page.py"},
-                "pages.context",
-                "/tmp/page.py",
-                1,
-            ),
-            (
-                on_page_rendered,
-                {"file_path": "/tmp/page.py", "duration_ms": None},
-                "pages.rendered",
-                "/tmp/page.py",
-                1,
-            ),
-            (on_route_registered, {"url_path": "/stats/"}, "urls.route", "/stats/", 1),
-            (on_router_reloaded, {}, "urls", "router_reloaded", 1),
-            (on_component_backend_loaded, {}, "components", "backend_loaded", 1),
-            (
-                on_action_registered,
-                {"action_name": "obs:filter_window"},
-                "forms.action_registered",
-                "obs:filter_window",
-                1,
-            ),
-            (
-                on_action_dispatched,
-                {"action_name": "obs:filter_window"},
-                "forms.action_dispatched",
-                "obs:filter_window",
-                1,
-            ),
-            (
-                on_form_validation_failed,
-                {"action_name": "obs:filter_window"},
-                "forms.validation_failed",
-                "obs:filter_window",
-                1,
-            ),
-            (on_asset_registered, {}, "static", "asset_registered", 1),
-            (on_static_backend_loaded, {}, "static", "backend_loaded", 1),
-            (on_html_injected, {"injected_bytes": None}, "static", "html_injected", 1),
-            (on_watch_specs_ready, {}, "server", "watch_specs_ready", 1),
-        ],
-    )
-    def test_receiver_increments_expected_counter(
-        self, receiver, kwargs, expected_kind, expected_key, expected_value
-    ) -> None:
-        receiver(**kwargs)
-        assert metrics.read_kind(expected_kind).get(expected_key) == expected_value
+    @pytest.mark.parametrize("case", RECEIVER_CASES)
+    def test_receiver_increments_expected_counter(self, case: ReceiverCase) -> None:
+        case.receiver(**case.kwargs)
+        assert metrics.read_kind(case.kind).get(case.key) == case.value
 
     def test_page_rendered_with_duration_accumulates_milliseconds(self) -> None:
         on_page_rendered(file_path="/tmp/page.py", duration_ms=42)
@@ -404,3 +461,14 @@ class TestContexts:
     def test_live_stats_unknown_window_falls_back_to_default(self) -> None:
         result = live_stats(window="bogus")
         assert result["minutes"] == 5
+
+
+class TestPageKey:
+    """Page metric labels stay relative to the project, never absolute."""
+
+    def test_a_project_page_loses_the_absolute_prefix(self) -> None:
+        absolute = Path(settings.BASE_DIR) / "obs" / "dashboards" / "page.py"
+        assert page_key(absolute) == "obs/dashboards/page.py"
+
+    def test_a_path_outside_the_project_is_kept_whole(self) -> None:
+        assert page_key(Path("/somewhere/else/page.py")) == "/somewhere/else/page.py"

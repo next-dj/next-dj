@@ -31,6 +31,24 @@ class TestMakeResolutionContext:
         b = make_resolution_context()
         assert a.cache is not b.cache
 
+    def test_fresh_stack_per_call(self) -> None:
+        a = make_resolution_context()
+        b = make_resolution_context()
+        a.stack.append("theme")
+        assert b.stack == []
+
+    def test_prepared_cache_and_stack_are_kept(self) -> None:
+        cache = DependencyCache()
+        stack = ["theme"]
+        ctx = make_resolution_context(cache=cache, stack=stack)
+        assert ctx.cache is cache
+        assert ctx.stack is stack
+
+    def test_cleaned_data_defaults_to_none_and_forwards(self) -> None:
+        assert make_resolution_context().cleaned_data is None
+        ctx = make_resolution_context(cleaned_data={"name": "Ada"})
+        assert ctx.cleaned_data == {"name": "Ada"}
+
 
 class TestResolveCall:
     """`resolve_call` returns the kwargs that would be passed to `func`."""

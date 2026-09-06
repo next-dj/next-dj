@@ -5,7 +5,7 @@ import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 from unittest.mock import MagicMock
 
 from django.http import HttpRequest
@@ -43,6 +43,15 @@ def inspect_parameter(
         default=default,
         annotation=annotation,
     )
+
+
+def typing_optional(cls: type) -> object:
+    """Return the `typing.Optional` spelling of `cls | None`, as user code may write it.
+
+    Built through the subscript method, because the literal spelling is rewritten
+    to the PEP 604 form, which is a different object on Python 3.12 and 3.13.
+    """
+    return Optional.__getitem__(cls)
 
 
 def next_framework_settings_for_checks(*, backends: list) -> object:
@@ -105,12 +114,12 @@ def _ctx(
 
 
 def _minimal_resolver() -> DependencyResolver:
-    """Return a resolver with only HttpRequest and URL providers (for isolated tests)."""
+    """Return a resolver with the request and URL providers only."""
     return DependencyResolver(HttpRequestProvider(), UrlKwargsProvider())
 
 
 def _resolver_with_form() -> DependencyResolver:
-    """Return a resolver with request, URL and form providers."""
+    """Return a resolver with the request, URL, and form providers only."""
     return DependencyResolver(
         HttpRequestProvider(), UrlKwargsProvider(), FormProvider()
     )

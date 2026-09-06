@@ -6,19 +6,72 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
+from next.deps import provider_registry, resolver
 from next.static import default_kinds, default_placeholders
 from next.static.discovery import default_stems
 from tests.support.helpers import next_framework_settings_for_checks
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Callable, Generator
     from pathlib import Path
 
 
-# The highest `_version` each registry has carried, so a restore can roll the
-# state back without rolling the counter every asset plan compares back with it.
-_REGISTRY_VERSION_HIGH_WATER: dict[int, int] = {}
+def _advance_version(registry: object, *, reached: int = 0) -> None:
+    """Leave the version of `registry` past every generation it has carried.
+
+    Two registry states sharing a version would make a genuinely stale plan
+    read fresh, so a restore rolls the state back and the counter forward.
+    `reached` is the version a restore is about to rewind past.
+    """
+    registry._version = max(registry.version, reached) + 1
+
+
+@contextmanager
+def restored_provider_registry() -> Generator[None, None, None]:
+    """Put the provider registry and the singleton's provider list back afterwards.
+
+    A provider class declared inside a test registers itself for the whole
+    process, so the class list goes back to what the body found and the
+    singleton is left to resync from a version it has never seen. The
+    instantiated providers go back too, because the rebuild that follows
+    republishes them and a reader that never resolves would see the test's.
+    """
+    classes = list(provider_registry)
+    head = list(resolver._head)
+    tail = list(resolver._tail)
+    auto = list(resolver._auto)
+    suppressed = set(resolver._suppressed)
+    try:
+        yield
+    finally:
+        provider_registry.replace(classes)
+        resolver._head[:] = head
+        resolver._tail[:] = tail
+        resolver._auto[:] = auto
+        resolver._suppressed = suppressed
+        resolver._registry_seen = -1
+        resolver._rebuild()
+
+
+@contextmanager
+def bound_dependency(
+    name: str, provider: Callable[..., object]
+) -> Generator[None, None, None]:
+    """Bind `Depends(name)` on the singleton to `provider` itself for the block.
+
+    `override_dependency` wraps a value in a constant lambda, which hides the
+    callable a test counts calls on or hands parameters to.
+    """
+    previous = resolver.get_dependency(name)
+    resolver.register_dependency(name, provider)
+    try:
+        yield
+    finally:
+        if previous is None:
+            resolver.unregister_dependency(name)
+        else:
+            resolver.register_dependency(name, previous)
 
 
 @contextmanager
@@ -26,9 +79,8 @@ def restored_static_registries() -> Generator[None, None, None]:
     """Put the stem, kind, and slot registries back the way the body found them.
 
     All three are process globals whose generation every asset plan compares
-    against, so a test teaching the framework a new shape puts them back. The
-    state goes back but `_version` only moves forward, because two registry
-    states sharing a generation would make a genuinely stale plan read fresh.
+    against, so a test teaching the framework a new shape puts them back and
+    `_advance_version` keeps the counter moving forward.
     """
     registries = (default_stems, default_kinds, default_placeholders)
     saved = [copy.deepcopy(registry.__dict__) for registry in registries]
@@ -36,16 +88,10 @@ def restored_static_registries() -> Generator[None, None, None]:
         yield
     finally:
         for registry, state in zip(registries, saved, strict=True):
-            key = id(registry)
-            reached = max(
-                _REGISTRY_VERSION_HIGH_WATER.get(key, 0),
-                registry.version,
-                state["_version"],
-            )
+            reached = registry.version
             registry.__dict__.clear()
             registry.__dict__.update(state)
-            registry._version = reached + 1
-            _REGISTRY_VERSION_HIGH_WATER[key] = reached + 1
+            _advance_version(registry, reached=reached)
 
 
 @contextmanager

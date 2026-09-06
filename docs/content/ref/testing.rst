@@ -7,9 +7,18 @@ Module summary
 --------------
 
 ``next.testing`` exposes a test client, partial envelope decoding, signal recorder, registry isolation, action helpers, HTML utilities, rendering helpers, loaders, patching helpers, and dependency context builders.
+``next.testing.plugin`` sits apart from that surface as an opt-in pytest plugin and is the only module in the package that imports pytest.
 
 Public API
 ----------
+
+Pytest plugin
+~~~~~~~~~~~~~
+
+``next.testing.plugin`` registers the ``next_pages``, ``next_components``, and ``next_clear_cache`` ini options together with the ``next_client`` fixture, once a project adds ``-p next.testing.plugin`` to its pytest ``addopts``.
+
+.. automodule:: next.testing.plugin
+   :members:
 
 Client
 ~~~~~~
@@ -64,7 +73,7 @@ Loaders
 HTML utilities
 ~~~~~~~~~~~~~~
 
-``find_anchor``, ``assert_has_class``, and ``assert_missing_class`` inspect rendered HTML fragments.
+``find_anchor``, ``find_form``, ``assert_has_class``, and ``assert_missing_class`` inspect rendered HTML fragments, while ``form_action``, ``form_fields``, ``hidden_fields``, and ``init_payload`` pull submit targets, input values, and the ``Next._init`` bootstrap payload out of a rendered page.
 
 .. automodule:: next.testing.html
    :members:

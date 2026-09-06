@@ -5,7 +5,8 @@ Testing
 
 next.dj ships ``next.testing`` with a test client, registry isolation, signal capture, action helpers, and HTML utilities.
 This page covers the public surface of the module and the patterns for testing pages, components, forms, and signals end to end.
-No helper in ``next.testing`` imports pytest, so every one of them works under Django's ``TestCase``, stdlib ``unittest``, and pytest alike.
+Nothing re-exported from ``next.testing`` imports pytest, so every helper works under Django's ``TestCase``, stdlib ``unittest``, and pytest alike.
+Pytest lives alone in the opt-in ``next.testing.plugin`` module, which a project loads from its ini file when it wants the fixtures described below.
 
 .. contents::
    :local:
@@ -24,6 +25,12 @@ The table below maps each testing goal to the helper and its import path.
    * - Goal
      - Use
      - Import
+   * - Load pages and clear the cache from ``pytest.ini``
+     - ``next_pages``, ``next_components``, ``next_clear_cache``
+     - ``next.testing.plugin``
+   * - Take a ``NextClient`` as a pytest fixture
+     - ``next_client``
+     - ``next.testing.plugin``
    * - HTTP request to a page or action
      - ``NextClient``
      - ``next.testing`` or ``next.testing.client``
@@ -50,6 +57,9 @@ The table below maps each testing goal to the helper and its import path.
      - ``next.testing`` or ``next.testing.rendering``
    * - Assert on rendered HTML structure
      - ``find_anchor``, ``assert_has_class``, ``assert_missing_class``
+     - ``next.testing`` or ``next.testing.html``
+   * - Read a form's target, fields, and bootstrap payload
+     - ``find_form``, ``form_action``, ``form_fields``, ``hidden_fields``, ``init_payload``
      - ``next.testing`` or ``next.testing.html``
    * - Capture one or more signals explicitly
      - ``SignalRecorder`` or ``capture_signals``
@@ -88,7 +98,7 @@ The table below maps each testing goal to the helper and its import path.
      - ``reset_form_registration_state``
      - ``next.testing`` or ``next.testing.isolation``
 
-Every helper in the table is importable from the ``next.testing`` package or from its submodule.
+Every helper in the table is importable from the ``next.testing`` package or from its submodule, except the plugin options and fixtures, which pytest supplies once the plugin is loaded.
 See :doc:`/content/ref/testing` for generated signatures.
 
 Boot the suite
@@ -107,9 +117,11 @@ Pytest.
       DJANGO_SETTINGS_MODULE = config.settings
       python_files = test_*.py
 
+   Add ``-p next.testing.plugin`` to ``addopts`` on top of that to get the page loader, the cache isolation, and the ``next_client`` fixture, as `Pytest plugin`_ describes.
+
 Stdlib ``unittest``.
    Call ``django.setup()`` once before importing any ``next.testing`` helper, then run the suite with the standard runner.
-   The helpers carry no pytest fixtures, so a plain ``TestCase`` drives them through ``setUp`` and ``addCleanup``.
+   The helpers re-exported from ``next.testing`` carry no pytest fixtures, so a plain ``TestCase`` drives them through ``setUp`` and ``addCleanup``.
 
    .. code-block:: python
       :caption: tests/test_signals_unittest.py
@@ -133,14 +145,113 @@ Stdlib ``unittest``.
                   NextClient().get("/")
               assert len(recorder.events) == 1
 
+Pytest plugin
+-------------
+
+``next.testing.plugin`` is a pytest plugin that carries the wiring every next.dj suite used to copy into its own ``conftest.py``.
+A project turns it on by naming it in ``addopts``, which loads the plugin for that suite alone.
+
+.. code-block:: ini
+   :caption: pytest.ini
+
+   [pytest]
+   DJANGO_SETTINGS_MODULE = config.settings
+   pythonpath = .
+   addopts = -p next.testing.plugin
+   next_pages = myapp/routes
+   next_clear_cache = true
+
+That file is the recommended starting point for a new suite.
+It configures Django through pytest-django, imports the pages so the decorators run, and isolates the cache between tests, without a single line of ``conftest.py``.
+
+Ini options
+~~~~~~~~~~~
+
+The plugin registers three ini options.
+Each one is inert by default, so a suite that loads the plugin and sets none of them behaves exactly as it did before.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 15 60
+
+   * - Option
+     - Type
+     - Effect
+   * - ``next_pages``
+     - paths
+     - Imports every ``page.py`` beneath the listed directories once per session, before the first test runs.
+   * - ``next_components``
+     - bool
+     - Imports every registered ``component.py`` once per session, through ``eager_load_components()``.
+   * - ``next_clear_cache``
+     - bool
+     - Clears the default Django cache before each test.
+
+``next_pages`` takes the ``paths`` ini type, so each entry resolves relative to the ini file and a project lists several page roots one per line.
+
+.. code-block:: ini
+   :caption: pytest.ini with two page roots
+
+   [pytest]
+   DJANGO_SETTINGS_MODULE = config.settings
+   pythonpath = .
+   addopts = -p next.testing.plugin
+   next_pages =
+       root_pages
+       notes/workspaces
+   next_components = true
+   next_clear_cache = true
+
+The page import happens in a session-scoped autouse fixture, which runs the ``@context`` and ``@action`` decorators before the first request reaches the router.
+The loader memoises each absolute directory, so listing the same root twice imports it once.
+
+``next_components`` matters for a suite that renders components without going through HTTP, and for a project that sets ``LAZY_COMPONENT_MODULES = True`` in ``NEXT_FRAMEWORK``.
+See :ref:`ref-settings` for the description of that flag.
+
+``next_clear_cache`` drops the default cache in an autouse fixture that runs before every test.
+A suite that memoises page context or renders through a cached backend needs that isolation, and a suite that never touches the cache leaves the option off.
+
+Fixtures
+~~~~~~~~
+
+The plugin ships one fixture a test asks for by name.
+
+``next_client``
+   A fresh ``NextClient`` for a single test.
+   The name is deliberate.
+   Calling it ``client`` would shadow the ``client`` fixture pytest-django provides, so a test that wants Django's plain client keeps asking for ``client`` and a test that wants the framework client asks for ``next_client``.
+
+.. code-block:: python
+   :caption: tests/test_index.py
+
+   from next.testing import NextClient
+
+   def test_index(next_client: NextClient) -> None:
+       response = next_client.get("/")
+       assert response.status_code == 200
+
+The other two fixtures are autouse and no test names them.
+``next_pages`` reads the page and component options once per session, and ``next_cache_isolation`` clears the cache before each test.
+The session fixture shares its name with the ini option it reads.
+
+Why the plugin is opt-in
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+A ``pytest11`` entry point would load the plugin into every pytest run on the machine, and that turned out to cost more than it saved.
+Pytest imports entry-point plugins before pytest-cov starts measuring, so importing the framework from the plugin made every import-time line under ``next/`` read as unexecuted and dropped a full-coverage gate to roughly two thirds.
+An explicit ``-p next.testing.plugin`` keeps the coverage numbers honest and keeps next.dj out of unrelated suites that happen to share the same environment.
+
 Registry state between tests
 ----------------------------
 
 Action and component registrations are side effects of importing ``page.py`` and ``component.py`` modules.
-The canonical scaffold imports them once per session with the eager loaders from ``next.testing.loaders`` and leaves the registries alone between tests.
+The canonical setup imports them once per session and leaves the registries alone between tests.
+``next_pages`` in ``pytest.ini`` covers that for a pytest suite, and every project under ``examples/`` uses it.
+
+A suite that runs outside pytest, or one that computes its page roots at runtime, calls the eager loaders from ``next.testing.loaders`` directly.
 
 .. code-block:: python
-   :caption: conftest.py
+   :caption: conftest.py, hand-rolled equivalent of ``next_pages``
 
    from pathlib import Path
 
@@ -153,23 +264,12 @@ The canonical scaffold imports them once per session with the eager loaders from
    def _load_pages() -> None:
        eager_load_pages(PROJECT_ROOT / "notes" / "pages")
 
-The session fixture runs the ``@context`` and ``@action`` decorators before the first test dispatches a request.
-Every project under ``examples/`` uses this scaffold.
+Either route runs the ``@context`` and ``@action`` decorators before the first test dispatches a request.
 
 .. note::
 
    When ``LAZY_COMPONENT_MODULES = True`` in ``NEXT_FRAMEWORK``, bulk import of ``component.py`` modules from configured component roots is skipped during ``AppConfig.ready``.
-   Call ``eager_load_components()`` from ``next.testing.loaders`` once per session to import every registered ``component.py`` regardless of the flag.
-
-   .. code-block:: python
-      :caption: conftest.py, eager loading with lazy modules
-
-      import pytest
-      from next.testing.loaders import eager_load_components
-
-      @pytest.fixture(autouse=True, scope="session")
-      def _load_components() -> None:
-          eager_load_components()
+   Set ``next_components = true`` in ``pytest.ini``, or call ``eager_load_components()`` from ``next.testing.loaders`` once per session, to import every registered ``component.py`` regardless of the flag.
 
    With the default ``LAZY_COMPONENT_MODULES = False``, the configured component roots are imported during ``AppConfig.ready``.
    Components that live inside a page tree register during the URL router walk instead, so a suite that renders them without any HTTP request triggers the walk first, for example by reversing one route with ``page_reverse()``.
@@ -550,6 +650,8 @@ The helper wraps Django's ``override_settings``, so the ``settings_reloaded`` ch
 ``override_provider`` prepends a provider instance to the resolver's provider list for the block.
 The prepended provider wins over every auto-registered provider that would otherwise claim the same parameter.
 Implement the ``ParameterProvider`` protocol on a plain class for the stub, because subclassing ``RegisteredParameterProvider`` registers the provider globally.
+The protocol asks for ``static_can_handle`` beside ``can_handle`` and ``resolve``, and returning ``None`` from it keeps the stub a runtime candidate for every parameter.
+The method is mandatory, and a stub that omits it is refused with a ``TypeError`` naming the class as ``override_provider`` hands it to the resolver.
 
 .. code-block:: python
    :caption: prepending a stub provider
@@ -563,6 +665,9 @@ Implement the ``ParameterProvider`` protocol on a plain class for the stub, beca
 
        def resolve(self, param, context) -> int:
            return 7
+
+       def static_can_handle(self, param) -> bool | None:
+           return None
 
    def count_notes(limit: int) -> int:
        return limit
@@ -622,7 +727,7 @@ Resolution context doubles
 
 ``next.testing.deps.make_resolution_context`` builds a ``ResolutionContext`` for unit tests on providers.
 ``next.testing.deps.resolve_call`` resolves a callable's dependencies and returns the kwargs mapping.
-Both accept the same loose keyword arguments, ``request``, ``form``, ``url_kwargs``, and ``context_data``.
+Both accept ``request``, ``form``, ``url_kwargs``, and ``context_data``, and ``make_resolution_context`` also takes ``cleaned_data`` together with a prepared ``cache`` and ``stack`` when a test wants to read either afterwards.
 
 .. code-block:: python
    :caption: provider unit test
