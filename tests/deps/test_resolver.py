@@ -1,8 +1,10 @@
+import copy
 import importlib
 import inspect
 import logging
 import threading
 from dataclasses import dataclass
+from typing import NamedTuple
 
 import pytest
 from django.http import HttpRequest
@@ -774,8 +776,8 @@ class TestBoundedCaches:
         assert list(instance._plan_cache) == [_introspect_key(first)]
 
 
-class _LegacyProvider:
-    """Provider written against the two-method contract, missing the static hook."""
+class _HooklessProvider:
+    """Provider that implements the two resolve-time methods and no static hook."""
 
     def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:
         return False
@@ -792,6 +794,21 @@ class _UnhashableHandler:
 
     def __call__(self, plain: int = 3) -> int:
         return plain
+
+
+class _Point(NamedTuple):
+    """Class whose parameters live on the generated `__new__`, not on `__init__`."""
+
+    x: int
+
+
+class _ClashingCallable:
+    """Callable object whose class body annotates a name its `__call__` takes."""
+
+    request: str = ""
+
+    def __call__(self, request: HttpRequest) -> object:
+        return request
 
 
 @dataclass
@@ -859,23 +876,23 @@ class TestProviderContract:
     """A provider joins a resolver only with a callable `static_can_handle`."""
 
     def test_the_constructor_refuses_a_provider_without_the_hook(self) -> None:
-        with pytest.raises(TypeError, match="_LegacyProvider") as exc_info:
-            DependencyResolver(_LegacyProvider())
+        with pytest.raises(TypeError, match="_HooklessProvider") as exc_info:
+            DependencyResolver(_HooklessProvider())
         assert "static_can_handle" in str(exc_info.value)
 
-    @pytest.mark.parametrize("entry", ["add_provider", "prepend_provider", "register"])
+    @pytest.mark.parametrize("entry", ["add_provider", "prepend_provider"])
     def test_every_other_door_refuses_it_too(self, entry) -> None:
         instance = DependencyResolver()
-        with pytest.raises(TypeError, match="_LegacyProvider"):
-            getattr(instance, entry)(_LegacyProvider())
+        with pytest.raises(TypeError, match="_HooklessProvider"):
+            getattr(instance, entry)(_HooklessProvider())
 
     def test_register_refuses_a_class_without_the_hook(self) -> None:
         instance = DependencyResolver()
-        with pytest.raises(TypeError, match="_LegacyProvider"):
-            instance.register(_LegacyProvider)
+        with pytest.raises(TypeError, match="_HooklessProvider"):
+            instance.register(_HooklessProvider)
 
     def test_an_auto_registered_provider_is_refused_at_the_resync(self) -> None:
-        class Legacy(RegisteredParameterProvider):
+        class Hookless(RegisteredParameterProvider):
             static_can_handle = None
 
             def can_handle(self, param, context) -> bool:
@@ -887,7 +904,7 @@ class TestProviderContract:
         def fn(a: int = 1) -> None:
             return None
 
-        with pytest.raises(TypeError, match="Legacy"):
+        with pytest.raises(TypeError, match="Hookless"):
             DependencyResolver().resolve_dependencies(fn)
 
 
@@ -915,8 +932,37 @@ class TestUnhashableCallable:
     def test_the_memo_helpers_inspect_it_afresh(self) -> None:
         handler = _UnhashableHandler()
         assert list(cached_signature(handler).parameters) == ["plain"]
-        assert cached_type_hints(handler) == {"tag": str}
+        assert cached_type_hints(handler)["plain"] is int
         assert cached_accepts_var_keyword(handler) is False
+
+
+class TestCallableObjectHints:
+    """A callable object is described by its `__call__`, not by its class body."""
+
+    def test_a_class_attribute_does_not_shadow_the_parameter(
+        self, mock_http_request
+    ) -> None:
+        handler = _ClashingCallable()
+        request = mock_http_request()
+        assert cached_type_hints(handler)["request"] is HttpRequest
+        assert DependencyResolver().resolve_dependencies(handler, request=request) == {
+            "request": request
+        }
+
+    def test_a_class_without_an_init_is_described_by_its_new(self) -> None:
+        """A NamedTuple carries its parameters on `__new__`, which is what signature reads."""
+        assert cached_type_hints(_Point)["x"] is int
+        assert DependencyResolver().resolve_dependencies(_Point, x="7") == {"x": 7}
+
+
+class TestUnknownDependencyErrorCopying:
+    """The error carries every argument its own `__init__` requires."""
+
+    def test_a_copy_round_trips(self) -> None:
+        error = UnknownDependencyError("theme", "value", registered=("them",))
+        clone = copy.copy(error)
+        assert clone.args == ("theme", "value")
+        assert (clone.name, clone.param_name) == ("theme", "value")
 
 
 class TestMemoRecency:

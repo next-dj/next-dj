@@ -28,8 +28,7 @@ type ParameterPlan = tuple[
 """Name, candidates, terminal, fallback, and parameter, replayed on every call.
 
 A plain tuple rather than a named one, because `UNPACK_SEQUENCE` takes its
-fast path only for an exact tuple and a subclass costs measurably more per
-entry on the hot path.
+fast path only for an exact tuple and a subclass costs more per entry.
 """
 
 type InjectionPlan = tuple[ParameterPlan, ...]
@@ -47,9 +46,9 @@ def compile_plan(
 
     Providers are walked in list order, which is already sorted by priority
     and keeps custom insertions where they were put. A verdict outside the
-    three-valued contract raises from the compile rather than changing
-    injection semantics silently, so no plan is cached and every resolve of
-    that callable raises again until the provider is fixed.
+    three-valued contract raises from the compile rather than changing injection
+    semantics silently. The walk reaches every parameter of every callable, so one
+    such provider raises for all of them until it is fixed.
     """
     entries: list[ParameterPlan] = []
     empty = inspect.Parameter.empty

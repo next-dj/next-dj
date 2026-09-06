@@ -189,9 +189,9 @@ _FORM_PARAMS_UNFILLED: dict[str, object] = {
     "cleaned_data": None,
 }
 
-# One row per callable and context whose pairing changes the answer. A fact
-# that holds in every context, like a signature nothing can read, is pinned
-# once rather than five times over the same contexts.
+# Every callable against every context, so a context that must leave a parameter
+# alone is pinned as firmly as one that decides it. The two callables with
+# nothing to read take one row, because they have no pairing to vary.
 PLAN_CASES: tuple[PlanCase, ...] = (
     PlanCase(
         "markers_full",
@@ -355,7 +355,7 @@ class TestGoldenMatrix:
     @pytest.mark.parametrize("case", PLAN_CASES, ids=attrgetter("id"))
     def test_plan_matches_the_pinned_literal(self, case: PlanCase) -> None:
         planned = _with_theme()
-        # The first call compiles the plan, the second replays the cached one.
+        # The first call compiles the plan and the second replays the cached one.
         compiled = planned.resolve_dependencies(case.func, **case.kwargs)
         replayed = planned.resolve_dependencies(case.func, **case.kwargs)
         assert compiled == case.expected
@@ -601,8 +601,7 @@ class TestReplay:
         planned.prepend_provider(stub)
         context = make_resolution_context()
         assert planned.resolve(_outer, context) == {"dep": "inner", "plain": None}
-        # The prepended stub is asked about `dep` ahead of the terminal, then
-        # about `plain` of the nested `_inner`, then about `plain` of `_outer`.
+        # `plain` repeats because the nested `_inner` is asked before `_outer`.
         assert stub.seen == ["dep", "plain", "plain"]
 
     def test_a_raising_provider_propagates(self) -> None:

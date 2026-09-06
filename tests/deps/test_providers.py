@@ -44,6 +44,10 @@ def _mock_wsgi_request_factory() -> MagicMock:
     return MagicMock(spec=WSGIRequest)
 
 
+def _stand_in_request_factory() -> MagicMock:
+    return MagicMock()
+
+
 def _no_request() -> None:
     return None
 
@@ -67,6 +71,8 @@ class TestHttpRequestProvider:
             (_mock_request_factory, HttpRequest, True),
             (_mock_request_factory, HttpRequest | None, True),
             (_mock_request_factory, typing_optional(HttpRequest), True),
+            (_stand_in_request_factory, HttpRequest, True),
+            (_stand_in_request_factory, HttpRequest | None, True),
             (_mock_wsgi_request_factory, WSGIRequest, True),
             (_mock_wsgi_request_factory, typing_optional(WSGIRequest), True),
             (_mock_request_factory, WSGIRequest, False),
@@ -83,6 +89,8 @@ class TestHttpRequestProvider:
             "request_present",
             "pep604_optional",
             "typing_optional",
+            "stand_in_under_the_base_annotation",
+            "stand_in_under_the_optional_base_annotation",
             "wsgi_subclass",
             "wsgi_subclass_typing_optional",
             "base_request_under_a_subclass_annotation",
@@ -195,6 +203,14 @@ class TestUrlByAnnotationProvider:
         param = inspect_parameter(case.name, case.annotation)
         ctx = _ctx(url_kwargs=case.url_kwargs)
         assert provider.resolve(param, ctx) == case.expected
+
+    def test_named_key_survives_the_resolved_hint(self) -> None:
+        """The segment name reaches the provider through a compiled plan."""
+
+        def fetch_note(note_id: DUrl["id", int]) -> object:
+            return note_id
+
+        assert resolver.resolve_dependencies(fetch_note, id="42") == {"note_id": 42}
 
 
 class TestFormProvider:

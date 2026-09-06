@@ -1,33 +1,36 @@
 """Dependency injection markers and provider for form parameters."""
 
 import inspect
-from typing import Annotated, get_args, get_origin, override
+from typing import get_args, get_origin, override
 
-from django.forms import BaseForm
+from django.forms import BaseForm, BaseFormSet
 
 from next.deps import DDependencyBase, RegisteredParameterProvider, ResolutionContext
+from next.deps.markers import unwrap_annotated
+
+
+# A bound form is a form or a formset, so a plain annotation naming either one
+# is a shape the context can carry.
+_FORM_BASES: tuple[type, ...] = (BaseForm, BaseFormSet)
 
 
 class DForm[FormT](DDependencyBase[FormT]):
-    r"""Annotation for injecting a form instance by class.
+    """Annotation for injecting a form instance by class.
 
-    Use as `DForm[MyForm]` or `DForm["MyForm"]`.
+    The string form spares a page an import it needs for nothing else.
     """
 
     __slots__ = ()
 
 
 def _annotated_form_class(annotation: object) -> type | None:
-    """Return the form class an annotation names, past any `Annotated` wrapper."""
-    origin = get_origin(annotation)
-    if origin is Annotated:
-        annotation = get_args(annotation)[0]
-        origin = get_origin(annotation)
-    if origin is DForm:
+    """Return the form or formset class an annotation names, past any `Annotated`."""
+    annotation = unwrap_annotated(annotation)
+    if get_origin(annotation) is DForm:
         args = get_args(annotation)
         marked = args[0] if args else None
         return marked if isinstance(marked, type) else None
-    if isinstance(annotation, type) and issubclass(annotation, BaseForm):
+    if isinstance(annotation, type) and issubclass(annotation, _FORM_BASES):
         return annotation
     return None
 
@@ -53,9 +56,8 @@ class FormProvider(RegisteredParameterProvider):
         """Rule out every annotation no form can inhabit. The rest waits for context.
 
         Even the `form` name stays open because the context may carry no form.
-        The plainest parameters leave here, which keeps the costliest provider
-        out of the candidate list of a signature that has nothing to do with
-        forms.
+        The plainest parameters leave here, which keeps the costliest provider out
+        of the candidate list of a signature that has nothing to do with forms.
         """
         if param.name == "form":
             return None

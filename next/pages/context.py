@@ -3,9 +3,8 @@
 `Context` is the default-value marker used on page and layout parameters
 to request a value from context_data. `ContextByDefaultProvider` handles
 parameters whose default is a `Context` instance. `ContextByNameProvider`
-injects context values when the parameter name already exists as a
-context key. `ContextResult` packages the full context and the
-JavaScript-serializable subset.
+injects context values when the parameter name already exists as a context key.
+`ContextResult` packages the full context and its JavaScript-serializable subset.
 """
 
 from __future__ import annotations
@@ -44,10 +43,8 @@ def _from_context_data(
 class Context:
     """Mark a parameter default so the value is taken from context_data.
 
-    An empty `Context()` reads the parameter name from context_data. A
-    string source reads that context key. A callable source is called
-    with DI-resolved arguments. Any other object becomes a constant. The
-    `default` keyword supplies a fallback when the context key is missing.
+    The source decides which of the four forms applies, and `default` answers
+    for the one case a context key can be missing.
     """
 
     source: object | None = None
@@ -58,13 +55,8 @@ class Context:
 class ContextResult:
     """Hold the full template context and its JavaScript-serializable subset.
 
-    `context_data` contains every value merged into the Django template
-    context. `js_context` contains only the subset marked
-    `serialize=True`, which the renderer later hands to
-    `StaticCollector.add_js_context`. `js_context_serializers` carries
-    per-key serializer overrides supplied through
-    `@context(serializer=...)` so the collector can route a single key
-    through a custom serializer without affecting other keys.
+    Only the keys a context marked for serialization cross to the client, each
+    through its own serializer, so the subset travels apart from the whole.
     """
 
     context_data: dict[str, Any]

@@ -58,6 +58,7 @@ Modules
 ``next.deps.registry``.
    The ``ProviderRegistry`` class and the ``provider_registry`` singleton, an ordered list of provider classes with a ``version`` counter.
    A class registering under an address another class already holds takes its place in the list, so a dev reload of the declaring module leaves one entry rather than a pile of dead ones.
+   The address pairs the class name with the file the body was compiled from, so two ``page.py`` files declaring the same provider name keep one entry each.
    A resolver keeps the version it last saw, and a change rebuilds every auto-registered instance from scratch in priority order under a lock.
    An abstract intermediate base is skipped by that rebuild, because it is a legitimate class to register and no instance of it exists to place.
 
@@ -99,6 +100,7 @@ The resolver sorts the registry by ``priority`` as the primary key and by subcla
 A provider handed over by hand sits outside that sort.
 ``prepend_provider`` puts it at the head of the list and ``add_provider`` appends it to the tail, and the auto-registered instances always sit between the two in priority order.
 A prepended provider therefore outranks every built-in one, whatever priority it declares.
+``remove_provider`` drops the instance from whichever of the three it sits in, and an auto-registered one has its class held out of every later rebuild, so a resync started by an unrelated registration does not hand back what the caller took out.
 
 Injection plan
 ~~~~~~~~~~~~~~

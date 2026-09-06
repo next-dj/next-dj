@@ -291,7 +291,7 @@ Four common causes explain this.
   Compare your scenario with the lifecycle discussion in :doc:`/content/topics/dependency-injection`.
 
 - The parameter names a request class the running server does not produce, such as ``request: ASGIRequest`` under a WSGI server.
-  The request provider claims the parameter only when the request in flight is an instance of the annotated class, so annotate ``HttpRequest`` unless the handler genuinely needs one concrete class.
+  The request provider tests a concrete subclass annotation against the request in flight, so annotate ``HttpRequest`` unless the handler genuinely needs one concrete class.
 
 To inspect what the resolver would actually inject, use ``resolve_call`` from ``next.testing.deps`` in a shell or test.
 The snippet below uses ``fetch_note``, the ``@context("note")`` callable from the :doc:`tutorial </content/intro/tutorial02>` detail page.

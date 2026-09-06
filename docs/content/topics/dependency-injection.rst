@@ -37,7 +37,7 @@ Each one carries an explicit ``priority`` value, the resolver consults them from
 5. Cleaned data provider (priority 40).
    A parameter named ``cleaned_data`` receives the merged wizard cleaned data on a wizard ``done()`` handler.
 6. HttpRequest provider (priority 50).
-   A parameter annotated ``HttpRequest`` or ``HttpRequest | None`` receives the current request when that request is an instance of the annotated class.
+   A parameter annotated ``HttpRequest`` or ``HttpRequest | None`` receives the current request, and one annotated with a concrete subclass receives it only when the request is an instance of that subclass.
 7. URL annotation provider (priority 60).
    A parameter annotated ``DUrl[T]`` reads the captured URL segment and coerces it to ``T``.
 8. URL kwargs provider (priority 70).
@@ -50,9 +50,10 @@ The order makes the default-driven and marker-driven providers decisive.
 ``DUrl`` and ``DQuery`` look only at the annotation.
 The context-by-name provider sits ahead of the form, URL, and query providers because a context key under the same name is considered a deliberate publication.
 
-The form provider matches the parameter name ``form``, the marker ``DForm[FormClass]``, and a plain annotation naming a ``django.forms.BaseForm`` subclass the bound form is an instance of.
+The form provider matches the parameter name ``form``, the marker ``DForm[FormClass]``, and a plain annotation naming a ``django.forms.BaseForm`` or ``django.forms.BaseFormSet`` subclass the bound form is an instance of.
 An annotation that names anything else is ruled out before the form is even consulted, so a parameter typed ``int`` or ``MyService`` never reaches this provider.
-The request provider claims a parameter only when the request in flight is an instance of the annotated class, so ``request: ASGIRequest`` under a WSGI server receives the parameter default instead of a request whose interface it would go on to call.
+The request provider tests a concrete subclass annotation against the request in flight, so ``request: ASGIRequest`` under a WSGI server receives the parameter default instead of a request whose interface it would go on to call.
+The bare ``HttpRequest`` annotation names no subclass and takes whatever the context carries.
 
 The URL-kwargs provider is the by-name fallback after the ``Depends``, ``Context``, form, request, and ``DUrl`` providers.
 It runs before the ``DQuery`` provider, so a ``DQuery`` parameter that shares a captured segment name receives the URL value, not the query value.

@@ -1,8 +1,7 @@
 """Cross-area helpers for paths, page trees, edit watching, and declaration sites.
 
-Everything here sits below the subpackages that share it, so a value
-object two of them build travels through this module rather than closing
-an import cycle between them.
+Everything here sits below the subpackages that share it, so a value object
+two of them build travels through this module rather than closing a cycle.
 """
 
 from __future__ import annotations
@@ -76,6 +75,18 @@ def store_bounded[K, V](cache: OrderedDict[K, V], key: K, value: V, size: int) -
     except KeyError:
         # The key is gone, so there is nothing left to reorder and the eviction
         # that took it already brought the cache back inside the bound.
+        return
+
+
+def touch_bounded[K](cache: OrderedDict[K, Any], key: K) -> None:
+    """Move `key` to the fresh end, tolerating a concurrent eviction of it.
+
+    The read side of `store_bounded`. No reader holds a lock, so a concurrent
+    clear or eviction of this very key costs a rebuild rather than a raised error.
+    """
+    try:
+        cache.move_to_end(key)
+    except KeyError:
         return
 
 

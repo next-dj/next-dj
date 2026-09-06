@@ -14,34 +14,32 @@ from next.urls import DUrl
 from tests.support import build_mock_http_request
 
 
-def _handler_simple(request: HttpRequest, name: str = "default") -> str:
+def _handler_simple(request: object, name: str = "default") -> str:
     del request
     return name
 
 
 def _handler_five(
-    request: HttpRequest, a: int = 1, b: int = 2, c: int = 3, d: int = 4
-) -> int:
-    del request
-    return a + b + c + d
-
-
-def _handler_simple_unclaimed(request: object, name: str = "default") -> str:
-    del request
-    return name
-
-
-def _handler_five_unclaimed(
     request: object, a: int = 1, b: int = 2, c: int = 3, d: int = 4
 ) -> int:
     del request
     return a + b + c + d
 
 
+def _handler_simple_claimed(request: HttpRequest, name: str = "default") -> str:
+    del request
+    return name
+
+
+def _handler_five_claimed(
+    request: HttpRequest, a: int = 1, b: int = 2, c: int = 3, d: int = 4
+) -> int:
+    del request
+    return a + b + c + d
+
+
 def _handler_mixed(
-    request: HttpRequest,
-    cached: str = Depends("theme"),
-    value: int = Context("page_value"),
+    request: object, cached: str = Depends("theme"), value: int = Context("page_value")
 ) -> str:
     del request
     return f"{cached}:{value}"
@@ -98,6 +96,13 @@ def _resolve_four_markers(planned: DependencyResolver) -> dict[str, object]:
 
 
 class TestBenchDependencyResolver:
+    """Resolve cost per signature shape.
+
+    The paired CI comparison matches runs by test id, so an id that already
+    carries a baseline keeps measuring the shape that baseline measured and a
+    new shape takes a new id rather than reusing one.
+    """
+
     @pytest.mark.benchmark(group="deps.resolver")
     def test_direct_call_baseline(self, benchmark) -> None:
         """Plain call of the two-parameter handler, the floor every resolve adds to."""
@@ -106,44 +111,38 @@ class TestBenchDependencyResolver:
 
     @pytest.mark.benchmark(group="deps.resolver")
     def test_resolve_simple(self, benchmark) -> None:
-        """Plan replay over an ``HttpRequest`` annotation and one default kwarg.
-
-        The annotation is settled at compile time, so the replay hands the
-        request straight over without asking a single candidate.
-        """
+        """Two parameters no provider claims, so both walk every candidate."""
         resolver = _default_resolver()
         request = build_mock_http_request()
         benchmark(resolver.resolve_dependencies, _handler_simple, request=request)
 
     @pytest.mark.benchmark(group="deps.resolver")
     def test_resolve_five_params(self, benchmark) -> None:
-        """Five parameters behind one settled annotation, the per-arg overhead."""
+        """Five parameters no provider claims, the per-arg cost of a full walk."""
         resolver = _default_resolver()
         request = build_mock_http_request()
         benchmark(resolver.resolve_dependencies, _handler_five, request=request)
 
     @pytest.mark.benchmark(group="deps.resolver")
-    def test_resolve_unclaimed_request_and_default(self, benchmark) -> None:
-        """Two parameters no provider claims, so both walk every candidate.
+    def test_resolve_claimed_request_and_default(self, benchmark) -> None:
+        """Plan replay over an ``HttpRequest`` annotation and one default kwarg.
 
-        The same shape as ``test_resolve_simple`` with the annotation the
-        request provider settles at compile time taken away, which leaves the
-        candidate walk and the fallback as the whole cost.
+        The compile narrows the request parameter to the one provider that can
+        claim it, which still asks ``can_handle`` because only the context says
+        whether a request is in flight.
         """
         resolver = _default_resolver()
         request = build_mock_http_request()
         benchmark(
-            resolver.resolve_dependencies, _handler_simple_unclaimed, request=request
+            resolver.resolve_dependencies, _handler_simple_claimed, request=request
         )
 
     @pytest.mark.benchmark(group="deps.resolver")
-    def test_resolve_five_unclaimed_params(self, benchmark) -> None:
-        """Five parameters no provider claims, the per-arg cost of a full walk."""
+    def test_resolve_five_claimed_params(self, benchmark) -> None:
+        """Five parameters behind an ``HttpRequest`` annotation, the per-arg cost."""
         resolver = _default_resolver()
         request = build_mock_http_request()
-        benchmark(
-            resolver.resolve_dependencies, _handler_five_unclaimed, request=request
-        )
+        benchmark(resolver.resolve_dependencies, _handler_five_claimed, request=request)
 
     @pytest.mark.benchmark(group="deps.resolver")
     def test_resolve_mixed_markers(self, benchmark) -> None:

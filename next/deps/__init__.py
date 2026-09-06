@@ -6,8 +6,7 @@ The public surface covers the annotation base class `DDependencyBase`, the
 `ParameterProvider` protocol, the `ProviderRegistry` and its singleton, and the
 `RESERVED_KEYS` set. Deeper helpers live under `next.deps.cache`,
 `next.deps.providers`, `next.deps.markers`, and `next.deps.plan`, whose
-`compile_plan`, `InjectionPlan`, and `ParameterPlan` are the contract a static
-verdict is compiled into.
+`compile_plan`, `InjectionPlan`, and `ParameterPlan` spell the compiled contract.
 """
 
 from __future__ import annotations

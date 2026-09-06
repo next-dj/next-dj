@@ -46,8 +46,9 @@ Registry
 .. automodule:: next.deps.registry
    :members:
 
-``provider_registry`` is the ordered list of provider classes that register themselves, and ``version`` is a read-only counter that moves on every registration or an explicit ``bump``.
+``provider_registry`` is the ordered list of provider classes that register themselves, and ``version`` is a read-only counter that moves on every registration.
 A class registering under an address another class already holds replaces it in place, so a dev reload of the module declaring a provider adds no duplicate.
+The address pairs the class name with the file its body was compiled from, because every ``page.py`` is loaded under one module name and two page files declaring the same provider name are two providers, not one.
 A resolver compares that counter before it replays a plan, so a provider class imported after the first resolve joins the auto-registered instances on the next one and the plans compiled without it recompile.
 Registering a provider also sends ``provider_registered``.
 
@@ -71,8 +72,7 @@ Context
 
 ``RESERVED_KEYS`` lists the names (``request``, ``form``, ``cleaned_data``, ``_cache``, ``_stack``, ``_context_data``) that name-based resolution refuses.
 A context key cannot shadow a reserved resolver input.
-``DependencyResolver.EXPLICIT_RESOLVE_KEYS`` is the class-level alias of the same frozenset.
-The resolver reads ``self.EXPLICIT_RESOLVE_KEYS``, which a subclass may override.
+``resolve_dependencies`` reads the same frozenset to tell its fixed inputs from the URL kwargs, so one list governs both the split and the refusal.
 A context mapping reaches resolution as it is, on the page path and on the component path alike, and the reserved names are invisible to the name-based providers rather than stripped from a copy.
 See :doc:`/content/internals/di-resolver` for the resolution detail.
 

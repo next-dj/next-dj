@@ -110,7 +110,6 @@ def _ctx(
         cache=cache,
         stack=stack,
         resolver=resolver_inst,
-        callable=None,
     )
 
 

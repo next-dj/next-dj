@@ -15,15 +15,15 @@ from collections import OrderedDict
 from difflib import get_close_matches
 from operator import attrgetter
 from types import MethodType
-from typing import TYPE_CHECKING, Any, ClassVar, cast, get_type_hints, override
+from typing import TYPE_CHECKING, Any, cast, get_type_hints, override
 
-from next.utils import callable_name, code_filename, store_bounded
+from next.utils import callable_name, code_filename, store_bounded, touch_bounded
 
 from .cache import _CACHE_MISS, _IN_PROGRESS, DependencyCache, DependencyCycleError
 from .context import RESERVED_KEYS, ResolutionContext
 from .plan import EMPTY_PLAN, InjectionPlan, compile_plan
 from .providers import ParameterProvider, RegisteredParameterProvider
-from .registry import provider_registry
+from .registry import _Address, _address, provider_registry
 
 
 if TYPE_CHECKING:
@@ -70,6 +70,25 @@ def _describe_callable(func: Callable[..., Any]) -> str:
     return f'"{name}"' if filename is None else f'"{name}" ({filename})'
 
 
+class _Described:
+    """Log argument that describes its callable only once a handler formats it.
+
+    A disabled debug log discards the record before formatting, so the walk
+    `_describe_callable` runs costs nothing on the path that repeats it.
+    """
+
+    __slots__ = ("func",)
+
+    def __init__(self, func: Callable[..., Any]) -> None:
+        """Hold the callable the message names."""
+        self.func = func
+
+    @override
+    def __str__(self) -> str:
+        """Describe the callable for the formatted record."""
+        return _describe_callable(self.func)
+
+
 class UnknownDependencyError(LookupError):
     """Raised when `Depends` names a dependency that nothing has registered."""
 
@@ -86,7 +105,9 @@ class UnknownDependencyError(LookupError):
         self.func: Callable[..., Any] | None = None
         matches = get_close_matches(name, registered, n=1)
         self.suggestion: str | None = str(matches[0]) if matches else None
-        super().__init__(name)
+        # Both arguments reach `args`, so the exception survives the copy a
+        # process pool or a caching layer makes of it.
+        super().__init__(name, param_name)
 
     def attribute_to(self, func: Callable[..., Any]) -> None:
         """Name `func` as the owner unless an inner resolve already named one."""
@@ -131,6 +152,15 @@ def _adopt_provider[P](provider: P) -> P:
     return provider
 
 
+def _drop[P](holder: list[P], provider: object) -> bool:
+    """Remove every occurrence of `provider` from `holder`, by identity."""
+    kept = [held for held in holder if held is not provider]
+    if len(kept) == len(holder):
+        return False
+    holder[:] = kept
+    return True
+
+
 def _introspect_key(func: Callable[..., Any]) -> _IntrospectKey:
     # `isinstance` over `inspect.ismethod`, which is a Python wrapper around the
     # same check and sits on every memoised lookup and plan replay.
@@ -151,22 +181,42 @@ def cached_signature(func: Callable[..., Any]) -> inspect.Signature:
         cached = inspect.signature(func)
         store_bounded(_signature_cache, key, cached, _INTROSPECTION_CACHE_MAX_SIZE)
     else:
-        _signature_cache.move_to_end(key)
+        touch_bounded(_signature_cache, key)
     return cached
 
 
+def _hints_target(func: Callable[..., Any]) -> Callable[..., Any]:
+    """Return the object whose annotations describe the parameters of `func`.
+
+    `inspect.signature` reads `__init__` of a class, `__new__` when the class
+    declares none, and `__call__` of a callable instance, while the annotations
+    on the object itself belong to the class body and would shadow a parameter.
+    """
+    if inspect.isroutine(func):
+        return func
+    if inspect.isclass(func):
+        if func.__init__ is not object.__init__:
+            return func.__init__
+        return func.__new__
+    return type(func).__call__
+
+
 def cached_type_hints(func: Callable[..., Any]) -> dict[str, Any]:
-    """Return the type hints of `func` with the `Annotated` extras kept, memoised."""
+    """Return the type hints of `func` with the `Annotated` extras kept, memoised.
+
+    The hints come from whatever `inspect.signature` reads, so the plan never
+    pairs one object's parameters with another object's annotations.
+    """
     key = _introspect_key(func)
     try:
         cached = _type_hints_cache.get(key)
     except TypeError:
-        return get_type_hints(func, include_extras=True)
+        return get_type_hints(_hints_target(func), include_extras=True)
     if cached is None:
-        cached = get_type_hints(func, include_extras=True)
+        cached = get_type_hints(_hints_target(func), include_extras=True)
         store_bounded(_type_hints_cache, key, cached, _INTROSPECTION_CACHE_MAX_SIZE)
     else:
-        _type_hints_cache.move_to_end(key)
+        touch_bounded(_type_hints_cache, key)
     return cached
 
 
@@ -181,7 +231,7 @@ def cached_accepts_var_keyword(func: Callable[..., Any]) -> bool:
         cached = _accepts_var_keyword(func)
         store_bounded(_var_keyword_cache, key, cached, _INTROSPECTION_CACHE_MAX_SIZE)
     else:
-        _var_keyword_cache.move_to_end(key)
+        touch_bounded(_var_keyword_cache, key)
     return cached
 
 
@@ -213,8 +263,6 @@ class DependencyResolver:
     GIL, so a concurrent first call at worst compiles the same plan twice.
     """
 
-    EXPLICIT_RESOLVE_KEYS: ClassVar[frozenset[str]] = RESERVED_KEYS
-
     def __init__(
         self, *providers: ParameterProvider | RegisteredParameterProvider
     ) -> None:
@@ -231,6 +279,12 @@ class DependencyResolver:
         # only records the registry version it would otherwise catch up to.
         self._explicit = bool(providers)
         self._registry_seen = -1
+        # Addresses a `remove_provider` dropped, so a later resync does not put
+        # the instance the caller took out back on the list. Addressed the way
+        # the registry addresses a class, so a reloader re-executing the module
+        # that declares it does not slip a fresh class past the removal.
+        self._suppressed: set[_Address] = set()
+        self._syncing = False
         # Bumped on every `_providers` mutation, so a compiled plan carries the
         # version it saw and is recompiled once the list has moved on.
         self._providers_version = 0
@@ -242,7 +296,7 @@ class DependencyResolver:
         self, cls: type[RegisteredParameterProvider]
     ) -> RegisteredParameterProvider:
         """Build one auto-registered provider, handing over the resolver when asked."""
-        if "resolver" in inspect.signature(cls).parameters:
+        if "resolver" in cached_signature(cls).parameters:
             return cast("RegisteredParameterProvider", cast("Any", cls)(resolver=self))
         return cls()
 
@@ -262,26 +316,37 @@ class DependencyResolver:
         replaced, one that refuses to instantiate, and two threads arriving at
         once all have to end at the list the registry describes.
         """
-        if self._registry_seen == provider_registry._version:
+        if self._registry_seen == provider_registry.version:
             return
         if self._explicit:
-            self._registry_seen = provider_registry._version
+            self._registry_seen = provider_registry.version
             return
         with self._lock:
-            version = provider_registry._version
-            if self._registry_seen == version:
+            version = provider_registry.version
+            if self._registry_seen == version or self._syncing:
+                # A provider whose construction resolves through this resolver
+                # re-enters here, and the list it is halfway through building
+                # is the wrong one to start over from.
                 return
-            # An abstract intermediate base is a legitimate class to register
-            # and no instance of it exists to place.
-            auto = [
-                _adopt_provider(self._instantiate(cls))
-                for cls in provider_registry
-                if not inspect.isabstract(cls)
-            ]
+            self._syncing = True
+            try:
+                # An abstract intermediate base is a legitimate class to
+                # register and no instance of it exists to place.
+                auto = [
+                    _adopt_provider(self._instantiate(cls))
+                    for cls in provider_registry
+                    if not inspect.isabstract(cls)
+                    and _address(cls) not in self._suppressed
+                ]
+            finally:
+                self._syncing = False
             auto.sort(key=attrgetter("priority"))
             self._auto = auto
-            self._registry_seen = version
+            # The rebuild lands first, so a resolve on another thread never
+            # finds the registry caught up while the plans it stamped are
+            # still reading fresh against the previous provider list.
             self._rebuild()
+            self._registry_seen = version
 
     def skips(self, param: inspect.Parameter) -> bool:
         """Return True for `self` / `cls` and variadic parameters.
@@ -311,7 +376,7 @@ class DependencyResolver:
             logger.debug(
                 "Type hints of %s did not resolve, so its plan reads the raw "
                 "annotations and is compiled again on the next resolve.",
-                _describe_callable(func),
+                _Described(func),
                 exc_info=True,
             )
             return compile_plan(sig, {}, self._providers, self.skips), False
@@ -325,9 +390,14 @@ class DependencyResolver:
         """
         self._sync_providers()
         version = self._providers_version
-        entry = self._plan_cache.get(key)
+        try:
+            entry = self._plan_cache.get(key)
+        except TypeError:
+            # A callable no mapping can key compiles a plan per resolve rather
+            # than losing injection altogether.
+            return self._compile_plan(func)[0]
         if entry is not None and entry[0] == version:
-            self._plan_cache.move_to_end(key)
+            touch_bounded(self._plan_cache, key)
             return entry[1]
         plan, settled = self._compile_plan(func)
         if settled:
@@ -335,16 +405,6 @@ class DependencyResolver:
                 self._plan_cache, key, (version, plan), _INTROSPECTION_CACHE_MAX_SIZE
             )
         return plan
-
-    def _plan(self, func: Callable[..., Any]) -> InjectionPlan:
-        """Return the plan for `func`, compiling afresh when no mapping can key it."""
-        key = _introspect_key(func)
-        try:
-            hash(key)
-        except TypeError:
-            self._sync_providers()
-            return self._compile_plan(func)[0]
-        return self._plan_for(key, func)
 
     def provides(
         self,
@@ -356,10 +416,11 @@ class DependencyResolver:
 
         The answer comes from the compiled plan, so a parameter the plan skips
         or one outside the signature is never filled, and the candidates see
-        the same resolved parameter a resolve hands them.
-        `EXPLICIT_RESOLVE_KEYS` is left to the caller.
+        the same resolved parameter a resolve hands them. Telling the fixed
+        inputs from the URL kwargs is left to the caller.
         """
-        entry = next((e for e in self._plan(func) if e[0] == param.name), None)
+        plan = self._plan_for(_introspect_key(func), func)
+        entry = next((e for e in plan if e[0] == param.name), None)
         if entry is None:
             return False
         _name, candidates, terminal, _fallback, resolved = entry
@@ -453,17 +514,21 @@ class DependencyResolver:
         """Drop `provider` by identity, tolerating one the resolver never held.
 
         By identity rather than equality, because two providers of a dataclass
-        type compare equal and the list would give up the wrong instance.
+        type compare equal and the list would give up the wrong instance. An
+        auto-registered one has its address suppressed as well, so the next
+        resync does not hand the caller back what it just took out. Adding a
+        provider of that address again puts it where an explicit one goes,
+        which leaves one copy rather than an auto one beside it.
         """
         with self._lock:
-            for holder in (self._head, self._tail, self._auto):
-                index = next(
-                    (i for i, held in enumerate(holder) if held is provider), None
-                )
-                if index is not None:
-                    del holder[index]
-                    self._rebuild()
-                    return
+            dropped = _drop(self._head, provider)
+            if _drop(self._tail, provider):
+                dropped = True
+            if _drop(self._auto, provider):
+                self._suppressed.add(_address(type(provider)))
+                dropped = True
+            if dropped:
+                self._rebuild()
 
     def register(
         self, provider: ParameterProvider | type[ParameterProvider]
@@ -484,25 +549,21 @@ class DependencyResolver:
         is the innermost one of a nested chain and therefore the one whose
         signature carries the offending `Depends`.
         """
-        # The hit path is inlined, a miss is rare enough to afford the helper.
+        # The hit path is inlined because a miss is rare enough to afford the helper.
         key = _introspect_key(func)
         try:
             entry = self._plan_cache.get(key)
         except TypeError:
-            # A callable no mapping can key compiles a plan per resolve rather
-            # than losing injection altogether.
-            self._sync_providers()
-            plan = self._compile_plan(func)[0]
+            entry = None
+        if (
+            entry is None
+            or entry[0] != self._providers_version
+            or self._registry_seen != provider_registry.version
+        ):
+            plan = self._plan_for(key, func)
         else:
-            if (
-                entry is None
-                or entry[0] != self._providers_version
-                or self._registry_seen != provider_registry._version
-            ):
-                plan = self._plan_for(key, func)
-            else:
-                self._plan_cache.move_to_end(key)
-                plan = entry[1]
+            touch_bounded(self._plan_cache, key)
+            plan = entry[1]
         if not plan:
             return {}
 
@@ -528,8 +589,7 @@ class DependencyResolver:
         self, func: Callable[..., Any], **context
     ) -> dict[str, Any]:
         """Resolve `func` from a loose kwargs mapping and build a context object."""
-        reserved = self.EXPLICIT_RESOLVE_KEYS
-        url_kwargs = {k: v for k, v in context.items() if k not in reserved}
+        url_kwargs = {k: v for k, v in context.items() if k not in RESERVED_KEYS}
 
         cache_obj = context.get("_cache")
         if isinstance(cache_obj, dict):
@@ -563,8 +623,8 @@ class DependencyResolver:
         """Resolve `func` for component callables using template context.
 
         The template context travels as it is, because the providers that read
-        it by name refuse `EXPLICIT_RESOLVE_KEYS` themselves. That costs one
-        test per parameter rather than a copy of the whole context per render.
+        it by name refuse `RESERVED_KEYS` themselves. That costs one test per
+        parameter rather than a copy of the whole context per render.
         """
         if isinstance(_cache, dict):
             cache = DependencyCache(backing_dict=_cache)

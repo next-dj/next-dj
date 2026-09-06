@@ -17,21 +17,14 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-# The highest `_version` each registry has carried, so a restore can roll the
-# state back without rolling the counter every cached plan compares back with it.
-_REGISTRY_VERSION_HIGH_WATER: dict[int, int] = {}
-
-
 def _advance_version(registry: object, *, reached: int = 0) -> None:
     """Leave the version of `registry` past every generation it has carried.
 
     Two registry states sharing a version would make a genuinely stale plan
     read fresh, so a restore rolls the state back and the counter forward.
+    `reached` is the version a restore is about to rewind past.
     """
-    key = id(registry)
-    high = max(_REGISTRY_VERSION_HIGH_WATER.get(key, 0), registry.version, reached) + 1
-    registry._version = high
-    _REGISTRY_VERSION_HIGH_WATER[key] = high
+    registry._version = max(registry.version, reached) + 1
 
 
 @contextmanager
@@ -40,18 +33,23 @@ def restored_provider_registry() -> Generator[None, None, None]:
 
     A provider class declared inside a test registers itself for the whole
     process, so the class list goes back to what the body found and the
-    singleton is left to resync from a version it has never seen.
+    singleton is left to resync from a version it has never seen. The
+    instantiated providers go back too, because the rebuild that follows
+    republishes them and a reader that never resolves would see the test's.
     """
     classes = list(provider_registry)
     head = list(resolver._head)
     tail = list(resolver._tail)
+    auto = list(resolver._auto)
+    suppressed = set(resolver._suppressed)
     try:
         yield
     finally:
-        provider_registry._ordered[:] = classes
-        _advance_version(provider_registry)
+        provider_registry.replace(classes)
         resolver._head[:] = head
         resolver._tail[:] = tail
+        resolver._auto[:] = auto
+        resolver._suppressed = suppressed
         resolver._registry_seen = -1
         resolver._rebuild()
 

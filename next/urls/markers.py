@@ -12,12 +12,20 @@ from __future__ import annotations
 
 import inspect
 import types
-from typing import TYPE_CHECKING, Annotated, Union, get_args, get_origin, override
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Literal,
+    Union,
+    get_args,
+    get_origin,
+    override,
+)
 
 from django.http import HttpRequest
 
 from next.deps import DDependencyBase, RegisteredParameterProvider
-from next.deps.markers import marker_origin
+from next.deps.markers import marker_origin, unwrap_annotated
 
 from .parser import _coerce_url_value
 
@@ -29,11 +37,8 @@ if TYPE_CHECKING:
 class DUrl[T](DDependencyBase[T]):
     """Annotation for a captured URL path parameter with optional type coercion.
 
-    Use `DUrl[SomeType]` to read the captured segment that matches the
-    parameter name and coerce it. Use `DUrl["param"]` to read a named
-    segment without coercion. Use `DUrl["param", SomeType]` to read a
-    named segment and coerce it, which is the form to reach for when the
-    parameter name differs from the captured segment name.
+    The named forms carry the segment name, so a parameter keeps reading the
+    same segment once either of the two is renamed away from the other.
     """
 
     __slots__ = ()
@@ -44,9 +49,13 @@ class DUrl[T](DDependencyBase[T]):
         A plain type follows the standard generic path. A string, or a
         `(string, type)` tuple, is wrapped so the provider can read the
         captured segment by an explicit name rather than the parameter name.
+        The name travels as a `Literal`, because `typing.get_type_hints`
+        reads a bare string inside an alias as a forward reference and would
+        resolve the segment name away into whatever global carries it.
         """
         if isinstance(item, (str, tuple)):
-            args = item if isinstance(item, tuple) else (item,)
+            raw = item if isinstance(item, tuple) else (item,)
+            args = tuple(Literal[a] if isinstance(a, str) else a for a in raw)
             return types.GenericAlias(cls, args)
         return super().__class_getitem__(item)  # type: ignore[misc]
 
@@ -54,14 +63,9 @@ class DUrl[T](DDependencyBase[T]):
 class DQuery[T](DDependencyBase[T]):
     """Annotation marker for a `request.GET` parameter.
 
-    Use `DQuery[str]`, `DQuery[int]`, `DQuery[bool]`, or `DQuery[float]`
-    for scalar values, or `DQuery[list[T]]` for multi-value parameters.
-    The list form accepts the plain repeated form `?brand=a&brand=b`,
-    the qs-style bracket suffix `?brand[]=a&brand[]=b` emitted by axios
-    and other front-end clients, and the comma-delimited form
-    `?brand=a,b` produced by `qs.stringify` with the comma array
-    format. The provider returns the parameter default when the key is
-    absent, or `None` when no default is given.
+    A query string carries neither a type nor an arity of its own, so the
+    annotation supplies both and the list form takes the several shapes a
+    front-end client may spell one repeated key in.
     """
 
     __slots__ = ()
@@ -107,17 +111,21 @@ class HttpRequestProvider(RegisteredParameterProvider):
 
     @override
     def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:
-        """Return True when the request in context is an instance of the annotation.
+        """Return True when the request in context inhabits the annotated class.
 
         A handler asking for one concrete subclass under a server that serves
         another gets the parameter default rather than a request whose
-        interface it would go on to call.
+        interface it would go on to call. The bare `HttpRequest` annotation
+        asks for no subclass and takes whatever the context carries, which is
+        what lets a test hand the handler a stand-in.
         """
         request = context.request
         if request is None:
             return False
         annotated = _request_annotation_class(param.annotation)
-        return annotated is not None and isinstance(request, annotated)
+        if annotated is None:
+            return False
+        return annotated is HttpRequest or isinstance(request, annotated)
 
     @override
     def static_can_handle(self, param: inspect.Parameter) -> bool | None:
@@ -149,7 +157,7 @@ class UrlByAnnotationProvider(RegisteredParameterProvider):
     def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:
         """URL value for the parameter, coerced when the annotation names a type."""
         args = _marker_args(param.annotation)
-        key = args[0] if args and isinstance(args[0], str) else param.name
+        key = _url_key(args) or param.name
         url_kwargs = context.url_kwargs
         raw = url_kwargs.get(key)
         if raw is None:
@@ -157,16 +165,21 @@ class UrlByAnnotationProvider(RegisteredParameterProvider):
         return _coerce_url_value(raw, _url_type_hint(args))
 
 
-def _unwrap_annotated(annotation: object) -> object:
-    """Return the type an `Annotated[...]` wraps, or the annotation unchanged."""
-    if get_origin(annotation) is Annotated:
-        return get_args(annotation)[0]
-    return annotation
-
-
 def _marker_args(annotation: object) -> tuple[object, ...]:
     """Return the arguments of a marker annotation, past any `Annotated` wrapper."""
-    return get_args(_unwrap_annotated(annotation))
+    return get_args(unwrap_annotated(annotation))
+
+
+def _url_key(args: tuple[object, ...]) -> str | None:
+    """Return the segment name a `DUrl` annotation carries, or `None` for no name.
+
+    The name arrives wrapped, so the unwrapped argument is a string only for
+    the named forms and the type of `DUrl[SomeType]` falls through.
+    """
+    first = args[0] if args else None
+    if get_origin(first) is Literal:
+        first = get_args(first)[0]
+    return first if isinstance(first, str) else None
 
 
 def _url_type_hint(args: tuple[object, ...]) -> type:
@@ -204,7 +217,7 @@ class UrlKwargsProvider(RegisteredParameterProvider):
         hint = (
             str
             if annotation is inspect.Parameter.empty
-            else _unwrap_annotated(annotation)
+            else unwrap_annotated(annotation)
         )
         return _coerce_url_value(raw, hint)
 
@@ -252,11 +265,8 @@ def _resolve_multi(
 ) -> object:
     """Resolve a `DQuery[list[T]]` parameter from repeated query-string keys.
 
-    The function tries three wire formats in order. The plain repeated
-    form `?brand=a&brand=b` wins first. The qs-style bracket suffix
-    `?brand[]=a&brand[]=b` is the second fallback. The comma-delimited
-    form `?brand=a,b` is the third fallback. When none of the three
-    yield values, the parameter default is returned.
+    One value is ambiguous between the three spellings, so the other two are
+    read only once the plain repeated key has yielded no more than that.
     """
     inner = get_args(hint)
     first = inner[0] if inner else str
@@ -270,13 +280,10 @@ def _resolve_multi(
 
 
 def _expand_multi_value(request: HttpRequest, name: str, plain: list[str]) -> list[str]:
-    """Return values for `name` after considering bracket and comma forms.
+    """Return values for `name` after considering the bracket and comma forms.
 
-    `plain` holds whatever `request.GET.getlist(name)` returned and is
-    expected to have at most one element. An empty `plain` or a single
-    empty string falls back to the bracket form `name[]`. A single
-    non-empty string is split on commas when commas are present and
-    empty segments are dropped. Otherwise `plain` is returned unchanged.
+    `plain` carries at most one element by the time the caller gets here,
+    which is what leaves room for the other two spellings to mean something.
     """
     only = plain[0] if plain else ""
     if not only:
@@ -287,12 +294,10 @@ def _expand_multi_value(request: HttpRequest, name: str, plain: list[str]) -> li
 
 
 def get_multi_values(request: HttpRequest, name: str) -> list[str]:
-    """Return all values for `name` from ``request.GET``.
+    """Return every value `name` carries in `request.GET`.
 
-    Tries three wire formats in order: plain repeated keys
-    (``?brand=a&brand=b``), bracket suffix (``?brand[]=a&brand[]=b``),
-    and comma-delimited (``?brand=a,b``). Returns an empty list when
-    the parameter is absent in all three forms.
+    The three spellings a client may use for one repeated key are read in
+    turn, so a caller sees one list whichever of them the front end sent.
     """
     plain = request.GET.getlist(name)
     if len(plain) > 1:

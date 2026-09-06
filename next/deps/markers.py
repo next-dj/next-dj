@@ -4,8 +4,7 @@
 such as `DForm` or `DUrl`. `Depends` is a dataclass default value used
 to request dependency resolution by name, by callable, or by constant
 injection. `DependsProvider` is the built-in parameter provider that
-handles the `Depends` marker and registers itself through
-`RegisteredParameterProvider`.
+handles the `Depends` marker and registers itself through `RegisteredParameterProvider`.
 """
 
 from __future__ import annotations
@@ -29,11 +28,22 @@ class DDependencyBase[T]:
     __slots__ = ()
 
 
+def unwrap_annotated(annotation: object) -> object:
+    """Return the type an `Annotated[...]` wraps, or the annotation unchanged.
+
+    The plan keeps the extras a resolved hint carries, so every provider
+    matching on a marker has to look past the metadata a caller wrapped it in.
+    """
+    if get_origin(annotation) is Annotated:
+        return get_args(annotation)[0]
+    return annotation
+
+
 def marker_origin(annotation: object) -> object:
     """Return the marker an annotation names, seeing through one `Annotated` layer.
 
-    The plan keeps the extras a resolved hint carries, so a provider matching
-    on `DUrl` has to look past the metadata a caller wrapped it in.
+    Spelled out rather than built on `unwrap_annotated`, because the plain
+    annotation is the common case and reads its origin once here.
     """
     origin = get_origin(annotation)
     if origin is Annotated:
@@ -45,10 +55,8 @@ def marker_origin(annotation: object) -> object:
 class Depends:
     """Mark a parameter as a dependency resolved by the resolver.
 
-    Use as a default parameter value. `Depends("name")` resolves a
-    registered callable by name. `Depends(callable)` calls a factory
-    with DI-resolved arguments. `Depends(value)` injects a constant
-    value directly. `Depends()` resolves by the parameter name.
+    The argument decides which of the four forms applies, so one marker
+    covers a registered name, a factory, a constant, and the parameter name.
     """
 
     dependency: object | None = None
