@@ -52,7 +52,7 @@ def zone_response(
         result = render_zone(page_path, intent.zones, request, url_kwargs=url_kwargs)
     except UnknownZoneError:
         return _bad_request("unknown zone")
-    envelope = _build_envelope(result, intent, version)
+    envelope = _build_envelope(result, intent, version, request)
     body = backend.serialize_envelope(envelope)
     return PatchResponse(body, content_type=backend.content_type, version=version)
 
@@ -67,7 +67,10 @@ def _version_conflict(intent: "PartialIntent", version: str) -> bool:
 
 
 def _build_envelope(
-    result: "ZoneRenderResult", intent: "PartialIntent", version: str
+    result: "ZoneRenderResult",
+    intent: "PartialIntent",
+    version: str,
+    request: "HttpRequest",
 ) -> Envelope:
     """Assemble one envelope patching every rendered zone with its assets.
 
@@ -79,7 +82,7 @@ def _build_envelope(
     and a duplicated name is patched once. The verb is server-authored from
     the parsed intent, the client never names it.
     """
-    patches = Patches.versioned(version)
+    patches = Patches.versioned(version, request=request)
     for name in result.html:
         _patch_zone(patches, name, result, intent.merge)
     patches._absorb_zone_result(result)

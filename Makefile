@@ -12,6 +12,10 @@ PYTEST_E2E ?= uv run --group e2e pytest
 # size. Override to parallelise, e.g. `make test-examples-e2e E2E_XDIST="-n 2"`.
 E2E_XDIST ?=
 
+# An empty value, not an absent one, is what routes the two Vite examples through
+# their built manifest, so the browser drives those bundles rather than a dev server.
+E2E_ENV ?= VITE_ORIGIN= VITE_DEV_ORIGIN=
+
 help: # show this help message
 	@echo "Available commands:"
 	@echo "  install         - sync runtime deps + project from uv.lock (no dev group)"
@@ -137,7 +141,7 @@ test-examples-e2e: # run the browser suites for every example that ships tests/e
 	for example_dir in examples/*/; do \
 		if [ -d "$$example_dir/tests/e2e" ]; then \
 			ran=1; \
-			cd "$$example_dir" && $(PYTEST_E2E) tests/e2e --no-cov $(E2E_XDIST) \
+			cd "$$example_dir" && $(E2E_ENV) $(PYTEST_E2E) tests/e2e --no-cov $(E2E_XDIST) \
 				-p e2e_support.browser \
 				--tracing=retain-on-failure --video=retain-on-failure \
 				--screenshot=only-on-failure --output=test-results; \

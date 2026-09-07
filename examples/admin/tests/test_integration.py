@@ -391,12 +391,17 @@ class TestChangelistChrome:
 
 
 class TestBulkAction:
-    def test_bulk_action_with_no_selection_redirects(self, admin_client):
-        r = admin_client.post_action(
-            "admin:bulk_action", {"action": ""}, origin="/admin/library/book/"
-        )
+    @pytest.mark.parametrize(
+        "origin",
+        ["/admin/library/book/", "/admin/library/book/?status__exact=draft"],
+        ids=["bare_changelist", "filtered_changelist"],
+    )
+    def test_an_empty_bulk_action_returns_to_the_changelist_it_came_from(
+        self, admin_client, demo_data, origin
+    ):
+        r = admin_client.post_action("admin:bulk_action", {"action": ""}, origin=origin)
         assert r.status_code == 302
-        assert r["Location"] == "/admin/library/book/"
+        assert r["Location"] == origin
 
     def test_filtered_changelist_form_carries_the_filter_in_its_origin(
         self, admin_client, demo_data
@@ -408,17 +413,6 @@ class TestBulkAction:
         assert rendered["_next_form_origin"] == (
             "/admin/library/book/?status__exact=draft"
         )
-
-    def test_bulk_action_returns_to_the_filtered_changelist(
-        self, admin_client, demo_data
-    ):
-        r = admin_client.post_action(
-            "admin:bulk_action",
-            {"action": ""},
-            origin="/admin/library/book/?status__exact=draft",
-        )
-        assert r.status_code == 302
-        assert r["Location"] == "/admin/library/book/?status__exact=draft"
 
 
 class TestAddView:

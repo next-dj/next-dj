@@ -56,6 +56,7 @@ A backend adds the renderer methods that its registered kinds reference, see :do
        """Return the public URL of an already-resolved asset for this render."""
 
 Every URL the pipeline renders passes through it, including the ``next.min.js`` runtime bundle and its preload hint, which the framework builds rather than a renderer method.
+A partial patch envelope carries bare URLs for the assets a zone body introduces, and those pass through the hook as well, so a zone morph reaches the client with the URLs a full page render would have written.
 Override ``asset_url`` when the URL must change, override the renderer methods when the markup must change.
 
 The default backend

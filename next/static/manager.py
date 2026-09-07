@@ -174,6 +174,18 @@ class StaticManager:
             )
         return html
 
+    def asset_url(self, url: str, *, request: HttpRequest | None = None) -> str:
+        """Return an already-resolved asset URL as the pipeline renders it.
+
+        Full page renders reach the backend hook through tag rendering, while a
+        partial envelope ships bare URLs to the client, so both ask here and a
+        backend that leaves the hook alone pays no call.
+        """
+        self._ensure_backends()
+        if not self._rewrites_urls:
+            return url
+        return self.default_backend.asset_url(url, request=request)
+
     def _next_script_builder(self) -> NextScriptBuilderType:
         if self._script_builder is None:
             url = str(staticfiles_storage.url(NEXT_JS_STATIC_PATH))

@@ -2,12 +2,14 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from django.http import HttpRequest
 from django.test import Client
 
 import next.partial.render as render_module
 from next.pages.loaders import _MODULE_MEMO, _load_python_module_memo
 from next.partial.headers import CONTENT_TYPE
-from next.testing import NextClient, envelope_of
+from next.static import StaticFilesBackend
+from next.testing import NextClient, envelope_of, override_next_settings
 from tests.site_pages.counted import probe
 
 
@@ -44,6 +46,36 @@ class TestZoneGetAssetsManifest:
             if asset["url"] == "/static/next/zoned.css"
         )
         assert css["kind"] == "css"
+
+
+class PrefixingStaticBackend(StaticFilesBackend):
+    """Backend that stamps a per-request prefix onto every asset URL."""
+
+    def asset_url(self, url: str, *, request: HttpRequest | None = None) -> str:
+        """Prefix a same-site URL while a request is in scope."""
+        if request is None or not url.startswith("/"):
+            return url
+        return f"/pfx{url}"
+
+
+PREFIXED_BACKENDS = [
+    {"BACKEND": "tests.partial.test_zone_acceptance.PrefixingStaticBackend"}
+]
+
+
+class TestZoneAssetsFollowTheBackendRewrite:
+    """A backend that rewrites URLs reaches the assets a zone body introduces.
+
+    The envelope ships bare URLs the client inserts itself, so a manifest built
+    from the raw collector would hand a CDN deployment an origin-relative URL.
+    """
+
+    def test_manifest_url_carries_the_prefix(self) -> None:
+        with override_next_settings(STATIC_BACKENDS=PREFIXED_BACKENDS):
+            response = NextClient().get_zones("/zoned/", "alpha")
+        urls = [asset["url"] for asset in envelope_of(response).assets]
+        assert "/pfx/static/next/zoned.css" in urls
+        assert "/static/next/zoned.css" not in urls
 
 
 class TestEarlyRenderResponseIsVerbatim:

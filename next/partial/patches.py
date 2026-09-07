@@ -10,6 +10,7 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from next.forms.origin import resolve_origin, resolve_url_to_page
 from next.pages import page
 from next.static.assets import default_kinds
+from next.static.manager import default_manager
 from next.static.scripts import RESERVED_PAYLOAD_KEYS
 from next.static.serializers import resolve_serializer
 
@@ -74,8 +75,8 @@ class Patches:
     Built from a request, the builder takes its asset version from the
     active protocol backend and resolves the origin page lazily, so a
     `morph(zone=...)` renders against the page that owns the request.
-    The `versioned` classmethod builds a request-free assembler for
-    paths that already hold the version and render their own HTML.
+    The `versioned` classmethod builds an assembler for paths that
+    already hold the version and render their own HTML.
     """
 
     def __init__(self, request: HttpRequest, *, echo_of: str | None = None) -> None:
@@ -89,14 +90,21 @@ class Patches:
         self._init_state(request, asset_version(), echo_of)
 
     @classmethod
-    def versioned(cls, version: str, *, echo_of: str | None = None) -> "Patches":
-        """Start an empty request-free builder stamped with a literal version.
+    def versioned(
+        cls,
+        version: str,
+        *,
+        echo_of: str | None = None,
+        request: HttpRequest | None = None,
+    ) -> "Patches":
+        """Start an empty builder stamped with a literal version.
 
-        The builder stays a low-level envelope assembler with no request, used by paths
-        that already hold the version and render their own HTML.
+        The builder stays a low-level envelope assembler, used by paths that already
+        hold the version and render their own HTML. Such a path passes `request` when
+        it has one, so an asset URL the backend scopes per request is scoped here too.
         """
         builder = cls.__new__(cls)
-        builder._init_state(None, version, echo_of)
+        builder._init_state(request, version, echo_of)
         return builder
 
     def _init_state(
@@ -594,13 +602,16 @@ class Patches:
     def _collect_zone_assets(self, result: "ZoneRenderResult") -> "Patches":
         """Record the URL-form and inline-form assets a zone body collected.
 
-        This deliberately collects assets only. The builder verbs own context
-        through context(), so they never absorb the js-context delta.
+        Each URL passes through the backend hook the full page render also asks,
+        so a per-request rewrite reaches an asset a zone introduces. This
+        deliberately collects assets only. The builder verbs own context through
+        context(), so they never absorb the js-context delta.
         """
+        request = self._request
         for kind, body in result.inline_assets():
             self.add_asset(kind, "", inline=body)
         for kind, url in result.url_assets():
-            self.add_asset(kind, url)
+            self.add_asset(kind, default_manager.asset_url(url, request=request))
         return self
 
     def _absorb_zone_result(self, result: "ZoneRenderResult") -> "Patches":

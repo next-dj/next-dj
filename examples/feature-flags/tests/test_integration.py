@@ -192,16 +192,23 @@ class TestAdminBulkToggle:
 class TestWriteGate:
     """The check_permissions hook gates the toggle action on the admin_writes flag."""
 
-    def test_gate_off_denies_toggle(self, next_client, write_gate, make_flag) -> None:
-        write_gate(enabled=False)
+    @pytest.mark.parametrize(
+        ("gate", "status", "toggled"),
+        [(False, 403, False), (True, 302, True)],
+        ids=["gate_off_denies", "gate_on_allows"],
+    )
+    def test_the_gate_decides_whether_the_toggle_lands(
+        self, next_client, write_gate, make_flag, gate, status, toggled
+    ) -> None:
+        write_gate(enabled=gate)
         make_flag("beta", label="Beta")
 
         response = next_client.post_action(
             "bulk_toggle_form", {"enabled_names": ["beta"]}
         )
 
-        assert response.status_code == 403
-        assert Flag.objects.get(name="beta").enabled is False
+        assert response.status_code == status
+        assert Flag.objects.get(name="beta").enabled is toggled
 
     def test_gate_absent_denies_toggle(self, next_client, make_flag) -> None:
         make_flag("beta", label="Beta", enabled=True)
@@ -209,17 +216,6 @@ class TestWriteGate:
         response = next_client.post_action("bulk_toggle_form", {"enabled_names": []})
 
         assert response.status_code == 403
-        assert Flag.objects.get(name="beta").enabled is True
-
-    def test_gate_on_allows_toggle(self, next_client, write_gate, make_flag) -> None:
-        write_gate(enabled=True)
-        make_flag("beta", label="Beta")
-
-        response = next_client.post_action(
-            "bulk_toggle_form", {"enabled_names": ["beta"]}
-        )
-
-        assert response.status_code == 302
         assert Flag.objects.get(name="beta").enabled is True
 
     def test_denial_is_counted_on_metrics_page(

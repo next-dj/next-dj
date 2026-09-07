@@ -768,6 +768,34 @@ class TestBackendRewritesEveryAssetUrl:
         assert asset_url.call_count == 0
 
 
+class TestAssetUrlHook:
+    """The manager hands out the URL the pipeline would render for an asset."""
+
+    def test_identity_backend_returns_the_url_unchanged(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        url = fresh_manager.asset_url(CSS_URL, request=RequestFactory().get("/"))
+        assert url == CSS_URL
+
+    def test_identity_backend_is_never_asked(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        with mock.patch.object(
+            fresh_manager.default_backend,
+            "asset_url",
+            wraps=fresh_manager.default_backend.asset_url,
+        ) as asset_url:
+            fresh_manager.asset_url(CSS_URL)
+        assert asset_url.call_count == 0
+
+    def test_rewriting_backend_stamps_the_prefix(self) -> None:
+        with override_settings(NEXT_FRAMEWORK=PREFIXED_BACKENDS):
+            url = StaticManager().asset_url(
+                "/static/next/a.css", request=RequestFactory().get("/")
+            )
+        assert url == "/pfx/static/next/a.css"
+
+
 class TestDiscoveryForwarding:
     def test_discover_page_assets_delegates(
         self, tmp_path: Path, fresh_manager: StaticManager

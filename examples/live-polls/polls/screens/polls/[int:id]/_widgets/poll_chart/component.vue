@@ -18,8 +18,24 @@ const rows = computed(() => {
   }));
 });
 
+function sameAsCurrent(payload) {
+  const next = payload.choices ?? [];
+  if (next.length !== choices.value.length) return false;
+  if ((payload.total_votes ?? totalVotes.value) !== totalVotes.value) return false;
+  return next.every((choice, index) => {
+    const current = choices.value[index];
+    return (
+      current.id === choice.id &&
+      current.votes === choice.votes &&
+      current.text === choice.text
+    );
+  });
+}
+
+// The voter's tab is told twice, by the zone morph and by the context patch
+// beside it, so re-applying the snapshot in hand must not clear the highlight.
 function applySnapshot(payload) {
-  if (!payload) return;
+  if (!payload || sameAsCurrent(payload)) return;
   const next = payload.choices ?? [];
   const previous = new Map(choices.value.map((c) => [c.id, c.votes]));
   let changed = null;

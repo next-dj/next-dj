@@ -297,6 +297,22 @@ class TestFilterFormDispatch:
         assert len(events) == 1
         assert events[0].kwargs["response_status"] == 302
 
+    def test_partial_post_without_the_zone_visits_the_live_page(
+        self, next_client
+    ) -> None:
+        """A stats sub-page renders the filter zoneless, so its apply navigates.
+
+        The live totals zone exists only on `/stats/`, and morphing it for a
+        sub-page would render a zone that page never declared.
+        """
+        response = next_client.post_action(
+            "window_filter_form", {"window": "1h"}, origin="/stats/pages/", partial=True
+        )
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["visit"]
+        assert envelope.ops[0]["href"] == "/stats/?window=1h"
+
 
 class TestPollZone:
     """The overview totals zone carries a poll interval and still morphs."""

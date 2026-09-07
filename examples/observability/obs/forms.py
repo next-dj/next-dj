@@ -2,7 +2,7 @@ from django import forms as django_forms
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 
 from next.forms import Form
-from next.partial import Patches, is_partial_request
+from next.partial import Patches, zone_requested
 
 
 WINDOW_CHOICES = (("1m", "Last minute"), ("5m", "Last 5 minutes"), ("1h", "Last hour"))
@@ -35,19 +35,20 @@ class WindowFilterForm(Form):
     def on_valid(self, request: HttpRequest) -> HttpResponse:
         """Re-aggregate the totals under the picked window and pulse the change.
 
-        A partial apply from the live page morphs the `live-totals` zone
-        with the re-aggregated cards and the `stats-window` label beside
-        it, so the heading never names a window the cards no longer show,
-        and emits the custom `metric-pulse` verb so the co-located handler
-        flashes the refreshed numbers. Without the runtime the apply falls
-        back to a redirect that carries the window in the querystring.
+        An apply from the live page morphs the `live-totals` zone with the
+        re-aggregated cards and the `stats-window` label beside it, so the
+        heading never names a window the cards no longer show, and emits the
+        custom `metric-pulse` verb so the co-located handler flashes the
+        refreshed numbers. Only that page asks for the zone, so a caller that
+        never named it takes the redirect instead, which covers a stats
+        sub-page rendering the filter zoneless and a browser with no runtime.
         """
         # Pick the literal out of WINDOW_CHOICES so the redirect target is
         # built from trusted constants, with request data used only to compare.
         chosen = next(
             value for value, _ in WINDOW_CHOICES if value == self.cleaned_data["window"]
         )
-        if not is_partial_request(request):
+        if not zone_requested(request, LIVE_TOTALS_ZONE):
             return HttpResponseRedirect(f"/stats/?window={chosen}")
         return (
             Patches(request)

@@ -13,23 +13,22 @@ BASE = "2026-05-08T12:00:00+00:00"
 class TestReadWindowBoundaries:
     """`read_window(kind, minutes)` includes events inside `[now - m, now]`."""
 
-    def test_event_inside_window_is_counted(self, frozen_now) -> None:
+    @pytest.mark.parametrize(
+        ("read_at", "expected"),
+        [
+            ("2026-05-08T12:00:30+00:00", {"x": 1}),
+            ("2026-05-08T12:01:00+00:00", {"x": 1}),
+            ("2026-05-08T12:02:00+00:00", {}),
+        ],
+        ids=["inside_the_window", "on_the_edge", "past_the_edge"],
+    )
+    def test_one_event_falls_in_or_out_by_the_age_of_its_bucket(
+        self, frozen_now, read_at: str, expected: dict[str, int]
+    ) -> None:
         with frozen_now(BASE) as traveller:
             metrics.incr("k", "x")
-            traveller.move_to("2026-05-08T12:00:30+00:00")
-            assert metrics.read_window("k", minutes=1) == {"x": 1}
-
-    def test_event_just_outside_window_is_excluded(self, frozen_now) -> None:
-        with frozen_now(BASE) as traveller:
-            metrics.incr("k", "x")
-            traveller.move_to("2026-05-08T12:02:00+00:00")
-            assert metrics.read_window("k", minutes=1) == {}
-
-    def test_event_at_window_edge_is_included(self, frozen_now) -> None:
-        with frozen_now(BASE) as traveller:
-            metrics.incr("k", "x")
-            traveller.move_to("2026-05-08T12:01:00+00:00")
-            assert metrics.read_window("k", minutes=1) == {"x": 1}
+            traveller.move_to(read_at)
+            assert metrics.read_window("k", minutes=1) == expected
 
     def test_separate_buckets_sum_under_wider_window(self, frozen_now) -> None:
         with frozen_now(BASE) as traveller:

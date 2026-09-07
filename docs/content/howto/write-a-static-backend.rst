@@ -61,7 +61,7 @@ When the URL itself must change, subclass ``StaticFilesBackend`` and override ``
            return f"{CDN}{url}"
 
 ``asset_url`` receives the URL and an optional ``request`` keyword.
-One override covers ``.css``, ``.js``, and ``.mjs`` assets plus the ``next.min.js`` runtime bundle and its preload hint.
+One override covers ``.css``, ``.js``, and ``.mjs`` assets plus the ``next.min.js`` runtime bundle and its preload hint, in a full page render and in the asset manifest of a partial patch envelope alike.
 The configured tag templates still shape the markup around the rewritten URL.
 
 Register the backend.

@@ -3,6 +3,7 @@ import os
 import pathlib
 import re
 import tempfile
+import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 
@@ -21,6 +22,7 @@ CDN_CACHE_DIR = pathlib.Path(tempfile.gettempdir()) / "next-dj-e2e-cdn"
 IGNORED_CONSOLE = (
     re.compile(r"cdn\.tailwindcss\.com should not be used in production"),
     re.compile(r"Third-party cookie will be blocked"),
+    re.compile(r"You are using the in-browser Babel transformer"),
 )
 
 HTTP_ERROR_STATUS = 400
@@ -184,11 +186,22 @@ def _serve_from_cache(route: Route) -> None:
     if not path.exists():
         CDN_CACHE_DIR.mkdir(parents=True, exist_ok=True)
         body = route.fetch().body()
-        # Another xdist worker may be writing the same asset, so publish atomically.
-        staging = path.with_suffix(f"{path.suffix}.{id(route)}")
+        # Another xdist worker may be writing the same asset, so publish atomically
+        # under a name no concurrent process on this machine can pick as well.
+        staging = path.with_suffix(f"{path.suffix}.{os.getpid()}.{uuid.uuid4().hex}")
         staging.write_bytes(body)
         staging.replace(path)
     route.fulfill(status=200, content_type=_content_type(path), body=path.read_bytes())
+
+
+def _test_failed(request: pytest.FixtureRequest) -> bool:
+    """Report whether the call phase failed, the way pytest-playwright reads it.
+
+    The report attribute is missing when the test never reached its call phase,
+    which counts as a failure so the artefacts survive.
+    """
+    report = getattr(request.node, "rep_call", None)
+    return report is None or bool(report.failed)
 
 
 @pytest.fixture()
@@ -203,10 +216,13 @@ def next_probe(request: pytest.FixtureRequest) -> Iterator[PageProbe]:
     collected.attach(page)
     yield collected
     collected.detach(page)
-    # Closing here also releases any SSE stream still parked in a server thread.
-    page.close()
 
     problems = collected.problems()
+    if not (problems or _test_failed(request)):
+        # Closing here releases any SSE stream still parked in a server thread. A
+        # failed test keeps its page open instead, because pytest-playwright shoots
+        # the failure screenshot off `context.pages` when the context tears down.
+        page.close()
     if problems:
         pytest.fail("the browser reported problems:\n  " + "\n  ".join(problems))
 
