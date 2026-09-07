@@ -42,7 +42,8 @@ _note_card = _load(
 
 def _tenant_request(**overrides) -> HttpRequest:
     request = HttpRequest()
-    request.tenant = Tenant(**{"slug": "acme", "name": "Acme", **overrides})  # type: ignore[attr-defined]
+    tenant = Tenant(**{"slug": "acme", "name": "Acme", **overrides})
+    request.tenant = tenant  # type: ignore[attr-defined]
     return request
 
 
@@ -215,38 +216,41 @@ class TestTenantPrefixStaticBackend:
 
     def test_no_request_returns_url_unchanged(self) -> None:
         backend = TenantPrefixStaticBackend()
-        assert backend.render_link_tag("/static/next/a.css", request=None) == (
-            '<link rel="stylesheet" href="/static/next/a.css">'
+        assert backend.asset_url("/static/next/a.css", request=None) == (
+            "/static/next/a.css"
+        )
+
+    def test_request_without_tenant_returns_url_unchanged(self) -> None:
+        backend = TenantPrefixStaticBackend()
+        assert backend.asset_url("/static/next/a.css", request=HttpRequest()) == (
+            "/static/next/a.css"
         )
 
     def test_request_with_tenant_prepends_prefix(
         self, tenant_request: Callable[..., HttpRequest]
     ) -> None:
         backend = TenantPrefixStaticBackend()
-        rendered = backend.render_script_tag(
-            "/static/next/a.js", request=tenant_request()
-        )
-        assert 'src="/_t/acme/static/next/a.js"' in rendered
-
-    def test_module_tag_prepends_prefix(
-        self, tenant_request: Callable[..., HttpRequest]
-    ) -> None:
-        backend = TenantPrefixStaticBackend()
-        rendered = backend.render_module_tag(
-            "/static/next/components/markdown_preview.mjs", request=tenant_request()
-        )
-        assert 'type="module"' in rendered
-        assert 'src="/_t/acme/static/next/components/markdown_preview.mjs"' in rendered
+        url = backend.asset_url("/static/next/a.js", request=tenant_request())
+        assert url == "/_t/acme/static/next/a.js"
 
     def test_absolute_external_url_passes_through(
         self, tenant_request: Callable[..., HttpRequest]
     ) -> None:
         backend = TenantPrefixStaticBackend()
-        rendered = backend.render_link_tag(
+        url = backend.asset_url(
             "https://cdn.example.com/x.css", request=tenant_request()
         )
-        assert "https://cdn.example.com/x.css" in rendered
-        assert "/_t/" not in rendered
+        assert url == "https://cdn.example.com/x.css"
+
+    def test_rendered_tags_still_use_the_default_markup(
+        self, tenant_request: Callable[..., HttpRequest]
+    ) -> None:
+        """Markup stays the default, the prefix is applied by the pipeline."""
+        backend = TenantPrefixStaticBackend()
+        request = tenant_request()
+        assert backend.render_link_tag("/x.css", request=request) == (
+            '<link rel="stylesheet" href="/x.css">'
+        )
 
 
 class TestNoteCardComponent:

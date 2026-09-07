@@ -82,6 +82,7 @@ Runtime script injection
 ------------------------
 
 Under the ``AUTO`` script injection policy the static manager wraps the rendered page with the ``next.min.js`` runtime through ``NextScriptBuilder``.
+The builder owns the markup of all three fragments, while the bundle URL comes from ``backend.asset_url``, so a request aware backend moves the runtime the same way it moves a co-located asset.
 
 .. mermaid::
 

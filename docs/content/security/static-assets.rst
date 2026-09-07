@@ -97,6 +97,10 @@ A request aware backend reads the nonce from the request and writes it into each
            nonce = getattr(request, "_csp_nonce", "")
            return f'<script src="{url}" nonce="{nonce}"></script>'
 
+The ``next.min.js`` tag and the inline ``Next._init`` script are built by ``NextScriptBuilder`` rather than by a renderer method, so a backend nonce never reaches them.
+The ``script_tag_template`` and ``init_template`` keys of ``NEXT_JS_OPTIONS`` are read once per process and cannot carry a per-request nonce either.
+A policy that must cover those two fragments admits them by hash, or through ``strict-dynamic`` from a script that already carries a nonce.
+
 Register the backend by its dotted path.
 
 .. code-block:: python

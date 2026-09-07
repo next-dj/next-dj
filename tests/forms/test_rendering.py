@@ -402,7 +402,7 @@ class TestFormTagRender:
         assert str(PAGE_MODULE_FOR_FORM_TESTS) not in html
 
     def test_includes_next_form_origin_hidden(self, form_engine, csrf_request) -> None:
-        """Form emits `_next_form_origin` hidden field set to `request.path`."""
+        """Form emits the `_next_form_origin` hidden field with the current URL."""
         csrf_request.path = "/admin/library/book/1/change/"
         t = form_engine.from_string('{% form "simple_form" %}x{% endform %}')
         html = t.render(
@@ -413,8 +413,40 @@ class TestFormTagRender:
                 }
             )
         )
-        assert "_next_form_origin" in html
-        assert "/admin/library/book/1/change/" in html
+        assert 'name="_next_form_origin" value="/admin/library/book/1/change/"' in html
+
+    def test_origin_keeps_the_query_string(self, form_engine, csrf_request) -> None:
+        """The origin carries the filters, so a redirect back keeps the list view."""
+        csrf_request.path = "/admin/library/book/"
+        csrf_request.META["QUERY_STRING"] = "status__exact=draft&p=2"
+        t = form_engine.from_string('{% form "simple_form" %}x{% endform %}')
+        html = t.render(
+            Context(
+                {
+                    "request": csrf_request,
+                    "current_page_module_path": str(PAGE_MODULE_FOR_FORM_TESTS),
+                }
+            )
+        )
+        assert (
+            'name="_next_form_origin" '
+            'value="/admin/library/book/?status__exact=draft&amp;p=2"' in html
+        )
+
+    def test_origin_without_a_query_carries_no_question_mark(
+        self, form_engine, csrf_request
+    ) -> None:
+        csrf_request.path = "/admin/library/book/"
+        t = form_engine.from_string('{% form "simple_form" %}x{% endform %}')
+        html = t.render(
+            Context(
+                {
+                    "request": csrf_request,
+                    "current_page_module_path": str(PAGE_MODULE_FOR_FORM_TESTS),
+                }
+            )
+        )
+        assert 'name="_next_form_origin" value="/admin/library/book/"' in html
 
     @staticmethod
     def _rerender_request(csrf_request, post: dict) -> object:

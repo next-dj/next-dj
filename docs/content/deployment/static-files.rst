@@ -87,16 +87,11 @@ Use a CDN aware backend to point asset URLs at a CDN host.
    CDN = "https://cdn.example.com"
 
    class CdnBackend(StaticFilesBackend):
-       def render_link_tag(self, url, *, request=None) -> str:
-           return f'<link rel="stylesheet" href="{CDN}{url}">'
-
-       def render_script_tag(self, url, *, request=None) -> str:
-           return f'<script src="{CDN}{url}" defer></script>'
-
-       def render_module_tag(self, url, *, request=None) -> str:
-           return f'<script type="module" src="{CDN}{url}"></script>'
+       def asset_url(self, url, *, request=None) -> str:
+           return f"{CDN}{url}"
 
 Register the backend in ``STATIC_BACKENDS`` and configure the CDN to pull from the static origin.
+``asset_url`` moves every URL the pipeline renders, so the ``next.min.js`` runtime bundle and its preload hint reach the CDN host as well.
 
 Pre compressed files
 --------------------

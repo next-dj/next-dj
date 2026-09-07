@@ -35,7 +35,7 @@ Framework machinery.
    ``bind_component_widgets`` lives in ``next.forms.widgets``.
    ``render_form_page_with_errors`` lives in ``next.forms.rendering``.
    ``RegistrationDiagnostics`` and the ``registration_diagnostics`` instance live in ``next.forms.diagnostics``.
-   The UID helpers ``FORM_ACTION_REVERSE_NAME``, ``URL_NAME_FORM_ACTION``, ``ORIGIN_FIELD_NAME``, ``FORM_ORIGIN_OVERRIDE_KEY``, ``reverse_form_action``, and ``validated_origin_path`` live in ``next.forms.uid``.
+   The UID helpers ``FORM_ACTION_REVERSE_NAME``, ``URL_NAME_FORM_ACTION``, ``ORIGIN_FIELD_NAME``, ``FORM_ORIGIN_OVERRIDE_KEY``, ``reverse_form_action``, ``current_origin_path``, and ``validated_origin_path`` live in ``next.forms.uid``.
    The test isolation helper ``reset_form_registration_state`` belongs to ``next.testing``, documented under :doc:`/content/ref/testing`.
 
 Internal hooks.
@@ -240,7 +240,8 @@ Action URL helpers
 ``reverse_form_action`` resolves the dispatch URL for an action UID under either URL wiring, the namespaced ``next:form_action`` route or the bare ``form_action`` route.
 It lives in ``next.forms.uid`` and is not re-exported at the package level.
 ``ORIGIN_FIELD_NAME`` is the wire name of the hidden origin field every rendered form carries, ``"_next_form_origin"``.
-``validated_origin_path`` accepts a posted origin value only as a same-site path.
+``current_origin_path`` names the URL a rendering request should return to, its query string included.
+``validated_origin_path`` accepts a posted origin value only as a same-site path, and refuses a value carrying a tab or a newline because a browser drops those code points before resolving a URL.
 ``redirect_to_origin`` builds the success redirect back to the page named by the posted origin field, falling back to ``fallback`` when the field is absent or off-site.
 It is re-exported from ``next.forms``.
 ``FORM_ORIGIN_OVERRIDE_KEY`` names the render-context key whose value overrides the origin of a rendered form, which the partial shaping layer sets to the next step URL on a wizard advance.
@@ -255,6 +256,7 @@ Origin resolution
 ``resolve_origin`` resolves the posted ``_next_form_origin`` field into an ``OriginMatch`` and memoises the result on the request, so the dispatcher and every ``{% form %}`` tag on a re-rendered page share one resolution.
 ``resolve_url_to_match`` resolves any same-site URL against the URLconf, and passing ``filter_reserved=False`` keeps the captured URL kwargs raw instead of dropping the names the dependency resolver reserves.
 ``resolve_url_to_page`` returns only the page path of the resolved view, or ``None`` when the URL does not name a routed page.
+The ``origin`` field of an ``OriginMatch`` holds the posted URL as submitted, while its ``path`` property drops the query string for a caller that treats the origin as a page address.
 
 .. automodule:: next.forms.origin
    :members: OriginMatch, resolve_origin, resolve_url_to_match, resolve_url_to_page

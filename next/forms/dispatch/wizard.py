@@ -70,9 +70,7 @@ def _bind_wizard_step(
     if denial is not None:
         return denial
     wizard = wizard_class(
-        request=request,
-        url_kwargs=state.url_kwargs,
-        base_path=state.origin_match.origin,
+        request=request, url_kwargs=state.url_kwargs, base_path=state.origin_match.path
     )
     step_name = wizard.current_step()
     form_class = wizard.step_form_class(step_name)

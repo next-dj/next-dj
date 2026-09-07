@@ -15,6 +15,8 @@ from next.forms.dispatch import FormActionDispatch
 from next.forms.dispatch.responses import _send_success_message
 from next.forms.manager import form_action_manager
 from next.forms.signals import action_dispatched
+from next.forms.uid import ORIGIN_FIELD_NAME
+from next.testing import hidden_fields
 
 
 def _computed_success_url() -> str:
@@ -466,6 +468,38 @@ class TestSuccessUrlViaClient:
         resp = _post_action(client_no_csrf, "instance_return_form", {"name": "Ada"})
         assert resp.status_code == 302
         assert resp.url == "/things/7/"
+
+
+@pytest.mark.django_db()
+class TestOriginKeepsTheQueryString:
+    """A form rendered on a filtered list sends the visitor back to that filter."""
+
+    def test_rendered_origin_carries_the_query_string(self, client_no_csrf) -> None:
+        page = client_no_csrf.get("/board_settings/?status=draft&p=2")
+        assert page.status_code == 200
+        fields = hidden_fields(page.content.decode())
+        assert fields[ORIGIN_FIELD_NAME] == "/board_settings/?status=draft&p=2"
+
+    def test_success_redirect_lands_back_on_the_filtered_page(
+        self, client_no_csrf
+    ) -> None:
+        page = client_no_csrf.get("/board_settings/?status=draft&p=2")
+        origin = hidden_fields(page.content.decode())[ORIGIN_FIELD_NAME]
+        resp = _post_action(
+            client_no_csrf, "default_redirect_form", {"name": "Ada"}, origin=origin
+        )
+        assert resp.status_code == 302
+        assert resp.url == "/board_settings/?status=draft&p=2"
+
+    def test_invalid_submit_rerenders_the_origin_with_its_query(
+        self, client_no_csrf
+    ) -> None:
+        origin = "/board_settings/?status=draft&p=2"
+        resp = _post_action(
+            client_no_csrf, "default_redirect_form", {"name": ""}, origin=origin
+        )
+        assert resp.status_code == 200
+        assert hidden_fields(resp.content.decode())[ORIGIN_FIELD_NAME] == origin
 
 
 class TestModelInstanceNormalisation:

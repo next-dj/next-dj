@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+from access.policy import POLICY_FIELD
 from django import forms as django_forms
 from django.template import Context, Template
 from django.utils.html import escape
@@ -99,10 +100,16 @@ def render(form: django_forms.Form, wizard: FormWizard) -> str:
 
 
 def _fields_by_step(wizard: FormWizard) -> dict[str, list[str]]:
+    """Map each step to the data fields it owns, minus the shared acknowledgement.
+
+    The acknowledgement rides on every step form and renders once beneath the
+    sections, so it is not a field any single section owns.
+    """
     by_step: dict[str, list[str]] = {}
     for name in wizard.step_names():
         form_class = wizard.step_form_class(name)
-        by_step[name] = list(form_class.base_fields) if form_class is not None else []
+        declared = list(form_class.base_fields) if form_class is not None else []
+        by_step[name] = [field for field in declared if field != POLICY_FIELD]
     return by_step
 
 

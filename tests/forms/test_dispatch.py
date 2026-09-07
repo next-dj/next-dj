@@ -1080,6 +1080,17 @@ class TestWizardDispatchViaClient:
         assert resp.status_code == 302
         assert resp.url == "/request/scope/"
 
+    def test_step_url_ignores_the_origin_query_string(self, client_no_csrf) -> None:
+        """A query on the origin never leaks into the derived next-step URL."""
+        resp = self._post_step(
+            client_no_csrf,
+            "identity",
+            {"name": "Ada"},
+            origin="/request/identity/?back=/request/identity/",
+        )
+        assert resp.status_code == 302
+        assert resp.url == "/request/scope/"
+
     def test_invalid_step_re_renders_page(self, client_no_csrf) -> None:
         """An invalid step re-renders the page and stores nothing."""
         resp = self._post_step(client_no_csrf, "identity", {"name": ""})

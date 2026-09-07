@@ -76,3 +76,79 @@ jobs:
           echo "Failed: ${failed[*]}"
           exit 1
         fi
+
+  test-examples-e2e:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        sparse-checkout: |
+          pyproject.toml
+          Makefile
+          examples
+          .github
+        sparse-checkout-cone-mode: false
+    - name: Download prebuilt wheel and requirements
+      uses: actions/download-artifact@v4
+      with:
+        name: next-dj-dist
+        path: dist
+    - name: Set up Python 3.13
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.13"
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+      with:
+        version: "0.11.2"
+    - name: Create venv and install wheel + dev and e2e requirements
+      run: |
+        uv venv --python 3.13
+        uv pip install -r dist/requirements-dev.txt -r dist/requirements-e2e.txt
+        uv pip install --no-deps --force-reinstall dist/*.whl
+        uv pip install "django==5.2"
+    # The browser binaries pin to the playwright release, and uv.lock is outside the
+    # sparse checkout, so the exported requirements file is what keys the cache.
+    - name: Cache the playwright browsers
+      id: browser-cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/ms-playwright
+        key: ${{ runner.os }}-playwright-${{ hashFiles('dist/requirements-e2e.txt') }}
+    - name: Install chromium with its system dependencies
+      if: steps.browser-cache.outputs.cache-hit != 'true'
+      run: uv run --no-project playwright install --with-deps chromium
+    # A cache hit restores the browsers but never the apt packages they link against.
+    - name: Install the system dependencies chromium links against
+      if: steps.browser-cache.outputs.cache-hit == 'true'
+      run: uv run --no-project playwright install-deps chromium
+    # Both guards against a missing browser stack are silent by design, so the job
+    # asserts the suites are collectable before trusting a green run.
+    - name: Verify the browser suites collect
+      run: |
+        set -e
+        total=0
+        for example_dir in examples/*/; do
+          if [ -d "$example_dir/tests/e2e" ]; then
+            count=$(cd "$example_dir" && uv run --no-project pytest tests/e2e \
+              -p e2e_support.browser --no-cov --collect-only -q 2>/dev/null \
+              | grep -c "::" || true)
+            echo "$example_dir -> $count"
+            total=$((total + count))
+          fi
+        done
+        if [ "$total" -eq 0 ]; then
+          echo "ERROR: no browser test was collected"
+          exit 1
+        fi
+    - name: Run the browser end-to-end suites
+      env:
+        PYTEST_E2E: uv run --no-project pytest
+      run: make test-examples-e2e
+    - name: Upload playwright artifacts from failures
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: playwright-artifacts
+        path: examples/*/test-results/
+        retention-days: 7

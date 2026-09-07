@@ -119,18 +119,15 @@ def _filters(cl: ChangeList) -> list[dict[str, Any]]:
     ]
 
 
-def _actions(
-    model_admin: ModelAdmin, model: type[Model], request: HttpRequest
-) -> list[dict[str, Any]]:
-    placeholders = {
-        "verbose_name": str(model._meta.verbose_name),
-        "verbose_name_plural": str(model._meta.verbose_name_plural),
-    }
+def _actions(model_admin: ModelAdmin, request: HttpRequest) -> list[dict[str, Any]]:
+    # `get_actions` answers with a `(callable, name, description)` tuple on Django 5.2
+    # and an `Action` dataclass from 6.0 on. `get_action_choices` is stable across both
+    # and interpolates `%(verbose_name_plural)s` against the model itself.
     return [
-        {"name": name, "description": str(description) % placeholders}
-        for name, (_func, _name, description) in model_admin.get_actions(
-            request
-        ).items()
+        {"name": name, "description": str(description)}
+        for name, description in model_admin.get_action_choices(
+            request, default_choices=[]
+        )
     ]
 
 
@@ -152,7 +149,7 @@ def changelist_state(
         "rows": _rows(cl, visible, model_admin, app_label, model_name),
         "pagination": _pagination(cl),
         "filters": _filters(cl),
-        "actions": _actions(model_admin, model, request),
+        "actions": _actions(model_admin, request),
         "search_enabled": bool(cl.search_fields),
         "query": cl.query,
         "carried_params": [(k, v) for k, v in cl.params.items() if k not in ("q", "p")],

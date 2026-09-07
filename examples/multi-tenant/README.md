@@ -10,7 +10,7 @@ A workspace for two independent tenants (Acme and Globex) that share the same Dj
 | `/notes/` | All notes that belong to the active tenant, rendered as `note_card` composites. |
 | `/notes/new/` | Create a note. The handler stamps the active tenant on the row and redirects to its editor. |
 | `/notes/<id>/edit/` | Note editor with title and body inputs and a `markdown_preview` pane. |
-| `/_t/<slug>/static/<path>` | The per-tenant asset prefix every `<link>` and `<script>` URL carries, forwarded to Django staticfiles by [`config/urls.py`](config/urls.py). |
+| `/_t/<slug>/static/<path>` | The per-tenant asset prefix every `<link>` and `<script>` URL carries, the `next.min.js` runtime included, forwarded to Django staticfiles by [`config/urls.py`](config/urls.py). |
 
 Two tenants ship with the example in [`notes/demo.py`](notes/demo.py):
 
@@ -19,7 +19,7 @@ Two tenants ship with the example in [`notes/demo.py`](notes/demo.py):
 | `acme`   | Acme Industries    | `#2563eb` (blue)  |
 | `globex` | Globex Corporation | `#16a34a` (green) |
 
-The header pill carries the tenant name, the accent strip and accent text use the CSS variable surfaced by the `tenant_theme` context processor, and every `<link>` and `<script>` URL is prefixed with `/_t/acme/` or `/_t/globex/`.
+The header pill carries the tenant name, the accent strip and accent text use the CSS variable surfaced by the `tenant_theme` context processor, and every `<link>` and `<script>` URL, the `next.min.js` runtime bundle included, is prefixed with `/_t/acme/` or `/_t/globex/`.
 
 ## How to run
 
@@ -67,19 +67,18 @@ The chain has three links:
 
 ### 2. Per-tenant static URL prefix
 
-The custom backend lives in [`notes/backends.py`](notes/backends.py). It overrides only the `render_*_tag` methods of `StaticFilesBackend`. The `request` keyword argument is the hook that core threads through `StaticManager.inject(...)`. For absolute URLs (CDN strings) the helper falls back to the unmodified URL.
+The custom backend lives in [`notes/backends.py`](notes/backends.py). It overrides only `asset_url`, the request-aware URL hook of `StaticBackend`. The `request` keyword argument is the hook that core threads through `StaticManager.inject(...)`. For absolute URLs (CDN strings) the method falls back to the unmodified URL.
 
 ```python
 class TenantPrefixStaticBackend(StaticFilesBackend):
-    def render_link_tag(self, url, *, request=None):
-        return super().render_link_tag(_prefixed(url, request))
-
-    def render_script_tag(self, url, *, request=None):
-        return super().render_script_tag(_prefixed(url, request))
-
-    def render_module_tag(self, url, *, request=None):
-        return super().render_module_tag(_prefixed(url, request))
+    def asset_url(self, url, *, request=None):
+        tenant = get_active_tenant(request) if request is not None else None
+        if tenant is None or not url.startswith("/"):
+            return url
+        return PREFIX_FORMAT.format(slug=tenant.slug) + url
 ```
+
+One override is enough because every URL the pipeline renders goes through `asset_url` — the co-located `<link>` and `<script>` tags, the `next.min.js` runtime tag, and its `<link rel="preload">` hint. Rewriting inside `render_*_tag` instead would leave the runtime bundle on the unprefixed URL, because core builds that tag from `NEXT_JS_OPTIONS` rather than from a renderer method.
 
 The settings entry is a single line:
 
@@ -89,7 +88,7 @@ The settings entry is a single line:
 ]
 ```
 
-The `next.static` collector caches deduplicated URLs once. The `render_*_tag` hook lets you decorate URLs at injection time without forking that cache.
+The `next.static` collector caches deduplicated URLs once. The `asset_url` hook lets you decorate URLs at injection time without forking that cache.
 
 The prefix has to resolve to a file for the demo to render, so [`config/urls.py`](config/urls.py) maps `^_t/(?P<slug>[^/]+)/static/(?P<path>.*)$` to a view that drops the slug and forwards to `django.contrib.staticfiles.views.serve`. A real deployment points a CDN at `STATIC_URL` and lets the prefix decorate cache keys instead of routing.
 
@@ -196,7 +195,7 @@ The example pins an explicit asset `VERSION` in `PARTIAL_BACKENDS`, the shared c
 
 ## Further reading
 
-- [`next/static/backends.py`](../../next/static/backends.py) — the `StaticBackend` ABC with the `request=` kwarg.
+- [`next/static/backends.py`](../../next/static/backends.py) — the `StaticBackend` ABC with the `asset_url` hook and its `request=` kwarg.
 - [`next/static/manager.py`](../../next/static/manager.py) — the `StaticManager.inject` call site that threads `request`.
 - [`next/urls/backends.py`](../../next/urls/backends.py) — the `FileRouterBackend.DIRS` handling that makes `root_pages/` work.
 - [`next/components/backends.py`](../../next/components/backends.py) — the matching `FileComponentsBackend.DIRS` handling for `root_blocks/`.

@@ -1,4 +1,5 @@
 import re
+import warnings
 from dataclasses import dataclass
 
 import pytest
@@ -7,40 +8,29 @@ from django.core.management import call_command
 from library.demo import DEMO_BOOKS, seed_demo
 from library.models import Book, Chapter, Tag
 
-from next.testing import envelope_of
+from next.testing import (
+    NextClient,
+    envelope_of,
+    find_form,
+    form_action,
+    form_fields,
+    hidden_fields,
+)
 
 
 pytestmark = pytest.mark.django_db
 
-
-def _action_form_body(body: str, *, action_substring: str = "/_next/form/") -> str:
-    """Return the inner HTML of the page's primary action form.
-
-    Skips the logout sign-out form in the topbar (also a `/_next/form/` URL
-    but with no formset) by picking the last matching form.
-    """
-    forms = re.findall(
-        r'<form[^>]*?(?<!-)action="([^"]+)"[^>]*>(.+?)</form>', body, re.DOTALL
-    )
-    matching = [text for url, text in forms if action_substring in url]
-    return matching[-1] if matching else ""
+ELEMENT_ID_RE = re.compile(r'\sid="([^"]+)"')
 
 
-def _extract_form_hiddens(body: str) -> dict[str, str]:
-    """Return all hidden inputs of the primary action form."""
-    target = _action_form_body(body)
-    return dict(re.findall(r'name="([^"]+)"\s+value="([^"]*)"', target))
+def action_form(client: NextClient, body: str, action_name: str) -> str:
+    """Return the page form that posts `action_name`, found by its dispatch URL."""
+    return find_form(body, action=client.get_action_url(action_name))
 
 
-def _extract_form_inputs(body: str) -> dict[str, str]:
-    """Return every input's name=value from the primary action form."""
-    target = _action_form_body(body)
-    out: dict[str, str] = {}
-    for m in re.finditer(
-        r'<input[^>]*name="([^"]+)"(?:[^>]*value="([^"]*)")?[^>]*>', target
-    ):
-        out[m.group(1)] = m.group(2) or ""
-    return out
+def element_ids(html: str) -> list[str]:
+    """Return every `id` attribute in the fragment, in document order."""
+    return ELEMENT_ID_RE.findall(html)
 
 
 class TestDashboard:
@@ -61,13 +51,23 @@ class TestDashboard:
         for label in ("Library", "Books", "Authors", "Tags", "Chapters"):
             assert label in body
 
-    def test_admin_chrome_renders_once(self, admin_client):
-        """Each chrome piece — sidebar, topbar, app card — appears exactly once."""
-        r = admin_client.get("/admin/")
-        body = r.content.decode()
-        assert body.count('class="flex min-h-screen w-full"') == 1
-        assert body.count('class="flex h-14 shrink-0') == 1
+    def test_two_layout_roots_produce_one_document(self, admin_client):
+        """`chrome/layout.djx` wraps `surfaces/layout.djx`, neither repeats."""
+        body = admin_client.get("/admin/").content.decode()
+        assert body.count("<!DOCTYPE html>") == 1
+        assert body.count("<body") == 1
+        assert body.count("<aside") == 1
+        assert body.count("<main") == 1
         assert body.count("Models registered with django.contrib.admin") == 1
+
+    def test_the_topbar_offers_exactly_one_sign_out_form(self, admin_client):
+        body = admin_client.get("/admin/").content.decode()
+        logout_url = admin_client.get_action_url("admin:logout")
+        assert body.count(f'action="{logout_url}"') == 1
+        assert "Sign out" in find_form(body, action=logout_url)
+
+    def test_each_app_reaches_the_sidebar_and_a_dashboard_card(self, admin_client):
+        body = admin_client.get("/admin/").content.decode()
         assert body.count("Authentication and Authorization") == 2
         assert body.count(">Library<") == 2
 
@@ -105,9 +105,8 @@ class TestAuth:
         assert "Sign in again" in body
 
     def test_bad_credentials_renders_form_error(self, next_client, admin_user):
-        rendered = _extract_form_inputs(
-            next_client.get("/admin/login/").content.decode()
-        )
+        body = next_client.get("/admin/login/").content.decode()
+        rendered = form_fields(action_form(next_client, body, "admin:login"))
         r = next_client.post_action(
             "admin:login",
             {**rendered, "username": "admin", "password": "wrong", "next": "/admin/"},
@@ -360,8 +359,7 @@ class TestChangelistChrome:
     def test_action_checkbox_column_is_hidden(self, admin_client):
         """`action_checkbox` is Django admin's synthetic column for selection.
 
-        We render selection ourselves through `selectable=`, so the literal
-        column header must not appear.
+        Selection is rendered through `selectable=`, so the literal header is gone.
         """
         r = admin_client.get("/admin/library/tag/")
         body = r.content.decode()
@@ -369,11 +367,27 @@ class TestChangelistChrome:
         assert "action checkbox" not in body.lower()
 
     def test_delete_selected_description_is_interpolated(self, admin_client):
-        """Django's `delete_selected` ships with `%(verbose_name_plural)s` placeholder."""
+        """Django ships `delete_selected` with a `%(verbose_name_plural)s` slot."""
         r = admin_client.get("/admin/library/tag/")
         body = r.content.decode()
         assert "%(verbose_name_plural)s" not in body
         assert "Delete selected tags" in body
+
+    def test_action_labels_come_from_a_version_stable_admin_api(self, admin_client):
+        """`get_actions` answers a tuple on Django 5.2 and an `Action` from 6.0.
+
+        `get_action_choices` reads the same registry on both without the
+        deprecated tuple unpacking, so a changelist render must raise no
+        deprecation warning at all.
+        """
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            warnings.simplefilter("error", PendingDeprecationWarning)
+            r = admin_client.get("/admin/library/book/")
+        assert r.status_code == 200
+        body = r.content.decode()
+        assert "Mark selected books as published" in body
+        assert "Delete selected books" in body
 
 
 class TestBulkAction:
@@ -383,6 +397,28 @@ class TestBulkAction:
         )
         assert r.status_code == 302
         assert r["Location"] == "/admin/library/book/"
+
+    def test_filtered_changelist_form_carries_the_filter_in_its_origin(
+        self, admin_client, demo_data
+    ):
+        r = admin_client.get("/admin/library/book/?status__exact=draft")
+        rendered = form_fields(
+            action_form(admin_client, r.content.decode(), "admin:bulk_action")
+        )
+        assert rendered["_next_form_origin"] == (
+            "/admin/library/book/?status__exact=draft"
+        )
+
+    def test_bulk_action_returns_to_the_filtered_changelist(
+        self, admin_client, demo_data
+    ):
+        r = admin_client.post_action(
+            "admin:bulk_action",
+            {"action": ""},
+            origin="/admin/library/book/?status__exact=draft",
+        )
+        assert r.status_code == 302
+        assert r["Location"] == "/admin/library/book/?status__exact=draft"
 
 
 class TestAddView:
@@ -405,8 +441,8 @@ class TestAddView:
 
     def test_add_post_invalid_rerenders_with_errors(self, admin_client):
         get = admin_client.get("/admin/library/tag/add/")
-        hiddens = _extract_form_hiddens(get.content.decode())
-        payload = {**hiddens, "name": "", "slug": ""}
+        form = action_form(admin_client, get.content.decode(), "admin:add")
+        payload = {**hidden_fields(form), "name": "", "slug": ""}
         r = admin_client.post_action("admin:add", payload)
         assert r.status_code == 200
         body = r.content.decode()
@@ -489,6 +525,45 @@ class TestInlineFieldIds:
         body = r.content.decode()
         assert f'id="id_chapter_{chapter.pk}_title"' in body
         assert 'id="id_chapter_add_title"' in body
+
+    def test_a_layered_editor_shares_no_id_with_the_page_behind_it(
+        self, admin_client, book_with_one_chapter
+    ):
+        """`admin:inline_add` opens the chapter editor over the book editor.
+
+        Both documents then live in one DOM, so a bare `id_%s` would repeat
+        `id_title` and every label inside the layer would address the book.
+        """
+        book, _chapter = book_with_one_chapter
+        page = admin_client.get(f"/admin/library/book/{book.pk}/change/")
+        new_chapter = Chapter.objects.create(
+            book=book, number=2, title="Rising", word_count=200
+        )
+        layer = admin_client.get_zones(
+            f"/admin/library/chapter/{new_chapter.pk}/change/", "record"
+        )
+        page_ids = element_ids(page.content.decode())
+        layer_ids = element_ids(envelope_of(layer).html_for_zone("record"))
+
+        assert "id_book_title" in page_ids
+        assert "id_chapter_title" in layer_ids
+        assert set(page_ids) & set(layer_ids) == set()
+        assert len(page_ids + layer_ids) == len(set(page_ids + layer_ids))
+
+    def test_every_field_label_points_at_its_own_input(
+        self, admin_client, book_with_one_chapter
+    ):
+        book, chapter = book_with_one_chapter
+        body = admin_client.get(
+            f"/admin/library/book/{book.pk}/change/"
+        ).content.decode()
+        targets = re.findall(r'<label for="([^"]+)"', body)
+        ids = element_ids(body)
+
+        assert "id_book_title" in targets
+        assert f"id_chapter_{chapter.pk}_title" in targets
+        for target in targets:
+            assert ids.count(target) == 1
 
     def test_the_wire_names_stay_unprefixed(self, admin_client, book_with_one_chapter):
         book, chapter = book_with_one_chapter
@@ -584,19 +659,19 @@ class TestInlines:
         assert '<select name="author"' in body
 
     def test_add_book_through_browser_flow(self, admin_client, author, make_tag):
-        """Mirrors a browser: GET the form, copy every rendered input, POST.
+        """Walk the browser flow, copying every rendered input from the GET to the POST.
 
-        Catches regressions where the GET page omits a hidden field the
-        dispatcher relies on (csrf, _next_form_origin), and where the
-        rendered initial values for an unfilled `extra` inline row would
-        make the formset look "changed" and trigger validation against
-        otherwise-skipped empty required fields.
+        This catches a GET page that omits a hidden field the dispatcher needs, and an
+        unfilled `extra` inline row whose rendered initial values make the formset look
+        changed and drag empty required fields into validation.
         """
         tag = make_tag("Fantasy")
 
         get = admin_client.get("/admin/library/book/add/")
         assert get.status_code == 200
-        rendered = _extract_form_inputs(get.content.decode())
+        rendered = form_fields(
+            action_form(admin_client, get.content.decode(), "admin:add")
+        )
 
         assert "csrfmiddlewaretoken" in rendered
         assert rendered.get("_next_form_origin") == "/admin/library/book/add/"
@@ -734,6 +809,96 @@ class TestLiveInlines:
         second.refresh_from_db()
         assert second.title == "Rising"
 
+    def test_a_duplicate_number_comes_back_as_a_row_error(
+        self, admin_client, book_with_two_chapters
+    ):
+        """`Chapter.unique_together` is checked before the INSERT reaches SQLite.
+
+        The parent link never appears on a keyed row form, so without the
+        narrowed exclusion Django skips the pair check and the duplicate
+        surfaces as an `IntegrityError` instead of a validation error.
+        """
+        book, first, second = book_with_two_chapters
+        r = admin_client.post_action(
+            "admin:inline_change",
+            {
+                "_inline": "chapter",
+                "_inline_pk": str(second.pk),
+                "number": str(first.number),
+                "title": "Dupe",
+                "word_count": "10",
+            },
+            origin=f"/admin/library/book/{book.pk}/change/",
+        )
+        assert r.status_code == 200
+        assert "Chapter with this Book and Number already exists." in r.content.decode()
+        second.refresh_from_db()
+        assert (second.number, second.title) == (2, "Rising")
+
+    def test_a_duplicate_number_blocks_the_add_row(
+        self, admin_client, book_with_two_chapters
+    ):
+        book, first, _second = book_with_two_chapters
+        r = admin_client.post_action(
+            "admin:inline_add",
+            {
+                "_inline": "chapter",
+                "number": str(first.number),
+                "title": "Dupe",
+                "word_count": "10",
+            },
+            origin=f"/admin/library/book/{book.pk}/change/",
+        )
+        assert r.status_code == 200
+        assert "Chapter with this Book and Number already exists." in r.content.decode()
+        assert Chapter.objects.filter(book=book).count() == 2
+
+    def test_a_duplicate_number_leaves_a_sibling_book_alone(
+        self, admin_client, book_with_two_chapters, make_book, make_chapter
+    ):
+        """The pair check is scoped to the parent, not to the number alone."""
+        book, first, _second = book_with_two_chapters
+        other = make_book("Other")
+        make_chapter(other, first.number, "Elsewhere", 10)
+        r = admin_client.post_action(
+            "admin:inline_add",
+            {
+                "_inline": "chapter",
+                "number": "3",
+                "title": "Climax",
+                "word_count": "10",
+            },
+            origin=f"/admin/library/book/{book.pk}/change/",
+        )
+        assert r.status_code == 302
+        assert Chapter.objects.filter(book=book, number=3).exists()
+
+    def test_a_duplicate_number_morphs_the_row_with_its_error(
+        self, admin_client, book_with_two_chapters
+    ):
+        book, first, second = book_with_two_chapters
+        response = admin_client.post_action(
+            "admin:inline_change",
+            {
+                "_inline": "chapter",
+                "_inline_pk": str(second.pk),
+                "number": str(first.number),
+                "title": "Dupe",
+                "word_count": "10",
+            },
+            origin=f"/admin/library/book/{book.pk}/change/",
+            partial=True,
+        )
+        assert response.status_code == 200
+        assert response["X-Next-Form"] == "invalid"
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["morph"]
+        html = envelope.ops[0]["html"]
+        assert f'data-next-key="{second.pk}"' in html
+        assert "Chapter with this Book and Number already exists." in html
+        second.refresh_from_db()
+        assert second.number == 2
+
     @pytest.mark.parametrize("action", _INLINE_ACTIONS)
     def test_unknown_inline_token_404(
         self, admin_client, action, book_with_two_chapters
@@ -863,15 +1028,23 @@ class TestLayerDismiss:
         assert f'action="{discard_url}" method="post" data-next-action=' in html
         assert "Discard" in html
 
-    def test_discard_form_is_scoped_to_the_dialog_by_css(
-        self, admin_client, book_with_one_chapter
-    ):
-        _book, chapter = book_with_one_chapter
-        response = admin_client.get(f"/admin/library/chapter/{chapter.pk}/change/")
-        assert response.status_code == 200
-        body = response.content.decode()
-        assert 'class="discard-in-layer"' in body
-        assert "/static/next/components/admin_form.css" in body
+    def test_only_a_change_view_renders_the_discard_form(self, admin_client, chapter):
+        """Discard dismisses an open editor, so the add view never offers it.
+
+        Whether the editor sits in a layer is a client-side fact, so the
+        button is hidden by the co-located CSS rather than by the server.
+        The browser suite asserts that visibility, this one asserts which
+        pages carry the form at all.
+        """
+        discard_url = admin_client.get_action_url("admin:discard")
+        change = admin_client.get(
+            f"/admin/library/chapter/{chapter.pk}/change/"
+        ).content.decode()
+        assert form_action(find_form(change, contains="Discard")) == discard_url
+
+        add = admin_client.get("/admin/library/chapter/add/").content.decode()
+        with pytest.raises(LookupError):
+            find_form(add, action=discard_url)
 
     def test_discard_closes_layer_with_dismiss_reason(self, admin_client):
         response = admin_client.post_action("admin:discard", {}, partial=True)
@@ -918,7 +1091,9 @@ class TestInlineValidationFailure:
 
     def test_inline_invalid_rerenders_with_errors(self, admin_client, author):
         get = admin_client.get("/admin/library/book/add/")
-        rendered = _extract_form_inputs(get.content.decode())
+        rendered = form_fields(
+            action_form(admin_client, get.content.decode(), "admin:add")
+        )
         payload = {
             **rendered,
             "title": "Book with bad chapter",
@@ -938,7 +1113,7 @@ class TestInlineValidationFailure:
 
 
 class TestSaveContinue:
-    """`_save_continue` and `_save_addanother` route to change/add instead of changelist."""
+    """`_save_continue` and `_save_addanother` route to change and add, not the list."""
 
     def test_save_continue_redirects_to_change(self, admin_client):
         r = admin_client.post_action(
@@ -974,7 +1149,7 @@ class TestSaveContinue:
 
 
 class TestCustomBulkAction:
-    """`mark_as_published` is registered on BookAdmin and reachable through admin:bulk_action."""
+    """`mark_as_published` sits on BookAdmin and answers through `admin:bulk_action`."""
 
     def test_action_present_in_changelist(self, admin_client):
         r = admin_client.get("/admin/library/book/")

@@ -16,7 +16,8 @@ Forms
 
    Renders a form bound to a registered action.
    The first argument is the action name, a quoted string or a context variable that resolves to a string.
-   Injects the ``csrfmiddlewaretoken`` CSRF field, and the ``_next_form_origin`` field carrying the URL path of the rendering page when an origin is available.
+   Injects the ``csrfmiddlewaretoken`` CSRF field, and the ``_next_form_origin`` field carrying the URL of the rendering page, query string included, when an origin is available.
+   The query string rides along so a redirect back to the origin lands on the same filtered, searched, or paginated view the visitor submitted from.
    The block body has access to the bound or unbound form through ``{{ form }}``.
 
    Optional ``attr="value"`` arguments after the action name render as HTML attributes on the ``<form>`` element, for example ``{% form "upload_form" class="stack" %}``.

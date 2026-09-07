@@ -88,7 +88,7 @@ class TestDevOriginRouting:
         asset_path: Path,
         tmp_path: Path,
     ) -> None:
-        """The dev URL is `{origin}/{relative}` under VITE_ROOT, `{origin}/{name}` outside."""
+        """The dev URL keeps the relative path in VITE_ROOT and the name outside."""
         backend = _backend(
             {
                 "DEV_ORIGIN": "http://localhost:5173",
@@ -137,7 +137,7 @@ class TestManifestRouting:
         asset_path: Path,
         tmp_path: Path,
     ) -> None:
-        """Manifest lookup uses the relative path under VITE_ROOT or the filename outside."""
+        """Manifest lookup takes the relative path in VITE_ROOT, the name outside."""
         manifest_path = tmp_path / "manifest.json"
         manifest_path.write_text(json.dumps({manifest_key: {"file": built_file}}))
         backend = _backend(
@@ -224,7 +224,7 @@ class TestDPollResolution:
         assert kwargs["active"] == poll
 
     def test_returns_none_when_no_source(self) -> None:
-        """`DPoll[Poll]` resolves to `None` when no URL kwarg or POST field is provided."""
+        """`DPoll[Poll]` resolves to `None` without a URL kwarg or a POST field."""
         kwargs = resolve_call(consume)
         assert kwargs["active"] is None
 

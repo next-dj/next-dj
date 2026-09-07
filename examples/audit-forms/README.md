@@ -89,7 +89,7 @@ class AccessRequestWizard(next.forms.FormWizard):
         url_param = "step"
 ```
 
-The class declares itself as one action through `__init_subclass__`, so the auto-name `access_request_wizard` resolves with `resolve_action_url("access_request_wizard")`. A namespaced name does not — see `tests/test_e2e.py::TestNamespacedAction`. Adding a step is one edit to `Meta.steps`. The `done` hook that runs on the final step is shown in full in section 10.
+The class declares itself as one action through `__init_subclass__`, so the auto-name `access_request_wizard` resolves with `resolve_action_url("access_request_wizard")`. A namespaced name does not — see `tests/test_integration.py::TestNamespacedAction`. Adding a step is one edit to `Meta.steps`. The `done` hook that runs on the final step is shown in full in section 10.
 
 ### 3a. A dynamic permission gate on the wizard
 
@@ -100,12 +100,12 @@ class AccessRequestWizard(next.forms.FormWizard):
     def check_permissions(cls, request):
         if partial_intent(request).validate_fields:
             return True
-        return request.POST.get("policy_acknowledged") == "on"
+        return request.POST.get(POLICY_FIELD) == "on"
 ```
 
 `check_permissions` is a DI-resolved classmethod the framework runs on **every step POST, before the step form binds**. It declares only what it reads — here the `request` and its POST data. Return `None` or `True` to allow, `False` or `raise PermissionDenied` to deny with a 403, or return an `HttpResponse` to short-circuit verbatim. A denied step writes no draft, so the wizard storage stays untouched.
 
-The gate is the retention-policy acknowledgement. The step template renders a checked `policy_acknowledged` checkbox inside the form (the `data-policy-notice` block), so a normal submission carries the field and passes, while a replayed or forged action URL that never rendered the form omits it and is denied. The acknowledgement field is a control field, not user data, so `_RESERVED_FORM_KEYS` in `access/backends.py` strips it from the captured payload. That denial is exactly the kind of event an audit example should capture.
+The gate is the retention-policy acknowledgement. Every step form inherits it from `AcknowledgedStep` in [`access/policy.py`](access/policy.py), a `BooleanField(required=False, initial=True)` that the step template renders as `{{ form.policy_acknowledged }}` inside the `data-policy-notice` block. A normal submission therefore carries the field and passes, while a replayed or forged action URL that never rendered the form omits it and is denied. Making it a real field rather than raw markup is what keeps the tick honest: the server renders `checked` from the submitted data, so a blur-validation morph replays the box the visitor left rather than putting a hardcoded tick back. The field is a control field, not user data, so `_RESERVED_FORM_KEYS` in `access/backends.py` strips it from the captured payload and `done` drops it before the model create. It is also not owned by any step section, so `step_section` filters it out of the fields it renders per step. That denial is exactly the kind of event an audit example should capture.
 
 One kind of POST passes ahead of the gate. A blur-validation probe (`validate="blur"` on the `{% form %}` tag, section 10) asks only whether one named field is well formed and binds no step data, so the hook returns early when `partial_intent(request).validate_fields` is set. Denying it would break inline validation on the very first field, long before the user has scrolled to the acknowledgement.
 
@@ -134,7 +134,7 @@ Each step is a bare `django.forms.ModelForm` (or `Form`) — the wizard owns dis
 - `ScopeStep` — a `ModelForm` on `["project_slug", "reason", "expires_in_days"]`.
 - `ApprovalStep` — a fieldless `Form` that only confirms the merged request.
 
-The wizard binds the current step's form to the POST, validates only that step's fields, and saves the cleaned data through the wizard backend. On a non-final step it 302-redirects to the next step's URL, computed by swapping the `[step]` segment of the origin path. On the final step it calls `done(request, cleaned_data)` with the merged dict of every step, so `AccessRequest.objects.create(**cleaned_data)` builds the row once. No per-step `.save()`, no hidden id fields, no hand-written routing.
+The wizard binds the current step's form to the POST, validates only that step's fields, and saves the cleaned data through the wizard backend. On a non-final step it 302-redirects to the next step's URL, computed by swapping the `[step]` segment of the origin path. On the final step it calls `done(request, cleaned_data)` with the merged dict of every step, so one `AccessRequest.objects.create` builds the row once, past the acknowledgement control field every step carries. No per-step `.save()`, no hidden id fields, no hand-written routing.
 
 ### 5. Three composite components, two patterns
 
@@ -166,7 +166,7 @@ Each step posts only its visible fields plus the framework's hidden `_next_form_
 
 Two options earn the swap for a flow that carries names, emails, and free-text reasons. `CACHE_ALIAS` sends drafts to `CACHES["wizards"]`, a store of their own rather than the application cache, so clearing one does not clear the other. `TIMEOUT` gives every draft a half-hour lifetime that a session cookie would not enforce on its own. Draft keys are `next_wizard:<session key>:<storage id>`, so `SessionMiddleware` still names the bucket even though nothing is stored in the session itself.
 
-The effect on the page is the same either way: on `GET` of step 2 the team summary already reads "Computing", which is what `tests/test_e2e.py::TestSessionResume` asserts. `TestCacheBackedDrafts` adds the storage half — the bucket lands in the `wizards` alias, stays out of `default`, and is emptied once `done` runs.
+The effect on the page is the same either way: on `GET` of step 2 the team summary already reads "Computing", which is what `tests/test_integration.py::TestSessionResume` asserts. `TestCacheBackedDrafts` adds the storage half — the bucket lands in the `wizards` alias, stays out of `default`, and is emptied once `done` runs.
 
 ### 8. Admin filter by GET query, plus a lazy audit table
 
@@ -247,7 +247,8 @@ The page module did not change for routing or steps. The only Python edit is the
 ```python
 # access/views/request/[step]/page.py
 def done(self, request, cleaned_data):
-    access_request = AccessRequest.objects.create(**cleaned_data)
+    fields = {k: v for k, v in cleaned_data.items() if k != POLICY_FIELD}
+    access_request = AccessRequest.objects.create(**fields)
     request.session["access_request_just_created"] = access_request.pk
     request.session.modified = True
     return (
@@ -264,7 +265,7 @@ Both entry points into the wizard carry the same opener attributes — the landi
 
 **With the runtime.** The link opens a native `<dialog>` and creates an empty `access-wizard` container before the request, then GETs the step page for that zone alone. Each step submits inside the modal: an invalid step morphs only the `access-wizard` zone and the modal stays open, a valid non-final step morphs the zone to the next step with no redirect, and the final step's `done` returns `layer.close` plus a toast. The runtime closes the modal and, because the opening link named `data-next-accepted`, re-GETs the `request-list` zone of the landing page with its own cookies, so the list authorizes and renders in its own view before morphing under the now-closed modal.
 
-**Without the runtime.** Every attribute degrades to a plain link or form. The link navigates to the full `/request/identity/` page, each step posts and `302`-redirects to the next step's page, and the final step's `done` falls back to a `303` redirect to `/request/<id>/audit/?just=1` — the same result page the workflow always landed on. The `data-next-*` attributes are inert without a runtime, so the no-JS path is byte-for-byte the original flow with one status code changed from `302` to `303`. The `tests/test_e2e.py` suite asserts both paths: `TestModalWizardFlagship` walks the partial envelopes, the no-runtime regression lives in `TestSuccessRedirect`.
+**Without the runtime.** Every attribute degrades to a plain link or form. The link navigates to the full `/request/identity/` page, each step posts and `302`-redirects to the next step's page, and the final step's `done` falls back to a `303` redirect to `/request/<id>/audit/?just=1` — the same result page the workflow always landed on. The `data-next-*` attributes are inert without a runtime, so the no-JS path is byte-for-byte the original flow with one status code changed from `302` to `303`. The `tests/test_integration.py` suite asserts both paths: `TestModalWizardFlagship` walks the partial envelopes, the no-runtime regression lives in `TestSuccessRedirect`.
 
 The shared `dialog` component ([`examples/_shared/_components/dialog/`](../_shared/_components/dialog/)) is now a pure styling shell over `<dialog>`. The framework's layer runtime owns opening a dialog from a `data-next-layer` link and closing it on accept or dismiss, so the component ships no open trigger of its own. Its `component.mjs` keeps only the document-delegation idiom — a single document listener that survives a morph replacing the dialog markup — for the cases that mount a styled `<dialog>` directly without a layer.
 

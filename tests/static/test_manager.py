@@ -30,11 +30,29 @@ SCRIPTS_PLACEHOLDER = "<!-- next:scripts -->"
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from django.http import HttpRequest
+
     from next.components import ComponentInfo
 
 
 CSS_URL = "https://cdn.example.com/a.css"
 JS_URL = "https://cdn.example.com/a.js"
+NEXT_JS_URL = "/static/next/next.min.js"
+
+
+PREFIXED_BACKENDS = {
+    "STATIC_BACKENDS": [{"BACKEND": "tests.static.test_manager.PrefixingStaticBackend"}]
+}
+
+
+class PrefixingStaticBackend(StaticFilesBackend):
+    """Backend that stamps a per-request prefix onto every asset URL."""
+
+    def asset_url(self, url: str, *, request: HttpRequest | None = None) -> str:
+        """Prefix a same-site URL while a request is in scope."""
+        if request is None or not url.startswith("/"):
+            return url
+        return f"/pfx{url}"
 
 
 class TestEnsureBackends:
@@ -679,6 +697,75 @@ class TestInjectForwardsRequest:
         ) as render:
             fresh_manager.inject(f"<head>{STYLES_PLACEHOLDER}</head>", collector)
         render.assert_called_once_with(CSS_URL, request=None)
+
+
+class TestBackendRewritesEveryAssetUrl:
+    """A backend that overrides `asset_url` reaches every URL the page carries.
+
+    The runtime bundle is not a collected asset, so a backend that only
+    rewrote through the renderer methods would leave `next.min.js` and its
+    preload hint pointing at the unrewritten URL.
+    """
+
+    @staticmethod
+    def _inject(collector, request) -> str:
+        html = (
+            f"<head>{STYLES_PLACEHOLDER}{HEAD_CLOSE}</head>"
+            f"<body>{SCRIPTS_PLACEHOLDER}</body>"
+        )
+        with (
+            override_settings(NEXT_FRAMEWORK=PREFIXED_BACKENDS),
+            mock.patch(
+                "next.static.manager.staticfiles_storage.url", return_value=NEXT_JS_URL
+            ),
+        ):
+            return StaticManager().inject(html, collector, request=request)
+
+    def test_the_configured_backend_is_the_prefixing_one(self) -> None:
+        with override_settings(NEXT_FRAMEWORK=PREFIXED_BACKENDS):
+            assert isinstance(StaticManager().default_backend, PrefixingStaticBackend)
+
+    def test_runtime_script_tag_carries_the_rewritten_url(self) -> None:
+        out = self._inject(StaticCollector(), RequestFactory().get("/"))
+        assert f'<script src="/pfx{NEXT_JS_URL}"></script>' in out
+        assert f'<script src="{NEXT_JS_URL}"></script>' not in out
+
+    def test_preload_hint_carries_the_rewritten_url(self) -> None:
+        out = self._inject(StaticCollector(), RequestFactory().get("/"))
+        assert f'<link rel="preload" as="script" href="/pfx{NEXT_JS_URL}">' in out
+        assert f'href="{NEXT_JS_URL}"' not in out
+
+    def test_collected_asset_urls_carry_the_rewritten_url(self) -> None:
+        collector = StaticCollector()
+        collector.add(StaticAsset(url="/static/next/a.css", kind="css"))
+        collector.add(StaticAsset(url="/static/next/a.js", kind="js"))
+        out = self._inject(collector, RequestFactory().get("/"))
+        assert 'href="/pfx/static/next/a.css"' in out
+        assert 'src="/pfx/static/next/a.js"' in out
+
+    def test_without_a_request_the_urls_stay_untouched(self) -> None:
+        out = self._inject(StaticCollector(), None)
+        assert f'<script src="{NEXT_JS_URL}"></script>' in out
+        assert "/pfx" not in out
+
+    def test_disabled_policy_never_asks_the_backend_for_the_runtime_url(self) -> None:
+        with override_settings(NEXT_FRAMEWORK=PREFIXED_BACKENDS):
+            manager = StaticManager()
+            manager._ensure_backends()
+            manager._script_builder = NextScriptBuilder(
+                NEXT_JS_URL, policy=ScriptInjectionPolicy.DISABLED
+            )
+            with mock.patch.object(
+                manager.default_backend,
+                "asset_url",
+                wraps=manager.default_backend.asset_url,
+            ) as asset_url:
+                manager.inject(
+                    f"<head>{HEAD_CLOSE}</head><body>{SCRIPTS_PLACEHOLDER}</body>",
+                    StaticCollector(),
+                    request=RequestFactory().get("/"),
+                )
+        assert asset_url.call_count == 0
 
 
 class TestDiscoveryForwarding:

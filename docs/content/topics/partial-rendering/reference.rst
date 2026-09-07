@@ -194,8 +194,8 @@ All values are ASCII, and zone names are ASCII slugs.
      - Every layer request, the open GET and the accept re-GET
      - The path and query string of the page that hosts a layer, for a server-side morph of its zones.
    * - CSRF header
-     - Every unsafe method
-     - The name comes from ``CSRF_HEADER_NAME``, the token from the runtime payload, the cookie is never read.
+     - Every unsafe method once the runtime holds a token
+     - The name comes from ``CSRF_HEADER_NAME``, the token from the ``$csrf`` init payload and from any later rotation meta, the cookie is never read.
 
 Response headers
 ----------------

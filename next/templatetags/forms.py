@@ -16,6 +16,7 @@ from next.forms.manager import (
 from next.forms.uid import (
     FORM_ORIGIN_OVERRIDE_KEY,
     ORIGIN_FIELD_NAME,
+    current_origin_path,
     validated_origin_path,
 )
 from next.forms.widgets import bind_component_widgets
@@ -190,11 +191,11 @@ class FormNode(template.Node):
 
     @staticmethod
     def _origin_path(context: template.Context, request: "HttpRequest") -> str | None:
-        """Return the page path the form belongs to.
+        """Return the page URL the form belongs to, query string included.
 
         On the validation-error re-render the request targets the action
-        endpoint, so the posted origin of the original page wins over
-        `request.path`. On a wizard advance the shaping layer merges the
+        endpoint, so the posted origin of the original page wins over the
+        current URL. On a wizard advance the shaping layer merges the
         next step URL under FORM_ORIGIN_OVERRIDE_KEY into the zone render
         context, which wins over the submitted step origin so blur-validate
         probes on the new step render from the correct page.
@@ -206,7 +207,7 @@ class FormNode(template.Node):
             posted = validated_origin_path(request.POST.get(ORIGIN_FIELD_NAME))
             if posted is not None:
                 return posted
-        return getattr(request, "path", None)
+        return current_origin_path(request)
 
     def _opening_tag(
         self,

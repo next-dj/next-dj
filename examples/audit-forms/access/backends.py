@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 from django.urls import Resolver404, resolve
 
 from access.models import AuditEntry
+from access.policy import POLICY_FIELD
 from next.forms import RegistryFormActionBackend
 
 
@@ -13,7 +14,7 @@ if TYPE_CHECKING:
 
 
 _RESERVED_FORM_KEYS = frozenset(
-    {"csrfmiddlewaretoken", "_next_form_origin", "policy_acknowledged"}
+    {"csrfmiddlewaretoken", "_next_form_origin", POLICY_FIELD}
 )
 
 

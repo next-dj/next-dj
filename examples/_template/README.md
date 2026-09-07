@@ -35,7 +35,7 @@ uv run python manage.py runserver
 uv run pytest
 ```
 
-The smoke test in `tests/test_e2e.py` fetches `/` and asserts the welcome banner renders. Keep it green while you fill the scaffold in, then grow it into the example's own suite. Every example is gated at 100% coverage by `make test-examples`.
+The smoke test in `tests/test_integration.py` fetches `/` and asserts the welcome banner renders. Keep it green while you fill the scaffold in, then grow it into the example's own suite. Every example is gated at 100% coverage by `make test-examples`.
 
 ## Further reading
 

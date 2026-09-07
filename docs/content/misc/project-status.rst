@@ -53,7 +53,7 @@ Continuous integration installs the built wheel and runs the full test suite aga
    * - 3.14
      - 6.0
 
-The matrix excludes Python 3.14 against Django 5.2, so Python 3.14 runs against Django 6.0 only.
+The matrix excludes Python 3.14 against Django 5.2, so Python 3.14 runs against Django 6.0 and 6.1.
 :doc:`/content/contributing/quality-gates` describes how that matrix runs.
 
 Where a change is announced

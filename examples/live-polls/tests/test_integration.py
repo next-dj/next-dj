@@ -1,5 +1,4 @@
 import json
-import re
 import threading
 import time
 
@@ -23,6 +22,7 @@ from next.testing import (
     SignalRecorder,
     build_form_for,
     envelope_of,
+    init_payload,
     resolve_action_url,
 )
 
@@ -34,13 +34,6 @@ def _detail_html(next_client: NextClient, poll: Poll) -> str:
     response = next_client.get(f"/polls/{poll.pk}/")
     assert response.status_code == 200
     return response.content.decode()
-
-
-def _next_init_payload(html: str) -> dict:
-    """Pull the JS context payload out of the rendered `Next._init(...)` call."""
-    match = re.search(r"Next\._init\((\{.*?\})\)", html)
-    assert match is not None, "Next._init call missing"
-    return json.loads(match.group(1))
 
 
 def _consume_one_change(
@@ -173,7 +166,7 @@ class TestPollDetailPage:
         self, next_client: NextClient, poll: Poll
     ) -> None:
         body = _detail_html(next_client, poll)
-        payload = _next_init_payload(body)
+        payload = init_payload(body)
         assert payload["results"]["poll_id"] == poll.pk
         assert payload["results"]["total_votes"] == 0
         assert {c["text"] for c in payload["results"]["choices"]} == {"Tabs", "Spaces"}
@@ -239,7 +232,7 @@ class TestVoteAction:
             response = next_client.post_action(
                 "vote_form", {"poll": poll.pk, "choice": foreign_choice.pk}
             )
-        assert response.status_code in (200, 400)
+        assert response.status_code == 400
         foreign_choice.refresh_from_db()
         assert foreign_choice.votes == 0
         events = recorder.events_for(form_validation_failed)
@@ -296,7 +289,7 @@ class TestPartialVote:
         self, next_client: NextClient, poll: Poll
     ) -> None:
         body = _detail_html(next_client, poll)
-        payload = _next_init_payload(body)
+        payload = init_payload(body)
         assert "live_results" in payload
         assert payload["live_results"]["poll_id"] == poll.pk
 

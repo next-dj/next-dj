@@ -15,7 +15,7 @@ Solution
 --------
 
 For attribute only changes, set the ``css_tag``, ``js_tag``, and ``module_tag`` options on the default backend.
-For URL rewriting, subclass ``StaticFilesBackend`` and override the renderer methods.
+For URL rewriting, subclass ``StaticFilesBackend`` and override ``asset_url``.
 
 Walkthrough
 -----------
@@ -47,7 +47,7 @@ The format string must contain the ``{url}`` placeholder.
 Subclass for URL rewriting
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-When the URL itself must change, subclass ``StaticFilesBackend`` and override the renderer methods.
+When the URL itself must change, subclass ``StaticFilesBackend`` and override ``asset_url``.
 
 .. code-block:: python
    :caption: notes/backends.py
@@ -57,16 +57,12 @@ When the URL itself must change, subclass ``StaticFilesBackend`` and override th
    CDN = "https://cdn.example.com"
 
    class CdnBackend(StaticFilesBackend):
-       def render_link_tag(self, url, *, request=None) -> str:
-           return f'<link rel="stylesheet" href="{CDN}{url}">'
+       def asset_url(self, url, *, request=None) -> str:
+           return f"{CDN}{url}"
 
-       def render_script_tag(self, url, *, request=None) -> str:
-           return f'<script src="{CDN}{url}" defer></script>'
-
-       def render_module_tag(self, url, *, request=None) -> str:
-           return f'<script type="module" src="{CDN}{url}"></script>'
-
-Each renderer method receives the URL and an optional ``request`` keyword.
+``asset_url`` receives the URL and an optional ``request`` keyword.
+One override covers ``.css``, ``.js``, and ``.mjs`` assets plus the ``next.min.js`` runtime bundle and its preload hint.
+The configured tag templates still shape the markup around the rewritten URL.
 
 Register the backend.
 
@@ -82,7 +78,7 @@ Register the backend.
 Request aware output
 ~~~~~~~~~~~~~~~~~~~~
 
-A renderer can read the request to vary its output per visitor.
+``asset_url`` and the renderer methods both read the request to vary their output per visitor.
 
 .. code-block:: python
    :caption: notes/backends.py
@@ -90,19 +86,18 @@ A renderer can read the request to vary its output per visitor.
    from next.static import StaticFilesBackend
 
    class TenantBackend(StaticFilesBackend):
-       def render_link_tag(self, url, *, request=None) -> str:
+       def asset_url(self, url, *, request=None) -> str:
            prefix = getattr(getattr(request, "tenant", None), "cdn", "")
-           return f'<link rel="stylesheet" href="{prefix}{url}">'
+           return f"{prefix}{url}"
 
-The static manager passes the current request to every renderer call.
+The static manager passes the current request to ``asset_url`` and to every renderer call.
 
 Tenant URL prefix
 ~~~~~~~~~~~~~~~~~
 
-A common multi-tenant pattern is to prefix every collected URL with a tenant slug so static files are scoped per tenant.
-Override all three renderer methods and delegate to the parent after rewriting the URL.
-Leave absolute URLs untouched.
-The shipped multi-tenant example implements this pattern, and the snippet below mirrors its backend, overriding all three methods so every kind stays consistent.
+A common multi-tenant pattern is to prefix every asset URL with a tenant slug so static files are scoped per tenant.
+Override ``asset_url`` and leave absolute URLs untouched.
+The shipped multi-tenant example implements this pattern, and the snippet below mirrors its backend.
 
 .. code-block:: python
    :caption: notes/backends.py
@@ -113,20 +108,11 @@ The shipped multi-tenant example implements this pattern, and the snippet below 
    PREFIX_FORMAT = "/_t/{slug}"
 
    class TenantPrefixStaticBackend(StaticFilesBackend):
-       def render_link_tag(self, url, *, request=None) -> str:
-           return super().render_link_tag(_prefixed(url, request))
-
-       def render_script_tag(self, url, *, request=None) -> str:
-           return super().render_script_tag(_prefixed(url, request))
-
-       def render_module_tag(self, url, *, request=None) -> str:
-           return super().render_module_tag(_prefixed(url, request))
-
-   def _prefixed(url, request):
-       tenant = get_active_tenant(request) if request is not None else None
-       if tenant is None or not url.startswith("/"):
-           return url
-       return PREFIX_FORMAT.format(slug=tenant.slug) + url
+       def asset_url(self, url, *, request=None) -> str:
+           tenant = get_active_tenant(request) if request is not None else None
+           if tenant is None or not url.startswith("/"):
+               return url
+           return PREFIX_FORMAT.format(slug=tenant.slug) + url
 
 .. code-block:: python
    :caption: config/settings.py
@@ -144,7 +130,7 @@ Verification
 ------------
 
 Reload a page and inspect the HTML.
-Every ``<link>`` and ``<script>`` tag carries the new attributes or the CDN host.
+Every ``<link>`` and ``<script>`` tag carries the new attributes or the CDN host, the ``next.min.js`` tag and its preload hint included.
 
 Run ``uv run python manage.py check`` and confirm the backend is registered.
 

@@ -1,14 +1,24 @@
 from __future__ import annotations
 
+import pathlib
 import re
 
 import pytest
 from django.core.cache import cache
 from flags.cache import FLAG_PREFIX, get_cached_flag
+from flags.metrics import render_counts
 from flags.models import Flag
 from flags.providers import WRITE_GATE_FLAG
+from flags.receivers import access_denied_count
 
-from next.testing import assert_has_class, assert_missing_class, find_anchor
+from next.testing import (
+    assert_has_class,
+    assert_missing_class,
+    find_anchor,
+    find_form,
+    render_component_by_name,
+    resolve_action_url,
+)
 
 
 pytestmark = pytest.mark.django_db
@@ -70,6 +80,23 @@ class TestHome:
         assert "Nothing disabled" in body
 
 
+ADMIN_PANEL = pathlib.Path("flags/panels/admin/page.py")
+
+BADGE_RE = re.compile(
+    r'<span class="inline-flex items-center rounded-full[^"]*">\s*(\w+)\s*</span>'
+)
+
+
+def _badge_text(fragment: str) -> str:
+    match = BADGE_RE.search(fragment)
+    assert match is not None, fragment
+    return match.group(1)
+
+
+def _badge_texts(html: str) -> list[str]:
+    return BADGE_RE.findall(html)
+
+
 class TestAdminBulkToggle:
     """Bulk-toggle form updates flags and invalidates each cached entry on save."""
 
@@ -80,17 +107,30 @@ class TestAdminBulkToggle:
         assert "Flag administration" in body
         assert 'name="enabled_names"' in body
         assert 'value="beta"' in body
-        assert "data-next-form" in body or 'method="post"' in body.lower()
+        form = find_form(body, action=resolve_action_url("bulk_toggle_form"))
+        assert 'name="enabled_names"' in form
 
-    def test_admin_shows_on_and_off_toggle_preview(
+    def test_toggle_preview_reads_the_flag_state(self, make_flag) -> None:
+        on_badge = render_component_by_name(
+            "toggle_preview",
+            at=ADMIN_PANEL,
+            props={"flag": make_flag("on_flag", label="On", enabled=True)},
+        )
+        off_badge = render_component_by_name(
+            "toggle_preview",
+            at=ADMIN_PANEL,
+            props={"flag": make_flag("off_flag", label="Off")},
+        )
+        assert _badge_text(on_badge) == "on"
+        assert _badge_text(off_badge) == "off"
+
+    def test_admin_renders_one_toggle_preview_per_flag(
         self, next_client, make_flag
     ) -> None:
         make_flag("on_flag", label="On", enabled=True)
         make_flag("off_flag", label="Off")
-        response = next_client.get("/admin/")
-        body = response.content.decode()
-        assert "bg-emerald-100" in body
-        assert "bg-slate-100" in body
+        body = next_client.get("/admin/").content.decode()
+        assert _badge_texts(body) == ["off", "on"]
 
     def test_posting_toggles_on_and_off(
         self, next_client, write_gate, make_flag
@@ -191,8 +231,7 @@ class TestWriteGate:
 
         body = next_client.get("/admin/metrics/").content.decode()
         assert "form permission denials" in body
-        denial_card = body.split("form permission denials</p>", 1)[1]
-        assert re.match(r"\s*<p[^>]*>\s*1\s*</p>", denial_card)
+        assert access_denied_count() == 1
 
 
 class TestDemoPage:
@@ -253,9 +292,7 @@ class TestMetricsPage:
         assert response.status_code == 200
         body = response.content.decode()
         assert "Renders" in body
-        assert ">/<" in body
-        assert ">admin<" in body
-        assert ">admin/metrics<" in body
+        assert set(render_counts()) == {"/", "admin", "admin/metrics"}
 
     def test_metrics_empty_state(self, next_client) -> None:
         response = next_client.get("/admin/metrics/")

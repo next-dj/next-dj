@@ -110,6 +110,30 @@ class TestNextScriptBuilderDefaults:
         assert NextScriptBuilder(URL).url == URL
 
 
+class TestNextScriptBuilderUrlOverride:
+    """A caller may pass the URL a request-aware backend resolved."""
+
+    def test_preload_link_takes_an_explicit_url(self) -> None:
+        builder = NextScriptBuilder(URL)
+        assert builder.preload_link("/pfx/next.min.js") == (
+            '<link rel="preload" as="script" href="/pfx/next.min.js">'
+        )
+
+    def test_script_tag_takes_an_explicit_url(self) -> None:
+        builder = NextScriptBuilder(URL)
+        assert builder.script_tag("/pfx/next.min.js") == (
+            '<script src="/pfx/next.min.js"></script>'
+        )
+
+    def test_explicit_url_keeps_the_custom_template(self) -> None:
+        builder = NextScriptBuilder(
+            URL, script_tag_template='<script defer src="{url}"></script>'
+        )
+        assert builder.script_tag("/pfx/next.min.js") == (
+            '<script defer src="/pfx/next.min.js"></script>'
+        )
+
+
 class TestNextScriptBuilderCustomTemplates:
     """Every template is an instance attribute, so it is pluggable without subclassing."""
 

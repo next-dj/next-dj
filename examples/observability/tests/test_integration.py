@@ -1,4 +1,3 @@
-import json
 import re
 
 import pytest
@@ -31,7 +30,7 @@ from next.static.signals import (
     collector_finalized,
     html_injected,
 )
-from next.testing import SignalRecorder, envelope_of
+from next.testing import SignalRecorder, envelope_of, init_payload
 from next.urls.signals import route_registered, router_reloaded
 
 
@@ -65,7 +64,6 @@ DASHBOARD_PATHS: tuple[str, ...] = (
     "/stats/static/",
 )
 
-_INIT_PAYLOAD = re.compile(r"Next\._init\((.*?)\);</script>")
 
 _ZONE_ATTR = re.compile(r'data-next-zone="([^"]+)"')
 
@@ -75,13 +73,6 @@ def _walk_dashboard(next_client) -> None:
     for url in DASHBOARD_PATHS:
         response = next_client.get(url)
         assert response.status_code == 200
-
-
-def _init_payload(html: str) -> dict:
-    """Return the decoded `Next._init(...)` payload of a rendered page."""
-    match = _INIT_PAYLOAD.search(html)
-    assert match is not None, "Next._init call missing"
-    return json.loads(match.group(1))
 
 
 @pytest.fixture()
@@ -199,7 +190,9 @@ class TestWindowFilters:
             metrics.incr("pages.rendered", "/recent", by=2)
             response = next_client.get("/stats/?window=1m")
             body = response.content.decode()
-            assert '"window":"1m"' in body or '"window": "1m"' in body
+            payload = init_payload(body)
+            assert payload["live_stats"]["data"]["window"] == "1m"
+            assert payload["render_rates"]["window"] == "1m"
             recent = metrics.read_window("pages.rendered", minutes=1)
             assert "/old" not in recent
             assert recent.get("/recent", 0) >= 2
@@ -247,12 +240,12 @@ class TestDevFlagChannel:
 
     @override_settings(DEBUG=True)
     def test_debug_render_announces_the_dev_flag(self, next_client) -> None:
-        payload = _init_payload(next_client.get("/").content.decode())
+        payload = init_payload(next_client.get("/").content.decode())
         assert payload["$dev"] is True
 
     @override_settings(DEBUG=False)
     def test_production_render_omits_the_dev_flag(self, next_client) -> None:
-        payload = _init_payload(next_client.get("/").content.decode())
+        payload = init_payload(next_client.get("/").content.decode())
         assert "$dev" not in payload
         assert "$csrf" in payload
 
@@ -260,7 +253,7 @@ class TestDevFlagChannel:
     def test_dashboard_context_keys_travel_beside_the_reserved_ones(
         self, next_client
     ) -> None:
-        payload = _init_payload(next_client.get("/stats/").content.decode())
+        payload = init_payload(next_client.get("/stats/").content.decode())
         assert "live_stats" in payload
         assert payload["$dev"] is True
 

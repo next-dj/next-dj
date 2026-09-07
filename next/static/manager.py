@@ -57,6 +57,16 @@ _RUNTIME_SLOT_NAME = "scripts"
 _DEFAULT_BACKEND_PATH = "next.static.StaticFilesBackend"
 
 
+def _rewrites_asset_urls(backend: StaticBackend) -> bool:
+    """Report whether the backend replaces the identity `asset_url` hook.
+
+    The hook is consulted per rendered asset, so the answer is settled once per
+    backend load and a pipeline nothing rewrites pays no call into a method that
+    hands its argument back.
+    """
+    return type(backend).asset_url is not StaticBackend.asset_url
+
+
 class StaticManager:
     """Coordinate static backends, asset discovery, and placeholder injection.
 
@@ -77,6 +87,7 @@ class StaticManager:
         self._script_builder: NextScriptBuilderType | None = None
         self._dedup_factory: Callable[[], DedupStrategy] | None = None
         self._js_policy_factory: Callable[[], JsContextPolicy] | None = None
+        self._rewrites_urls: bool = False
 
     def __len__(self) -> int:
         """Return the number of configured backends, loading them if needed."""
@@ -132,10 +143,12 @@ class StaticManager:
         An empty collector yields empty tag sections. The preload hint
         is injected before `</head>` under the same policy.
 
-        The optional `request` argument is forwarded to backend tag
-        renderers and to the `collector_finalized` and `html_injected`
-        signals. Backends may use it to rewrite asset URLs based on
-        per-request state. The default backend ignores it.
+        The optional `request` argument is forwarded to `backend.asset_url`,
+        to the backend tag renderers, and to the `collector_finalized` and
+        `html_injected` signals. Every URL passes through `asset_url` first,
+        the runtime bundle and its preload hint included, so a backend that
+        rewrites URLs per request reaches all of them. The default backend
+        ignores the request.
         """
         collector_finalized.send(sender=collector, page_path=page_path, request=request)
         html_before = html
@@ -148,7 +161,7 @@ class StaticManager:
         for slot in default_placeholders:
             rendered = self._render_slot(slot, collector, backend, request=request)
             html = html.replace(slot.token, rendered)
-        html = self._inject_preload_hint(html)
+        html = self._inject_preload_hint(html, backend, request=request)
         if replaced is not None:
             html_injected.send(
                 sender=self,
@@ -182,7 +195,9 @@ class StaticManager:
             collector.assets_in_slot(slot.name), backend, request=request
         )
         if slot.name == _RUNTIME_SLOT_NAME:
-            return self._wrap_with_runtime(user_tags, collector, request=request)
+            return self._wrap_with_runtime(
+                user_tags, collector, backend, request=request
+            )
         return user_tags
 
     def _reserved_payload(self, request: HttpRequest | None) -> dict[str, Any]:
@@ -195,8 +210,20 @@ class StaticManager:
             payload[DEV_PAYLOAD_KEY] = True
         return payload
 
+    def _runtime_url(self, backend: StaticBackend, request: HttpRequest | None) -> str:
+        """Return the runtime bundle URL as the backend resolves it for this render."""
+        url = self._next_script_builder().url
+        if not self._rewrites_urls:
+            return url
+        return backend.asset_url(url, request=request)
+
     def _wrap_with_runtime(
-        self, user_tags: str, collector: StaticCollector, *, request: HttpRequest | None
+        self,
+        user_tags: str,
+        collector: StaticCollector,
+        backend: StaticBackend,
+        *,
+        request: HttpRequest | None,
     ) -> str:
         builder = self._next_script_builder()
         if builder.policy is ScriptInjectionPolicy.AUTO:
@@ -218,15 +245,19 @@ class StaticManager:
             init_payload = builder.init_script(
                 js_context, key_serializers=serializers, encoded=encoded
             )
-            next_scripts = f"{builder.script_tag()}\n{init_payload}\n"
+            url = self._runtime_url(backend, request)
+            next_scripts = f"{builder.script_tag(url)}\n{init_payload}\n"
             return next_scripts + user_tags if user_tags else next_scripts
         return user_tags
 
-    def _inject_preload_hint(self, html: str) -> str:
+    def _inject_preload_hint(
+        self, html: str, backend: StaticBackend, *, request: HttpRequest | None
+    ) -> str:
         builder = self._next_script_builder()
         if builder.policy is not ScriptInjectionPolicy.AUTO:
             return html
-        replacement = f"{builder.preload_link()}\n{HEAD_CLOSE}"
+        url = self._runtime_url(backend, request)
+        replacement = f"{builder.preload_link(url)}\n{HEAD_CLOSE}"
         return html.replace(HEAD_CLOSE, replacement, 1)
 
     def _render_tags(
@@ -248,7 +279,10 @@ class StaticManager:
             return f"<{tag}>{asset.inline}</{tag}>"
         renderer_name = default_kinds.renderer(asset.kind)
         renderer = getattr(backend, renderer_name)
-        return cast("str", renderer(asset.url, request=request))
+        url = asset.url
+        if self._rewrites_urls:
+            url = backend.asset_url(url, request=request)
+        return cast("str", renderer(url, request=request))
 
     def _ensure_backends(self) -> None:
         if not self._loaded:
@@ -283,7 +317,8 @@ class StaticManager:
         self._resolve_collector_strategies()
 
     def _resolve_collector_strategies(self) -> None:
-        """Read dedup and js-context policy dotted paths from the first backend."""
+        """Read the pipeline-level facts the first backend settles for a render."""
+        self._rewrites_urls = _rewrites_asset_urls(self._backends[0])
         options = dict(self._backends[0].config.get("OPTIONS") or {})
         dedup_path = options.get("DEDUP_STRATEGY")
         policy_path = options.get("JS_CONTEXT_POLICY")
@@ -310,8 +345,7 @@ class StaticManager:
     def page_roots(self) -> tuple[Path, ...]:
         """Return absolute page-tree roots from configured page backends.
 
-        Taken as the watch layer spells them, already resolved, so a lookup
-        pays no second resolve per root.
+        Taken already resolved, as the watch layer spells them, so no lookup repeats it.
         """
         if self._cached_page_roots is None:
             self._cached_page_roots = tuple(get_pages_directories_for_watch())
