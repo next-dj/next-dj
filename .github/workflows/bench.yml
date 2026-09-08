@@ -263,6 +263,26 @@ jobs:
         if: always()
         run: cat bench-comment.md >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Shrink bench JSON to aggregates
+        if: always()
+        run: |
+          set -euo pipefail
+          uv run python - <<'PY'
+          import json
+          from pathlib import Path
+
+          for name in ("bench-base.json", "bench-head.json"):
+              path = Path(name)
+              if not path.is_file() or not path.stat().st_size:
+                  continue
+              with path.open() as fh:
+                  report = json.load(fh)
+              for bench in report["benchmarks"]:
+                  bench["stats"].pop("data", None)
+              with path.open("w") as fh:
+                  json.dump(report, fh)
+          PY
+
       - name: Upload bench artefact
         if: always()
         uses: actions/upload-artifact@v4
@@ -274,7 +294,6 @@ jobs:
             bench-base.json
             bench-head.json
             pr-number.txt
-            .benchmarks/**/*.json
           retention-days: 14
           if-no-files-found: error
 
