@@ -59,6 +59,7 @@ def submit_new_chapter(page: Page) -> Locator:
     add_form.get_by_role("button", name="Add chapter").click()
     dialog = page.locator(DIALOG)
     expect(dialog).to_have_count(1)
+    expect(dialog.locator("#id_chapter_title")).to_have_value("Climax")
     return dialog
 
 

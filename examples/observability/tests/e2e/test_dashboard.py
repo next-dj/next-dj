@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime, timedelta
+from urllib.parse import urlsplit
 
 import pytest
 from e2e_support.browser import (
@@ -16,6 +17,8 @@ from playwright.sync_api import Locator, Page, Response, expect
 pytestmark = pytest.mark.e2e
 
 FrozenNow = Callable[[datetime], AbstractContextManager[object]]
+
+CDN_HOSTS = frozenset({"unpkg.com", "cdn.jsdelivr.net"})
 
 SPARKLINE = "#sparkline-mount"
 SPARK_BARS = f"{SPARKLINE} li"
@@ -61,7 +64,7 @@ def test_the_overview_boots_and_babel_draws_the_react_sparkline(
     cdn = [
         response
         for response in next_probe.responses
-        if "unpkg.com" in response.url or "jsdelivr.net" in response.url
+        if urlsplit(response.url).hostname in CDN_HOSTS
     ]
     assert len(cdn) == 3
     assert {response.status for response in cdn} == {200}
