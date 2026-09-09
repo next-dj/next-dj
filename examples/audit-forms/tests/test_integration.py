@@ -13,7 +13,7 @@ from next.forms.signals import (
     form_access_denied,
     form_validation_failed,
 )
-from next.testing import SignalRecorder, envelope_of, resolve_action_url
+from next.testing import SignalRecorder, envelope_of, hidden_fields, resolve_action_url
 
 
 pytestmark = pytest.mark.django_db
@@ -141,12 +141,6 @@ def _policy_input(html: str) -> str:
     return match.group(0)
 
 
-def _hidden_fields(block: str) -> dict[str, str]:
-    return dict(
-        re.findall(r'<input type="hidden" name="([^"]+)" value="([^"]*)"', block)
-    )
-
-
 class TestFullSubmission:
     def test_full_three_step_submit_creates_access_request(self, next_client) -> None:
         with SignalRecorder(action_dispatched) as recorder:
@@ -250,11 +244,11 @@ class TestValidationFailure:
         ack = {"policy_acknowledged": "on"}
         invalid = next_client.post(
             _form_action_url(block),
-            {**_hidden_fields(block), **ack, **IDENTITY, "email": ""},
+            {**hidden_fields(block), **ack, **IDENTITY, "email": ""},
         )
         assert invalid.status_code == 200
         rerendered = _wizard_form_block(invalid.content.decode())
-        refields = _hidden_fields(rerendered)
+        refields = hidden_fields(rerendered)
         assert refields["_next_form_origin"] == "/request/identity/"
         fixed = next_client.post(
             _form_action_url(rerendered), {**refields, **ack, **IDENTITY}

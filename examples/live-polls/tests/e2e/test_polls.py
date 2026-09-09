@@ -5,6 +5,7 @@ from e2e_support.browser import (
     CDN_URL_PATTERN,
     PageProbe,
     applied_count,
+    expect_no_partial_request,
     wait_for_apply,
     wait_for_runtime,
 )
@@ -121,7 +122,7 @@ def test_the_vue_island_mounts_and_draws_the_bars_the_server_never_sizes(
     expect(page.locator(TOTAL)).to_have_text("4")
     assert bar_of(page, tabs).evaluate("element => element.style.width") == "75%"
     assert bar_of(page, spaces).evaluate("element => element.style.width") == "25%"
-    assert next_probe.partial_requests() == []
+    expect_no_partial_request(page, next_probe)
 
 
 def test_voting_repaints_the_zone_through_the_very_same_vue_instance(

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING
+from functools import partial
+from typing import TYPE_CHECKING, Any
 from unittest import mock
 
+import pytest
 from django.test import RequestFactory, override_settings
 from django.utils.functional import empty
 
@@ -28,6 +30,7 @@ SCRIPTS_PLACEHOLDER = "<!-- next:scripts -->"
 
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
 
     from django.http import HttpRequest
@@ -44,6 +47,18 @@ PREFIXED_BACKENDS = {
     "STATIC_BACKENDS": [{"BACKEND": "tests.static.test_manager.PrefixingStaticBackend"}]
 }
 
+COMPOSED_BACKENDS = {
+    "STATIC_BACKENDS": [{"BACKEND": "tests.static.test_manager.ComposedStaticBackend"}]
+}
+
+REWRITING_BACKENDS = pytest.mark.parametrize(
+    ("backends", "prefix"),
+    [
+        pytest.param(PREFIXED_BACKENDS, "/pfx", id="override"),
+        pytest.param(COMPOSED_BACKENDS, "/composed", id="composed"),
+    ],
+)
+
 
 class PrefixingStaticBackend(StaticFilesBackend):
     """Backend that stamps a per-request prefix onto every asset URL."""
@@ -53,6 +68,21 @@ class PrefixingStaticBackend(StaticFilesBackend):
         if request is None or not url.startswith("/"):
             return url
         return f"/pfx{url}"
+
+
+def _stamp_prefix(prefix: str, url: str, *, request: HttpRequest | None = None) -> str:
+    if request is None or not url.startswith("/"):
+        return url
+    return f"{prefix}{url}"
+
+
+class ComposedStaticBackend(StaticFilesBackend):
+    """Backend that installs its rewrite on the instance instead of the class."""
+
+    def __init__(self, config: Mapping[str, Any] | None = None) -> None:
+        """Bind the prefix into the hook the manager will find on the instance."""
+        super().__init__(config)
+        self.asset_url = partial(_stamp_prefix, "/composed")
 
 
 class TestEnsureBackends:
@@ -700,21 +730,22 @@ class TestInjectForwardsRequest:
 
 
 class TestBackendRewritesEveryAssetUrl:
-    """A backend that overrides `asset_url` reaches every URL the page carries.
+    """A backend that rewrites `asset_url` reaches every URL the page carries.
 
     The runtime bundle is not a collected asset, so a backend that only
     rewrote through the renderer methods would leave `next.min.js` and its
-    preload hint pointing at the unrewritten URL.
+    preload hint pointing at the unrewritten URL. A hook composed onto the
+    instance has to count as a rewrite exactly like an override on the class.
     """
 
     @staticmethod
-    def _inject(collector, request) -> str:
+    def _inject(backends, collector, request) -> str:
         html = (
             f"<head>{STYLES_PLACEHOLDER}{HEAD_CLOSE}</head>"
             f"<body>{SCRIPTS_PLACEHOLDER}</body>"
         )
         with (
-            override_settings(NEXT_FRAMEWORK=PREFIXED_BACKENDS),
+            override_settings(NEXT_FRAMEWORK=backends),
             mock.patch(
                 "next.static.manager.staticfiles_storage.url", return_value=NEXT_JS_URL
             ),
@@ -725,28 +756,40 @@ class TestBackendRewritesEveryAssetUrl:
         with override_settings(NEXT_FRAMEWORK=PREFIXED_BACKENDS):
             assert isinstance(StaticManager().default_backend, PrefixingStaticBackend)
 
-    def test_runtime_script_tag_carries_the_rewritten_url(self) -> None:
-        out = self._inject(StaticCollector(), RequestFactory().get("/"))
-        assert f'<script src="/pfx{NEXT_JS_URL}"></script>' in out
+    @REWRITING_BACKENDS
+    def test_runtime_script_tag_carries_the_rewritten_url(
+        self, backends: dict, prefix: str
+    ) -> None:
+        out = self._inject(backends, StaticCollector(), RequestFactory().get("/"))
+        assert f'<script src="{prefix}{NEXT_JS_URL}"></script>' in out
         assert f'<script src="{NEXT_JS_URL}"></script>' not in out
 
-    def test_preload_hint_carries_the_rewritten_url(self) -> None:
-        out = self._inject(StaticCollector(), RequestFactory().get("/"))
-        assert f'<link rel="preload" as="script" href="/pfx{NEXT_JS_URL}">' in out
+    @REWRITING_BACKENDS
+    def test_preload_hint_carries_the_rewritten_url(
+        self, backends: dict, prefix: str
+    ) -> None:
+        out = self._inject(backends, StaticCollector(), RequestFactory().get("/"))
+        assert f'<link rel="preload" as="script" href="{prefix}{NEXT_JS_URL}">' in out
         assert f'href="{NEXT_JS_URL}"' not in out
 
-    def test_collected_asset_urls_carry_the_rewritten_url(self) -> None:
+    @REWRITING_BACKENDS
+    def test_collected_asset_urls_carry_the_rewritten_url(
+        self, backends: dict, prefix: str
+    ) -> None:
         collector = StaticCollector()
         collector.add(StaticAsset(url="/static/next/a.css", kind="css"))
         collector.add(StaticAsset(url="/static/next/a.js", kind="js"))
-        out = self._inject(collector, RequestFactory().get("/"))
-        assert 'href="/pfx/static/next/a.css"' in out
-        assert 'src="/pfx/static/next/a.js"' in out
+        out = self._inject(backends, collector, RequestFactory().get("/"))
+        assert f'href="{prefix}/static/next/a.css"' in out
+        assert f'src="{prefix}/static/next/a.js"' in out
 
-    def test_without_a_request_the_urls_stay_untouched(self) -> None:
-        out = self._inject(StaticCollector(), None)
+    @REWRITING_BACKENDS
+    def test_without_a_request_the_urls_stay_untouched(
+        self, backends: dict, prefix: str
+    ) -> None:
+        out = self._inject(backends, StaticCollector(), None)
         assert f'<script src="{NEXT_JS_URL}"></script>' in out
-        assert "/pfx" not in out
+        assert prefix not in out
 
     def test_disabled_policy_never_asks_the_backend_for_the_runtime_url(self) -> None:
         with override_settings(NEXT_FRAMEWORK=PREFIXED_BACKENDS):
@@ -766,6 +809,26 @@ class TestBackendRewritesEveryAssetUrl:
                     request=RequestFactory().get("/"),
                 )
         assert asset_url.call_count == 0
+
+    def test_the_runtime_url_is_resolved_once_for_the_whole_render(self) -> None:
+        """The script tag and its preload hint cannot disagree, and cost one call."""
+        with override_settings(NEXT_FRAMEWORK=PREFIXED_BACKENDS):
+            manager = StaticManager()
+            manager._ensure_backends()
+            manager._script_builder = NextScriptBuilder(NEXT_JS_URL)
+            with mock.patch.object(
+                manager.default_backend,
+                "asset_url",
+                wraps=manager.default_backend.asset_url,
+            ) as asset_url:
+                out = manager.inject(
+                    f"<head>{HEAD_CLOSE}</head><body>{SCRIPTS_PLACEHOLDER}</body>",
+                    StaticCollector(),
+                    request=RequestFactory().get("/"),
+                )
+        assert asset_url.call_args_list == [mock.call(NEXT_JS_URL, request=mock.ANY)]
+        assert f'<script src="/pfx{NEXT_JS_URL}"></script>' in out
+        assert f'<link rel="preload" as="script" href="/pfx{NEXT_JS_URL}">' in out
 
 
 class TestAssetUrlHook:

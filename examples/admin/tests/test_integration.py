@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import pytest
 from admin_audit.models import AdminActivityLog
 from django.core.management import call_command
+from django.db.models import UniqueConstraint
 from library.demo import DEMO_BOOKS, seed_demo
 from library.models import Book, Chapter, Tag
 
@@ -707,6 +708,22 @@ class TestInlines:
 _INLINE_ACTIONS = ("admin:inline_change", "admin:inline_add")
 
 
+@pytest.fixture()
+def chapter_unique_constraint(monkeypatch):
+    """Restate the chapter pair rule as the `UniqueConstraint` Django documents.
+
+    `unique_together` and `Meta.constraints` are checked by two different
+    `_post_clean` calls, so the modern spelling needs its own proof that the
+    parent key is back in scope.
+    """
+    monkeypatch.setattr(Chapter._meta, "unique_together", ())
+    monkeypatch.setattr(
+        Chapter._meta,
+        "constraints",
+        [UniqueConstraint(fields=["book", "number"], name="uniq_chapter_number")],
+    )
+
+
 class TestLiveInlines:
     """Each existing related row is its own keyed `admin:inline_change` form."""
 
@@ -846,6 +863,43 @@ class TestLiveInlines:
         assert r.status_code == 200
         assert "Chapter with this Book and Number already exists." in r.content.decode()
         assert Chapter.objects.filter(book=book).count() == 2
+
+    def test_a_duplicate_number_under_a_unique_constraint_is_a_row_error(
+        self, admin_client, book_with_two_chapters, chapter_unique_constraint
+    ):
+        book, first, second = book_with_two_chapters
+        r = admin_client.post_action(
+            "admin:inline_change",
+            {
+                "_inline": "chapter",
+                "_inline_pk": str(second.pk),
+                "number": str(first.number),
+                "title": "Dupe",
+                "word_count": "10",
+            },
+            origin=f"/admin/library/book/{book.pk}/change/",
+        )
+        assert r.status_code == 200
+        assert "Chapter with this Book and Number already exists." in r.content.decode()
+        second.refresh_from_db()
+        assert (second.number, second.title) == (2, "Rising")
+
+    def test_a_unique_constraint_still_lets_a_free_number_through(
+        self, admin_client, book_with_two_chapters, chapter_unique_constraint
+    ):
+        book, *_ = book_with_two_chapters
+        r = admin_client.post_action(
+            "admin:inline_add",
+            {
+                "_inline": "chapter",
+                "number": "3",
+                "title": "Climax",
+                "word_count": "10",
+            },
+            origin=f"/admin/library/book/{book.pk}/change/",
+        )
+        assert r.status_code == 302
+        assert Chapter.objects.filter(book=book, number=3).exists()
 
     def test_a_duplicate_number_leaves_a_sibling_book_alone(
         self, admin_client, book_with_two_chapters, make_book, make_chapter

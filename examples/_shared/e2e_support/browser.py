@@ -4,8 +4,10 @@ import pathlib
 import re
 import tempfile
 import uuid
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
+from contextlib import suppress
 from dataclasses import dataclass, field
+from typing import NamedTuple
 
 import pytest
 from playwright.sync_api import ConsoleMessage, Error, Page, Request, Response, Route
@@ -96,6 +98,7 @@ class PageProbe:
     bad_responses: list[str] = field(default_factory=list)
     failed_requests: list[str] = field(default_factory=list)
     responses: list[Response] = field(default_factory=list)
+    page: Page | None = None
 
     def on_console(self, message: ConsoleMessage) -> None:
         """Record an error or warning the page logged."""
@@ -131,6 +134,7 @@ class PageProbe:
 
     def attach(self, page: Page) -> None:
         """Subscribe to the four channels that carry browser problems."""
+        self.page = page
         page.on("console", self.on_console)
         page.on("pageerror", self.on_page_error)
         page.on("response", self.on_response)
@@ -143,6 +147,17 @@ class PageProbe:
         page.remove_listener("response", self.on_response)
         page.remove_listener("requestfailed", self.on_request_failed)
 
+    def flush(self) -> None:
+        """Round-trip to the browser so late events land before the noise is read.
+
+        Playwright delivers protocol events while the sync API waits on a call, so a
+        message the last statement of a test logged needs one more call to arrive.
+        """
+        if self.page is None or self.page.is_closed():
+            return
+        with suppress(Error):
+            self.page.evaluate("() => undefined")
+
     def problems(self) -> list[str]:
         """Return every recorded problem as a readable line."""
         return (
@@ -152,14 +167,17 @@ class PageProbe:
             + [f"netfail: {entry}" for entry in self.failed_requests]
         )
 
-    def partial_requests(self, zone: str | None = None) -> list[Response]:
+    def partial_requests(
+        self, zone: str | None = None, *, since: int = 0
+    ) -> list[Response]:
         """Return responses the runtime stamped as partial, optionally one zone.
 
         A batched trigger sends every target in one comma-separated header, so a
-        zone matches when it appears in that list rather than equalling it.
+        zone matches when it appears in that list rather than equalling it. The
+        `since` index skips the responses a caller already accounted for.
         """
         matched = []
-        for response in self.responses:
+        for response in self.responses[since:]:
             headers = response.request.headers
             if headers.get("x-next-request") != "1":
                 continue
@@ -169,6 +187,9 @@ class PageProbe:
                     continue
             matched.append(response)
         return matched
+
+
+PROBE_KEY = pytest.StashKey[PageProbe]()
 
 
 def _cache_path(url: str) -> pathlib.Path:
@@ -184,12 +205,18 @@ def _content_type(path: pathlib.Path) -> str:
 def _serve_from_cache(route: Route) -> None:
     path = _cache_path(route.request.url)
     if not path.exists():
+        fetched = route.fetch()
+        if not fetched.ok:
+            # An error page cached under a script name would be replayed as a valid
+            # bundle by every later run on this machine, so nothing is stored and the
+            # test sees the real status instead.
+            route.fulfill(response=fetched)
+            return
         CDN_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        body = route.fetch().body()
         # Another xdist worker may be writing the same asset, so publish atomically
         # under a name no concurrent process on this machine can pick as well.
         staging = path.with_suffix(f"{path.suffix}.{os.getpid()}.{uuid.uuid4().hex}")
-        staging.write_bytes(body)
+        staging.write_bytes(fetched.body())
         staging.replace(path)
     route.fulfill(status=200, content_type=_content_type(path), body=path.read_bytes())
 
@@ -204,9 +231,28 @@ def _test_failed(request: pytest.FixtureRequest) -> bool:
     return report is None or bool(report.failed)
 
 
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_call(item: pytest.Item) -> Generator[None, object, object]:
+    """Fail the call phase, not the teardown, on the noise the probe collected.
+
+    pytest-playwright keeps the retain-on-failure trace, video and screenshot only
+    when `rep_call` failed, so a probe failing in teardown would delete its own
+    evidence.
+    """
+    outcome = yield
+    probe = item.stash.get(PROBE_KEY, None)
+    if probe is None:
+        return outcome
+    probe.flush()
+    problems = probe.problems()
+    if problems:
+        pytest.fail("the browser reported problems:\n  " + "\n  ".join(problems))
+    return outcome
+
+
 @pytest.fixture()
 def next_probe(request: pytest.FixtureRequest) -> Iterator[PageProbe]:
-    """Stub the CDN, bridge the runtime events, and fail the test on browser noise."""
+    """Stub the CDN, bridge the runtime events, and collect browser noise."""
     page: Page = request.getfixturevalue("page")
     page.context.route(CDN_URL_PATTERN, _serve_from_cache)
     bridge = EVENT_BRIDGE % {"dom": list(DOM_EVENTS), "bus": list(BUS_EVENTS)}
@@ -214,17 +260,15 @@ def next_probe(request: pytest.FixtureRequest) -> Iterator[PageProbe]:
 
     collected = PageProbe()
     collected.attach(page)
+    request.node.stash[PROBE_KEY] = collected
     yield collected
     collected.detach(page)
 
-    problems = collected.problems()
-    if not (problems or _test_failed(request)):
+    if not _test_failed(request):
         # Closing here releases any SSE stream still parked in a server thread. A
         # failed test keeps its page open instead, because pytest-playwright shoots
         # the failure screenshot off `context.pages` when the context tears down.
         page.close()
-    if problems:
-        pytest.fail("the browser reported problems:\n  " + "\n  ".join(problems))
 
 
 @pytest.fixture(autouse=True)
@@ -263,3 +307,47 @@ def wait_for_apply(page: Page, since: int, timeout: int = 10_000) -> None:
         arg=since,
         timeout=timeout,
     )
+
+
+def _requested_count(page: Page) -> int:
+    """Return how many partial requests the bridge has recorded leaving so far."""
+    return page.evaluate(
+        "() => (window.__nextEvents ?? [])"
+        ".filter((entry) => entry.name === 'partial:before-request').length"
+    )
+
+
+class RequestBaseline(NamedTuple):
+    """What an interaction is measured against, as counted before it ran."""
+
+    sent: int = 0
+    answered: int = 0
+
+
+# The counts a page that has just loaded starts from.
+PAGE_START = RequestBaseline()
+
+
+def request_baseline(page: Page, probe: PageProbe) -> RequestBaseline:
+    """Return the counts a later `expect_no_partial_request` opens its window at."""
+    return RequestBaseline(_requested_count(page), len(probe.responses))
+
+
+def expect_no_partial_request(
+    page: Page, probe: PageProbe, since: RequestBaseline = PAGE_START
+) -> None:
+    """Fail unless the interaction since the baseline left the server untouched.
+
+    The runtime dispatches `partial:before-request` synchronously before it awaits the
+    fetch, so the event is already recorded once the playwright call that triggered it
+    returns. The response listener alone would pass while the request is still in
+    flight, which is the very regression these assertions guard against, and it stays
+    only as a second reading that catches a bridge which never installed.
+    """
+    sent = _requested_count(page) - since.sent
+    if sent > 0:
+        pytest.fail(f"the runtime sent {sent} partial request(s), expected none")
+    answered = probe.partial_requests(since=since.answered)
+    if answered:
+        urls = "\n  ".join(response.url for response in answered)
+        pytest.fail(f"the server answered partial requests:\n  {urls}")

@@ -463,12 +463,16 @@ class Patches:
         The insertion verb comes from the kind registry, so an unregistered
         kind still travels and only loses the field the runtime would use.
         An inline body keeps the verb only when the runtime builds the same
-        element the full page render wraps it in.
+        element the full page render wraps it in. A URL passes through the
+        backend hook a full page render also asks, so one `asset_url` override
+        covers the manifest of an envelope as well.
         """
+        # An inline body carries no URL, so it never reaches the backend hook.
+        resolved = default_manager.asset_url(url, request=self._request) if url else url
         self._assets.append(
             Asset(
                 kind=kind,
-                url=url,
+                url=resolved,
                 inline=inline,
                 load=default_kinds.load(kind, inline=inline is not None),
             )
@@ -602,16 +606,13 @@ class Patches:
     def _collect_zone_assets(self, result: "ZoneRenderResult") -> "Patches":
         """Record the URL-form and inline-form assets a zone body collected.
 
-        Each URL passes through the backend hook the full page render also asks,
-        so a per-request rewrite reaches an asset a zone introduces. This
-        deliberately collects assets only. The builder verbs own context through
-        context(), so they never absorb the js-context delta.
+        This deliberately collects assets only. The builder verbs own context
+        through context(), so they never absorb the js-context delta.
         """
-        request = self._request
         for kind, body in result.inline_assets():
             self.add_asset(kind, "", inline=body)
         for kind, url in result.url_assets():
-            self.add_asset(kind, default_manager.asset_url(url, request=request))
+            self.add_asset(kind, url)
         return self
 
     def _absorb_zone_result(self, result: "ZoneRenderResult") -> "Patches":

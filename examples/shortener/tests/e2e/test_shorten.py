@@ -2,6 +2,8 @@ import pytest
 from e2e_support.browser import (
     PageProbe,
     applied_count,
+    expect_no_partial_request,
+    request_baseline,
     wait_for_apply,
     wait_for_runtime,
 )
@@ -76,9 +78,10 @@ def test_an_invalid_url_never_reaches_the_server(
 
     field = page.locator("#id_url")
     field.fill("not-a-url")
+    seen = request_baseline(page, next_probe)
     page.get_by_role("button", name="Shorten").click()
 
     assert field.evaluate("element => element.validity.valid") is False
-    assert next_probe.partial_requests() == []
+    expect_no_partial_request(page, next_probe, seen)
     expect(page.locator(f"{LATEST_LINKS} li")).to_have_count(0)
     assert Link.objects.count() == 0

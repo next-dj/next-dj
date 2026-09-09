@@ -68,6 +68,43 @@ class TestAddAssetResolvesLoad:
         assert envelope.assets[0].as_dict()["inline"] == "x()"
 
 
+class TestAddAssetFollowsTheBackendRewrite:
+    """A hand-written asset reaches the client through the same hook a page does.
+
+    The envelope ships bare URLs the client inserts itself, so a manifest built
+    around the hook would hand a rewriting deployment an unresolvable URL.
+    """
+
+    def test_a_url_passes_through_the_backend_hook(self, monkeypatch) -> None:
+        def prefix(url: str, *, request=None) -> str:
+            assert request is not None
+            return f"/pfx{url}"
+
+        monkeypatch.setattr(default_manager, "asset_url", prefix)
+        envelope = (
+            Patches(partial_request("/"))
+            .add_asset("css", "/static/app/x.css")
+            .envelope()
+        )
+        assert envelope.assets[0].url == "/pfx/static/app/x.css"
+
+    def test_an_inline_body_never_reaches_the_hook(self, monkeypatch) -> None:
+        asked = []
+
+        def record(url: str, *, request=None) -> str:
+            asked.append(url)
+            return url
+
+        monkeypatch.setattr(default_manager, "asset_url", record)
+        envelope = (
+            Patches(partial_request("/"))
+            .add_asset("css", "", inline=".x {}")
+            .envelope()
+        )
+        assert envelope.assets[0].url == ""
+        assert asked == []
+
+
 class TestPatchesBuilder:
     """The minimal builder emits HTML and HTML-less verbs in order."""
 

@@ -1,5 +1,10 @@
 import pytest
-from e2e_support.browser import PageProbe, wait_for_runtime
+from e2e_support.browser import (
+    PageProbe,
+    expect_no_partial_request,
+    request_baseline,
+    wait_for_runtime,
+)
 from notes.models import Note
 from playwright.sync_api import Page, expect
 
@@ -124,6 +129,7 @@ def test_typing_in_the_editor_updates_the_markdown_preview(
 
     expect(page.locator(PREVIEW)).to_have_text("Nothing to preview yet.")
 
+    seen = request_baseline(page, next_probe)
     page.locator("#id_body").press_sequentially("# Draft", delay=20)
 
     expect(page.locator(f"{PREVIEW} h1")).to_have_text("Draft")
@@ -132,7 +138,7 @@ def test_typing_in_the_editor_updates_the_markdown_preview(
 
     expect(page.locator(f"{PREVIEW} li")).to_have_count(2)
     expect(page.locator(f"{PREVIEW} h1")).to_have_count(0)
-    assert next_probe.partial_requests() == []
+    expect_no_partial_request(page, next_probe, seen)
 
 
 def test_a_locked_note_refuses_every_save_path(
@@ -148,14 +154,16 @@ def test_a_locked_note_refuses_every_save_path(
     save = page.get_by_role("button", name="Save note")
     expect(save).to_be_disabled()
 
+    seen = request_baseline(page, next_probe)
     page.locator("#id_body").fill("smuggled past the guard")
     page.locator("#id_title").press("Enter")
+
+    expect_no_partial_request(page, next_probe, seen)
 
     with page.expect_navigation():
         page.get_by_role("link", name="Back to notes").click()
 
     expect(page).to_have_url(f"{base_url}/notes/")
-    assert next_probe.partial_requests() == []
     locked_note.refresh_from_db()
     assert locked_note.body != "smuggled past the guard"
 

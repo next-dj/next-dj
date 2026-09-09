@@ -62,9 +62,11 @@ def _rewrites_asset_urls(backend: StaticBackend) -> bool:
 
     The hook is consulted per rendered asset, so the answer is settled once per
     backend load and a pipeline nothing rewrites pays no call into a method that
-    hands its argument back.
+    hands its argument back. The question is put to the instance rather than the
+    class, so a backend that composes its rewrite in `__init__` counts as well,
+    and only a bound method carrying the base function reads as the identity.
     """
-    return type(backend).asset_url is not StaticBackend.asset_url
+    return getattr(backend.asset_url, "__func__", None) is not StaticBackend.asset_url
 
 
 class StaticManager:
@@ -158,10 +160,26 @@ class StaticManager:
                 slot.name for slot in default_placeholders if slot.token in html
             )
         backend = self.default_backend
+        builder = self._next_script_builder()
+        # Settled once for the render, so the script tag and the preload hint
+        # cannot disagree and a backend doing real work in the hook pays for one.
+        runtime_url = (
+            self._runtime_url(builder, backend, request)
+            if builder.policy is ScriptInjectionPolicy.AUTO
+            else None
+        )
         for slot in default_placeholders:
-            rendered = self._render_slot(slot, collector, backend, request=request)
+            rendered = self._render_slot(
+                slot,
+                collector,
+                backend,
+                builder,
+                request=request,
+                runtime_url=runtime_url,
+            )
             html = html.replace(slot.token, rendered)
-        html = self._inject_preload_hint(html, backend, request=request)
+        if runtime_url is not None:
+            html = self._inject_preload_hint(html, builder, runtime_url)
         if replaced is not None:
             html_injected.send(
                 sender=self,
@@ -200,15 +218,17 @@ class StaticManager:
         slot: PlaceholderSlot,
         collector: StaticCollector,
         backend: StaticBackend,
+        builder: NextScriptBuilderType,
         *,
         request: HttpRequest | None,
+        runtime_url: str | None,
     ) -> str:
         user_tags = self._render_tags(
             collector.assets_in_slot(slot.name), backend, request=request
         )
-        if slot.name == _RUNTIME_SLOT_NAME:
+        if slot.name == _RUNTIME_SLOT_NAME and runtime_url is not None:
             return self._wrap_with_runtime(
-                user_tags, collector, backend, request=request
+                user_tags, collector, builder, runtime_url, request=request
             )
         return user_tags
 
@@ -222,54 +242,49 @@ class StaticManager:
             payload[DEV_PAYLOAD_KEY] = True
         return payload
 
-    def _runtime_url(self, backend: StaticBackend, request: HttpRequest | None) -> str:
+    def _runtime_url(
+        self,
+        builder: NextScriptBuilderType,
+        backend: StaticBackend,
+        request: HttpRequest | None,
+    ) -> str:
         """Return the runtime bundle URL as the backend resolves it for this render."""
-        url = self._next_script_builder().url
         if not self._rewrites_urls:
-            return url
-        return backend.asset_url(url, request=request)
+            return builder.url
+        return backend.asset_url(builder.url, request=request)
 
     def _wrap_with_runtime(
         self,
         user_tags: str,
         collector: StaticCollector,
-        backend: StaticBackend,
+        builder: NextScriptBuilderType,
+        runtime_url: str,
         *,
         request: HttpRequest | None,
     ) -> str:
-        builder = self._next_script_builder()
-        if builder.policy is ScriptInjectionPolicy.AUTO:
-            js_context: dict[str, Any] = collector.js_context()
-            encoded = collector.js_context_encoded()
-            serializers = collector.js_context_serializers()
-            collided = RESERVED_PAYLOAD_KEYS.intersection(js_context)
-            if collided:
-                # Fresh mappings leave the collector untouched, and a colliding
-                # key drops its fragment and serializer along with its value.
-                js_context = {k: v for k, v in js_context.items() if k not in collided}
-                encoded = {k: v for k, v in encoded.items() if k not in collided}
-                serializers = {
-                    k: v for k, v in serializers.items() if k not in collided
-                }
-            reserved = self._reserved_payload(request)
-            if reserved:
-                js_context = {**js_context, **reserved}
-            init_payload = builder.init_script(
-                js_context, key_serializers=serializers, encoded=encoded
-            )
-            url = self._runtime_url(backend, request)
-            next_scripts = f"{builder.script_tag(url)}\n{init_payload}\n"
-            return next_scripts + user_tags if user_tags else next_scripts
-        return user_tags
+        js_context: dict[str, Any] = collector.js_context()
+        encoded = collector.js_context_encoded()
+        serializers = collector.js_context_serializers()
+        collided = RESERVED_PAYLOAD_KEYS.intersection(js_context)
+        if collided:
+            # Fresh mappings leave the collector untouched, and a colliding
+            # key drops its fragment and serializer along with its value.
+            js_context = {k: v for k, v in js_context.items() if k not in collided}
+            encoded = {k: v for k, v in encoded.items() if k not in collided}
+            serializers = {k: v for k, v in serializers.items() if k not in collided}
+        reserved = self._reserved_payload(request)
+        if reserved:
+            js_context = {**js_context, **reserved}
+        init_payload = builder.init_script(
+            js_context, key_serializers=serializers, encoded=encoded
+        )
+        next_scripts = f"{builder.script_tag(runtime_url)}\n{init_payload}\n"
+        return next_scripts + user_tags if user_tags else next_scripts
 
     def _inject_preload_hint(
-        self, html: str, backend: StaticBackend, *, request: HttpRequest | None
+        self, html: str, builder: NextScriptBuilderType, runtime_url: str
     ) -> str:
-        builder = self._next_script_builder()
-        if builder.policy is not ScriptInjectionPolicy.AUTO:
-            return html
-        url = self._runtime_url(backend, request)
-        replacement = f"{builder.preload_link(url)}\n{HEAD_CLOSE}"
+        replacement = f"{builder.preload_link(runtime_url)}\n{HEAD_CLOSE}"
         return html.replace(HEAD_CLOSE, replacement, 1)
 
     def _render_tags(

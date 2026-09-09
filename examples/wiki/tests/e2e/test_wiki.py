@@ -2,6 +2,8 @@ import pytest
 from e2e_support.browser import (
     PageProbe,
     applied_count,
+    expect_no_partial_request,
+    request_baseline,
     wait_for_apply,
     wait_for_runtime,
 )
@@ -67,7 +69,7 @@ def test_runtime_boots_and_serves_its_bundle(
     assert [response.status for response in bundle] == [200]
     assert page.evaluate("() => typeof window.Next") == "function"
     expect(page.get_by_role("link", name="Routing", exact=True)).to_be_visible()
-    assert next_probe.partial_requests() == []
+    expect_no_partial_request(page, next_probe)
 
 
 def test_typing_narrows_the_search_without_pressing_enter(
@@ -118,6 +120,7 @@ def test_typing_markdown_repaints_the_preview_with_real_markup(
 ) -> None:
     open_create_form(page, base_url)
 
+    seen = request_baseline(page, next_probe)
     page.fill(BODY_FIELD, "# Title\n\nSome **bold** words.")
 
     strong = page.locator(f"{PREVIEW} strong")
@@ -126,7 +129,7 @@ def test_typing_markdown_repaints_the_preview_with_real_markup(
     weight = strong.evaluate("node => window.getComputedStyle(node).fontWeight")
     assert int(weight) > 400
     expect(page.locator(PREVIEW)).not_to_contain_text("**")
-    assert next_probe.partial_requests() == []
+    expect_no_partial_request(page, next_probe, seen)
 
 
 def test_the_preview_neutralises_a_javascript_link(page: Page, base_url: str) -> None:

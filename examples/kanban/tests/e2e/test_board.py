@@ -1,5 +1,5 @@
 import pytest
-from e2e_support.browser import PageProbe, wait_for_runtime
+from e2e_support.browser import PageProbe, expect_no_partial_request, wait_for_runtime
 from kanban.models import Board, Card, Column
 from playwright.sync_api import Locator, Page, Response, Route, expect
 
@@ -129,7 +129,7 @@ def test_the_react_island_mounts_over_the_server_rendered_board(
     expect(page.locator(COLUMN)).to_have_count(4)
     expect(page.locator(WIP_BADGE)).to_have_count(2)
     expect(page.get_by_role("textbox", name="New card in Backlog")).to_have_count(1)
-    assert next_probe.partial_requests() == []
+    expect_no_partial_request(page, next_probe)
 
 
 def test_dragging_a_card_moves_it_and_the_move_survives_a_reload(

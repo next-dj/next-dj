@@ -6,6 +6,8 @@ from django.contrib.auth.models import User
 from e2e_support.browser import (
     PageProbe,
     applied_count,
+    expect_no_partial_request,
+    request_baseline,
     wait_for_apply,
     wait_for_runtime,
 )
@@ -77,7 +79,7 @@ def test_runtime_boots_and_serves_its_bundle(
     assert [response.status for response in bundle] == [200]
     assert page.evaluate("() => typeof window.Next") == "function"
     expect(page.get_by_role("heading", name="Library")).to_be_visible()
-    assert next_probe.partial_requests() == []
+    expect_no_partial_request(page, next_probe)
 
 
 def test_an_anonymous_visit_lands_on_the_login_form_and_signing_in_returns(
@@ -124,6 +126,7 @@ def test_the_header_checkbox_drives_every_row_checkbox(
     expect(page.locator(ROW_BOXES)).to_have_count(12)
     expect(page.locator(CHECKED_BOXES)).to_have_count(0)
 
+    seen = request_baseline(page, next_probe)
     page.locator(BULK_TOGGLE).check()
 
     expect(page.locator(CHECKED_BOXES)).to_have_count(12)
@@ -131,7 +134,7 @@ def test_the_header_checkbox_drives_every_row_checkbox(
     page.locator(BULK_TOGGLE).uncheck()
 
     expect(page.locator(CHECKED_BOXES)).to_have_count(0)
-    assert next_probe.partial_requests() == []
+    expect_no_partial_request(page, next_probe, seen)
 
 
 def test_applying_a_bulk_action_publishes_the_whole_selection(
@@ -232,10 +235,11 @@ def test_an_empty_inline_title_never_reaches_the_server(
 
     title = inline_row(page, second.pk).locator(f"#id_chapter_{second.pk}_title")
     title.fill("")
+    seen = request_baseline(page, next_probe)
     inline_row(page, second.pk).get_by_role("button", name="Save").click()
 
     assert title.evaluate("element => element.validity.valueMissing") is True
-    assert next_probe.partial_requests() == []
+    expect_no_partial_request(page, next_probe, seen)
     second.refresh_from_db()
     assert second.title == "Rising"
 

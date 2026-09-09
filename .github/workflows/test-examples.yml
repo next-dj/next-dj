@@ -134,8 +134,8 @@ jobs:
     - name: Install the system dependencies chromium links against
       if: steps.browser-cache.outputs.cache-hit == 'true'
       run: uv run --no-project playwright install-deps chromium
-    # Both guards against a missing browser stack are silent by design, so the job
-    # asserts the suites are collectable before trusting a green run.
+    # A machine without playwright skips the browser suites with a warning rather than
+    # failing, so the job asserts they are collectable before trusting a green run.
     - name: Verify the browser suites collect
       run: |
         set -e

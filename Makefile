@@ -141,6 +141,17 @@ test-examples-e2e: # run the browser suites for every example that ships tests/e
 	for example_dir in examples/*/; do \
 		if [ -d "$$example_dir/tests/e2e" ]; then \
 			ran=1; \
+			for config in "$$example_dir"vite.config.*; do \
+				[ -f "$$config" ] || continue; \
+				manifest=$$(find "$$example_dir" -name node_modules -prune -o \
+					-path "*/.vite/manifest.json" -print -quit); \
+				if [ -z "$$manifest" ]; then \
+					echo "ERROR: $$example_dir ships a Vite bundle but no built manifest,"; \
+					echo "       so the browser has nothing to load. Build it first:"; \
+					echo "       (cd $$example_dir && npm ci && npm run build)"; \
+					exit 1; \
+				fi; \
+			done; \
 			cd "$$example_dir" && $(E2E_ENV) $(PYTEST_E2E) tests/e2e --no-cov $(E2E_XDIST) \
 				-p e2e_support.browser \
 				--tracing=retain-on-failure --video=retain-on-failure \

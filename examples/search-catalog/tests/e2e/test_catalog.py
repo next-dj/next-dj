@@ -4,6 +4,7 @@ import pytest
 from e2e_support.browser import (
     PageProbe,
     applied_count,
+    expect_no_partial_request,
     wait_for_apply,
     wait_for_runtime,
 )
@@ -53,7 +54,7 @@ def test_runtime_boots_and_serves_its_bundle(
     assert [response.status for response in bundle] == [200]
     assert page.evaluate("() => typeof window.Next") == "function"
     expect(page.locator(RESULTS)).to_have_count(6)
-    assert next_probe.partial_requests() == []
+    expect_no_partial_request(page, next_probe)
 
 
 def test_typing_narrows_the_listing_without_pressing_enter(
