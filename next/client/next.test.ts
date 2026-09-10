@@ -1,17 +1,23 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "./next";
 
 interface NextStatic {
   context: Readonly<Record<string, unknown>>;
   partial: {
     apply(raw: unknown): unknown;
-    fetch(request: { url: string }): Promise<void>;
+    fetch(request: { url: string; method?: string; uid?: string }): Promise<void>;
     defineOp(
       name: string,
       handler: (patch: Record<string, unknown>, ctx: unknown) => void,
     ): void;
+    setCsrf(csrf: { header: string; token: string } | undefined): void;
     ready(): void;
-    _configure(adapters: { dev?: boolean }): void;
+    _configure(adapters: {
+      dev?: boolean;
+      document?: Document;
+      fetch?: (input: string, init: RequestInit) => Promise<Response>;
+      navigate?: (url: string) => void;
+    }): void;
     _reset(): void;
   };
   _init(context: Record<string, unknown>): void;
@@ -109,6 +115,115 @@ describe("Next._init dev channel", () => {
     expect(received[0]!.changed).toEqual(["$dev", "page"]);
     off();
     expect(configure).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Next._init csrf seed", () => {
+  // The bodies the stub fetch hands back, shifted one per request.
+  let bodies: string[];
+  let calls: RequestInit[];
+
+  function envelope(csrf?: string): string {
+    const meta =
+      csrf === undefined ? "" : `,"csrf":{"header":"X-CSRFToken","token":"${csrf}"}`;
+    return `{"version":"v1","ops":[],"assets":[],"form":null${meta}}`;
+  }
+
+  function header(index: number): string | undefined {
+    return (calls[index]!.headers as Record<string, string>)["X-CSRFToken"];
+  }
+
+  beforeEach(() => {
+    bodies = [];
+    calls = [];
+    win.Next.partial._reset();
+    win.Next.partial._configure({
+      document,
+      fetch: (_url, init) => {
+        calls.push(init);
+        return Promise.resolve(
+          new Response(bodies.shift() ?? envelope(), {
+            status: 200,
+            headers: { "content-type": "application/vnd.next.patches+json" },
+          }),
+        );
+      },
+      navigate: () => {},
+    });
+  });
+
+  afterEach(() => {
+    win.Next.partial._reset();
+    win.Next._init({});
+  });
+
+  it("seeds the token so a programmatic mutation carries the CSRF header", async () => {
+    win.Next._init({ $csrf: { header: "X-CSRFToken", token: "seeded" } });
+    await win.Next.partial.fetch({ url: "/mutate/", method: "POST" });
+    expect(header(0)).toBe("seeded");
+  });
+
+  it("sends no CSRF header when the payload carries no $csrf", async () => {
+    win.Next._init({ page: "home" });
+    await win.Next.partial.fetch({ url: "/mutate/", method: "POST" });
+    expect(header(0)).toBeUndefined();
+  });
+
+  it("keeps a token learned from an envelope when a later payload omits $csrf", async () => {
+    win.Next.partial.setCsrf({ header: "X-CSRFToken", token: "learned" });
+    win.Next._init({ page: "home" });
+    await win.Next.partial.fetch({ url: "/mutate/", method: "POST" });
+    expect(header(0)).toBe("learned");
+  });
+
+  it("lets an envelope rotation override the seeded token", async () => {
+    bodies = [envelope("rotated")];
+    win.Next._init({ $csrf: { header: "X-CSRFToken", token: "seeded" } });
+    await win.Next.partial.fetch({ url: "/mutate/", method: "POST", uid: "u1" });
+    await win.Next.partial.fetch({ url: "/mutate/", method: "POST", uid: "u1" });
+    expect(header(0)).toBe("seeded");
+    expect(header(1)).toBe("rotated");
+  });
+
+  it("leaves a safe method without the header even with a seed", async () => {
+    win.Next._init({ $csrf: { header: "X-CSRFToken", token: "seeded" } });
+    await win.Next.partial.fetch({ url: "/list/" });
+    expect(header(0)).toBeUndefined();
+  });
+
+  it.each([
+    ["a non-object", "nope"],
+    ["a missing token", { header: "X-CSRFToken" }],
+    ["a missing header", { token: "seeded" }],
+    ["a non-string token", { header: "X-CSRFToken", token: 42 }],
+  ])("ignores %s payload and still boots", async (_label, payload) => {
+    let ready = 0;
+    const off = win.Next.on("ready", () => {
+      ready += 1;
+    });
+    ready = 0;
+    win.Next._init({ $csrf: payload });
+    off();
+    await win.Next.partial.fetch({ url: "/mutate/", method: "POST" });
+    expect(ready).toBe(1);
+    expect(header(0)).toBeUndefined();
+    expect(win.Next.context.$csrf).toEqual(payload);
+  });
+
+  it("warns about a malformed payload only in dev", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    // _configure is stubbed so the shared runtime does not stay wired for dev.
+    const configure = vi
+      .spyOn(win.Next.partial, "_configure")
+      .mockImplementation(() => undefined);
+    win.Next._init({ $csrf: { header: "X-CSRFToken" } });
+    expect(warn).not.toHaveBeenCalled();
+    win.Next._init({ $dev: true, $csrf: { header: "X-CSRFToken" } });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("$csrf"));
+    warn.mockClear();
+    win.Next._init({ $dev: true, $csrf: { header: "X-CSRFToken", token: "ok" } });
+    expect(warn).not.toHaveBeenCalled();
+    expect(configure).toHaveBeenCalledTimes(2);
   });
 });
 

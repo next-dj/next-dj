@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 from typing import Any
 
@@ -82,6 +83,16 @@ class AdminFormSpec:
         return self.instance is not None
 
     @property
+    def auto_id(self) -> str:
+        """Id template namespacing the main form's fields by model.
+
+        A server-opened layer drops one change view's markup into another's
+        document, so a bare `id_%s` would render `id_title` twice and every
+        `<label for=...>` inside the layer would address the page behind it.
+        """
+        return f"id_{self.model_name}_%s"
+
+    @property
     def changelist_url(self) -> str:
         """URL of the changelist this form returns to on plain Save."""
         return utils.changelist_url(self.app_label, self.model_name)
@@ -147,7 +158,26 @@ class RelatedSection:
     count: int
 
 
-@dataclass(frozen=True, slots=True)
+def _row_form_class(
+    base: type[django_forms.ModelForm], fk_name: str
+) -> type[django_forms.ModelForm]:
+    """Wrap a row form so the model checks still see the link to the parent.
+
+    A keyed row form never renders the parent key, so Django excludes it and
+    skips every uniqueness and constraint check naming it, letting a duplicate
+    reach the database as an `IntegrityError`.
+    """
+
+    class InlineRowForm(base):  # type: ignore[misc, valid-type]
+        def _get_validation_exclusions(self) -> set[str]:
+            """Keep the parent key in scope for every check `_post_clean` runs."""
+            return super()._get_validation_exclusions() - {fk_name}
+
+    InlineRowForm.__name__ = base.__name__
+    return InlineRowForm
+
+
+@dataclass(frozen=True)
 class AdminInlineSpec:
     """One inline of a parent admin, with the helpers its keyed row forms need."""
 
@@ -193,8 +223,9 @@ class AdminInlineSpec:
         """The child model's name, the `_inline` discriminator on the wire."""
         return self.inline.model._meta.model_name
 
-    @property
+    @cached_property
     def _formset(self) -> type[BaseInlineFormSet]:
+        """Build this inline's formset class once, since a render reads it per row."""
         return self.inline.get_formset(self.spec.request, self.spec.instance)
 
     @property
@@ -223,9 +254,14 @@ class AdminInlineSpec:
         """Return a new, unsaved child already tied to the parent."""
         return self.inline.model(**{self.fk_name: self.spec.instance})
 
+    @cached_property
+    def row_form(self) -> type[django_forms.ModelForm]:
+        """Row `ModelForm` for this inline, rendered and dispatched alike."""
+        return _row_form_class(self._formset.form, self.fk_name)
+
     def __call__(self, instance: Model | None) -> type[django_forms.ModelForm]:
         """Build the row `ModelForm`, bound to `instance` on dispatch."""
-        base = self._formset.form
+        base = self.row_form
 
         class InlineRowForm(base, BaseModelForm):  # type: ignore[misc, valid-type]
             @classmethod
@@ -255,7 +291,7 @@ class AdminInlineSpec:
         return f"id_{self.token}_{suffix}_%s"
 
     def _bind(self, instance: Model, post: QueryDict | None) -> django_forms.ModelForm:
-        form_cls = self._formset.form
+        form_cls = self.row_form
         auto_id = self._auto_id(instance)
         if post is None:
             return form_cls(instance=instance, auto_id=auto_id)

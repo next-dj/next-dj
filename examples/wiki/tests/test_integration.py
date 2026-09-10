@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 from django.core.exceptions import ValidationError
-from django.urls import reverse
+from django.urls import path, reverse
 from wiki.backends import HybridRouterBackend
 from wiki.models import Article
 from wiki.providers import ArticleProvider, DArticle
@@ -16,6 +16,7 @@ from next.testing import (
     NextClient,
     SignalRecorder,
     envelope_of,
+    find_anchor,
     make_resolution_context,
 )
 from next.urls.signals import router_reloaded
@@ -96,8 +97,8 @@ class TestIndex:
         response = next_client.get(reverse("next:page_"))
         body = response.content.decode()
         assert response.status_code == 200
-        assert ">\n            Routing\n          <" in body
-        assert ">\n            Components\n          <" in body
+        assert find_anchor(body, href="/docs/routing/", text="Routing")
+        assert find_anchor(body, href="/docs/components/", text="Components")
         assert routing_doc.title in body
         assert lifecycle_doc.title in body
 
@@ -151,7 +152,8 @@ class TestArticleCreation:
                 "body_md": "## Hello\n\nA brand new article.",
             },
         )
-        assert response.status_code in (302, 303)
+        assert response.status_code == 302
+        assert response.headers["Location"] == "/wiki/freshly-baked/"
         assert Article.objects.filter(slug="freshly-baked").exists()
 
         article_response = next_client.get("/wiki/freshly-baked/")
@@ -189,7 +191,8 @@ class TestArticleEdit:
                 "next:page_articles_edit_slug", kwargs={"slug": routing_doc.slug}
             ),
         )
-        assert response.status_code in (302, 303)
+        assert response.status_code == 302
+        assert response.headers["Location"] == routing_doc.url
 
         routing_doc.refresh_from_db()
         assert routing_doc.body_md == "Rewritten body of the article."
@@ -400,11 +403,21 @@ class TestUnits:
         ctx = make_resolution_context(url_kwargs={})
         assert ArticleProvider().resolve(param, ctx) is None
 
-    def test_hybrid_backend_returns_file_urls_when_catchall_absent(self) -> None:
+    def test_hybrid_backend_skips_aliases_when_catchall_absent(
+        self, routing_doc: Article
+    ) -> None:
+        unrelated = path("elsewhere/", lambda _request: None, name="elsewhere")
         backend = HybridRouterBackend()
-        with patch("wiki.backends.FileRouterBackend.generate_urls", return_value=[]):
+        with patch(
+            "wiki.backends.FileRouterBackend.generate_urls", return_value=[unrelated]
+        ):
             result = backend.generate_urls()
-        assert result == []
+        assert result == [unrelated]
+        assert not [
+            url
+            for url in result
+            if getattr(url, "name", "") == f"wiki_article_{routing_doc.slug}"
+        ]
 
 
 class TestValidationPreservesPreview:

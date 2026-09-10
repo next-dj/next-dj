@@ -1,12 +1,11 @@
 import base64
-import json
 import re
 
 import pytest
 from django.urls import reverse
 from kanban.models import Board, Card, Column
 
-from next.testing import NextClient
+from next.testing import NextClient, init_payload
 
 
 pytestmark = pytest.mark.django_db
@@ -58,12 +57,6 @@ def _settings_html(next_client: NextClient, board: Board) -> str:
     response = next_client.get(f"/board/{board.pk}/settings/")
     assert response.status_code == 200
     return response.content.decode()
-
-
-def _next_init_payload(html: str) -> dict:
-    match = re.search(r"Next\._init\((\{.*?\})\)", html)
-    assert match is not None, "Next._init call missing"
-    return json.loads(match.group(1))
 
 
 def _rename_form_block(html: str) -> str:
@@ -387,7 +380,7 @@ class TestJsContext:
         self, next_client: NextClient, board: Board
     ) -> None:
         body = _board_html(next_client, board)
-        payload = _next_init_payload(body)
+        payload = init_payload(body)
         assert payload["board"]["id"] == board.pk
         assert payload["board"]["title"] == board.title
         assert "csrf" in payload["board"]
@@ -395,7 +388,7 @@ class TestJsContext:
     def test_next_init_carries_both_action_urls(
         self, next_client: NextClient, board: Board
     ) -> None:
-        payload = _next_init_payload(_board_html(next_client, board))
+        payload = init_payload(_board_html(next_client, board))
         assert payload["board"]["move_card_url"]
         assert payload["board"]["create_card_url"]
 
@@ -403,7 +396,7 @@ class TestJsContext:
         self, next_client: NextClient, board: Board
     ) -> None:
         body = _board_html(next_client, board)
-        payload = _next_init_payload(body)
+        payload = init_payload(body)
         cols = payload["board"]["columns"]
         assert {c["title"] for c in cols} >= {"Backlog", "In Progress", "Done"}
         backlog = next(c for c in cols if c["title"] == "Backlog")
@@ -479,7 +472,7 @@ class TestPayloadEnrichment:
         self, next_client: NextClient, board: Board
     ) -> None:
         body = _board_html(next_client, board)
-        payload = _next_init_payload(body)
+        payload = init_payload(body)
         in_progress = next(
             c for c in payload["board"]["columns"] if c["title"] == "In Progress"
         )
@@ -492,7 +485,7 @@ class TestPayloadEnrichment:
         long_card.body = "y" * 200
         long_card.save(update_fields=["body"])
         body = _board_html(next_client, board)
-        payload = _next_init_payload(body)
+        payload = init_payload(body)
         backlog_payload = next(
             c for c in payload["board"]["columns"] if c["title"] == "Backlog"
         )
@@ -500,7 +493,8 @@ class TestPayloadEnrichment:
         assert target["excerpt"].endswith("…")
 
 
-def test_index_page_has_module_help(next_client: NextClient) -> None:
-    """The default response uses the next.dj page reverse helper."""
-    url = reverse("next:page_")
-    assert url == "/"
+def test_index_page_renders_at_the_reversed_root(next_client: NextClient) -> None:
+    """The board index answers on the URL the page reverse helper names."""
+    response = next_client.get(reverse("next:page_"))
+    assert response.status_code == 200
+    assert "Boards" in response.content.decode()

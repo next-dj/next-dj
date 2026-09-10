@@ -4,6 +4,8 @@
 import { createPartial } from "./partial";
 import type { PartialSurface } from "./partial";
 import type { Envelope } from "./apply";
+import type { CsrfPayload } from "./wire";
+import { asString, isRecord } from "./protocol";
 import type { PartialError } from "./protocol";
 
 /** The client context store, shared by _init, the context op, and csrf meta. */
@@ -17,8 +19,7 @@ export type { PartialError, PartialErrorKind } from "./protocol";
  */
 export interface NextEventMap {
   ready: NextContext;
-  // changed lists only the delta keys, so an island can skip a re-render its
-  // own keys did not cause.
+  // changed lists only the delta keys, so an island can skip a foreign re-render.
   "context-updated": { context: NextContext; changed: string[] };
   "partial:before-request": {
     url: string;
@@ -39,6 +40,16 @@ export interface NextEventMap {
 type NextListener = (payload: Record<string, unknown>) => void;
 type NextPlugin<T> = (next: typeof Next) => T;
 
+// The init payload is untyped JSON, so the seed is taken only when both halves
+// are strings. A half-filled pair would stamp a broken header on every mutation.
+function readCsrf(value: unknown): CsrfPayload | undefined {
+  if (!isRecord(value)) return undefined;
+  const header = asString(value.header);
+  const token = asString(value.token);
+  if (header === undefined || token === undefined) return undefined;
+  return { header, token };
+}
+
 /** The window-exposed runtime facade, a static class since there is one per page. */
 class Next {
   static #context: Record<string, unknown> = {};
@@ -58,7 +69,19 @@ class Next {
   static _init(context: Record<string, unknown>): void {
     // Only the literal true opens the dev channel, so a stray "true" string
     // leaves production quiet. Runs before the initial trigger scan.
-    if (context.$dev === true) Next.partial._configure({ dev: true });
+    const dev = context.$dev === true;
+    if (dev) Next.partial._configure({ dev: true });
+    // A page without a mintable token carries no $csrf, so an absent key keeps
+    // whatever an envelope already rotated in rather than clearing it.
+    const csrf = readCsrf(context.$csrf);
+    if (csrf !== undefined) {
+      Next.partial.setCsrf(csrf);
+    } else if (dev && context.$csrf !== undefined) {
+      // Otherwise the only symptom is a 403 on every programmatic mutation.
+      console.warn(
+        "[next] ignored a malformed $csrf payload, unsafe requests send no header",
+      );
+    }
     Next.#context = context;
     Next.#ready = true;
     // The initial seed is one big delta, so every seeded key is changed.
@@ -94,8 +117,7 @@ class Next {
     return plugin(Next);
   }
 
-  // The context op and csrf meta merge into the store _init owns, so islands
-  // see one consistent snapshot.
+  // The context op and csrf meta merge into the store _init owns, one snapshot.
   static #mergeContext(data: Record<string, unknown>): void {
     const changed = Object.keys(data);
     Next.#context = { ...Next.#context, ...data };

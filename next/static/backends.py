@@ -39,9 +39,10 @@ class StaticBackend(ABC):
     shape `{"BACKEND": "...", "OPTIONS": {...}}`. The base class stores the mapping on
     the `config` property. Subclasses are free to read any keys they expose to users.
 
-    The only abstract requirement is `register_file`. Renderer
-    methods are added by subclasses and selected per asset through
-    `KindRegistry.renderer(kind)`. The default backend below ships
+    The only abstract requirement is `register_file`. The concrete `asset_url`
+    hook rewrites a resolved URL per request and covers every asset the pipeline
+    renders. Renderer methods are added by subclasses and selected per asset
+    through `KindRegistry.renderer(kind)`. The default backend below ships
     `render_link_tag` and `render_script_tag` for the built-in `css` and `js`
     kinds. Custom backends register additional kinds and expose matching methods.
     """
@@ -54,6 +55,18 @@ class StaticBackend(ABC):
     def config(self) -> Mapping[str, Any]:
         """Return the backend entry supplied at construction time."""
         return self._config
+
+    def asset_url(self, url: str, *, request: HttpRequest | None = None) -> str:
+        """Return the public URL of an already-resolved asset for this render.
+
+        The default answer is the URL as `register_file` resolved it. A backend
+        whose URLs vary per request, such as a per-tenant prefix, overrides this
+        one hook so the rewrite reaches every rendered asset and the `next.min.js`
+        runtime alike, which no renderer method can do because the runtime tag
+        and its preload hint are built by the framework.
+        """
+        del request
+        return url
 
     @abstractmethod
     def register_file(self, source_path: Path, logical_name: str, kind: str) -> str:
@@ -135,8 +148,7 @@ class StaticFilesBackend(StaticBackend):
     def render_link_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
         """Return a link tag built from the configured css_tag template.
 
-        The `request` argument is accepted for contract compatibility
-        and ignored by the default backend.
+        The `request` argument holds the contract and the default backend ignores it.
         """
         del request
         return self._css_tag.format(url=url)
@@ -144,8 +156,7 @@ class StaticFilesBackend(StaticBackend):
     def render_script_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
         """Return a script tag built from the configured js_tag template.
 
-        The `request` argument is accepted for contract compatibility
-        and ignored by the default backend.
+        The `request` argument holds the contract and the default backend ignores it.
         """
         del request
         return self._js_tag.format(url=url)
@@ -153,8 +164,7 @@ class StaticFilesBackend(StaticBackend):
     def render_module_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
         """Return a module script tag built from the configured module_tag template.
 
-        The `request` argument is accepted for contract compatibility
-        and ignored by the default backend.
+        The `request` argument holds the contract and the default backend ignores it.
         """
         del request
         return self._module_tag.format(url=url)

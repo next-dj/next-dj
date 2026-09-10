@@ -6,6 +6,7 @@ from types import ModuleType
 import pytest
 from access.backends import _safe_form_payload, _step_from_origin
 from access.models import AccessRequest, AuditEntry
+from access.policy import POLICY_FIELD
 from access.receivers import _on_form_access_denied
 from django.contrib.sessions.backends.db import SessionStore
 from django.http import HttpRequest, QueryDict
@@ -198,7 +199,38 @@ class TestWizardSteps:
         ids=["identity", "scope", "approval"],
     )
     def test_step_owns_its_own_fields(self, step, expected_fields) -> None:
-        assert list(step.base_fields) == expected_fields
+        data_fields = [name for name in step.base_fields if name != POLICY_FIELD]
+        assert data_fields == expected_fields
+
+    @pytest.mark.parametrize(
+        "step",
+        [_step_page.IdentityStep, _step_page.ScopeStep, _step_page.ApprovalStep],
+        ids=["identity", "scope", "approval"],
+    )
+    def test_every_step_carries_the_acknowledgement_field(self, step) -> None:
+        assert POLICY_FIELD in step.base_fields
+        assert step.base_fields[POLICY_FIELD].required is False
+        assert step.base_fields[POLICY_FIELD].initial is True
+
+    @pytest.mark.parametrize(
+        ("posted", "expected"),
+        [({}, False), ({POLICY_FIELD: "on"}, True)],
+        ids=["unchecked", "checked"],
+    )
+    def test_the_acknowledgement_renders_from_the_posted_data(
+        self, posted, expected
+    ) -> None:
+        form = _step_page.IdentityStep(data=posted)
+        assert ("checked" in str(form[POLICY_FIELD])) is expected
+
+    def test_an_unbound_step_renders_the_acknowledgement_ticked(self) -> None:
+        assert "checked" in str(_step_page.IdentityStep()[POLICY_FIELD])
+
+    def test_the_acknowledgement_is_not_owned_by_any_section(self) -> None:
+        wizard = _wizard("identity")
+        owned = _step_section._fields_by_step(wizard)
+        assert all(POLICY_FIELD not in fields for fields in owned.values())
+        assert owned["approval"] == []
 
     def test_wizard_declares_three_ordered_steps(self) -> None:
         names = [name for name, _ in _step_page.AccessRequestWizard.Meta.steps]
@@ -350,7 +382,7 @@ class TestStepFormValidation:
     def test_approval_step_is_always_valid(self) -> None:
         form = _step_page.ApprovalStep(data={})
         assert form.is_valid()
-        assert form.cleaned_data == {}
+        assert form.cleaned_data == {POLICY_FIELD: False}
 
 
 class TestStepSectionRenderPaths:

@@ -1,8 +1,15 @@
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
+from blog.markdown_template import read_post_body, reading_minutes
 
-from next.testing import assert_has_class, assert_missing_class, find_anchor
+from next.testing import (
+    assert_has_class,
+    assert_missing_class,
+    find_anchor,
+    init_payload,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,6 +28,9 @@ NAV_CASES: tuple[NavCase, ...] = (
     NavCase("on-home", "/", "/", "Home", "/about/", "About"),
     NavCase("on-about", "/about/", "/about/", "About", "/", "Home"),
 )
+
+
+WELCOME_POST = Path("blog/screens/posts/welcome/template.md")
 
 
 class TestIndex:
@@ -64,10 +74,10 @@ class TestPost:
         assert 'class="language-python"' in body
         assert "print(" in body
 
-    def test_reading_time_is_at_least_one_minute(self, next_client) -> None:
-        response = next_client.get("/posts/welcome/")
-        body = response.content.decode()
-        assert "~ 1 min read" in body or "~ 2 min read" in body
+    def test_reading_time_matches_the_post_body(self, next_client) -> None:
+        expected = reading_minutes(read_post_body(WELCOME_POST))
+        body = next_client.get("/posts/welcome/").content.decode()
+        assert f"~ {expected} min read" in body
 
 
 class TestShareButton:
@@ -88,9 +98,9 @@ class TestShareButton:
 
     def test_serialized_post_context_is_injected_for_js(self, next_client) -> None:
         response = next_client.get("/posts/welcome/")
-        body = response.content.decode()
-        assert '"title":"Welcome to the blog"' in body
-        assert '"slug":"welcome"' in body
+        payload = init_payload(response.content.decode())
+        assert payload["post"]["title"] == "Welcome to the blog"
+        assert payload["post"]["slug"] == "welcome"
 
 
 class TestActiveNav:

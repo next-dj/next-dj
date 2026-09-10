@@ -11,8 +11,8 @@ Requirements
 ------------
 
 - Python 3.12 or newer (3.12, 3.13, 3.14 tested).
-- Django 5.2 or 6.0.
-- Python 3.14 requires Django 6.0.
+- Django 5.2, 6.0, or 6.1.
+- Python 3.14 requires Django 6.0 or newer.
   Django 5.2 supports Python 3.12 and 3.13.
 - An ASGI or WSGI server compatible with the Django version in use.
 

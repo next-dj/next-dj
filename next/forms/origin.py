@@ -27,6 +27,16 @@ class OriginMatch:
     url_kwargs: dict[str, object]
     origin: str
 
+    @property
+    def path(self) -> str:
+        """Return the origin URL without its query string.
+
+        A caller that treats the origin as a page address, such as the wizard
+        deriving a sibling step URL from it, works on the path alone so a query
+        parameter cannot be mistaken for a path segment.
+        """
+        return self.origin.partition("?")[0]
+
 
 def _filter_reserved_url_kwargs(url_kwargs: dict[str, object]) -> dict[str, object]:
     """Drop keys that collide with DI names used by `resolve_dependencies`."""

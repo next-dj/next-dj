@@ -46,6 +46,39 @@ describe("PollChart", () => {
     expect(tabsRow.attributes("data-just-updated")).toBe("true");
   });
 
+  it("keeps the highlight when the same snapshot arrives twice", async () => {
+    const wrapper = mount(PollChart, { props: { snapshot: SNAPSHOT } });
+    const fresh = {
+      poll_id: 1,
+      total_votes: 6,
+      choices: [
+        { id: 10, text: "Tabs", votes: 4 },
+        { id: 11, text: "Spaces", votes: 2 },
+      ],
+    };
+    wrapper.vm.applySnapshot(fresh);
+    wrapper.vm.applySnapshot(fresh);
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('[data-choice-id="10"]').attributes("data-just-updated")).toBe(
+      "true",
+    );
+    expect(wrapper.find("[data-poll-chart-total]").text()).toBe("6");
+  });
+
+  it("rebinds a renamed choice whose vote counts did not move", async () => {
+    const wrapper = mount(PollChart, { props: { snapshot: SNAPSHOT } });
+    wrapper.vm.applySnapshot({
+      poll_id: 1,
+      total_votes: 5,
+      choices: [
+        { id: 10, text: "Tabs (edited)", votes: 3 },
+        { id: 11, text: "Spaces", votes: 2 },
+      ],
+    });
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('[data-choice-id="10"]').text()).toContain("Tabs (edited)");
+  });
+
   it("ignores an empty applySnapshot payload", async () => {
     const wrapper = mount(PollChart, { props: { snapshot: SNAPSHOT } });
     wrapper.vm.applySnapshot(null);

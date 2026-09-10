@@ -235,6 +235,14 @@ class TestOriginMatchValue:
         assert match.url_kwargs == {"id": 1}
         assert match.origin == "/p/1/"
 
+    def test_path_drops_the_query_string(self) -> None:
+        match = OriginMatch(page_path=None, url_kwargs={}, origin="/p/1/?q=x&r=y")
+        assert match.path == "/p/1/"
+
+    def test_path_equals_the_origin_without_a_query(self) -> None:
+        match = OriginMatch(page_path=None, url_kwargs={}, origin="/p/1/")
+        assert match.path == "/p/1/"
+
 
 class TestSiblingFormReRenderKwargs:
     """Sibling forms built on a dispatch POST see typed origin kwargs, not the uid."""

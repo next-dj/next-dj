@@ -263,6 +263,32 @@ jobs:
         if: always()
         run: cat bench-comment.md >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Shrink bench JSON to aggregates
+        if: always()
+        run: |
+          set -euo pipefail
+          uv run python - <<'PY'
+          import json
+          from pathlib import Path
+
+          # Best-effort, as the `always()` above implies. The gate has already run,
+          # so a truncated report must not turn a passing bench job red.
+          for name in ("bench-base.json", "bench-head.json"):
+              path = Path(name)
+              if not path.is_file() or not path.stat().st_size:
+                  continue
+              try:
+                  with path.open() as fh:
+                      report = json.load(fh)
+              except json.JSONDecodeError as exc:
+                  print(f"::warning::{name} is not readable JSON, left as is ({exc})")
+                  continue
+              for bench in report.get("benchmarks", []):
+                  bench.get("stats", {}).pop("data", None)
+              with path.open("w") as fh:
+                  json.dump(report, fh)
+          PY
+
       - name: Upload bench artefact
         if: always()
         uses: actions/upload-artifact@v4
@@ -274,7 +300,6 @@ jobs:
             bench-base.json
             bench-head.json
             pr-number.txt
-            .benchmarks/**/*.json
           retention-days: 14
           if-no-files-found: error
 

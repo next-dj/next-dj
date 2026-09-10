@@ -1,8 +1,10 @@
 from unittest.mock import MagicMock
 
 import pytest
+from django.test import RequestFactory
 
 from next.forms import redirect_to_origin
+from next.forms.uid import current_origin_path
 
 
 class TestRedirectToOrigin:
@@ -30,6 +32,11 @@ class TestRedirectToOrigin:
             "ftp://x/y",
             "",
             "no-leading-slash",
+            "/\t/attacker.example.com/x/",
+            "/\t\\attacker.example.com/x/",
+            "/\n/attacker.example.com/x/",
+            "/\r/attacker.example.com/x/",
+            "/items/?q=x\ty",
         ],
         ids=(
             "https",
@@ -40,6 +47,11 @@ class TestRedirectToOrigin:
             "ftp",
             "empty",
             "relative",
+            "tab_hidden_protocol_relative",
+            "tab_hidden_backslash",
+            "newline_hidden_protocol_relative",
+            "carriage_return_hidden_protocol_relative",
+            "tab_inside_query",
         ),
     )
     def test_rejects_open_redirect_attempts(self, mock_http_request, origin) -> None:
@@ -61,3 +73,37 @@ class TestRedirectToOrigin:
         request = mock_http_request(method="POST", POST=post)
         response = redirect_to_origin(request, fallback="/x/")
         assert response.url == "/x/"
+
+
+class TestCurrentOriginPath:
+    """`current_origin_path` names the URL a form should return to."""
+
+    def test_path_without_query(self) -> None:
+        request = RequestFactory().get("/admin/library/book/")
+        assert current_origin_path(request) == "/admin/library/book/"
+
+    def test_query_string_rides_along(self) -> None:
+        request = RequestFactory().get(
+            "/admin/library/book/", {"status__exact": "draft", "p": "2"}
+        )
+        assert current_origin_path(request) == (
+            "/admin/library/book/?status__exact=draft&p=2"
+        )
+
+    def test_query_string_keeps_its_client_encoding(self) -> None:
+        request = RequestFactory().get("/search/?q=a%20b&tag=%D1%8F")
+        assert current_origin_path(request) == "/search/?q=a%20b&tag=%D1%8F"
+
+    def test_non_ascii_path_stays_decoded(self) -> None:
+        request = RequestFactory().get("/notes/\u0442\u0435\u0441\u0442/")
+        assert current_origin_path(request) == "/notes/\u0442\u0435\u0441\u0442/"
+
+    def test_request_without_a_path_yields_none(self, mock_http_request) -> None:
+        request = mock_http_request(method="GET", path="")
+        assert current_origin_path(request) is None
+
+    def test_stand_in_request_without_a_real_meta_carries_no_query(
+        self, mock_http_request
+    ) -> None:
+        request = mock_http_request(method="GET", path="/items/")
+        assert current_origin_path(request) == "/items/"

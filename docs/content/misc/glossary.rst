@@ -117,7 +117,7 @@ Terms used throughout the next.dj documentation.
 
    origin page
       The page that rendered a form.
-      Identified at dispatch time by resolving the hidden ``_next_form_origin`` URL path against the URLconf.
+      Identified at dispatch time by resolving the hidden ``_next_form_origin`` URL against the URLconf, which ignores the query string the field carries.
 
    outcome
       The ``ActionOutcome`` dataclass a form action backend produces from a dispatch, shaped into the HTTP response by ``shape_response``.

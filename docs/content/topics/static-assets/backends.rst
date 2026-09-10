@@ -42,6 +42,23 @@ A custom backend that wants a soft fail for an unresolvable asset should raise `
 Renderer methods are not abstract.
 A backend adds the renderer methods that its registered kinds reference, see :doc:`asset-kinds`.
 
+``asset_url`` is concrete on the base class and returns the URL unchanged.
+
+.. code-block:: python
+   :caption: next/static/backends.py
+
+   def asset_url(
+       self,
+       url: str,
+       *,
+       request: HttpRequest | None = None,
+   ) -> str:
+       """Return the public URL of an already-resolved asset for this render."""
+
+Every URL the pipeline renders passes through it, including the ``next.min.js`` runtime bundle and its preload hint, which the framework builds rather than a renderer method.
+A partial patch envelope carries bare URLs for the assets a zone body introduces, and those pass through the hook as well, so a zone morph reaches the client with the URLs a full page render would have written.
+Override ``asset_url`` when the URL must change, override the renderer methods when the markup must change.
+
 The default backend
 -------------------
 
@@ -60,7 +77,7 @@ The backend ships three renderer methods.
 - ``render_module_tag`` for the ``module`` kind.
 
 Each method takes the URL and an optional ``request`` keyword.
-The default backend ignores ``request``.
+The default backend ignores ``request`` in every renderer and in ``asset_url``.
 
 Configuring the default backend
 --------------------------------
@@ -136,6 +153,14 @@ Subclass ``StaticFilesBackend`` to keep the staticfiles resolution and change on
 Override ``render_link_tag``, ``render_script_tag``, and ``render_module_tag`` so ``.css``, ``.js``, and ``.mjs`` assets all carry the new attribute or host.
 A renderer that is not overridden falls back to the parent output, which is why dropping ``render_module_tag`` makes ``.mjs`` assets skip the customisation.
 
+To move the URL rather than the markup, override ``asset_url`` instead.
+One override then covers all three kinds and the runtime bundle, and the tag templates configured through ``css_tag``, ``js_tag``, ``module_tag``, and ``NEXT_JS_OPTIONS`` keep applying on top of the new URL.
+
+.. warning::
+
+   Do not rewrite the URL inside a renderer method when the runtime bundle must move with it.
+   The framework builds the ``next.min.js`` script tag and its preload hint from ``NEXT_JS_OPTIONS``, not from ``render_script_tag``, so a rewrite that lives only in a renderer leaves the bundle on the unrewritten URL.
+
 :doc:`/content/howto/write-a-static-backend` walks through the attribute and CDN recipes.
 For a complete Subresource Integrity implementation that also computes the ``integrity`` hash, see :doc:`/content/security/static-assets`.
 
@@ -167,7 +192,7 @@ When no entry survives, the manager seeds the built-in staticfiles backend so re
 Request aware output
 --------------------
 
-Every renderer method accepts a ``request`` keyword.
+``asset_url`` and every renderer method accept a ``request`` keyword.
 A custom backend can vary its output per request, for example to pick a CDN host based on the tenant.
 
 .. code-block:: python
@@ -176,11 +201,11 @@ A custom backend can vary its output per request, for example to pick a CDN host
    from next.static import StaticFilesBackend
 
    class TenantPrefixBackend(StaticFilesBackend):
-       def render_link_tag(self, url, *, request=None) -> str:
+       def asset_url(self, url, *, request=None) -> str:
            prefix = getattr(getattr(request, "tenant", None), "cdn", "")
-           return f'<link rel="stylesheet" href="{prefix}{url}">'
+           return f"{prefix}{url}"
 
-The manager passes the current request to every renderer call.
+The manager passes the current request to ``asset_url`` and to every renderer call.
 See the `multi-tenant example <https://github.com/next-dj/next-dj/tree/main/examples/multi-tenant>`__ for a worked tenant prefix backend.
 
 Signals
@@ -216,7 +241,7 @@ Subclass ``StaticFilesBackend`` and override ``render_link_tag`` and ``render_sc
 Per-tenant CDN
 ~~~~~~~~~~~~~~
 
-Use a request aware backend that reads the tenant from the request and chooses a CDN host.
+Use a request aware ``asset_url`` that reads the tenant from the request and chooses a CDN host.
 
 See also
 --------

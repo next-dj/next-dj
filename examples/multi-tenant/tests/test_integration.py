@@ -101,6 +101,16 @@ class TestTenantPrefixStatic:
         body = response.content.decode()
         assert f"/_t/{slug}/static/next/" in body
 
+    @override_settings(DEBUG=False)
+    def test_runtime_bundle_carries_the_tenant_prefix(
+        self, next_client: NextClient, demo_data
+    ) -> None:
+        response = next_client.get("/notes/", HTTP_X_TENANT="acme")
+        body = response.content.decode()
+        assert 'src="/_t/acme/static/next/next.min.js"' in body
+        assert 'href="/_t/acme/static/next/next.min.js"' in body
+        assert '"/static/next/next.min.js"' not in body
+
 
 class TestRootBlocks:
     """Header from `root_blocks/` renders the tenant name."""
@@ -345,7 +355,7 @@ class TestNoteEditPage:
 
 
 class TestDebugAffordance:
-    """Browser demo path: ?tenant=<slug> sets a cookie and redirects."""
+    """The `?tenant=<slug>` demo path sets a cookie and redirects."""
 
     @override_settings(DEBUG=True)
     def test_query_param_redirects_with_cookie(

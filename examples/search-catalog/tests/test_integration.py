@@ -15,6 +15,9 @@ PRODUCT_CARD_PATTERN = re.compile(r"data-product-card[\s\S]*?</article>")
 PRODUCT_SLUG_PATTERN = re.compile(r'data-product-slug="([^"]+)"')
 KEY_PATTERN = re.compile(r'data-next-key="([^"]+)"')
 FILTER_FORM_PATTERN = re.compile(r"<form method=\"get\"[\s\S]*?>")
+MORE_ZONE_PATTERN = re.compile(
+    r'<div data-next-zone="catalog-more"[^>]*>([\s\S]*?)</div>'
+)
 
 LISTING_TARGET = zone_target(LISTING_ZONES)
 CATEGORY_TARGET = zone_target(CATEGORY_ZONES)
@@ -33,6 +36,11 @@ def _product_card_section(body: str) -> str:
 def _slug_set(body: str) -> set[str]:
     """Return the set of product slugs rendered as cards in the body."""
     return set(PRODUCT_SLUG_PATTERN.findall(body))
+
+
+def _more_zone(body: str) -> str:
+    """Return the rendered body of the `catalog-more` zone."""
+    return MORE_ZONE_PATTERN.search(body).group(1)
 
 
 def _cache_keys() -> list[str]:
@@ -126,7 +134,7 @@ class TestRouting:
         assert "iPhone 15" in r.content.decode()
 
     def test_filter_panel_scoped_to_catalog(self, next_client, demo_data) -> None:
-        """filter_panel CSS is present on catalog pages but absent on the landing page."""
+        """The filter_panel CSS reaches catalog pages and never the landing page."""
         catalog_body = next_client.get("/catalog/").content.decode()
         assert "filter_panel" in catalog_body
 
@@ -363,11 +371,17 @@ class TestInfiniteScrollAppend:
         assert keys_two
         assert not keys_one & keys_two
 
-    def test_last_page_drops_the_sentinel(self, next_client, demo_data) -> None:
-        body = next_client.get("/catalog/?page=999").content.decode()
-        assert "results-sentinel" not in body
+    def test_last_page_swaps_the_link_for_an_inert_end_marker(
+        self, next_client, demo_data
+    ) -> None:
+        more = _more_zone(next_client.get("/catalog/?page=999").content.decode())
+        assert 'id="results-sentinel"' in more
+        assert "data-catalog-end" in more
+        assert "<a" not in more
+        assert "data-next-merge" not in more
+        assert "data-next-lazy" not in more
 
-    def test_last_page_append_empties_the_more_zone(
+    def test_last_page_append_keeps_the_sentinel_id_on_the_end_marker(
         self, next_client, demo_data
     ) -> None:
         envelope = envelope_of(
@@ -377,7 +391,11 @@ class TestInfiniteScrollAppend:
                 HTTP_X_NEXT_MERGE="append",
             )
         )
-        assert "results-sentinel" not in envelope.html_for_zone("catalog-more")
+        more_html = envelope.html_for_zone("catalog-more")
+        assert 'id="results-sentinel"' in more_html
+        assert "data-catalog-end" in more_html
+        assert "data-next-merge" not in more_html
+        assert "page=" not in more_html
 
     def test_changing_the_query_re_morphs_both_zones(
         self, next_client, demo_data

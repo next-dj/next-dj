@@ -154,9 +154,8 @@ router_manager = RouterManager()
 def _on_settings_reloaded(**kwargs) -> None:
     """Rebuild router backends and drop the built URL resolver on settings reload.
 
-    The slot keeps its identity so the outer include resolver, which
-    iterates it on every resolve, picks the replacement up on its next
-    read.
+    The slot keeps its identity so the outer include resolver, which iterates it on
+    every resolve, picks the replacement up on its next read.
     """
     router_manager.reload()
     urlpatterns.reset()

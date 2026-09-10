@@ -1,6 +1,7 @@
 from typing import Any, ClassVar
 
 from access.models import AccessRequest
+from access.policy import POLICY_FIELD, AcknowledgedStep
 from django import forms as django_forms
 from django.http import HttpRequest, HttpResponse
 
@@ -8,7 +9,7 @@ from next.forms import ComponentWidget, FormWizard, PermissionOutcome
 from next.partial import Patches, PatchResponse, partial_intent
 
 
-class IdentityStep(django_forms.ModelForm):
+class IdentityStep(AcknowledgedStep, django_forms.ModelForm):
     """First wizard step capturing who is asking for access."""
 
     class Meta:
@@ -21,7 +22,7 @@ class IdentityStep(django_forms.ModelForm):
         }
 
 
-class ScopeStep(django_forms.ModelForm):
+class ScopeStep(AcknowledgedStep, django_forms.ModelForm):
     """Second wizard step capturing what access is requested and for how long."""
 
     class Meta:
@@ -34,7 +35,7 @@ class ScopeStep(django_forms.ModelForm):
         }
 
 
-class ApprovalStep(django_forms.Form):
+class ApprovalStep(AcknowledgedStep):
     """Final wizard step that only confirms the merged request."""
 
 
@@ -53,11 +54,11 @@ class AccessRequestWizard(FormWizard):
     def check_permissions(cls, request: HttpRequest) -> PermissionOutcome:
         """Deny every binding step POST that omits the retention acknowledgement.
 
-        The form page renders the acknowledgement notice and carries the
-        `policy_acknowledged` field, so a normal submission passes while a
-        replayed or forged action URL that never rendered the form is
-        denied before any PII binds. A denied step writes no draft and
-        leaves only the `form_access_denied` audit row behind.
+        Every step form declares the `policy_acknowledged` field, so a
+        normal submission carries the tick and passes while a replayed or
+        forged action URL that never rendered the form is denied before any
+        PII binds. A denied step writes no draft and leaves only the
+        `form_access_denied` audit row behind.
 
         A blur-validation probe binds no data and asks only whether one
         field is well formed, so it is let through ahead of the
@@ -65,12 +66,15 @@ class AccessRequestWizard(FormWizard):
         """
         if partial_intent(request).validate_fields:
             return True
-        return request.POST.get("policy_acknowledged") == "on"
+        return request.POST.get(POLICY_FIELD) == "on"
 
     def done(
         self, request: HttpRequest, cleaned_data: dict[str, Any]
     ) -> PatchResponse | HttpResponse:
         """Create the request, close the wizard layer, and link the next dispatch.
+
+        The acknowledgement rides on every step, so it merges into the wizard
+        payload as a control field and never reaches the model.
 
         With a live runtime the final step closes the modal with the new
         request id and shows a success toast, then the opening link refreshes
@@ -78,7 +82,8 @@ class AccessRequestWizard(FormWizard):
         builder falls back to a redirect to the per-request audit page, so
         the no-JS path lands on the result just as before.
         """
-        access_request = AccessRequest.objects.create(**cleaned_data)
+        fields = {k: v for k, v in cleaned_data.items() if k != POLICY_FIELD}
+        access_request = AccessRequest.objects.create(**fields)
         request.session["access_request_just_created"] = access_request.pk
         request.session.modified = True
         return (

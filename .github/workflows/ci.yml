@@ -34,6 +34,8 @@ jobs:
       run: uv build
     - name: Export locked dev requirements
       run: uv export --no-hashes --group dev --format requirements-txt --no-emit-project --output-file dist/requirements-dev.txt
+    - name: Export locked e2e requirements
+      run: uv export --no-hashes --only-group e2e --format requirements-txt --no-emit-project --output-file dist/requirements-e2e.txt
     - name: Upload dist artifact
       uses: actions/upload-artifact@v4
       with:

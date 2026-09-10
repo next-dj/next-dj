@@ -60,7 +60,7 @@ The Notes project from the tutorial demonstrates the full layout.
        favicon.ico
      tests/
        __init__.py
-       test_e2e.py
+       test_integration.py
 
 Three things are special about this tree.
 

@@ -205,8 +205,9 @@ Prefix asset URLs per tenant
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Scope the static backend the same way.
-Subclass ``StaticFilesBackend`` and override the renderer methods.
-Read the tenant from the ``request`` keyword argument that the static manager passes to every renderer, then prepend the tenant slug to each collected URL.
+Subclass ``StaticFilesBackend`` and override ``asset_url``.
+Read the tenant from the ``request`` keyword argument that the static manager passes to that hook, then prepend the tenant slug to each URL.
+The one override reaches the co-located assets and the ``next.min.js`` runtime alike.
 Register the subclass in ``STATIC_BACKENDS``.
 
 See :doc:`write-a-static-backend` under *Tenant URL prefix* for the full implementation.

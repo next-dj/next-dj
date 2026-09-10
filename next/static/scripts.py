@@ -150,13 +150,21 @@ class NextScriptBuilder:
         """Return the resolved `next.min.js` URL."""
         return self._url
 
-    def preload_link(self) -> str:
-        """Return the preload hint tag for early browser download."""
-        return self._preload_template.format(url=self._url)
+    def preload_link(self, url: str | None = None) -> str:
+        """Return the preload hint tag for early browser download.
 
-    def script_tag(self) -> str:
-        """Return the blocking script tag that executes `next.min.js`."""
-        return self._script_tag_template.format(url=self._url)
+        The optional `url` overrides the resolved runtime URL, which lets the
+        static manager pass the answer of a request-aware backend.
+        """
+        return self._preload_template.format(url=url or self._url)
+
+    def script_tag(self, url: str | None = None) -> str:
+        """Return the blocking script tag that executes `next.min.js`.
+
+        The optional `url` overrides the resolved runtime URL, which lets the
+        static manager pass the answer of a request-aware backend.
+        """
+        return self._script_tag_template.format(url=url or self._url)
 
     def init_script(
         self,

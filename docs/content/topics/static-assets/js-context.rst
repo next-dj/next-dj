@@ -175,6 +175,7 @@ Pick distinct keys when both registrations live in the same module.
 The framework owns the ``$``-prefixed keys of the init payload, ``$csrf`` and ``$dev``, and claims them once the policy has already run.
 A project key of either name is dropped from the collected context on every automatically injected payload, whichever way the project registered it, together with the pre-encoded fragment and the per-key serializer that key recorded.
 The framework then writes its own value where it has one, ``$csrf`` on a payload whose request can mint a CSRF token and ``$dev`` on a payload built while ``DEBUG`` is on.
+The runtime reads ``$csrf`` at bootstrap and seeds the header it stamps on every unsafe request, so a programmatic ``Next.partial.fetch`` carries a token without a form field.
 A render with no value to write leaves the key out of the payload altogether, so a production page carries no ``$dev`` key at all and the registered value reaches ``window.Next.context`` in no environment.
 The ``next.W075`` system check reports such a key at ``manage.py check`` and names the ``page.py`` or ``component.py`` that declares it, so the declaring module keeps its value by renaming the key.
 The check walks the keyed registrations only.

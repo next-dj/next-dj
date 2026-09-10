@@ -74,6 +74,12 @@ def book_with_one_chapter(make_book, make_chapter):
 
 
 @pytest.fixture()
+def chapter(book_with_one_chapter):
+    _book, only = book_with_one_chapter
+    return only
+
+
+@pytest.fixture()
 def book_with_two_chapters(make_book, make_chapter):
     target = make_book()
     first, second = (make_chapter(target, *row) for row in CHAPTER_ROWS)

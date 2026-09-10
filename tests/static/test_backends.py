@@ -53,6 +53,22 @@ class TestStaticBackendContract:
         assert dict(backend.config) == {}
 
 
+class TestAssetUrlHook:
+    """`asset_url` is the request-aware URL seam and defaults to identity."""
+
+    def test_base_class_returns_the_url_unchanged(self) -> None:
+        backend = _CollectingBackend()
+        assert backend.asset_url(CSS_URL) == CSS_URL
+
+    def test_base_class_ignores_the_request(self, mock_http_request) -> None:
+        backend = _CollectingBackend()
+        assert backend.asset_url(CSS_URL, request=mock_http_request) == CSS_URL
+
+    def test_default_backend_returns_the_url_unchanged(self, mock_http_request) -> None:
+        backend = StaticFilesBackend()
+        assert backend.asset_url(JS_URL, request=mock_http_request) == JS_URL
+
+
 class TestStaticFilesBackendDefaults:
     """Default tag templates mirror Django conventions."""
 

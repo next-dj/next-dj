@@ -33,7 +33,7 @@ A benchmark workflow runs on every pull request and fails at a ``median:99%`` re
 Ruff runs with ``select = ["ALL"]``, mypy runs strict over ``next/``, the documentation builds with warnings as errors, and the client runtime bundle is held to a gzip size budget.
 
 The support matrix is tested rather than declared.
-Continuous integration runs the suite against Python 3.12, 3.13, and 3.14 crossed with Django 5.2 and 6.0, excluding Python 3.14 on Django 5.2, and it runs against the built wheel rather than the source tree.
+Continuous integration runs the suite against Python 3.12, 3.13, and 3.14 crossed with Django 5.2, 6.0, and 6.1, excluding Python 3.14 on Django 5.2, and it runs against the built wheel rather than the source tree.
 A separate compatibility suite runs against django-allauth, django-crispy-forms, django-htmx, and django-widget-tweaks, and every project under ``examples/`` ships tests held to 100 percent coverage of its own.
 A deployment verifies its own configuration with ``manage.py check``, which runs the framework system checks contributed by eight subsystems (see :doc:`/content/ref/system-checks`).
 

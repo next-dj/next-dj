@@ -10,6 +10,7 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from next.forms.origin import resolve_origin, resolve_url_to_page
 from next.pages import page
 from next.static.assets import default_kinds
+from next.static.manager import default_manager
 from next.static.scripts import RESERVED_PAYLOAD_KEYS
 from next.static.serializers import resolve_serializer
 
@@ -74,8 +75,8 @@ class Patches:
     Built from a request, the builder takes its asset version from the
     active protocol backend and resolves the origin page lazily, so a
     `morph(zone=...)` renders against the page that owns the request.
-    The `versioned` classmethod builds a request-free assembler for
-    paths that already hold the version and render their own HTML.
+    The `versioned` classmethod builds an assembler for paths that
+    already hold the version and render their own HTML.
     """
 
     def __init__(self, request: HttpRequest, *, echo_of: str | None = None) -> None:
@@ -89,14 +90,21 @@ class Patches:
         self._init_state(request, asset_version(), echo_of)
 
     @classmethod
-    def versioned(cls, version: str, *, echo_of: str | None = None) -> "Patches":
-        """Start an empty request-free builder stamped with a literal version.
+    def versioned(
+        cls,
+        version: str,
+        *,
+        echo_of: str | None = None,
+        request: HttpRequest | None = None,
+    ) -> "Patches":
+        """Start an empty builder stamped with a literal version.
 
-        The builder stays a low-level envelope assembler with no request, used by paths
-        that already hold the version and render their own HTML.
+        The builder stays a low-level envelope assembler, used by paths that already
+        hold the version and render their own HTML. Such a path passes `request` when
+        it has one, so an asset URL the backend scopes per request is scoped here too.
         """
         builder = cls.__new__(cls)
-        builder._init_state(None, version, echo_of)
+        builder._init_state(request, version, echo_of)
         return builder
 
     def _init_state(
@@ -455,12 +463,16 @@ class Patches:
         The insertion verb comes from the kind registry, so an unregistered
         kind still travels and only loses the field the runtime would use.
         An inline body keeps the verb only when the runtime builds the same
-        element the full page render wraps it in.
+        element the full page render wraps it in. A URL passes through the
+        backend hook a full page render also asks, so one `asset_url` override
+        covers the manifest of an envelope as well.
         """
+        # An inline body carries no URL, so it never reaches the backend hook.
+        resolved = default_manager.asset_url(url, request=self._request) if url else url
         self._assets.append(
             Asset(
                 kind=kind,
-                url=url,
+                url=resolved,
                 inline=inline,
                 load=default_kinds.load(kind, inline=inline is not None),
             )

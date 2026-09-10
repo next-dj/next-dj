@@ -8,20 +8,22 @@ from next.conf import extend_default_backend
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Vue asset resolution rule, in priority order.
-#  1. `VITE_DEV_ORIGIN` env var (any value): explicit override wins.
-#  2. A built manifest exists on disk: production-shaped run after
+#  1. `VITE_DEV_ORIGIN` env var, an empty value included: an explicit
+#     override wins, and an empty one asks for the built manifest.
+#  2. Pytest without that variable: a stub origin, so no test depends
+#     on a build and every machine reads the same asset URLs.
+#  3. A built manifest exists on disk: production-shaped run after
 #     `npm run build`. The backend reads hashed bundle URLs.
-#  3. Neither: assume the developer is running `npm run dev` and
+#  4. Neither: assume the developer is running `npm run dev` and
 #     default to the local Vite dev server. `runserver` plus
 #     `npm run dev` then works without env-var ceremony.
-#  4. Pytest mode: a stub origin so the static collector stops short
-#     of looking for a manifest the test never built.
 _VITE_MANIFEST_PATH = BASE_DIR / "polls/static/polls/dist/.vite/manifest.json"
 VITE_DEV_ORIGIN = os.environ.get("VITE_DEV_ORIGIN", "")
-if not VITE_DEV_ORIGIN and not _VITE_MANIFEST_PATH.exists():
-    VITE_DEV_ORIGIN = "http://localhost:5173"
-if "pytest" in sys.modules:
-    VITE_DEV_ORIGIN = "http://test-vite.invalid"
+if "VITE_DEV_ORIGIN" not in os.environ:
+    if "pytest" in sys.modules:
+        VITE_DEV_ORIGIN = "http://test-vite.invalid"
+    elif not _VITE_MANIFEST_PATH.exists():
+        VITE_DEV_ORIGIN = "http://localhost:5173"
 
 SECRET_KEY = "django-insecure-live-polls-replace-me"
 

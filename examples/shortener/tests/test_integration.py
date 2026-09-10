@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import re
 from dataclasses import dataclass
 
 import pytest
@@ -38,6 +39,16 @@ SUBNAV_CASES: tuple[SubnavCase, ...] = (
         "on-stats", "/admin/stats/", "/admin/stats/", "Stats", "/admin/", "Links"
     ),
 )
+
+
+STAT_VALUE_RE = r"{label}</p>\s*<p[^>]*>\s*([^<\s]+)\s*</p>"
+
+
+def _stat_value(html: str, label: str) -> str:
+    """Return the number a stat tile shows under `label`."""
+    match = re.search(STAT_VALUE_RE.format(label=re.escape(label)), html)
+    assert match is not None, f"no stat tile labelled {label!r}"
+    return match.group(1)
 
 
 class TestShorten:
@@ -95,7 +106,7 @@ class TestAdminLinkDetail:
         assert "detailed" in body
         assert "https://example.com/d" in body
         assert f"{CLICK_PREFIX}detailed" in body
-        assert "12" in body
+        assert "12 clicks" in body
 
     def test_detail_unknown_slug_returns_404(self, next_client) -> None:
         response = next_client.get("/admin/links/ghost/")
@@ -176,8 +187,7 @@ class TestAdminSurface:
         assert response.status_code == 200
         body = response.content.decode()
         assert "Admin panel" in body
-        assert "Total clicks" in body
-        assert ">7<" in body
+        assert _stat_value(body, "Total clicks") == "7"
 
     def test_admin_link_detail_inherits_nested_layout(
         self, next_client, make_link

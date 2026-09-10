@@ -13,7 +13,7 @@ from next.forms.signals import (
     form_access_denied,
     form_validation_failed,
 )
-from next.testing import SignalRecorder, envelope_of, resolve_action_url
+from next.testing import SignalRecorder, envelope_of, hidden_fields, resolve_action_url
 
 
 pytestmark = pytest.mark.django_db
@@ -79,15 +79,33 @@ def _post_step_partial(next_client, step: str, data: dict[str, str]):
     )
 
 
+def _validate_zone() -> str:
+    """Return the synthetic queue key the runtime sends on a blur probe.
+
+    `triggers.ts` queues inline validation on `validate:<uid>` and `wire.ts`
+    ships that key in the zone header, so the origin page declares no such
+    zone and the server answers with the extract-morph of the form by uid.
+    """
+    uid = resolve_action_url(WIZARD_ACTION).rstrip("/").rsplit("/", 1)[1]
+    return f"validate:{uid}"
+
+
 def _validate_field(next_client, step: str, field: str, data: dict[str, str]):
     return next_client.post_action(
         WIZARD_ACTION,
         dict(data),
         origin=f"/request/{step}/",
         partial=True,
-        zones="access-wizard",
+        zones=_validate_zone(),
         HTTP_X_NEXT_VALIDATE=field,
     )
+
+
+def _morphed_form(response) -> str:
+    """Return the HTML the single morph op of a blur probe carries."""
+    ops = envelope_of(response).ops
+    assert len(ops) == 1
+    return ops[0]["html"]
 
 
 def _walk_three_steps(next_client) -> None:
@@ -114,10 +132,13 @@ def _form_action_url(block: str) -> str:
     return match.group(1)
 
 
-def _hidden_fields(block: str) -> dict[str, str]:
-    return dict(
-        re.findall(r'<input type="hidden" name="([^"]+)" value="([^"]*)"', block)
-    )
+_POLICY_INPUT = re.compile(r'<input[^>]*name="policy_acknowledged"[^>]*>')
+
+
+def _policy_input(html: str) -> str:
+    match = _POLICY_INPUT.search(html)
+    assert match is not None
+    return match.group(0)
 
 
 class TestFullSubmission:
@@ -223,11 +244,11 @@ class TestValidationFailure:
         ack = {"policy_acknowledged": "on"}
         invalid = next_client.post(
             _form_action_url(block),
-            {**_hidden_fields(block), **ack, **IDENTITY, "email": ""},
+            {**hidden_fields(block), **ack, **IDENTITY, "email": ""},
         )
         assert invalid.status_code == 200
         rerendered = _wizard_form_block(invalid.content.decode())
-        refields = _hidden_fields(rerendered)
+        refields = hidden_fields(rerendered)
         assert refields["_next_form_origin"] == "/request/identity/"
         fixed = next_client.post(
             _form_action_url(rerendered), {**refields, **ack, **IDENTITY}
@@ -650,7 +671,7 @@ class TestModalWizardFlagship:
 class TestBlurValidation:
     """A blur probe surfaces one field's error and binds no data."""
 
-    def test_bad_email_blur_morphs_the_zone_with_the_field_error(
+    def test_bad_email_blur_morphs_the_form_with_the_field_error(
         self, next_client
     ) -> None:
         before = AccessRequest.objects.count()
@@ -660,11 +681,13 @@ class TestBlurValidation:
         assert response.status_code == 200
         envelope = envelope_of(response)
         assert envelope.op_verbs() == ["morph"]
-        assert envelope.zone_targets() == ["access-wizard"]
+        assert envelope.zone_targets() == []
+        assert envelope.form_targets() == [_validate_zone().split(":")[1]]
         meta = envelope.form_meta()
         assert meta is not None
         assert meta["valid"] is False
         assert list(meta["errors"]) == ["email"]
+        assert "Enter a valid email address." in _morphed_form(response)
         assert AccessRequest.objects.count() == before == 0
 
     def test_blur_probe_writes_no_request_and_emits_no_redirect_ops(
@@ -689,3 +712,44 @@ class TestBlurValidation:
         meta = envelope_of(response).form_meta()
         assert meta is not None
         assert list(meta["errors"]) == ["email"]
+
+
+class TestAcknowledgementRoundTrip:
+    """The acknowledgement is a step field, so every re-render replays what was sent."""
+
+    def test_the_first_render_ticks_the_acknowledgement(self, next_client) -> None:
+        body = next_client.get("/request/identity/").content.decode()
+        assert "checked" in _policy_input(body)
+
+    def test_a_blur_morph_keeps_an_unticked_acknowledgement_unticked(
+        self, next_client
+    ) -> None:
+        response = _validate_field(next_client, "identity", "email", IDENTITY)
+        assert "checked" not in _policy_input(_morphed_form(response))
+
+    def test_a_blur_morph_keeps_a_ticked_acknowledgement_ticked(
+        self, next_client
+    ) -> None:
+        response = _validate_field(
+            next_client, "identity", "email", {**IDENTITY, "policy_acknowledged": "on"}
+        )
+        assert "checked" in _policy_input(_morphed_form(response))
+
+    def test_an_invalid_step_morph_keeps_the_acknowledgement_ticked(
+        self, next_client
+    ) -> None:
+        response = _post_step_partial(
+            next_client, "identity", {**IDENTITY, "email": ""}
+        )
+        html = envelope_of(response).html_for_zone("access-wizard")
+        assert "checked" in _policy_input(html)
+
+    def test_the_acknowledgement_stays_out_of_the_audit_payload(
+        self, next_client
+    ) -> None:
+        _post_step(next_client, "identity", IDENTITY)
+        row = AuditEntry.objects.get(
+            source=AuditEntry.SOURCE_BACKEND, kind=AuditEntry.KIND_REQUEST_STARTED
+        )
+        assert "policy_acknowledged" not in row.payload
+        assert row.payload["email"] == ["ada@example.com"]

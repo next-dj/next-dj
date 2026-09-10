@@ -37,7 +37,7 @@ See :doc:`/content/deployment/settings` for the values a production deployment s
 Supported Python and Django
 ---------------------------
 
-The distribution requires Python 3.12 or newer and Django 5.2 or newer below 6.1.
+The distribution requires Python 3.12 or newer and Django 5.2 or newer below 6.2.
 Continuous integration installs the built wheel and runs the full test suite against every combination in the table below.
 
 .. list-table:: Tested combinations
@@ -47,13 +47,13 @@ Continuous integration installs the built wheel and runs the full test suite aga
    * - Python
      - Django
    * - 3.12
-     - 5.2 and 6.0
+     - 5.2, 6.0 and 6.1
    * - 3.13
-     - 5.2 and 6.0
+     - 5.2, 6.0 and 6.1
    * - 3.14
-     - 6.0
+     - 6.0 and 6.1
 
-The matrix excludes Python 3.14 against Django 5.2, so Python 3.14 runs against Django 6.0 only.
+The matrix excludes Python 3.14 against Django 5.2, so Python 3.14 runs against Django 6.0 and 6.1.
 :doc:`/content/contributing/quality-gates` describes how that matrix runs.
 
 Where a change is announced

@@ -116,7 +116,7 @@ Support matrix
 
 A dedicated ``build`` job produces the wheel and the source distribution once, and the matrix jobs install that wheel rather than running from the source tree.
 Each matrix job then pins its Django with ``uv pip install "django==<version>"`` after the wheel is installed, which is deliberate and not a broken lockfile.
-The matrix covers Python 3.12, 3.13, and 3.14 against Django 5.2 and 6.0, and excludes Python 3.14 against Django 5.2.
+The matrix covers Python 3.12, 3.13, and 3.14 against Django 5.2, 6.0, and 6.1, and excludes Python 3.14 against Django 5.2.
 
 A separate ``test-compat`` job runs ``pytest tests/compat`` with the ``compat`` dependency group, which pins django-crispy-forms, crispy-bootstrap5, django-widget-tweaks, django-htmx, and django-allauth.
 That job checks the framework against the ecosystem packages a project is likely to have installed already.

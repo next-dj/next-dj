@@ -1,7 +1,20 @@
-.PHONY: help install test bench test-compat lint format type-check clean build docs docs-lint docs-serve docs-clean docs-linkcheck install-js build-js test-js test-js-coverage lint-js format-js format-js-check type-check-js test-examples ci pre-commit-install pre-commit-run dev-setup
+.PHONY: help install test bench test-compat lint format type-check clean build docs docs-lint docs-serve docs-clean docs-linkcheck install-js build-js test-js test-js-coverage lint-js format-js format-js-check type-check-js test-examples test-examples-e2e ci pre-commit-install pre-commit-run dev-setup
 
 # Allow CI to point at a prebuilt venv's pytest (bypassing `uv run` and its sync step)
 PYTEST ?= uv run pytest
+
+# The browser suites need the e2e group. `uv run --group` is additive, unlike `uv sync --group`,
+# so it adds playwright without pruning dev. CI overrides this with `uv run --no-project pytest`.
+PYTEST_E2E ?= uv run --group e2e pytest
+
+# Browser suites run serially by default: every xdist worker pays for its own live
+# server and its own browser, which costs more than it saves at the current suite
+# size. Override to parallelise, e.g. `make test-examples-e2e E2E_XDIST="-n 2"`.
+E2E_XDIST ?=
+
+# An empty value, not an absent one, is what routes the two Vite examples through
+# their built manifest, so the browser drives those bundles rather than a dev server.
+E2E_ENV ?= VITE_ORIGIN= VITE_DEV_ORIGIN=
 
 help: # show this help message
 	@echo "Available commands:"
@@ -10,6 +23,7 @@ help: # show this help message
 	@echo "  bench           - run performance benchmarks (opt-in, no coverage)"
 	@echo "  test-compat     - run ecosystem compatibility tests (no coverage)"
 	@echo "  test-examples   - run Python + JS tests for examples with coverage"
+	@echo "  test-examples-e2e - run the browser suites for examples that ship one"
 	@echo "  lint            - run linting with ruff"
 	@echo "  format          - format code with ruff"
 	@echo "  type-check      - run type checking with mypy"
@@ -104,7 +118,7 @@ test-examples: # run Python, JS tests for examples with coverage
 	for example_dir in examples/*/; do \
 		if [ -d "$$example_dir" ] && [ -f "$$example_dir/manage.py" ]; then \
 			if [ -d "$$example_dir/tests" ]; then \
-				cd "$$example_dir" && $(PYTEST) tests/ -n auto --cov=. --cov-config=../.coveragerc --cov-report=term-missing --cov-fail-under=100; \
+				cd "$$example_dir" && $(PYTEST) tests/ --ignore=tests/e2e -n auto --cov=. --cov-config=../.coveragerc --cov-report=term-missing --cov-fail-under=100; \
 				cd - > /dev/null; \
 			elif [ -f "$$example_dir/tests.py" ]; then \
 				cd "$$example_dir" && $(PYTEST) tests.py -n auto --cov=. --cov-config=../.coveragerc --cov-report=term-missing --cov-fail-under=100; \
@@ -120,6 +134,35 @@ test-examples: # run Python, JS tests for examples with coverage
 			fi; \
 		fi; \
 	done
+
+test-examples-e2e: # run the browser suites for every example that ships tests/e2e
+	@set -e; \
+	ran=0; \
+	for example_dir in examples/*/; do \
+		if [ -d "$$example_dir/tests/e2e" ]; then \
+			ran=1; \
+			for config in "$$example_dir"vite.config.*; do \
+				[ -f "$$config" ] || continue; \
+				manifest=$$(find "$$example_dir" -name node_modules -prune -o \
+					-path "*/.vite/manifest.json" -print -quit); \
+				if [ -z "$$manifest" ]; then \
+					echo "ERROR: $$example_dir ships a Vite bundle but no built manifest,"; \
+					echo "       so the browser has nothing to load. Build it first:"; \
+					echo "       (cd $$example_dir && npm ci && npm run build)"; \
+					exit 1; \
+				fi; \
+			done; \
+			cd "$$example_dir" && $(E2E_ENV) $(PYTEST_E2E) tests/e2e --no-cov $(E2E_XDIST) \
+				-p e2e_support.browser \
+				--tracing=retain-on-failure --video=retain-on-failure \
+				--screenshot=only-on-failure --output=test-results; \
+			cd - > /dev/null; \
+		fi; \
+	done; \
+	if [ $$ran -eq 0 ]; then \
+		echo "ERROR: no example ships a tests/e2e directory, nothing ran"; \
+		exit 1; \
+	fi
 
 lint: # run linting with ruff
 	uv run ruff check next/ tests/ examples/
@@ -172,8 +215,7 @@ docs-lint: # check semantic newlines in the documentation prose
 	uv run python docs/prose_lint.py docs/content
 
 docs: docs-lint # build documentation
-	uv sync --locked --group docs
-	uv run sphinx-build -aETW --keep-going -b html docs docs/_build
+	uv run --group docs sphinx-build -aETW --keep-going -b html docs docs/_build
 
 docs-serve: docs # build and serve documentation
 	@echo "Opening documentation in browser..."
@@ -183,5 +225,4 @@ docs-clean: # clean documentation build
 	rm -rf docs/_build
 
 docs-linkcheck: # check documentation links
-	uv sync --locked --group docs
-	uv run sphinx-build -b linkcheck docs docs/_build
+	uv run --group docs sphinx-build -b linkcheck docs docs/_build

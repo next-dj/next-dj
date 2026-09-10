@@ -18,10 +18,12 @@ def form_state(
         spec.request, spec.instance, change=spec.is_change
     )
     if request.method == "POST":
-        bound = form_cls(request.POST, request.FILES, instance=spec.instance)
+        bound = form_cls(
+            request.POST, request.FILES, instance=spec.instance, auto_id=spec.auto_id
+        )
         bound.is_valid()
     else:
-        bound = form_cls(instance=spec.instance)
+        bound = form_cls(instance=spec.instance, auto_id=spec.auto_id)
     fieldsets = spec.model_admin.get_fieldsets(spec.request, spec.instance)
     if spec.is_change:
         inlines: list[Any] = []
