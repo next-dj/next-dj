@@ -1,4 +1,3 @@
-from collections.abc import Callable
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
@@ -162,32 +161,17 @@ class RelatedSection:
 def _row_form_class(
     base: type[django_forms.ModelForm], fk_name: str
 ) -> type[django_forms.ModelForm]:
-    """Wrap a row form so uniqueness still sees the link to the parent.
+    """Wrap a row form so the model checks still see the link to the parent.
 
-    An inline formset adds the parent foreign key as a form field, which is what
-    keeps a `unique_together` or a `UniqueConstraint` naming that key inside
-    Django's checks. A keyed row form stands alone and never renders the key, so
-    Django excludes it from both `validate_unique` and `validate_constraints`,
-    skips the check, and the duplicate reaches the database as an
-    `IntegrityError`. Narrowing the exclusion turns it back into a row error.
+    A keyed row form never renders the parent key, so Django excludes it and
+    skips every uniqueness and constraint check naming it, letting a duplicate
+    reach the database as an `IntegrityError`.
     """
 
     class InlineRowForm(base):  # type: ignore[misc, valid-type]
-        def _check_with_parent(self, check: Callable[..., None]) -> None:
-            """Run one model-level check with the parent key back in scope."""
-            exclude = self._get_validation_exclusions() - {fk_name}
-            try:
-                check(exclude=exclude)
-            except ValidationError as exc:
-                self._update_errors(exc)
-
-        def validate_unique(self) -> None:
-            """Run the model uniqueness check with the parent key back in scope."""
-            self._check_with_parent(self.instance.validate_unique)
-
-        def validate_constraints(self) -> None:
-            """Run the model constraint check with the parent key back in scope."""
-            self._check_with_parent(self.instance.validate_constraints)
+        def _get_validation_exclusions(self) -> set[str]:
+            """Keep the parent key in scope for every check `_post_clean` runs."""
+            return super()._get_validation_exclusions() - {fk_name}
 
     InlineRowForm.__name__ = base.__name__
     return InlineRowForm
@@ -272,11 +256,7 @@ class AdminInlineSpec:
 
     @cached_property
     def row_form(self) -> type[django_forms.ModelForm]:
-        """Row `ModelForm` for this inline, rendered and dispatched alike.
-
-        Cached because a change view binds it once per existing row plus once
-        for the add form, and the class does not vary between them.
-        """
+        """Row `ModelForm` for this inline, rendered and dispatched alike."""
         return _row_form_class(self._formset.form, self.fk_name)
 
     def __call__(self, instance: Model | None) -> type[django_forms.ModelForm]:
