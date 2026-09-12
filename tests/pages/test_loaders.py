@@ -301,7 +301,7 @@ class TestLayoutTemplateLoader:
             PAGE_BACKENDS="not-a-list", URL_NAME_TEMPLATE="page_{name}"
         )
         with patch("next.pages.loaders.next_framework_settings", mock_nf):
-            assert loader._get_additional_layout_files() == []
+            assert loader._get_additional_layout_files() == ()
 
     @pytest.mark.parametrize(
         ("test_case", "config", "expected_result"),
@@ -312,9 +312,9 @@ class TestLayoutTemplateLoader:
                     "invalid_config",
                     file_router_config_entry(pages_dir="/nonexistent/path"),
                 ],
-                [],
+                (),
             ),
-            ("app_dirs_true", [file_router_config_entry(app_dirs=True)], []),
+            ("app_dirs_true", [file_router_config_entry(app_dirs=True)], ()),
         ],
         ids=["invalid_config", "app_dirs_true"],
     )
@@ -473,6 +473,22 @@ class TestLayoutTemplateLoader:
 
         assert len(result) == 1
         assert layout_file in result
+
+    def test_get_additional_layout_files_hands_back_an_immutable_memo(
+        self, tmp_path
+    ) -> None:
+        """Every walk reads the one memo, so no caller may reorder it."""
+        loader = LayoutTemplateLoader()
+        (tmp_path / "layout.djx").write_text("layout content")
+
+        with override_settings(
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(tmp_path)}
+        ):
+            first = loader._get_additional_layout_files()
+
+            assert first is loader._get_additional_layout_files()
+            with pytest.raises(AttributeError):
+                first.append(tmp_path / "late.djx")
 
     def test_find_layout_files_with_additional_layouts_already_present(
         self, tmp_path
@@ -1289,6 +1305,14 @@ class TestBuildRegisteredLoaders:
         self._reset_cache()
         loaders = build_registered_loaders()
         assert [type(loader) for loader in loaders] == [DjxTemplateLoader]
+
+    def test_the_memoised_chain_is_immutable(self) -> None:
+        """Every render reads the one chain, so no caller may reorder it."""
+        loaders = build_registered_loaders()
+
+        assert loaders is build_registered_loaders()
+        with pytest.raises(AttributeError):
+            loaders.append(PythonTemplateLoader())
 
 
 def _loader_records(caplog, level: int) -> list[logging.LogRecord]:

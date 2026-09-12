@@ -3,19 +3,15 @@
 `settings_reloaded` fires after `NextFrameworkSettings.reload` drops its caches,
 through `dispatch_settings_reloaded`, which runs every receiver before it lets an
 error out. Package-level managers subscribe to it and reset their own state when the
-merged settings change. The module also wires the Django `setting_changed` signal, so
-`override_settings` in a test triggers the reload path on its own.
+merged settings change. Nothing here reads the merged settings, so the module the
+reload lives in imports this one and not the other way round.
 """
 
 import logging
 
-from django.core.signals import setting_changed
 from django.dispatch import Signal
 
 from next.utils import callable_name
-
-from .defaults import USER_SETTING
-from .settings import next_framework_settings
 
 
 logger = logging.getLogger(__name__)
@@ -46,12 +42,3 @@ def dispatch_settings_reloaded(sender: type) -> None:
         )
     if first is not None:
         raise first
-
-
-def _on_setting_changed(*, setting: str, **kwargs) -> None:
-    """Reload framework settings when Django reports a matching change."""
-    if setting == USER_SETTING:
-        next_framework_settings.reload()
-
-
-setting_changed.connect(_on_setting_changed)

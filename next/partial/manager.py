@@ -23,9 +23,7 @@ _VERSION_OPTION = "VERSION"
 _MANIFEST_VERSION = "manifest"
 _DEFAULT_VERSION = "0"
 _HASH_WIDTH = 12
-_DEFAULT_BACKEND_PATH = (
-    f"{PartialProtocolBackend.__module__}.{PartialProtocolBackend.__qualname__}"
-)
+_DEFAULT_BACKEND_PATH = "next.partial.JsonPartialProtocolBackend"
 # The settings the resolved version reads through, beyond NEXT_FRAMEWORK.
 _STORAGE_SETTINGS = frozenset({"STORAGES", "STATIC_ROOT"})
 

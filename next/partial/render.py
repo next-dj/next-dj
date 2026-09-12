@@ -188,7 +188,7 @@ def _emit_rendered(
     page_path: "Path", zone_names: tuple[str, ...], request: "HttpRequest", start: float
 ) -> None:
     """Announce each rendered zone when the signal has receivers."""
-    if not zone_rendered.receivers:
+    if not zone_rendered.receivers or not zone_rendered.has_listeners(ZoneRenderResult):
         return
     duration_ms = (time.perf_counter() - start) * 1000
     for name in zone_names:

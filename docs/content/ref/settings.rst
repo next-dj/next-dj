@@ -170,7 +170,7 @@ Default value.
 
    [
        {
-           "BACKEND": "next.partial.PartialProtocolBackend",
+           "BACKEND": "next.partial.JsonPartialProtocolBackend",
            "OPTIONS": {
                "VERSION": "manifest",
                "PUSH_WIZARD_STEPS": False,
@@ -218,6 +218,7 @@ The default ``TrieURLResolver`` resolves a static route through a dictionary loo
 Set the key to ``"django.urls.resolvers.URLResolver"`` to opt out of the trie and run every resolution through Django's plain linear scan.
 A custom value must name a :class:`~django.urls.URLResolver` subclass whose constructor accepts the same pattern and pattern-sequence pair.
 A path that fails to import, or one that names anything other than a ``URLResolver`` subclass, raises :exc:`~django.core.exceptions.ImproperlyConfigured` at startup.
+The key is read through ``next.backends.resolve_setting_class``, documented in :doc:`backends`, which is also what raises those two errors.
 The resolver is rebuilt on settings reload, so ``override_settings`` swaps it without a restart.
 
 See :doc:`/content/internals/url-router` for the resolution algorithm.
@@ -233,9 +234,12 @@ Dotted path to the resolver class that fills dependency-injected parameters.
 Default value ``"next.deps.DependencyResolver"``.
 
 The class owns every injection the framework performs, from page views and ``@context`` callables to form actions and component renderers.
-A custom value must name a ``next.deps.DependencyResolver`` subclass, so the key is an extension point rather than a switch between two shipped implementations.
+A custom value must name a ``next.deps.DependencyResolver`` subclass.
+The framework ships a second one, ``next.deps.linear.LinearDependencyResolver``, which resolves each parameter by walking the providers instead of replaying a compiled plan.
+It answers identically and costs about three times as much, so it earns its place as a differential oracle in the test suite rather than as a production choice.
 Widening the public ``skips`` predicate is the usual reason to subclass, because it decides which parameters a compiled plan carries at all.
 A path that fails to import, or one that names anything other than a ``DependencyResolver`` subclass, raises :exc:`~django.core.exceptions.ImproperlyConfigured`.
+The key is read through ``next.backends.resolve_setting_class``, documented in :doc:`backends`, the same helper ``URL_RESOLVER`` goes through.
 
 The key is read at startup and again on every settings reload, never per request, so ``override_settings`` swaps the resolver without a restart.
 The framework holds one resolver singleton that the rest of the code binds by reference, so the named class is adopted by retyping that object in place rather than by building a new one.
@@ -326,7 +330,7 @@ See :doc:`pages` for the page-load contract, :doc:`template-tags` for the compon
 Loudness axes
 ~~~~~~~~~~~~~
 
-Five independent switches decide how loudly a broken piece fails.
+Several independent switches decide how loudly a broken piece fails.
 
 .. list-table::
    :header-rows: 1
@@ -345,13 +349,13 @@ Five independent switches decide how loudly a broken piece fails.
      - Django context processor exceptions
      - Raises regardless of ``DEBUG``.
    * - ``next.E076``
-     - Seven ``NEXT_FRAMEWORK`` keys whose mistyped value the settings merge silently drops
+     - The ``NEXT_FRAMEWORK`` keys whose mistyped value the settings merge silently drops
      - Always, on ``manage.py check``.
    * - ``next.E077``
      - A ``NEXT_FRAMEWORK`` that is not a dict at all, which the settings layer ignores entirely
      - Always, on ``manage.py check``.
    * - ``next.W072``
-     - The four ``NEXT_FRAMEWORK`` bool keys, where ``bool()`` coercion can invert the intent
+     - Every ``NEXT_FRAMEWORK`` bool key, where ``bool()`` coercion can invert the intent
      - Always, on ``manage.py check``, as a warning rather than an error.
 
 ``DEBUG=True`` turned on temporarily, for serving static files or profiling, also changes the error semantics of pages.
@@ -362,6 +366,26 @@ See :doc:`system-checks` for each check condition.
 Component loading
 -----------------
 
+COMPONENT_TEMPLATE_LOADER
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Dotted path to the loader class that reads and compiles component template bodies.
+
+Default value ``"next.components.CachedComponentTemplateLoader"``.
+
+The class is instantiated once with the shared module loader and handed to both render strategies, so one instance answers every component read in the process.
+The default ``CachedComponentTemplateLoader`` keeps a compiled ``Template`` per component and revalidates it against the modification time of the file the body came from, which costs a warm render one ``stat`` instead of a read plus a parse.
+Set the key to ``"next.components.ComponentTemplateLoader"`` to drop that cache and read and parse the body on every render.
+Both shipped classes produce the same HTML for the same sources, so the choice is a cost, not a behaviour.
+A custom value must name a ``next.components.ComponentTemplateLoader`` subclass.
+A path that fails to import, or one that names anything other than such a subclass, raises :exc:`~django.core.exceptions.ImproperlyConfigured`.
+The key is read through ``next.backends.resolve_setting_class``, documented in :doc:`backends`, the same helper ``URL_RESOLVER`` goes through.
+
+The key is read when the render pipeline is built, never per render.
+A settings reload drops the pipeline, so ``override_settings`` swaps the loader without a restart.
+
+See :doc:`components` for the loader API.
+
 LAZY_COMPONENT_MODULES
 ~~~~~~~~~~~~~~~~~~~~~~
 
@@ -371,6 +395,30 @@ Components discovered through ``_components`` directories beside page files are 
 
 Default value ``False``.
 See :doc:`/content/deployment/settings` for production defaults and :doc:`/content/topics/testing` for the ``eager_load_components`` helper.
+
+Static assets
+-------------
+
+STATIC_DISCOVERY_CACHE
+~~~~~~~~~~~~~~~~~~~~~~
+
+Controls whether asset discovery keeps the plan it built for a page or a component.
+
+Default value ``True``.
+
+A plan records the co-located files a page or component directory holds and the module-level ``styles`` and ``scripts`` URLs it declares.
+With the key on, discovery keeps one plan per page file and one per component, each bounded at 2048 entries, and rebuilds a plan once a watched directory moves or an asset registry changes.
+Every render still hands the planned files to the backend and the planned URLs to the collector, so a warm render collects what a cold one collected.
+
+When ``False``, both plan caches are bypassed and every render walks the role directories and reads the module lists again.
+The collected assets are the same, only the walk is paid on each render.
+Turn the key off when a deployment suspects a stale plan, because the uncached path reads the disk with no freshness heuristic in front of it.
+
+The key is read when the discovery instance is built, never per render.
+A settings reload drops the static manager and the discovery behind it, so ``override_settings`` takes effect without a restart.
+The page-root lookup that maps a page file to its tree is memoised separately and is not affected, because it is a pure function of the path and the configured roots and it is dropped whole whenever those roots move.
+
+See :doc:`/content/topics/static-assets/index` for the discovery rules.
 
 Patching defaults
 -----------------

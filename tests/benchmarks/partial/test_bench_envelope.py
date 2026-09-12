@@ -10,7 +10,7 @@ from next.forms import Form
 from next.forms.backends import ActionRegistration, RegistryFormActionBackend
 from next.forms.dispatch.responses import ActionOutcome, ActionOutcomeKind
 from next.forms.uid import ORIGIN_FIELD_NAME
-from next.partial import PartialProtocolBackend, Patches, shape_partial
+from next.partial import JsonPartialProtocolBackend, Patches, shape_partial
 from next.partial.headers import REQUEST_FLAG
 
 
@@ -31,7 +31,7 @@ class TestBenchEnvelopeBuild:
 
     @pytest.mark.benchmark(group="partial.envelope")
     def test_build_and_serialise(self, benchmark) -> None:
-        protocol = PartialProtocolBackend()
+        protocol = JsonPartialProtocolBackend()
 
         def run() -> bytes:
             envelope = (

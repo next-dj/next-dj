@@ -154,6 +154,23 @@ Runtime script overrides
 Strict content security policies sometimes need nonces or manual ordering for the bundled ``next.min.js`` shell.
 ``NEXT_FRAMEWORK["NEXT_JS_OPTIONS"]`` accepts template overrides and ``ScriptInjectionPolicy`` values described on :ref:`ref-settings` and in :doc:`/content/topics/static-assets/js-context`.
 
+Template and asset staleness
+----------------------------
+
+No ``NEXT_FRAMEWORK`` key controls this one, ``settings.DEBUG`` does, and it is the only behaviour difference between a warm cache and a cold one.
+
+The composed-template cache, the compiled component template cache, and the co-located asset plans each hold a snapshot of what they read from disk.
+Every probe that compares that snapshot against the disk is gated on ``settings.DEBUG`` through the ``next.utils.template_edits_watched`` predicate.
+With ``DEBUG`` off none of them runs, and a warm request issues no ``stat`` call at all.
+
+The consequence is that a running production process never notices a file changed underneath it.
+An edited ``template.djx``, an edited or newly added ``layout.djx``, and a ``template.css`` created next to a page are all invisible until the process restarts.
+Only a registration still invalidates an asset plan, because a stem or a kind registered at startup moves no file and is compared through a generation counter rather than a ``stat``.
+
+This is a deliberate trade of edit visibility for a syscall-free hot path.
+A deployment publishes assets through ``collectstatic`` and restarts its workers, so the alternative buys nothing a release does not already do.
+Read :doc:`/content/internals/page-discovery` and :doc:`/content/internals/static-pipeline` for the snapshots and the checks that read them.
+
 See also
 --------
 

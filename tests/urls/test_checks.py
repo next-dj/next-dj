@@ -1,13 +1,16 @@
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.core.checks import Error
+from django.test import override_settings
 
 from next.checks import reset_check_caches
 from next.testing import override_next_settings
 from next.urls import FileRouterBackend, PageRoot, RouterBackend
 from next.urls.checks import (
     _collect_url_patterns,
+    check_next_pages_configuration,
     check_reverse_name_collisions,
     check_url_patterns,
 )
@@ -370,3 +373,42 @@ class TestCollectUrlPatterns:
 
         assert patterns == []
         assert errors == []
+
+
+class TestPagesConfigurationCodes:
+    """Each `PAGE_BACKENDS` mistake carries a code of its own."""
+
+    def test_non_dict_next_framework_is_e001(self) -> None:
+        with override_settings(NEXT_FRAMEWORK=["not a dict"]):
+            errors = check_next_pages_configuration()
+        assert [e.id for e in errors] == ["next.E001"]
+
+    def test_non_list_page_backends_is_e081(self) -> None:
+        mock_ns = SimpleNamespace(PAGE_BACKENDS="pages")
+        with patch("next.urls.checks.next_framework_settings", mock_ns):
+            errors = check_next_pages_configuration()
+        assert [e.id for e in errors] == ["next.E081"]
+
+    def test_non_dict_page_backend_entry_is_e002(self) -> None:
+        with override_settings(
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": ["next.urls.FileRouterBackend"]}
+        ):
+            errors = check_next_pages_configuration()
+        assert [e.id for e in errors] == ["next.E002"]
+
+    def test_non_string_pages_dir_is_e027(self) -> None:
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "PAGE_BACKENDS": [
+                    {
+                        "BACKEND": "next.urls.FileRouterBackend",
+                        "PAGES_DIR": 1,
+                        "APP_DIRS": True,
+                        "DIRS": [],
+                        "OPTIONS": {},
+                    }
+                ]
+            }
+        ):
+            errors = check_next_pages_configuration()
+        assert [e.id for e in errors] == ["next.E027"]

@@ -62,6 +62,30 @@ A partial-zone request takes a different path.
 When the request targets named zones, the view returns a zone response before step 2, so the full page render does not run.
 See :doc:`/content/topics/partial-rendering/zones` for the zone-morph request.
 
+Broken page modules
+-------------------
+
+A ``page.py`` whose body raises while importing is a broken module rather than an absent one.
+The loader records the failure against the modification time of the file that executed, and ``logger.exception`` writes the traceback on every load attempt.
+``ImportError``, ``SyntaxError``, and ``AttributeError`` are the common causes, not a closed list.
+
+What the request does with that record depends on one predicate, ``next.conf.fail_loudly``, which is true when ``settings.DEBUG`` or ``NEXT_FRAMEWORK["STRICT_LOADING"]`` is set.
+
+Fail loud.
+   The view raises ``PageModuleImportError`` with the original exception as its ``__cause__``.
+   Under ``DEBUG`` the technical 500 page points at the failing line, and under ``STRICT_LOADING`` alone the client sees the generic 500 while the traceback stays in the server log.
+
+Fail quiet, the default.
+   The view answers 404 and the failure is visible only in the log record.
+   A deployment that never reads its logs therefore reads a broken page as a missing one, which is the reason :doc:`/content/deployment/settings` recommends ``STRICT_LOADING`` in production.
+
+The blast radius is one page in every mode.
+The broken page still gets its URL pattern, so the error surfaces at the view rather than while the URL configuration is built, and every sibling page keeps its pattern and keeps serving.
+The record is keyed by modification time, so saving a fixed ``page.py`` clears it on the next request without a restart.
+``manage.py check`` reports the same failure as :ref:`next.E017 <ref-system-checks>`, naming the exception type and message, which catches a broken page before traffic reaches it.
+
+See :doc:`/content/ref/pages` for the exception class and :ref:`ref-settings` for the loudness table across ``DEBUG`` and the strict flags.
+
 The ``render`` function
 -----------------------
 

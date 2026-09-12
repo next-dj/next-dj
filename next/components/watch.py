@@ -5,19 +5,16 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from django.core.exceptions import ImproperlyConfigured
-
-from next.backends import backend_entries, resolve_backend_class
 from next.pages.watch import (
     components_folder_name_for_watch,
     iter_page_backends_for_watch,
     page_root_paths_for_watch,
 )
 
-from .backends import _DEFAULT_BACKEND_PATH, ComponentsBackend, FileComponentsBackend
 from .info import _paths_from_component_info
 from .loading import ModuleLoader
-from .scanner import ComponentScanner, component_extra_roots_from_config
+from .manager import components_manager
+from .scanner import ComponentScanner
 
 
 if TYPE_CHECKING:
@@ -62,23 +59,11 @@ def _collect_component_paths_under_page_trees() -> set[Path]:
 
 
 def _collect_component_paths_from_backend_dirs() -> set[Path]:
-    """Collect paths from component backend `DIRS` entries only."""
+    """Collect paths from the trees each components backend reports watching."""
     result: set[Path] = set()
-    for config in backend_entries("COMPONENT_BACKENDS"):
-        try:
-            klass = resolve_backend_class(
-                config, base=ComponentsBackend, default=_DEFAULT_BACKEND_PATH
-            )
-        except (ImproperlyConfigured, ImportError):
-            logger.exception(
-                "error resolving component backend for autoreload scan %s", config
-            )
-            continue
-        # A read-only scan reads roots off the config, so it skips the instance.
-        if not issubclass(klass, FileComponentsBackend):
-            continue
+    for backend in components_manager.backends:
         scanner = ComponentScanner(module_loader=ModuleLoader())
-        for root in component_extra_roots_from_config(config):
+        for root in backend.watch_roots():
             try:
                 for info in scanner.scan_directory(root, root, ""):
                     result |= _paths_from_component_info(info)
@@ -90,7 +75,9 @@ def _collect_component_paths_from_backend_dirs() -> set[Path]:
 def get_component_paths_for_watch() -> set[Path]:
     """Return filesystem paths that matter for the dev component reloader.
 
-    The scan mutates neither the components manager nor the router registry.
+    The scan registers nothing. It asks the loaded backends which trees they
+    watch and walks those with a scanner of its own, so neither the component
+    registries nor the router registry move.
     """
     page_paths = _collect_component_paths_under_page_trees()
     extra_paths = _collect_component_paths_from_backend_dirs()

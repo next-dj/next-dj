@@ -333,7 +333,9 @@ class _DispatchState:
         response: HttpResponse,
     ) -> None:
         """Send `action_dispatched` when any receiver is connected."""
-        if action_dispatched.receivers:
+        if action_dispatched.receivers and action_dispatched.has_listeners(
+            FormActionDispatch
+        ):
             action_dispatched.send(
                 sender=FormActionDispatch,
                 action_name=action_name,
@@ -350,7 +352,9 @@ class _DispatchState:
         self, request: "HttpRequest", action_name: str, form: "django_forms.Form"
     ) -> None:
         """Send `form_validation_failed` when any receiver is connected."""
-        if form_validation_failed.receivers:
+        if form_validation_failed.receivers and form_validation_failed.has_listeners(
+            FormActionDispatch
+        ):
             error_count = sum(len(errors) for errors in form.errors.values())
             form_validation_failed.send(
                 sender=FormActionDispatch,
@@ -369,7 +373,9 @@ class _DispatchState:
         cleaned: dict[str, Any],
     ) -> None:
         """Send `wizard_step_submitted` when any receiver is connected."""
-        if wizard_step_submitted.receivers:
+        if wizard_step_submitted.receivers and wizard_step_submitted.has_listeners(
+            wizard_class
+        ):
             wizard_step_submitted.send(
                 sender=wizard_class,
                 step=step_name,
@@ -385,7 +391,7 @@ class _DispatchState:
         merged: dict[str, Any],
     ) -> None:
         """Send `wizard_completed` when any receiver is connected."""
-        if wizard_completed.receivers:
+        if wizard_completed.receivers and wizard_completed.has_listeners(wizard_class):
             wizard_completed.send(
                 sender=wizard_class, cleaned_data=merged, uid=self.uid, request=request
             )

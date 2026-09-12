@@ -44,7 +44,7 @@ class TestUseStyleScriptInlineTags:
     def test_empty_url_is_ignored(self) -> None:
         out, coll = _render('{% load next_static %}{% use_style "" %}')
         assert out == ""
-        assert coll.assets_in_slot("styles") == []
+        assert coll.assets_in_slot("styles") == ()
 
     def test_no_collector_in_context_is_no_op(self) -> None:
         template = Template('{% load next_static %}{% use_style "https://cdn/a.css" %}')
@@ -124,7 +124,7 @@ class TestBlockUseStyleScript:
             "{% load next_static %}{% #use_style %}   \n   {% /use_style %}"
         )
         assert out == ""
-        assert coll.assets_in_slot("styles") == []
+        assert coll.assets_in_slot("styles") == ()
 
     def test_block_without_collector_noop(self) -> None:
         template = Template(

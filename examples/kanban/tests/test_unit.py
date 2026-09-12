@@ -434,7 +434,7 @@ class TestInjectViteDevAssetsGuard:
     def test_skips_when_no_jsx_assets(self) -> None:
         collector = StaticCollector()
         inject_vite_dev_assets(collector)
-        assert collector.assets_in_slot("scripts") == []
+        assert collector.assets_in_slot("scripts") == ()
 
     def test_injects_when_jsx_present(self) -> None:
         collector = StaticCollector()

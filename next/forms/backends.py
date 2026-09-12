@@ -271,7 +271,10 @@ class FormActionBackend(ABC):
 
         Lookups without a page scope resolve a bare name to the first
         registration that used it, unless a later one sets
-        `claims_name_binding` and takes the name over.
+        `claims_name_binding` and takes the name over. Registrations arrive
+        through `FormActionManager.register_action`, which moves the token the
+        URL patterns are cached against, so an action stored by a caller that
+        reached a backend directly waits for the next move of that token.
         """
 
     @abstractmethod

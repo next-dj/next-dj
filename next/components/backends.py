@@ -2,8 +2,6 @@
 
 `ComponentsBackend` is the ABC for alternative component sources.
 `FileComponentsBackend` is the default filesystem-based backend.
-`DummyBackend` and `BoomBackend` are tiny doubles kept here so
-dotted-path resolution in tests works through `import_class_cached`.
 """
 
 from __future__ import annotations
@@ -85,6 +83,14 @@ class ComponentsBackend(ABC):
         A shared root makes its root-scope components visible
         from every template, a page tree does not, and the
         cross-root name check reads this to tell the two apart.
+        """
+        return ()
+
+    def watch_roots(self) -> Iterable[Path]:
+        """Return the trees the development watcher and link tooling observe.
+
+        A backend that computes its roots from somewhere other than its config
+        entry names them here, which is the only way they reach autoreload.
         """
         return ()
 
@@ -181,6 +187,11 @@ class FileComponentsBackend(ComponentsBackend):
         return self._registry.global_roots()
 
     @override
+    def watch_roots(self) -> tuple[Path, ...]:
+        """Return the `DIRS` roots, which are known without a scan."""
+        return tuple(self._extra_component_roots)
+
+    @override
     def get_component(self, name: str, template_path: Path) -> ComponentInfo | None:
         """Return the named component visible from `template_path`."""
         self._ensure_loaded()
@@ -199,46 +210,4 @@ class FileComponentsBackend(ComponentsBackend):
         return self._visibility_resolver.resolve_visible(template_path)
 
 
-class DummyBackend(ComponentsBackend):
-    """Test double that keeps its settings `config` entry on `self`."""
-
-    def __init__(self, config: dict[str, Any]) -> None:
-        """Keep `config` on `self` for assertions about wiring."""
-        self.config = config
-
-    @override
-    def get_component(self, _name: str, _template_path: Path) -> ComponentInfo | None:
-        """Return `None` to skip name resolution through this backend."""
-        return None
-
-    @override
-    def collect_visible_components(
-        self, _template_path: Path
-    ) -> Mapping[str, ComponentInfo]:
-        """Return an empty mapping because this test double never registers."""
-        return {}
-
-
-class BoomBackend(ComponentsBackend):
-    """Test double that raises from `__init__` for load error-path tests."""
-
-    def __init__(self, config: dict[str, Any]) -> None:
-        """Raise the kind of error the loader never swallows."""
-        del config
-        msg = "boom"
-        raise RuntimeError(msg)
-
-    @override
-    def get_component(self, _name: str, _template_path: Path) -> ComponentInfo | None:
-        """Unreachable because construction always raises."""
-        raise NotImplementedError
-
-    @override
-    def collect_visible_components(
-        self, _template_path: Path
-    ) -> Mapping[str, ComponentInfo]:
-        """Unreachable because construction always raises."""
-        raise NotImplementedError
-
-
-__all__ = ["BoomBackend", "ComponentsBackend", "DummyBackend", "FileComponentsBackend"]
+__all__ = ["ComponentsBackend", "FileComponentsBackend"]

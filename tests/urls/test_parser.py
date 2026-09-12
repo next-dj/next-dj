@@ -1,8 +1,15 @@
 from pathlib import Path
 
 import pytest
+from django.core.exceptions import ImproperlyConfigured
+from django.urls import path
 
 from next.urls import DuplicateURLParameterError, URLPatternParser
+from next.urls.parser import InvalidURLParameterError
+
+
+def _noop_view(request):
+    return request
 
 
 class TestParseUrlPatternHappyPath:
@@ -151,6 +158,55 @@ class TestDuplicateURLParameterError:
     def test_classvar_points_at_public_error(self) -> None:
         """Parser exposes the error class for import-cycle-free callers."""
         assert URLPatternParser.duplicate_parameter_error is DuplicateURLParameterError
+
+
+class TestNamesDjangoRefuses:
+    """Django accepts only a Python identifier between its angle brackets."""
+
+    @pytest.mark.parametrize(
+        ("url_path", "expected_name"),
+        [
+            ("user/[user.id]", "user.id"),
+            ("user/[int:user.id]", "user.id"),
+            ("user/[2fa]", "2fa"),
+            ("files/[[doc path]]", "doc path"),
+            ("files/[[a.b]]", "a.b"),
+        ],
+        ids=[
+            "dotted_param",
+            "dotted_param_with_converter",
+            "param_opening_with_a_digit",
+            "wildcard_with_whitespace",
+            "dotted_wildcard",
+        ],
+    )
+    def test_a_refused_name_raises(self, url_parser, url_path, expected_name) -> None:
+        """Both bracket forms answer with the name Django would refuse."""
+        with pytest.raises(InvalidURLParameterError) as excinfo:
+            url_parser.parse_url_pattern(url_path)
+        error = excinfo.value
+        assert error.param_name == expected_name
+        assert error.url_path == url_path
+        assert expected_name in str(error)
+        assert url_path in str(error)
+
+    def test_is_value_error(self) -> None:
+        """The error stays catchable as ValueError alongside its sibling."""
+        assert isinstance(InvalidURLParameterError("a.b", "[a.b]"), ValueError)
+
+    def test_classvar_points_at_public_error(self) -> None:
+        """Parser exposes the error class for import-cycle-free callers."""
+        assert URLPatternParser.invalid_parameter_error is InvalidURLParameterError
+
+    def test_django_refuses_what_the_parser_refuses(self) -> None:
+        """The rule tracks `path()`, which compiles the route as it is built."""
+        with pytest.raises(ImproperlyConfigured, match="valid Python identifier"):
+            path("user/<str:user.id>/", _noop_view)
+
+    def test_a_hyphen_name_still_builds_a_django_route(self, url_parser) -> None:
+        """Normalisation runs before the rule, so a hyphen keeps working."""
+        pattern, _params = url_parser.parse_url_pattern("post/[slug:post-slug]")
+        assert path(pattern, _noop_view).pattern.regex.pattern.count("post_slug") == 1
 
 
 class TestCreateUrlPatternFileContext:

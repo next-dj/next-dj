@@ -84,8 +84,8 @@ next.dj adds the ``NEXT_FRAMEWORK`` dict, includes ``next.urls`` for the file ro
 Standard ``.html`` templates in other apps keep rendering, and they gain the framework tags, because next.dj registers its template tag libraries as Django builtins.
 
 One parsing change does reach every template the process loads.
-The framework reinstalls Django's template tag pattern with the ``re.DOTALL`` flag, so a ``{% ... %}`` token may span several lines.
-A template that relies on a newline ending a tag needs adjusting before adopting next.dj, and :doc:`/content/ref/template-tags` states the rule.
+The framework widens the ``{% ... %}`` alternative of Django's template tag pattern at startup, so a block tag may span several lines while ``{{ ... }}`` and ``{# ... #}`` keep their stock behaviour.
+A template that relies on a newline ending a block tag needs adjusting before adopting next.dj, and :doc:`/content/ref/template-tags` states the rule.
 
 For the design principles behind that split, read :doc:`/content/misc/design-philosophy`.
 

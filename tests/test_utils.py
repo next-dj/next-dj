@@ -17,6 +17,7 @@ from next.utils import (
     resolve_base_dir,
     stat_mtime_ns,
     store_bounded,
+    store_capped,
     template_edits_watched,
     touch_bounded,
 )
@@ -74,6 +75,34 @@ class TestStoreBounded:
         store_bounded(cache, "first", 10, 1)
         assert cache["first"] == 10
         assert len(cache) == 2
+
+
+class TestStoreCapped:
+    """Tests for ``store_capped``."""
+
+    def test_a_new_key_past_the_bound_drops_the_oldest_insert(self) -> None:
+        """The bound is what a cache of one-off keys never grows past."""
+        cache: OrderedDict[str, int] = OrderedDict(first=1, second=2)
+        store_capped(cache, "third", 3, 2)
+        assert list(cache.items()) == [("second", 2), ("third", 3)]
+
+    def test_a_key_under_the_bound_evicts_nothing(self) -> None:
+        """A working set below the bound keeps every entry it ever wrote."""
+        cache: OrderedDict[str, int] = OrderedDict(first=1)
+        store_capped(cache, "second", 2, 8)
+        assert list(cache.items()) == [("first", 1), ("second", 2)]
+
+    def test_a_rewrite_keeps_the_key_where_it_was(self) -> None:
+        """A rewrite costs no reorder, so the entry keeps the age of its insert."""
+        cache: OrderedDict[str, int] = OrderedDict(first=1, second=2)
+        store_capped(cache, "first", 10, 2)
+        assert list(cache.items()) == [("first", 10), ("second", 2)]
+
+    def test_a_cache_emptied_in_between_costs_no_error(self) -> None:
+        """A concurrent clear leaves the write standing rather than raising."""
+        cache = _EmptiedCache()
+        store_capped(cache, "only", 1, 0)
+        assert cache["only"] == 1
 
 
 class TestTouchBounded:

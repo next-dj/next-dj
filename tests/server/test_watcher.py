@@ -14,7 +14,7 @@ from next.server.watcher import (
     _iter_default_autoreload_watch_specs,
     _registered_extra_watch_specs,
 )
-from tests.support.backends import file_components_entry
+from tests.support.backends import file_components_entry, watching_components_entry
 
 
 if TYPE_CHECKING:
@@ -72,6 +72,18 @@ class TestServerAutoreloadWatchApi:
 
         assert [p for p, glob in specs if glob == "**/component.py"] == [first, second]
         assert all(".djx" not in glob for _, glob in specs)
+
+    def test_a_backend_contributes_the_roots_it_watches(
+        self, tmp_path: Path, apply_component_backends: Callable[[list[Any]], None]
+    ) -> None:
+        """A root computed outside ``DIRS`` still reaches the file watcher."""
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        apply_component_backends([watching_components_entry(elsewhere)])
+
+        specs = _iter_default_autoreload_watch_specs()
+
+        assert specs == [(elsewhere, "**/component.py")]
 
     def test_iter_default_watches_component_py_under_each_page_root(
         self, tmp_path: Path

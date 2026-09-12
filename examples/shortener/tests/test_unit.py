@@ -17,6 +17,7 @@ from shortener.routes.page import (
     _create_link_with_unique_slug,
 )
 
+from next.forms.dispatch import FormActionDispatch
 from next.forms.signals import action_dispatched
 from next.testing import make_resolution_context
 
@@ -90,8 +91,8 @@ class TestReceivers:
         assert action_counts() == {}
 
     def test_remember_is_idempotent(self) -> None:
-        action_dispatched.send(sender=None, action_name="noop")
-        action_dispatched.send(sender=None, action_name="noop")
+        action_dispatched.send(sender=FormActionDispatch, action_name="noop")
+        action_dispatched.send(sender=FormActionDispatch, action_name="noop")
         assert action_counts() == {"noop": 2}
 
 

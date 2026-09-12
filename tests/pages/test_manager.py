@@ -12,12 +12,12 @@ from django.template import Template
 from django.test import override_settings
 
 import next.pages.loaders as loaders_module
-from next.checks import _load_python_module
 from next.pages import Page, context, page
 from next.pages.loaders import (
     LayoutTemplateLoader,
     PageModuleImportError,
     TemplateLoader,
+    _load_python_module,
     _load_python_module_memo,
 )
 from next.pages.registry import PageContextRegistry

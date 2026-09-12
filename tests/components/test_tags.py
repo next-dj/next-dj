@@ -149,11 +149,41 @@ class TestComponentTag:
         assert "from_prop" in result
         assert "from_parent" not in result
 
-    def test_component_tag_accepts_path_object_in_context(self, tmp_path: Path) -> None:
-        """current_template_path in context can be a Path object."""
-        with patch.object(components_manager, "get_component", return_value=None):
+    def test_component_tag_accepts_path_object_in_context(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A `Path` under the key renders and never reaches the string memo."""
+        (tmp_path / "c.djx").write_text("<i>from a Path</i>")
+        info = ComponentInfo(
+            name="c",
+            scope_root=tmp_path,
+            scope_relative="",
+            template_path=tmp_path / "c.djx",
+            module_path=None,
+            is_simple=True,
+        )
+        page = tmp_path / "t.djx"
+        resolved: list[str] = []
+        looked_up: list[Path] = []
+
+        def counting(value: str) -> Path:
+            resolved.append(value)
+            return Path(value).resolve()
+
+        def get_component(name: str, path: Path) -> ComponentInfo:
+            looked_up.append(path)
+            return info
+
+        monkeypatch.setattr(component_tags, "_resolve_template_path", counting)
+        with patch.object(
+            components_manager, "get_component", side_effect=get_component
+        ):
             t = Template('{% load components %}{% component "c" %}')
-            t.render(Context({"current_template_path": tmp_path / "t.djx"}))
+            result = t.render(Context({"current_template_path": page}))
+
+        assert result == "<i>from a Path</i>"
+        assert looked_up == [page]
+        assert resolved == []
 
     def test_component_tag_triggers_static_discovery_for_composite(
         self, tmp_path: Path
@@ -690,6 +720,23 @@ class TestComponentAnchorContext:
 class TestSlotTag:
     """Tests for ``{% #slot %}``, ``{% /slot %}``, and short ``{% slot %}``."""
 
+    def _render_slotted(self, tmp_path: Path, source: str, body: str) -> str:
+        """Render the `c` component with `source` as its template through `body`."""
+        (tmp_path / "c.djx").write_text(source)
+        info = ComponentInfo(
+            name="c",
+            scope_root=tmp_path,
+            scope_relative="",
+            template_path=tmp_path / "c.djx",
+            module_path=None,
+            is_simple=True,
+        )
+        with patch.object(components_manager, "get_component", return_value=info):
+            t = Template("{% load components %}" + body)
+            return t.render(
+                Context({"current_template_path": str(tmp_path / "page.djx")})
+            )
+
     def test_block_slot_tag_requires_name(self) -> None:
         """{% #slot %} without name raises TemplateSyntaxError."""
         with pytest.raises(TemplateSyntaxError, match="#slot"):
@@ -721,23 +768,25 @@ class TestSlotTag:
                 '{% #component "c" %}{% slot "a" "b" %}{% /component %}'
             )
 
-    def test_block_slot_parses_inside_block_component(self) -> None:
-        """A block slot inside a block component compiles without error."""
-        t = Template(
-            "{% load components %}"
+    def test_block_slot_fills_the_named_slot_variable(self, tmp_path: Path) -> None:
+        """A block slot inside a block component arrives as `slot_<name>`."""
+        result = self._render_slotted(
+            tmp_path,
+            "<div>[{{ slot_image }}]</div>",
             '{% #component "c" %}'
-            '{% #slot "image" %}<img/>{% /slot %}'
-            "{% /component %}"
+            '{% #slot "image" %}<img src="x"/>{% /slot %}'
+            "{% /component %}",
         )
-        t.render(Context({"current_template_path": "/x"}))
+        assert result == '<div>[<img src="x"/>]</div>'
 
-    def test_short_slot_parses_inside_block_component(self) -> None:
-        """{% slot "name" %} short form compiles inside {% #component %}."""
-        t = Template(
-            "{% load components %}"
-            '{% #component "c" %}{% slot "footer" %}{% /component %}'
+    def test_short_slot_fills_the_named_slot_with_nothing(self, tmp_path: Path) -> None:
+        """The short `{% slot %}` form declares the name and leaves it empty."""
+        result = self._render_slotted(
+            tmp_path,
+            "<div>[{{ slot_footer }}]</div>",
+            '{% #component "c" %}{% slot "footer" %}{% /component %}',
         )
-        t.render(Context({"current_template_path": "/x"}))
+        assert result == "<div>[]</div>"
 
     def test_orphan_slash_slot_raises(self) -> None:
         """{% /slot %} without opening #slot raises."""
@@ -1325,3 +1374,48 @@ class TestCallerControlsChildEscaping:
         assert self._render(tmp_path, body, autoescape=False) == (
             "<div><script>alert(1)</script></div>"
         )
+
+
+_MULTILINE_COMPONENT = (
+    '<article data-title="{{ title }}">'
+    '{% #set_slot "header" %}<h2>default</h2>{% /set_slot %}'
+    "</article>"
+)
+
+_MULTILINE_PAGE = (
+    "{% load components %}"
+    '{% #component\n    "card"\n    title="Card title"\n%}'
+    '{% #slot\n    "header"\n%}<h1>Injected</h1>{% /slot %}'
+    "{% /component %}"
+)
+
+_MULTILINE_HTML = '<article data-title="Card title"><h1>Injected</h1></article>'
+
+# A comment and a variable that both run over a line break. Django lexes neither
+# across lines, so the whole source is template text.
+_UNLEXED_SOURCE = "A {# note\nstill note #} B\nC {{ x\n}} D"
+
+
+class TestTagsSpanLines:
+    """A block tag may wrap across lines, a comment or a variable may not."""
+
+    def test_multiline_component_and_slot_parse(self, tmp_path: Path) -> None:
+        """Tag bodies broken over several lines compile into the same nodes."""
+        (tmp_path / "card.djx").write_text(_MULTILINE_COMPONENT)
+        info = ComponentInfo(
+            name="card",
+            scope_root=tmp_path,
+            scope_relative="",
+            template_path=tmp_path / "card.djx",
+            module_path=None,
+            is_simple=True,
+        )
+        context = Context({"current_template_path": str(tmp_path / "page.djx")})
+        with patch.object(components_manager, "get_component", return_value=info):
+            result = Template(_MULTILINE_PAGE).render(context)
+
+        assert result == _MULTILINE_HTML
+
+    def test_multiline_comment_and_variable_render_verbatim(self) -> None:
+        """Widening the block-tag branch alone leaves Django's other tokens alone."""
+        assert Template(_UNLEXED_SOURCE).render(Context({"x": 1})) == _UNLEXED_SOURCE

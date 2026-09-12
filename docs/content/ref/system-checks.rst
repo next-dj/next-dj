@@ -20,6 +20,7 @@ The list continues with ``next.static.checks``, ``next.partial.checks``, and ``n
 Each of these modules registers checks.
 
 Every next.dj check carries the ``next`` tag.
+That tag is the importable string constant ``next.checks.NEXT``, so a project check joins the framework ones by decorating itself with ``@register(NEXT)`` rather than by repeating the literal.
 Run ``uv run python manage.py check --tag next`` to execute only the framework checks and skip the built-in Django and third-party ones.
 Checks that also concern templates or URL patterns keep their :doc:`Django tags <django:ref/checks>` (``templates``, ``urls``) alongside ``next``, so filtering by those tags still reaches them.
 A tagged run reports what a full run reports.
@@ -118,11 +119,13 @@ Errors
      - Condition
      - Emitted by
    * - ``next.E001``
-     - ``NEXT_FRAMEWORK`` is not a dict, or ``PAGE_BACKENDS`` is not a list.
+     - ``NEXT_FRAMEWORK`` is not a dict, so the page checks have nothing to index into.
+       ``PAGE_BACKENDS`` carries its own code, ``next.E081``, so silencing one key never silences the whole mapping.
      - ``next.urls.checks``
    * - ``next.E002``
-     - A ``PAGE_BACKENDS`` or ``COMPONENT_BACKENDS`` entry is not a dict.
-     - ``next.urls.checks``, ``next.components.checks``
+     - A ``PAGE_BACKENDS`` entry is not a dict.
+       The ``COMPONENT_BACKENDS`` counterpart is ``next.E079``.
+     - ``next.urls.checks``
    * - ``next.E003``
      - A page backend entry does not specify ``BACKEND``.
      - ``next.urls.checks``
@@ -139,7 +142,7 @@ Errors
      - The router manager fails to initialize.
      - ``next.checks.common``
    * - ``next.E008``
-     - A ``[param]`` directory uses invalid parameter syntax.
+     - A ``[param]`` directory uses invalid parameter syntax, names a converter Django has no registration for, or names a parameter that is no Python identifier.
      - ``next.pages.checks``
    * - ``next.E009``
      - A ``[[args]]`` directory uses invalid or incomplete args syntax.
@@ -198,8 +201,9 @@ Errors
      - A file router entry is missing ``OPTIONS``.
      - ``next.urls.checks``
    * - ``next.E027``
-     - A ``COMPONENTS_DIR`` or ``PAGES_DIR`` value is not a string.
-     - ``next.components.checks``, ``next.urls.checks``
+     - A ``PAGES_DIR`` value is not a string.
+       The ``COMPONENTS_DIR`` counterpart is ``next.E080``.
+     - ``next.urls.checks``
    * - ``next.E028``
      - A route repeats one or more bracket parameter names, all listed in the error.
      - ``next.urls.checks``
@@ -341,6 +345,17 @@ Errors
    * - ``next.E078``
      - A ``@context(zone=)`` names a zone the composed page template does not declare, so no zone request ever matches the callable and its value is missing from every zone render.
      - ``next.partial.checks``
+   * - ``next.E079``
+     - A ``COMPONENT_BACKENDS`` entry is not a dict.
+       It carries its own code rather than sharing ``next.E002`` with ``PAGE_BACKENDS``, so silencing one settings key never silences the other.
+     - ``next.components.checks``
+   * - ``next.E080``
+     - A ``COMPONENTS_DIR`` value is not a string.
+       It carries its own code rather than sharing ``next.E027`` with ``PAGES_DIR``, for the same reason.
+     - ``next.components.checks``
+   * - ``next.E081``
+     - ``NEXT_FRAMEWORK['PAGE_BACKENDS']`` is not a list, so no page backend entry can be read.
+     - ``next.urls.checks``
 
 A code emitted by ``next.checks.common`` is produced by a shared helper that the listed subsystem check modules call.
 
@@ -427,7 +442,7 @@ Warnings
        Partial rendering uses a single protocol backend, so only the first entry runs and the rest are ignored.
      - ``next.partial.checks``
    * - ``next.W072``
-     - A ``NEXT_FRAMEWORK`` bool key, ``STRICT_CONTEXT``, ``STRICT_LOADING``, ``LAZY_COMPONENT_MODULES``, or ``FORM_AUTODISCOVER``, holds a non-bool value.
+     - A ``NEXT_FRAMEWORK`` bool key, ``STRICT_CONTEXT``, ``STRICT_LOADING``, ``LAZY_COMPONENT_MODULES``, ``FORM_AUTODISCOVER``, or ``STATIC_DISCOVERY_CACHE``, holds a non-bool value.
        The ``bool()`` coercion turns a falsy-looking string such as ``'False'`` into ``True``, so the written value can mean the opposite of the intent.
      - ``next.conf.checks``
    * - ``next.W074``

@@ -3,7 +3,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from next.partial import Envelope, PartialProtocolBackend, PatchResponse
+from next.partial import Envelope, JsonPartialProtocolBackend, PatchResponse
 from next.partial.headers import CONTENT_TYPE
 
 
@@ -29,7 +29,7 @@ def serialize_case(case: GoldenCase) -> tuple[bytes, dict[str, object]]:
     verification path never touches the filesystem and the committed
     fixtures are regenerated only through the explicit `write_case`.
     """
-    backend = PartialProtocolBackend()
+    backend = JsonPartialProtocolBackend()
     body = backend.serialize_envelope(case.envelope)
     response = PatchResponse(
         body,

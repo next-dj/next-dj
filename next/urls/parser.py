@@ -77,6 +77,26 @@ class DuplicateURLParameterError(ValueError):
         super().__init__(message)
 
 
+class InvalidURLParameterError(ValueError):
+    """Raised when a bracket segment names something Django refuses as a route.
+
+    Django compiles a route the moment the pattern is built, so a name that is
+    no Python identifier would otherwise surface as an `ImproperlyConfigured`
+    traceback far from the directory that named it.
+    """
+
+    def __init__(self, param_name: str, url_path: str) -> None:
+        """Build the message from the refused name and the route holding it."""
+        self.param_name = param_name
+        self.url_path = url_path
+        message = (
+            f"URL parameter '{param_name}' in URL pattern '{url_path}' is no "
+            "valid Python identifier once '-' is read as '_'. Django refuses "
+            "such a name when it compiles the route."
+        )
+        super().__init__(message)
+
+
 class URLPatternParser:
     """Map bracket segments in a file-based path to Django path converters.
 
@@ -87,6 +107,9 @@ class URLPatternParser:
 
     duplicate_parameter_error: ClassVar[type[DuplicateURLParameterError]] = (
         DuplicateURLParameterError
+    )
+    invalid_parameter_error: ClassVar[type[InvalidURLParameterError]] = (
+        InvalidURLParameterError
     )
 
     # The wildcard alternative must come first so `[[x]]` never matches
@@ -104,7 +127,7 @@ class URLPatternParser:
             nonlocal wildcard_seen
             wild = match.group("wild")
             if wild is not None:
-                name = wild.replace("-", "_")
+                name = self._route_name(wild, url_path)
                 if wildcard_seen or name in parameters:
                     raise DuplicateURLParameterError(name, url_path)
                 wildcard_seen = True
@@ -113,7 +136,7 @@ class URLPatternParser:
             param_name, param_type = self._parse_param_name_and_type(
                 match.group("param")
             )
-            name = param_name.replace("-", "_")
+            name = self._route_name(param_name, url_path)
             if name in parameters:
                 raise DuplicateURLParameterError(name, url_path)
             parameters[name] = name
@@ -145,6 +168,17 @@ class URLPatternParser:
             seen.add(name)
         return duplicates
 
+    def _route_name(self, raw_name: str, url_path: str) -> str:
+        """Return the Django route name for a bracket name, refusing a bad one.
+
+        Django accepts only a Python identifier between its angle brackets, and
+        the check that reports the directory reads the same rule.
+        """
+        name = raw_name.replace("-", "_")
+        if not name.isidentifier():
+            raise InvalidURLParameterError(name, url_path)
+        return name
+
     def _parse_param_name_and_type(self, param_str: str) -> tuple[str, str]:
         """Split bracket text into a name and converter label (default `str`)."""
         if ":" in param_str:
@@ -162,4 +196,9 @@ class URLPatternParser:
 default_url_parser: URLPatternParser = URLPatternParser()
 
 
-__all__ = ["DuplicateURLParameterError", "URLPatternParser", "default_url_parser"]
+__all__ = [
+    "DuplicateURLParameterError",
+    "InvalidURLParameterError",
+    "URLPatternParser",
+    "default_url_parser",
+]

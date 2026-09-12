@@ -27,7 +27,7 @@ Protocol.
 
 Strategy.
    Swap an internal algorithm.
-   Used for static deduplication, the JS context conflict policy, and the URL resolver.
+   Used for static deduplication, the JS context conflict policy, the URL resolver, and the dependency resolver.
    A strategy is selected by dotted path and satisfies the contract its slot names.
 
 Signal.
@@ -70,11 +70,10 @@ A backend always implements the full contract.
 Every family checks the configured class against the base named above, so a class that does not subclass it is rejected with :class:`~django.core.exceptions.ImproperlyConfigured`.
 A custom backend usually subclasses the default so it inherits every default behaviour.
 
-Not every base is abstract.
-``RouterBackend``, ``ComponentsBackend``, ``FormActionBackend``, ``StaticBackend``, and ``FormWizardBackend`` are abstract base classes that declare methods a subclass must implement.
-``PartialProtocolBackend`` is a plain concrete class with no abstract methods, so a subclass overrides only the parts of the wire format it changes.
-Its override points are ``serialize_envelope``, which returns the HTTP response body for one patch envelope, ``sse_event``, which returns the same envelope as a server-sent-events frame, and the ``content_type`` class attribute that names the media type of the body.
-The ``_dumps`` helper the two methods share is internal and carries no stability promise, so override both public methods rather than reaching through it.
+Every base is an abstract base class that declares the methods a subclass must implement.
+``PartialProtocolBackend`` requires ``serialize_envelope``, which returns the HTTP response body for one patch envelope, and ``sse_event``, which returns the same envelope as a server-sent-events frame.
+It also expects the ``content_type`` class attribute that names the media type of the body, and it supplies the ``options`` property that reads ``OPTIONS`` out of the settings entry.
+The shipped ``next.partial.JsonPartialProtocolBackend`` implements that contract as compact JSON, and a subclass of it that only changes part of the wire format overrides both public methods rather than reaching through the internal ``_dumps`` helper, which carries no stability promise.
 
 ``PARTIAL_BACKENDS`` differs from the other backend lists in that only its first entry is active.
 ``FORM_WIZARD_BACKEND`` is singular rather than a list, so the key holds one configuration dict instead of a list of them.
@@ -258,14 +257,24 @@ The framework calls the strategy at a well known point in the pipeline.
    * - URL resolver
      - ``URL_RESOLVER`` at the top level of ``NEXT_FRAMEWORK``
      - ``next.urls.TrieURLResolver``
+   * - Dependency resolver
+     - ``DEPENDENCY_RESOLVER`` at the top level of ``NEXT_FRAMEWORK``
+     - ``next.deps.DependencyResolver``
 
 Use a strategy when the customisation is a single algorithm rather than a complete subsystem.
 
-The URL resolver is the one strategy configured at the top level of ``NEXT_FRAMEWORK`` rather than inside a backend ``OPTIONS`` mapping.
-Its value is a dotted path to a ``django.urls.resolvers.URLResolver`` subclass, and the framework builds one instance of that class around the lazy list of page and form-action patterns.
+Two strategies are configured at the top level of ``NEXT_FRAMEWORK`` rather than inside a backend ``OPTIONS`` mapping.
+``URL_RESOLVER`` and ``DEPENDENCY_RESOLVER`` each hold a single dotted path, and ``next.backends.resolve_setting_class`` reads both against the base class the slot names.
+A value that is not a string is dropped by the settings merge for either key, which leaves the default in place with no error, and :ref:`next.E076 <ref-system-checks>` reports the dropped value on ``manage.py check``.
+
+``URL_RESOLVER`` names a ``django.urls.resolvers.URLResolver`` subclass, and the framework builds one instance of that class around the lazy list of page and form-action patterns.
 Swap it to change how a request path is matched against those patterns, for example to trade the default trie for a different index.
 A path that cannot be imported, and a class that is not a ``URLResolver`` subclass, both raise :class:`~django.core.exceptions.ImproperlyConfigured` while the URL configuration is built.
-A value that is not a string is dropped by the settings merge, which leaves the default in place with no error.
+
+``DEPENDENCY_RESOLVER`` names a ``next.deps.DependencyResolver`` subclass, and that class performs every injection the framework makes, from page views and ``@context`` callables to form actions and component renderers.
+The framework holds one resolver singleton and adopts the named class by retyping that object in place, so the subclass adds no instance slots and no second base and its ``__init__`` never runs.
+Widening the public ``skips`` predicate is the usual reason to subclass, because it decides which parameters a compiled injection plan carries at all.
+See :doc:`dependency-injection` for the resolver contract and :doc:`/content/ref/settings` for the constraints the retype imposes.
 
 Signals
 -------
@@ -284,6 +293,8 @@ Use the entries below as a quick map.
 
 - **Add a new URL pattern source.** Subclass ``RouterBackend`` and register it under ``PAGE_BACKENDS``.
 - **Change how a path is matched against the built patterns.** Name a ``URLResolver`` subclass under ``URL_RESOLVER``.
+- **Change how an injected parameter is filled.** Name a ``DependencyResolver`` subclass under ``DEPENDENCY_RESOLVER``.
+  See :doc:`dependency-injection`.
 - **Recognise a new asset extension.** Register through the kind registry (``default_kinds``).
 - **Recognise a new asset filename next to a page, layout, or component.** Register a custom stem (``default_stems``).
 - **Validate every dispatch.** Implement a form action backend.

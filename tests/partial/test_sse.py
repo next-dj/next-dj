@@ -90,7 +90,9 @@ class TestPolitenessHeaders:
         _consume(response)
 
 
-_NO_SSE_BACKEND = [{"BACKEND": "next.partial.PartialProtocolBackend", "OPTIONS": {}}]
+_NO_SSE_BACKEND = [
+    {"BACKEND": "next.partial.JsonPartialProtocolBackend", "OPTIONS": {}}
+]
 
 
 class TestRetryOption:
@@ -108,7 +110,7 @@ class TestRetryOption:
     def test_retry_falls_back_on_non_int_value(self) -> None:
         backend = [
             {
-                "BACKEND": "next.partial.PartialProtocolBackend",
+                "BACKEND": "next.partial.JsonPartialProtocolBackend",
                 "OPTIONS": {"SSE": {"RETRY_MS": "fast"}},
             }
         ]
@@ -120,7 +122,7 @@ def _custom_heartbeat_backend(seconds: object) -> list[dict]:
     """Return a backend config carrying a custom SSE heartbeat value."""
     return [
         {
-            "BACKEND": "next.partial.PartialProtocolBackend",
+            "BACKEND": "next.partial.JsonPartialProtocolBackend",
             "OPTIONS": {"SSE": {"HEARTBEAT_SECONDS": seconds}},
         }
     ]

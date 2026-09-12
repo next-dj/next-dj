@@ -436,7 +436,9 @@ def _form_backends(*backends, partial_active: bool) -> Iterator[None]:
     manager.backends = tuple(backends)
     settings_ns = MagicMock()
     settings_ns.PARTIAL_BACKENDS = (
-        [{"BACKEND": "next.partial.PartialProtocolBackend"}] if partial_active else []
+        [{"BACKEND": "next.partial.JsonPartialProtocolBackend"}]
+        if partial_active
+        else []
     )
     with (
         patch("next.partial.checks.form_action_manager", manager),
@@ -488,7 +490,7 @@ def _partial_version(version: object) -> Iterator[None]:
         options["VERSION"] = version
     settings_ns = MagicMock()
     settings_ns.PARTIAL_BACKENDS = [
-        {"BACKEND": "next.partial.PartialProtocolBackend", "OPTIONS": options}
+        {"BACKEND": "next.partial.JsonPartialProtocolBackend", "OPTIONS": options}
     ]
     with patch("next.partial.checks.next_framework_settings", settings_ns):
         yield
@@ -549,7 +551,7 @@ def _partial_backends(configs: object) -> Iterator[None]:
         yield
 
 
-_BACKEND_DICT = {"BACKEND": "next.partial.PartialProtocolBackend"}
+_BACKEND_DICT = {"BACKEND": "next.partial.JsonPartialProtocolBackend"}
 
 
 class TestSinglePartialBackendCheck:
@@ -607,7 +609,7 @@ class TestBackendsShapeCheck:
 
     @pytest.mark.parametrize(
         "configs",
-        [(_BACKEND_DICT,), _BACKEND_DICT, "next.partial.PartialProtocolBackend"],
+        [(_BACKEND_DICT,), _BACKEND_DICT, "next.partial.JsonPartialProtocolBackend"],
         ids=["tuple", "bare_dict", "dotted_path"],
     )
     def test_non_list_value_errors(self, configs: object) -> None:

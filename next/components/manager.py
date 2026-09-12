@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, cast
 
 from django.core.signals import setting_changed
 
-from next.backends import backend_entries, load_backends
+from next.backends import backend_entries, load_backends, resolve_setting_class
 from next.conf.signals import settings_reloaded
 
 from .backends import _DEFAULT_BACKEND_PATH, ComponentsBackend
@@ -33,6 +33,19 @@ if TYPE_CHECKING:
     from .info import ComponentInfo
 
 
+def _configured_template_loader_class() -> type[ComponentTemplateLoader]:
+    """Return the class named by `NEXT_FRAMEWORK["COMPONENT_TEMPLATE_LOADER"]`."""
+    return resolve_setting_class(
+        "COMPONENT_TEMPLATE_LOADER",
+        base=ComponentTemplateLoader,
+        # The package binds `CachedComponentTemplateLoader` only after importing
+        # this module, so the import helper would hit a half-initialised
+        # `next.components`.
+        shipped=CachedComponentTemplateLoader,
+        base_path="next.components.ComponentTemplateLoader",
+    )
+
+
 class ComponentsManager:
     """Loads backends from settings and merges name resolution across them."""
 
@@ -51,7 +64,9 @@ class ComponentsManager:
 
         ml = ModuleLoader()
 
-        tl = CachedComponentTemplateLoader(ml)
+        # Read here rather than per render, because the pipeline is built once
+        # and dropped whole whenever settings reload.
+        tl = _configured_template_loader_class()(ml)
         self._template_loader = tl
         simple = SimpleComponentRenderer(tl)
         composite = CompositeComponentRenderer(ml, tl)
@@ -92,18 +107,20 @@ class ComponentsManager:
         self._walk_registered_folders.clear()
         self._loaded = False
 
-    def reload(self) -> None:
+    def reload(self, *, notify: bool = True) -> None:
         """Rebuild the backends from the current `NEXT_FRAMEWORK` settings.
 
         The render pipeline and the router-walk claims go with the old backends, so the
-        next render resolves against the freshly configured sources.
+        next render resolves against the freshly configured sources. Pass `notify=False`
+        for a manager nobody renders from, so a throwaway build announces no backend the
+        process will never consult.
         """
         self._invalidate()
         self._backends = load_backends(
             backend_entries("COMPONENT_BACKENDS"),
             base=ComponentsBackend,
             default=_DEFAULT_BACKEND_PATH,
-            signal=component_backend_loaded,
+            signal=component_backend_loaded if notify else None,
         )
         self._loaded = True
 

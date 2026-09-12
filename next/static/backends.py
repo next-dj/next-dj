@@ -18,9 +18,14 @@ signal for each one so user code may react to backend construction.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections import OrderedDict
 from typing import TYPE_CHECKING, Any, ClassVar, override
+from weakref import WeakSet
 
 from django.contrib.staticfiles.storage import staticfiles_storage
+from django.core.signals import setting_changed
+
+from next.utils import store_capped
 
 from .assets import StaticNamespace
 
@@ -30,6 +35,16 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from django.http import HttpRequest
+
+
+# Bounded against a backend asked for logical names without end rather than as an
+# eviction policy, because a project serves far fewer assets than it allows. So the
+# stalest insert goes and a warm tag reorders nothing.
+_URL_CACHE_MAX_SIZE = 2048
+
+# Changing one of these rebuilds `staticfiles_storage`, so every URL resolved
+# through the manifest it held answers for a manifest that is gone.
+_MANIFEST_SETTINGS = frozenset({"STATIC_ROOT", "STATIC_URL", "STORAGES"})
 
 
 class StaticBackend(ABC):
@@ -108,7 +123,8 @@ class StaticFilesBackend(StaticBackend):
         self._css_tag = str(opts.get("css_tag") or self._DEFAULT_CSS_TAG)
         self._js_tag = str(opts.get("js_tag") or self._DEFAULT_JS_TAG)
         self._module_tag = str(opts.get("module_tag") or self._DEFAULT_MODULE_TAG)
-        self._url_cache: dict[tuple[str, str], str] = {}
+        self._url_cache: OrderedDict[tuple[str, str], str] = OrderedDict()
+        _url_caching_backends.add(self)
 
     def _logical_static_path(self, logical_name: str, suffix: str) -> str:
         return f"{StaticNamespace.NEXT}/{logical_name}{suffix}"
@@ -119,12 +135,12 @@ class StaticFilesBackend(StaticBackend):
 
         The suffix is taken from `source_path.suffix`, so a single kind
         can serve multiple file extensions if a custom backend wishes to.
-        The answer is memoised per `(logical_name, suffix)` for the life of
-        this backend, which `StaticManager.reload()` ends, because staticfiles
-        itself reads its manifest once per process. Missing entries in that
-        manifest are reported as `RuntimeError` with a hint about running
-        `collectstatic`. The `kind` argument is part of the contract and
-        ignored here, the suffix alone names the file.
+        The answer is memoised per `(logical_name, suffix)` under a bound,
+        because staticfiles itself reads its manifest once per process. A
+        setting that moves that manifest drops the memo through `forget_urls`.
+        Missing entries in the manifest are reported as `RuntimeError` with a
+        hint about running `collectstatic`. The `kind` argument is part of the
+        contract and ignored here, the suffix alone names the file.
         """
         del kind
         suffix = source_path.suffix
@@ -142,8 +158,12 @@ class StaticFilesBackend(StaticBackend):
                 "finder is enabled."
             )
             raise RuntimeError(msg) from e
-        self._url_cache[cache_key] = url
+        store_capped(self._url_cache, cache_key, url, _URL_CACHE_MAX_SIZE)
         return url
+
+    def forget_urls(self) -> None:
+        """Drop every memoised URL, so the next lookup reads the manifest again."""
+        self._url_cache.clear()
 
     def render_link_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
         """Return a link tag built from the configured css_tag template.
@@ -168,3 +188,16 @@ class StaticFilesBackend(StaticBackend):
         """
         del request
         return self._module_tag.format(url=url)
+
+
+_url_caching_backends: WeakSet[StaticFilesBackend] = WeakSet()
+
+
+def _on_setting_changed(*, setting: str, **kwargs) -> None:
+    """Drop memoised asset URLs when Django rebuilds the staticfiles storage."""
+    if setting in _MANIFEST_SETTINGS:
+        for backend in _url_caching_backends:
+            backend.forget_urls()
+
+
+setting_changed.connect(_on_setting_changed)

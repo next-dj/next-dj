@@ -13,12 +13,13 @@ import os
 from collections import OrderedDict
 from typing import TYPE_CHECKING, NamedTuple, Protocol, runtime_checkable
 
+from next.conf import next_framework_settings
 from next.pages import loaders as pages_loaders
 from next.utils import (
     MAX_ANCESTOR_WALK_DEPTH,
     resolved_tree,
     stat_mtime_ns,
-    store_bounded,
+    store_capped,
     template_edits_watched,
 )
 
@@ -40,8 +41,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# Every one of these bounds catches a caller naming paths without end rather than
+# working as an eviction policy, because a project holds far fewer pages and
+# components than they allow. So the stalest insert goes and a hit reorders nothing.
 _PAGE_PLAN_CACHE_MAX_SIZE = 2048
 _COMPONENT_PLAN_CACHE_MAX_SIZE = 2048
+_PAGE_ROOT_CACHE_MAX_SIZE = 2048
 
 # What identifies the component a plan was built for. The folder it reads comes
 # from one of the two paths, and the logical name comes from the component name.
@@ -204,7 +209,7 @@ class PathResolver:
     def __init__(self, page_roots_provider: Callable[[], tuple[Path, ...]]) -> None:
         """Store the page-roots provider callable consulted on every lookup."""
         self._provider = page_roots_provider
-        self._find_page_root_cache: dict[Path, Path | None] = {}
+        self._find_page_root_cache: OrderedDict[Path, Path | None] = OrderedDict()
 
     def page_roots(self) -> tuple[Path, ...]:
         """Return the current tuple of page tree roots from the provider."""
@@ -212,16 +217,20 @@ class PathResolver:
 
     def find_page_root(self, path: Path) -> Path | None:
         """Return the page tree root that contains the path, or None."""
-        cached = self._find_page_root_cache.get(path)
-        if cached is not None or path in self._find_page_root_cache:
-            return cached
+        # Subscript rather than `get` with a sentinel, because a cached `None`
+        # is a real answer and the sentinel form costs a `cast` on every hit.
+        try:
+            return self._find_page_root_cache[path]
+        except KeyError:
+            pass
+        found: Path | None = None
         resolved_parent = path.parent.resolve()
         for root in self.page_roots():
             if resolved_parent.is_relative_to(root):
-                self._find_page_root_cache[path] = root
-                return root
-        self._find_page_root_cache[path] = None
-        return None
+                found = root
+                break
+        store_capped(self._find_page_root_cache, path, found, _PAGE_ROOT_CACHE_MAX_SIZE)
+        return found
 
     def logical_name_for_template(
         self, template_dir: Path, page_root: Path | None
@@ -277,6 +286,9 @@ class AssetDiscovery:
         self._provider = provider
         self._resolver = resolver or PathResolver(provider.page_roots)
         self._stems = stems or default_stems
+        # Settled once per instance rather than per render, because the static
+        # manager drops the whole discovery when framework settings reload.
+        self._cache_plans: bool = bool(next_framework_settings.STATIC_DISCOVERY_CACHE)
         self._page_plan_cache: OrderedDict[Path, _AssetPlan] = OrderedDict()
         self._component_plan_cache: OrderedDict[_ComponentKey, _AssetPlan] = (
             OrderedDict()
@@ -289,10 +301,17 @@ class AssetDiscovery:
         the template directory, then from `styles` and `scripts`
         module lists declared in `page.py`.
         """
-        plan = self._page_plan_cache.get(file_path)
-        if plan is None or self._plan_stale(plan):
+        if self._cache_plans:
+            plan = self._page_plan_cache.get(file_path)
+            if plan is None or self._plan_stale(plan):
+                plan = self._build_page_asset_plan(file_path)
+                # Only a rebuilt plan is written, because a plan still fresh is
+                # already held under the key a warm render reads it back by.
+                store_capped(
+                    self._page_plan_cache, file_path, plan, _PAGE_PLAN_CACHE_MAX_SIZE
+                )
+        else:
             plan = self._build_page_asset_plan(file_path)
-        store_bounded(self._page_plan_cache, file_path, plan, _PAGE_PLAN_CACHE_MAX_SIZE)
         self._apply_plan(plan, collector)
 
     def _registry_generation(self) -> tuple[int, int, int]:
@@ -379,13 +398,21 @@ class AssetDiscovery:
             # A simple component owns no folder, so it has nothing to plan and
             # an entry per instance would only crowd out the plans that do.
             return
-        key: _ComponentKey = (info.template_path, info.module_path, info.name)
-        plan = self._component_plan_cache.get(key)
-        if plan is None or self._plan_stale(plan):
+        if self._cache_plans:
+            key: _ComponentKey = (info.template_path, info.module_path, info.name)
+            plan = self._component_plan_cache.get(key)
+            if plan is None or self._plan_stale(plan):
+                plan = self._build_component_asset_plan(info, _resolved_parent(source))
+                # Only a rebuilt plan is written, so the second instance of a
+                # component on a page reads the plan and writes nothing.
+                store_capped(
+                    self._component_plan_cache,
+                    key,
+                    plan,
+                    _COMPONENT_PLAN_CACHE_MAX_SIZE,
+                )
+        else:
             plan = self._build_component_asset_plan(info, _resolved_parent(source))
-        store_bounded(
-            self._component_plan_cache, key, plan, _COMPONENT_PLAN_CACHE_MAX_SIZE
-        )
         self._apply_plan(plan, collector)
 
     def _build_component_asset_plan(

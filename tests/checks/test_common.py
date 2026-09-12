@@ -15,7 +15,6 @@ from next.checks import NEXT, register_all
 from next.checks.common import (
     PageRootsError,
     RegistrationSubject,
-    get_components_manager,
     get_page_roots,
     get_pages_directories,
     get_router_manager,
@@ -24,10 +23,19 @@ from next.checks.common import (
     page_tree_skip_names,
     read_page_roots,
     registration_file_errors,
-    reset_components_manager_cache,
     reset_router_manager_cache,
 )
+from next.components.sources import reset_components_manager_cache
 from next.conf.signals import settings_reloaded
+from next.deps import resolver
+from next.deps.resolver import forget_dep_caches
+from next.pages.loaders import _PAGE_ROOTS_CACHE, _page_roots, forget_page_roots
+from next.pages.watch import (
+    _BACKENDS_MEMO,
+    _page_backends_for_watch,
+    forget_watch_state,
+)
+from next.static.manager import forget_manager_page_roots, get_static_manager
 from next.urls import (
     FileRouterBackend,
     PageRoot,
@@ -144,7 +152,7 @@ class TestRouterManagerCache:
     """`get_router_manager` reuses one manager per check run."""
 
     def test_built_once_across_repeated_calls(self) -> None:
-        with patch("next.urls.RouterManager") as mock_cls:
+        with patch("next.urls.access.RouterManager") as mock_cls:
             first = get_router_manager()
             second = get_router_manager()
             third = get_router_manager()
@@ -153,7 +161,7 @@ class TestRouterManagerCache:
         assert mock_cls.return_value.reload.call_count == 1
 
     def test_explicit_reset_forces_rebuild(self) -> None:
-        with patch("next.urls.RouterManager") as mock_cls:
+        with patch("next.urls.access.RouterManager") as mock_cls:
             get_router_manager()
             reset_router_manager_cache()
             get_router_manager()
@@ -161,48 +169,20 @@ class TestRouterManagerCache:
         assert mock_cls.return_value.reload.call_count == 2
 
     def test_settings_reloaded_signal_resets_cache(self) -> None:
-        with patch("next.urls.RouterManager") as mock_cls:
+        with patch("next.urls.access.RouterManager") as mock_cls:
             get_router_manager()
             settings_reloaded.send(sender=None)
             get_router_manager()
         assert mock_cls.call_count == 2
 
     def test_init_error_result_is_cached(self) -> None:
-        with patch("next.urls.RouterManager", side_effect=ImportError("boom")):
+        with patch("next.urls.access.RouterManager", side_effect=ImportError("boom")):
             manager, errors = get_router_manager()
             second_manager, second_errors = get_router_manager()
         assert manager is None
         assert second_manager is None
         assert errors is second_errors
         assert errors[0].id == "next.E007"
-
-
-class TestComponentsManagerCache:
-    """`get_components_manager` reuses one manager per check run."""
-
-    def test_built_once_across_repeated_calls(self) -> None:
-        with patch("next.components.manager.ComponentsManager") as mock_cls:
-            first = get_components_manager()
-            second = get_components_manager()
-            third = get_components_manager()
-        assert first is second is third
-        assert mock_cls.call_count == 1
-        assert mock_cls.return_value.reload.call_count == 1
-
-    def test_explicit_reset_forces_rebuild(self) -> None:
-        with patch("next.components.manager.ComponentsManager") as mock_cls:
-            get_components_manager()
-            reset_components_manager_cache()
-            get_components_manager()
-        assert mock_cls.call_count == 2
-        assert mock_cls.return_value.reload.call_count == 2
-
-    def test_settings_reloaded_signal_resets_cache(self) -> None:
-        with patch("next.components.manager.ComponentsManager") as mock_cls:
-            get_components_manager()
-            settings_reloaded.send(sender=None)
-            get_components_manager()
-        assert mock_cls.call_count == 2
 
 
 class TestScannedPairsCache:
@@ -870,3 +850,58 @@ class TestRegistrationFileErrors:
             True,
             True,
         ]
+
+
+@pytest.fixture()
+def live_caches() -> Iterator[None]:
+    """Empty the process-wide memos a check run must leave alone."""
+    _forget_live_caches()
+    yield
+    _forget_live_caches()
+
+
+def _forget_live_caches() -> None:
+    forget_dep_caches()
+    forget_page_roots()
+    forget_watch_state()
+    forget_manager_page_roots()
+
+
+def _injected_view(request) -> None:
+    """Plain callable the resolver compiles a plan for."""
+
+
+class TestACheckRunLeavesTheLiveCachesWarm:
+    """The managers a check run builds are its own, so no live memo is evicted."""
+
+    def test_the_compiled_plan_cache_survives(self, live_caches) -> None:
+        """The DI plans stay compiled, so the first request after a check is warm."""
+        register_all()
+        resolver.resolve_dependencies(_injected_view)
+        assert resolver._plan_cache
+
+        run_checks(tags=[NEXT])
+
+        assert resolver._plan_cache
+
+    def test_the_page_root_memos_survive(self, live_caches) -> None:
+        """Both page-root memos stay filled, so no walk asks the routers again."""
+        register_all()
+        _page_roots()
+        get_static_manager().page_roots()
+
+        run_checks(tags=[NEXT])
+
+        assert _PAGE_ROOTS_CACHE["value"] is not None
+        assert get_static_manager()._cached_page_roots is not None
+
+    def test_the_watch_state_survives(self, live_caches) -> None:
+        """The routers the watcher holds outlive a check run."""
+        register_all()
+        with override_settings(DEBUG=False):
+            _page_backends_for_watch()
+            assert _BACKENDS_MEMO["value"] is not None
+
+            run_checks(tags=[NEXT])
+
+            assert _BACKENDS_MEMO["value"] is not None

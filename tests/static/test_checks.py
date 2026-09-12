@@ -431,7 +431,7 @@ class TestReservedJsContextKeyCheck:
         manager = MagicMock()
         manager.backends = (backend,)
         with patch(
-            "next.components.context.get_components_manager", return_value=manager
+            "next.components.sources.get_components_manager", return_value=manager
         ):
             messages = check_reserved_js_context_keys()
         assert _ids(messages) == ["next.W075"]

@@ -14,7 +14,6 @@ from next.checks import NEXT
 from next.checks.common import (
     RegistrationSubject,
     errors_for_unknown_keys,
-    get_components_manager,
     import_backend_class,
     registration_file_errors,
 )
@@ -22,6 +21,7 @@ from next.conf import next_framework_settings
 
 from .backends import ComponentsBackend
 from .context import component
+from .sources import get_components_manager
 
 
 if TYPE_CHECKING:
@@ -98,7 +98,7 @@ def _validate_single_component_backend(
             Error(
                 f"{prefix}.COMPONENTS_DIR must be a string.",
                 obj=settings,
-                id="next.E027",
+                id="next.E080",
             )
         )
     errors.extend(
@@ -145,7 +145,7 @@ def check_next_components_configuration(*args, **kwargs) -> list[CheckMessage]:
                     f"NEXT_FRAMEWORK['{_COMPONENT_BACKEND_SETTINGS_KEY}'][{i}] "
                     "must be a dictionary.",
                     obj=settings,
-                    id="next.E002",
+                    id="next.E079",
                 )
             )
             continue

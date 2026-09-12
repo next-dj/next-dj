@@ -3,6 +3,7 @@ from django.http import HttpRequest
 from django.test import RequestFactory
 
 from next.deps import Depends
+from next.deps.linear import LinearDependencyResolver
 from next.deps.resolver import (
     DependencyResolver,
     cached_accepts_var_keyword,
@@ -91,6 +92,14 @@ def _themed_resolver() -> DependencyResolver:
     return planned
 
 
+def _linear_resolver() -> LinearDependencyResolver:
+    """Fresh plan-free resolver with its providers and the `theme` dependency loaded."""
+    walked = LinearDependencyResolver()
+    walked.dependency("theme")(lambda: "dark")
+    walked._sync_providers()
+    return walked
+
+
 def _resolve_four_markers(planned: DependencyResolver) -> dict[str, object]:
     return planned.resolve_dependencies(_handler_four_markers, **_FOUR_MARKERS_KWARGS)
 
@@ -164,6 +173,25 @@ class TestBenchDependencyResolver:
         resolver.dependency("theme")(lambda: "dark")
         benchmark(
             resolver.resolve_dependencies, _handler_four_markers, **_FOUR_MARKERS_KWARGS
+        )
+
+    @pytest.mark.benchmark(group="deps.resolver")
+    def test_linear_resolve_simple(self, benchmark) -> None:
+        """Two unclaimed parameters walked by the plan-free reference resolver."""
+        walked = _linear_resolver()
+        request = build_mock_http_request()
+        benchmark(walked.resolve_dependencies, _handler_simple, request=request)
+
+    @pytest.mark.benchmark(group="deps.resolver")
+    def test_linear_resolve_four_markers(self, benchmark) -> None:
+        """The four-marker handler walked by the plan-free reference resolver.
+
+        Paired with ``test_resolve_four_markers``, which is the same work under
+        the compiled plan, so the price of the safety net stays a measurement.
+        """
+        walked = _linear_resolver()
+        benchmark(
+            walked.resolve_dependencies, _handler_four_markers, **_FOUR_MARKERS_KWARGS
         )
 
     @pytest.mark.benchmark(group="deps.resolver")

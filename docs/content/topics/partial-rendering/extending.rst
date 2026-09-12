@@ -176,7 +176,7 @@ The wire format itself is replaced rather than extended, and the replacement liv
 ``PARTIAL_BACKENDS`` holds the protocol backends and only the first entry is active.
 The rest are ignored, so multi-backend selection is not a supported seam.
 A configuration with more than one entry earns the ``next.W071`` warning at ``manage.py check``.
-An application that needs a different envelope shape subclasses ``PartialProtocolBackend``, serialises its own wire format, and makes the subclass the single entry of ``PARTIAL_BACKENDS``.
+An application that needs a different envelope shape subclasses ``PartialProtocolBackend`` or the shipped ``JsonPartialProtocolBackend``, serialises its own wire format, and makes the subclass the single entry of ``PARTIAL_BACKENDS``.
 See :doc:`/content/ref/partial` for the ``PartialProtocolBackend`` API.
 
 See also

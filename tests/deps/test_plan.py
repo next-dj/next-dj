@@ -1,4 +1,6 @@
 import inspect
+from collections.abc import Callable
+from dataclasses import dataclass
 from operator import attrgetter
 from typing import Annotated
 
@@ -34,7 +36,10 @@ from tests.support import (
     DeferringProvider,
     OtherForm,
     PlanCase,
+    PlanEntry,
     inspect_parameter,
+    plan_by_name,
+    plan_entries,
     typing_optional,
 )
 
@@ -141,8 +146,10 @@ class _BadVerdict:
         return 1
 
 
-def _with_theme() -> DependencyResolver:
-    planned = DependencyResolver()
+def _with_theme(
+    resolver_class: type[DependencyResolver] = DependencyResolver,
+) -> DependencyResolver:
+    planned = resolver_class()
     planned.dependency("theme")(lambda: "dark")
     return planned
 
@@ -349,12 +356,140 @@ PLAN_CASES: tuple[PlanCase, ...] = (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class _TemplateContextCase:
+    """One callable resolved the way a component render resolves it.
+
+    `template_context` is the mapping the tag hands the resolver, and
+    `expected` the literal both the compile and the replay have to produce.
+    """
+
+    id: str
+    func: Callable[..., object]
+    request: HttpRequest | None
+    template_context: dict[str, object] | None
+    expected: dict[str, object]
+
+
+# The component entry point differs from the kwargs one in three ways, and each
+# row below turns one of them into a literal: URL kwargs are always empty, the
+# form comes from the template context itself, and cleaned data never exists.
+TEMPLATE_CONTEXT_CASES: tuple[_TemplateContextCase, ...] = (
+    _TemplateContextCase(
+        "markers_request_and_context",
+        _markers,
+        _REQUEST,
+        {"page_value": 42, "named": "n"},
+        {
+            "theme": "dark",
+            "value": 42,
+            "named": "n",
+            "slug": None,
+            "ident": None,
+            "page": 3,
+            "request": _REQUEST,
+            "req": _REQUEST,
+            "built": "True:42",
+        },
+    ),
+    _TemplateContextCase(
+        "markers_context_without_request",
+        _markers,
+        None,
+        {"page_value": 42, "named": "n"},
+        {
+            "theme": "dark",
+            "value": 42,
+            "named": "n",
+            "slug": None,
+            "ident": None,
+            "page": 1,
+            "request": None,
+            "req": None,
+            "built": "False:42",
+        },
+    ),
+    _TemplateContextCase(
+        "markers_no_template_context",
+        _markers,
+        _REQUEST,
+        None,
+        {
+            "theme": "dark",
+            "value": None,
+            "named": None,
+            "slug": None,
+            "ident": None,
+            "page": 3,
+            "request": _REQUEST,
+            "req": _REQUEST,
+            "built": "True:None",
+        },
+    ),
+    # A template key named like a `DUrl` parameter outranks the marker, because
+    # the name provider sits ahead of it and hands the value over uncoerced,
+    # while the marker itself only ever reads the empty `url_kwargs`.
+    _TemplateContextCase(
+        "markers_template_names_shadow_the_url_markers",
+        _markers,
+        None,
+        {"slug": "from-context", "ident": "5"},
+        {
+            "theme": "dark",
+            "value": None,
+            "named": None,
+            "slug": "from-context",
+            "ident": "5",
+            "page": 1,
+            "request": None,
+            "req": None,
+            "built": "False:None",
+        },
+    ),
+    _TemplateContextCase(
+        "form_params_form_under_the_template_key",
+        _form_params,
+        None,
+        {"form": _FORM, "named": "n", "cleaned_data": {"a": 1}},
+        {**_FORM_PARAMS_UNFILLED, "form": _FORM, "named": "n"},
+    ),
+    _TemplateContextCase(
+        "form_params_without_a_form",
+        _form_params,
+        _REQUEST,
+        {"page_value": 1},
+        _FORM_PARAMS_UNFILLED,
+    ),
+    _TemplateContextCase(
+        "uncovered_reads_the_template_context_by_name",
+        _uncovered,
+        None,
+        {"plain": "p", "ident": 5},
+        {"plain": "p", "with_default": 7, "ident": 5},
+    ),
+    _TemplateContextCase(
+        "string_request_annotation",
+        _string_request,
+        _REQUEST,
+        {},
+        {"request": _REQUEST},
+    ),
+    _TemplateContextCase("builtin", int, _REQUEST, {}, {}),
+)
+
+
 class TestGoldenMatrix:
-    """A compile and a replay both yield the literal pinned for the pair."""
+    """A compile and a replay both yield the literal pinned for the pair.
+
+    Every row runs under the plan resolver and the linear one, so a literal
+    pinned once holds the two paths to the same answer.
+    """
 
     @pytest.mark.parametrize("case", PLAN_CASES, ids=attrgetter("id"))
-    def test_plan_matches_the_pinned_literal(self, case: PlanCase) -> None:
-        planned = _with_theme()
+    def test_plan_matches_the_pinned_literal(
+        self, case: PlanCase, resolver_class
+    ) -> None:
+        planned = _with_theme(resolver_class)
         # The first call compiles the plan and the second replays the cached one.
         compiled = planned.resolve_dependencies(case.func, **case.kwargs)
         replayed = planned.resolve_dependencies(case.func, **case.kwargs)
@@ -366,8 +501,10 @@ class TestGoldenMatrix:
             if isinstance(value, HttpRequest | forms.Form):
                 assert compiled[name] is value
 
-    def test_request_param_without_request_falls_back_to_url_kwargs(self) -> None:
-        planned = _with_theme()
+    def test_request_param_without_request_falls_back_to_url_kwargs(
+        self, resolver_class
+    ) -> None:
+        planned = _with_theme(resolver_class)
         assert planned.resolve_dependencies(_markers, req="raw")["req"] == "raw"
 
     def test_non_introspectable_callable_yields_empty(self) -> None:
@@ -376,25 +513,55 @@ class TestGoldenMatrix:
         assert planned._plan_cache[_introspect_key(int)][1] is EMPTY_PLAN
 
 
+class TestTemplateContextGoldenMatrix:
+    """The component entry point replays the same plan through its own context.
+
+    Parametrised over both resolution paths, the way the kwargs matrix is.
+    """
+
+    @pytest.mark.parametrize("case", TEMPLATE_CONTEXT_CASES, ids=attrgetter("id"))
+    def test_plan_matches_the_pinned_literal(
+        self, case: _TemplateContextCase, resolver_class
+    ) -> None:
+        planned = _with_theme(resolver_class)
+        # The first call compiles the plan and the second replays the cached one.
+        compiled = planned.resolve_with_template_context(
+            case.func, request=case.request, template_context=case.template_context
+        )
+        replayed = planned.resolve_with_template_context(
+            case.func, request=case.request, template_context=case.template_context
+        )
+        assert compiled == case.expected
+        assert replayed == case.expected
+        for name, value in case.expected.items():
+            if isinstance(value, HttpRequest | forms.Form):
+                assert compiled[name] is value
+
+    def test_both_entry_points_share_one_compiled_plan(self) -> None:
+        """The kwargs path and the component path read the same cache entry."""
+        planned = _with_theme()
+        planned.resolve_dependencies(_markers, _context_data={"page_value": 42})
+        cached = planned._plan_cache[_introspect_key(_markers)][1]
+        planned.resolve_with_template_context(
+            _markers, template_context={"page_value": 42}
+        )
+        assert planned._plan_cache[_introspect_key(_markers)][1] is cached
+
+
 class TestPlanShape:
     """Compiled entries hold the short-list the signature leaves open."""
 
-    def _plan(self, planned: DependencyResolver, func) -> dict[str, tuple]:
+    def _plan(self, planned: DependencyResolver, func) -> dict[str, PlanEntry]:
         planned.resolve_dependencies(func)
-        return {
-            name: (candidates, filler)
-            for name, candidates, _fb, _p, filler in planned._plan_cache[
-                _introspect_key(func)
-            ][1]
-        }
+        return plan_by_name(planned._plan_cache[_introspect_key(func)][1])
 
     def test_marker_parameters_end_in_a_terminal(self) -> None:
         planned = _with_theme()
         plan = self._plan(planned, _two)
-        assert plan["theme"][0] == ()
-        assert plan["theme"][1] is not None
-        assert plan["value"][0] == ()
-        assert plan["value"][1] is not None
+        assert plan["theme"].candidates == ()
+        assert plan["theme"].filler is not None
+        assert plan["value"].candidates == ()
+        assert plan["value"].filler is not None
         assert planned.resolve_dependencies(_two, _context_data={"page_value": 42}) == {
             "theme": "dark",
             "value": 42,
@@ -419,27 +586,22 @@ class TestPlanShape:
 
     def test_request_annotation_keeps_the_name_provider_ahead(self) -> None:
         plan = self._plan(DependencyResolver(), _theme_request)
-        candidates, filler = plan["theme"]
-        assert [type(p) for p in candidates] == [
+        entry = plan["theme"]
+        assert [type(p) for p in entry.candidates] == [
             ContextByNameProvider,
             HttpRequestProvider,
             UrlKwargsProvider,
         ]
-        assert filler is None
+        assert entry.filler is None
 
     def test_fallback_is_the_default_object_itself(self) -> None:
         planned = DependencyResolver()
         planned.resolve_dependencies(_uncovered)
-        entries = {
-            name: fallback
-            for name, _c, fallback, _p, _fill in planned._plan_cache[
-                _introspect_key(_uncovered)
-            ][1]
-        }
-        assert entries["plain"] is None
-        assert entries["with_default"] == 7
+        entries = plan_by_name(planned._plan_cache[_introspect_key(_uncovered)][1])
+        assert entries["plain"].fallback is None
+        assert entries["with_default"].fallback == 7
         default = inspect.signature(_uncovered).parameters["with_default"].default
-        assert entries["with_default"] is default
+        assert entries["with_default"].fallback is default
 
     def test_skipped_parameters_are_absent(self) -> None:
         def fn(self, *args, value: int = 1, **kwargs) -> None:
@@ -458,22 +620,22 @@ class TestPlanShape:
         planned.prepend_provider(first)
         planned.add_provider(last)
         plan = self._plan(planned, _plain)
-        assert [type(p) for p in plan["plain"][0]] == [
+        assert [type(p) for p in plan["plain"].candidates] == [
             DeferringProvider,
             ContextByNameProvider,
             UrlKwargsProvider,
             DeferringProvider,
         ]
-        assert plan["plain"][0][0] is first
-        assert plan["plain"][0][-1] is last
+        assert plan["plain"].candidates[0] is first
+        assert plan["plain"].candidates[-1] is last
 
         def by_marker(flag: str = Depends("flag")) -> None:
             return None
 
         marker_plan = self._plan(planned, by_marker)
-        candidates, filler = marker_plan["flag"]
-        assert candidates == (first,)
-        assert filler is not None
+        entry = marker_plan["flag"]
+        assert entry.candidates == (first,)
+        assert entry.filler is not None
         assert planned.resolve_dependencies(by_marker) == {"flag": "STUB"}
 
     def test_compile_plan_stops_at_the_terminal(self) -> None:
@@ -481,19 +643,22 @@ class TestPlanShape:
         tail = DeferringProvider()
         sig = inspect.signature(_two)
         plan = compile_plan(sig, {}, [depends, tail], lambda _p: False)
+        # The replay unpacks a plain tuple, so the entry stays exactly that.
         assert type(plan[0]) is tuple
-        assert plan[0][0] == "theme"
-        assert plan[0][1] == ()
-        assert plan[0][4] is not None
-        assert plan[1][1] == (tail,)
-        assert plan[1][4] is None
+        theme, value = plan_entries(plan)
+        assert theme.name == "theme"
+        assert theme.candidates == ()
+        assert theme.filler is not None
+        assert value.name == "value"
+        assert value.candidates == (tail,)
+        assert value.filler is None
 
     def test_entry_carries_the_resolved_annotation(self) -> None:
         planned = DependencyResolver()
         planned.resolve_dependencies(_string_url)
-        (entry,) = planned._plan_cache[_introspect_key(_string_url)][1]
-        assert entry[3].annotation is int
-        assert entry[3].name == "user_id"
+        (entry,) = plan_entries(planned._plan_cache[_introspect_key(_string_url)][1])
+        assert entry.param.annotation is int
+        assert entry.param.name == "user_id"
 
     def test_string_annotation_coerces_through_the_plan(self) -> None:
         planned = DependencyResolver()
@@ -504,7 +669,7 @@ class TestPlanShape:
     def test_raw_parameter_is_kept_when_hints_add_nothing(self) -> None:
         sig = inspect.signature(_uncovered)
         plan = compile_plan(sig, {}, [], lambda _p: False)
-        assert plan[0][3] is sig.parameters["plain"]
+        assert plan_entries(plan)[0].param is sig.parameters["plain"]
 
     def test_verdict_outside_the_contract_raises_at_compile_time(self) -> None:
         planned = DependencyResolver()

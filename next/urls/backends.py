@@ -8,9 +8,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, override
 
 from django.apps import apps
-from django.core.exceptions import AppRegistryNotReady
+from django.core.exceptions import AppRegistryNotReady, ImproperlyConfigured
 
-from next.conf import import_class_cached, next_framework_settings
+from next.backends import resolve_backend_class
+from next.conf import next_framework_settings
 from next.pages import page
 from next.utils import PageRoot, classify_dirs_entries, resolve_base_dir, resolved_tree
 
@@ -30,6 +31,10 @@ logger = logging.getLogger(__name__)
 # Django's own apps and the framework package hold no project pages, and the
 # framework ships a `next/pages` package that otherwise reads as a page tree.
 _NON_PAGE_APP_ROOTS = ("django", "next")
+
+# The keys a file router entry carries. They have no defaults here, because a
+# partial entry is a settings mistake the checks name rather than a shorthand.
+_FILE_ROUTER_KEYS = ("PAGES_DIR", "APP_DIRS", "OPTIONS", "DIRS")
 
 
 def _is_framework_app(app_name: str) -> bool:
@@ -167,13 +172,14 @@ class FileRouterBackend(RouterBackend):
         Taken from the first `COMPONENT_BACKENDS` entry.
         """
         cbs = next_framework_settings.COMPONENT_BACKENDS
-        _components_key = "COMPONENTS_DIR"
-        if not isinstance(cbs, list) or not cbs:
-            raise KeyError(_components_key)
-        cb0 = cbs[0]
-        if not isinstance(cb0, dict) or _components_key not in cb0:
-            raise KeyError(_components_key)
-        return str(cb0[_components_key])
+        cb0 = cbs[0] if isinstance(cbs, list) and cbs else None
+        if not isinstance(cb0, dict) or "COMPONENTS_DIR" not in cb0:
+            msg = (
+                "A file router takes the folder it skips from COMPONENTS_DIR on "
+                f"the first NEXT_FRAMEWORK['COMPONENT_BACKENDS'] entry, got {cbs!r}."
+            )
+            raise ImproperlyConfigured(msg)
+        return str(cb0["COMPONENTS_DIR"])
 
     @override
     def __repr__(self) -> str:
@@ -359,6 +365,17 @@ class FileRouterBackend(RouterBackend):
         yield from dispatcher.walk(pages_path)
 
 
+def _construction_error(
+    backend_class: type[RouterBackend], exc: TypeError
+) -> ImproperlyConfigured:
+    """Name a router whose constructor refuses the arguments the factory passes."""
+    msg = (
+        f"{backend_class.__name__} does not take the arguments RouterFactory "
+        f"builds a router with: {exc}"
+    )
+    return ImproperlyConfigured(msg)
+
+
 class RouterFactory:
     """Build `RouterBackend` instances from `PAGE_BACKENDS`-style dicts."""
 
@@ -389,48 +406,65 @@ class RouterFactory:
         return name in cls._backends
 
     @classmethod
-    def create_backend(cls, config: dict[str, Any]) -> RouterBackend:
-        """Instantiate the backend class named by `config["BACKEND"]`."""
-        backend_name = config["BACKEND"]
-        backend_class: Any
+    def _backend_class(cls, config: Mapping[str, Any]) -> type[RouterBackend]:
+        """Return the registered class for the entry, or resolve its dotted path."""
+        dotted = config.get("BACKEND")
+        registered = cls._backends.get(dotted) if isinstance(dotted, str) else None
+        if registered is not None:
+            return registered
+        try:
+            return resolve_backend_class(config, base=RouterBackend)
+        except ImportError as exc:
+            msg = f"Router backend {dotted!r} could not be imported: {exc}"
+            raise ImproperlyConfigured(msg) from exc
 
-        if backend_name in cls._backends:
-            backend_class = cls._backends[backend_name]
-        else:
-            try:
-                backend_class = import_class_cached(backend_name)
-            except ImportError as e:
-                msg = f"Unsupported backend: {backend_name}"
-                raise ValueError(msg) from e
-
-        if not isinstance(backend_class, type) or not issubclass(
-            backend_class, RouterBackend
-        ):
-            msg = f"Backend {backend_name!r} is not a RouterBackend subclass"
-            raise TypeError(msg)
-
-        if issubclass(backend_class, FileRouterBackend):
-            for req in ("PAGES_DIR", "APP_DIRS", "OPTIONS", "DIRS"):
-                if req not in config:
-                    raise KeyError(req)
-            base_dir = resolve_base_dir()
-            raw_opts = config.get("OPTIONS")
-            if not isinstance(raw_opts, dict):
-                raw_opts = {}
-            dirs_list = list(config.get("DIRS") or [])
-            path_roots, segment_names = classify_dirs_entries(dirs_list, base_dir)
-            components_dir = FileRouterBackend._resolve_components_folder_name()
-            skip_names = frozenset({components_dir, *segment_names})
-            narrow_opts = _narrow_file_router_options(raw_opts)
+    @classmethod
+    def _create_file_router(
+        cls, backend_class: type[FileRouterBackend], config: Mapping[str, Any]
+    ) -> RouterBackend:
+        """Build one file router from the keys its entry carries."""
+        for req in _FILE_ROUTER_KEYS:
+            if req not in config:
+                msg = (
+                    f"A {backend_class.__name__} entry lists {req!r} alongside "
+                    f"{', '.join(_FILE_ROUTER_KEYS)}, got {config!r}."
+                )
+                raise ImproperlyConfigured(msg)
+        base_dir = resolve_base_dir()
+        raw_opts = config.get("OPTIONS")
+        if not isinstance(raw_opts, dict):
+            raw_opts = {}
+        dirs_list = list(config.get("DIRS") or [])
+        path_roots, segment_names = classify_dirs_entries(dirs_list, base_dir)
+        components_dir = FileRouterBackend._resolve_components_folder_name()
+        try:
             return backend_class(
                 pages_dir=config.get("PAGES_DIR", "pages"),
                 app_dirs=bool(config.get("APP_DIRS", True)),
                 extra_root_paths=path_roots,
-                skip_dir_names=skip_names,
+                skip_dir_names=frozenset({components_dir, *segment_names}),
                 components_folder_name=components_dir,
-                options=narrow_opts,
+                options=_narrow_file_router_options(raw_opts),
             )
-        return backend_class()
+        except TypeError as exc:
+            raise _construction_error(backend_class, exc) from exc
+
+    @classmethod
+    def create_backend(cls, config: dict[str, Any]) -> RouterBackend:
+        """Instantiate the backend class named by `config["BACKEND"]`.
+
+        Every misconfigured entry answers `ImproperlyConfigured`, the type the
+        shared backend loader raises, so one handler covers the whole family.
+        """
+        backend_class = cls._backend_class(config)
+        if issubclass(backend_class, FileRouterBackend):
+            return cls._create_file_router(backend_class, config)
+        try:
+            # A router of any other shape reads its own configuration, so the
+            # entry names it and nothing else reaches its constructor.
+            return backend_class()
+        except TypeError as exc:
+            raise _construction_error(backend_class, exc) from exc
 
 
 __all__ = ["FileRouterBackend", "RouterBackend", "RouterFactory"]

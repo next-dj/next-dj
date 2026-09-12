@@ -18,6 +18,6 @@ injecting static assets. The sender is `Page`. The keyword arguments are `file_p
 from django.dispatch import Signal
 
 
-template_loaded: Signal = Signal()
-context_registered: Signal = Signal()
-page_rendered: Signal = Signal()
+template_loaded: Signal = Signal(use_caching=True)
+context_registered: Signal = Signal(use_caching=True)
+page_rendered: Signal = Signal(use_caching=True)

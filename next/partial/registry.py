@@ -59,8 +59,9 @@ class PatchOpRegistry:
         """
         self._ops.add(name)
         self._custom.add(name)
-        if patch_op_registered.receivers:
-            patch_op_registered.send(sender=type(self), name=name)
+        sender = type(self)
+        if patch_op_registered.receivers and patch_op_registered.has_listeners(sender):
+            patch_op_registered.send(sender=sender, name=name)
 
     def __contains__(self, name: object) -> bool:
         """Return True when the verb is known to the registry."""
@@ -149,10 +150,11 @@ def zones_of(template: "Template") -> "Mapping[str, ZoneInfo]":
         return cached
     zones = _zones_from_template(template)
     _zone_cache[template] = zones
-    if zone_registered.receivers:
+    sender = type(template)
+    if zone_registered.receivers and zone_registered.has_listeners(sender):
         for info in zones.values():
             zone_registered.send(
-                sender=type(template),
+                sender=sender,
                 template=template,
                 zone_name=info.name,
                 lazy=info.options.lazy,

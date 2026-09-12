@@ -81,7 +81,7 @@ Modules
 
 ``next.components.checks``.
    The components system checks, including ``next.E020`` and ``next.E034``.
-   They read the per-run manager ``next.checks.common.get_components_manager`` builds, which registers the ``_components`` folders under the page trees itself instead of waiting for the router walk to reach them, so every check sees the same components whatever asked for the manager first.
+   They read the per-run manager ``next.components.sources.get_components_manager`` builds, which registers the ``_components`` folders under the page trees itself instead of waiting for the router walk to reach them, so every check sees the same components whatever asked for the manager first.
    The checks enumerate through ``ComponentsBackend.iter_components``, so a custom backend joins the reports by implementing that hook and stays out of them by leaving it alone.
 
 ``next.components.watch``.

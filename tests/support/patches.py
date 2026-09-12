@@ -13,7 +13,7 @@ from tests.support.helpers import next_framework_settings_for_checks
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator
+    from collections.abc import Callable, Generator, Iterable, Set as AbstractSet
     from pathlib import Path
 
 
@@ -92,6 +92,41 @@ def restored_static_registries() -> Generator[None, None, None]:
             registry.__dict__.clear()
             registry.__dict__.update(state)
             _advance_version(registry, reached=reached)
+
+
+@contextmanager
+def patched_watch_sources(
+    *,
+    pages: Iterable[Path] = (),
+    templates: AbstractSet[Path] = frozenset(),
+    layouts: AbstractSet[Path] = frozenset(),
+    components: AbstractSet[Path] = frozenset(),
+) -> Generator[None, None, None]:
+    """Answer the four watch seams `next.static.finders` reads from one call.
+
+    The finder asks for page roots and then for every template, layout, and
+    component path the reloader watches, so a caller that leaves one seam
+    unpatched reads the real project tree into its assertions.
+    """
+    with (
+        patch(
+            "next.static.finders.get_pages_directories_for_watch",
+            return_value=list(pages),
+        ),
+        patch(
+            "next.static.finders.get_template_djx_paths_for_watch",
+            return_value=set(templates),
+        ),
+        patch(
+            "next.static.finders.get_layout_djx_paths_for_watch",
+            return_value=set(layouts),
+        ),
+        patch(
+            "next.static.finders.get_component_paths_for_watch",
+            return_value=set(components),
+        ),
+    ):
+        yield
 
 
 @contextmanager

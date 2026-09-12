@@ -11,6 +11,7 @@ from blog.markdown_template import (
 )
 from blog.receivers import _detect_source, loader_hits
 
+from next.pages import Page
 from next.pages.signals import template_loaded
 
 
@@ -125,6 +126,6 @@ class TestReceivers:
     def test_on_template_loaded_records_hit(self, tmp_path: Path) -> None:
         page_file = tmp_path / "page.py"
         (tmp_path / "template.djx").write_text("<p>x</p>")
-        template_loaded.send(sender=None, file_path=page_file)
+        template_loaded.send(sender=Page, file_path=page_file)
         hits = loader_hits()
         assert hits[str(page_file)].startswith("template.djx")

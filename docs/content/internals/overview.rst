@@ -57,7 +57,7 @@ Subsystems
      - Test client, signal recorder, isolation.
      - ``next.testing``
    * - App
-     - Django ``AppConfig`` that wires autoreload, template-tag builtins, staticfiles integration, component bootstrap, form autodiscovery, and the partial shaper port during ``ready()``.
+     - Django ``AppConfig`` that wires autoreload, template-tag builtins, staticfiles integration, component bootstrap, form autodiscovery, and the three ports during ``ready()``.
      - ``next.apps``
 
 Bootstrap
@@ -65,11 +65,11 @@ Bootstrap
 
 Django calls ``NextFrameworkConfig.ready()`` once per process after all applications load.
 The hook calls ``register_all()`` to register the framework system checks.
-It then runs seven startup steps in a fixed order.
+It then runs nine startup steps in a fixed order.
 The first, ``apply_resolver_setting()``, points the dependency-injection singleton at the configured resolver class, ahead of every step that imports user modules.
+The next three bind the ``next.ports`` slots, the composition the request path, the watcher, and the checks all depend on, and they run early for the same reason the resolver setting does.
 The next four install autoreload, template-tag builtins, staticfiles integration, and component bootstrap into the Django runtime.
-The sixth, ``autodiscover_forms()``, registers shared forms before the first request arrives.
-The seventh binds the partial shaper into the ``next.ports`` slot, which is the one composition step the request path depends on.
+The last, ``autodiscover_forms()``, registers shared forms before the first request arrives.
 See :doc:`/content/ref/apps` for the canonical ordering and the full API.
 
 The boot pays for registration and wiring.
@@ -139,11 +139,11 @@ The dependency graph between subsystems is shallow.
   Its ``defaults`` and ``settings`` modules import nothing from the framework, and only its ``checks`` module reaches up to ``next.checks``.
 - ``next.deps`` imports nothing from the framework and sits at the bottom next to ``next.conf``.
 - ``next.ports`` imports no subsystem at all and declares the protocols one subsystem calls another through.
-- ``next.pages`` depends on ``next.conf`` and ``next.deps``, and reaches ``next.static`` and ``next.urls`` only through deferred call-site imports.
+- ``next.pages`` depends on ``next.conf`` and ``next.deps``, and reaches ``next.static`` and ``next.urls`` only through ``next.ports`` slots.
 - ``next.components`` depends on ``next.conf`` and ``next.deps``, and adds a module-level dependency on ``next.pages.watch`` so the watcher and the checks share one page-tree reading.
 - ``next.static`` depends on ``next.conf``, ``next.pages``, and ``next.components``, whose trees its discovery and staticfiles finder walk.
 - ``next.forms`` depends on ``next.conf``, ``next.pages``, ``next.deps``, ``next.components``, and ``next.static``, the last two through the component-widget binding.
-- ``next.pages`` and ``next.forms`` reach partial shaping through the ``next.ports`` slot rather than through ``next.partial``, so neither imports the partial subsystem on the request path.
+- ``next.pages`` and ``next.forms`` reach partial shaping through a ``next.ports`` slot rather than through ``next.partial``, so neither imports the partial subsystem on the request path.
 - ``next.urls`` depends on ``next.conf``, ``next.deps``, ``next.pages``, ``next.components``, and ``next.forms``.
 - ``next.partial`` depends on ``next.conf``, ``next.pages``, ``next.static``, and ``next.forms`` to render zones and shape patches, and reads ``next.templatetags.forms`` in its system checks.
   It touches ``next.urls`` only in those checks, under ``TYPE_CHECKING``.
@@ -167,9 +167,9 @@ The set of submodules differs by area, and :doc:`adding-an-area` states the cont
    * - ``next.pages``
      - ``manager``, ``registry``, ``loaders``, ``context``, ``processors``, ``scan``, ``checks``, ``signals``, ``watch``.
    * - ``next.components``
-     - ``manager``, ``registry``, ``scanner``, ``loading``, ``renderers``, ``context``, ``facade``, ``info``, ``backends``, ``watch``, ``checks``, ``signals``.
+     - ``manager``, ``registry``, ``scanner``, ``sources``, ``loading``, ``renderers``, ``context``, ``facade``, ``info``, ``backends``, ``watch``, ``checks``, ``signals``.
    * - ``next.urls``
-     - ``manager``, ``backends``, ``dispatcher``, ``parser``, ``resolver``, ``markers``, ``reverse``, ``checks``, ``signals``.
+     - ``manager``, ``access``, ``backends``, ``dispatcher``, ``parser``, ``resolver``, ``markers``, ``reverse``, ``checks``, ``signals``.
    * - ``next.forms``
      - ``manager``, ``dispatch`` (``build``, ``permissions``, ``responses``, ``wizard``), ``backends``, ``decorators``, ``base``, ``markers``, ``serializers``, ``formsets``, ``uid``, ``rendering``, ``autodiscover``, ``wizard``, ``widgets``, ``origin``, ``diagnostics``, ``checks``, ``signals``.
    * - ``next.static``
@@ -190,7 +190,7 @@ The set of submodules differs by area, and :doc:`adding-an-area` states the cont
      - A single flat module that provides ``load_backends``, ``resolve_backend_class``, and ``SingleBackendManager`` for every settings-driven backend family.
    * - ``next.ports``
      - A single flat module holding the protocols and slots one subsystem calls another through.
-       ``PartialShaper`` and ``partial_shaper_slot`` let the page and form paths shape partial responses without importing ``next.partial``.
+       ``PartialShaper`` lets the page and form paths shape partial responses without importing ``next.partial``, ``RouterAccess`` lets the page watcher and the checks build routers without importing ``next.urls``, and ``StaticAssets`` lets the render path reach the static manager without importing ``next.static``.
    * - ``next.utils``
      - A single flat module holding the path helpers, the ``PageRoot`` value object, the ``template_edits_watched`` predicate, and the declaration-site attribution that several subsystems share.
    * - ``next.signals``

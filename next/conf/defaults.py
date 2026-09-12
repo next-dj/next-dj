@@ -32,13 +32,15 @@ DEFAULTS: dict[str, Any] = {
             "COMPONENTS_DIR": "_components",
         }
     ],
+    "COMPONENT_TEMPLATE_LOADER": "next.components.CachedComponentTemplateLoader",
     "STATIC_BACKENDS": [{"BACKEND": "next.static.StaticFilesBackend", "OPTIONS": {}}],
+    "STATIC_DISCOVERY_CACHE": True,
     "FORM_ACTION_BACKENDS": [
         {"BACKEND": "next.forms.RegistryFormActionBackend", "OPTIONS": {}}
     ],
     "PARTIAL_BACKENDS": [
         {
-            "BACKEND": "next.partial.PartialProtocolBackend",
+            "BACKEND": "next.partial.JsonPartialProtocolBackend",
             "OPTIONS": {
                 "VERSION": "manifest",
                 "PUSH_WIZARD_STEPS": False,

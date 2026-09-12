@@ -8,10 +8,10 @@ application-wide singleton. `context` is a convenience alias for
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import sys
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast, overload
@@ -23,8 +23,13 @@ from django.urls import URLPattern, path
 
 from next.conf import fail_loudly, next_framework_settings
 from next.deps import DependencyResolver, resolver
-from next.ports import partial_shaper_slot
-from next.utils import defining_file, template_edits_watched
+from next.ports import partial_shaper_slot, static_assets_slot
+from next.utils import (
+    defining_file,
+    stat_mtime_ns,
+    store_capped,
+    template_edits_watched,
+)
 
 from .loaders import (
     LayoutTemplateLoader,
@@ -54,7 +59,14 @@ logger = logging.getLogger(__name__)
 
 
 # Mtimes of every source behind one composition, keyed by its page path.
-type _SourceMtimes = dict[Path, dict[Path, float]]
+type _SourceMtimes = dict[Path, dict[Path, int]]
+
+# The bound the three per-page template layers share, so the composed source, the
+# compiled form of it and the layout skeleton of one page fall out of use together.
+# One number rather than three, because the hot page set of a project is one number.
+# It catches a router naming page paths without end rather than working as an
+# eviction policy, so the stalest insert goes and a warm read reorders nothing.
+_TEMPLATE_REGISTRY_MAX_SIZE = 2048
 
 
 class _RoutedPageView(Protocol):
@@ -96,10 +108,10 @@ class Page:
         attribute. The module-level `build_registered_loaders()` helper
         caches them and invalidates on `settings_reloaded`.
         """
-        self._template_registry: dict[Path, str] = {}
-        self._compiled_registry: dict[Path, Template] = {}
+        self._template_registry: OrderedDict[Path, str] = OrderedDict()
+        self._compiled_registry: OrderedDict[Path, Template] = OrderedDict()
         self._template_source_mtimes: _SourceMtimes = {}
-        self._skeleton_registry: dict[Path, str] = {}
+        self._skeleton_registry: OrderedDict[Path, str] = OrderedDict()
         self._skeleton_source_mtimes: _SourceMtimes = {}
         self._context_manager = PageContextRegistry(None)
         self._layout_loader = LayoutTemplateLoader()
@@ -114,7 +126,12 @@ class Page:
         The compiled-template entry and the memoised path facts go with it,
         so every layer keyed off the page path invalidates together.
         """
-        self._template_registry[file_path] = template_str
+        store_capped(
+            self._template_registry,
+            file_path,
+            template_str,
+            _TEMPLATE_REGISTRY_MAX_SIZE,
+        )
         self._compiled_registry.pop(file_path, None)
         forget_page_path_info(file_path)
         template_loaded.send(sender=Page, file_path=file_path)
@@ -329,18 +346,15 @@ class Page:
         the JS context that `build_render_context` left under the
         `_next_js_context` key, discovers co-located assets for the
         page, renders the Django template, and replaces placeholders
-        through `default_manager.inject`. The active `request` reaches
+        through the static assets port. The active `request` reaches
         the static backend so request-aware subclasses can rewrite
         URLs. Both the rendered HTML and the collector are returned so
         callers can reuse the collector for telemetry without a second
         rendering pass. Suitable for the canonical page render path
         and for partial paths such as form-error rerenders.
         """
-        # next.static imports next.pages.manager, so the static manager import
-        # is deferred here to break the next.pages <-> next.static cycle.
-        from next.static import default_manager  # noqa: PLC0415
-
-        collector = default_manager.create_collector()
+        assets = static_assets_slot.get()
+        collector = assets.create_collector()
         js_context: dict[str, object] = context_data.pop("_next_js_context", {})  # type: ignore[assignment]
         js_serializers: dict[str, JsContextSerializer] = context_data.pop(
             "_next_js_context_serializers", {}
@@ -349,17 +363,12 @@ class Page:
             collector.add_js_context(
                 js_key, js_value, serializer=js_serializers.get(js_key)
             )
-        default_manager.discover_page_assets(file_path, collector)
+        assets.discover_page_assets(file_path, collector)
         context_data["_static_collector"] = collector
 
         compiled = template if isinstance(template, Template) else Template(template)
         html = compiled.render(DjangoTemplateContext(context_data))
-        result = cast(
-            "str",
-            default_manager.inject(
-                html, collector, page_path=file_path, request=request
-            ),
-        )
+        result = assets.inject(html, collector, page_path=file_path, request=request)
         return result, collector
 
     def _render_template_str(
@@ -375,7 +384,7 @@ class Page:
         result, collector = self.render_with_static_assets(
             file_path, template, context_data, request=request
         )
-        if page_rendered.receivers:
+        if page_rendered.receivers and page_rendered.has_listeners(Page):
             duration_ms = (time.perf_counter() - start) * 1000
             page_rendered.send(
                 sender=Page,
@@ -411,7 +420,12 @@ class Page:
             file_path, self._skeleton_source_mtimes
         ):
             skeleton = self._layout_loader.compose_skeleton(file_path)
-            self._skeleton_registry[file_path] = skeleton
+            store_capped(
+                self._skeleton_registry,
+                file_path,
+                skeleton,
+                _TEMPLATE_REGISTRY_MAX_SIZE,
+            )
             self._skeleton_source_mtimes.pop(file_path, None)
             self._record_template_source_mtimes(file_path, self._skeleton_source_mtimes)
             # A dynamic page registers no template, so the facts drop here.
@@ -425,8 +439,11 @@ class Page:
         invalidated by source-mtime staleness. The compiled `Template`
         layer keys off the same registry, so both caches go stale
         together and a warm hit performs no file reads and no parsing.
+        The source is held in a local rather than read back out, because
+        the bound lets a concurrent write evict it between the two reads.
         """
-        if file_path not in self._template_registry or self._is_template_stale(
+        composed = self._template_registry.get(file_path)
+        if composed is None or self._is_template_stale(
             file_path, self._template_source_mtimes
         ):
             self._template_registry.pop(file_path, None)
@@ -440,11 +457,14 @@ class Page:
         if compiled is None:
             # The origin makes compile errors name the page path.
             compiled = Template(
-                self._template_registry[file_path],
-                origin=Origin(str(file_path)),
-                name=str(file_path),
+                composed, origin=Origin(str(file_path)), name=str(file_path)
             )
-            self._compiled_registry[file_path] = compiled
+            store_capped(
+                self._compiled_registry,
+                file_path,
+                compiled,
+                _TEMPLATE_REGISTRY_MAX_SIZE,
+            )
         return compiled
 
     def render(
@@ -619,32 +639,28 @@ class Page:
         paths = self._get_template_source_paths(file_path)
         if not paths:
             return
-        mtimes: dict[Path, float] = {}
+        mtimes: dict[Path, int] = {}
         for p in paths:
-            with contextlib.suppress(OSError):
-                mtimes[p] = p.stat().st_mtime
+            mtime = stat_mtime_ns(p)
+            if mtime is not None:
+                mtimes[p] = mtime
         if mtimes:
             store[file_path] = mtimes
 
     def _is_template_stale(self, file_path: Path, store: _SourceMtimes) -> bool:
         """Return whether any source tracked in `store` changed on disk.
 
-        A source that no longer stats reads as changed, and a process
-        watching no edit answers no without a single stat.
+        Nanoseconds compared for inequality, so that two writes inside one
+        clock tick and an mtime moved backwards by a checkout both read as
+        changed. A source that no longer stats reads as changed, and a
+        process watching no edit answers no without a single stat.
         """
         if not template_edits_watched():
             return False
         stored = store.get(file_path)
         if not stored:
             return False
-        for p, old_mtime in stored.items():
-            try:
-                current = p.stat().st_mtime
-            except OSError:
-                return True
-            if current > old_mtime:
-                return True
-        return False
+        return any(stat_mtime_ns(p) != old_mtime for p, old_mtime in stored.items())
 
     def _create_regular_page_pattern(
         self,

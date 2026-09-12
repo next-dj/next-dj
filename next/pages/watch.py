@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from next.backends import backend_entries
 from next.conf.signals import settings_reloaded
+from next.ports import router_access_slot
 from next.utils import (
     forget_resolved_trees,
     page_roots_shape_error,
@@ -94,15 +95,12 @@ settings_reloaded.connect(forget_watch_state)
 
 def _build_page_backends_for_watch() -> tuple[list[RouterBackend], bool]:
     """Build one router per `PAGE_BACKENDS` entry, telling whether all were built."""
-    # next.urls imports next.pages, so the router import is deferred here to
-    # break the next.pages <-> next.urls cycle.
-    from next.urls import RouterFactory  # noqa: PLC0415
-
+    routers = router_access_slot.get()
     backends: list[RouterBackend] = []
     complete = True
     for position, config in enumerate(backend_entries("PAGE_BACKENDS"), start=1):
         try:
-            backend = RouterFactory.create_backend(config)
+            backend = routers.create_backend(config)
         except Exception:
             complete = False
             # Keyed by position, because entries naming no BACKEND share a key.

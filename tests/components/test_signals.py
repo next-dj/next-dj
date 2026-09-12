@@ -6,7 +6,6 @@ import pytest
 from django.dispatch import Signal
 
 from next.components import ComponentInfo, render_component
-from next.components.backends import DummyBackend
 from next.components.manager import ComponentsManager
 from next.components.registry import ComponentRegistry
 from next.components.signals import (
@@ -16,6 +15,7 @@ from next.components.signals import (
     components_registered,
 )
 from next.testing import SignalRecorder
+from tests.support import DUMMY_COMPONENTS_BACKEND, DummyComponentsBackend
 
 
 @pytest.mark.parametrize(
@@ -178,8 +178,8 @@ class TestComponentBackendLoadedSignal:
         """`ComponentsManager.reload` fires once per built backend."""
         manager = ComponentsManager()
         configs = [
-            {"BACKEND": "next.components.DummyBackend", "COMPONENTS_DIR": "a"},
-            {"BACKEND": "next.components.DummyBackend", "COMPONENTS_DIR": "b"},
+            {"BACKEND": DUMMY_COMPONENTS_BACKEND, "COMPONENTS_DIR": "a"},
+            {"BACKEND": DUMMY_COMPONENTS_BACKEND, "COMPONENTS_DIR": "b"},
         ]
 
         with patch("next.backends.next_framework_settings") as fake_settings:
@@ -198,13 +198,11 @@ class TestComponentBackendLoadedSignal:
         """The class is the sender, so receivers can filter on it."""
         manager = ComponentsManager()
         with patch("next.backends.next_framework_settings") as fake_settings:
-            fake_settings.COMPONENT_BACKENDS = [
-                {"BACKEND": "next.components.DummyBackend"}
-            ]
+            fake_settings.COMPONENT_BACKENDS = [{"BACKEND": DUMMY_COMPONENTS_BACKEND}]
             manager.reload()
 
         senders = {ev.sender for ev in capture_component_backend_loaded}
-        assert senders == {DummyBackend}
+        assert senders == {DummyComponentsBackend}
 
     def test_instance_carries_the_loaded_backend(
         self, capture_component_backend_loaded: SignalRecorder
@@ -212,9 +210,7 @@ class TestComponentBackendLoadedSignal:
         """``instance`` is the backend the manager kept, under its new name."""
         manager = ComponentsManager()
         with patch("next.backends.next_framework_settings") as fake_settings:
-            fake_settings.COMPONENT_BACKENDS = [
-                {"BACKEND": "next.components.DummyBackend"}
-            ]
+            fake_settings.COMPONENT_BACKENDS = [{"BACKEND": DUMMY_COMPONENTS_BACKEND}]
             manager.reload()
 
         event = capture_component_backend_loaded.events[0]
@@ -225,7 +221,7 @@ class TestComponentBackendLoadedSignal:
         self, capture_component_backend_loaded: SignalRecorder
     ) -> None:
         """A receiver mutating ``config`` cannot corrupt the settings entry."""
-        entry = {"BACKEND": "next.components.DummyBackend"}
+        entry = {"BACKEND": DUMMY_COMPONENTS_BACKEND}
         manager = ComponentsManager()
         with patch("next.backends.next_framework_settings") as fake_settings:
             fake_settings.COMPONENT_BACKENDS = [entry]

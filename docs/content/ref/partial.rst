@@ -25,7 +25,7 @@ Stable.
    Use them in page modules, action handlers, and stream sources.
 
 Advanced.
-   ``shape_partial`` and ``PartialProtocolBackend`` are imported from ``next.partial``.
+   ``shape_partial``, ``PartialProtocolBackend``, and ``JsonPartialProtocolBackend`` are imported from ``next.partial``.
    ``resolve_partial_origin`` stays in ``next.partial`` as a thin helper that reads the host page out of the ``X-Next-Origin`` header so a ``done`` step can pass it to ``morph(page=)``.
    ``OriginSource`` lives in ``next.partial.origin``.
    ``ZoneInfo`` and ``zones_of`` live in ``next.partial.registry``.
@@ -156,10 +156,14 @@ See :doc:`/content/topics/partial-rendering/sse` for the WSGI and ASGI contract.
 Protocol backend
 ~~~~~~~~~~~~~~~~~
 
-``PartialProtocolBackend`` owns the patch wire format and is the first entry of ``PARTIAL_BACKENDS``.
-Subclass it and serialise a different envelope shape to support another wire format.
+``PartialProtocolBackend`` is the abstract root of the protocol family and names the patch wire format contract.
+``JsonPartialProtocolBackend`` is the shipped implementation and the default first entry of ``PARTIAL_BACKENDS``.
+Subclass the root and serialise a different envelope shape to support another wire format, or subclass the JSON backend to keep its serialisation and change one part of it.
 
 .. autoclass:: next.partial.PartialProtocolBackend
+   :members:
+
+.. autoclass:: next.partial.JsonPartialProtocolBackend
    :members:
 
 Exceptions

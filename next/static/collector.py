@@ -28,7 +28,7 @@ from .serializers import JsContextSerializer, resolve_serializer
 
 
 if TYPE_CHECKING:
-    from collections.abc import Hashable, Iterator
+    from collections.abc import Hashable, Iterator, Sequence
     from pathlib import Path
 
 
@@ -36,6 +36,10 @@ logger = logging.getLogger(__name__)
 
 
 HEAD_CLOSE: str = "</head>"
+
+# One shared answer for every slot nothing registered, so a lookup that misses
+# neither allocates nor hands out a list a caller could fill.
+_EMPTY: tuple[StaticAsset, ...] = ()
 
 
 def _inline_dedup_key(asset: StaticAsset) -> tuple[str, str, str]:
@@ -84,7 +88,7 @@ class HashContentDedup:
 
     def key(self, asset: StaticAsset) -> Hashable:
         """Hash the asset disk contents when available, otherwise fall back."""
-        if asset.inline is not None:  # pragma: no cover
+        if asset.inline is not None:
             return _inline_dedup_key(asset)
         if asset.source_path is None:
             return ("url", asset.kind, asset.url)
@@ -327,13 +331,14 @@ class StaticCollector:
             bucket.append(asset)
         return True
 
-    def assets_in_slot(self, name: str) -> list[StaticAsset]:
+    def assets_in_slot(self, name: str) -> Sequence[StaticAsset]:
         """Return collected assets for the named slot in insertion order.
 
-        Returns an empty list when nothing was registered for the slot.
-        Callers must not mutate the returned list.
+        Answers an empty sequence when nothing was registered for the slot.
+        The read-only type keeps a caller from rewriting the bucket a later
+        `add` still appends to.
         """
-        return self._buckets.get(name, [])
+        return self._buckets.get(name, _EMPTY)
 
     def _get_js_serializer(self) -> JsContextSerializer:
         if self._js_serializer is None:

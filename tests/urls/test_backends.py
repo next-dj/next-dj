@@ -3,7 +3,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
-from django.core.exceptions import AppRegistryNotReady
+from django.core.exceptions import AppRegistryNotReady, ImproperlyConfigured
 from django.test import RequestFactory, override_settings
 
 from next.pages import page
@@ -12,11 +12,20 @@ from next.urls import FileRouterBackend, PageRoot, RouterBackend, RouterFactory
 from next.urls.backends import _installed_app_directories, _is_framework_app
 from next.utils import forget_resolved_trees
 from tests.support import (
+    RootPagesRouter,
     file_router_backend_from_params,
     file_router_config_entry,
     importable_dir,
     record_path_calls,
 )
+
+
+class NarrowFileRouter(FileRouterBackend):
+    """File router subclass that refuses the keywords the factory passes."""
+
+    def __init__(self, pages_dir: str | None = None) -> None:
+        """Take the pages directory alone, so every other keyword is a TypeError."""
+        super().__init__(pages_dir)
 
 
 class TestRouterBackend:
@@ -1059,7 +1068,6 @@ class TestRouterFactory:
     @pytest.mark.parametrize(
         ("config", "missing_key"),
         [
-            ({}, "BACKEND"),
             ({"BACKEND": "next.urls.FileRouterBackend"}, "PAGES_DIR"),
             (
                 {"BACKEND": "next.urls.FileRouterBackend", "PAGES_DIR": "pages"},
@@ -1084,26 +1092,29 @@ class TestRouterFactory:
             ),
         ],
         ids=[
-            "missing_backend",
             "missing_pages_dir",
             "missing_app_dirs",
             "missing_options",
             "missing_dirs",
         ],
     )
-    def test_create_backend_keyerror_when_required_key_missing(
+    def test_create_backend_names_the_missing_required_key(
         self, config, missing_key
     ) -> None:
         """FileRouterBackend config must list PAGES_DIR, APP_DIRS, OPTIONS, and DIRS."""
-        with pytest.raises(KeyError) as exc:
+        with pytest.raises(ImproperlyConfigured, match=missing_key):
             RouterFactory.create_backend(config)
-        assert exc.value.args[0] == missing_key
+
+    def test_create_backend_without_a_backend_key(self) -> None:
+        """An entry naming no backend is a misconfiguration like any other."""
+        with pytest.raises(ImproperlyConfigured, match="BACKEND"):
+            RouterFactory.create_backend({})
 
     def test_create_backend_unsupported(self) -> None:
-        """Unknown BACKEND string raises ValueError."""
+        """An unknown BACKEND string is reported as a misconfigured entry."""
         config = {"BACKEND": "unsupported.backend"}
 
-        with pytest.raises(ValueError, match="Unsupported backend"):
+        with pytest.raises(ImproperlyConfigured, match="could not be imported"):
             RouterFactory.create_backend(config)
 
     def test_register_backend_typeerror_when_not_router_subclass(self) -> None:
@@ -1116,10 +1127,31 @@ class TestRouterFactory:
             RouterFactory.register_backend("plain.not.Router", Plain)
         assert not RouterFactory.is_registered("plain.not.Router")
 
-    def test_create_backend_typeerror_when_import_is_not_router_subclass(self) -> None:
-        """Importable BACKEND path that is not a RouterBackend raises TypeError."""
-        with pytest.raises(TypeError, match="RouterBackend"):
+    def test_create_backend_when_import_is_not_router_subclass(self) -> None:
+        """An importable BACKEND path outside the family is a misconfiguration."""
+        with pytest.raises(ImproperlyConfigured, match="RouterBackend"):
             RouterFactory.create_backend({"BACKEND": "unittest.mock.MagicMock"})
+
+    def test_create_backend_when_the_constructor_takes_arguments(self) -> None:
+        """A router the factory cannot call is an entry to skip, not a traceback."""
+        RouterFactory.register_backend("needs.args", RootPagesRouter)
+
+        with pytest.raises(ImproperlyConfigured, match="does not take the arguments"):
+            RouterFactory.create_backend({"BACKEND": "needs.args"})
+
+    def test_create_backend_when_a_file_router_refuses_the_keywords(self) -> None:
+        """A file router subclass narrowing the signature answers the same way."""
+        RouterFactory.register_backend("narrow.file.router", NarrowFileRouter)
+        config = {
+            "BACKEND": "narrow.file.router",
+            "PAGES_DIR": "pages",
+            "APP_DIRS": True,
+            "DIRS": [],
+            "OPTIONS": {},
+        }
+
+        with pytest.raises(ImproperlyConfigured, match="does not take the arguments"):
+            RouterFactory.create_backend(config)
 
     def test_create_backend_non_file_router_backend(self, custom_backend_class) -> None:
         """Custom registered backend is instantiated without FileRouterBackend fields."""
@@ -1146,10 +1178,10 @@ class TestRouterFactory:
             assert FileRouterBackend._resolve_components_folder_name() == "custom_comp"
 
     def test_resolve_components_folder_name_raises_when_unavailable(self) -> None:
-        """Missing COMPONENTS_DIR and no valid component backend entry raises KeyError."""
+        """No usable component backend entry leaves the skipped folder unnamed."""
         with patch("next.urls.backends.next_framework_settings") as nfs:
             nfs.COMPONENT_BACKENDS = []
-            with pytest.raises(KeyError, match="COMPONENTS_DIR"):
+            with pytest.raises(ImproperlyConfigured, match="COMPONENTS_DIR"):
                 FileRouterBackend._resolve_components_folder_name()
 
     def test_resolve_components_folder_name_raises_when_first_entry_invalid(
@@ -1158,5 +1190,5 @@ class TestRouterFactory:
         """First component backend dict must contain COMPONENTS_DIR."""
         with patch("next.urls.backends.next_framework_settings") as nfs:
             nfs.COMPONENT_BACKENDS = [{}]
-            with pytest.raises(KeyError, match="COMPONENTS_DIR"):
+            with pytest.raises(ImproperlyConfigured, match="COMPONENTS_DIR"):
                 FileRouterBackend._resolve_components_folder_name()

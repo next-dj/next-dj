@@ -9,8 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from next.backends import backend_entries
-from next.components import component_extra_roots_from_config
+from next.components import components_manager
 from next.pages.watch import get_pages_directories_for_watch
 
 
@@ -19,11 +18,11 @@ if TYPE_CHECKING:
 
 
 def get_framework_filesystem_roots_for_linking() -> list[Path]:
-    """Return sorted unique roots from page trees and component `DIRS`.
+    """Return sorted unique roots from page trees and component backends.
 
     The page trees arrive resolved, so only the component roots are normalised.
     """
     roots: set[Path] = set(get_pages_directories_for_watch())
-    for config in backend_entries("COMPONENT_BACKENDS"):
-        roots.update(p.resolve() for p in component_extra_roots_from_config(config))
+    for backend in components_manager.backends:
+        roots.update(root.resolve() for root in backend.watch_roots())
     return sorted(roots)

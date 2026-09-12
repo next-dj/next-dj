@@ -97,7 +97,7 @@ def _emit_form_access_denied(
     sender: type,
 ) -> None:
     """Send `form_access_denied` when any receiver is connected."""
-    if form_access_denied.receivers:
+    if form_access_denied.receivers and form_access_denied.has_listeners(sender):
         form_access_denied.send(
             sender=sender,
             action_name=action_name,

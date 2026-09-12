@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
 
 if TYPE_CHECKING:
@@ -11,11 +11,42 @@ if TYPE_CHECKING:
     from django.forms import BaseForm, BaseFormSet
     from django.http import HttpRequest, HttpResponse
 
+    from next.forms.backends import FormActionBackend
+    from next.forms.dispatch.responses import ActionOutcome
+    from next.static import StaticCollector
+    from next.urls import RouterBackend, RouterManager
 
-_UNBOUND_SHAPER = (
-    "The partial shaper is unbound, which means the next app never finished "
-    "starting. NextFrameworkConfig.ready() binds it."
-)
+
+def _unbound(subject: str) -> str:
+    """Spell the failure of a slot read before the app finished starting."""
+    return (
+        f"The {subject} is unbound, which means the next app never finished "
+        "starting. NextFrameworkConfig.ready() binds it."
+    )
+
+
+class PortSlot[T]:
+    """Holds the one implementation of a port composed at app startup.
+
+    The binding is static, so unlike a settings-driven backend manager a
+    slot never rebinds itself once the app is ready.
+    """
+
+    _unbound_message: ClassVar[str]
+
+    def __init__(self) -> None:
+        """Start unbound so a missing composition step fails loudly."""
+        self._impl: T | None = None
+
+    def set(self, impl: T) -> None:
+        """Bind the implementation composed in `AppConfig.ready`."""
+        self._impl = impl
+
+    def get(self) -> T:
+        """Return the bound implementation."""
+        if self._impl is None:
+            raise RuntimeError(self._unbound_message)
+        return self._impl
 
 
 class PartialIntentView(Protocol):
@@ -63,14 +94,14 @@ class PartialShaper(Protocol):
         ...
 
     def shape_response(
-        self, backend: object, request: HttpRequest, outcome: object
+        self, backend: FormActionBackend, request: HttpRequest, outcome: ActionOutcome
     ) -> HttpResponse:
         """Return the envelope for one form action outcome."""
         ...
 
     def shape_validate(
         self,
-        backend: object,
+        backend: FormActionBackend,
         request: HttpRequest,
         form: BaseForm | BaseFormSet,
         intent: PartialIntentView,
@@ -82,34 +113,83 @@ class PartialShaper(Protocol):
         ...
 
 
-class PartialShaperSlot:
-    """Holds the one shaper implementation composed at app startup.
+class RouterAccess(Protocol):
+    """Builds the routers of `next.urls` for an area that cannot import it.
 
-    The binding is static, so unlike a settings-driven backend manager the
-    slot never rebinds itself once the app is ready.
+    `next.urls` routes to pages and so imports `next.pages`, which leaves the
+    watcher and the system checks reaching back the other way. They ask here
+    instead and the composition root supplies the one implementation.
     """
 
-    def __init__(self) -> None:
-        """Start unbound so a missing composition step fails loudly."""
-        self._impl: PartialShaper | None = None
+    def create_backend(self, config: dict[str, Any]) -> RouterBackend:
+        """Return the router one `PAGE_BACKENDS` entry names."""
+        ...
 
-    def set(self, impl: PartialShaper) -> None:
-        """Bind the implementation composed in `AppConfig.ready`."""
-        self._impl = impl
+    def create_manager(self) -> RouterManager:
+        """Return a fresh manager over every configured router."""
+        ...
 
-    def get(self) -> PartialShaper:
-        """Return the bound implementation."""
-        if self._impl is None:
-            raise RuntimeError(_UNBOUND_SHAPER)
-        return self._impl
+
+class StaticAssets(Protocol):
+    """The static-manager surface one page render calls.
+
+    `next.static` reads page trees and page modules and so imports
+    `next.pages`, which leaves the render path reaching back the other way.
+    """
+
+    def create_collector(self) -> StaticCollector:
+        """Return a fresh sink for the assets one render references."""
+        ...
+
+    def discover_page_assets(self, file_path: Path, collector: StaticCollector) -> None:
+        """Collect the assets co-located with one page."""
+        ...
+
+    def inject(
+        self,
+        html: str,
+        collector: StaticCollector,
+        *,
+        page_path: Path,
+        request: HttpRequest | None,
+    ) -> str:
+        """Replace every placeholder token in `html` with rendered tags."""
+        ...
+
+
+class PartialShaperSlot(PortSlot["PartialShaper"]):
+    """Holds the one shaper implementation composed at app startup."""
+
+    _unbound_message: ClassVar[str] = _unbound("partial shaper")
+
+
+class RouterAccessSlot(PortSlot["RouterAccess"]):
+    """Holds the one router builder composed at app startup."""
+
+    _unbound_message: ClassVar[str] = _unbound("router access port")
+
+
+class StaticAssetsSlot(PortSlot["StaticAssets"]):
+    """Holds the one static manager composed at app startup."""
+
+    _unbound_message: ClassVar[str] = _unbound("static assets port")
 
 
 partial_shaper_slot = PartialShaperSlot()
+router_access_slot = RouterAccessSlot()
+static_assets_slot = StaticAssetsSlot()
 
 
 __all__ = [
     "PartialIntentView",
     "PartialShaper",
     "PartialShaperSlot",
+    "PortSlot",
+    "RouterAccess",
+    "RouterAccessSlot",
+    "StaticAssets",
+    "StaticAssetsSlot",
     "partial_shaper_slot",
+    "router_access_slot",
+    "static_assets_slot",
 ]

@@ -9,15 +9,17 @@ Module summary
 ``next.apps`` contains the Django ``AppConfig`` and the helpers that the framework runs at application startup.
 
 ``NextFrameworkConfig.ready()`` first runs ``next.checks.register_all()`` to register the framework system checks.
-It then runs seven startup steps in a fixed order.
+It then runs nine startup steps in a fixed order.
 
 #. ``apply_resolver_setting()``
+#. ``partial_shaper_slot.set(PartialShaperImpl())``
+#. ``router_access_slot.set(RouterAccessImpl())``
+#. ``static_assets_slot.set(default_manager)``
 #. ``autoreload.install()``
 #. ``templates.install()``
 #. ``staticfiles.install()``
 #. ``components.install()``
 #. ``autodiscover_forms()``
-#. ``partial_shaper_slot.set(PartialShaperImpl())``
 
 ``apply_resolver_setting()`` points the dependency-injection singleton at the class named by ``DEPENDENCY_RESOLVER``, see :doc:`settings`.
 It runs first because the two discovery steps import user modules, and a ``component.py`` or a ``forms.py`` that resolves at import time has to see the configured resolver rather than the base one.
@@ -25,8 +27,9 @@ It runs first because the two discovery steps import user modules, and a ``compo
 ``autodiscover_forms()`` imports the ``forms`` submodule of every installed app so shared forms register before the first request arrives.
 It respects the ``FORM_AUTODISCOVER`` setting and is a no-op when that setting is ``False``.
 
-The seventh step binds the partial shaper into the :doc:`next.ports <ports>` slot that ``next.pages`` and ``next.forms`` read on every request.
-Binding it here keeps the page and form subsystems free of an import of ``next.partial``.
+Steps two to four bind the three :doc:`next.ports <ports>` slots, ahead of every step that imports user code so that a module touching a framework path at import time never reads an unbound slot.
+They also run ahead of the discovery steps so a discovery failure leaves no process behind with a slot still empty.
+Binding the static handle stores the lazy object rather than reading through it, so the static manager is still built on first use.
 
 Public API
 ----------

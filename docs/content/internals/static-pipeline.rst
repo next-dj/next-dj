@@ -31,7 +31,7 @@ Module-level URLs are literals the backend is never asked about, so the plan kee
 The page plan is keyed by the page file path.
 The component plan is keyed by the component's ``template_path``, ``module_path``, and ``name``, which is what identifies the component the plan was built for, so a rescan that produces an equal ``ComponentInfo`` reuses the entry and a renamed or moved component gets its own.
 A simple component owns no folder and reaches no plan at all, which keeps the entries the cache holds to the components that read the disk.
-Both caches are bounded and evict the least recently used entry.
+Both caches are bounded and evict the oldest entry once full, because the working set of a project sits far below the bound and a warm render answers from them without writing anything.
 
 Three things invalidate a plan.
 

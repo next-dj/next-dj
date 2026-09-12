@@ -104,12 +104,13 @@ Renderers
 .. autoclass:: next.components.CachedComponentTemplateLoader
    :members:
 
-``ComponentsManager`` wires one ``CachedComponentTemplateLoader`` into its render pipeline, and the loader is fixed rather than configurable.
-It keeps the compiled ``Template`` of each component, so a repeated render pays neither the read nor the parse.
+``ComponentsManager`` wires one loader into its render pipeline, the class named by ``NEXT_FRAMEWORK['COMPONENT_TEMPLATE_LOADER']``.
+The default ``CachedComponentTemplateLoader`` keeps the compiled ``Template`` of each component, so a repeated render pays neither the read nor the parse.
 Under ``DEBUG`` the entry is revalidated against the mtime of the file the body was read from, and an edit reaches the next render.
 With ``DEBUG`` off nothing stats that file, and the compilation stands until eviction drops it.
 The cache is bounded at 2048 compiled templates, the bound the visibility resolver also uses, and a ``TEMPLATES`` change drops it whole, because a compiled ``Template`` carries the engine that built it.
-A component backend reads template bodies through that shared loader rather than substituting its own.
+Naming ``ComponentTemplateLoader`` instead drops the cache and reads and parses each body on every render, for the same HTML at a higher cost.
+A component backend reads template bodies through whichever loader the pipeline holds rather than substituting its own.
 
 Internal infrastructure
 -----------------------
@@ -145,23 +146,6 @@ The same name under a deeper route trail of one tree is the documented override 
 .. autofunction:: next.components.component_extra_roots_from_config
 
 .. autofunction:: next.components.get_component_paths_for_watch
-
-Test doubles
-~~~~~~~~~~~~
-
-``DummyBackend`` and ``BoomBackend`` are minimal ``ComponentsBackend`` implementations kept in this module so that dotted-path resolution in tests works through the standard loader.
-They are **not** intended for production use.
-
-``DummyBackend`` accepts a config dict, stores it on ``self``, and resolves no components.
-Use it to test backend wiring.
-
-.. autoclass:: next.components.DummyBackend
-   :members:
-
-``BoomBackend`` raises ``RuntimeError`` from ``__init__`` so you can assert that a backend bug reaches the caller instead of being logged as a configuration error.
-
-.. autoclass:: next.components.BoomBackend
-   :members:
 
 Signals
 -------

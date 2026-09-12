@@ -14,7 +14,7 @@ from next.partial import PartialProtocolBackend
 from next.partial.manager import asset_version, partial_backend_manager
 
 
-_DEFAULT_BACKEND = "next.partial.PartialProtocolBackend"
+_DEFAULT_BACKEND = "next.partial.JsonPartialProtocolBackend"
 
 
 @contextmanager

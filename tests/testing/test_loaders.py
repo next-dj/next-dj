@@ -3,13 +3,14 @@ from pathlib import Path
 import pytest
 from django.test import override_settings
 
-from next.components import DummyBackend, components_manager
+from next.components import components_manager
 from next.testing import (
     clear_loaded_dirs,
     eager_load_components,
     eager_load_pages,
     loaders,
 )
+from tests.support import DummyComponentsBackend
 
 
 @pytest.fixture(autouse=True)
@@ -89,7 +90,7 @@ class TestEagerLoadPages:
         assert len(loaded) == 1
 
 
-class _RecordingBackend(DummyBackend):
+class _RecordingBackend(DummyComponentsBackend):
     """Backend that answers both eager hooks and notes each call."""
 
     def __init__(self, label: str, calls: list[str]) -> None:
@@ -108,12 +109,12 @@ class _RecordingBackend(DummyBackend):
 class _StubManager:
     """Components manager double exposing only the public backend list."""
 
-    def __init__(self, *backends: DummyBackend) -> None:
+    def __init__(self, *backends: DummyComponentsBackend) -> None:
         self._backends = backends
         self.reads = 0
 
     @property
-    def backends(self) -> tuple[DummyBackend, ...]:
+    def backends(self) -> tuple[DummyComponentsBackend, ...]:
         self.reads += 1
         return self._backends
 
@@ -155,7 +156,7 @@ class TestEagerLoadComponents:
     ) -> None:
         # A backend resolving names on demand owns no modules, so both
         # hooks keep their inherited no-op behaviour.
-        backend = DummyBackend({})
+        backend = DummyComponentsBackend({})
         manager = _StubManager(backend)
         monkeypatch.setattr(loaders, "components_manager", manager)
         eager_load_components()

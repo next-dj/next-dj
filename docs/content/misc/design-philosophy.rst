@@ -149,9 +149,9 @@ Name-based resolution.
    A parameter bound by name has no static checker behind it.
    A rename on either side yields ``None`` rather than an error.
 
-Template parsing changes process wide.
-   The framework reinstalls Django's tag pattern with ``re.DOTALL``, so a ``{% ... %}`` token may span lines in every template the process loads.
-   A template that relies on a newline ending a tag needs adjusting first.
+Block tag parsing changes process wide.
+   The framework widens the ``{% ... %}`` alternative of Django's tag pattern, so a block tag may span lines in every template the process loads.
+   A template that relies on a newline ending a block tag needs adjusting first, while variables and comments keep their stock behaviour.
 
 Two-sided protocol extensions.
    A custom patch verb is registered on the server and defined on the client.

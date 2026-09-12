@@ -6,10 +6,11 @@ and dropped by the lifecycle that rebuilds a composition.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from next.utils import MAX_ANCESTOR_WALK_DEPTH
+from next.utils import MAX_ANCESTOR_WALK_DEPTH, store_capped
 
 
 if TYPE_CHECKING:
@@ -29,7 +30,14 @@ class PagePathInfo:
     ancestors: tuple[Path, ...]
 
 
-_PAGE_PATH_INFO_CACHE: dict[Path, PagePathInfo] = {}
+# Bounded because a router is free to name a page path no earlier read named, and
+# each entry pins an ancestor tuple until the process ends. The bound catches
+# that growth rather than working as an eviction policy, because a project holds
+# far fewer pages than it allows, so the stalest insert is the one to drop and a
+# hit reorders nothing.
+_PAGE_PATH_INFO_CACHE_MAX_SIZE = 2048
+
+_PAGE_PATH_INFO_CACHE: OrderedDict[Path, PagePathInfo] = OrderedDict()
 
 
 def page_path_info(file_path: Path) -> PagePathInfo:
@@ -37,7 +45,9 @@ def page_path_info(file_path: Path) -> PagePathInfo:
     info = _PAGE_PATH_INFO_CACHE.get(file_path)
     if info is None:
         info = _build_page_path_info(file_path)
-        _PAGE_PATH_INFO_CACHE[file_path] = info
+        store_capped(
+            _PAGE_PATH_INFO_CACHE, file_path, info, _PAGE_PATH_INFO_CACHE_MAX_SIZE
+        )
     return info
 
 

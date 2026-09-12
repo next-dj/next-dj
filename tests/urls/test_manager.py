@@ -13,7 +13,7 @@ from django.urls import Resolver404, URLResolver, include, path
 from next.forms import ActionRegistration, RegistryFormActionBackend
 from next.forms.manager import FormActionManager
 from next.pages import page
-from next.testing import override_next_settings
+from next.testing import capture_signals, override_next_settings
 from next.urls import (
     FileRouterBackend,
     RouterBackend,
@@ -29,6 +29,7 @@ from next.urls.manager import (
     _LazyUrlPatterns,
     _on_settings_reloaded,
 )
+from next.urls.signals import router_reloaded
 from tests.support import named_temp_py
 
 
@@ -265,7 +266,7 @@ class TestRouterManager:
         """Backend creation failure leaves routers empty but cache is still set."""
         with patch(
             "next.urls.RouterFactory.create_backend",
-            side_effect=ValueError("Test error"),
+            side_effect=ImproperlyConfigured("Test error"),
         ):
             manager.reload()
             assert len(manager._backends) == 0
@@ -273,18 +274,12 @@ class TestRouterManager:
             assert len(manager._config_cache) == 1
             assert manager._config_cache[0]["BACKEND"] == "next.urls.FileRouterBackend"
 
-    @pytest.mark.parametrize(
-        "exc_type",
-        [ValueError, TypeError, KeyError, ImportError],
-        ids=["value_error", "type_error", "key_error", "import_error"],
-    )
-    def test_reload_swallows_expected_config_errors(
-        self, manager, caplog, exc_type
-    ) -> None:
-        """Each config-error type from backend creation is logged and swallowed."""
+    def test_reload_swallows_a_misconfigured_entry(self, manager, caplog) -> None:
+        """The one type the factory raises for a bad entry is logged and swallowed."""
         with (
             patch(
-                "next.urls.RouterFactory.create_backend", side_effect=exc_type("boom")
+                "next.urls.RouterFactory.create_backend",
+                side_effect=ImproperlyConfigured("boom"),
             ),
             caplog.at_level(logging.ERROR, logger="next.urls.manager"),
         ):
@@ -309,6 +304,23 @@ class TestRouterManager:
         manager.reload()
         manager.reload()
         assert manager.version == before + 2
+
+    def test_a_quiet_reload_keeps_the_url_caches_and_the_signal(self, manager) -> None:
+        """A manager nobody serves from flushes no resolver cache and tells nobody."""
+        with (
+            patch("next.urls.manager.clear_url_caches") as flush,
+            capture_signals(router_reloaded) as recorder,
+        ):
+            manager.reload(notify=False)
+
+        assert flush.call_args_list == []
+        assert list(recorder) == []
+
+    def test_a_quiet_reload_still_rebuilds_the_backends(self, manager) -> None:
+        """Silence costs no work, so the manager is loaded once it returns."""
+        manager.reload(notify=False)
+
+        assert manager._loaded is True
 
     def test_get_next_pages_config_uses_cache(self, manager) -> None:
         """Returns cached list when present."""
@@ -832,10 +844,16 @@ class TestRouterManagerNextPagesConfig:
     def test_non_list_default_page_backends_returns_empty_cached(self) -> None:
         """When ``PAGE_BACKENDS`` is not a list, config is empty and cached."""
         mock_nf = SimpleNamespace(PAGE_BACKENDS="not-a-list")
-        with patch("next.urls.manager.next_framework_settings", mock_nf):
+        with patch("next.backends.next_framework_settings", mock_nf):
             mgr = RouterManager()
             assert mgr._get_next_pages_config() == []
             assert mgr._get_next_pages_config() == []
+
+    def test_an_entry_that_is_not_a_dict_is_no_entry(self) -> None:
+        """A malformed entry never reaches the factory that would choke on it."""
+        mock_nf = SimpleNamespace(PAGE_BACKENDS=["not-a-dict", {"BACKEND": "x"}])
+        with patch("next.backends.next_framework_settings", mock_nf):
+            assert RouterManager()._get_next_pages_config() == [{"BACKEND": "x"}]
 
 
 class TestLazyResolverSlot:

@@ -7,9 +7,10 @@ import pytest
 from django.core.exceptions import PermissionDenied
 from django.test import override_settings
 
-from next.pages import Page
+from next.pages import Page, manager as manager_mod
 from next.pages.loaders import _load_python_module_memo
 from next.testing import envelope_of
+from next.utils import stat_mtime_ns
 from tests.support import (
     build_nested_page,
     build_page_request,
@@ -85,7 +86,26 @@ class TestTemplateSourceSnapshot:
         """A tracked source that no longer stats counts as a change."""
         page_file = tmp_path / "page.py"
         missing_path = tmp_path / "removed.djx"
-        page_instance._template_source_mtimes[page_file] = {missing_path: 1000.0}
+        page_instance._template_source_mtimes[page_file] = {missing_path: 1000}
+        assert (
+            page_instance._is_template_stale(
+                page_file, page_instance._template_source_mtimes
+            )
+            is True
+        )
+
+    def test_is_template_stale_sees_an_mtime_moved_backwards(
+        self, page_instance, tmp_path, watched_template_edits
+    ) -> None:
+        """A source restored to an older mtime by a checkout counts as a change."""
+        page_file = tmp_path / "page.py"
+        layout_file = tmp_path / "layout.djx"
+        layout_file.write_text(
+            "<html>{% block template %}{% endblock template %}</html>"
+        )
+        page_instance._template_source_mtimes[page_file] = {
+            layout_file: stat_mtime_ns(layout_file) + 5_000_000_000
+        }
         assert (
             page_instance._is_template_stale(
                 page_file, page_instance._template_source_mtimes
@@ -608,6 +628,23 @@ class TestTemplateStalenessGate:
 
         assert page_file in page_instance._template_source_mtimes
 
+    def test_a_layout_restored_to_an_older_mtime_recomposes(
+        self, page_instance, tmp_path, watched_template_edits
+    ) -> None:
+        """A checkout moving a layout mtime backwards drops the composed caches."""
+        page_file = build_nested_page(tmp_path)
+        layout_file = tmp_path / "layout.djx"
+        page_instance.render(page_file, title="One")
+
+        layout_file.write_text(
+            "<html data-old>{% block template %}{% endblock template %}</html>"
+        )
+        older = time.time() - 60
+        os.utime(layout_file, (older, older))
+        rendered = page_instance.render(page_file, title="One")
+
+        assert "data-old" in rendered
+
     def test_a_warm_get_stats_no_source_in_production(
         self, page_instance, tmp_path, monkeypatch
     ) -> None:
@@ -685,3 +722,102 @@ class TestTemplateStalenessGate:
         page_instance.clear_template_caches()
 
         assert b"second" in view(build_page_request()).content
+
+
+class TestTemplateRegistryBound:
+    """The per-page template layers drop their oldest insert once full."""
+
+    @staticmethod
+    def _static_page(directory: Path, name: str, body: str = "<p>body</p>") -> Path:
+        page_dir = directory / name
+        page_dir.mkdir(parents=True)
+        page_file = page_dir / "page.py"
+        page_file.write_text("x = 1")
+        (page_dir / "template.djx").write_text(body)
+        return page_file
+
+    def test_a_full_registry_evicts_the_oldest_insert(
+        self, page_instance, tmp_path, monkeypatch
+    ) -> None:
+        """Both composition layers keep only the page rendered last."""
+        monkeypatch.setattr(manager_mod, "_TEMPLATE_REGISTRY_MAX_SIZE", 1)
+        first = self._static_page(tmp_path, "first")
+        second = self._static_page(tmp_path, "second")
+
+        page_instance.render(first)
+        page_instance.render(second)
+
+        assert list(page_instance._template_registry) == [second]
+        assert list(page_instance._compiled_registry) == [second]
+
+    def test_a_warm_render_leaves_a_full_registry_in_insert_order(
+        self, page_instance, tmp_path, monkeypatch
+    ) -> None:
+        """A warm render reorders nothing, so the page written first goes first."""
+        monkeypatch.setattr(manager_mod, "_TEMPLATE_REGISTRY_MAX_SIZE", 2)
+        pages = [self._static_page(tmp_path, name) for name in ("a", "b", "c")]
+
+        page_instance.render(pages[0])
+        page_instance.render(pages[1])
+        page_instance.render(pages[0])
+        page_instance.render(pages[2])
+
+        assert list(page_instance._template_registry) == [pages[1], pages[2]]
+        assert list(page_instance._compiled_registry) == [pages[1], pages[2]]
+
+    def test_a_full_skeleton_registry_evicts_the_oldest_insert(
+        self, page_instance, tmp_path, monkeypatch
+    ) -> None:
+        """The layout skeletons are bounded the same way the compositions are."""
+        monkeypatch.setattr(manager_mod, "_TEMPLATE_REGISTRY_MAX_SIZE", 1)
+        first = _build_dynamic_page(tmp_path / "first")
+        second = _build_dynamic_page(tmp_path / "second")
+
+        page_instance._layout_skeleton_for(first)
+        page_instance._layout_skeleton_for(second)
+
+        assert list(page_instance._skeleton_registry) == [second]
+
+    def test_a_warm_skeleton_leaves_a_full_registry_in_insert_order(
+        self, page_instance, tmp_path, monkeypatch
+    ) -> None:
+        """Reading the older skeleton again reorders nothing under the bound."""
+        monkeypatch.setattr(manager_mod, "_TEMPLATE_REGISTRY_MAX_SIZE", 2)
+        pages = [_build_dynamic_page(tmp_path / name) for name in ("a", "b", "c")]
+
+        page_instance._layout_skeleton_for(pages[0])
+        page_instance._layout_skeleton_for(pages[1])
+        page_instance._layout_skeleton_for(pages[0])
+        page_instance._layout_skeleton_for(pages[2])
+
+        assert list(page_instance._skeleton_registry) == [pages[1], pages[2]]
+
+    def test_a_source_evicted_alone_leaves_no_stale_compiled_form(
+        self, page_instance, tmp_path
+    ) -> None:
+        """A rebuilt source drops the compiled form the earlier one produced."""
+        page_file = self._static_page(tmp_path, "page", body="<h1>old</h1>")
+        page_instance.render(page_file)
+        stale = page_instance._compiled_registry[page_file]
+
+        page_instance._template_registry.pop(page_file)
+        (page_file.parent / "template.djx").write_text("<h1>new</h1>")
+        result = page_instance.render(page_file)
+
+        assert "<h1>new</h1>" in result
+        assert page_instance._compiled_registry[page_file] is not stale
+
+    def test_a_compiled_form_evicted_alone_recompiles_from_the_held_source(
+        self, page_instance, tmp_path, monkeypatch
+    ) -> None:
+        """The surviving source answers the recompile without a disk read."""
+        page_file = self._static_page(tmp_path, "page")
+        page_instance.render(page_file)
+        source = page_instance._template_registry[page_file]
+
+        page_instance._compiled_registry.pop(page_file)
+        reads = record_path_calls(monkeypatch, "read_text", path_under(tmp_path))
+        template = page_instance.composed_template_for(page_file)
+
+        assert reads == []
+        assert template.source == source

@@ -128,12 +128,13 @@ One missed component inside an otherwise healthy page degrades to a comment in d
 Multiline tag bodies
 ~~~~~~~~~~~~~~~~~~~~
 
-The framework reinstalls Django's template tag pattern with the ``re.DOTALL`` flag so a single ``{% ... %}`` token may span several lines.
+The framework rebinds Django's template tag pattern during ``AppConfig.ready`` so that a dot matches a newline inside the ``{% ... %}`` alternative, and a single block tag may therefore span several lines.
 That allows readable block components and slots when the inner markup is long.
+The widening is scoped to that one alternative, so ``{{ ... }}`` and ``{# ... #}`` lex exactly as Django lexes them and a newline still ends a variable or a comment.
 
 .. warning::
 
-   This changes template parsing for **every** template the process loads, not only DJX files.
+   The wider block-tag rule reaches **every** template the process loads, not only DJX files, because the Django lexer reads the pattern from a module global that the rebind replaces.
    If you rely on Django's stock behaviour where a newline inside ``{% ... %}`` ends the tag, adjust those templates before adopting next.dj.
 
 Static pipeline

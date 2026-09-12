@@ -16,11 +16,11 @@ import threading
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, overload, override
 
+from django.core.exceptions import ImproperlyConfigured
 from django.urls import URLPattern, URLResolver, clear_url_caches
 from django.urls.resolvers import RoutePattern
 
-from next.backends import resolve_setting_class
-from next.conf import next_framework_settings
+from next.backends import backend_entries, resolve_setting_class
 from next.conf.signals import settings_reloaded
 from next.forms.manager import form_action_manager
 
@@ -99,15 +99,21 @@ class RouterManager:
         for backend in self._backends:
             yield from backend.generate_urls()
 
-    def reload(self) -> None:
+    def reload(self, *, notify: bool = True) -> None:
         """Rebuild backends from `PAGE_BACKENDS` and notify listeners.
+
+        A misconfigured entry costs its own backend and nothing else, as it
+        does for every other backend family. Anything else a router raises
+        while it is built is a bug in that router and reaches the caller.
 
         The Django URL resolver caches resolved patterns. The cache is
         cleared here so the next request sees the freshly built backend
         list. The `router_reloaded` signal fires after the rebuild and
         the cache flush so receivers observe a consistent state. The lock
         is reentrant, so a receiver reloading again from this thread is
-        answered rather than deadlocked.
+        answered rather than deadlocked. Pass `notify=False` for a manager
+        nobody serves from, so a throwaway build leaves the process-wide
+        URL caches and the memos hanging off the signal alone.
         """
         with self._lock:
             self.version += 1
@@ -122,7 +128,7 @@ class RouterManager:
                 for config in self._get_next_pages_config():
                     try:
                         built.append(RouterFactory.create_backend(config))
-                    except (ValueError, TypeError, KeyError, ImportError):
+                    except ImproperlyConfigured:
                         logger.exception("error creating router from config %s", config)
             finally:
                 self._building_thread = None
@@ -131,18 +137,14 @@ class RouterManager:
             self._backends = built
             # Set before the signal, so a receiver reading `backends` stays out.
             self._loaded = True
-            clear_url_caches()
-            router_reloaded.send(sender=type(self))
+            if notify:
+                clear_url_caches()
+                router_reloaded.send(sender=type(self))
 
     def _get_next_pages_config(self) -> list[dict[str, Any]]:
-        """Router list from `settings.NEXT_FRAMEWORK` (merged defaults, cached)."""
-        if self._config_cache is not None:
-            return self._config_cache
-        routers = next_framework_settings.PAGE_BACKENDS
-        if not isinstance(routers, list):
-            self._config_cache = []
-            return self._config_cache
-        self._config_cache = routers
+        """Router entries from `PAGE_BACKENDS`, read once per load."""
+        if self._config_cache is None:
+            self._config_cache = backend_entries("PAGE_BACKENDS")
         return self._config_cache
 
 

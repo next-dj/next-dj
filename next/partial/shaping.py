@@ -510,10 +510,11 @@ def _emit_field_validated(
     form: "BaseForm | BaseFormSet",
 ) -> None:
     """Announce a validated pass when the signal has receivers, always behind guard."""
-    if not field_validated.receivers:
+    sender = type(partial_backend_manager.get())
+    if not field_validated.receivers or not field_validated.has_listeners(sender):
         return
     field_validated.send(
-        sender=type(partial_backend_manager.get()),
+        sender=sender,
         action_name=action.action_name,
         uid=action.uid,
         request=request,

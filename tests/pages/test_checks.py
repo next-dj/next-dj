@@ -3,10 +3,10 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 from django.test import override_settings
+from django.urls.converters import get_converters
 
 import next.pages.loaders as loaders_module
 from next.checks import (
-    _has_template_or_djx,
     check_context_functions,
     check_layout_templates,
     check_page_functions,
@@ -19,6 +19,7 @@ from next.checks import (
 from next.conf import next_framework_settings as s
 from next.deps import RegisteredParameterProvider
 from next.pages.checks import (
+    _has_template_or_djx,
     check_context_processor_signature,
     check_context_reads_foreign_zone,
     check_context_registration_files,
@@ -1685,3 +1686,83 @@ class TestUnroutedWorkingDirectoryPages:
             patch_checks_router_manager_with_routers(routers=[RootPagesRouter([])]),
         ):
             assert check_unrouted_working_directory_pages(None) == []
+
+
+class TestBracketDirectoryNamesDjangoRefuses:
+    """A bracket directory Django cannot compile is a report, not a traceback."""
+
+    def _messages(self, tmp_path: Path, name: str) -> list:
+        directory = tmp_path / name
+        directory.mkdir(parents=True)
+        (directory / "page.py").write_text('template = "ok"\n')
+        router = FileRouterBackend(app_dirs=False, extra_root_paths=[tmp_path])
+        reset_check_caches()
+        with patch_checks_router_manager_with_routers(routers=[router]):
+            return check_pages_structure(None)
+
+    @pytest.mark.parametrize(
+        ("name", "fragment"),
+        [
+            ("[integer:pk]", "registered under the name 'integer'"),
+            ("[user.id]", "Parameter name 'user.id'"),
+            ("[int:user.id]", "Parameter name 'user.id'"),
+            ("[2fa]", "Parameter name '2fa'"),
+            ("[:pk]", "Use [param] or [type:param] format."),
+            ("[int:]", "Use [param] or [type:param] format."),
+        ],
+        ids=[
+            "unregistered_converter",
+            "dotted_name",
+            "dotted_name_with_converter",
+            "name_opening_with_a_digit",
+            "empty_converter",
+            "empty_name",
+        ],
+    )
+    def test_a_parameter_directory_django_refuses_reports_e008(
+        self, tmp_path, name, fragment
+    ) -> None:
+        """Each refusal carries the reason that names the offending half."""
+        messages = self._messages(tmp_path, name)
+        assert [m.id for m in messages] == ["next.E008"]
+        assert fragment in messages[0].msg
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "[id]",
+            "[int:pk]",
+            "[slug:post-slug]",
+            "[uuid:pk]",
+            "[[args]]",
+            "[[doc-path]]",
+        ],
+    )
+    def test_a_directory_django_compiles_is_silent(self, tmp_path, name) -> None:
+        """Every form the file router documents still passes the check."""
+        assert self._messages(tmp_path, name) == []
+
+    @pytest.mark.parametrize(
+        ("name", "fragment"),
+        [
+            ("[[doc path]]", "Parameter name 'doc path'"),
+            ("[[int:rest]]", "Parameter name 'int:rest'"),
+            ("[[ ]]", "Use [[args]] format."),
+        ],
+        ids=["whitespace_in_the_name", "converter_in_a_wildcard", "blank_name"],
+    )
+    def test_a_wildcard_directory_django_refuses_reports_e009(
+        self, tmp_path, name, fragment
+    ) -> None:
+        """The wildcard form captures its name whole, so no trimming saves it."""
+        messages = self._messages(tmp_path, name)
+        assert [m.id for m in messages] == ["next.E009"]
+        assert fragment in messages[0].msg
+
+    def test_the_converter_registry_is_read_per_check(self, tmp_path) -> None:
+        """A converter a project registers of its own counts as one Django knows."""
+        with patch(
+            "next.pages.checks.get_converters",
+            return_value={**get_converters(), "four_digit_year": object()},
+        ):
+            assert self._messages(tmp_path, "[four_digit_year:year]") == []

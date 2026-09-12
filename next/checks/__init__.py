@@ -12,8 +12,6 @@ import importlib
 from typing import TYPE_CHECKING
 
 
-__all__ = ["NEXT", "register_all", "reset_check_caches"]
-
 NEXT: str = "next"
 """Shared system-check tag that selects every `next-dj` check."""
 
@@ -32,7 +30,6 @@ if TYPE_CHECKING:
     )
     from next.forms.checks import check_form_action_collisions
     from next.pages.checks import (
-        _has_template_or_djx,
         check_context_functions,
         check_context_processor_signature,
         check_context_registration_files,
@@ -45,7 +42,6 @@ if TYPE_CHECKING:
         check_template_loaders,
         check_unrouted_working_directory_pages,
     )
-    from next.pages.loaders import _load_python_module
     from next.static.checks import (
         check_asset_kinds_are_loadable,
         check_inline_asset_bodies_are_loadable,
@@ -73,7 +69,6 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
     ),
     "next.forms.checks": ("check_form_action_collisions",),
     "next.pages.checks": (
-        "_has_template_or_djx",
         "check_context_functions",
         "check_context_processor_signature",
         "check_context_registration_files",
@@ -86,7 +81,6 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_template_loaders",
         "check_unrouted_working_directory_pages",
     ),
-    "next.pages.loaders": ("_load_python_module",),
     "next.static.checks": (
         "check_asset_kinds_are_loadable",
         "check_inline_asset_bodies_are_loadable",
@@ -104,6 +98,38 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
 _LAZY_ATTRIBUTES: dict[str, str] = {
     name: module for module, names in _LAZY_SOURCES_BY_MODULE.items() for name in names
 }
+
+__all__ = [
+    "NEXT",
+    "check_asset_kinds_are_loadable",
+    "check_component_context_registration_files",
+    "check_component_py_no_pages_context",
+    "check_context_functions",
+    "check_context_processor_signature",
+    "check_context_registration_files",
+    "check_cross_root_component_name_conflicts",
+    "check_duplicate_component_names",
+    "check_form_action_collisions",
+    "check_inline_asset_bodies_are_loadable",
+    "check_js_context_serializer",
+    "check_layout_templates",
+    "check_next_components_configuration",
+    "check_next_framework_unknown_top_level_keys",
+    "check_next_framework_value_types",
+    "check_next_pages_configuration",
+    "check_page_functions",
+    "check_page_module_imports",
+    "check_pages_structure",
+    "check_request_in_context",
+    "check_reserved_js_context_keys",
+    "check_reverse_name_collisions",
+    "check_single_keyless_context",
+    "check_template_loaders",
+    "check_unrouted_working_directory_pages",
+    "check_url_patterns",
+    "register_all",
+    "reset_check_caches",
+]
 
 
 def register_all() -> None:
@@ -130,9 +156,9 @@ def reset_check_caches() -> None:
     registry are cleared together so a re-executed `page.py` repopulates the
     registry from its current source instead of keeping a stale `@context`.
     """
-    common = importlib.import_module("next.checks.common")
-    common.reset_router_manager_cache()
-    common.reset_components_manager_cache()
+    importlib.import_module("next.checks.common").reset_router_manager_cache()
+    sources = importlib.import_module("next.components.sources")
+    sources.reset_components_manager_cache()
     importlib.import_module("next.partial.checks").reset_composed_pages_memo()
     importlib.import_module("next.urls.checks").reset_collected_patterns_cache()
     importlib.import_module("next.pages.loaders").reset_module_memo()
@@ -149,5 +175,5 @@ def __getattr__(name: str) -> object:
 
 
 def __dir__() -> list[str]:
-    """List the eager `register_all` plus every lazily resolved re-export."""
-    return ["NEXT", "register_all", "reset_check_caches", *sorted(_LAZY_ATTRIBUTES)]
+    """List exactly the names `__all__` carries, so both views of the facade agree."""
+    return sorted(__all__)

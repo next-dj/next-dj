@@ -250,6 +250,96 @@ class TestDependencyResolverSetting:
         assert errors == []
 
 
+class TestComponentTemplateLoaderSetting:
+    """COMPONENT_TEMPLATE_LOADER default, string merge, and check acceptance."""
+
+    def test_default_is_the_cached_loader_path(self) -> None:
+        """The setting defaults to the caching component template loader."""
+        assert (
+            NextFrameworkSettings.DEFAULTS["COMPONENT_TEMPLATE_LOADER"]
+            == "next.components.CachedComponentTemplateLoader"
+        )
+        next_framework_settings.reload()
+        assert (
+            next_framework_settings.COMPONENT_TEMPLATE_LOADER
+            == "next.components.CachedComponentTemplateLoader"
+        )
+
+    def test_string_override_reaches_merged_settings(self) -> None:
+        """A dotted-path string lands in next_framework_settings unchanged."""
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "COMPONENT_TEMPLATE_LOADER": "next.components.ComponentTemplateLoader"
+            }
+        ):
+            assert (
+                next_framework_settings.COMPONENT_TEMPLATE_LOADER
+                == "next.components.ComponentTemplateLoader"
+            )
+
+    @pytest.mark.parametrize(
+        "raw",
+        [123, None, ["next.components.ComponentTemplateLoader"]],
+        ids=["int", "none", "list"],
+    )
+    def test_non_string_override_keeps_default(self, raw: object) -> None:
+        """A non-string value is ignored by the merge and the default stays."""
+        with override_settings(NEXT_FRAMEWORK={"COMPONENT_TEMPLATE_LOADER": raw}):  # type: ignore[dict-item]
+            assert (
+                next_framework_settings.COMPONENT_TEMPLATE_LOADER
+                == "next.components.CachedComponentTemplateLoader"
+            )
+
+    def test_key_passes_unknown_key_check(self) -> None:
+        """System checks accept COMPONENT_TEMPLATE_LOADER as a known key."""
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "COMPONENT_TEMPLATE_LOADER": "next.components.ComponentTemplateLoader"
+            }
+        ):
+            errors = check_next_framework_unknown_top_level_keys()
+        assert errors == []
+
+
+class TestStaticDiscoveryCacheSetting:
+    """STATIC_DISCOVERY_CACHE default, typed read, and bool coercion."""
+
+    def test_default_is_true(self) -> None:
+        """Asset plans are cached unless a project turns the key off."""
+        assert NextFrameworkSettings.DEFAULTS["STATIC_DISCOVERY_CACHE"] is True
+        next_framework_settings.reload()
+        assert next_framework_settings.STATIC_DISCOVERY_CACHE is True
+
+    def test_is_a_bool_key(self) -> None:
+        """The key is coerced and checked like every other bool flag."""
+        assert "STATIC_DISCOVERY_CACHE" in NextFrameworkSettings.BOOL_KEYS
+
+    def test_typed_read_of_override(self) -> None:
+        """Turning the key off reaches the merged settings as a real bool."""
+        with override_settings(NEXT_FRAMEWORK={"STATIC_DISCOVERY_CACHE": False}):
+            assert next_framework_settings.STATIC_DISCOVERY_CACHE is False
+
+    @pytest.mark.parametrize(
+        "raw",
+        [1, 0, "", "False", [], None],
+        ids=["one", "zero", "empty_str", "false_str", "empty_list", "none"],
+    )
+    def test_coercion_matches_existing_bool_keys(
+        self, fresh_next_framework_settings: NextFrameworkSettings, raw: object
+    ) -> None:
+        """The merge coerces the key with bool() like every bool key."""
+        merged = fresh_next_framework_settings._build_flat_merged(
+            {"STATIC_DISCOVERY_CACHE": raw}
+        )
+        assert merged["STATIC_DISCOVERY_CACHE"] is bool(raw)
+
+    def test_key_passes_unknown_key_check(self) -> None:
+        """System checks accept STATIC_DISCOVERY_CACHE as a known key."""
+        with override_settings(NEXT_FRAMEWORK={"STATIC_DISCOVERY_CACHE": False}):
+            errors = check_next_framework_unknown_top_level_keys()
+        assert errors == []
+
+
 class TestNextFrameworkChecksUnknownKeys:
     """System checks reject keys that are not part of the supported schema."""
 
@@ -403,7 +493,7 @@ class TestPartialBackendsDefault:
 
     def test_default_lists_protocol_backend(self) -> None:
         entry = NextFrameworkSettings.DEFAULTS["PARTIAL_BACKENDS"][0]
-        assert entry["BACKEND"] == "next.partial.PartialProtocolBackend"
+        assert entry["BACKEND"] == "next.partial.JsonPartialProtocolBackend"
 
     def test_default_options(self) -> None:
         options = NextFrameworkSettings.DEFAULTS["PARTIAL_BACKENDS"][0]["OPTIONS"]
@@ -417,7 +507,7 @@ class TestPartialBackendsDefault:
 
     def test_accessible_via_settings(self) -> None:
         assert next_framework_settings.PARTIAL_BACKENDS[0]["BACKEND"] == (
-            "next.partial.PartialProtocolBackend"
+            "next.partial.JsonPartialProtocolBackend"
         )
 
     def test_is_known_top_level_key(self) -> None:

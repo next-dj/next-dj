@@ -1,8 +1,9 @@
 import functools
 import importlib.util
+import sys
 import textwrap
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -11,16 +12,18 @@ from next.components import (
     ComponentContextRegistry,
     ComponentInfo,
     ContextFunction,
-    DummyBackend,
-    FileComponentsBackend,
     component,
     render_component,
 )
-from next.components.context import iter_serialized_component_context_keys
 from next.components.renderers import _inject_component_context
 from next.static import StaticCollector
 from tests.support import attribution, handler_declared_here, record_path_calls
 from tests.support.components import build_composite_component
+
+
+# The package rebinds the name `context` to the decorator, so the module that
+# holds the bound answers under its import path.
+_CONTEXT_MODULE = sys.modules["next.components.context"]
 
 
 class TestComponentContextManager:
@@ -393,8 +396,10 @@ class TestInjectComponentContextSerialize:
 
         assert collector.js_context() == {}
 
-    def test_serialize_without_collector_does_not_raise(self, tmp_path: Path) -> None:
-        """When no _static_collector is in context_data, serialize is silently skipped."""
+    def test_serialize_without_collector_still_injects_the_value(
+        self, tmp_path: Path
+    ) -> None:
+        """With no `_static_collector` in context_data the key is injected anyway."""
         mgr, info, module_path = build_composite_component(tmp_path)
 
         def get_val() -> str:
@@ -405,6 +410,8 @@ class TestInjectComponentContextSerialize:
         context_data: dict = {}
         with patch("next.components.renderers.component", mgr):
             _inject_component_context(info, context_data, None)
+
+        assert context_data == {"key": "value"}
 
 
 class TestComponentContextSerializerOverride:
@@ -466,67 +473,6 @@ class TestComponentContextSerializerOverride:
             _inject_component_context(info, context_data, None)
 
         assert collector.js_context_serializers() == {}
-
-
-class TestSerializedComponentContextKeys:
-    """iter_serialized_component_context_keys reports what a component.py declares."""
-
-    def _backend(self, tmp_path: Path, body: str) -> FileComponentsBackend:
-        """Write a composite component with `body` as its component.py."""
-        comp_dir = tmp_path / "widget"
-        comp_dir.mkdir()
-        (comp_dir / "component.djx").write_text("<div/>")
-        (comp_dir / "component.py").write_text(textwrap.dedent(body))
-        return FileComponentsBackend(
-            {"DIRS": [str(tmp_path)], "COMPONENTS_DIR": "_components"}
-        )
-
-    def _keys(self, *backends: object) -> list[tuple[Path, str]]:
-        """Enumerate serialized keys with a components manager over `backends`."""
-        manager = MagicMock()
-        manager.backends = tuple(backends)
-        with patch(
-            "next.components.context.get_components_manager", return_value=manager
-        ):
-            return list(iter_serialized_component_context_keys())
-
-    def test_keyed_serialized_key_is_reported(self, tmp_path: Path) -> None:
-        backend = self._backend(
-            tmp_path,
-            """
-            from next.components import context
-
-
-            @context("$csrf", serialize=True)
-            def csrf_token():
-                return {"token": "app"}
-            """,
-        )
-        assert self._keys(backend) == [(tmp_path / "widget" / "component.py", "$csrf")]
-
-    def test_unserialized_and_keyless_contexts_are_skipped(
-        self, tmp_path: Path
-    ) -> None:
-        backend = self._backend(
-            tmp_path,
-            """
-            from next.components import context
-
-
-            @context("plain")
-            def plain():
-                return 1
-
-
-            @context(serialize=True)
-            def spread():
-                return {"$dev": True}
-            """,
-        )
-        assert self._keys(backend) == []
-
-    def test_backend_without_component_files_is_skipped(self, tmp_path: Path) -> None:
-        assert self._keys(DummyBackend({})) == []
 
 
 class TestComponentContextRegistryLookupCache:
@@ -664,3 +610,73 @@ class TestComponentContextRegistryLookupCache:
         rebuilt = reg.get_functions(module_path)
         assert rebuilt is not warm
         assert [entry.serialize for entry in rebuilt] == [True]
+
+
+class TestComponentContextRegistryLookupBound:
+    """The lookup memo is bounded and keyed on the resolved path."""
+
+    def test_a_full_memo_evicts_the_oldest_insert(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Only the path looked up last survives a memo of one."""
+        monkeypatch.setattr(_CONTEXT_MODULE, "_LOOKUP_CACHE_MAX_SIZE", 1)
+        reg = ComponentContextRegistry()
+        first = tmp_path / "a" / "component.py"
+        second = tmp_path / "b" / "component.py"
+
+        reg.get_functions(first)
+        reg.get_functions(second)
+
+        assert list(reg._lookup_cache) == [second]
+
+    def test_a_warm_lookup_leaves_a_full_memo_in_insert_order(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A warm lookup reorders nothing, so the path memoised first goes first."""
+        monkeypatch.setattr(_CONTEXT_MODULE, "_LOOKUP_CACHE_MAX_SIZE", 2)
+        reg = ComponentContextRegistry()
+        paths = [tmp_path / name / "component.py" for name in ("a", "b", "c")]
+
+        reg.get_functions(paths[0])
+        reg.get_functions(paths[1])
+        reg.get_functions(paths[0])
+        reg.get_functions(paths[2])
+
+        assert list(reg._lookup_cache) == [paths[1], paths[2]]
+
+    def test_two_spellings_of_one_file_share_one_entry(self, tmp_path: Path) -> None:
+        """A relative-looking spelling collapses onto the resolved path."""
+        reg = ComponentContextRegistry()
+        module_path = tmp_path / "component.py"
+        (tmp_path / "sub").mkdir()
+        spelled = tmp_path / "sub" / ".." / "component.py"
+
+        def provide() -> int:
+            return 1
+
+        reg.register(module_path, "n", provide)
+
+        assert reg.get_functions(spelled) is reg.get_functions(module_path)
+        assert list(reg._lookup_cache) == [module_path.resolve()]
+
+    def test_a_symlinked_spelling_shares_the_entry_of_the_real_file(
+        self, tmp_path: Path
+    ) -> None:
+        """A symlink to a component folder adds no second row to the memo."""
+        reg = ComponentContextRegistry()
+        real_dir = tmp_path / "real"
+        real_dir.mkdir()
+        module_path = real_dir / "component.py"
+        module_path.write_text("# empty\n")
+        link_dir = tmp_path / "link"
+        link_dir.symlink_to(real_dir, target_is_directory=True)
+
+        def provide() -> int:
+            return 1
+
+        reg.register(module_path, "n", provide)
+
+        assert [
+            entry.func for entry in reg.get_functions(link_dir / "component.py")
+        ] == [provide]
+        assert list(reg._lookup_cache) == [module_path.resolve()]

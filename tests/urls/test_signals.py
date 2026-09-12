@@ -10,6 +10,7 @@ from next.conf import next_framework_settings
 from next.testing import SignalRecorder, capture_signals
 from next.urls import FileRouterBackend, RouterManager, router_manager
 from next.urls.signals import route_registered, router_reloaded
+from tests.support import SignalSender
 
 
 @pytest.fixture()
@@ -44,7 +45,7 @@ class TestRouteRegisteredSignal:
         self, capture_route_registered: SignalRecorder
     ) -> None:
         """The sender argument is preserved in the captured event."""
-        sentinel = object()
+        sentinel = SignalSender()
         route_registered.send(sender=sentinel, url_path="home")
         assert capture_route_registered.events[0].sender is sentinel
 
@@ -138,7 +139,7 @@ class TestRouterReloadedSignal:
         self, capture_router_reloaded: SignalRecorder
     ) -> None:
         """The sender argument is preserved in the captured event."""
-        sentinel = object()
+        sentinel = SignalSender()
         router_reloaded.send(sender=sentinel)
         assert capture_router_reloaded.events[0].sender is sentinel
 

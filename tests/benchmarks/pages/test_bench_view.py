@@ -28,6 +28,11 @@ _DYNAMIC_PAGE = (
     + "".join(f"<p>row {i}</p>" for i in range(10))
     + "'\n"
 )
+# A cold round throws away every composed layer, so the count stays modest and
+# a couple of warmup rounds keep the first import out of the reported median.
+_COLD_ROUNDS = 50
+_COLD_WARMUP_ROUNDS = 5
+
 _ZONED_TEMPLATE = (
     "<main>"
     + "".join(f'{{% zone "z_{i}" %}}<p>row {i}</p>{{% endzone %}}' for i in range(5))
@@ -55,6 +60,78 @@ def _view_for(page_file: Path) -> Iterator[Callable[..., HttpResponseBase]]:
         yield view
     finally:
         page_singleton.clear_template_caches()
+
+
+class TestBenchColdViewGet:
+    """The same GETs with the composed layers thrown away before every round.
+
+    `Page.clear_template_caches` drops the layout skeleton, the composed source,
+    and the compiled template together, so a cold round prices the composition
+    and the parse that a warm row never pays. The page module stays imported,
+    the way it does in production once the process has served the page once.
+    """
+
+    @pytest.mark.benchmark(group="pages.view")
+    def test_static_cold_composition(self, tmp_path: Path, benchmark) -> None:
+        """A static body composed through two layouts and compiled per round."""
+        page_file = build_layout_page(tmp_path, layouts=2, template=_STATIC_TEMPLATE)
+        request = plain_get("/")
+        with _view_for(page_file) as view:
+            view(request)
+
+            def setup() -> tuple[tuple[HttpRequest], dict[str, object]]:
+                page_singleton.clear_template_caches()
+                return (request,), {}
+
+            benchmark.pedantic(
+                view,
+                setup=setup,
+                rounds=_COLD_ROUNDS,
+                warmup_rounds=_COLD_WARMUP_ROUNDS,
+            )
+
+    @pytest.mark.benchmark(group="pages.view")
+    def test_dynamic_cold_skeleton(self, tmp_path: Path, benchmark) -> None:
+        """A `render()` body, so the round prices `compose_skeleton` on its own."""
+        page_file = build_layout_page(tmp_path, layouts=2, page_body=_DYNAMIC_PAGE)
+        request = plain_get("/")
+        with _view_for(page_file) as view:
+            view(request)
+
+            def setup() -> tuple[tuple[HttpRequest], dict[str, object]]:
+                page_singleton.clear_template_caches()
+                return (request,), {}
+
+            benchmark.pedantic(
+                view,
+                setup=setup,
+                rounds=_COLD_ROUNDS,
+                warmup_rounds=_COLD_WARMUP_ROUNDS,
+            )
+
+    @pytest.mark.parametrize("layouts", [0, 8], ids=["flat", "deep"])
+    @pytest.mark.benchmark(group="pages.view")
+    def test_static_cold_layout_depth(
+        self, tmp_path: Path, layouts: int, benchmark
+    ) -> None:
+        """What layout-chain depth costs a composition rather than a replay."""
+        page_file = build_layout_page(
+            tmp_path, layouts=layouts, template=_STATIC_TEMPLATE
+        )
+        request = plain_get("/")
+        with _view_for(page_file) as view:
+            view(request)
+
+            def setup() -> tuple[tuple[HttpRequest], dict[str, object]]:
+                page_singleton.clear_template_caches()
+                return (request,), {}
+
+            benchmark.pedantic(
+                view,
+                setup=setup,
+                rounds=_COLD_ROUNDS,
+                warmup_rounds=_COLD_WARMUP_ROUNDS,
+            )
 
 
 class TestBenchUnifiedViewGet:

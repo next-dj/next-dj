@@ -8,4 +8,4 @@ without subclassing the reloader.
 from django.dispatch import Signal
 
 
-watch_specs_ready: Signal = Signal()
+watch_specs_ready: Signal = Signal(use_caching=True)

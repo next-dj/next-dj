@@ -626,7 +626,7 @@ The rest are ignored, multi-backend selection is not supported, and a list with 
 
    "PARTIAL_BACKENDS": [
        {
-           "BACKEND": "next.partial.PartialProtocolBackend",
+           "BACKEND": "next.partial.JsonPartialProtocolBackend",
            "OPTIONS": {
                "VERSION": "manifest",
                "PUSH_WIZARD_STEPS": False,

@@ -23,9 +23,8 @@ if TYPE_CHECKING:
 class PartialShaperImpl(PartialShaper):
     """Binds the port to the partial rendering and shaping entry points.
 
-    The port keeps `pages` and `forms` off the `partial` package, so the
-    area-owned arguments arrive as `object` or as the narrow intent view
-    and are cast back to the types the shaping entry points take.
+    The port declares the narrow intent view rather than the parsed intent, so
+    that one argument is cast back to the type the entry points take.
     """
 
     @override
@@ -54,17 +53,18 @@ class PartialShaperImpl(PartialShaper):
 
     @override
     def shape_response(
-        self, backend: object, request: "HttpRequest", outcome: object
+        self,
+        backend: "FormActionBackend",
+        request: "HttpRequest",
+        outcome: "ActionOutcome",
     ) -> "HttpResponse":
         """Return the envelope for one form action outcome."""
-        return shape_partial(
-            cast("FormActionBackend", backend), request, cast("ActionOutcome", outcome)
-        )
+        return shape_partial(backend, request, outcome)
 
     @override
     def shape_validate(
         self,
-        backend: object,
+        backend: "FormActionBackend",
         request: "HttpRequest",
         form: "BaseForm | BaseFormSet",
         intent: "PartialIntentView",
@@ -74,7 +74,7 @@ class PartialShaperImpl(PartialShaper):
     ) -> "HttpResponse":
         """Return the form morph envelope of a validate-only pass."""
         return shape_validate(
-            cast("FormActionBackend", backend),
+            backend,
             request,
             form,
             cast("PartialIntent", intent),

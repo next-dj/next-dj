@@ -81,8 +81,9 @@ class PatchEventStream(StreamingHttpResponse):
         self["Cache-Control"] = _CACHE_CONTROL
         self[_ACCEL_BUFFERING] = "no"
         set_partial_vary(self)
-        if sse_stream_opened.receivers:
-            sse_stream_opened.send(sender=type(self), request=request)
+        sender = type(self)
+        if sse_stream_opened.receivers and sse_stream_opened.has_listeners(sender):
+            sse_stream_opened.send(sender=sender, request=request)
 
     def _guard_source_kind(
         self, source: "Iterable[Patches] | AsyncIterable[Patches]"
@@ -218,11 +219,14 @@ class PatchEventStream(StreamingHttpResponse):
 
     def _announce_closed(self, sent: int) -> None:
         """Fire the close signal with the stream's duration and event count."""
-        if not sse_stream_closed.receivers:
+        sender = type(self)
+        if not sse_stream_closed.receivers or not sse_stream_closed.has_listeners(
+            sender
+        ):
             return
         duration_ms = (self._clock() - self._opened_at) * 1000
         sse_stream_closed.send(
-            sender=type(self),
+            sender=sender,
             request=self._request,
             duration_ms=duration_ms,
             envelopes_sent=sent,

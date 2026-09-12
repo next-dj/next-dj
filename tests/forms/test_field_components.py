@@ -405,8 +405,8 @@ class TestComponentWidgetAssetCollection:
     def test_simple_component_collects_nothing(self, echo_component: Path) -> None:
         collector = StaticCollector()
         self._render_with_collector("echo", echo_component, collector)
-        assert collector.assets_in_slot("styles") == []
-        assert collector.assets_in_slot("scripts") == []
+        assert collector.assets_in_slot("styles") == ()
+        assert collector.assets_in_slot("scripts") == ()
 
     def test_no_collector_does_not_collect(self, echo_box_component: Path) -> None:
         # No _static_collector bound: render is a no-op for asset discovery.

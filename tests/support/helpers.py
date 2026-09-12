@@ -45,6 +45,14 @@ def inspect_parameter(
     )
 
 
+class SignalSender:
+    """Stand-in sender whose identity a signal test can assert on.
+
+    A cached signal weak-references its sender and a bare ``object()`` carries no
+    ``__weakref__`` slot, so it cannot play that part.
+    """
+
+
 def typing_optional(cls: type) -> object:
     """Return the `typing.Optional` spelling of `cls | None`, as user code may write it.
 

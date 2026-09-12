@@ -11,7 +11,7 @@ from django.conf import settings
 from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register
 
 from next.checks import NEXT
-from next.components.context import iter_serialized_component_context_keys
+from next.components.sources import iter_serialized_component_context_keys
 from next.conf import import_class_cached, next_framework_settings
 from next.pages.scan import iter_serialized_page_context_keys
 

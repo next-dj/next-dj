@@ -19,6 +19,7 @@ from django.core.checks import (
     register,
 )
 from django.http import HttpRequest
+from django.urls.converters import get_converters
 
 from next.checks import NEXT
 from next.checks.common import (
@@ -59,7 +60,8 @@ logger = logging.getLogger(__name__)
 
 REQUEST_CONTEXT_PROCESSOR = "django.template.context_processors.request"
 
-EXPECTED_PARAMETER_PARTS = 2
+_PARAMETER_FORMAT_HINT = "Use [param] or [type:param] format."
+_ARGS_FORMAT_HINT = "Use [[args]] format."
 
 # A page declares a body-source conflict only when two or more sources claim it.
 _MIN_CONFLICTING_BODY_SOURCES = 2
@@ -232,27 +234,29 @@ def _check_directory_syntax(
         dir_name_str = item.name
         relative_path = item.relative_to(pages_path)
 
-        if dir_name_str.startswith("[") and dir_name_str.endswith("]"):
-            if not _is_valid_parameter_syntax(dir_name_str):
-                errors.append(
-                    Error(
-                        f"{context} pages: Invalid parameter syntax "
-                        f'"{dir_name_str}" in {relative_path}. '
-                        f"Use [param] or [type:param] format.",
-                        obj=settings,
-                        id="next.E008",
-                    )
-                )
-
-        elif dir_name_str.startswith("[[") and dir_name_str.endswith("]]"):
-            if not _is_valid_args_syntax(dir_name_str):
+        # The wildcard form is read first, because every `[[args]]` name also
+        # opens with `[` and closes with `]`.
+        if dir_name_str.startswith("[[") and dir_name_str.endswith("]]"):
+            reason = _args_syntax_error(dir_name_str)
+            if reason is not None:
                 errors.append(
                     Error(
                         f"{context} pages: Invalid args syntax "
-                        f'"{dir_name_str}" in {relative_path}. '
-                        f"Use [[args]] format.",
+                        f'"{dir_name_str}" in {relative_path}. {reason}',
                         obj=settings,
                         id="next.E009",
+                    )
+                )
+
+        elif dir_name_str.startswith("[") and dir_name_str.endswith("]"):
+            reason = _parameter_syntax_error(dir_name_str)
+            if reason is not None:
+                errors.append(
+                    Error(
+                        f"{context} pages: Invalid parameter syntax "
+                        f'"{dir_name_str}" in {relative_path}. {reason}',
+                        obj=settings,
+                        id="next.E008",
                     )
                 )
 
@@ -355,30 +359,68 @@ def _check_pages_directory(
     return errors, warnings
 
 
-def _is_valid_parameter_syntax(param_str: str) -> bool:
-    """Return True when single-bracket parameter syntax is valid."""
+def _route_name_error(name: str) -> str | None:
+    """Return why Django refuses `name` between its angle brackets, or `None`.
+
+    Django compiles a route as the pattern is built, so a name it refuses is a
+    traceback out of the first URL resolution rather than a report here.
+    """
+    if name.replace("-", "_").isidentifier():
+        return None
+    return (
+        f"Parameter name {name!r} is no valid Python identifier once '-' is "
+        "read as '_', and Django refuses such a name when it compiles the route."
+    )
+
+
+def _converter_error(converter: str) -> str | None:
+    """Return why Django knows no such converter, or `None` when it knows one.
+
+    The registry is read per check, so a converter a project registers of its
+    own counts as one Django knows.
+    """
+    registered = get_converters()
+    if converter in registered:
+        return None
+    known = ", ".join(sorted(registered))
+    return (
+        f"No Django URL converter is registered under the name {converter!r}. "
+        f"Registered converters: {known}."
+    )
+
+
+def _parameter_syntax_error(param_str: str) -> str | None:
+    """Return why a `[param]` directory names no route, or `None` when it does."""
     if not (param_str.startswith("[") and param_str.endswith("]")):
-        return False
+        return _PARAMETER_FORMAT_HINT
 
     content = param_str[1:-1]
-    if ":" in content:
-        parts = content.split(":", 1)
-        if len(parts) != EXPECTED_PARAMETER_PARTS:
-            return False
-        type_name, param_name = parts
-        if ":" in param_name:
-            return False
-        return bool(type_name.strip() and param_name.strip())
-    return bool(content.strip())
+    if ":" not in content:
+        name = content.strip()
+        return _PARAMETER_FORMAT_HINT if not name else _route_name_error(name)
+    type_name, param_name = content.split(":", 1)
+    if ":" in param_name:
+        return _PARAMETER_FORMAT_HINT
+    converter = type_name.strip()
+    name = param_name.strip()
+    if not converter or not name:
+        return _PARAMETER_FORMAT_HINT
+    return _converter_error(converter) or _route_name_error(name)
 
 
-def _is_valid_args_syntax(args_str: str) -> bool:
-    """Return True when double-bracket args syntax is valid."""
+def _args_syntax_error(args_str: str) -> str | None:
+    """Return why a `[[args]]` directory names no route, or `None` when it does.
+
+    The name is read unstripped, because the router captures whatever sits
+    between the brackets and Django allows no whitespace in a route parameter.
+    """
     if not (args_str.startswith("[[") and args_str.endswith("]]")):
-        return False
+        return _ARGS_FORMAT_HINT
 
     content = args_str[2:-2]
-    return bool(content.strip())
+    if not content.strip():
+        return _ARGS_FORMAT_HINT
+    return _route_name_error(content)
 
 
 @register(NEXT)
@@ -865,7 +907,7 @@ def _url_parameter_names(url_path: str) -> list[str]:
     parser = _url_parser()
     try:
         _pattern, parameters = parser.parse_url_pattern(url_path)
-    except parser.duplicate_parameter_error:
+    except ValueError:
         return []
     return list(parameters)
 

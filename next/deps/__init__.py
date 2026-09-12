@@ -7,6 +7,8 @@ exception, the `RegisteredParameterProvider` ABC, the `ParameterProvider` protoc
 under `next.deps.cache`, `next.deps.markers`, and `next.deps.providers`, whose
 `CompilingParameterProvider` spells the optional compile hook, while `next.deps.plan`
 spells the compiled contract, cached per callable and replayed on every resolve.
+`next.deps.linear` holds the plan-free reference resolver the compiled path is
+checked against, selectable through `NEXT_FRAMEWORK["DEPENDENCY_RESOLVER"]`.
 """
 
 from __future__ import annotations

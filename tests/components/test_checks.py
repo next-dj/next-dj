@@ -15,10 +15,10 @@ from next.checks import (
     check_next_components_configuration,
     register_all,
 )
-from next.checks.common import get_components_manager
 from next.components import ComponentInfo, FileComponentsBackend
 from next.components.context import ComponentContextRegistry, component
 from next.components.manager import components_manager
+from next.components.sources import get_components_manager
 from tests.support import (
     file_router_config_entry,
     importable_dir,
@@ -529,7 +529,35 @@ class TestPageTreeComponentsReachTheChecks:
 
         with (
             override_settings(NEXT_FRAMEWORK=self._framework_settings(pages)),
-            patch("next.checks.common.get_router_manager", return_value=(None, [])),
+            patch(
+                "next.components.sources.get_router_manager", return_value=(None, [])
+            ),
         ):
             manager = get_components_manager()
             assert manager._walk_registered_folders == set()
+
+
+class TestComponentConfigurationCodes:
+    """Each `COMPONENT_BACKENDS` mistake carries a code of its own."""
+
+    def test_non_dict_backend_entry_is_e079(self) -> None:
+        mock_ns = _next_framework_settings_component_backends_list(
+            ["next.components.FileComponentsBackend"]
+        )
+        with patch("next.components.checks.next_framework_settings", mock_ns):
+            errors = check_next_components_configuration()
+        assert [e.id for e in errors] == ["next.E079"]
+
+    def test_non_string_components_dir_is_e080(self) -> None:
+        mock_ns = _next_framework_settings_component_backends_list(
+            [
+                {
+                    "BACKEND": "next.components.FileComponentsBackend",
+                    "DIRS": [],
+                    "COMPONENTS_DIR": 1,
+                }
+            ]
+        )
+        with patch("next.components.checks.next_framework_settings", mock_ns):
+            errors = check_next_components_configuration()
+        assert [e.id for e in errors] == ["next.E080"]

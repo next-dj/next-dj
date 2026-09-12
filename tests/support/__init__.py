@@ -6,10 +6,17 @@ from tests.support.attribution import (
     wraps_decorator,
 )
 from tests.support.backends import (
+    BOOM_COMPONENTS_BACKEND,
+    DUMMY_COMPONENTS_BACKEND,
+    BoomComponentsBackend,
+    DummyComponentsBackend,
     MockAutoreloadSender,
     PlainStaticBackend,
     RecordingStaticBackend,
     StaticAssetProvider,
+    WatchingComponentsBackend,
+    file_components_entry,
+    watching_components_entry,
 )
 from tests.support.cases import (
     COERCE_URL_VALUE_CASES,
@@ -22,13 +29,21 @@ from tests.support.cases import (
     UrlKwargsResolveCase,
 )
 from tests.support.components import build_composite_component, component_info
-from tests.support.deps import AForm, DeferringProvider, OtherForm
+from tests.support.deps import (
+    AForm,
+    DeferringProvider,
+    OtherForm,
+    PlanEntry,
+    plan_by_name,
+    plan_entries,
+)
 from tests.support.forms import (
     GuardedTenantForm,
     build_post_request,
     isolated_form_registries,
 )
 from tests.support.helpers import (
+    SignalSender,
     _ctx,
     _minimal_resolver,
     _resolver_with_form,
@@ -64,6 +79,7 @@ from tests.support.patches import (
     patch_checks_components_manager,
     patch_checks_router_manager,
     patch_checks_router_manager_with_routers,
+    patched_watch_sources,
     restored_provider_registry,
     restored_static_registries,
 )
@@ -83,14 +99,18 @@ from tests.support.wizard import CountingWizardBackend
 
 
 __all__ = [
+    "BOOM_COMPONENTS_BACKEND",
     "COERCE_URL_VALUE_CASES",
+    "DUMMY_COMPONENTS_BACKEND",
     "URL_BY_ANNOTATION_RESOLVE_CASES",
     "URL_KWARGS_RESOLVE_CASES",
     "AForm",
+    "BoomComponentsBackend",
     "CoerceUrlValueCase",
     "ContextMarkerCase",
     "CountingWizardBackend",
     "DeferringProvider",
+    "DummyComponentsBackend",
     "GuardedTenantForm",
     "IntentOnlyShaper",
     "MalformedRootsRouter",
@@ -100,15 +120,18 @@ __all__ = [
     "OtherForm",
     "PlainStaticBackend",
     "PlanCase",
+    "PlanEntry",
     "RaisingComponentsRouter",
     "RaisingRootsRouter",
     "RaisingSkipNamesRouter",
     "RecordingStaticBackend",
     "RootPagesRouter",
+    "SignalSender",
     "SkippingRouter",
     "StaticAssetProvider",
     "UrlByAnnotationResolveCase",
     "UrlKwargsResolveCase",
+    "WatchingComponentsBackend",
     "_ctx",
     "_minimal_resolver",
     "_resolver_with_form",
@@ -121,6 +144,7 @@ __all__ = [
     "build_zone_request",
     "counting_provider",
     "default_page_router_config",
+    "file_components_entry",
     "file_router_backend_from_params",
     "file_router_config_entry",
     "handler_declared_here",
@@ -135,9 +159,12 @@ __all__ = [
     "patch_checks_components_manager",
     "patch_checks_router_manager",
     "patch_checks_router_manager_with_routers",
+    "patched_watch_sources",
     "path_under",
     "plain_get",
     "plain_request",
+    "plan_by_name",
+    "plan_entries",
     "record_path_calls",
     "restored_provider_registry",
     "restored_static_registries",
@@ -145,5 +172,6 @@ __all__ = [
     "typing_optional",
     "unified_view",
     "unwrapped_decorator",
+    "watching_components_entry",
     "wraps_decorator",
 ]

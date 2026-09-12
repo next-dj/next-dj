@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from django.conf import settings
 from django.contrib.staticfiles.storage import staticfiles_storage
+from django.core.signals import setting_changed
 from django.utils.functional import LazyObject, empty
 
 from next.backends import backend_entries, load_backends
@@ -40,7 +41,7 @@ from .signals import backend_loaded, collector_finalized, html_injected
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
     from pathlib import Path
 
     from django.http import HttpRequest
@@ -155,7 +156,7 @@ class StaticManager:
         collector_finalized.send(sender=collector, page_path=page_path, request=request)
         html_before = html
         replaced: tuple[str, ...] | None = None
-        if html_injected.receivers:
+        if html_injected.receivers and html_injected.has_listeners(self):
             replaced = tuple(
                 slot.name for slot in default_placeholders if slot.token in html
             )
@@ -289,7 +290,7 @@ class StaticManager:
 
     def _render_tags(
         self,
-        assets: list[StaticAsset],
+        assets: Sequence[StaticAsset],
         backend: StaticBackend,
         *,
         request: HttpRequest | None,
@@ -450,4 +451,15 @@ def _on_settings_reloaded(**kwargs) -> None:
     reset_default_manager()
 
 
+def _on_setting_changed(*, setting: str, **kwargs) -> None:
+    """Drop the cached page trees when the app list behind them moves.
+
+    `settings_reloaded` covers only the `NEXT_FRAMEWORK` half, and the trees
+    of a router with `APP_DIRS` move with `INSTALLED_APPS`.
+    """
+    if setting == "INSTALLED_APPS":
+        forget_manager_page_roots()
+
+
 settings_reloaded.connect(_on_settings_reloaded)
+setting_changed.connect(_on_setting_changed)

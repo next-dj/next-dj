@@ -11,13 +11,23 @@ Each port is a pair of a ``Protocol`` that states the method contract the caller
 The caller imports the slot instead of the implementing subsystem, so the two areas stay decoupled while the call still lands on real code.
 A slot binds once and never rebinds, which is what separates it from the settings-driven backend managers in :doc:`backends`.
 
-``PartialShaper`` is the port the framework ships.
-``PartialIntentView`` is the read-only view of a parsed partial request that travels between its methods, so a shape method never re-reads the request headers.
-``PartialShaperSlot`` starts unbound and raises ``RuntimeError`` when read before the binding, and ``partial_shaper_slot`` is the single instance the framework uses.
+``PortSlot`` is the shared holder every port uses.
+It starts unbound and raises ``RuntimeError`` naming the missing binding when read too early, and each port subclasses it so the message names its own subject.
 
-``next.apps`` binds the implementation from ``next.partial`` as the last step of ``NextFrameworkConfig.ready()``.
-``next.pages`` and ``next.forms`` read the slot on the request path, first to ask whether a request is partial at all and then to shape the response when it is.
+``PartialShaper`` shapes page and form responses for partial requests.
+``PartialIntentView`` is the read-only view of a parsed partial request that travels between its methods, so a shape method never re-reads the request headers.
+``next.pages`` and ``next.forms`` read ``partial_shaper_slot`` on the request path, first to ask whether a request is partial at all and then to shape the response when it is.
 Neither subsystem imports ``next.partial``.
+
+``RouterAccess`` builds router backends and router managers.
+``next.urls`` routes to pages and so imports ``next.pages``, which leaves the page watcher and the system checks needing routers from the other direction.
+They read ``router_access_slot`` instead, at watch time and at check time.
+
+``StaticAssets`` is the static-manager surface one page render calls, a collector, page asset discovery, and placeholder injection.
+``next.static`` reads page trees and page modules and so imports ``next.pages``, so the render path reads ``static_assets_slot`` rather than importing the static manager back.
+The slot holds the lazy default handle, so a settings reload that drops the wrapped manager still reaches every later render.
+
+``next.apps`` binds all three in ``NextFrameworkConfig.ready()``.
 
 Public API
 ----------

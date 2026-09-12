@@ -9,24 +9,34 @@ matching component template is rendered.
 from __future__ import annotations
 
 import sys
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, overload
 
-from next.checks.common import get_components_manager
 from next.deps import RESERVED_KEYS
 from next.utils import (
     MisattributedContext,
     MisattributionLog,
     callable_name,
     defining_file,
+    resolved_tree,
+    store_capped,
 )
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Sequence
+    from collections.abc import Callable, Sequence
 
     from next.static.serializers import JsContextSerializer
+
+
+# Bounded because a render is free to spell a component path no earlier render
+# spelled, and the memo answers within one registry version for every one of them.
+# The bound catches that rather than working as an eviction policy, because a
+# project holds far fewer components than it allows, so the stalest insert is the
+# one to drop and a hit reorders nothing.
+_LOOKUP_CACHE_MAX_SIZE = 2048
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,7 +61,9 @@ class ComponentContextRegistry:
         self._registry: dict[Path, dict[str | None, ContextFunction]] = {}
         self._misattributions = MisattributionLog()
         self._version = 0
-        self._lookup_cache: dict[Path, tuple[ContextFunction, ...]] = {}
+        self._lookup_cache: OrderedDict[Path, tuple[ContextFunction, ...]] = (
+            OrderedDict()
+        )
         self._lookup_version = 0
 
     @property
@@ -94,7 +106,7 @@ class ComponentContextRegistry:
         serializer: JsContextSerializer | None = None,
     ) -> None:
         """Register `func` under `key` for `component_path`, rejecting reserved keys."""
-        path = component_path.resolve()
+        path = resolved_tree(component_path)
 
         if isinstance(key, str) and key in RESERVED_KEYS:
             msg = (
@@ -129,25 +141,27 @@ class ComponentContextRegistry:
 
     def unregister(self, component_path: Path) -> None:
         """Drop every context function registered for `component_path`."""
-        if self._registry.pop(component_path.resolve(), None) is not None:
+        if self._registry.pop(resolved_tree(component_path), None) is not None:
             self._bump()
 
     def get_functions(self, component_path: Path) -> Sequence[ContextFunction]:
         """Return a tuple of registered context functions for `component_path`.
 
-        Results are memoised under the path as passed and thrown away when
-        the registry version moves, so a render pays neither the resolve nor
-        the tuple build twice. The empty result is memoised too, because most
+        Results are memoised under the resolved path and thrown away when the
+        registry version moves, so a render pays neither the walk of the registry
+        nor the tuple build twice, and a symlinked spelling of one file shares the
+        entry of its plain one. The empty result is memoised too, because most
         components register no context function at all.
         """
         if self._lookup_version != self._version:
             self._lookup_cache.clear()
             self._lookup_version = self._version
-        cached = self._lookup_cache.get(component_path)
+        path = resolved_tree(component_path)
+        cached = self._lookup_cache.get(path)
         if cached is not None:
             return cached
-        functions = tuple(self._registry.get(component_path.resolve(), {}).values())
-        self._lookup_cache[component_path] = functions
+        functions = tuple(self._registry.get(path, {}).values())
+        store_capped(self._lookup_cache, path, functions, _LOOKUP_CACHE_MAX_SIZE)
         return functions
 
     def _is_same_function(
@@ -224,28 +238,10 @@ component = ComponentContextManager()
 context = component.context
 
 
-def iter_serialized_component_context_keys() -> Iterator[tuple[Path, str]]:
-    """Yield the `component.py` path and key of every keyed `serialize=True` context.
-
-    A keyless `serialize=True` callable spreads the keys of the dict it
-    returns at render time, so those keys exist only at runtime and never
-    travel through here. Reading the keys imports every `component.py`, since
-    the decorator state is the truth, so a check calling this pays that import
-    even under `LAZY_COMPONENT_MODULES`.
-    """
-    manager = get_components_manager()
-    for backend in manager.backends:
-        for module_path in backend.import_component_modules():
-            for entry in component.get_functions(module_path):
-                if entry.serialize and entry.key is not None:
-                    yield module_path, entry.key
-
-
 __all__ = [
     "ComponentContextManager",
     "ComponentContextRegistry",
     "ContextFunction",
     "component",
     "context",
-    "iter_serialized_component_context_keys",
 ]

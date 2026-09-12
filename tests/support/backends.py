@@ -1,10 +1,11 @@
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, override
 
 from django.core.exceptions import ImproperlyConfigured
 
+from next.components import ComponentInfo, ComponentsBackend
 from next.static import StaticBackend, StaticFilesBackend, default_kinds
 
 
@@ -94,7 +95,61 @@ NOT_A_CLASS = f"{__name__}.not_a_class"
 MISSING = f"{__name__}.NoSuchBackend"
 
 
+class DummyComponentsBackend(ComponentsBackend):
+    """Components backend that keeps its settings entry and resolves nothing."""
+
+    def __init__(self, config: dict[str, Any]) -> None:
+        """Keep `config` on `self` for assertions about wiring."""
+        self.config = config
+
+    @override
+    def get_component(self, _name: str, _template_path: Path) -> ComponentInfo | None:
+        """Return `None` to skip name resolution through this backend."""
+        return None
+
+    @override
+    def collect_visible_components(
+        self, _template_path: Path
+    ) -> Mapping[str, ComponentInfo]:
+        """Return an empty mapping because this double never registers."""
+        return {}
+
+
+class WatchingComponentsBackend(DummyComponentsBackend):
+    """Components backend whose watch roots come from outside `DIRS`."""
+
+    @override
+    def watch_roots(self) -> tuple[Path, ...]:
+        """Report the roots named under a key only this backend reads."""
+        return tuple(Path(entry) for entry in self.config.get("WATCH_ROOTS", ()))
+
+
+class BoomComponentsBackend(ComponentsBackend):
+    """Components backend that raises from `__init__` for load error paths."""
+
+    def __init__(self, config: dict[str, Any]) -> None:
+        """Raise the kind of error the loader never swallows."""
+        del config
+        msg = "boom"
+        raise RuntimeError(msg)
+
+    @override
+    def get_component(self, _name: str, _template_path: Path) -> ComponentInfo | None:
+        """Unreachable because construction always raises."""
+        raise NotImplementedError
+
+    @override
+    def collect_visible_components(
+        self, _template_path: Path
+    ) -> Mapping[str, ComponentInfo]:
+        """Unreachable because construction always raises."""
+        raise NotImplementedError
+
+
 FILE_COMPONENTS_BACKEND = "next.components.FileComponentsBackend"
+DUMMY_COMPONENTS_BACKEND = f"{__name__}.DummyComponentsBackend"
+WATCHING_COMPONENTS_BACKEND = f"{__name__}.WatchingComponentsBackend"
+BOOM_COMPONENTS_BACKEND = f"{__name__}.BoomComponentsBackend"
 
 
 def file_components_entry(*dirs: Path) -> dict[str, Any]:
@@ -103,6 +158,16 @@ def file_components_entry(*dirs: Path) -> dict[str, Any]:
         "BACKEND": FILE_COMPONENTS_BACKEND,
         "DIRS": [str(p) for p in dirs],
         "COMPONENTS_DIR": "_components",
+    }
+
+
+def watching_components_entry(*watch_roots: Path) -> dict[str, Any]:
+    """Build one entry whose backend watches the given roots outside ``DIRS``."""
+    return {
+        "BACKEND": WATCHING_COMPONENTS_BACKEND,
+        "DIRS": [],
+        "COMPONENTS_DIR": "_components",
+        "WATCH_ROOTS": [str(root) for root in watch_roots],
     }
 
 

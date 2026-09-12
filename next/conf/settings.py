@@ -3,7 +3,8 @@
 The `NextFrameworkSettings` class reads the user mapping lazily and merges it with
 `DEFAULTS` on first access. Merge results are cached until `reload()` drops the cache
 and emits `settings_reloaded`. Package managers that depend on the merged values
-subscribe to that signal and reset their own state.
+subscribe to that signal and reset their own state. The Django `setting_changed`
+receiver lives here too, because it reloads the singleton this module owns.
 """
 
 from __future__ import annotations
@@ -11,10 +12,12 @@ from __future__ import annotations
 from typing import Any, ClassVar, override
 
 from django.conf import settings
+from django.core.signals import setting_changed
 
 from .defaults import DEFAULTS, USER_SETTING
 from .frozen import freeze
 from .imports import clear_import_cache
+from .signals import dispatch_settings_reloaded
 
 
 class NextFrameworkSettings:
@@ -37,10 +40,6 @@ class NextFrameworkSettings:
         self._merged_cache = None
         self._attr_value_cache.clear()
         clear_import_cache()
-        # Deferred because next.conf.signals imports this module, which would
-        # close the next.conf.settings <-> next.conf.signals cycle.
-        from .signals import dispatch_settings_reloaded  # noqa: PLC0415
-
         dispatch_settings_reloaded(type(self))
 
     def _raw_user(self) -> dict[str, Any] | None:
@@ -68,7 +67,12 @@ class NextFrameworkSettings:
         }
     )
     STR_KEYS: ClassVar[frozenset[str]] = frozenset(
-        {"DEPENDENCY_RESOLVER", "URL_NAME_TEMPLATE", "URL_RESOLVER"}
+        {
+            "COMPONENT_TEMPLATE_LOADER",
+            "DEPENDENCY_RESOLVER",
+            "URL_NAME_TEMPLATE",
+            "URL_RESOLVER",
+        }
     )
     BOOL_KEYS: ClassVar[frozenset[str]] = frozenset(
         {
@@ -76,6 +80,7 @@ class NextFrameworkSettings:
             "STRICT_LOADING",
             "LAZY_COMPONENT_MODULES",
             "FORM_AUTODISCOVER",
+            "STATIC_DISCOVERY_CACHE",
         }
     )
 
@@ -107,7 +112,12 @@ class NextFrameworkSettings:
         return out
 
     def __getattr__(self, attr: str) -> Any:  # noqa: ANN401
-        """Return merged values for keys declared in `DEFAULTS`."""
+        """Return merged values for keys declared in `DEFAULTS`.
+
+        `DEFAULTS` is open for third-party keys and every value carries the
+        shape of its own key, so one accessor cannot name a narrower return.
+        `Any` is what lets each read site re-validate the shape it needs.
+        """
         if attr in self._attr_value_cache:
             return self._attr_value_cache[attr]
         if attr not in self.DEFAULTS:
@@ -143,3 +153,12 @@ def fail_loudly() -> bool:
     `DEBUG` cannot drift apart between the page loader and the component tag.
     """
     return bool(next_framework_settings.STRICT_LOADING or settings.DEBUG)
+
+
+def _on_setting_changed(*, setting: str, **kwargs) -> None:
+    """Reload framework settings when Django reports a matching change."""
+    if setting == USER_SETTING:
+        next_framework_settings.reload()
+
+
+setting_changed.connect(_on_setting_changed)

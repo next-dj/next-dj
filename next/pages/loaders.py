@@ -41,7 +41,7 @@ from .watch import get_pages_directories_for_watch
 
 if TYPE_CHECKING:
     import types
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Sequence
     from pathlib import Path
 
 
@@ -197,7 +197,7 @@ def reset_module_memo() -> None:
 
 
 # A single-slot holder mutated in place, so a reset needs no `global`.
-_ADDITIONAL_LAYOUTS_CACHE: dict[str, list[Path] | None] = {"value": None}
+_ADDITIONAL_LAYOUTS_CACHE: dict[str, tuple[Path, ...] | None] = {"value": None}
 
 
 def _reset_additional_layouts_cache(**kwargs) -> None:
@@ -451,8 +451,11 @@ class LayoutTemplateLoader(TemplateLoader):
         layout_files, _ = self._walk_ancestors(file_path, 0)
         return layout_files
 
-    def _get_additional_layout_files(self) -> list[Path]:
-        """Return root-level `layout.djx` files from each page backend `DIRS`."""
+    def _get_additional_layout_files(self) -> Sequence[Path]:
+        """Return root-level `layout.djx` files from each page backend `DIRS`.
+
+        The memo is a tuple, so a caller cannot reorder the shared result.
+        """
         cached = _ADDITIONAL_LAYOUTS_CACHE["value"]
         if cached is not None:
             return cached
@@ -466,7 +469,7 @@ class LayoutTemplateLoader(TemplateLoader):
             for d in self._get_pages_dirs_for_config(c)
             if d.exists() and (layout := d / "layout.djx").exists()
         )
-        result = list(dict.fromkeys(candidates))
+        result = tuple(dict.fromkeys(candidates))
         _ADDITIONAL_LAYOUTS_CACHE["value"] = result
         return result
 
@@ -509,16 +512,19 @@ class LayoutTemplateLoader(TemplateLoader):
 
 
 # A single-slot holder mutated in place, so a reset needs no `global`.
-_REGISTERED_LOADERS_CACHE: dict[str, list[TemplateLoader] | None] = {"value": None}
+_REGISTERED_LOADERS_CACHE: dict[str, tuple[TemplateLoader, ...] | None] = {
+    "value": None
+}
 
 
-def build_registered_loaders() -> list[TemplateLoader]:
+def build_registered_loaders() -> Sequence[TemplateLoader]:
     """Instantiate `TEMPLATE_LOADERS` dotted paths into `TemplateLoader` instances.
 
     Entries that cannot be imported or are not `TemplateLoader` subclasses
     are skipped with a debug-level log. `check_template_loaders` is the
     user-visible report for the same misconfigurations. The result is
-    memoised and reset on `settings_reloaded`.
+    memoised as a tuple and reset on `settings_reloaded`, so a caller
+    cannot reorder the chain every later render reads.
     """
     cached = _REGISTERED_LOADERS_CACHE["value"]
     if cached is not None:
@@ -547,8 +553,9 @@ def build_registered_loaders() -> list[TemplateLoader]:
         seen.add(cls)
         instances.append(cls())
 
-    _REGISTERED_LOADERS_CACHE["value"] = instances
-    return instances
+    memoised = tuple(instances)
+    _REGISTERED_LOADERS_CACHE["value"] = memoised
+    return memoised
 
 
 def _reset_registered_loaders_cache(**kwargs) -> None:

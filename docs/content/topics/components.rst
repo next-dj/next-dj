@@ -132,8 +132,8 @@ A ``{% component %}`` tag resolves its name through the mapping of names visible
 That mapping and the scope index behind it are derived from the version counter of the registry, so they are rebuilt when a component registers or a backend reloads, not on every render.
 
 The ``component.py`` of a component is imported once per process and kept between requests.
-Its template body is parsed once and reused until the file it was read from changes, so an edited ``.djx`` reaches the next render without a restart.
-A process that does not watch template edits skips that comparison, and a warm render there costs neither a read nor a parse.
+Its template body is parsed once and reused, and in a process that watches template edits the entry is revalidated against the modification time of the file it was read from, so an edited ``.djx`` reaches the next render without a restart.
+Watching is tied to ``settings.DEBUG``, so a production process skips that comparison entirely, a warm render costs neither a read nor a parse, and an edited file stays invisible until the next restart.
 See :doc:`/content/internals/component-pipeline` for the module cache, the template loader, and the visibility resolver.
 
 Calling a component
@@ -203,13 +203,13 @@ Multiline tags
 ~~~~~~~~~~~~~~
 
 Both the void form and the block form accept line breaks inside the tag body, which is useful when a component takes many props.
-The framework enables ``re.DOTALL`` for Django's tag lexer at startup, so tag bodies wrap across lines in every template type.
+The framework widens the ``{% ... %}`` alternative of Django's tag pattern at startup, so a block tag body wraps across lines in every template type.
 
 .. warning::
 
-   This changes template parsing for **every** template the process loads, not only DJX files.
+   The wider block-tag rule reaches **every** template the process loads, not only DJX files.
    If you rely on Django's stock behaviour where a newline inside ``{% ... %}`` ends the tag, adjust those templates before adopting next.dj.
-   The patch is applied once at import time and is one-way, so the original Django pattern is not restored when the components template tag library is unloaded.
+   Variables and comments are left alone, and the rebind happens once during ``AppConfig.ready`` and is one-way, so the stock Django pattern does not come back while the process runs.
 
 .. code-block:: jinja
    :caption: multiline void tag
@@ -457,7 +457,8 @@ Hot reload
 
 The development server reloads when a ``component.py`` changes inside a watched component folder.
 The watched folders are the ``DIRS`` roots configured on a backend and the page-tree component folders the URL router walks.
-Template-only edits to ``.djx`` files are reflected on the next request without a process restart.
+Template-only edits to ``.djx`` files trigger no reload and are instead picked up on the next request, because the template cache revalidates its entries under ``DEBUG``.
+With ``DEBUG`` off neither mechanism applies and an edited ``.djx`` waits for a restart, which :doc:`/content/deployment/settings` covers.
 
 Component backends
 ------------------

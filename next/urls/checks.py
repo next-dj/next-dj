@@ -268,7 +268,7 @@ def check_next_pages_configuration(*args, **kwargs) -> list[CheckMessage]:
                 "NEXT_FRAMEWORK['PAGE_BACKENDS'] must be a list of "
                 "configuration dictionaries.",
                 obj=settings,
-                id="next.E001",
+                id="next.E081",
             )
         ]
 

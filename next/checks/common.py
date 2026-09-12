@@ -12,6 +12,7 @@ from django.core.checks import CheckMessage, Error
 
 from next.conf.imports import import_class_cached
 from next.conf.signals import settings_reloaded
+from next.ports import router_access_slot
 from next.utils import page_roots_shape_error, walk_page_tree
 
 
@@ -19,7 +20,6 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-    from next.components.manager import ComponentsManager
     from next.urls import RouterBackend, RouterManager
     from next.utils import PageRoot
 
@@ -152,12 +152,11 @@ def errors_for_unknown_keys(
     ]
 
 
-# One manager per `manage.py check` run instead of rescanning the page and
-# component trees for every registered check.
+# One manager per `manage.py check` run instead of rescanning the page
+# tree for every registered check.
 _ROUTER_MANAGER_CACHE: dict[
     str, tuple[RouterManager | None, list[CheckMessage]] | None
 ] = {"value": None}
-_COMPONENTS_MANAGER_CACHE: dict[str, ComponentsManager | None] = {"value": None}
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,14 +202,12 @@ def get_router_manager() -> tuple[RouterManager | None, list[CheckMessage]]:
     cached = _ROUTER_MANAGER_CACHE["value"]
     if cached is not None:
         return cached
-    # next.urls.checks imports next.checks.common, so the manager import is
-    # deferred here to break the next.checks.common <-> next.urls cycle.
-    from next.urls import RouterManager  # noqa: PLC0415
-
     result: tuple[RouterManager | None, list[CheckMessage]]
     try:
-        router_manager = RouterManager()
-        router_manager.reload()
+        router_manager = router_access_slot.get().create_manager()
+        # Throwaway manager for this check run, so the live URL caches and the
+        # memos hanging off `router_reloaded` stay warm.
+        router_manager.reload(notify=False)
     except (ImportError, AttributeError) as e:
         error = Error(
             f"Error initializing router manager: {e}", obj=settings, id="next.E007"
@@ -233,47 +230,7 @@ def reset_router_manager_cache(**kwargs) -> None:
     _CACHED_ROUTERS.clear()
 
 
-def get_components_manager() -> ComponentsManager:
-    """Return a per-run cached `ComponentsManager` holding every component source.
-
-    The manager is the checks' own, because the live registry holds only what requests
-    have already made the router walk. Invalidated like `get_router_manager`.
-    """
-    cached = _COMPONENTS_MANAGER_CACHE["value"]
-    if cached is not None:
-        return cached
-    # next.components imports next.conf, which imports next.checks.common during
-    # app setup, so the manager import is deferred here to break that cycle.
-    from next.components.manager import ComponentsManager  # noqa: PLC0415
-
-    manager = ComponentsManager()
-    manager.reload()
-    _COMPONENTS_MANAGER_CACHE["value"] = manager
-    _register_page_tree_component_folders(manager)
-    return manager
-
-
-def _register_page_tree_component_folders(manager: ComponentsManager) -> None:
-    """Register every components folder the configured page trees carry.
-
-    The folders and the registration are the router's own, so a check reads
-    the store a render would resolve against.
-    """
-    router_manager, _errors = get_router_manager()
-    if router_manager is None:
-        return
-    for router in router_manager.backends:
-        for folder, tree_root, route_trail in iter_page_tree_component_folders(router):
-            manager.register_router_walk_folder(folder, tree_root, route_trail)
-
-
-def reset_components_manager_cache(**kwargs) -> None:
-    """Drop the cached `ComponentsManager` so the next check run rebuilds it."""
-    _COMPONENTS_MANAGER_CACHE["value"] = None
-
-
 settings_reloaded.connect(reset_router_manager_cache)
-settings_reloaded.connect(reset_components_manager_cache)
 
 
 def first_visit(path: Path, seen: set[Path]) -> bool:
@@ -461,7 +418,6 @@ __all__ = [
     "PageRootsError",
     "errors_for_unknown_keys",
     "first_visit",
-    "get_components_manager",
     "get_page_roots",
     "get_pages_directories",
     "get_router_manager",
@@ -470,6 +426,5 @@ __all__ = [
     "iter_scanned_page_pairs",
     "page_tree_skip_names",
     "read_page_roots",
-    "reset_components_manager_cache",
     "reset_router_manager_cache",
 ]

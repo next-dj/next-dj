@@ -8,6 +8,7 @@ import pytest
 from django.core.exceptions import ImproperlyConfigured
 
 from next.deps import Depends
+from next.deps.linear import LinearDependencyResolver
 from next.deps.resolver import (
     DependencyResolver,
     _configured_resolver_class,
@@ -18,6 +19,7 @@ from next.testing import override_next_settings, resolve_call
 
 
 DEFAULT_PATH = "next.deps.DependencyResolver"
+LINEAR_PATH = "next.deps.linear.LinearDependencyResolver"
 WIDE_SKIP_PATH = "tests.deps.test_setting.WideSkipResolver"
 SLOTTED_PATH = "tests.deps.test_setting.SlottedResolver"
 
@@ -155,6 +157,13 @@ class TestApplyResolverSetting:
         apply_with(DEFAULT_PATH)
         assert type(resolver) is DependencyResolver
         assert resolve_call(widget) == {"size": 3, "label": "plain"}
+
+    def test_the_linear_resolver_ships_as_a_selectable_alternative(self) -> None:
+        """The reference resolver is reachable through the setting like any other."""
+        apply_with(LINEAR_PATH)
+        assert type(resolver) is LinearDependencyResolver
+        assert resolve_call(widget) == {"size": 3, "label": "plain"}
+        assert dict(resolver._plan_cache) == {}
 
     def test_incompatible_layout_raises_improperly_configured(self) -> None:
         """A subclass declaring slots cannot be taken on in place."""

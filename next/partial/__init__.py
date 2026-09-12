@@ -1,7 +1,7 @@
 """Public facade for the partial-rendering subsystem."""
 
 from . import signals
-from .backends import PartialProtocolBackend
+from .backends import JsonPartialProtocolBackend, PartialProtocolBackend
 from .envelope import Asset, Envelope, FormMeta, Patch
 from .errors import ForeignPageNotAuthorizedError, LayerHrefWithoutZoneError
 from .headers import is_partial_request, partial_intent
@@ -18,6 +18,7 @@ __all__ = [
     "Envelope",
     "ForeignPageNotAuthorizedError",
     "FormMeta",
+    "JsonPartialProtocolBackend",
     "LayerHrefWithoutZoneError",
     "PartialProtocolBackend",
     "Patch",

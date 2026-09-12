@@ -451,7 +451,7 @@ Values behind ``Depends("name")`` are reused for the rest of the pass, as `Resol
 
 ``DEPENDENCY_RESOLVER`` in ``NEXT_FRAMEWORK`` names the class that performs every injection.
 It is an extension point for a ``DependencyResolver`` subclass rather than a switch between shipped implementations, and it is read at startup and on every settings reload, never per request.
-See :doc:`/content/internals/di-resolver` for how a plan is compiled, cached, and invalidated, and :doc:`/content/ref/settings` for the setting.
+See :doc:`/content/internals/di-resolver` for how a plan is compiled, cached, and invalidated, :doc:`/content/ref/settings` for the setting, and :doc:`extending` for where it sits among the extension mechanisms.
 
 Avoid ``from __future__ import annotations`` in DI modules
 ----------------------------------------------------------

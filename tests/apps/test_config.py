@@ -4,6 +4,7 @@ from contextlib import ExitStack
 from typing import TYPE_CHECKING, ClassVar
 from unittest.mock import Mock, patch
 
+import pytest
 from django.apps import apps
 from django.conf import settings
 from django.test import override_settings
@@ -14,15 +15,25 @@ from django.utils.autoreload import (
 )
 
 from next.apps import autoreload as next_autoreload, components as next_components
-from next.components import DummyBackend, FileComponentsBackend, components_manager
+from next.components import FileComponentsBackend, components_manager
 from next.deps import resolver
 from next.deps.resolver import _signature_cache
 from next.pages import loaders as pages_loaders
 from next.pages.watch import get_pages_directories_for_watch
+from next.partial.shaper import PartialShaperImpl
+from next.ports import PartialShaperSlot, RouterAccessSlot, StaticAssetsSlot
 from next.server import NextStatReloader
 from next.static import get_static_manager
+from next.static.manager import default_manager
 from next.urls import RouterFactory, router_manager
-from tests.support import MalformedRootsRouter, RaisingRootsRouter, importable_dir
+from next.urls.access import RouterAccessImpl
+from tests.support import (
+    DUMMY_COMPONENTS_BACKEND,
+    DummyComponentsBackend,
+    MalformedRootsRouter,
+    RaisingRootsRouter,
+    importable_dir,
+)
 
 
 if TYPE_CHECKING:
@@ -324,11 +335,13 @@ class TestComponentsInstall:
     def test_install_asks_every_backend_through_the_contract(self) -> None:
         # A backend resolving names on demand implements no eager pass, and the
         # hook it inherits is a public one, not a private attribute probed for.
-        config = {"BACKEND": "next.components.DummyBackend"}
+        config = {"BACKEND": DUMMY_COMPONENTS_BACKEND}
         try:
             with override_settings(NEXT_FRAMEWORK={"COMPONENT_BACKENDS": [config]}):
                 next_components.install()
-                assert isinstance(components_manager._backends[0], DummyBackend)
+                assert isinstance(
+                    components_manager._backends[0], DummyComponentsBackend
+                )
         finally:
             components_manager.reload()
 
@@ -358,12 +371,14 @@ class TestDependencyResolverInstall:
     STEPS: ClassVar[tuple[str, ...]] = (
         "_register_checks",
         "apply_resolver_setting",
+        "partial_shaper_slot",
+        "router_access_slot",
+        "static_assets_slot",
         "autoreload",
         "templates",
         "staticfiles",
         "components",
         "autodiscover_forms",
-        "partial_shaper_slot",
     )
 
     def test_ready_applies_the_setting_before_it_imports_user_modules(self) -> None:
@@ -380,10 +395,48 @@ class TestDependencyResolverInstall:
         assert made == [
             "_register_checks",
             "apply_resolver_setting",
+            "partial_shaper_slot.set",
+            "router_access_slot.set",
+            "static_assets_slot.set",
             "autoreload.install",
             "templates.install",
             "staticfiles.install",
             "components.install",
             "autodiscover_forms",
-            "partial_shaper_slot.set",
         ]
+
+    def test_ready_binds_the_partial_shaper_before_discovery_can_fail(self) -> None:
+        """A discovery failure leaves the shaper port bound for the process."""
+        config = apps.get_app_config("next")
+        slot = PartialShaperSlot()
+        with (
+            patch("next.apps.config.partial_shaper_slot", slot),
+            patch.object(next_components, "install", side_effect=RuntimeError("boom")),
+            pytest.raises(RuntimeError, match="boom"),
+        ):
+            config.ready()
+        assert isinstance(slot.get(), PartialShaperImpl)
+
+    def test_ready_binds_the_router_port_before_discovery_can_fail(self) -> None:
+        """The watcher and the checks find a router builder however ready ends."""
+        config = apps.get_app_config("next")
+        slot = RouterAccessSlot()
+        with (
+            patch("next.apps.config.router_access_slot", slot),
+            patch.object(next_components, "install", side_effect=RuntimeError("boom")),
+            pytest.raises(RuntimeError, match="boom"),
+        ):
+            config.ready()
+        assert isinstance(slot.get(), RouterAccessImpl)
+
+    def test_ready_binds_the_static_port_before_discovery_can_fail(self) -> None:
+        """The render path finds the lazy static handle however ready ends."""
+        config = apps.get_app_config("next")
+        slot = StaticAssetsSlot()
+        with (
+            patch("next.apps.config.static_assets_slot", slot),
+            patch.object(next_components, "install", side_effect=RuntimeError("boom")),
+            pytest.raises(RuntimeError, match="boom"),
+        ):
+            config.ready()
+        assert slot.get() is default_manager

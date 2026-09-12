@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Any, cast, override
 
 from django import template
-from django.template import base as template_base
 from django.template.base import (
     FilterExpression,
     Node,
@@ -35,9 +34,6 @@ from next.conf import fail_loudly, next_framework_settings
 from next.static import collect_component_assets
 from next.utils import on_forget_resolved_trees
 
-
-# Component tags span several lines, which Django's tag regex refuses by default.
-template_base.tag_re = re.compile(template_base.tag_re.pattern, re.DOTALL)
 
 logger = logging.getLogger(__name__)
 

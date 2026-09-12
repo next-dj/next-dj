@@ -168,6 +168,52 @@ class TestForgetManagerPageRoots:
         assert get_static_manager() is manager
 
 
+class TestAppListChanges:
+    """An `APP_DIRS` router routes new trees when the app list moves."""
+
+    def test_an_app_list_change_drops_the_cached_page_roots(
+        self, reset_default: None, tmp_path: Path
+    ) -> None:
+        """The override reaches the live manager, resolver memo and all."""
+        reset_default_manager()
+        manager = get_static_manager()
+        with mock.patch(
+            "next.static.manager.get_pages_directories_for_watch", return_value=[]
+        ):
+            assert manager.page_roots() == ()
+            stale_discovery = manager.discovery
+
+        with (
+            mock.patch(
+                "next.static.manager.get_pages_directories_for_watch",
+                return_value=[tmp_path],
+            ),
+            override_settings(INSTALLED_APPS=["django.contrib.contenttypes"]),
+        ):
+            assert manager.page_roots() == (tmp_path,)
+            assert manager.discovery is not stale_discovery
+
+    def test_an_unrelated_setting_change_keeps_the_cached_page_roots(
+        self, reset_default: None, tmp_path: Path
+    ) -> None:
+        """Only the app list moves what an `APP_DIRS` router reports."""
+        reset_default_manager()
+        manager = get_static_manager()
+        with mock.patch(
+            "next.static.manager.get_pages_directories_for_watch",
+            return_value=[tmp_path],
+        ):
+            assert manager.page_roots() == (tmp_path,)
+
+        with (
+            mock.patch(
+                "next.static.manager.get_pages_directories_for_watch", return_value=[]
+            ),
+            override_settings(LANGUAGE_CODE="fr"),
+        ):
+            assert manager.page_roots() == (tmp_path,)
+
+
 class TestReloadConfig:
     def test_reload_rebuilds_backends(self) -> None:
         manager = StaticManager()

@@ -7,6 +7,7 @@ import pytest
 
 from next.static import StaticAsset, StaticCollector
 from next.static.collector import (
+    _EMPTY,
     HEAD_CLOSE,
     DeepMergePolicy,
     FirstWinsPolicy,
@@ -44,8 +45,21 @@ class TestStaticCollectorOrdering:
             collector.add(StaticAsset(url=url, kind="css"))
         assert [asset.url for asset in collector.assets_in_slot("styles")] == urls
 
-    def test_unknown_slot_returns_empty_list(self, collector: StaticCollector) -> None:
-        assert collector.assets_in_slot("never-registered") == []
+    def test_unknown_slot_returns_an_empty_sequence(
+        self, collector: StaticCollector
+    ) -> None:
+        assert collector.assets_in_slot("never-registered") == ()
+
+    def test_a_missed_slot_hands_back_one_shared_immutable_answer(
+        self, collector: StaticCollector
+    ) -> None:
+        """Nothing registered means no allocation and nothing to append to."""
+        first = collector.assets_in_slot("never-registered")
+
+        assert first is _EMPTY
+        assert first is collector.assets_in_slot("also-never-registered")
+        with pytest.raises(AttributeError):
+            first.append(StaticAsset(url=CSS_URL, kind="css"))
 
 
 class TestStaticCollectorDedup:
@@ -226,6 +240,16 @@ class TestHashContentDedup:
         collector.add(StaticAsset(url="/a.css", kind="css"))
         collector.add(StaticAsset(url="/a.css", kind="css"))
         assert len(collector.assets_in_slot("styles")) == 1
+
+    def test_inline_bodies_dedupe_by_body(self) -> None:
+        """An inline block carries no file, so its body is the whole key."""
+        collector = StaticCollector(dedup=HashContentDedup())
+        collector.add(StaticAsset(url="", kind="css", inline=".x {}"))
+        collector.add(StaticAsset(url="", kind="css", inline=".x {}"))
+        assert len(collector.assets_in_slot("styles")) == 1
+
+        collector.add(StaticAsset(url="", kind="css", inline=".y {}"))
+        assert len(collector.assets_in_slot("styles")) == 2
 
 
 class TestIdentityDedup:

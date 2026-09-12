@@ -23,12 +23,8 @@ from django.template.base import Node, NodeList, TextNode
 from django.template.defaulttags import ForNode, IfNode, WithNode
 
 from next.checks import NEXT
-from next.checks.common import (
-    first_visit,
-    get_components_manager,
-    get_router_manager,
-    iter_scanned_page_pairs,
-)
+from next.checks.common import first_visit, get_router_manager, iter_scanned_page_pairs
+from next.components.sources import get_components_manager
 from next.conf import import_class_cached, next_framework_settings
 from next.conf.signals import settings_reloaded
 from next.forms.backends import FormActionBackend

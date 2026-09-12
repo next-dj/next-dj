@@ -200,7 +200,9 @@ Checks
       * - Error
         - Condition
       * - ``next.E001``
-        - ``NEXT_FRAMEWORK`` is not a dictionary, or ``PAGE_BACKENDS`` is not a list.
+        - ``NEXT_FRAMEWORK`` is not a dictionary.
+      * - ``next.E081``
+        - ``PAGE_BACKENDS`` is not a list.
       * - ``next.E022``
         - ``PAGE_BACKENDS`` is an empty list.
       * - ``next.E002``
