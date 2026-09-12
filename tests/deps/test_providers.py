@@ -1,4 +1,5 @@
 import inspect
+from operator import attrgetter
 from typing import ClassVar
 from unittest.mock import MagicMock
 
@@ -28,6 +29,7 @@ from tests.support import (
     URL_KWARGS_RESOLVE_CASES,
     AForm,
     CoerceUrlValueCase,
+    ContextMarkerCase,
     DeferringProvider,
     OtherForm,
     UrlByAnnotationResolveCase,
@@ -366,7 +368,9 @@ class TestReservedContextKeys:
         ctx = _ctx(context_data={"request": "from-context"})
         assert provider.resolve(param, ctx) == "fallback"
 
-    @pytest.mark.parametrize("source", [None, "request"])
+    @pytest.mark.parametrize(
+        "source", [None, "request"], ids=["from_param_name", "from_named_key"]
+    )
     def test_the_compiled_default_marker_reads_no_reserved_key(self, source) -> None:
         provider = ContextByDefaultProvider(resolver)
         marker = Context(source, default="fallback")
@@ -394,34 +398,29 @@ def _made(page_value: int = Context("page_value")) -> str:
     return f"made-{page_value}"
 
 
+CONTEXT_MARKER_CASES: tuple[ContextMarkerCase, ...] = (
+    ContextMarkerCase("from_param_name", None, {"value": 7}, 7),
+    ContextMarkerCase("from_named_key", "page_value", {"page_value": 7}, 7),
+    ContextMarkerCase("missing_key", None, {}, "fallback"),
+    ContextMarkerCase("missing_named_key", "page_value", {}, "fallback"),
+    ContextMarkerCase("callable_source", _made, {"page_value": 7}, "made-7"),
+    ContextMarkerCase("constant_source", 42, {}, 42),
+)
+
+
 class TestContextMarkerForms:
     """Both paths of the `Context` marker answer the same for every source."""
 
-    CASES: ClassVar[list[tuple[str, object, str, dict[str, object], object]]] = [
-        ("from_param_name", None, "value", {"value": 7}, 7),
-        ("from_named_key", "page_value", "value", {"page_value": 7}, 7),
-        ("missing_key", None, "value", {}, "fallback"),
-        ("missing_named_key", "page_value", "value", {}, "fallback"),
-        ("callable_source", _made, "value", {"page_value": 7}, "made-7"),
-        ("constant_source", 42, "value", {}, 42),
-    ]
-
-    @pytest.mark.parametrize(
-        ("source", "name", "context_data", "expected"),
-        [case[1:] for case in CASES],
-        ids=[case[0] for case in CASES],
-    )
-    def test_resolve_and_compiled_filler_agree(
-        self, source, name, context_data, expected
-    ) -> None:
+    @pytest.mark.parametrize("case", CONTEXT_MARKER_CASES, ids=attrgetter("id"))
+    def test_resolve_and_compiled_filler_agree(self, case: ContextMarkerCase) -> None:
         provider = ContextByDefaultProvider(DependencyResolver())
-        context = {"context_data": context_data}
-        param = inspect_parameter(name, default=Context(source, default="fallback"))
+        marker = Context(case.source, default="fallback")
+        param = inspect_parameter("value", default=marker)
         fill = provider.compile_resolve(param)
         assert fill is not None
-        resolved = provider.resolve(param, make_resolution_context(**context))
-        assert resolved == expected
-        assert fill(make_resolution_context(**context)) == expected
+        context = make_resolution_context(context_data=case.context_data)
+        assert provider.resolve(param, context) == case.expected
+        assert fill(context) == case.expected
 
     def test_resolve_ignores_a_default_that_is_no_marker(self) -> None:
         provider = ContextByDefaultProvider(DependencyResolver())

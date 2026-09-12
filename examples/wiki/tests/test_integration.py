@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pytest
 from django.core.exceptions import ValidationError
+from django.http import Http404
 from django.urls import path, reverse
 from wiki.backends import HybridRouterBackend
 from wiki.models import Article
@@ -29,6 +30,13 @@ if TYPE_CHECKING:
 
 
 pytestmark = pytest.mark.django_db
+
+
+def _article_param(annotation: object) -> inspect.Parameter:
+    """Build the parameter a page would declare with the given annotation."""
+    return inspect.Parameter(
+        "item", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=annotation
+    )
 
 
 def _origin_field(html: str) -> str:
@@ -394,14 +402,46 @@ class TestUnits:
         with pytest.raises(ValidationError):
             article.clean()
 
+    @pytest.mark.parametrize(
+        ("annotation", "expected"),
+        [(DArticle[Article], True), (Article, False)],
+        ids=["marker", "plain_model"],
+    )
+    def test_provider_static_verdict_agrees_with_can_handle(
+        self, annotation, expected
+    ) -> None:
+        """The annotation settles the match, so both verdicts read the same."""
+        provider = ArticleProvider()
+        param = _article_param(annotation)
+        ctx = make_resolution_context(url_kwargs={"slug": "routing"})
+        assert provider.static_can_handle(param) is expected
+        assert provider.can_handle(param, ctx) is expected
+
     def test_provider_returns_none_for_missing_slug(self) -> None:
-        param = inspect.Parameter(
-            "item",
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=DArticle[Article],
-        )
+        provider = ArticleProvider()
+        param = _article_param(DArticle[Article])
         ctx = make_resolution_context(url_kwargs={})
-        assert ArticleProvider().resolve(param, ctx) is None
+        assert provider.compile_resolve(param)(ctx) is None
+        assert provider.resolve(param, ctx) is None
+
+    def test_provider_compiled_filler_matches_resolve(
+        self, routing_doc: Article
+    ) -> None:
+        provider = ArticleProvider()
+        param = _article_param(DArticle[Article])
+        ctx = make_resolution_context(url_kwargs={"slug": routing_doc.slug})
+        assert provider.compile_resolve(param)(ctx) == routing_doc
+        assert provider.resolve(param, ctx) == routing_doc
+
+    def test_provider_paths_raise_404_for_unknown_slug(self) -> None:
+        provider = ArticleProvider()
+        param = _article_param(DArticle[Article])
+        ctx = make_resolution_context(url_kwargs={"slug": "nothing-here"})
+        fill = provider.compile_resolve(param)
+        with pytest.raises(Http404):
+            fill(ctx)
+        with pytest.raises(Http404):
+            provider.resolve(param, ctx)
 
     def test_hybrid_backend_skips_aliases_when_catchall_absent(
         self, routing_doc: Article

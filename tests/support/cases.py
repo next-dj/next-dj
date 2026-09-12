@@ -150,6 +150,21 @@ class PlanCase:
     expected: dict[str, object]
 
 
+@dataclass(frozen=True, slots=True)
+class ContextMarkerCase:
+    """One `Context` marker source, resolved against one template context.
+
+    `source` is what the marker was built with, a name, a callable, a constant,
+    or None for the parameter name, and `expected` the value both the plain
+    resolve and the compiled filler have to answer.
+    """
+
+    id: str
+    source: object
+    context_data: dict[str, object]
+    expected: object
+
+
 # Sentinels the matrix reads specially: RAISE makes the hook raise
 # PermissionDenied, BAD_TYPE makes it return an unsupported type.
 PERMISSION_HOOK_RAISE = object()

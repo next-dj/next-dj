@@ -54,7 +54,7 @@ Tailwind loads via the Play CDN in the shared [`page_head`](../_shared/_componen
 The chain has three links:
 
 1. [`notes/middleware.py`](notes/middleware.py) parses `X-Tenant` and looks up the matching `Tenant` row. Missing slug → `400`. Unknown slug → `404`. Match → `request.tenant = tenant`. Paths under `/_t/` return early without resolving anything, because the per-tenant asset URLs of section 2 already carry the slug in the path and a browser never puts the header on an asset request.
-2. [`notes/providers.py`](notes/providers.py) defines `DTenant` (a `DDependencyBase` marker) and `TenantProvider`, a `RegisteredParameterProvider`. The provider matches when `param.annotation is DTenant` and `request.tenant` is set. `apps.py` imports the module on startup so the auto-registry picks it up.
+2. [`notes/providers.py`](notes/providers.py) defines `DTenant` (a `DDependencyBase` marker) and `TenantProvider`, a `RegisteredParameterProvider`. The provider matches when `param.annotation is DTenant` and `request.tenant` is set. `static_can_handle` answers `False` for any other annotation, so the plan compiler keeps the provider out of unrelated parameters, and `None` for `DTenant`, whose tenant check stays in `can_handle`. `apps.py` imports the module on startup so the auto-registry picks it up.
 3. Pages and form actions request the tenant by name and type:
 
    ```python
@@ -63,7 +63,7 @@ The chain has three links:
        return list(Note.objects.filter(tenant=active_tenant))
    ```
 
-   The framework injects the `Tenant` instance directly. Page modules in the example do not start with `from __future__ import annotations`, because the DI resolver compares parameter annotations by identity.
+   The framework injects the `Tenant` instance directly. Page modules never start with `from __future__ import annotations` and import `DTenant` at runtime. The resolver does evaluate string hints through `get_type_hints`, but a single name it cannot evaluate — a marker or a model imported only under `if TYPE_CHECKING` — drops the whole callable back to its raw annotations, where `get_origin` sees a string and the parameter silently falls through to another provider.
 
 ### 2. Per-tenant static URL prefix
 

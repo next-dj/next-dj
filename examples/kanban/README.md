@@ -196,7 +196,9 @@ Creating a card has the same shape plus one extra problem. The action answers wi
 
 `CreateColumnForm` cannot use that route. It creates a row under the board rather than editing one, so there is no instance to load. It carries `board_id` as a hidden field instead and its `on_valid` takes `board: DBoard[Board]`, which `BoardProvider` resolves from `url_kwargs["id"]` when a page renders and from POST `board_id` when the dispatcher handles the action. `CardProvider` mirrors the pattern for `DCard[Card]` against POST `card_id`.
 
-Modules that use these markers do not start with `from __future__ import annotations`, because the DI resolver compares parameter annotations by identity.
+The two providers answer `static_can_handle` differently, and the difference is the point. `BoardProvider` settles a `DBoard[...]` parameter from the annotation alone, so it returns `True`, becomes the terminal of that parameter in the compiled injection plan, and implements `compile_resolve` to read the model out of the annotation once per plan instead of once per resolve. `CardProvider` also needs a POST `card_id` before it owns anything, so it returns `False` for a foreign annotation and `None` for `DCard[...]`, which keeps it a runtime candidate whose `can_handle` runs per request — the compiler never asks it for a filler. `BoardProvider` routes both `resolve` and its compiled filler through one module-level fetch helper, so the two paths cannot drift apart.
+
+Modules that use these markers never start with `from __future__ import annotations` and import both the marker and the model at runtime. The resolver does evaluate string hints through `get_type_hints`, but a single name it cannot evaluate — a marker or a model imported only under `if TYPE_CHECKING` — drops the whole callable back to its raw annotations, where `get_origin` sees a string and the parameter silently falls through to another provider.
 
 ## Gotchas
 

@@ -87,19 +87,27 @@ class FiltersProvider(RegisteredParameterProvider):
             return False
         return getattr(context, "request", None) is not None
 
+    def static_can_handle(self, param: inspect.Parameter) -> bool | None:
+        """Rule out a foreign annotation. A match still needs an attached request."""
+        return None if param.annotation is DFilters else False
+
     def resolve(self, _param: inspect.Parameter, context: ResolutionContext) -> Filters:
         """Return a `Filters` snapshot derived from the current request."""
         return parse_filters(context.request)
 
 
 class PageProvider(RegisteredParameterProvider):
-    """Resolve `DPage[T]`-annotated parameters into a `PageRequest`."""
+    """Resolve `DPage`-annotated parameters into a `PageRequest`."""
 
     def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:
         """Match `DPage` annotations when a request is attached."""
         if param.annotation is not DPage:
             return False
         return getattr(context, "request", None) is not None
+
+    def static_can_handle(self, param: inspect.Parameter) -> bool | None:
+        """Rule out a foreign annotation. A match still needs an attached request."""
+        return None if param.annotation is DPage else False
 
     def resolve(
         self, _param: inspect.Parameter, context: ResolutionContext

@@ -274,23 +274,35 @@ class DLink[T](DDependencyBase[T]):
     __slots__ = ()
 
 
+def _by_url_slug(model_cls, context):
+    slug = context.url_kwargs["slug"]
+    try:
+        return model_cls.objects.get(slug=str(slug))
+    except model_cls.DoesNotExist as exc:
+        raise Http404 from exc
+
+
 class LinkProvider(RegisteredParameterProvider):
     def can_handle(self, param, _context) -> bool:
+        return self.static_can_handle(param)
+
+    def static_can_handle(self, param) -> bool:
         return get_origin(param.annotation) is DLink
 
     def resolve(self, param, context):
         (model_cls,) = get_args(param.annotation)
-        slug = context.url_kwargs["slug"]
-        try:
-            return model_cls.objects.get(slug=str(slug))
-        except model_cls.DoesNotExist as exc:
-            raise Http404 from exc
+        return _by_url_slug(model_cls, context)
+
+    def compile_resolve(self, param):
+        (model_cls,) = get_args(param.annotation)
+        return partial(_by_url_slug, model_cls)
 ```
 
-Two non-obvious details:
+Three non-obvious details:
 
 1. **Python 3.12 generic syntax is required.** `class DLink[T](DDependencyBase[T])` makes `DLink[Link]` a parameterised generic whose origin is `DLink`. Writing `class DLink(DDependencyBase[Link])` instead gives you a non-generic class and `get_origin(DLink[Link])` returns `None`.
 2. **Register the provider before the resolver caches its provider list.** [`apps.py`](shortener/apps.py) imports `shortener.providers` from `AppConfig.ready()`. The `RegisteredParameterProvider.__init_subclass__` hook records the class at import time, so importing early makes the class part of the resolver snapshot.
+3. **The verdict is static and the lookup is compiled.** `static_can_handle` answers from the annotation alone, so the plan compiler names `LinkProvider` the owner of that parameter once per callable instead of polling every provider on every request, and `compile_resolve` unpacks the model out of `DLink[Link]` once per plan so a request pays for the query alone. Both paths call the same `_by_url_slug`, so the compiled filler can never drift from `resolve`.
 
 Use it anywhere:
 
@@ -353,7 +365,7 @@ def _on_action_dispatched(action_name: str, **kwargs) -> None:
 
 ### PEP 563 and DI annotations
 
-The DI resolver inspects `inspect.signature(func).parameters[...].annotation`. Under `from __future__ import annotations` that annotation is a **string**, and `typing.get_origin(string)` returns `None` — your `DLink[Link]` parameter will not be resolved.
+The DI resolver reads the resolved type hints of a callable, so deferred annotations do not break a `DLink[Link]` parameter by themselves — they make the failure silent and total instead. A single name the resolver cannot evaluate drops the whole callable back to its raw annotations, where every parameter is a **string**, `typing.get_origin(string)` returns `None`, and `LinkProvider` never claims the parameter.
 
 Two rules:
 

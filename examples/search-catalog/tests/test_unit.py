@@ -6,7 +6,10 @@ from catalog.demo import seed_demo
 from catalog.forms import PRESETS, PresetFilterForm
 from catalog.models import Category, Product
 from catalog.providers import (
+    DFilters,
+    DPage,
     Filters,
+    FiltersProvider,
     PageProvider,
     PageRequest,
     _decimal_or_none,
@@ -20,17 +23,15 @@ from django.core.management import call_command
 pytestmark = pytest.mark.django_db
 
 
-class _PageParam:
-    """Stand-in for the `page` parameter the provider is asked to resolve."""
-
-    name = "page"
-    annotation = None
+def _param(annotation: object) -> SimpleNamespace:
+    """Stand-in for a parameter carrying the annotation a provider reads."""
+    return SimpleNamespace(name="value", annotation=annotation)
 
 
 def _resolve_page(rf, query: str) -> PageRequest:
     """Run `PageProvider` against a request carrying `query`."""
     request = rf.get("/" + (f"?{query}" if query else ""))
-    return PageProvider().resolve(_PageParam(), SimpleNamespace(request=request))
+    return PageProvider().resolve(_param(None), SimpleNamespace(request=request))
 
 
 class TestDemoData:
@@ -151,6 +152,48 @@ class TestPageProvider:
     def test_resolve_clamps_and_falls_back(self, rf, query, expected) -> None:
         """Clamp both paging values and fall back on anything unparsable."""
         assert _resolve_page(rf, query) == expected
+
+    @pytest.mark.parametrize(
+        ("annotation", "expected"),
+        [(DPage, None), (int, False)],
+        ids=("own_marker", "foreign_annotation"),
+    )
+    def test_static_can_handle(self, annotation, expected) -> None:
+        """Drop a foreign annotation for good and leave `DPage` to the context."""
+        assert PageProvider().static_can_handle(_param(annotation)) is expected
+
+    @pytest.mark.parametrize(
+        ("annotation", "attached", "expected"),
+        [(DPage, True, True), (DPage, False, False), (int, True, False)],
+        ids=("marker_with_request", "marker_without_request", "foreign_annotation"),
+    )
+    def test_can_handle(self, rf, annotation, attached, expected) -> None:
+        """Claim `DPage` only while the context carries a request."""
+        context = SimpleNamespace(request=rf.get("/") if attached else None)
+        assert PageProvider().can_handle(_param(annotation), context) is expected
+
+
+class TestFiltersProvider:
+    """Cover the static and contextual verdicts of `FiltersProvider`."""
+
+    @pytest.mark.parametrize(
+        ("annotation", "expected"),
+        [(DFilters, None), (int, False)],
+        ids=("own_marker", "foreign_annotation"),
+    )
+    def test_static_can_handle(self, annotation, expected) -> None:
+        """Drop a foreign annotation for good and leave `DFilters` to the context."""
+        assert FiltersProvider().static_can_handle(_param(annotation)) is expected
+
+    @pytest.mark.parametrize(
+        ("annotation", "attached", "expected"),
+        [(DFilters, True, True), (DFilters, False, False), (int, True, False)],
+        ids=("marker_with_request", "marker_without_request", "foreign_annotation"),
+    )
+    def test_can_handle(self, rf, annotation, attached, expected) -> None:
+        """Claim `DFilters` only while the context carries a request."""
+        context = SimpleNamespace(request=rf.get("/") if attached else None)
+        assert FiltersProvider().can_handle(_param(annotation), context) is expected
 
 
 class TestPresetFilterForm:

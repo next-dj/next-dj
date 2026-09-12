@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import inspect
 from unittest import mock
 
 import pytest
 from django.db import IntegrityError
+from django.http import Http404
 from shortener import cache as cache_module
 from shortener.cache import flush_clicks, increment_clicks
 from shortener.models import Link
+from shortener.providers import DLink, LinkProvider
 from shortener.receivers import action_counts
 from shortener.routes.page import (
     SLUG_ATTEMPTS_PER_LENGTH,
@@ -15,6 +18,7 @@ from shortener.routes.page import (
 )
 
 from next.forms.signals import action_dispatched
+from next.testing import make_resolution_context
 
 
 pytestmark = pytest.mark.django_db
@@ -89,3 +93,55 @@ class TestReceivers:
         action_dispatched.send(sender=None, action_name="noop")
         action_dispatched.send(sender=None, action_name="noop")
         assert action_counts() == {"noop": 2}
+
+
+def _link_param(annotation: object) -> inspect.Parameter:
+    """Build the parameter a page would declare with the given annotation."""
+    return inspect.Parameter(
+        "link", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=annotation
+    )
+
+
+class TestLinkProvider:
+    """`LinkProvider` settles `DLink[...]` on the signature and compiles the lookup."""
+
+    @pytest.mark.parametrize(
+        ("annotation", "expected"),
+        [(DLink[Link], True), (Link, False), (inspect.Parameter.empty, False)],
+        ids=["marker", "plain_model", "no_annotation"],
+    )
+    def test_static_verdict_agrees_with_can_handle(self, annotation, expected) -> None:
+        provider = LinkProvider()
+        param = _link_param(annotation)
+        ctx = make_resolution_context(url_kwargs={"slug": "abc123"})
+        assert provider.static_can_handle(param) is expected
+        assert provider.can_handle(param, ctx) is expected
+
+    def test_compiled_filler_returns_what_resolve_returns(self, make_link) -> None:
+        link = make_link("compiled")
+        provider = LinkProvider()
+        param = _link_param(DLink[Link])
+        ctx = make_resolution_context(url_kwargs={"slug": "compiled"})
+        fill = provider.compile_resolve(param)
+        assert fill(ctx) == link
+        assert provider.resolve(param, ctx) == link
+
+    def test_both_paths_raise_404_for_an_unknown_slug(self) -> None:
+        provider = LinkProvider()
+        param = _link_param(DLink[Link])
+        ctx = make_resolution_context(url_kwargs={"slug": "missing"})
+        fill = provider.compile_resolve(param)
+        with pytest.raises(Http404):
+            fill(ctx)
+        with pytest.raises(Http404):
+            provider.resolve(param, ctx)
+
+    def test_both_paths_need_the_slug_kwarg(self) -> None:
+        provider = LinkProvider()
+        param = _link_param(DLink[Link])
+        ctx = make_resolution_context()
+        fill = provider.compile_resolve(param)
+        with pytest.raises(KeyError):
+            fill(ctx)
+        with pytest.raises(KeyError):
+            provider.resolve(param, ctx)
