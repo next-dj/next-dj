@@ -9,6 +9,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.dispatch import Signal
 
 from next.conf import import_class_cached, next_framework_settings
+from next.conf.defaults import DEFAULTS
 
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,29 @@ def resolve_backend_class[T](
     return klass
 
 
+def resolve_setting_class[T](
+    setting: str, *, base: type[T], shipped: type[T], base_path: str
+) -> type[T]:
+    """Return the class named by one dotted-path setting, checked against `base`.
+
+    The shipped default short-circuits the import helper, because a package binds its
+    own default class only after importing the module that reads the setting.
+    """
+    dotted = getattr(next_framework_settings, setting)
+    if dotted == DEFAULTS[setting]:
+        klass: type[Any] = shipped
+    else:
+        try:
+            klass = import_class_cached(dotted)
+        except ImportError as exc:
+            msg = f"NEXT_FRAMEWORK[{setting!r}] {dotted!r} could not be imported: {exc}"
+            raise ImproperlyConfigured(msg) from exc
+    if not isinstance(klass, type) or not issubclass(klass, base):
+        msg = f"NEXT_FRAMEWORK[{setting!r}] {dotted!r} is not a {base_path} subclass."
+        raise ImproperlyConfigured(msg)
+    return klass
+
+
 def _instantiate_backend[T](klass: type[T], config: Mapping[str, Any]) -> T:
     """Build one backend from its config entry.
 
@@ -69,11 +93,10 @@ def load_backends[T](
 ) -> list[T]:
     """Instantiate every configured backend, skipping the misconfigured entries.
 
-    An entry is misconfigured when its dotted path does not resolve into
-    the family, or when the backend itself answers `ImproperlyConfigured`.
-    Such an entry costs its own backend and nothing else, so a site keeps
-    serving with the rest. Anything else a constructor raises is a bug in
-    that backend and reaches the caller.
+    An entry is misconfigured when its dotted path does not resolve into the family, or
+    when the backend itself answers `ImproperlyConfigured`. Such an entry costs its own
+    backend and nothing else, so a site keeps serving with the rest. Anything else a
+    constructor raises is a bug in that backend and reaches the caller.
     """
     name = _root_class(base).__name__
     backends: list[T] = []
@@ -151,4 +174,5 @@ __all__ = [
     "backend_entries",
     "load_backends",
     "resolve_backend_class",
+    "resolve_setting_class",
 ]

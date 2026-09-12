@@ -51,6 +51,11 @@ The innermost wraps the page body.
 The middle layout wraps the result.
 The outermost layout wraps the result again.
 
+The cost of that composition follows the depth of the page directory, which the bounded walk caps, not the number of pages in the project.
+The composed template is kept per page and reused by later requests, under a snapshot of every file the composition read, each ancestor ``layout.djx`` among them, and of the directories the walk visited.
+In a process that watches template edits a layout that is edited, created, or deleted therefore reaches the next render rather than the next restart.
+See :doc:`/content/internals/page-discovery` for the snapshot and the staleness check that reads it.
+
 Layout-only directories
 ~~~~~~~~~~~~~~~~~~~~~~~
 

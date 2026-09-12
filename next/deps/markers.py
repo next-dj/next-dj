@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     import inspect
 
     from .context import ResolutionContext
+    from .plan import ParameterFiller
     from .resolver import DependencyResolver
 
 
@@ -102,3 +103,34 @@ class DependsProvider(RegisteredParameterProvider):
             return dep(**resolved)
 
         return dep
+
+    @override
+    def compile_resolve(self, param: inspect.Parameter) -> ParameterFiller | None:
+        """Settle which of the four forms the marker names, once per plan."""
+        marker: Depends = param.default
+        dep = marker.dependency
+        target = param.name if dep is None else dep
+        resolver = self._resolver
+
+        if isinstance(target, str):
+            name = target
+
+            def by_name(context: ResolutionContext) -> object:
+                return resolver._resolve_callable_dependency(name, context, param=param)
+
+            return by_name
+
+        if callable(target):
+            factory = target
+
+            def by_callable(context: ResolutionContext) -> object:
+                return factory(**resolver.resolve(factory, context))
+
+            return by_callable
+
+        constant = target
+
+        def by_constant(_context: ResolutionContext) -> object:
+            return constant
+
+        return by_constant

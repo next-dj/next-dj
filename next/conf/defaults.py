@@ -24,6 +24,7 @@ DEFAULTS: dict[str, Any] = {
     ],
     "URL_NAME_TEMPLATE": "page_{name}",
     "URL_RESOLVER": "next.urls.TrieURLResolver",
+    "DEPENDENCY_RESOLVER": "next.deps.DependencyResolver",
     "COMPONENT_BACKENDS": [
         {
             "BACKEND": "next.components.FileComponentsBackend",

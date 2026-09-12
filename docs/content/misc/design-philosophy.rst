@@ -120,6 +120,16 @@ The routed UI layer is the part that depends on next.dj, covering page modules, 
 Removing the framework therefore costs a view for every ``page.py``, a ``path()`` entry for every routed directory, a ``get_context_data`` for every ``@context`` callable, and a view plus a URL entry for every registered form action.
 Nothing below that layer moves.
 
+Pay at boot, not per request
+----------------------------
+
+The rejected alternative is answering the same structural question on every request, where a response re-walks the page tree, re-imports a module, and re-reads the signature of a callable because nothing kept the previous answer.
+next.dj pays discovery, registration, and introspection once instead, at process start or on the first request that needs them, and :doc:`/content/internals/overview` states which of those two stages pays for what.
+A warm request then reads dictionaries, indexes, and version-stamped caches rather than walking trees or inspecting callables, and :doc:`/content/internals/request-lifecycle` is the canonical account of what a response leaves behind and what every request still computes.
+
+The cost is bookkeeping, because a structure that outlives a response needs a key that invalidates it.
+Each cache carries one, a version counter or an mtime snapshot of the sources it was built from, which is what lets an edit to a source file reach the next request under ``DEBUG`` rather than the next restart.
+
 Trade-offs
 ----------
 

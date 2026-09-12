@@ -5,7 +5,7 @@ Multi-project setup
 
 A multi project setup hosts several Django projects from one repository.
 A shared UI kit lives in one place, each project pulls components from it, and each project keeps its own page tree.
-This page covers the directory shape, the ``DIRS`` configuration, the shared components convention, and the autoreload watchers that keep development fast.
+This page covers the directory shape, the ``DIRS`` configuration, the shared components convention, and the autoreload watchers that restart a development server when a shared directory it watches changes.
 
 .. contents::
    :local:

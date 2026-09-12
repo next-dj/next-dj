@@ -2,14 +2,17 @@ import copy
 import importlib
 import inspect
 import logging
+import sys
 import threading
 from dataclasses import dataclass
 from typing import NamedTuple
+from unittest.mock import ANY
 
 import pytest
 from django.http import HttpRequest
 
 from next.deps import (
+    RESERVED_KEYS,
     DependencyCycleError,
     DependencyResolver,
     Depends,
@@ -38,6 +41,7 @@ from tests.support import (
     _ctx,
     _minimal_resolver,
     _resolver_with_form,
+    bound_dependency,
     inspect_parameter,
 )
 
@@ -423,6 +427,75 @@ class TestResolverResolveDependencies:
         form = AForm()
         result = resolver.resolve_dependencies(fn, form=form)
         assert result == {"form": form}
+
+    def test_no_reserved_name_reaches_the_url_kwargs(self) -> None:
+        """Every reserved name is taken out of the mapping the providers read."""
+        seen: list[dict[str, object]] = []
+
+        def fn(plain) -> None:
+            return None
+
+        class _Recording(DeferringProvider):
+            def can_handle(self, param, context) -> bool:
+                seen.append(dict(context.url_kwargs))
+                return False
+
+        instance = DependencyResolver()
+        instance.prepend_provider(_Recording(None))
+        reserved = dict.fromkeys(RESERVED_KEYS, "taken")
+        instance.resolve_dependencies(fn, kept="url", **reserved)
+        assert seen == [{"kept": "url"}]
+
+    def test_a_reserved_name_outside_the_fixed_pops_is_stripped(
+        self, monkeypatch
+    ) -> None:
+        """A reserved name the code does not pop by hand is taken out all the same."""
+        seen: list[dict[str, object]] = []
+
+        def fn(plain) -> None:
+            return None
+
+        class _Recording(DeferringProvider):
+            def can_handle(self, param, context) -> bool:
+                seen.append(dict(context.url_kwargs))
+                return False
+
+        module = sys.modules["next.deps.resolver"]
+        monkeypatch.setattr(module, "_UNCLAIMED_RESERVED", ("extra",))
+        instance = DependencyResolver()
+        instance.prepend_provider(_Recording(None))
+        instance.resolve_dependencies(fn, kept="url", extra="taken")
+        assert seen == [{"kept": "url"}]
+
+    def test_a_cache_of_another_type_starts_a_private_one(self) -> None:
+        """A `_cache` that is neither a dict nor a cache leaves the resolve untouched."""
+
+        def fn(theme: str = Depends("theme")) -> None:
+            return None
+
+        instance = DependencyResolver()
+        instance.register_dependency("theme", lambda: "dark")
+        assert instance.resolve_dependencies(fn, _cache="stray") == {"theme": "dark"}
+
+    @pytest.mark.parametrize("shared", [dict, DependencyCache], ids=["dict", "cache"])
+    def test_a_shared_cache_is_read_and_written(self, shared) -> None:
+        """Both cache shapes a caller may hand over carry values across resolves."""
+
+        def fn(theme: str = Depends("theme")) -> None:
+            return None
+
+        instance = DependencyResolver()
+        calls: list[int] = []
+
+        def theme() -> str:
+            calls.append(1)
+            return "dark"
+
+        instance.register_dependency("theme", theme)
+        cache = shared()
+        assert instance.resolve_dependencies(fn, _cache=cache) == {"theme": "dark"}
+        assert instance.resolve_dependencies(fn, _cache=cache) == {"theme": "dark"}
+        assert calls == [1]
 
 
 class TestResolveWithTemplateContext:
@@ -873,7 +946,7 @@ _broken_annotation.__annotations__["value"] = "int |"
 
 
 class TestProviderContract:
-    """A provider joins a resolver only with a callable `static_can_handle`."""
+    """A provider joins a resolver only with the hooks the compiler calls."""
 
     def test_the_constructor_refuses_a_provider_without_the_hook(self) -> None:
         with pytest.raises(TypeError, match="_HooklessProvider") as exc_info:
@@ -906,6 +979,18 @@ class TestProviderContract:
 
         with pytest.raises(TypeError, match="Hookless"):
             DependencyResolver().resolve_dependencies(fn)
+
+    def test_a_compile_resolve_that_is_no_method_is_refused(self) -> None:
+        provider = DeferringProvider(None)
+        provider.compile_resolve = "not a call"
+        with pytest.raises(TypeError, match="DeferringProvider") as exc_info:
+            DependencyResolver(provider)
+        assert "compile_resolve" in str(exc_info.value)
+
+    def test_a_provider_leaving_the_optional_hook_out_is_adopted(self) -> None:
+        instance = DependencyResolver(DeferringProvider(None))
+        assert not hasattr(DeferringProvider, "compile_resolve")
+        assert instance._tail == [ANY]
 
 
 class TestUnhashableCallable:
@@ -1092,3 +1177,78 @@ class TestForgetDepCaches:
         assert not _type_hints_cache
         assert not _var_keyword_cache
         assert not resolver._plan_cache
+
+    def test_the_leaf_dependencies_are_emptied(self) -> None:
+        def fn(theme: str = Depends("theme")) -> None:
+            return None
+
+        with bound_dependency("theme", lambda: "dark"):
+            resolver.resolve_dependencies(fn)
+            assert resolver._leaf_dependencies == {"theme": ANY}
+            forget_dep_caches()
+            assert not resolver._leaf_dependencies
+
+
+class TestLeafDependencies:
+    """A dependency with nothing to inject is called without a nested replay."""
+
+    def test_a_leaf_is_noted_once_and_called_straight_after(self) -> None:
+        calls: list[int] = []
+
+        def theme() -> str:
+            calls.append(1)
+            return "dark"
+
+        def fn(theme: str = Depends("theme")) -> None:
+            return None
+
+        instance = DependencyResolver()
+        instance.register_dependency("theme", theme)
+        assert instance.resolve_dependencies(fn) == {"theme": "dark"}
+        assert instance._leaf_dependencies == {"theme": theme}
+        assert instance.resolve_dependencies(fn) == {"theme": "dark"}
+        assert calls == [1, 1]
+
+    def test_a_leaf_is_memoised_within_one_resolution(self) -> None:
+        calls: list[int] = []
+
+        def theme() -> str:
+            calls.append(1)
+            return "dark"
+
+        def fn(one: str = Depends("theme"), two: str = Depends("theme")) -> None:
+            return None
+
+        instance = DependencyResolver()
+        instance.register_dependency("theme", theme)
+        instance.resolve_dependencies(fn)
+        assert instance.resolve_dependencies(fn) == {"one": "dark", "two": "dark"}
+        assert calls == [1, 1]
+
+    def test_a_dependency_with_parameters_keeps_the_nested_replay(self) -> None:
+        def theme(pk: int = 0) -> str:
+            return f"dark-{pk}"
+
+        def fn(theme: str = Depends("theme")) -> None:
+            return None
+
+        instance = DependencyResolver()
+        instance.register_dependency("theme", theme)
+        assert instance.resolve_dependencies(fn, pk=7) == {"theme": "dark-7"}
+        assert instance._leaf_dependencies == {}
+        assert instance.resolve_dependencies(fn, pk=8) == {"theme": "dark-8"}
+
+    def test_a_rebound_name_is_looked_at_afresh(self) -> None:
+        def fn(theme: str = Depends("theme")) -> None:
+            return None
+
+        instance = DependencyResolver()
+        instance.register_dependency("theme", lambda: "dark")
+        assert instance.resolve_dependencies(fn) == {"theme": "dark"}
+
+        def themed(pk: int = 0) -> str:
+            return f"light-{pk}"
+
+        instance.register_dependency("theme", themed)
+        assert instance.resolve_dependencies(fn, pk=3) == {"theme": "light-3"}
+        assert instance._leaf_dependencies == {}

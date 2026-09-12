@@ -1,6 +1,7 @@
 from collections.abc import Generator
 
 import pytest
+from django.core.exceptions import ImproperlyConfigured
 from django.test import override_settings
 
 from next.conf import next_framework_settings
@@ -41,6 +42,28 @@ class TestSettingsReloadedSignal:
         with override_settings(NEXT_FRAMEWORK={}):
             pass
         assert len(capture_settings_reloaded) >= 1
+
+    def test_every_receiver_runs_before_an_error_leaves_the_reload(self) -> None:
+        """A receiver that raises does not stop the ones connected behind it."""
+        ran: list[str] = []
+        message = "bad value"
+
+        def failing(**kwargs) -> None:
+            ran.append("failing")
+            raise ImproperlyConfigured(message)
+
+        def following(**kwargs) -> None:
+            ran.append("following")
+
+        settings_reloaded.connect(failing)
+        settings_reloaded.connect(following)
+        try:
+            with pytest.raises(ImproperlyConfigured, match="bad value"):
+                next_framework_settings.reload()
+        finally:
+            settings_reloaded.disconnect(failing)
+            settings_reloaded.disconnect(following)
+        assert ran == ["failing", "following"]
 
     def test_does_not_fire_for_unrelated_setting(
         self, capture_settings_reloaded: SignalRecorder

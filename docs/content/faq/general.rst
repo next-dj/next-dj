@@ -16,6 +16,13 @@ next.dj is a framework built on Django, not a replacement for it.
 It adds file-based routing, a layout system, reusable components, form dispatch, and partial rendering on top of a regular Django project.
 See :doc:`/content/intro/overview`, especially :ref:`intro-overview-django-unchanged`, for what stays stock Django versus what the framework adds.
 
+Does the file router add per-request overhead
+---------------------------------------------
+
+The routing half of the answer lives in :doc:`/content/topics/file-router` under *Resolution performance*, which states what a resolve costs and what it does not grow with.
+For the rest of a request, :doc:`/content/internals/request-lifecycle` lists per stage what the framework keeps between responses and what it computes again every time.
+:doc:`/content/misc/design-philosophy` holds the design rule behind both and the costs the framework accepts in exchange.
+
 Which Django and Python versions are supported
 ----------------------------------------------
 

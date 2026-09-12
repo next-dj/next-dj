@@ -39,9 +39,9 @@ class NextFrameworkSettings:
         clear_import_cache()
         # Deferred because next.conf.signals imports this module, which would
         # close the next.conf.settings <-> next.conf.signals cycle.
-        from .signals import settings_reloaded  # noqa: PLC0415
+        from .signals import dispatch_settings_reloaded  # noqa: PLC0415
 
-        settings_reloaded.send(sender=type(self))
+        dispatch_settings_reloaded(type(self))
 
     def _raw_user(self) -> dict[str, Any] | None:
         raw = getattr(settings, USER_SETTING, None)
@@ -68,7 +68,7 @@ class NextFrameworkSettings:
         }
     )
     STR_KEYS: ClassVar[frozenset[str]] = frozenset(
-        {"URL_NAME_TEMPLATE", "URL_RESOLVER"}
+        {"DEPENDENCY_RESOLVER", "URL_NAME_TEMPLATE", "URL_RESOLVER"}
     )
     BOOL_KEYS: ClassVar[frozenset[str]] = frozenset(
         {

@@ -125,6 +125,17 @@ One name in each of two page trees is valid too, because neither tree is visible
 What is rejected is a name the resolver cannot decide: two components under one route scope (``next.E020``), or one name at the root scope of two ``DIRS`` roots, which are both visible everywhere (``next.E034``).
 Both clashes are reported by system checks, covered in the `System checks`_ section below.
 
+Lookup performance
+------------------
+
+A ``{% component %}`` tag resolves its name through the mapping of names visible from the calling template, so a render costs a dictionary lookup rather than a scan over the registered components.
+That mapping and the scope index behind it are derived from the version counter of the registry, so they are rebuilt when a component registers or a backend reloads, not on every render.
+
+The ``component.py`` of a component is imported once per process and kept between requests.
+Its template body is parsed once and reused until the file it was read from changes, so an edited ``.djx`` reaches the next render without a restart.
+A process that does not watch template edits skips that comparison, and a warm render there costs neither a read nor a parse.
+See :doc:`/content/internals/component-pipeline` for the module cache, the template loader, and the visibility resolver.
+
 Calling a component
 -------------------
 

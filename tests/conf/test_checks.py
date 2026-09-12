@@ -24,6 +24,7 @@ VALID_TYPED_VALUES: dict[str, object] = {
     "TEMPLATE_LOADERS": [],
     "URL_NAME_TEMPLATE": "page_{name}",
     "URL_RESOLVER": "next.urls.TrieURLResolver",
+    "DEPENDENCY_RESOLVER": "next.deps.DependencyResolver",
     "NEXT_JS_OPTIONS": {},
 }
 
@@ -43,6 +44,7 @@ class TestValueTypeErrors:
             ("TEMPLATE_LOADERS", {}),
             ("URL_NAME_TEMPLATE", []),
             ("URL_RESOLVER", []),
+            ("DEPENDENCY_RESOLVER", []),
             ("NEXT_JS_OPTIONS", []),
         ],
         ids=[
@@ -52,6 +54,7 @@ class TestValueTypeErrors:
             "list_key_given_dict_loaders",
             "str_key_given_list",
             "str_key_given_list_resolver",
+            "str_key_given_list_deps_resolver",
             "dict_key_given_list",
         ],
     )

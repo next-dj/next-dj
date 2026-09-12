@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-from unittest.mock import patch
+from contextlib import ExitStack
+from typing import TYPE_CHECKING, ClassVar
+from unittest.mock import Mock, patch
 
+from django.apps import apps
 from django.conf import settings
 from django.test import override_settings
 from django.utils import autoreload
@@ -348,3 +350,40 @@ class TestComponentsInstall:
                 assert not marker.exists()
         finally:
             components_manager.reload()
+
+
+class TestDependencyResolverInstall:
+    """``ready()`` points the DI singleton at the configured resolver class."""
+
+    STEPS: ClassVar[tuple[str, ...]] = (
+        "_register_checks",
+        "apply_resolver_setting",
+        "autoreload",
+        "templates",
+        "staticfiles",
+        "components",
+        "autodiscover_forms",
+        "partial_shaper_slot",
+    )
+
+    def test_ready_applies_the_setting_before_it_imports_user_modules(self) -> None:
+        """The resolver is configured ahead of every step that imports user code."""
+        config = apps.get_app_config("next")
+        recorder = Mock()
+        with ExitStack() as stack:
+            for step in self.STEPS:
+                stack.enter_context(
+                    patch(f"next.apps.config.{step}", getattr(recorder, step))
+                )
+            config.ready()
+        made = [name for name, _args, _kwargs in recorder.mock_calls]
+        assert made == [
+            "_register_checks",
+            "apply_resolver_setting",
+            "autoreload.install",
+            "templates.install",
+            "staticfiles.install",
+            "components.install",
+            "autodiscover_forms",
+            "partial_shaper_slot.set",
+        ]

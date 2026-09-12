@@ -9,31 +9,53 @@ resolver replays that short-list on every call.
 from __future__ import annotations
 
 import inspect
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
+    from .context import ResolutionContext
     from .providers import ParameterProvider
 
+
+type ParameterFiller = Callable[[ResolutionContext], object]
+"""The call the replay makes to fill one claimed parameter."""
 
 type ParameterPlan = tuple[
     str,
     tuple[ParameterProvider, ...],
-    ParameterProvider | None,
     object,
     inspect.Parameter,
+    ParameterFiller | None,
 ]
-"""Name, candidates, terminal, fallback, and parameter, replayed on every call.
+"""Name, candidates, fallback, parameter, and filler, replayed per call.
 
-A plain tuple rather than a named one, because `UNPACK_SEQUENCE` takes its
-fast path only for an exact tuple and a subclass costs more per entry.
+A filler stands for the terminal provider that compiled it, so a parameter no signature
+settled is exactly one whose filler is None. A plain tuple rather than a named one,
+because `UNPACK_SEQUENCE` takes its fast path only for an exact tuple.
 """
 
 type InjectionPlan = tuple[ParameterPlan, ...]
 
+type _CompileHook = Callable[[inspect.Parameter], ParameterFiller | None]
+
 EMPTY_PLAN: InjectionPlan = ()
+
+
+def _filler(provider: ParameterProvider, param: inspect.Parameter) -> ParameterFiller:
+    """Return the single call that fills `param` for the provider owning it.
+
+    The hook is read off the instance, so a provider that defines none keeps the plain
+    `resolve` path. The bound method is captured here either way, not on every replay.
+    """
+    hook: _CompileHook | None = getattr(provider, "compile_resolve", None)
+    if callable(hook):
+        compiled = hook(param)
+        if compiled is not None:
+            return compiled
+    return partial(provider.resolve, param)
 
 
 def compile_plan(
@@ -80,8 +102,15 @@ def compile_plan(
             terminal = provider
             break
         fallback = None if param.default is empty else param.default
-        entries.append((name, tuple(candidates), terminal, fallback, param))
+        filler = None if terminal is None else _filler(terminal, param)
+        entries.append((name, tuple(candidates), fallback, param, filler))
     return tuple(entries)
 
 
-__all__ = ["EMPTY_PLAN", "InjectionPlan", "ParameterPlan", "compile_plan"]
+__all__ = [
+    "EMPTY_PLAN",
+    "InjectionPlan",
+    "ParameterFiller",
+    "ParameterPlan",
+    "compile_plan",
+]

@@ -382,18 +382,23 @@ class TestPlanShape:
     def _plan(self, planned: DependencyResolver, func) -> dict[str, tuple]:
         planned.resolve_dependencies(func)
         return {
-            name: (candidates, terminal)
-            for name, candidates, terminal, _fallback, _param in planned._plan_cache[
+            name: (candidates, filler)
+            for name, candidates, _fb, _p, filler in planned._plan_cache[
                 _introspect_key(func)
             ][1]
         }
 
     def test_marker_parameters_end_in_a_terminal(self) -> None:
-        plan = self._plan(_with_theme(), _two)
+        planned = _with_theme()
+        plan = self._plan(planned, _two)
         assert plan["theme"][0] == ()
-        assert isinstance(plan["theme"][1], DependsProvider)
+        assert plan["theme"][1] is not None
         assert plan["value"][0] == ()
-        assert isinstance(plan["value"][1], ContextByDefaultProvider)
+        assert plan["value"][1] is not None
+        assert planned.resolve_dependencies(_two, _context_data={"page_value": 42}) == {
+            "theme": "dark",
+            "value": 42,
+        }
 
     def test_marker_parameters_call_no_can_handle(self, monkeypatch) -> None:
         planned = _with_theme()
@@ -414,20 +419,20 @@ class TestPlanShape:
 
     def test_request_annotation_keeps_the_name_provider_ahead(self) -> None:
         plan = self._plan(DependencyResolver(), _theme_request)
-        candidates, terminal = plan["theme"]
+        candidates, filler = plan["theme"]
         assert [type(p) for p in candidates] == [
             ContextByNameProvider,
             HttpRequestProvider,
             UrlKwargsProvider,
         ]
-        assert terminal is None
+        assert filler is None
 
     def test_fallback_is_the_default_object_itself(self) -> None:
         planned = DependencyResolver()
         planned.resolve_dependencies(_uncovered)
         entries = {
             name: fallback
-            for name, _c, _t, fallback, _p in planned._plan_cache[
+            for name, _c, fallback, _p, _fill in planned._plan_cache[
                 _introspect_key(_uncovered)
             ][1]
         }
@@ -466,9 +471,9 @@ class TestPlanShape:
             return None
 
         marker_plan = self._plan(planned, by_marker)
-        candidates, terminal = marker_plan["flag"]
+        candidates, filler = marker_plan["flag"]
         assert candidates == (first,)
-        assert isinstance(terminal, DependsProvider)
+        assert filler is not None
         assert planned.resolve_dependencies(by_marker) == {"flag": "STUB"}
 
     def test_compile_plan_stops_at_the_terminal(self) -> None:
@@ -479,16 +484,16 @@ class TestPlanShape:
         assert type(plan[0]) is tuple
         assert plan[0][0] == "theme"
         assert plan[0][1] == ()
-        assert plan[0][2] is depends
+        assert plan[0][4] is not None
         assert plan[1][1] == (tail,)
-        assert plan[1][2] is None
+        assert plan[1][4] is None
 
     def test_entry_carries_the_resolved_annotation(self) -> None:
         planned = DependencyResolver()
         planned.resolve_dependencies(_string_url)
         (entry,) = planned._plan_cache[_introspect_key(_string_url)][1]
-        assert entry[4].annotation is int
-        assert entry[4].name == "user_id"
+        assert entry[3].annotation is int
+        assert entry[3].name == "user_id"
 
     def test_string_annotation_coerces_through_the_plan(self) -> None:
         planned = DependencyResolver()
@@ -499,7 +504,7 @@ class TestPlanShape:
     def test_raw_parameter_is_kept_when_hints_add_nothing(self) -> None:
         sig = inspect.signature(_uncovered)
         plan = compile_plan(sig, {}, [], lambda _p: False)
-        assert plan[0][4] is sig.parameters["plain"]
+        assert plan[0][3] is sig.parameters["plain"]
 
     def test_verdict_outside_the_contract_raises_at_compile_time(self) -> None:
         planned = DependencyResolver()
@@ -778,3 +783,80 @@ class TestAnnotatedHints:
         assert planned.resolve_dependencies(
             _annotated, request=request, form=form, slug="12", ident="34"
         ) == {"request": request, "slug": 12, "page": 7, "form": form, "ident": 34}
+
+
+class _NullCompileProvider:
+    """Provider that claims one name for good and compiles to nothing."""
+
+    def __init__(self, name: str = "plain", value: object = "PLAIN") -> None:
+        self.name = name
+        self.value = value
+        self.compiled: list[str] = []
+
+    def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:
+        return param.name == self.name
+
+    def static_can_handle(self, param: inspect.Parameter) -> bool:
+        return param.name == self.name
+
+    def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:
+        return self.value
+
+    def compile_resolve(self, param: inspect.Parameter) -> None:
+        self.compiled.append(param.name)
+
+
+def _fillers(planned: DependencyResolver, func) -> dict[str, object]:
+    return {
+        name: fill
+        for name, _c, _fb, _p, fill in planned._plan_cache[_introspect_key(func)][1]
+    }
+
+
+class TestCompiledFillers:
+    """A terminal folds its work into the call the replay makes with the context."""
+
+    def test_a_marker_compiles_a_filler_the_replay_reuses(self) -> None:
+        planned = _with_theme()
+        assert planned.resolve_dependencies(_two, _context_data={"page_value": 42}) == {
+            "theme": "dark",
+            "value": 42,
+        }
+        first = _fillers(planned, _two)
+        assert planned.resolve_dependencies(_two, _context_data={"page_value": 42}) == {
+            "theme": "dark",
+            "value": 42,
+        }
+        second = _fillers(planned, _two)
+        assert first["theme"] is second["theme"]
+        assert first["value"] is second["value"]
+
+    def test_a_provider_mutation_compiles_fresh_fillers(self) -> None:
+        planned = _with_theme()
+        planned.resolve_dependencies(_two, _context_data={"page_value": 42})
+        before = _fillers(planned, _two)
+        planned.add_provider(DeferringProvider(None))
+        planned.resolve_dependencies(_two, _context_data={"page_value": 42})
+        after = _fillers(planned, _two)
+        assert after["theme"] is not before["theme"]
+        assert after["value"] is not before["value"]
+
+    def test_a_hook_that_compiles_nothing_keeps_the_resolve_path(self) -> None:
+        planned = DependencyResolver()
+        provider = _NullCompileProvider()
+        planned.prepend_provider(provider)
+        assert planned.resolve_dependencies(_plain) == {"plain": "PLAIN"}
+        assert provider.compiled == ["plain"]
+        assert planned.resolve_dependencies(_plain) == {"plain": "PLAIN"}
+        assert provider.compiled == ["plain"]
+
+    def test_a_provider_without_the_hook_keeps_the_resolve_path(self) -> None:
+        planned = DependencyResolver()
+        planned.prepend_provider(_MetadataProvider())
+        assert planned.resolve_dependencies(_tagged) == {"value": "acme"}
+        assert _fillers(planned, _tagged)["value"] is not None
+
+    def test_the_default_hook_compiles_nothing(self) -> None:
+        param = inspect_parameter("anything")
+        assert ContextByNameProvider().compile_resolve(param) is None
+        assert UrlKwargsProvider().compile_resolve(param) is None

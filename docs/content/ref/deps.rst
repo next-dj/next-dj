@@ -37,6 +37,12 @@ A subclass reaches the active resolver through the ``resolver`` class attribute,
 The parameter a provider receives arrives with its type hint already resolved, so a provider never re-derives the hint of a ``request: "HttpRequest"`` parameter written under a deferred annotation.
 The hint keeps the extras of an ``Annotated[...]`` annotation, so a provider may match on the metadata a caller attached.
 
+``compile_resolve`` is the optional hook that folds the work of ``resolve`` into a call the plan makes with the context alone.
+The compiler asks it once, and only about a parameter ``static_can_handle`` claimed with ``True``, so whatever the answer reads off the signature is paid per plan rather than per resolve.
+Returning ``None``, which is what the base class answers, leaves the parameter on the plain ``resolve`` path, and so does leaving the hook undefined altogether.
+The hook belongs to ``CompilingParameterProvider`` rather than to ``ParameterProvider``, so a provider written against the mandatory contract alone still passes an ``isinstance`` check against it.
+A ``compile_resolve`` that is present but not callable is refused with a ``TypeError`` naming the class, the way a missing ``static_can_handle`` is.
+
 .. automodule:: next.deps.providers
    :members:
 

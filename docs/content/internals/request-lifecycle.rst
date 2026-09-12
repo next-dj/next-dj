@@ -109,6 +109,49 @@ On invalid form the dispatcher loads the origin page and re-renders it through t
 
 The dependency cache is reused across the failure path so context functions and providers run at most once per request.
 
+What is cached between requests
+-------------------------------
+
+Every stage above keeps a structure that outlives the response it served, and each of those structures carries the key that invalidates it.
+
+Route index.
+   The resolver holds a static route map and a segment trie built from the concatenated router and form-action pattern list, versioned by the counter pair those two managers bump.
+   See :doc:`url-router` for the index layout and for what a reload does to it.
+
+Page modules.
+   An executed ``page.py`` is memoised by the nanosecond mtime of its file, so the pattern build, the loader probe, and the view share one module object instead of executing the file again.
+   See :doc:`page-discovery` for the render path that reads the memo.
+
+Layout compositions.
+   A page keeps the composed template string, the compiled ``Template`` built from it, and, for a page whose body comes from ``render()``, the layout skeleton whose body slot is filled per request.
+   Each entry is keyed by the page path and carries an mtime snapshot of the sources and the directories the composition read.
+   See :doc:`page-discovery` for that snapshot and the staleness check around it.
+
+Dependency introspection.
+   The signature and the type hints of a callable are read once per process rather than once per call.
+
+Injection plans.
+   The plan the resolver replays for a callable is compiled once and stamped with the providers version it was built against, so only a change to the provider list recompiles it.
+   See :doc:`di-resolver` for both memos and the bounds they are held under.
+
+Component lookup.
+   The component registry holds an ordered list with a name index and a version counter, the visibility resolver derives its scope index from that counter, and the module cache keeps the imported ``component.py`` modules.
+
+Compiled component templates.
+   A component template is parsed once and kept under the files that define the component, revalidated against the mtime of the file the body was read from.
+   See :doc:`component-pipeline` for the loader and the visibility resolver.
+
+Asset plans.
+   Asset discovery remembers, per page path and per component, what the filesystem walk found, together with the generations of the registries that decide which filenames count as an asset.
+   See :doc:`static-pipeline` for the contents of a plan and for what invalidates it.
+
+The caches hold structures and compilations, never a rendered answer.
+Every request still runs each ``@context`` function in order, resolves the parameters the compiled plan left as runtime candidates, renders the body and the layout chain against a freshly assembled scope, and fills a ``StaticCollector`` created for that request alone.
+The dependency cache lives for a single resolution pass, and the form dispatch path shares one such cache across the stages of a single POST.
+
+An edit to a source file reaches the next request rather than the next restart.
+The module memo compares mtimes on every load, the version counters behind the route index, the component registry, and the asset plans are compared on every read, and under ``DEBUG`` the composition, component-template, and asset-plan caches re-stat their sources before a hit counts.
+
 Extension points
 ----------------
 

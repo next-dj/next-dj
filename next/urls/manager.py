@@ -16,13 +16,11 @@ import threading
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, overload, override
 
-from django.core.exceptions import ImproperlyConfigured
 from django.urls import URLPattern, URLResolver, clear_url_caches
 from django.urls.resolvers import RoutePattern
 
+from next.backends import resolve_setting_class
 from next.conf import next_framework_settings
-from next.conf.defaults import DEFAULTS
-from next.conf.imports import import_class_cached
 from next.conf.signals import settings_reloaded
 from next.forms.manager import form_action_manager
 
@@ -222,32 +220,16 @@ class _LazyUrlPatterns(Sequence["URLPattern | URLResolver"]):
         return self._patterns()[key]
 
 
-# Single-sourced so the circular-import guard below cannot drift from it.
-_DEFAULT_URL_RESOLVER: str = DEFAULTS["URL_RESOLVER"]
-
-
 def _build_url_resolver() -> URLResolver:
     """Instantiate the resolver class named by `NEXT_FRAMEWORK["URL_RESOLVER"]`."""
-    dotted = next_framework_settings.URL_RESOLVER
-    if dotted == _DEFAULT_URL_RESOLVER:
+    cls = resolve_setting_class(
+        "URL_RESOLVER",
+        base=URLResolver,
         # The package binds `TrieURLResolver` only after importing this module,
         # so the import helper would hit a half-initialised `next.urls`.
-        cls: type[Any] = TrieURLResolver
-    else:
-        try:
-            cls = import_class_cached(dotted)
-        except ImportError as exc:
-            msg = (
-                f"NEXT_FRAMEWORK['URL_RESOLVER'] {dotted!r} could not be "
-                f"imported: {exc}"
-            )
-            raise ImproperlyConfigured(msg) from exc
-    if not isinstance(cls, type) or not issubclass(cls, URLResolver):
-        msg = (
-            f"NEXT_FRAMEWORK['URL_RESOLVER'] {dotted!r} is not a "
-            "django.urls.resolvers.URLResolver subclass."
-        )
-        raise ImproperlyConfigured(msg)
+        shipped=TrieURLResolver,
+        base_path="django.urls.resolvers.URLResolver",
+    )
     return cls(RoutePattern(""), _LazyUrlPatterns())
 
 

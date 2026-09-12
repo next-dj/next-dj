@@ -4,7 +4,7 @@ import inspect
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
 from next.urls import DUrl
@@ -122,6 +122,16 @@ URL_BY_ANNOTATION_RESOLVE_CASES: tuple[UrlByAnnotationResolveCase, ...] = (
     ),
     UrlByAnnotationResolveCase(
         "coerce_uuid_from_text", "pk", DUrl[UUID], {"pk": _UUID_TEXT}, _UUID_VALUE
+    ),
+    UrlByAnnotationResolveCase(
+        "annotated_coerce_int", "pk", Annotated[DUrl[int], "tenant"], {"pk": "123"}, 123
+    ),
+    UrlByAnnotationResolveCase(
+        "annotated_named_key",
+        "note_id",
+        Annotated[DUrl["id", int], "tenant"],
+        {"id": "42"},
+        42,
     ),
 )
 

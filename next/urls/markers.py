@@ -32,6 +32,7 @@ from .parser import _coerce_url_value
 
 if TYPE_CHECKING:
     from next.deps.context import ResolutionContext
+    from next.deps.plan import ParameterFiller
 
 
 class DUrl[T](DDependencyBase[T]):
@@ -163,6 +164,24 @@ class UrlByAnnotationProvider(RegisteredParameterProvider):
         if raw is None:
             return None
         return _coerce_url_value(raw, _url_type_hint(args))
+
+    @override
+    def compile_resolve(self, param: inspect.Parameter) -> ParameterFiller | None:
+        """Read the segment name and the coercion type off the annotation once.
+
+        The replay is left with a lookup in `url_kwargs` and the coercion itself.
+        """
+        args = _marker_args(param.annotation)
+        key = _url_key(args) or param.name
+        hint = _url_type_hint(args)
+
+        def fill(context: ResolutionContext) -> object:
+            raw = context.url_kwargs.get(key)
+            if raw is None:
+                return None
+            return _coerce_url_value(raw, hint)
+
+        return fill
 
 
 def _marker_args(annotation: object) -> tuple[object, ...]:

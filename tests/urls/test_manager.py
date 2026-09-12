@@ -780,7 +780,7 @@ class TestBuildUrlResolver:
 
     def test_default_short_circuits_the_import_helper(self) -> None:
         """The default dotted path binds TrieURLResolver without importing."""
-        with patch("next.urls.manager.import_class_cached") as import_helper:
+        with patch("next.backends.import_class_cached") as import_helper:
             resolver = _build_url_resolver()
         import_helper.assert_not_called()
         assert type(resolver) is TrieURLResolver
@@ -795,7 +795,7 @@ class TestBuildUrlResolver:
         """An unimportable dotted path fails loudly at build time."""
         mock_nf = SimpleNamespace(URL_RESOLVER="no_such_module_zzz.Resolver")
         with (
-            patch("next.urls.manager.next_framework_settings", mock_nf),
+            patch("next.backends.next_framework_settings", mock_nf),
             pytest.raises(ImproperlyConfigured, match="could not be imported"),
         ):
             _build_url_resolver()
@@ -809,7 +809,7 @@ class TestBuildUrlResolver:
         """Importable targets outside URLResolver subclasses are rejected."""
         mock_nf = SimpleNamespace(URL_RESOLVER=dotted)
         with (
-            patch("next.urls.manager.next_framework_settings", mock_nf),
+            patch("next.backends.next_framework_settings", mock_nf),
             pytest.raises(ImproperlyConfigured, match="URLResolver subclass"),
         ):
             _build_url_resolver()
