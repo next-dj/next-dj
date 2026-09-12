@@ -1,6 +1,6 @@
 """Template tags for rendering next.forms form blocks."""
 
-from typing import TYPE_CHECKING, cast, override
+from typing import TYPE_CHECKING, Final, cast, override
 
 from django import template
 from django.core.exceptions import ImproperlyConfigured
@@ -26,14 +26,19 @@ _MIN_FORM_TAG_BITS = 2
 _RESERVED_FORM_ATTRS = frozenset({"action", "method"})
 _RESERVED_FORM_ATTR_PREFIX = "data-next-"
 
+# Wire attributes other areas ask a compiled form about, named once here
+# because the tag is what writes them.
+FORM_ZONE_ATTR: Final = "data-next-target"
+FORM_KEY_ATTR: Final = "data-next-key"
+
 # Python params of the tag that compile to client `data-next-*` attributes on
 # the form, so the markup never carries a raw selector or swap mode.
 _PARTIAL_FORM_PARAMS: dict[str, str] = {
     "validate": "data-next-validate",
     "trigger": "data-next-trigger",
     "debounce": "data-next-debounce",
-    "zone": "data-next-target",
-    "key": "data-next-key",
+    "zone": FORM_ZONE_ATTR,
+    "key": FORM_KEY_ATTR,
 }
 
 
@@ -154,6 +159,10 @@ class FormNode(template.Node):
         self.nodelist = nodelist
         self.attrs = attrs
         self.partial_attrs = partial_attrs
+
+    def has_partial_attr(self, attr: str) -> bool:
+        """Return True when the tag compiled the given `data-next-*` attribute."""
+        return any(name == attr for name, _expr in self.partial_attrs)
 
     def _get_request(self, context: template.Context) -> "HttpRequest":
         """Extract request from context or raise ImproperlyConfigured."""

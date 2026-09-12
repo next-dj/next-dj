@@ -21,6 +21,7 @@ from next.forms import (
 from next.forms.manager import form_action_manager
 from next.forms.rendering import _ErrorRenderParams, render_form_page_with_errors
 from next.forms.wizard import FormWizard
+from next.templatetags.forms import FORM_KEY_ATTR, FORM_ZONE_ATTR, FormNode
 from tests.forms.actions import SimpleForm
 
 
@@ -946,6 +947,37 @@ class TestFormTagMarkupIdentity:
         )
         assert 'enctype="text/plain">' in html
         assert "multipart/form-data" not in html
+
+
+class TestFormNodePartialAttrs:
+    """`has_partial_attr` answers what wire attributes a compiled form carries."""
+
+    @staticmethod
+    def _node(form_engine, source: str) -> FormNode:
+        template = form_engine.from_string(source)
+        nodes = [node for node in template.nodelist if isinstance(node, FormNode)]
+        return nodes[0]
+
+    def test_zone_param_answers_under_the_zone_attribute(self, form_engine) -> None:
+        """A zone= param is visible under the attribute name it compiles to."""
+        node = self._node(
+            form_engine, '{% form "simple_form" zone="board" %}x{% endform %}'
+        )
+        assert node.has_partial_attr(FORM_ZONE_ATTR) is True
+        assert node.has_partial_attr(FORM_KEY_ATTR) is False
+
+    def test_key_param_answers_under_the_key_attribute(self, form_engine) -> None:
+        """A key= param is visible under the attribute name it compiles to."""
+        node = self._node(
+            form_engine, '{% form "simple_form" key="row-7" %}x{% endform %}'
+        )
+        assert node.has_partial_attr(FORM_KEY_ATTR) is True
+
+    def test_plain_form_carries_no_partial_attribute(self, form_engine) -> None:
+        """A form tag without partial params answers no to every attribute."""
+        node = self._node(form_engine, '{% form "simple_form" %}x{% endform %}')
+        assert node.has_partial_attr(FORM_ZONE_ATTR) is False
+        assert node.has_partial_attr(FORM_KEY_ATTR) is False
 
 
 class TestFormTagPartialParams:

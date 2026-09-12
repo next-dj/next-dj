@@ -21,7 +21,11 @@ from next.static import (
     reset_default_manager,
 )
 from next.static.collector import HEAD_CLOSE
-from next.static.manager import DefaultStaticManager, forget_manager_page_roots
+from next.static.manager import (
+    DefaultStaticManager,
+    forget_manager_backend_urls,
+    forget_manager_page_roots,
+)
 from next.static.scripts import CSRF_PAYLOAD_KEY, DEV_PAYLOAD_KEY, NextScriptBuilder
 
 
@@ -49,6 +53,13 @@ PREFIXED_BACKENDS = {
 
 COMPOSED_BACKENDS = {
     "STATIC_BACKENDS": [{"BACKEND": "tests.static.test_manager.ComposedStaticBackend"}]
+}
+
+PAIRED_BACKENDS = {
+    "STATIC_BACKENDS": [
+        {"BACKEND": "next.static.StaticFilesBackend"},
+        {"BACKEND": "tests.static.test_manager.PrefixingStaticBackend"},
+    ]
 }
 
 REWRITING_BACKENDS = pytest.mark.parametrize(
@@ -166,6 +177,45 @@ class TestForgetManagerPageRoots:
 
             assert manager.page_roots() == (tmp_path,)
         assert get_static_manager() is manager
+
+
+class TestForgetManagerBackendUrls:
+    """The hook a rebuilt staticfiles storage sends every configured backend."""
+
+    def test_an_unbuilt_handle_is_left_alone(self, reset_default: None) -> None:
+        """A manager nothing has built yet holds no backend and no memo."""
+        reset_default_manager()
+
+        forget_manager_backend_urls()
+
+        assert default_manager._wrapped is empty
+
+    def test_a_manifest_setting_reaches_every_backend(
+        self, reset_default: None
+    ) -> None:
+        """Not just the first one, which is all the render pipeline reads."""
+        reset_default_manager()
+        with override_settings(NEXT_FRAMEWORK=PAIRED_BACKENDS):
+            manager = get_static_manager()
+            manager._ensure_backends()
+            for position, backend in enumerate(manager._backends):
+                backend._url_cache[("a", ".css")] = f"/static/next/a{position}.css"
+
+            with override_settings(STATIC_URL="/assets/"):
+                assert [backend._url_cache for backend in manager._backends] == [{}, {}]
+
+    def test_an_unrelated_setting_keeps_every_memo(self, reset_default: None) -> None:
+        """Only a setting that rebuilds the storage moves the URLs it answered."""
+        reset_default_manager()
+        with override_settings(NEXT_FRAMEWORK=PAIRED_BACKENDS):
+            manager = get_static_manager()
+            manager._ensure_backends()
+            for backend in manager._backends:
+                backend._url_cache[("a", ".css")] = "/static/next/a.css"
+
+            with override_settings(LANGUAGE_CODE="fr"):
+                held = [dict(backend._url_cache) for backend in manager._backends]
+        assert held == [{("a", ".css"): "/static/next/a.css"}] * 2
 
 
 class TestAppListChanges:

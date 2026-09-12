@@ -13,7 +13,7 @@ from next.checks import (
     check_next_framework_unknown_top_level_keys,
     check_next_pages_configuration,
 )
-from next.conf import NextFrameworkSettings, next_framework_settings, perform_import
+from next.conf import NextFrameworkSettings, next_framework_settings
 from next.urls import RouterBackend, RouterFactory
 
 
@@ -143,15 +143,6 @@ class TestFlatNextFrameworkBehavior:
         """Top level keys must not be assigned on the settings object."""
         with pytest.raises(AttributeError, match="cannot be assigned"):
             next_framework_settings.URL_NAME_TEMPLATE = "x"  # type: ignore[misc]
-
-    def test_perform_import_raises_import_error(self) -> None:
-        """Invalid dotted path raises ImportError with context."""
-        with pytest.raises(ImportError, match="no_such_module_zzz"):
-            perform_import("no_such_module_zzz.ClassName", "TEST_SETTING")
-
-    def test_perform_import_returns_non_string_unchanged(self) -> None:
-        """Non string values are returned as is for future IMPORT_STRINGS use."""
-        assert perform_import(42, "X") == 42
 
     def test_setattr_allows_internal_attributes(self) -> None:
         """Attributes outside DEFAULTS keys may be set for tests or hooks."""
@@ -595,13 +586,12 @@ class TestMergedSettingsAreImmutable:
             next_framework_settings.NEXT_JS_OPTIONS["a"]["b"] = 2
 
     def test_merged_wizard_backend_is_frozen(self) -> None:
-        """FORM_WIZARD_BACKEND merges defaults with the user dict and freezes."""
+        """FORM_WIZARD_BACKEND replaces the default entry and freezes."""
         with override_settings(
             NEXT_FRAMEWORK={"FORM_WIZARD_BACKEND": {"OPTIONS": {"ttl": 1}}}
         ):
             merged = next_framework_settings.FORM_WIZARD_BACKEND
-            assert merged["BACKEND"] == "next.forms.SessionFormWizardBackend"
-            assert merged["OPTIONS"] == {"ttl": 1}
+            assert merged == {"OPTIONS": {"ttl": 1}}
             with pytest.raises(TypeError, match="immutable"):
                 merged["OPTIONS"]["ttl"] = 2
 

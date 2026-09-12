@@ -25,7 +25,7 @@ from next.conf.signals import settings_reloaded
 from next.pages.watch import get_pages_directories_for_watch
 
 from .assets import default_kinds
-from .backends import StaticBackend
+from .backends import MANIFEST_SETTINGS, StaticBackend
 from .collector import HEAD_CLOSE, StaticCollector, default_placeholders
 from .discovery import AssetDiscovery, PathResolver
 from .scripts import (
@@ -345,9 +345,17 @@ class StaticManager:
         self._resolve_collector_strategies()
 
     def _resolve_collector_strategies(self) -> None:
-        """Read the pipeline-level facts the first backend settles for a render."""
-        self._rewrites_urls = _rewrites_asset_urls(self._backends[0])
-        options = dict(self._backends[0].config.get("OPTIONS") or {})
+        """Read the pipeline-level facts the first backend settles for a render.
+
+        One render holds one collector, so it holds one dedup strategy and one
+        JS-context policy. The first entry of `STATIC_BACKENDS` settles both for
+        the whole pipeline, which is the same entry every other caller reaches
+        through `default_backend`, and the later entries are read for nothing
+        but their own rendering.
+        """
+        backend = self._backends[0]
+        self._rewrites_urls = _rewrites_asset_urls(backend)
+        options = dict(backend.config.get("OPTIONS") or {})
         dedup_path = options.get("DEDUP_STRATEGY")
         policy_path = options.get("JS_CONTEXT_POLICY")
         self._dedup_factory = (
@@ -369,6 +377,17 @@ class StaticManager:
             self._js_policy_factory() if self._js_policy_factory is not None else None
         )
         return StaticCollector(dedup=dedup, js_context_policy=policy)
+
+    def forget_backend_urls(self) -> None:
+        """Tell every loaded backend the storage behind its URLs was rebuilt.
+
+        Driven from the backend list rather than from one class, so a
+        third-party backend that memoises what `register_file` resolved is
+        invalidated on the same terms as the bundled one. A manager holding no
+        backend has nothing to tell and stays unloaded.
+        """
+        for backend in self._backends:
+            backend.forget_urls()
 
     def page_roots(self) -> tuple[Path, ...]:
         """Return absolute page-tree roots from configured page backends.
@@ -446,19 +465,33 @@ def forget_manager_page_roots(**kwargs) -> None:
         default_manager.forget_page_roots()
 
 
+def forget_manager_backend_urls(**kwargs) -> None:
+    """Tell the default manager the staticfiles storage was rebuilt.
+
+    A manager nothing has built yet holds no backend and no memo, so the lazy
+    handle is left alone rather than woken to be invalidated.
+    """
+    if default_manager._wrapped is not empty:
+        default_manager.forget_backend_urls()
+
+
 def _on_settings_reloaded(**kwargs) -> None:
     """Reset the default static manager when framework settings reload."""
     reset_default_manager()
 
 
 def _on_setting_changed(*, setting: str, **kwargs) -> None:
-    """Drop the cached page trees when the app list behind them moves.
+    """Drop the derived state a Django setting moved out from under.
 
-    `settings_reloaded` covers only the `NEXT_FRAMEWORK` half, and the trees
-    of a router with `APP_DIRS` move with `INSTALLED_APPS`.
+    `settings_reloaded` covers only the `NEXT_FRAMEWORK` half. The trees of a
+    router with `APP_DIRS` move with `INSTALLED_APPS`, and every asset URL a
+    backend memoised answers for a staticfiles storage the manifest settings
+    rebuild.
     """
     if setting == "INSTALLED_APPS":
         forget_manager_page_roots()
+    elif setting in MANIFEST_SETTINGS:
+        forget_manager_backend_urls()
 
 
 settings_reloaded.connect(_on_settings_reloaded)

@@ -9,6 +9,7 @@ from django.test import Client
 
 from next.forms.uid import ORIGIN_FIELD_NAME
 from next.partial import keys
+from next.partial.envelope import Envelope
 from next.partial.headers import CONTENT_TYPE, REQUEST_FLAG, VERSION, ZONE
 
 from .actions import resolve_action_url
@@ -26,68 +27,76 @@ _VERSION_HEADER = f"HTTP_{VERSION.upper().replace('-', '_')}"
 class PartialEnvelope:
     """Structural view over a decoded patch envelope for test assertions.
 
-    The helpers read the JSON envelope and answer questions about ops and their targets
-    without any HTML regex, so tests assert the server contract on structure alone.
+    The payload is rebuilt into the producer's own envelope objects, so the helpers
+    answer from named fields rather than from a second reading of the wire, and the
+    mappings they hand back are the producer's serialization of those fields.
     """
 
     def __init__(self, data: dict[str, Any]) -> None:
         """Wrap the decoded envelope mapping."""
         self.data = data
 
+    def _envelope(self) -> Envelope:
+        return Envelope.from_dict(self.data)
+
+    def _addressed(self, selector: str) -> list[str]:
+        return [
+            patch.target[selector]
+            for patch in self._envelope().ops
+            if isinstance(patch.target, dict) and selector in patch.target
+        ]
+
     @property
     def version(self) -> str:
         """Return the asset version stamped in the envelope."""
-        return cast("str", self.data[keys.VERSION])
+        return self._envelope().version
 
     @property
     def ops(self) -> list[dict[str, Any]]:
         """Return the ordered list of op objects."""
-        return cast("list[dict[str, Any]]", self.data.get(keys.OPS, []))
+        return [patch.as_dict() for patch in self._envelope().ops]
 
     @property
     def assets(self) -> list[dict[str, Any]]:
         """Return the asset manifest entries."""
-        return cast("list[dict[str, Any]]", self.data.get(keys.ASSETS, []))
+        return [asset.as_dict() for asset in self._envelope().assets]
 
     def op_verbs(self) -> list[str]:
         """Return the verb of every op in order."""
-        return [op[keys.OP] for op in self.ops]
+        return [patch.op for patch in self._envelope().ops]
 
     def targets(self) -> list[dict[str, Any] | None]:
         """Return the target object of every op in order."""
-        return [op.get(keys.TARGET) for op in self.ops]
+        return [
+            None if patch.target is None else dict(patch.target)
+            for patch in self._envelope().ops
+        ]
 
     def zone_targets(self) -> list[str]:
         """Return the zone name of every op that addresses a zone, in order."""
-        return [
-            op[keys.TARGET][keys.ZONE]
-            for op in self.ops
-            if isinstance(op.get(keys.TARGET), dict) and keys.ZONE in op[keys.TARGET]
-        ]
+        return self._addressed(keys.ZONE)
 
     def form_targets(self) -> list[str]:
         """Return the form uid of every op that addresses a form, in order."""
-        return [
-            op[keys.TARGET][keys.FORM_SELECTOR]
-            for op in self.ops
-            if isinstance(op.get(keys.TARGET), dict)
-            and keys.FORM_SELECTOR in op[keys.TARGET]
-        ]
+        return self._addressed(keys.FORM_SELECTOR)
 
     def form_meta(self) -> dict[str, Any] | None:
         """Return the machine-readable form meta object of the envelope."""
-        return cast("dict[str, Any] | None", self.data.get(keys.FORM))
+        form = self._envelope().form
+        return None if form is None else form.as_dict()
 
     def toasts(self) -> list[dict[str, Any]]:
         """Return the payload of every toast op in order."""
-        return [op for op in self.ops if op.get(keys.OP) == "toast"]
+        return [
+            patch.as_dict() for patch in self._envelope().ops if patch.op == "toast"
+        ]
 
     def html_for_zone(self, zone: str) -> str:
         """Return the HTML payload of the op morphing the named zone."""
-        for op in self.ops:
-            target = op.get(keys.TARGET)
+        for patch in self._envelope().ops:
+            target = patch.target
             if isinstance(target, dict) and target.get(keys.ZONE) == zone:
-                return cast("str", op.get(keys.HTML, ""))
+                return patch.html or ""
         msg = f"no op targets zone {zone!r}"
         raise AssertionError(msg)
 

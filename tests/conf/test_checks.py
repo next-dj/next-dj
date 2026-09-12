@@ -191,6 +191,15 @@ class TestSilencing:
             silenced = {m.id: m.is_silenced() for m in messages}
         assert silenced == {"next.E076": False, "next.W072": True}
 
+    def test_non_dict_setting_is_reported_by_one_check_only(self) -> None:
+        """No second area repeats "NEXT_FRAMEWORK is not a dict" under its own id."""
+        register_all()
+        with override_settings(NEXT_FRAMEWORK=["not a dict"]):  # type: ignore[arg-type]
+            messages = run_checks(tags=[NEXT])
+        assert [
+            m.id for m in messages if m.msg.startswith("NEXT_FRAMEWORK must be")
+        ] == ["next.E077"]
+
     def test_silencing_a_mistyped_key_leaves_the_whole_setting_reported(self) -> None:
         """A project deaf to next.E076 still hears that NEXT_FRAMEWORK is ignored."""
         with override_settings(

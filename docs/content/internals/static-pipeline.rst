@@ -128,6 +128,7 @@ Modules
 ``next.static.finders``.
    ``NextStaticFilesFinder`` exposes co-located page and component assets to Django staticfiles, so ``collectstatic`` copies them into ``STATIC_ROOT``.
    :doc:`/content/topics/static-assets/overview` covers the finder from the user side.
+   The finder holds the mapping it discovered and rebuilds it when the stem or kind registry moves, when the reported page or component trees change, or, while ``DEBUG`` is true, when the mtime of any directory inside those trees moves.
 
 ``next.static.defaults``.
    ``register_defaults`` registers the built in ``css``, ``js``, and ``module`` kinds and the ``styles`` and ``scripts`` slots.
@@ -144,6 +145,8 @@ Dedup
 
 The collector holds one dedup strategy for the request.
 The strategy is selected by the dotted path under the ``DEDUP_STRATEGY`` key of the first static backend ``OPTIONS``, instantiated once per request, defaulting to ``UrlDedup`` when the key is absent.
+One render holds one collector, so it holds one strategy and one JS context policy, and the first entry of ``STATIC_BACKENDS`` settles both for the whole pipeline.
+That first entry is also the one ``StaticManager.default_backend`` returns, so a later entry is read for nothing but its own rendering.
 :doc:`/content/topics/static-assets/deduplication` covers the bundled strategies and the custom-strategy protocol.
 
 Signals
@@ -163,6 +166,7 @@ Extension points
 ----------------
 
 - Subclass ``StaticFilesBackend`` to change the rendered output.
+- Override ``StaticBackend.forget_urls`` when a backend memoises resolved URLs somewhere other than the base memo, and the manager drives it over every configured backend whenever ``STATIC_ROOT``, ``STATIC_URL``, or ``STORAGES`` changes.
 - Implement the ``DedupStrategy`` protocol and point ``DEDUP_STRATEGY`` at it.
 - Call ``default_kinds.register`` in ``AppConfig.ready`` to recognise a new extension.
 - Call ``default_stems.register`` in ``AppConfig.ready`` to recognise a new filename.

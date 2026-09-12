@@ -4,8 +4,13 @@ import pytest
 from django.core.exceptions import ImproperlyConfigured
 from django.urls import path
 
-from next.urls import DuplicateURLParameterError, URLPatternParser
-from next.urls.parser import InvalidURLParameterError
+import next.urls
+from next.urls import (
+    DuplicateURLParameterError,
+    InvalidURLParameterError,
+    URLParameterError,
+    URLPatternParser,
+)
 
 
 def _noop_view(request):
@@ -140,6 +145,55 @@ class TestDuplicateParameterNames:
         assert url_parser.duplicate_parameter_names(url_path) == expected
 
 
+class TestURLParameterError:
+    """The shared base owns the attributes and the page-file tail."""
+
+    def test_is_value_error(self) -> None:
+        """The base stays catchable as ValueError like its subclasses."""
+        assert isinstance(URLParameterError("x", "[x]"), ValueError)
+
+    def test_both_refusals_share_the_base(self) -> None:
+        """One except clause catches either refusal the parser raises."""
+        assert issubclass(DuplicateURLParameterError, URLParameterError)
+        assert issubclass(InvalidURLParameterError, URLParameterError)
+
+    def test_base_reason_names_the_parameter_and_route(self) -> None:
+        """A refusal with no subclass reason still names both."""
+        error = URLParameterError("x", "[x]/[x]")
+        assert "'x'" in str(error)
+        assert "[x]/[x]" in str(error)
+        assert "Page file" not in str(error)
+
+    def test_with_file_keeps_the_class_and_the_attributes(self) -> None:
+        """Attribution rebuilds the same refusal with the file named."""
+        error = InvalidURLParameterError("2fa", "user/[2fa]")
+        attributed = error.with_file(Path("/pages/user/2fa/page.py"))
+        assert type(attributed) is InvalidURLParameterError
+        assert attributed.param_name == error.param_name
+        assert attributed.url_path == error.url_path
+        assert attributed.file_path == Path("/pages/user/2fa/page.py")
+        assert "Page file: /pages/user/2fa/page.py." in str(attributed)
+
+    def test_with_file_leaves_the_original_untouched(self) -> None:
+        """The parser-raised instance keeps reporting no file."""
+        error = DuplicateURLParameterError("x", "[x]/[x]")
+        error.with_file(Path("/pages/page.py"))
+        assert error.file_path is None
+
+
+class TestPublicExports:
+    """Both refusals are importable from `next.urls`, not just the submodule."""
+
+    @pytest.mark.parametrize(
+        "name",
+        ["DuplicateURLParameterError", "InvalidURLParameterError", "URLParameterError"],
+    )
+    def test_name_is_exported(self, name) -> None:
+        """A caller catching one refusal can catch the other the same way."""
+        assert name in next.urls.__all__
+        assert getattr(next.urls, name) is getattr(next.urls.parser, name)
+
+
 class TestDuplicateURLParameterError:
     """Error attributes and optional file context."""
 
@@ -155,9 +209,9 @@ class TestDuplicateURLParameterError:
         assert error.file_path == file_path
         assert "Page file: /pages/dup/page.py." in str(error)
 
-    def test_classvar_points_at_public_error(self) -> None:
-        """Parser exposes the error class for import-cycle-free callers."""
-        assert URLPatternParser.duplicate_parameter_error is DuplicateURLParameterError
+    def test_classvar_points_at_the_shared_base(self) -> None:
+        """Parser exposes one error class for import-cycle-free callers."""
+        assert URLPatternParser.parameter_error is URLParameterError
 
 
 class TestNamesDjangoRefuses:
@@ -194,9 +248,12 @@ class TestNamesDjangoRefuses:
         """The error stays catchable as ValueError alongside its sibling."""
         assert isinstance(InvalidURLParameterError("a.b", "[a.b]"), ValueError)
 
-    def test_classvar_points_at_public_error(self) -> None:
-        """Parser exposes the error class for import-cycle-free callers."""
-        assert URLPatternParser.invalid_parameter_error is InvalidURLParameterError
+    def test_message_includes_file_path_when_given(self) -> None:
+        """A known page file lands in the message tail, as for the sibling."""
+        file_path = Path("/pages/2fa/page.py")
+        error = InvalidURLParameterError("2fa", "[2fa]", file_path=file_path)
+        assert error.file_path == file_path
+        assert "Page file: /pages/2fa/page.py." in str(error)
 
     def test_django_refuses_what_the_parser_refuses(self) -> None:
         """The rule tracks `path()`, which compiles the route as it is built."""
@@ -223,6 +280,21 @@ class TestCreateUrlPatternFileContext:
         assert error.file_path == page_file
         assert str(page_file) in str(error)
         assert isinstance(error.__cause__, DuplicateURLParameterError)
+        assert error.__cause__.file_path is None
+
+    def test_reraises_a_refused_name_with_file_path(
+        self, page_instance, url_parser, tmp_path
+    ) -> None:
+        """A directory Django would refuse reports the page file too."""
+        page_file = tmp_path / "page.py"
+        with pytest.raises(InvalidURLParameterError) as excinfo:
+            page_instance.create_url_pattern("user/[2fa]", page_file, url_parser)
+        error = excinfo.value
+        assert error.param_name == "2fa"
+        assert error.url_path == "user/[2fa]"
+        assert error.file_path == page_file
+        assert str(page_file) in str(error)
+        assert isinstance(error.__cause__, InvalidURLParameterError)
         assert error.__cause__.file_path is None
 
 

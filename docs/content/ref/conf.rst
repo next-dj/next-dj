@@ -7,7 +7,7 @@ Module summary
 --------------
 
 ``next.conf`` merges user ``NEXT_FRAMEWORK`` settings with framework defaults.
-It exposes the merged-settings object, the ``DEFAULTS`` mapping and the ``USER_SETTING`` name, the import helpers, the ``extend_default_backend`` helper, the ``fail_loudly`` predicate that every fail-loud path reads, and the ``settings_reloaded`` signal.
+It exposes the merged-settings object, the ``DEFAULTS`` mapping and the ``USER_SETTING`` name, the cached import helper, the ``extend_default_backend`` helper, the ``fail_loudly`` predicate that every fail-loud path reads, and the ``settings_reloaded`` signal.
 
 Public API
 ----------
@@ -17,6 +17,9 @@ Settings class
 
 .. automodule:: next.conf.settings
    :members:
+
+The merge policy the class applies lives in ``next.conf.merge``, which is framework-internal.
+:ref:`ref-settings-merge` states the rule a project writes settings against.
 
 Merged values are immutable, so appending to ``next_framework_settings.PAGE_BACKENDS``, assigning into it, or mutating a nested list or mapping raises ``TypeError``.
 A value of any other type, such as a set inside ``OPTIONS``, is copied rather than frozen, so it stays editable and only the copy handed to you changes.
@@ -48,12 +51,8 @@ Import utilities
 
 .. autofunction:: next.conf.imports.import_class_cached
 
-.. autofunction:: next.conf.imports.perform_import
-
 ``next.conf.imports.clear_import_cache`` is framework-internal.
 The settings object invokes it from ``reload`` to drop cached imports when settings change.
-
-.. autodata:: next.conf.imports.IMPORT_STRINGS
 
 Signals
 -------

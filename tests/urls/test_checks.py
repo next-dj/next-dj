@@ -378,10 +378,11 @@ class TestCollectUrlPatterns:
 class TestPagesConfigurationCodes:
     """Each `PAGE_BACKENDS` mistake carries a code of its own."""
 
-    def test_non_dict_next_framework_is_e001(self) -> None:
+    def test_non_dict_next_framework_is_left_to_the_conf_check(self) -> None:
+        """The type of the whole mapping is reported once, as next.E077."""
         with override_settings(NEXT_FRAMEWORK=["not a dict"]):
             errors = check_next_pages_configuration()
-        assert [e.id for e in errors] == ["next.E001"]
+        assert errors == []
 
     def test_non_list_page_backends_is_e081(self) -> None:
         mock_ns = SimpleNamespace(PAGE_BACKENDS="pages")

@@ -19,7 +19,12 @@ from .markers import (
     UrlKwargsProvider,
     get_multi_values,
 )
-from .parser import DuplicateURLParameterError, URLPatternParser
+from .parser import (
+    DuplicateURLParameterError,
+    InvalidURLParameterError,
+    URLParameterError,
+    URLPatternParser,
+)
 from .resolver import TrieURLResolver
 from .reverse import page_reverse, page_reverse_lazy, with_query
 
@@ -30,12 +35,14 @@ __all__ = [
     "DuplicateURLParameterError",
     "FileRouterBackend",
     "HttpRequestProvider",
+    "InvalidURLParameterError",
     "PageRoot",
     "QueryParamProvider",
     "RouterBackend",
     "RouterFactory",
     "RouterManager",
     "TrieURLResolver",
+    "URLParameterError",
     "URLPatternParser",
     "UrlByAnnotationProvider",
     "UrlKwargsProvider",

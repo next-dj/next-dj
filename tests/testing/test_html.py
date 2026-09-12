@@ -287,3 +287,108 @@ class TestInitPayload:
     def test_raises_when_object_is_unterminated(self) -> None:
         with pytest.raises(LookupError, match="Unterminated object"):
             init_payload('<script>Next._init({"a": 1')
+
+
+class TestFindAnchorParsing:
+    """`find_anchor` locates anchors with the HTML parser, not a regex."""
+
+    def test_attributes_in_any_order(self) -> None:
+        html = '<a class="x" data-next-zone="z" href="/b" id="i">Docs</a>'
+        assert find_anchor(html, href="/b", text="Docs") == html
+
+    def test_mixed_quote_styles(self) -> None:
+        html = "<a href='/q' title=\"Q > R\" class=bare>Quoted</a>"
+        assert find_anchor(html, href="/q", text="Quoted") == html
+
+    def test_angle_bracket_inside_an_attribute_value(self) -> None:
+        html = '<a href="/x" title="a > b">Text</a>'
+        assert find_anchor(html, href="/x") == html
+
+    def test_anchor_spanning_lines_is_returned_verbatim(self) -> None:
+        html = '<nav>\n  <a\n    href="/b"\n    class="y"\n  >\n    Docs\n  </a\n  >\n</nav>'
+        assert find_anchor(html, href="/b", text="Docs") == (
+            '<a\n    href="/b"\n    class="y"\n  >\n    Docs\n  </a\n  >'
+        )
+
+    def test_carriage_returns_do_not_shift_the_span(self) -> None:
+        html = '<div>\r\n<p>x</p>\r\n<a href="/b">Docs</a>\r\n</div>'
+        assert find_anchor(html, href="/b") == '<a href="/b">Docs</a>'
+
+    def test_nested_markup_inside_the_anchor_text(self) -> None:
+        html = '<a href="/n"><span class="icon"><b>Stats</b></span> now</a>'
+        assert find_anchor(html, text="Stats now") == html
+
+    def test_multiple_anchors_on_one_line(self) -> None:
+        html = '<a href="/x">one</a><a href="/y">two</a><a href="/z">three</a>'
+        assert find_anchor(html, href="/z") == '<a href="/z">three</a>'
+
+    def test_uppercase_tag_and_attribute_names(self) -> None:
+        html = '<A HREF="/b" CLASS="y">Docs</A>'
+        assert find_anchor(html, href="/b", text="Docs") == html
+
+    def test_entity_in_href_is_decoded(self) -> None:
+        html = '<a href="/a?x=1&amp;y=2">Link</a>'
+        assert find_anchor(html, href="/a?x=1&y=2") == html
+
+    def test_nested_anchor_keeps_the_outer_start(self) -> None:
+        html = '<a href="/outer">one<a href="/inner">two</a>'
+        assert find_anchor(html, text="onetwo") == html
+
+    def test_stray_end_tag_before_any_anchor(self) -> None:
+        html = '</a><a href="/x">one</a>'
+        assert find_anchor(html, href="/x") == '<a href="/x">one</a>'
+
+    def test_unclosed_anchor_is_not_a_match(self) -> None:
+        with pytest.raises(LookupError, match="Anchor not found"):
+            find_anchor('<a href="/x">dangling', href="/x")
+
+    def test_self_closed_anchor_is_skipped(self) -> None:
+        html = '<a href="/x"/><a href="/x">real</a>'
+        assert find_anchor(html, href="/x") == '<a href="/x">real</a>'
+
+    def test_self_closed_child_stays_inside_the_span(self) -> None:
+        html = '<a href="/x"><img src="/i.png"/> Icon</a>'
+        assert find_anchor(html, text="Icon") == html
+
+    def test_anchor_inside_a_comment_never_matches(self) -> None:
+        html = '<!-- <a href="/x">commented</a> --><a href="/y">live</a>'
+        assert find_anchor(html, href="/y") == '<a href="/y">live</a>'
+        with pytest.raises(LookupError, match="Anchor not found"):
+            find_anchor(html, href="/x")
+
+    def test_anchor_inside_a_script_body_never_matches(self) -> None:
+        html = "<script>el.innerHTML = \"<a href='/x'>tpl</a>\";</script>"
+        with pytest.raises(LookupError, match="Anchor not found"):
+            find_anchor(html, href="/x")
+
+
+class TestFindFormParsing:
+    """`find_form` shares the parser and its limits with `find_anchor`."""
+
+    def test_angle_bracket_inside_an_attribute_value(self) -> None:
+        html = '<form action="/a" data-hint="x > y"><input name="t"></form>'
+        assert find_form(html, action="/a") == html
+
+    def test_form_inside_a_comment_never_matches(self) -> None:
+        html = '<!-- <form action="/old"></form> --><form action="/new"></form>'
+        assert find_form(html) == '<form action="/new"></form>'
+
+    def test_unclosed_form_is_not_a_match(self) -> None:
+        with pytest.raises(LookupError, match="Form not found"):
+            find_form('<form action="/a">dangling')
+
+    def test_self_closed_form_is_skipped(self) -> None:
+        html = '<form action="/a"/><form action="/a"><input name="t"></form>'
+        assert find_form(html, action="/a") == (
+            '<form action="/a"><input name="t"></form>'
+        )
+
+    def test_multiline_form_with_nested_blocks(self) -> None:
+        html = (
+            '<div>\n<form action="/multi" method="post">\n'
+            '  <fieldset>\n    <input name="title">\n  </fieldset>\n</form>\n</div>'
+        )
+        assert find_form(html, action="/multi") == (
+            '<form action="/multi" method="post">\n'
+            '  <fieldset>\n    <input name="title">\n  </fieldset>\n</form>'
+        )

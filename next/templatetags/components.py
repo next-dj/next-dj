@@ -54,9 +54,12 @@ _END_BLOCK_SET_SLOT = ("/set_slot",)
 _SHORT_SLOT_EMPTY_NAME = "{% slot %} tag requires a quoted slot name"
 _SHORT_SET_SLOT_EMPTY_NAME = "{% set_slot %} tag requires a quoted slot name"
 
-# The key slot collection writes while the parent ``{% #component %}`` body
-# renders. ``_component_props`` stays out because every node overwrites it.
-_INTERNAL_CONTEXT_KEYS = frozenset({"_component_slots"})
+# The key a component pushes for its body to write slots into.
+_SLOT_COLLECTOR_KEY = "_component_slots"
+
+# Keys the component body sees but the component scope must not. The collector
+# is one. ``_component_props`` stays out because every node overwrites it.
+_INTERNAL_CONTEXT_KEYS = frozenset({_SLOT_COLLECTOR_KEY})
 
 _DASH_BEFORE_DASH = re.compile(r"-(?=-)")
 
@@ -137,22 +140,48 @@ def _parse_one_named_block(
     return name, nodelist
 
 
+@dataclass(frozen=True, slots=True)
+class _SlotCollector:
+    """The slot dict a rendering component offers to the slots it owns."""
+
+    owner: ComponentNode
+    slots: dict[str, str]
+
+
 class SlotNode(Node):
-    """Renders the slot body and records it by name when under ``{% #component %}``."""
+    """Fills a named slot of the component whose body holds it."""
 
     def __init__(self, name: str, nodelist: NodeList) -> None:
         """Remember the slot name and nested nodes."""
         self.name = name
         self.nodelist = nodelist
+        # Claimed by the component that compiles this node into its body. A
+        # slot reached from another template, through an include, fills nothing.
+        self.owner: ComponentNode | None = None
+
+    def collect(self, context: template.Context, slots: dict[str, str]) -> None:
+        """Append the rendered body to the entry this slot name holds.
+
+        A repeat appends rather than replaces, so a slot written once per
+        ``{% for %}`` iteration keeps every body in render order.
+        """
+        body = self.nodelist.render(context)
+        previous = slots.get(self.name)
+        slots[self.name] = body if previous is None else previous + body
 
     @override
     def render(self, context: template.Context) -> str:
-        """Render the body and write into ``_component_slots`` when that dict exists."""
-        body = self.nodelist.render(context)
-        slots = context.get("_component_slots")
-        if isinstance(slots, dict):
-            slots[self.name] = body
-        return body
+        """Fill the owning component's slot, or render the body where it stands.
+
+        Filling contributes nothing to ``children``, wherever in the body the
+        slot sits. A slot whose owner is not the component rendering around it
+        has nothing to fill, so its body renders in place.
+        """
+        collector = context.get(_SLOT_COLLECTOR_KEY)
+        if isinstance(collector, _SlotCollector) and collector.owner is self.owner:
+            self.collect(context, collector.slots)
+            return ""
+        return self.nodelist.render(context)
 
 
 class ComponentNode(Node):
@@ -167,6 +196,18 @@ class ComponentNode(Node):
         self.nodelist = nodelist
         # Prop names are fixed at compile time, so the guard rebuilds nothing.
         self.prop_names = frozenset(props)
+        # Which slots a body holds is settled once the body is compiled, so
+        # the recursive walk runs here and the render pays nothing. Django's
+        # ``get_nodes_by_type`` also descends into a nested ``{% #component %}``,
+        # which parses first and has already claimed the slots of its own body.
+        claimed = [
+            node
+            for node in cast("list[SlotNode]", nodelist.get_nodes_by_type(SlotNode))
+            if node.owner is None
+        ]
+        for node in claimed:
+            node.owner = self
+        self.has_slots = bool(claimed)
 
     def _resolved_props(self, context: template.Context) -> dict[str, Any]:
         """Resolve every prop expression against the active template context.
@@ -248,6 +289,19 @@ class ComponentNode(Node):
             f"(not-found){hint} -->"
         )
 
+    def _render_children(
+        self, context: template.Context, slots: dict[str, str]
+    ) -> SafeString:
+        """Render the body, routing every slot body into `slots`.
+
+        A body holding no slot skips the collector push, so the plain component
+        pays nothing for the slot protocol.
+        """
+        if not self.has_slots:
+            return self.nodelist.render(context)
+        with context.push(_component_slots=_SlotCollector(self, slots)):
+            return self.nodelist.render(context)
+
     @override
     def render(self, context: template.Context) -> str:
         """Merge props, slots, and children, then render the component."""
@@ -262,13 +316,7 @@ class ComponentNode(Node):
         collect_component_assets(info, context.get("_static_collector"))
 
         slots: dict[str, str] = {}
-        child_chunks: list[str] = []
-        with context.push(_component_slots=slots):
-            for node in self.nodelist:
-                if isinstance(node, SlotNode):
-                    node.render(context)
-                else:
-                    child_chunks.append(node.render(context))
+        children = self._render_children(context, slots)
 
         # ``flatten`` returns a dict built for this call alone, so the render
         # context is filled in place instead of through another copy.
@@ -277,10 +325,10 @@ class ComponentNode(Node):
             render_ctx.pop(key, None)
         render_ctx.update(self._resolved_props(context))
         render_ctx["current_template_path"] = path
-        # Children arrive as finished markup, so the join is spliced in as
-        # written, the way slot content already is. Whether the values inside
-        # were escaped is the calling template's business.
-        render_ctx["children"] = SafeString("".join(child_chunks))
+        # Children arrive as finished markup, spliced in as written the way
+        # slot content already is. Whether the values inside were escaped is
+        # the calling template's business.
+        render_ctx["children"] = children
         render_ctx[COMPONENT_PROPS_CONTEXT_KEY] = self.prop_names
 
         for slot_name, content in slots.items():

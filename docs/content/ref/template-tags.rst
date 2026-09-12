@@ -104,6 +104,20 @@ Components
    Block form.
    Marks a slot location inside a component template, with a fallback body used when the caller omits the slot.
 
+Where a caller slot may sit
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A caller slot fills the component whose ``{% #component %}`` body it is written in.
+It may sit anywhere in that body, directly or inside ``{% if %}``, ``{% for %}``, or any other block tag, and the framework records which slots a body holds when it compiles the body.
+Wherever the slot sits, its content fills the named slot and never reaches ``children``.
+
+A slot the render never reaches, such as one under an ``{% if %}`` branch that is not taken, leaves its name unfilled, so the component's ``{% #set_slot %}`` fallback body renders.
+One name written more than once, such as a slot repeated per ``{% for %}`` iteration, keeps every body and joins them in render order.
+
+A ``{% #slot %}`` compiled into some other template, reached through ``{% include %}`` or an overridden ``{% block %}``, belongs to no component body.
+It renders its content where it stands, which inside a ``{% #component %}`` body means as part of ``children``.
+Put the slot in the component body itself to fill a slot.
+
 Resolution misses
 ~~~~~~~~~~~~~~~~~
 

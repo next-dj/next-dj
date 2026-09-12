@@ -13,6 +13,8 @@ Custom backends extend the surface by adding more named methods such as
 Instances are built from `NEXT_FRAMEWORK['STATIC_BACKENDS']`
 entries by the static manager, which emits the `backend_loaded`
 signal for each one so user code may react to backend construction.
+The manager also drives `forget_urls` over that same list whenever a
+setting rebuilds the storage the memoised URLs were resolved against.
 """
 
 from __future__ import annotations
@@ -20,10 +22,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from typing import TYPE_CHECKING, Any, ClassVar, override
-from weakref import WeakSet
 
 from django.contrib.staticfiles.storage import staticfiles_storage
-from django.core.signals import setting_changed
 
 from next.utils import store_capped
 
@@ -44,7 +44,7 @@ _URL_CACHE_MAX_SIZE = 2048
 
 # Changing one of these rebuilds `staticfiles_storage`, so every URL resolved
 # through the manifest it held answers for a manifest that is gone.
-_MANIFEST_SETTINGS = frozenset({"STATIC_ROOT", "STATIC_URL", "STORAGES"})
+MANIFEST_SETTINGS = frozenset({"STATIC_ROOT", "STATIC_URL", "STORAGES"})
 
 
 class StaticBackend(ABC):
@@ -60,11 +60,17 @@ class StaticBackend(ABC):
     through `KindRegistry.renderer(kind)`. The default backend below ships
     `render_link_tag` and `render_script_tag` for the built-in `css` and `js`
     kinds. Custom backends register additional kinds and expose matching methods.
+
+    The base also owns the memo a backend fills with what it resolved, keyed by
+    logical name and suffix, because a backend that remembers a URL needs the
+    framework to tell it when the storage behind that URL is rebuilt. The
+    `forget_urls` hook is that telling, and the static manager drives it.
     """
 
     def __init__(self, config: Mapping[str, Any] | None = None) -> None:
-        """Store the raw config mapping for subclasses to read."""
+        """Store the raw config mapping and prime the URL memo it may fill."""
         self._config: Mapping[str, Any] = config or {}
+        self._url_cache: OrderedDict[tuple[str, str], str] = OrderedDict()
 
     @property
     def config(self) -> Mapping[str, Any]:
@@ -82,6 +88,15 @@ class StaticBackend(ABC):
         """
         del request
         return url
+
+    def forget_urls(self) -> None:
+        """Drop every memoised URL, so the next lookup resolves it again.
+
+        A backend that remembers what it resolved somewhere other than the
+        base memo overrides this one hook, so a setting rebuilding the storage
+        behind those URLs reaches it whatever shape the memo has.
+        """
+        self._url_cache.clear()
 
     @abstractmethod
     def register_file(self, source_path: Path, logical_name: str, kind: str) -> str:
@@ -117,14 +132,12 @@ class StaticFilesBackend(StaticBackend):
     _DEFAULT_MODULE_TAG: ClassVar[str] = '<script type="module" src="{url}"></script>'
 
     def __init__(self, config: Mapping[str, Any] | None = None) -> None:
-        """Read tag templates from the OPTIONS mapping and prime caches."""
+        """Read the tag templates from the OPTIONS mapping."""
         super().__init__(config)
         opts = dict(self._config.get("OPTIONS") or {})
         self._css_tag = str(opts.get("css_tag") or self._DEFAULT_CSS_TAG)
         self._js_tag = str(opts.get("js_tag") or self._DEFAULT_JS_TAG)
         self._module_tag = str(opts.get("module_tag") or self._DEFAULT_MODULE_TAG)
-        self._url_cache: OrderedDict[tuple[str, str], str] = OrderedDict()
-        _url_caching_backends.add(self)
 
     def _logical_static_path(self, logical_name: str, suffix: str) -> str:
         return f"{StaticNamespace.NEXT}/{logical_name}{suffix}"
@@ -161,10 +174,6 @@ class StaticFilesBackend(StaticBackend):
         store_capped(self._url_cache, cache_key, url, _URL_CACHE_MAX_SIZE)
         return url
 
-    def forget_urls(self) -> None:
-        """Drop every memoised URL, so the next lookup reads the manifest again."""
-        self._url_cache.clear()
-
     def render_link_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
         """Return a link tag built from the configured css_tag template.
 
@@ -188,16 +197,3 @@ class StaticFilesBackend(StaticBackend):
         """
         del request
         return self._module_tag.format(url=url)
-
-
-_url_caching_backends: WeakSet[StaticFilesBackend] = WeakSet()
-
-
-def _on_setting_changed(*, setting: str, **kwargs) -> None:
-    """Drop memoised asset URLs when Django rebuilds the staticfiles storage."""
-    if setting in _MANIFEST_SETTINGS:
-        for backend in _url_caching_backends:
-            backend.forget_urls()
-
-
-setting_changed.connect(_on_setting_changed)

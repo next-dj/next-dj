@@ -5,13 +5,12 @@ from __future__ import annotations
 from . import checks, signals
 from .defaults import DEFAULTS, USER_SETTING
 from .helpers import extend_default_backend
-from .imports import IMPORT_STRINGS, import_class_cached, perform_import
+from .imports import import_class_cached
 from .settings import NextFrameworkSettings, fail_loudly, next_framework_settings
 
 
 __all__ = [
     "DEFAULTS",
-    "IMPORT_STRINGS",
     "USER_SETTING",
     "NextFrameworkSettings",
     "checks",
@@ -19,6 +18,5 @@ __all__ = [
     "fail_loudly",
     "import_class_cached",
     "next_framework_settings",
-    "perform_import",
     "signals",
 ]

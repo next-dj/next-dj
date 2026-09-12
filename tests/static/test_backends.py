@@ -4,7 +4,6 @@ from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
-from django.test import override_settings
 
 import next.static
 from next.static import StaticBackend, StaticFilesBackend
@@ -211,19 +210,14 @@ class TestUrlMemoInvalidation:
         second = self._register(backend, tmp_path, "/static/next/a.9f1.css")
         assert (first, second) == ("/static/next/a.css", "/static/next/a.9f1.css")
 
-    def test_a_manifest_setting_change_drops_the_memo(self, tmp_path: Path) -> None:
-        backend = StaticFilesBackend()
-        self._register(backend, tmp_path, "/static/next/a.css")
-        with override_settings(STATIC_URL="/assets/"):
-            resolved = self._register(backend, tmp_path, "/assets/next/a.css")
-        assert resolved == "/assets/next/a.css"
+    def test_the_hook_reaches_a_backend_of_any_other_shape(self) -> None:
+        """The memo and the hook that drops it both sit on the base contract."""
+        backend = _CollectingBackend()
+        backend._url_cache[("a", ".css")] = "/static/next/a.css"
 
-    def test_an_unrelated_setting_change_keeps_the_memo(self, tmp_path: Path) -> None:
-        backend = StaticFilesBackend()
-        self._register(backend, tmp_path, "/static/next/a.css")
-        with override_settings(STATICFILES_DIRS=[]):
-            resolved = self._register(backend, tmp_path, "/never/read.css")
-        assert resolved == "/static/next/a.css"
+        backend.forget_urls()
+
+        assert backend._url_cache == {}
 
 
 class TestStaticBackendReexport:

@@ -118,10 +118,6 @@ Errors
    * - Code
      - Condition
      - Emitted by
-   * - ``next.E001``
-     - ``NEXT_FRAMEWORK`` is not a dict, so the page checks have nothing to index into.
-       ``PAGE_BACKENDS`` carries its own code, ``next.E081``, so silencing one key never silences the whole mapping.
-     - ``next.urls.checks``
    * - ``next.E002``
      - A ``PAGE_BACKENDS`` entry is not a dict.
        The ``COMPONENT_BACKENDS`` counterpart is ``next.E079``.
@@ -341,6 +337,7 @@ Errors
      - ``NEXT_FRAMEWORK`` is not a dict, so the settings layer ignores it entirely and the project runs on the framework defaults.
        It carries its own code rather than sharing ``next.E076``, so silencing the noise from one mistyped key never silences this one.
        The per-key probes are skipped, because there is nothing to index into.
+       No other area repeats the condition under a code of its own, so one mistyped setting costs one error.
      - ``next.conf.checks``
    * - ``next.E078``
      - A ``@context(zone=)`` names a zone the composed page template does not declare, so no zone request ever matches the callable and its value is missing from every zone render.

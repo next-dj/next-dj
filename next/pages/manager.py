@@ -729,10 +729,8 @@ class Page:
         # at module level would close the next.pages <-> next.urls cycle.
         try:
             django_pattern, parameters = url_parser.parse_url_pattern(url_path)
-        except url_parser.duplicate_parameter_error as exc:
-            raise url_parser.duplicate_parameter_error(
-                exc.param_name, exc.url_path, file_path=file_path
-            ) from exc
+        except url_parser.parameter_error as exc:
+            raise exc.with_file(file_path) from exc
         clean_name = url_parser.prepare_url_name(url_path)
 
         if file_path.exists():

@@ -74,6 +74,7 @@ HTML utilities
 ~~~~~~~~~~~~~~
 
 ``find_anchor``, ``find_form``, ``assert_has_class``, and ``assert_missing_class`` inspect rendered HTML fragments, while ``form_action``, ``form_fields``, ``hidden_fields``, and ``init_payload`` pull submit targets, input values, and the ``Next._init`` bootstrap payload out of a rendered page.
+``find_anchor`` and ``find_form`` locate the element with the standard library HTML parser and return its verbatim source span, so an element needs its end tag to be found and markup inside a comment or a script body is never matched.
 
 .. automodule:: next.testing.html
    :members:

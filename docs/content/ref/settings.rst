@@ -23,6 +23,37 @@ A singular ``*_BACKEND`` key holds the one engine for a concern.
 A subsystem prefix (``PAGE_``, ``COMPONENT_``, ``STATIC_``, ``FORM_``, ``URL_``, ``TEMPLATE_``, ``JS_``, ``PARTIAL_``) groups related keys.
 ``NEXT_JS_OPTIONS`` stands outside the prefix scheme and configures the bundled client runtime.
 
+.. _ref-settings-merge:
+
+How values merge
+----------------
+
+``NEXT_FRAMEWORK`` merges over the framework defaults one level deep, and one level only.
+A key the project sets replaces the default for that key whole.
+A key the project leaves out keeps its default.
+Nothing below the top level is combined, so a nested ``OPTIONS`` dict, an entry inside a backend list, and a sub-key of a single backend dict all come from the project alone once the top-level key is present.
+The rule holds for every key, with no per-key exception.
+
+This is what Django does with its own configuration mappings.
+Defining :doc:`STORAGES <django:ref/settings>` overrides the default configuration rather than merging with it, and ``TEMPLATES``, ``DATABASES``, and ``CACHES`` each read the whole list or mapping the project wrote.
+Filling in what a single entry leaves out belongs to the code that consumes the entry, the same place Django fills a ``DATABASES`` alias with ``ATOMIC_REQUESTS`` or a ``TEMPLATES`` entry with ``APP_DIRS``.
+
+A single backend dict follows the rule like any other key.
+``FORM_WIZARD_BACKEND`` set to ``{"OPTIONS": {...}}`` alone carries no ``BACKEND``, which ``manage.py check`` reports as ``next.E051`` and the wizard manager answers with :exc:`~django.core.exceptions.ImproperlyConfigured` on first use.
+Write the whole entry, ``BACKEND`` included.
+
+Each key accepts one shape, and a value of any other type is dropped in favour of the default rather than merged into it.
+
+- The list keys (``PAGE_BACKENDS``, ``COMPONENT_BACKENDS``, ``STATIC_BACKENDS``, ``FORM_ACTION_BACKENDS``, ``PARTIAL_BACKENDS``, ``TEMPLATE_LOADERS``, ``FORM_ANCHOR_FILES``) accept a list.
+- The mapping keys (``NEXT_JS_OPTIONS``, ``FORM_WIZARD_BACKEND``) accept a dict.
+- The dotted-path keys (``URL_RESOLVER``, ``URL_NAME_TEMPLATE``, ``DEPENDENCY_RESOLVER``, ``COMPONENT_TEMPLATE_LOADER``) accept a string, and ``JS_CONTEXT_SERIALIZER`` accepts a string or ``None``.
+- The bool flags (``STRICT_CONTEXT``, ``STRICT_LOADING``, ``LAZY_COMPONENT_MODULES``, ``FORM_AUTODISCOVER``, ``STATIC_DISCOVERY_CACHE``) accept any value and pass through ``bool()``.
+
+A dropped value is reported at ``manage.py check`` as ``next.E076``, or under the code the key owns where it carries one, and a bool flag holding a non-bool is reported as ``next.W072``.
+See :doc:`system-checks` for the conditions.
+
+To change one key of a default backend entry without writing the entry out, build the replacement value with ``next.conf.extend_default_backend``, described under `Patching defaults`_.
+
 Backends
 --------
 
@@ -153,6 +184,7 @@ The bundled ``CacheFormWizardBackend`` stores drafts in the Django cache instead
 It reads two keys from ``OPTIONS``.
 ``CACHE_ALIAS`` names the cache to use, defaulting to ``"default"``, and ``TIMEOUT`` sets the draft expiry in seconds, defaulting to ``SESSION_COOKIE_AGE``.
 Set ``BACKEND`` to a dotted path that subclasses ``FormWizardBackend`` to swap the persistence layer.
+A project value replaces the default dict whole, as :ref:`ref-settings-merge` describes, so the key names its ``BACKEND`` even when the point of setting it is ``OPTIONS``.
 See :doc:`/content/topics/forms/wizard-backend` for the contract, the codec, and a custom backend.
 
 PARTIAL_BACKENDS

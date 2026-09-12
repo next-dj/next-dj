@@ -106,6 +106,8 @@ Captured values reach Python through markers.
 Hyphens in directory names are normalised to underscores in the generated URL parameter and URL name.
 A ``routes/[my-id]/page.py`` route becomes the Django parameter ``<str:my_id>``, the resolver provides it as ``my_id``, and the URL name registers as ``next:page_my_id``.
 Name your directories without hyphens when you want the parameter name and the directory name to match exactly.
+A directory name that is no Python identifier after that normalisation, such as ``[2fa]`` or ``[user.id]``, raises ``InvalidURLParameterError`` at router build and reports :ref:`next.E008 <ref-system-checks>` at check time.
+Both that refusal and ``DuplicateURLParameterError`` name the offending ``page.py`` alongside the route.
 
 .. code-block:: python
    :caption: routes/posts/[int:post_id]/page.py

@@ -153,7 +153,8 @@ The framework default points at the session backend with empty options.
        },
    }
 
-A project setting merges shallowly over the default.
+A project value replaces the default dict whole rather than merging into it, so the key carries its own ``BACKEND`` alongside any ``OPTIONS``.
+See :ref:`ref-settings-merge` for the rule and the shape every other key follows.
 Switch to the cache backend to point drafts at a dedicated cache alias and shorten their lifetime through ``OPTIONS``.
 
 .. code-block:: python

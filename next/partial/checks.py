@@ -30,7 +30,7 @@ from next.conf.signals import settings_reloaded
 from next.forms.backends import FormActionBackend
 from next.forms.manager import form_action_manager
 from next.pages import page
-from next.templatetags.forms import FormNode
+from next.templatetags.forms import FORM_KEY_ATTR, FORM_ZONE_ATTR, FormNode
 
 from .registry import BUILTIN_OPS, patch_op_registry
 from .zone import ZoneNode
@@ -67,8 +67,6 @@ W_TOO_MANY_BACKENDS: Final = "next.W071"
 
 _PARTIAL_BACKENDS_KEY: Final = "PARTIAL_BACKENDS"
 _MIN_DUPLICATE_COUNT: Final = 2
-_FORM_TARGET_ATTR: Final = "data-next-target"
-_FORM_KEY_ATTR: Final = "data-next-key"
 
 
 _ZONE_SLUG = re.compile(r"\A[A-Za-z0-9_-]+\Z")
@@ -310,20 +308,15 @@ def _forms_in_loop(nodelist: NodeList, *, inside: bool = False) -> "Iterator[For
             yield from _forms_in_loop(child, inside=now_inside)
 
 
-def _form_has_partial_attr(node: FormNode, attr: str) -> bool:
-    """Return True when the form tag wrote the given `data-next-*` attribute."""
-    return any(name == attr for name, _expr in node.partial_attrs)
-
-
 @register(Tags.templates, NEXT)
 def check_repeated_form_has_key(*args, **kwargs) -> list[CheckMessage]:
     """Warn when a looped `{% form %}` has no key or zone (`next.W070`)."""
     messages: list[CheckMessage] = []
     for page_path, template in _iter_composed_pages():
         for node in _forms_in_loop(template.nodelist):
-            if _form_has_partial_attr(node, _FORM_TARGET_ATTR):
+            if node.has_partial_attr(FORM_ZONE_ATTR):
                 continue
-            if _form_has_partial_attr(node, _FORM_KEY_ATTR):
+            if node.has_partial_attr(FORM_KEY_ATTR):
                 continue
             messages.append(
                 DjangoWarning(

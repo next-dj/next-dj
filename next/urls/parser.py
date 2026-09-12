@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, Self, override
 from uuid import UUID
 
 
@@ -51,7 +51,38 @@ def _coerce_url_value(value: object, hint: object) -> object:
         return value
 
 
-class DuplicateURLParameterError(ValueError):
+class URLParameterError(ValueError):
+    """Raised when the parser refuses to turn a bracket segment into a route.
+
+    The parser knows the route but not the file it came from, so one base
+    carries the page file and every refusal reports it the same way.
+    """
+
+    def __init__(
+        self, param_name: str, url_path: str, file_path: Path | None = None
+    ) -> None:
+        """Build the message from the refused name, its route, and the page file."""
+        self.param_name = param_name
+        self.url_path = url_path
+        self.file_path = file_path
+        message = self._reason()
+        if file_path is not None:
+            message = f"{message} Page file: {file_path}."
+        super().__init__(message)
+
+    def with_file(self, file_path: Path) -> Self:
+        """Return the same refusal with `file_path` named in its message."""
+        return type(self)(self.param_name, self.url_path, file_path=file_path)
+
+    def _reason(self) -> str:
+        """Return the sentence explaining why the route cannot be built."""
+        return (
+            f"URL parameter '{self.param_name}' in URL pattern "
+            f"'{self.url_path}' cannot be turned into a Django route."
+        )
+
+
+class DuplicateURLParameterError(URLParameterError):
     """Raised when bracket segments in one route conflict after normalisation.
 
     Covers a repeated normalised parameter name (`-` maps to `_`) and a
@@ -59,25 +90,18 @@ class DuplicateURLParameterError(ValueError):
     reject only at resolve time or resolve ambiguously.
     """
 
-    def __init__(
-        self, param_name: str, url_path: str, file_path: Path | None = None
-    ) -> None:
-        """Build the message from the conflicting name and the source path."""
-        self.param_name = param_name
-        self.url_path = url_path
-        self.file_path = file_path
-        message = (
-            f"Duplicate URL parameter '{param_name}' in URL pattern "
-            f"'{url_path}'. Parameter names must be unique after '-' to '_' "
-            "normalisation and a route can hold at most one [[wildcard]] "
+    @override
+    def _reason(self) -> str:
+        """Name the conflicting parameter and the rule it breaks."""
+        return (
+            f"Duplicate URL parameter '{self.param_name}' in URL pattern "
+            f"'{self.url_path}'. Parameter names must be unique after '-' to "
+            "'_' normalisation and a route can hold at most one [[wildcard]] "
             "segment."
         )
-        if file_path is not None:
-            message = f"{message} Page file: {file_path}."
-        super().__init__(message)
 
 
-class InvalidURLParameterError(ValueError):
+class InvalidURLParameterError(URLParameterError):
     """Raised when a bracket segment names something Django refuses as a route.
 
     Django compiles a route the moment the pattern is built, so a name that is
@@ -85,16 +109,14 @@ class InvalidURLParameterError(ValueError):
     traceback far from the directory that named it.
     """
 
-    def __init__(self, param_name: str, url_path: str) -> None:
-        """Build the message from the refused name and the route holding it."""
-        self.param_name = param_name
-        self.url_path = url_path
-        message = (
-            f"URL parameter '{param_name}' in URL pattern '{url_path}' is no "
-            "valid Python identifier once '-' is read as '_'. Django refuses "
-            "such a name when it compiles the route."
+    @override
+    def _reason(self) -> str:
+        """Name the refused parameter and the rule Django applies to it."""
+        return (
+            f"URL parameter '{self.param_name}' in URL pattern "
+            f"'{self.url_path}' is no valid Python identifier once '-' is read "
+            "as '_'. Django refuses such a name when it compiles the route."
         )
-        super().__init__(message)
 
 
 class URLPatternParser:
@@ -105,12 +127,7 @@ class URLPatternParser:
     second value from the page-tree scanner.
     """
 
-    duplicate_parameter_error: ClassVar[type[DuplicateURLParameterError]] = (
-        DuplicateURLParameterError
-    )
-    invalid_parameter_error: ClassVar[type[InvalidURLParameterError]] = (
-        InvalidURLParameterError
-    )
+    parameter_error: ClassVar[type[URLParameterError]] = URLParameterError
 
     # The wildcard alternative must come first so `[[x]]` never matches
     # the single-bracket branch with a `[` inside the captured name.
@@ -199,6 +216,7 @@ default_url_parser: URLPatternParser = URLPatternParser()
 __all__ = [
     "DuplicateURLParameterError",
     "InvalidURLParameterError",
+    "URLParameterError",
     "URLPatternParser",
     "default_url_parser",
 ]

@@ -254,13 +254,12 @@ def _validate_config_fields(config: dict[str, Any], index: int) -> list[CheckMes
 
 @register(NEXT)
 def check_next_pages_configuration(*args, **kwargs) -> list[CheckMessage]:
-    """Validate `PAGE_BACKENDS` inside merged `NEXT_FRAMEWORK`."""
-    raw = getattr(settings, "NEXT_FRAMEWORK", None)
-    if raw is not None and not isinstance(raw, dict):
-        return [
-            Error("NEXT_FRAMEWORK must be a dictionary.", obj=settings, id="next.E001")
-        ]
+    """Validate `PAGE_BACKENDS` inside merged `NEXT_FRAMEWORK`.
 
+    A `NEXT_FRAMEWORK` that is no dict belongs to the configuration layer and is
+    reported once as `next.E077`. The merged value falls back to the defaults here,
+    so the page checks run against a shape they can read.
+    """
     next_pages = next_framework_settings.PAGE_BACKENDS
     if not isinstance(next_pages, list):
         return [

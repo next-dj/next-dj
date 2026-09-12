@@ -1,6 +1,7 @@
 import pytest
 from django.test import Client
 
+from next.partial.envelope import Asset, Envelope, FormMeta, Patch
 from next.testing import NextClient, PartialEnvelope, envelope_of
 from tests.forms import actions
 
@@ -146,3 +147,102 @@ class TestEnvelopeHelpers:
         envelope = envelope_of(NextClient().get_zones("/zoned/", "alpha"))
         with pytest.raises(AssertionError, match="no op targets zone"):
             envelope.html_for_zone("absent")
+
+
+class TestEnvelopeDecoding:
+    """The view rebuilds the producer's own objects out of the wire mapping."""
+
+    def test_decoding_is_the_inverse_of_the_producer(self) -> None:
+        envelope = Envelope(
+            version="v1",
+            ops=(
+                Patch(op="morph", target={"zone": "list"}, html="<div></div>"),
+                Patch(op="toast", extras={"text": "Saved"}),
+            ),
+            assets=(
+                Asset(kind="css", url="/a.css", load="link"),
+                Asset(kind="js", url="", inline="console.log(1)"),
+            ),
+            form=FormMeta(uid="ab12", valid=False, errors={"name": ["required"]}),
+            csrf={"token": "t"},
+            request_id="r1",
+        )
+        data = envelope.as_dict()
+        assert Envelope.from_dict(data) == envelope
+        assert Envelope.from_dict(data).as_dict() == data
+
+    def test_reads_every_accessor_off_the_rebuilt_objects(self) -> None:
+        envelope = Envelope(
+            version="v1",
+            ops=(
+                Patch(op="morph", target={"zone": "list"}, html="<div></div>"),
+                Patch(op="morph", target={"form": "ab12"}, html="<form></form>"),
+                Patch(op="toast", extras={"text": "Saved"}),
+            ),
+            assets=(Asset(kind="css", url="/a.css", load="link"),),
+            form=FormMeta(uid="ab12", valid=True),
+        )
+        view = PartialEnvelope(envelope.as_dict())
+        assert view.version == "v1"
+        assert view.op_verbs() == ["morph", "morph", "toast"]
+        assert view.targets() == [{"zone": "list"}, {"form": "ab12"}, None]
+        assert view.zone_targets() == ["list"]
+        assert view.form_targets() == ["ab12"]
+        assert view.assets == [{"kind": "css", "url": "/a.css", "load": "link"}]
+        assert view.form_meta() == {"uid": "ab12", "valid": True, "errors": {}}
+        assert view.toasts() == [{"op": "toast", "text": "Saved"}]
+        assert view.html_for_zone("list") == "<div></div>"
+
+    def test_absent_collections_decode_to_empty(self) -> None:
+        view = PartialEnvelope({"version": "v1"})
+        assert view.ops == []
+        assert view.assets == []
+        assert view.form_meta() is None
+
+    def test_null_form_decodes_to_none(self) -> None:
+        view = PartialEnvelope({"version": "v1", "ops": [], "form": None})
+        assert view.form_meta() is None
+
+    def test_zone_op_without_html_answers_empty(self) -> None:
+        view = PartialEnvelope(
+            {"version": "v1", "ops": [{"op": "refresh", "target": {"zone": "a"}}]}
+        )
+        assert view.html_for_zone("a") == ""
+
+    def test_returned_mappings_do_not_alias_the_payload(self) -> None:
+        data = {
+            "version": "v1",
+            "ops": [{"op": "morph", "target": {"zone": "a"}, "html": "<p></p>"}],
+        }
+        view = PartialEnvelope(data)
+        view.ops[0]["html"] = "mutated"
+        view.targets()[0]["zone"] = "b"
+        assert data["ops"] == [
+            {"op": "morph", "target": {"zone": "a"}, "html": "<p></p>"}
+        ]
+
+
+class TestEnvelopeStrictness:
+    """A payload that is not a whole envelope fails loudly instead of half answering."""
+
+    def test_missing_version_raises(self) -> None:
+        with pytest.raises(KeyError):
+            _ = PartialEnvelope({"ops": []}).ops
+
+    def test_op_without_a_verb_raises(self) -> None:
+        with pytest.raises(KeyError):
+            _ = PartialEnvelope({"version": "v1", "ops": [{"html": "<p></p>"}]}).ops
+
+    def test_asset_without_a_url_raises(self) -> None:
+        with pytest.raises(KeyError):
+            _ = PartialEnvelope({"version": "v1", "assets": [{"kind": "css"}]}).assets
+
+    def test_form_meta_without_errors_raises(self) -> None:
+        view = PartialEnvelope(
+            {"version": "v1", "form": {"uid": "ab12", "valid": True}}
+        )
+        with pytest.raises(KeyError):
+            view.form_meta()
+
+    def test_raw_payload_stays_readable(self) -> None:
+        assert PartialEnvelope({"ops": []}).data == {"ops": []}

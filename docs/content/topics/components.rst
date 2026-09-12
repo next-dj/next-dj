@@ -312,6 +312,40 @@ Both the void ``{% slot "name" %}`` and the block ``{% #slot %}`` forms are supp
 The void caller slot marks the slot explicitly empty and suppresses the ``{% #set_slot %}`` fallback body.
 Caller slot content reaches the component scope under the ``slot_<name>`` key.
 
+Conditional and repeated slots
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A slot may sit anywhere inside the ``{% #component %}`` body, not only as its direct child.
+A slot under an ``{% if %}`` fills the slot when the branch is taken and leaves it unfilled otherwise, which is how a component shows a fallback body for one audience and caller content for another.
+
+.. code-block:: jinja
+   :caption: filling a slot for some callers only
+
+   {% #component "card" title="News" %}
+     {% if user.is_staff %}
+       {% #slot "actions" %}<button>Edit</button>{% /slot %}
+     {% endif %}
+   {% /component %}
+
+When the branch is not taken the ``actions`` name stays unfilled and the component's ``{% #set_slot "actions" %}`` fallback body renders.
+A slot never contributes to ``children``, wherever in the body it sits.
+
+One slot name written more than once keeps every body and joins them in render order, so a slot repeated per ``{% for %}`` iteration collects the whole list.
+
+.. code-block:: jinja
+   :caption: one row per iteration in a single slot
+
+   {% #component "table" %}
+     {% for note in notes %}
+       {% #slot "rows" %}<tr><td>{{ note.title }}</td></tr>{% /slot %}
+     {% endfor %}
+   {% /component %}
+
+The component template renders ``{{ slot_rows }}`` once and receives every row.
+
+A ``{% #slot %}`` written in another template and pulled into the body by ``{% include %}`` belongs to no component body, so it renders where it stands and reaches the component as part of ``children``.
+Write the slot in the component body to fill a slot.
+
 Component context
 -----------------
 

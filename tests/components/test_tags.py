@@ -6,6 +6,7 @@ from unittest.mock import patch
 import pytest
 from django.template import Context, Template
 from django.template.base import TemplateSyntaxError
+from django.template.engine import Engine
 from django.test import override_settings
 from django.utils.safestring import SafeString
 
@@ -717,25 +718,45 @@ class TestComponentAnchorContext:
         assert "C[]" in result
 
 
+def _render_slotted(
+    tmp_path: Path, source: str, body: str, context: dict[str, object] | None = None
+) -> str:
+    """Render the `c` component with `source` as its template through `body`."""
+    (tmp_path / "c.djx").write_text(source)
+    info = _component_info(tmp_path)
+    with patch.object(components_manager, "get_component", return_value=info):
+        t = Template("{% load components %}" + body)
+        return t.render(
+            Context(
+                {"current_template_path": str(tmp_path / "page.djx"), **(context or {})}
+            )
+        )
+
+
+def _component_info(tmp_path: Path) -> ComponentInfo:
+    """Describe the `c` component whose template sits in `tmp_path`."""
+    return ComponentInfo(
+        name="c",
+        scope_root=tmp_path,
+        scope_relative="",
+        template_path=tmp_path / "c.djx",
+        module_path=None,
+        is_simple=True,
+    )
+
+
+def _component_node(source: str) -> ComponentNode:
+    """Compile `source` and return the single component node it holds."""
+    nodes = [
+        node
+        for node in Template("{% load components %}" + source).nodelist
+        if isinstance(node, ComponentNode)
+    ]
+    return nodes[0]
+
+
 class TestSlotTag:
     """Tests for ``{% #slot %}``, ``{% /slot %}``, and short ``{% slot %}``."""
-
-    def _render_slotted(self, tmp_path: Path, source: str, body: str) -> str:
-        """Render the `c` component with `source` as its template through `body`."""
-        (tmp_path / "c.djx").write_text(source)
-        info = ComponentInfo(
-            name="c",
-            scope_root=tmp_path,
-            scope_relative="",
-            template_path=tmp_path / "c.djx",
-            module_path=None,
-            is_simple=True,
-        )
-        with patch.object(components_manager, "get_component", return_value=info):
-            t = Template("{% load components %}" + body)
-            return t.render(
-                Context({"current_template_path": str(tmp_path / "page.djx")})
-            )
 
     def test_block_slot_tag_requires_name(self) -> None:
         """{% #slot %} without name raises TemplateSyntaxError."""
@@ -770,7 +791,7 @@ class TestSlotTag:
 
     def test_block_slot_fills_the_named_slot_variable(self, tmp_path: Path) -> None:
         """A block slot inside a block component arrives as `slot_<name>`."""
-        result = self._render_slotted(
+        result = _render_slotted(
             tmp_path,
             "<div>[{{ slot_image }}]</div>",
             '{% #component "c" %}'
@@ -781,7 +802,7 @@ class TestSlotTag:
 
     def test_short_slot_fills_the_named_slot_with_nothing(self, tmp_path: Path) -> None:
         """The short `{% slot %}` form declares the name and leaves it empty."""
-        result = self._render_slotted(
+        result = _render_slotted(
             tmp_path,
             "<div>[{{ slot_footer }}]</div>",
             '{% #component "c" %}{% slot "footer" %}{% /component %}',
@@ -792,6 +813,111 @@ class TestSlotTag:
         """{% /slot %} without opening #slot raises."""
         with pytest.raises(TemplateSyntaxError, match="/slot"):
             Template("{% load components %}{% /slot %}")
+
+    def test_slot_outside_a_component_renders_its_body_in_place(self) -> None:
+        """With no component to fill, the slot body renders where it stands."""
+        t = Template('{% load components %}[{% #slot "x" %}body{% /slot %}]')
+        assert t.render(Context({})) == "[body]"
+
+
+class TestNestedSlot:
+    """A slot under a block tag fills its slot instead of leaking into children."""
+
+    def test_slot_under_a_taken_if_branch_fills_the_slot(self, tmp_path: Path) -> None:
+        """A slot inside {% if %} fills the slot and adds nothing to children."""
+        result = _render_slotted(
+            tmp_path,
+            "<div>[{{ slot_actions }}][{{ children }}]</div>",
+            '{% #component "c" %}'
+            '{% if is_staff %}{% #slot "actions" %}<b>edit</b>{% /slot %}{% endif %}'
+            "{% /component %}",
+            {"is_staff": True},
+        )
+        assert result == "<div>[<b>edit</b>][]</div>"
+
+    def test_slot_under_an_untaken_if_branch_leaves_the_fallback(
+        self, tmp_path: Path
+    ) -> None:
+        """An unreached slot never fills, so the set_slot fallback renders."""
+        result = _render_slotted(
+            tmp_path,
+            '<div>{% #set_slot "actions" %}none{% /set_slot %}</div>',
+            '{% #component "c" %}'
+            '{% if is_staff %}{% #slot "actions" %}<b>edit</b>{% /slot %}{% endif %}'
+            "{% /component %}",
+            {"is_staff": False},
+        )
+        assert result == "<div>none</div>"
+
+    def test_slot_repeated_in_a_loop_appends_every_body(self, tmp_path: Path) -> None:
+        """One slot written per iteration keeps every body in render order."""
+        result = _render_slotted(
+            tmp_path,
+            "<ul>{{ slot_row }}</ul>",
+            '{% #component "c" %}'
+            '{% for item in items %}{% #slot "row" %}<li>{{ item }}</li>'
+            "{% /slot %}{% endfor %}"
+            "{% /component %}",
+            {"items": ["a", "b"]},
+        )
+        assert result == "<ul><li>a</li><li>b</li></ul>"
+
+    def test_one_name_written_twice_appends_both_bodies(self, tmp_path: Path) -> None:
+        """Two slots sharing a name append instead of the last one winning."""
+        result = _render_slotted(
+            tmp_path,
+            "<div>[{{ slot_note }}]</div>",
+            '{% #component "c" %}'
+            '{% #slot "note" %}one{% /slot %}{% #slot "note" %}two{% /slot %}'
+            "{% /component %}",
+        )
+        assert result == "<div>[onetwo]</div>"
+
+    def test_slot_under_a_for_tag_is_found_at_parse_time(self) -> None:
+        """The nested walk runs once at compile time, not per render."""
+        node = _component_node(
+            '{% #component "c" %}'
+            '{% for item in items %}{% slot "row" %}{% endfor %}'
+            "{% /component %}"
+        )
+        assert node.has_slots is True
+
+    def test_body_without_a_slot_carries_no_slots(self) -> None:
+        """A body with no slot anywhere skips the collector push."""
+        node = _component_node(
+            '{% #component "c" %}{% if x %}<p>free</p>{% endif %}{% /component %}'
+        )
+        assert node.has_slots is False
+
+    def test_nested_component_keeps_the_slots_of_its_own_body(
+        self, tmp_path: Path
+    ) -> None:
+        """A slot in a nested component fills that component, not the outer one."""
+        result = _render_slotted(
+            tmp_path,
+            "<div>[{{ slot_a }}][{{ children }}]</div>",
+            '{% #component "c" %}{% #slot "a" %}A{% /slot %}'
+            '{% #component "c" %}{% #slot "a" %}B{% /slot %}{% /component %}'
+            "{% /component %}",
+        )
+        assert result == "<div>[A][<div>[B][]</div>]</div>"
+
+    def test_slot_pulled_in_by_include_fills_nothing(self, tmp_path: Path) -> None:
+        """A slot compiled into another template renders in place as children."""
+        (tmp_path / "inc.djx").write_text('{% #slot "a" %}included{% /slot %}')
+        (tmp_path / "c.djx").write_text("<div>[{{ slot_a }}][{{ children }}]</div>")
+        engine = Engine(dirs=[str(tmp_path)], builtins=["next.templatetags.components"])
+        body = engine.from_string(
+            '{% #component "c" %}{% #slot "a" %}own{% /slot %}'
+            '{% include "inc.djx" %}{% /component %}'
+        )
+        with patch.object(
+            components_manager, "get_component", return_value=_component_info(tmp_path)
+        ):
+            result = body.render(
+                Context({"current_template_path": str(tmp_path / "page.djx")})
+            )
+        assert result == "<div>[own][included]</div>"
 
 
 class TestSetSlotTag:

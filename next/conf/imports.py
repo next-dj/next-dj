@@ -1,9 +1,8 @@
-"""Import helpers backed by a module-level dotted-path cache.
+"""Import helper backed by a module-level dotted-path cache.
 
-`import_class_cached` memoises dotted-path lookups across reloads of the
-framework settings. `perform_import` wraps the cache with the dotted-path
-conversion rules used for future `IMPORT_STRINGS` entries. The cache is
-cleared by `NextFrameworkSettings.reload`.
+`import_class_cached` memoises dotted-path lookups across reloads of the framework
+settings, so a backend named by a settings key is imported once per process. The
+cache is cleared by `NextFrameworkSettings.reload`.
 """
 
 from __future__ import annotations
@@ -13,8 +12,6 @@ from typing import Any
 from django.utils.module_loading import import_string
 
 
-IMPORT_STRINGS: frozenset[str] = frozenset()
-
 _import_class_cache: dict[str, type[Any]] = {}
 
 
@@ -23,21 +20,6 @@ def import_class_cached(dotted_path: str) -> type[Any]:
     if dotted_path not in _import_class_cache:
         _import_class_cache[dotted_path] = import_string(dotted_path)
     return _import_class_cache[dotted_path]
-
-
-def perform_import(val: object, setting_name: str) -> object:
-    """Resolve a dotted import path through the cache when the value is a string."""
-    if val is None or not isinstance(val, str):
-        return val
-    try:
-        return import_class_cached(val)
-    except ImportError as e:
-        detail = f"{e!s}"
-        msg = (
-            f"Could not import {val!r} for Next framework setting "
-            f"{setting_name!r}: {detail}"
-        )
-        raise ImportError(msg) from e
 
 
 def clear_import_cache() -> None:
