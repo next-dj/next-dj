@@ -17,6 +17,10 @@ from operator import attrgetter
 from types import MethodType
 from typing import TYPE_CHECKING, Any, cast, get_type_hints, override
 
+from django.core.exceptions import ImproperlyConfigured
+
+from next.backends import resolve_setting_class
+from next.conf.signals import settings_reloaded
 from next.utils import callable_name, code_filename, store_bounded, touch_bounded
 
 from .cache import _CACHE_MISS, _IN_PROGRESS, DependencyCache, DependencyCycleError
@@ -37,9 +41,8 @@ logger = logging.getLogger(__name__)
 
 type _IntrospectKey = tuple[object, bool]
 
-# Bounded because the dev reloader re-executes a `page.py` on every save and
-# mints fresh function objects, each of which would otherwise stay pinned here
-# for the life of the process.
+# Bounded because the dev reloader re-executes a `page.py` on every save and mints fresh
+# function objects, each of which would otherwise stay pinned here for good.
 _INTROSPECTION_CACHE_MAX_SIZE = 2048
 
 # Everything an annotation expression is allowed to fail with. A string hint
@@ -56,8 +59,15 @@ _HINT_ERRORS: tuple[type[Exception], ...] = (
     RecursionError,
 )
 
-# Keyed by the stable `__func__` plus a bound flag, because a bound method is
-# recreated on each access.
+# The names `resolve_dependencies` takes out one by one, spelled there for speed.
+# Whatever `RESERVED_KEYS` grows beyond them is stripped by the loop that follows,
+# so a new reserved name never reaches the URL kwargs a provider reads by name.
+_CLAIMED_RESERVED = frozenset(
+    {"_cache", "request", "form", "cleaned_data", "_context_data", "_stack"}
+)
+_UNCLAIMED_RESERVED: tuple[str, ...] = tuple(RESERVED_KEYS - _CLAIMED_RESERVED)
+
+# Keyed by the stable `__func__` plus a bound flag, since a bound method is recreated.
 _signature_cache: OrderedDict[_IntrospectKey, inspect.Signature] = OrderedDict()
 _type_hints_cache: OrderedDict[_IntrospectKey, dict[str, Any]] = OrderedDict()
 _var_keyword_cache: OrderedDict[_IntrospectKey, bool] = OrderedDict()
@@ -135,7 +145,7 @@ class UnknownDependencyError(LookupError):
 
 
 def _adopt_provider[P](provider: P) -> P:
-    """Return `provider` once it carries the hook the plan compiler calls.
+    """Return `provider` once the hooks the plan compiler calls hold up.
 
     Checked as the provider joins a resolver, so one written against an older
     contract names itself here instead of surfacing as an `AttributeError` out
@@ -149,7 +159,29 @@ def _adopt_provider[P](provider: P) -> P:
             "None for a verdict that depends on the context."
         )
         raise TypeError(msg)
+    hook = getattr(provider, "compile_resolve", None)
+    if hook is not None and not callable(hook):
+        msg = (
+            f"{type(provider).__name__} carries a compile_resolve that is not "
+            "callable. The hook is optional, so leave it out to keep the plain "
+            "resolve path, or make it return the call the plan holds."
+        )
+        raise TypeError(msg)
     return provider
+
+
+def _as_cache(cache_obj: object) -> DependencyCache:
+    """Return the cache a caller handed over, wrapping a plain dict in one.
+
+    Anything else starts a private cache, so one resolve never reads what another left.
+    The callers spell the None case out rather than leave it here, because it is the
+    common one and the benchmarks lose five percent to the call and checks it skips.
+    """
+    if isinstance(cache_obj, DependencyCache):
+        return cache_obj
+    if isinstance(cache_obj, dict):
+        return DependencyCache(backing_dict=cache_obj)
+    return DependencyCache()
 
 
 def _drop[P](holder: list[P], provider: object) -> bool:
@@ -244,15 +276,17 @@ def _accepts_var_keyword(func: Callable[..., Any]) -> bool:
 
 
 def forget_dep_caches(**kwargs) -> None:
-    """Drop every memo keyed by a callable, so a reloaded module leaves none behind.
+    """Drop the introspection memos, so a reloaded module leaves none behind.
 
-    A saved `page.py` mints fresh function objects, and the memos would
-    otherwise pin every generation of them together with their globals.
+    A saved `page.py` mints fresh function objects, and the memos keyed by a callable
+    would otherwise pin every generation of them with their globals. The bindings noted
+    per dependency name go too, because the callable behind a name is one of them.
     """
     _signature_cache.clear()
     _type_hints_cache.clear()
     _var_keyword_cache.clear()
     resolver._plan_cache.clear()
+    resolver._leaf_dependencies.clear()
 
 
 class DependencyResolver:
@@ -291,6 +325,9 @@ class DependencyResolver:
         self._plan_cache: OrderedDict[_IntrospectKey, tuple[int, InjectionPlan]] = (
             OrderedDict()
         )
+        # Dependency callables whose plan fills nothing, held under the name they answer
+        # to and checked by identity, so a rebound name is looked at afresh.
+        self._leaf_dependencies: dict[str, Callable[..., Any]] = {}
 
     def _instantiate(
         self, cls: type[RegisteredParameterProvider]
@@ -423,16 +460,21 @@ class DependencyResolver:
         entry = next((e for e in plan if e[0] == param.name), None)
         if entry is None:
             return False
-        _name, candidates, terminal, _fallback, resolved = entry
-        if terminal is not None:
+        _name, candidates, _fallback, resolved, filler = entry
+        if filler is not None:
             return True
         return any(provider.can_handle(resolved, context) for provider in candidates)
 
     def register_dependency(
         self, name: str, callable_dep: Callable[..., Any]
     ) -> Callable[..., Any]:
-        """Register a callable as a dependency reachable through `Depends("name")`."""
+        """Register a callable as a dependency reachable through `Depends("name")`.
+
+        Any note the name carries goes with it, so the new callable is looked at afresh
+        and no callable of an earlier generation stays pinned here.
+        """
         self._dependency_callables[name] = callable_dep
+        self._leaf_dependencies.pop(name, None)
         return callable_dep
 
     def get_dependency(self, name: str) -> Callable[..., Any] | None:
@@ -442,6 +484,7 @@ class DependencyResolver:
     def unregister_dependency(self, name: str) -> None:
         """Drop the binding for `name`, tolerating a name that has none."""
         self._dependency_callables.pop(name, None)
+        self._leaf_dependencies.pop(name, None)
 
     def dependency(
         self, name: str
@@ -485,11 +528,22 @@ class DependencyResolver:
         if cached is not _CACHE_MISS:
             return cached
 
+        if self._leaf_dependencies.get(name) is callable_dep:
+            # Nothing to inject is nothing that could re-enter this resolution, so the
+            # call needs neither the stack nor the in-progress marker.
+            value = callable_dep()
+            context.cache.set(name, value)
+            return value
+
         context.stack.append(name)
         context.cache.mark_in_progress(name)
 
         try:
             resolved = self.resolve(callable_dep, context)
+            if not resolved:
+                # No provider can add a parameter to a signature, so a plan that came
+                # back empty stays empty for as long as the name keeps this callable.
+                self._leaf_dependencies[name] = callable_dep
             value = callable_dep(**resolved)
             context.cache.set(name, value)
             return value
@@ -569,17 +623,13 @@ class DependencyResolver:
 
         result: dict[str, Any] = {}
         try:
-            for name, candidates, terminal, fallback, param in plan:
+            for name, candidates, fallback, param, filler in plan:
                 for provider in candidates:
                     if provider.can_handle(param, context):
                         result[name] = provider.resolve(param, context)
                         break
                 else:
-                    result[name] = (
-                        fallback
-                        if terminal is None
-                        else terminal.resolve(param, context)
-                    )
+                    result[name] = fallback if filler is None else filler(context)
         except UnknownDependencyError as exc:
             exc.attribute_to(func)
             raise
@@ -588,25 +638,28 @@ class DependencyResolver:
     def resolve_dependencies(
         self, func: Callable[..., Any], **context
     ) -> dict[str, Any]:
-        """Resolve `func` from a loose kwargs mapping and build a context object."""
-        url_kwargs = {k: v for k, v in context.items() if k not in RESERVED_KEYS}
+        """Resolve `func` from a loose kwargs mapping and build a context object.
 
-        cache_obj = context.get("_cache")
-        if isinstance(cache_obj, dict):
-            cache = DependencyCache(backing_dict=cache_obj)
-        elif isinstance(cache_obj, DependencyCache):
-            cache = cache_obj
-        else:
-            cache = DependencyCache()
+        The reserved names are popped from the mapping rather than filtered into a copy,
+        because `**context` owns its dict and what is left of it is the URL kwargs.
+        """
+        cache_obj = context.pop("_cache", None)
+        request = context.pop("request", None)
+        form = context.pop("form", None)
+        cleaned_data = context.pop("cleaned_data", None)
+        context_data = context.pop("_context_data", None) or {}
+        stack = context.pop("_stack", None) or []
+        for reserved in _UNCLAIMED_RESERVED:
+            context.pop(reserved, None)
 
         resolution_context = ResolutionContext(
-            request=context.get("request"),
-            form=context.get("form"),
-            url_kwargs=url_kwargs,
-            context_data=context.get("_context_data") or {},
-            cache=cache,
-            stack=context.get("_stack") or [],
-            cleaned_data=context.get("cleaned_data"),
+            request=request,
+            form=form,
+            url_kwargs=context,
+            context_data=context_data,
+            cache=DependencyCache() if cache_obj is None else _as_cache(cache_obj),
+            stack=stack,
+            cleaned_data=cleaned_data,
         )
 
         return self.resolve(func, resolution_context)
@@ -626,12 +679,7 @@ class DependencyResolver:
         it by name refuse `RESERVED_KEYS` themselves. That costs one test per
         parameter rather than a copy of the whole context per render.
         """
-        if isinstance(_cache, dict):
-            cache = DependencyCache(backing_dict=_cache)
-        elif isinstance(_cache, DependencyCache):
-            cache = _cache
-        else:
-            cache = DependencyCache()
+        cache = DependencyCache() if _cache is None else _as_cache(_cache)
 
         context = ResolutionContext(
             request=request,
@@ -648,3 +696,54 @@ class DependencyResolver:
 resolver: DependencyResolver = DependencyResolver()
 
 RegisteredParameterProvider.resolver = resolver
+
+
+def _configured_resolver_class() -> type[DependencyResolver]:
+    """Return the class named by `NEXT_FRAMEWORK["DEPENDENCY_RESOLVER"]`."""
+    return resolve_setting_class(
+        "DEPENDENCY_RESOLVER",
+        base=DependencyResolver,
+        # The package binds `DependencyResolver` only after importing this module,
+        # so the import helper would hit a half-initialised `next.deps`.
+        shipped=DependencyResolver,
+        base_path="next.deps.DependencyResolver",
+    )
+
+
+def apply_resolver_setting() -> None:
+    """Retype the resolver singleton to the configured resolver class.
+
+    Retyped in place rather than replaced, because the framework and its test helpers
+    hold the singleton by reference and a fresh object would strand every holder. The
+    swap runs under the resolver lock, so it never interleaves with a provider rebuild
+    moving the same version counter.
+    """
+    cls = _configured_resolver_class()
+    with resolver._lock:
+        if type(resolver) is cls:
+            return
+        try:
+            resolver.__class__ = cls
+        except TypeError as exc:
+            msg = (
+                f"NEXT_FRAMEWORK['DEPENDENCY_RESOLVER'] {cls.__name__!r} has an "
+                "object layout the singleton cannot take on in place. A resolver "
+                f"subclass adds no instance slots and no second base: {exc}"
+            )
+            raise ImproperlyConfigured(msg) from exc
+        # `skips` is public so a subclass may widen what the resolver refuses, and that
+        # verdict decides both which parameters a plan carries and which dependency
+        # fills nothing. Both memos were taken under the class just replaced.
+        resolver._plan_cache.clear()
+        resolver._leaf_dependencies.clear()
+        # The version moves last, the way a provider rebuild publishes its list, so a
+        # plan compiled under the class being replaced is stamped stale, not fresh.
+        resolver._providers_version += 1
+
+
+def _on_settings_reloaded(**kwargs) -> None:
+    """Retype the resolver singleton when the framework settings change."""
+    apply_resolver_setting()
+
+
+settings_reloaded.connect(_on_settings_reloaded)

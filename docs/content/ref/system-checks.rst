@@ -330,7 +330,7 @@ Errors
    * - ``next.E076``
      - A ``NEXT_FRAMEWORK`` value has a type the settings merge silently drops in favour of the framework default.
        The check covers ``PAGE_BACKENDS``, ``COMPONENT_BACKENDS``, ``STATIC_BACKENDS``, and ``TEMPLATE_LOADERS`` as lists.
-       It also covers ``URL_NAME_TEMPLATE`` and ``URL_RESOLVER`` as strings and ``NEXT_JS_OPTIONS`` as a dict.
+       It also covers ``URL_NAME_TEMPLATE``, ``URL_RESOLVER``, and ``DEPENDENCY_RESOLVER`` as strings and ``NEXT_JS_OPTIONS`` as a dict.
        ``PARTIAL_BACKENDS``, ``FORM_ACTION_BACKENDS``, and ``FORM_ANCHOR_FILES`` carry their own per-key checks, ``next.E067``, ``next.E044``, and ``next.E052``, so this probe leaves them out.
      - ``next.conf.checks``
    * - ``next.E077``

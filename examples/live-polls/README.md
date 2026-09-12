@@ -220,28 +220,39 @@ Two serialize providers feed one JS object here, the component-level `results` a
 ### 8. DI through `DPoll[Poll]`
 
 ```python
+def _by_url_or_post(model_cls, context):
+    pk = context.url_kwargs.get("id")
+    if pk is None and context.request is not None:
+        pk = context.request.POST.get("poll")
+    if pk is None:
+        return None
+    try:
+        return model_cls.objects.get(pk=pk)
+    except model_cls.DoesNotExist as exc:
+        raise Http404 from exc
+
+
 class PollProvider(RegisteredParameterProvider):
     def can_handle(self, param, _context):
+        return self.static_can_handle(param)
+
+    def static_can_handle(self, param):
         return get_origin(param.annotation) is DPoll
 
     def resolve(self, param, context):
         (model_cls,) = get_args(param.annotation)
-        pk = context.url_kwargs.get("id")
-        if pk is None:
-            request = getattr(context, "request", None)
-            if request is not None:
-                pk = request.POST.get("poll")
-        if pk is None:
-            return None
-        try:
-            return model_cls.objects.get(pk=pk)
-        except model_cls.DoesNotExist as exc:
-            raise Http404 from exc
+        return _by_url_or_post(model_cls, context)
+
+    def compile_resolve(self, param):
+        (model_cls,) = get_args(param.annotation)
+        return partial(_by_url_or_post, model_cls)
 ```
 
-`DPoll[Poll]` resolves the URL kwarg `id` for page rendering and falls back to the POST `poll` field, the hidden input `VoteForm` already carries, when the dispatcher hands over a form-action request that has no URL kwargs of its own. The stream endpoint and the page-level `poll` callable both consume the same provider, so the model fetch lives in one place. `resolve` returns `None` rather than raising when neither source names a poll, which lets a caller with a default keep working, and it maps a missing row to `Http404` so a stale poll id answers `404` instead of `500`.
+`DPoll[Poll]` resolves the URL kwarg `id` for page rendering and falls back to the POST `poll` field, the hidden input `VoteForm` already carries, when the dispatcher hands over a form-action request that has no URL kwargs of its own. The stream endpoint and the page-level `poll` callable both consume the same provider, so the model fetch lives in one place. The lookup returns `None` rather than raising when neither source names a poll, which lets a caller with a default keep working, and it maps a missing row to `Http404` so a stale poll id answers `404` instead of `500`.
 
-Page and component modules that use `DPoll[Poll]` do not import `from __future__ import annotations`. The DI resolver compares annotations by identity and lazy strings would silently break the match.
+`static_can_handle` reads the verdict off the annotation, so the plan compiler hands the parameter to `PollProvider` once per callable rather than polling every provider on each request, and `compile_resolve` unpacks the model out of `DPoll[Poll]` once per plan so a vote pays for the query alone. Both the filler and `resolve` call `_by_url_or_post`, so the two paths cannot drift apart.
+
+Page and component modules that use `DPoll[Poll]` never start with `from __future__ import annotations` and import both names at runtime. The resolver does evaluate string hints through `get_type_hints`, but a single name it cannot evaluate — a marker or a model imported only under `if TYPE_CHECKING` — drops the whole callable back to its raw annotations, where `get_origin` sees a string and the parameter silently falls through to another provider.
 
 ### 9. Two composites at two scopes
 

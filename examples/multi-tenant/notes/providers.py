@@ -23,6 +23,10 @@ class TenantProvider(RegisteredParameterProvider):
             return False
         return get_active_tenant(request) is not None
 
+    def static_can_handle(self, param: inspect.Parameter) -> bool | None:
+        """Rule out a foreign annotation. A match still needs an active tenant."""
+        return None if param.annotation is DTenant else False
+
     def resolve(self, _param: inspect.Parameter, context: ResolutionContext) -> Tenant:
         """Return the `Tenant` previously stashed by `TenantMiddleware`."""
         return get_active_tenant(context.request)

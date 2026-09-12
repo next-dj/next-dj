@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from next.deps import ResolutionContext
+    from next.deps.plan import ParameterFiller
     from next.static.serializers import JsContextSerializer
 
 
@@ -107,6 +108,49 @@ class ContextByDefaultProvider(RegisteredParameterProvider):
             return source(**resolved)
 
         return source
+
+    @override
+    def compile_resolve(self, param: inspect.Parameter) -> ParameterFiller | None:
+        """Settle the source and the default of the marker, once per plan.
+
+        A reserved key can never reach the marker, so a parameter naming one compiles
+        straight to its default.
+        """
+        marker: Context = param.default
+        source = marker.source
+        resolver = self._resolver
+        fallback: object = (
+            None if marker.default is _CONTEXT_DEFAULT_UNSET else marker.default
+        )
+
+        if source is None or isinstance(source, str):
+            key = param.name if source is None else source
+            if key in RESERVED_KEYS:
+
+                def by_default(_context: ResolutionContext) -> object:
+                    return fallback
+
+                return by_default
+
+            def by_key(context: ResolutionContext) -> object:
+                return context.context_data.get(key, fallback)
+
+            return by_key
+
+        if callable(source):
+            factory = source
+
+            def by_callable(context: ResolutionContext) -> object:
+                return factory(**resolver.resolve(factory, context))
+
+            return by_callable
+
+        constant = source
+
+        def by_constant(_context: ResolutionContext) -> object:
+            return constant
+
+        return by_constant
 
 
 class ContextByNameProvider(RegisteredParameterProvider):

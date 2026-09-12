@@ -401,6 +401,11 @@ A hint the framework cannot evaluate falls back to the raw annotation as written
 A provider that implements the ``ParameterProvider`` protocol directly declares the method itself, while a ``RegisteredParameterProvider`` subclass inherits the ``None`` default.
 The method is not optional.
 A provider handed to ``add_provider``, ``prepend_provider``, ``register``, or the resolver constructor without a callable ``static_can_handle`` is refused with a ``TypeError`` naming the class, rather than failing later from inside the plan compiler.
+
+A provider that answers ``True`` may go one step further and implement ``compile_resolve(param)``, which returns the call the plan makes with the resolution context alone.
+That hook is spelled by ``CompilingParameterProvider``, a second protocol extending ``ParameterProvider``, so a provider that stops at the mandatory three methods still satisfies the first one.
+``NoteProvider`` above would read ``get_args(param.annotation)`` there, once per plan, and return a closure that is left with the lookup and the query.
+Returning ``None`` from the hook keeps the parameter on the plain ``resolve`` path, and so does leaving the hook undefined.
 See :doc:`/content/internals/di-resolver` for how a plan is compiled, cached, and invalidated.
 
 Resolution cache
@@ -434,6 +439,19 @@ The function returns ``None`` outside a form dispatch, so callers handle the mis
 The constant ``REQUEST_DEP_CACHE_ATTR`` names the request attribute that holds the cache.
 
 More recipes for diagnosing missing markers and CSRF or dispatch errors live in :doc:`/content/faq/troubleshooting`.
+
+Resolution performance
+----------------------
+
+The signature and the type hints of a callable are read once per process rather than once per request, and every later resolve reads that memo.
+The provider that fills each parameter is settled at the same time and compiled into the injection plan of the callable, so a request replays that plan instead of asking every provider about every parameter.
+A parameter the signature alone cannot settle keeps its remaining candidates and replays their ``can_handle``, which is the only provider walk left on the request path.
+The cost of a resolve therefore follows the number of parameters the callable declares, not the number of pages, components, or forms in the project.
+Values behind ``Depends("name")`` are reused for the rest of the pass, as `Resolution cache`_ above describes.
+
+``DEPENDENCY_RESOLVER`` in ``NEXT_FRAMEWORK`` names the class that performs every injection.
+It is an extension point for a ``DependencyResolver`` subclass rather than a switch between shipped implementations, and it is read at startup and on every settings reload, never per request.
+See :doc:`/content/internals/di-resolver` for how a plan is compiled, cached, and invalidated, and :doc:`/content/ref/settings` for the setting.
 
 Avoid ``from __future__ import annotations`` in DI modules
 ----------------------------------------------------------

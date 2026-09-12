@@ -66,6 +66,11 @@ The server renders the named zone alone and serialises the result through the co
 Every operation and every address is authored by the server, so the client is never asked to do anything the server did not name.
 :doc:`reference` lists the verbs, the addresses, the manifest fields, and the headers in tables.
 
+The view branches into that zone response before the page renders, so no layout chain is composed and no markup is produced only to be dropped.
+The addressed bodies still render against the page context, and a ``@context`` callable bound to another zone of the same page does not run for the batch.
+Data that is expensive to produce guards itself with ``zone_requested``, which keeps it off the full render too, and :doc:`scenarios` shows that guard in full.
+See :doc:`/content/internals/request-lifecycle` for where the view branches.
+
 The apply
 ---------
 

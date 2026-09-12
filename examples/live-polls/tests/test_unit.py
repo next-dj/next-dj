@@ -1,3 +1,4 @@
+import inspect
 import json
 import threading
 import time
@@ -13,11 +14,11 @@ from polls.broker import SNAPSHOT_KEY, PollBroker, build_snapshot, store_snapsho
 from polls.demo import DEMO_POLLS, seed_demo
 from polls.forms import VoteForm
 from polls.models import Choice, Poll
-from polls.providers import DPoll
+from polls.providers import DPoll, PollProvider
 from polls.signals import VOTE_ACTION_NAME, broadcast_vote
 
 from next.static import default_kinds
-from next.testing import resolve_call
+from next.testing import make_resolution_context, resolve_call
 
 
 pytestmark = pytest.mark.django_db
@@ -232,6 +233,76 @@ class TestDPollResolution:
         """An unknown id raises `Http404` so the dispatcher returns the right page."""
         with pytest.raises(Http404):
             resolve_call(consume, url_kwargs={"id": 99999})
+
+
+def _poll_param(annotation: object) -> inspect.Parameter:
+    """Build the parameter a page or an action handler declares for the poll."""
+    return inspect.Parameter(
+        "active", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=annotation
+    )
+
+
+def _url_kwarg_context(poll: Poll, _rf) -> object:
+    """Build the context a page render hands the provider."""
+    return make_resolution_context(url_kwargs={"id": poll.pk})
+
+
+def _post_field_context(poll: Poll, rf) -> object:
+    """Build the context a `VoteForm` dispatch hands the provider."""
+    return make_resolution_context(request=rf.post("/", data={"poll": str(poll.pk)}))
+
+
+def _sourceless_context(_poll: Poll, _rf) -> object:
+    """Build the context of a call that names no poll at all."""
+    return make_resolution_context()
+
+
+class TestPollProviderPaths:
+    """The compiled filler answers exactly what `resolve` answers, source by source."""
+
+    @pytest.mark.parametrize(
+        ("annotation", "expected"),
+        [(DPoll[Poll], True), (Poll, False)],
+        ids=["marker", "plain_model"],
+    )
+    def test_static_verdict_agrees_with_can_handle(self, annotation, expected) -> None:
+        """The annotation settles the match, so the plan never re-asks per request."""
+        provider = PollProvider()
+        param = _poll_param(annotation)
+        ctx = make_resolution_context(url_kwargs={"id": 1})
+        assert provider.static_can_handle(param) is expected
+        assert provider.can_handle(param, ctx) is expected
+
+    @pytest.mark.parametrize(
+        ("context_factory", "resolves_to_the_poll"),
+        [
+            (_url_kwarg_context, True),
+            (_post_field_context, True),
+            (_sourceless_context, False),
+        ],
+        ids=["url_kwarg", "post_field", "no_source"],
+    )
+    def test_filler_matches_resolve(
+        self, context_factory, resolves_to_the_poll, rf, poll: Poll
+    ) -> None:
+        """Each source yields one value, reached through either path."""
+        provider = PollProvider()
+        param = _poll_param(DPoll[Poll])
+        ctx = context_factory(poll, rf)
+        filled = provider.compile_resolve(param)(ctx)
+        assert filled == provider.resolve(param, ctx)
+        assert filled == (poll if resolves_to_the_poll else None)
+
+    def test_both_paths_raise_404_for_an_unknown_id(self) -> None:
+        """A stale id is a 404 whichever path performs the query."""
+        provider = PollProvider()
+        param = _poll_param(DPoll[Poll])
+        ctx = make_resolution_context(url_kwargs={"id": 99999})
+        fill = provider.compile_resolve(param)
+        with pytest.raises(Http404):
+            fill(ctx)
+        with pytest.raises(Http404):
+            provider.resolve(param, ctx)
 
 
 class TestVueKindRegistration:

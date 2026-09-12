@@ -652,6 +652,7 @@ The prepended provider wins over every auto-registered provider that would other
 Implement the ``ParameterProvider`` protocol on a plain class for the stub, because subclassing ``RegisteredParameterProvider`` registers the provider globally.
 The protocol asks for ``static_can_handle`` beside ``can_handle`` and ``resolve``, and returning ``None`` from it keeps the stub a runtime candidate for every parameter.
 The method is mandatory, and a stub that omits it is refused with a ``TypeError`` naming the class as ``override_provider`` hands it to the resolver.
+``compile_resolve`` stays optional and lives on the separate ``CompilingParameterProvider`` protocol, so a stub that defines none still satisfies ``ParameterProvider`` and is asked for its ``resolve`` on every replay.
 
 .. code-block:: python
    :caption: prepending a stub provider

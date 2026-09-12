@@ -222,6 +222,30 @@ The resolver is rebuilt on settings reload, so ``override_settings`` swaps it wi
 
 See :doc:`/content/internals/url-router` for the resolution algorithm.
 
+Dependency injection
+--------------------
+
+DEPENDENCY_RESOLVER
+~~~~~~~~~~~~~~~~~~~
+
+Dotted path to the resolver class that fills dependency-injected parameters.
+
+Default value ``"next.deps.DependencyResolver"``.
+
+The class owns every injection the framework performs, from page views and ``@context`` callables to form actions and component renderers.
+A custom value must name a ``next.deps.DependencyResolver`` subclass, so the key is an extension point rather than a switch between two shipped implementations.
+Widening the public ``skips`` predicate is the usual reason to subclass, because it decides which parameters a compiled plan carries at all.
+A path that fails to import, or one that names anything other than a ``DependencyResolver`` subclass, raises :exc:`~django.core.exceptions.ImproperlyConfigured`.
+
+The key is read at startup and again on every settings reload, never per request, so ``override_settings`` swaps the resolver without a restart.
+The framework holds one resolver singleton that the rest of the code binds by reference, so the named class is adopted by retyping that object in place rather than by building a new one.
+Two constraints on the subclass follow from that.
+Its ``__init__`` never runs, because the state it would build already lives on the singleton the base class initialised.
+It adds no instance slots and no second base, because either changes the object layout and the retype then raises :exc:`~django.core.exceptions.ImproperlyConfigured`.
+An empty ``__slots__ = ()`` leaves the layout alone and is fine.
+
+See :doc:`/content/internals/di-resolver` for the resolution algorithm and :doc:`deps` for the resolver API.
+
 Templates
 ---------
 

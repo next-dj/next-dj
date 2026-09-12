@@ -1,4 +1,5 @@
 import inspect
+from operator import attrgetter
 from typing import ClassVar
 from unittest.mock import MagicMock
 
@@ -7,11 +8,13 @@ from django.core.handlers.asgi import ASGIRequest
 from django.core.handlers.wsgi import WSGIRequest
 from django.http import HttpRequest
 
-from next.deps import DependencyResolver, resolver
+from next.deps import DependencyResolver, ParameterProvider, resolver
 from next.deps.markers import DependsProvider
+from next.deps.providers import CompilingParameterProvider
 from next.forms import DForm
 from next.forms.markers import FormProvider
 from next.pages.context import Context, ContextByDefaultProvider, ContextByNameProvider
+from next.testing import make_resolution_context
 from next.urls import (
     DUrl,
     HttpRequestProvider,
@@ -26,6 +29,8 @@ from tests.support import (
     URL_KWARGS_RESOLVE_CASES,
     AForm,
     CoerceUrlValueCase,
+    ContextMarkerCase,
+    DeferringProvider,
     OtherForm,
     UrlByAnnotationResolveCase,
     UrlKwargsResolveCase,
@@ -204,6 +209,21 @@ class TestUrlByAnnotationProvider:
         ctx = _ctx(url_kwargs=case.url_kwargs)
         assert provider.resolve(param, ctx) == case.expected
 
+    @pytest.mark.parametrize(
+        "case", URL_BY_ANNOTATION_RESOLVE_CASES, ids=lambda case: case.id
+    )
+    def test_compile_resolve_matches_resolve(
+        self, case: UrlByAnnotationResolveCase
+    ) -> None:
+        """The compiled filler answers what the plain resolve answers."""
+        provider = UrlByAnnotationProvider()
+        param = inspect_parameter(case.name, case.annotation)
+        ctx = _ctx(url_kwargs=case.url_kwargs)
+        fill = provider.compile_resolve(param)
+        assert fill is not None
+        assert fill(ctx) == case.expected
+        assert fill(ctx) == provider.resolve(param, ctx)
+
     def test_named_key_survives_the_resolved_hint(self) -> None:
         """The segment name reaches the provider through a compiled plan."""
 
@@ -347,3 +367,70 @@ class TestReservedContextKeys:
         param = inspect_parameter("request", default=marker)
         ctx = _ctx(context_data={"request": "from-context"})
         assert provider.resolve(param, ctx) == "fallback"
+
+    @pytest.mark.parametrize(
+        "source", [None, "request"], ids=["from_param_name", "from_named_key"]
+    )
+    def test_the_compiled_default_marker_reads_no_reserved_key(self, source) -> None:
+        provider = ContextByDefaultProvider(resolver)
+        marker = Context(source, default="fallback")
+        param = inspect_parameter("request", default=marker)
+        fill = provider.compile_resolve(param)
+        assert fill is not None
+        assert fill(_ctx(context_data={"request": "from-context"})) == "fallback"
+
+
+class TestProviderProtocols:
+    """The optional compile hook sits in its own structural contract."""
+
+    def test_a_provider_without_the_hook_is_still_a_parameter_provider(self) -> None:
+        provider = DeferringProvider(None)
+        assert isinstance(provider, ParameterProvider)
+        assert not isinstance(provider, CompilingParameterProvider)
+
+    def test_a_marker_provider_satisfies_both_protocols(self) -> None:
+        provider = UrlByAnnotationProvider()
+        assert isinstance(provider, ParameterProvider)
+        assert isinstance(provider, CompilingParameterProvider)
+
+
+def _made(page_value: int = Context("page_value")) -> str:
+    return f"made-{page_value}"
+
+
+CONTEXT_MARKER_CASES: tuple[ContextMarkerCase, ...] = (
+    ContextMarkerCase("from_param_name", None, {"value": 7}, 7),
+    ContextMarkerCase("from_named_key", "page_value", {"page_value": 7}, 7),
+    ContextMarkerCase("missing_key", None, {}, "fallback"),
+    ContextMarkerCase("missing_named_key", "page_value", {}, "fallback"),
+    ContextMarkerCase("callable_source", _made, {"page_value": 7}, "made-7"),
+    ContextMarkerCase("constant_source", 42, {}, 42),
+)
+
+
+class TestContextMarkerForms:
+    """Both paths of the `Context` marker answer the same for every source."""
+
+    @pytest.mark.parametrize("case", CONTEXT_MARKER_CASES, ids=attrgetter("id"))
+    def test_resolve_and_compiled_filler_agree(self, case: ContextMarkerCase) -> None:
+        provider = ContextByDefaultProvider(DependencyResolver())
+        marker = Context(case.source, default="fallback")
+        param = inspect_parameter("value", default=marker)
+        fill = provider.compile_resolve(param)
+        assert fill is not None
+        context = make_resolution_context(context_data=case.context_data)
+        assert provider.resolve(param, context) == case.expected
+        assert fill(context) == case.expected
+
+    def test_resolve_ignores_a_default_that_is_no_marker(self) -> None:
+        provider = ContextByDefaultProvider(DependencyResolver())
+        param = inspect_parameter("value", default="plain")
+        assert provider.resolve(param, make_resolution_context()) is None
+
+    def test_an_unset_default_reads_as_none(self) -> None:
+        provider = ContextByDefaultProvider(DependencyResolver())
+        param = inspect_parameter("value", default=Context())
+        fill = provider.compile_resolve(param)
+        assert fill is not None
+        assert fill(make_resolution_context()) is None
+        assert provider.resolve(param, make_resolution_context()) is None

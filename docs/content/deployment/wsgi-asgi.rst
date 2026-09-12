@@ -116,7 +116,7 @@ Configure the load balancer or container orchestrator to hit ``/healthz/`` for l
 Concurrency notes
 -----------------
 
-Form dispatch reuses the request scoped dependency cache so a re-render after validation failure is cheap.
+Form dispatch reuses the request scoped dependency cache on the re-render that follows a validation failure, see :doc:`/content/topics/forms/validation-rerender`.
 This is safe under both WSGI and ASGI because the cache lives on the request, not on the worker process.
 
 The router manager and the components registry are process scoped.

@@ -41,6 +41,7 @@ File router.
    A new page costs a ``path()`` entry, a view, and a route name to reverse.
    Every directory under a configured page root becomes a URL instead, and a ``page.py`` turns it into a navigable page.
    A bracketed segment such as ``[slug]`` becomes a captured URL parameter.
+   Resolving a request follows the depth of the path it asks for rather than the number of pages the project holds.
    See :doc:`/content/topics/file-router`.
 
 Layouts and context.

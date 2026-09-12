@@ -149,6 +149,38 @@ class TestBoardProvider:
         with pytest.raises(Http404):
             provider.resolve(_param(DBoard[Board]), ctx)
 
+    @pytest.mark.parametrize(
+        ("annotation", "expected"),
+        [(DBoard[Board], True), (int, False)],
+        ids=["dboard_subscript", "plain_int"],
+    )
+    def test_static_can_handle(self, annotation, expected) -> None:
+        provider = BoardProvider()
+        assert provider.static_can_handle(_param(annotation)) is expected
+
+    @pytest.mark.parametrize(
+        "make_ctx",
+        [
+            lambda pk: _context(url_kwargs={"id": pk}),
+            lambda pk: _context(request=_post_request(board_id=str(pk))),
+            lambda _pk: _context(),
+            lambda _pk: _context(request=_post_request()),
+        ],
+        ids=["url_id", "post_board_id", "no_source", "post_without_board_id"],
+    )
+    def test_compiled_filler_matches_resolve(self, board: Board, make_ctx) -> None:
+        provider = BoardProvider()
+        param = _param(DBoard[Board])
+        ctx = make_ctx(board.pk)
+        fill = provider.compile_resolve(param)
+        assert fill(ctx) == provider.resolve(param, ctx)
+
+    def test_compiled_filler_raises_404_for_missing_id(self) -> None:
+        provider = BoardProvider()
+        fill = provider.compile_resolve(_param(DBoard[Board]))
+        with pytest.raises(Http404):
+            fill(_context(url_kwargs={"id": 99999}))
+
 
 class TestCardProvider:
     @pytest.mark.parametrize(
@@ -185,6 +217,19 @@ class TestCardProvider:
         ctx = _context(request=_post_request(card_id="99999"))
         with pytest.raises(Http404):
             provider.resolve(_param(DCard[Card]), ctx)
+
+    @pytest.mark.parametrize(
+        ("annotation", "expected"),
+        [(DCard[Card], None), (int, False)],
+        ids=["dcard_subscript", "plain_int"],
+    )
+    def test_static_can_handle(self, annotation, expected) -> None:
+        provider = CardProvider()
+        assert provider.static_can_handle(_param(annotation)) is expected
+
+    def test_no_filler_is_compiled(self) -> None:
+        provider = CardProvider()
+        assert provider.compile_resolve(_param(DCard[Card])) is None
 
 
 class TestMoveCardFormClean:

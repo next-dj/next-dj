@@ -186,6 +186,15 @@ class TestTenantProvider:
         context = self._context(http_request)
         assert provider.can_handle(self._param(annotation), context) is expected
 
+    @pytest.mark.parametrize(
+        ("annotation", "expected"),
+        [(DTenant, None), (int, False)],
+        ids=["dtenant_waits_for_context", "other_annotation"],
+    )
+    def test_static_can_handle(self, annotation, expected) -> None:
+        provider = TenantProvider()
+        assert provider.static_can_handle(self._param(annotation)) is expected
+
     def test_resolve_returns_request_tenant(
         self, tenant_request: Callable[..., HttpRequest]
     ) -> None:

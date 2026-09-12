@@ -99,17 +99,30 @@ class DFlag[T](DDependencyBase[T]):
     __slots__ = ()
 
 
+def _fetch_flag(model_cls, context):
+    name = context.url_kwargs.get("name") or context.context_data.get("flag_name")
+    if not name:
+        raise LookupError(...)
+    return get_cached_flag(str(name)) or model_cls(name=str(name), enabled=False)
+
+
 class FlagProvider(RegisteredParameterProvider):
     def can_handle(self, param, _context):
+        return self.static_can_handle(param)
+
+    def static_can_handle(self, param):
         return get_origin(param.annotation) is DFlag
 
     def resolve(self, param, context):
         (model_cls,) = get_args(param.annotation)
-        name = context.url_kwargs.get("name") or context.context_data.get("flag_name")
-        if not name:
-            raise LookupError(...)
-        return get_cached_flag(str(name)) or model_cls(name=str(name), enabled=False)
+        return _fetch_flag(model_cls, context)
+
+    def compile_resolve(self, param):
+        (model_cls,) = get_args(param.annotation)
+        return partial(_fetch_flag, model_cls)
 ```
+
+`static_can_handle` answers from the annotation alone, so the resolver claims the parameter while it compiles the injection plan for a callable and `can_handle` never runs again per request. `compile_resolve` is the hook the compiler then asks for exactly that parameter: it reads the model out of the annotation once per plan and hands back the call the plan replays with the resolution context alone. Both paths go through `_fetch_flag`, so the compiled filler and a direct `resolve` can never drift apart.
 
 Two call sites drive the same provider:
 
@@ -118,7 +131,7 @@ Two call sites drive the same provider:
 
 When the flag does not exist, the provider returns a **disabled placeholder** (`Flag(name=..., enabled=False)`) instead of `None`. Guard components can then blindly check `flag.enabled` without three-way `None` logic at every usage site. It is a deliberate choice — a `None` would force every call site to handle a ternary (on / off / unknown), and "unknown" is always treated as off here anyway.
 
-Because the annotation is inspected at DI time, the component module **must not use** `from __future__ import annotations` — PEP 563 would string-ify `DFlag[Flag]` and `get_origin` would return `None`. That is the same gotcha any custom DI marker runs into in this codebase.
+The component modules never start with `from __future__ import annotations`, the rule every DI-inspected module in this repository follows, and they import `Flag` and `DFlag` at runtime. The resolver does evaluate string hints through `get_type_hints`, but a single name it cannot evaluate — a marker or a model imported only under `if TYPE_CHECKING` — drops the whole callable back to its raw annotations, where `get_origin` sees a string and the parameter silently falls through to another provider.
 
 ### 4. Composite `feature_guard` — Python `render()` returns empty to hide
 
@@ -293,7 +306,7 @@ The bulk-toggle action is mounted at the framework's action URL. Tests use `Next
 
 ### `DFlag` needs the annotation at runtime
 
-Any module that declares a parameter `flag: DFlag[Flag]` **must not** start with `from __future__ import annotations`. PEP 563 would string-ify the annotation and `get_origin(...)` in `FlagProvider.can_handle` returns `None` on strings. The two component modules in this example skip that import on purpose.
+`FlagProvider.static_can_handle` decides from the annotation, so a module that declares `flag: DFlag[Flag]` must not start with `from __future__ import annotations` and must import both names at runtime. The resolver does evaluate string hints through `get_type_hints`, but a single name it cannot evaluate — a marker or a model imported only under `if TYPE_CHECKING` — drops the whole callable back to its raw annotations, where `get_origin` sees a string and the parameter silently falls through to another provider.
 
 ### `{% component %}` props resolve against the template context
 

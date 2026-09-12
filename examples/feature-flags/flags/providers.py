@@ -1,5 +1,8 @@
 import inspect
+from functools import partial
 from typing import get_args, get_origin
+
+from django.db.models import Model
 
 from next.deps import (
     DDependencyBase,
@@ -7,6 +10,7 @@ from next.deps import (
     ResolutionContext,
     resolver,
 )
+from next.deps.plan import ParameterFiller
 
 from .cache import get_cached_flag
 
@@ -35,6 +39,19 @@ class DFlag[T](DDependencyBase[T]):
     __slots__ = ()
 
 
+def _fetch_flag(model_cls: type[Model], context: ResolutionContext) -> object:
+    """Return the cached flag named by the URL kwargs or the template context.
+
+    Shared by `resolve` and the compiled filler, so the two paths cannot drift
+    apart and the only difference between them is when the annotation is read.
+    """
+    name = context.url_kwargs.get("name") or context.context_data.get("flag_name")
+    if not name:
+        msg = "DFlag requires `name` URL kwarg or `flag_name` template context key"
+        raise LookupError(msg)
+    return get_cached_flag(str(name)) or model_cls(name=str(name), enabled=False)
+
+
 class FlagProvider(RegisteredParameterProvider):
     """Resolve `DFlag[...]` parameters by looking up `flag_name`.
 
@@ -44,14 +61,23 @@ class FlagProvider(RegisteredParameterProvider):
     """
 
     def can_handle(self, param: inspect.Parameter, _context: ResolutionContext) -> bool:
-        """Return True when the parameter annotation is a `DFlag[...]` subscript."""
+        """Defer to the static verdict, which the context never changes."""
+        return self.static_can_handle(param)
+
+    def static_can_handle(self, param: inspect.Parameter) -> bool:
+        """Settle on the annotation alone, so the plan claims the parameter for good.
+
+        A `DFlag[...]` parameter is owned here in every context, which makes this
+        provider the terminal of its plan entry and skips the per-request walk.
+        """
         return get_origin(param.annotation) is DFlag
 
     def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:
         """Return the cached `Flag` for `flag_name`, or a disabled placeholder."""
         (model_cls,) = get_args(param.annotation)
-        name = context.url_kwargs.get("name") or context.context_data.get("flag_name")
-        if not name:
-            msg = "DFlag requires `name` URL kwarg or `flag_name` template context key"
-            raise LookupError(msg)
-        return get_cached_flag(str(name)) or model_cls(name=str(name), enabled=False)
+        return _fetch_flag(model_cls, context)
+
+    def compile_resolve(self, param: inspect.Parameter) -> ParameterFiller:
+        """Read the model off the annotation once per plan, not once per resolve."""
+        (model_cls,) = get_args(param.annotation)
+        return partial(_fetch_flag, model_cls)

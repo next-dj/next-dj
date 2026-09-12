@@ -65,11 +65,22 @@ Bootstrap
 
 Django calls ``NextFrameworkConfig.ready()`` once per process after all applications load.
 The hook calls ``register_all()`` to register the framework system checks.
-It then runs six startup steps in a fixed order.
-The first four install autoreload, template-tag builtins, staticfiles integration, and component bootstrap into the Django runtime.
-The fifth, ``autodiscover_forms()``, registers shared forms before the first request arrives.
-The sixth binds the partial shaper into the ``next.ports`` slot, which is the one composition step the request path depends on.
+It then runs seven startup steps in a fixed order.
+The first, ``apply_resolver_setting()``, points the dependency-injection singleton at the configured resolver class, ahead of every step that imports user modules.
+The next four install autoreload, template-tag builtins, staticfiles integration, and component bootstrap into the Django runtime.
+The sixth, ``autodiscover_forms()``, registers shared forms before the first request arrives.
+The seventh binds the partial shaper into the ``next.ports`` slot, which is the one composition step the request path depends on.
 See :doc:`/content/ref/apps` for the canonical ordering and the full API.
+
+The boot pays for registration and wiring.
+Component discovery runs there as well, and unless ``LAZY_COMPONENT_MODULES`` defers them it also imports every discovered ``component.py`` so the decorators run before the first request.
+Nothing walks a route tree and nothing compiles a template at this point.
+
+The first request pays for what the boot left lazy.
+The router builds its patterns from the page tree on the first resolve, the resolver instantiates its providers on the first callable it fills, and a page module enters the mtime-keyed memo the first time something loads it.
+
+A warm request pays neither of those.
+It reads the structures those two stages left behind and compares the version counters that guard them, and :doc:`request-lifecycle` is the canonical account of what survives a response and what every request still computes.
 
 How they compose
 ----------------

@@ -4,7 +4,7 @@ import inspect
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
 from next.urls import DUrl
@@ -123,6 +123,16 @@ URL_BY_ANNOTATION_RESOLVE_CASES: tuple[UrlByAnnotationResolveCase, ...] = (
     UrlByAnnotationResolveCase(
         "coerce_uuid_from_text", "pk", DUrl[UUID], {"pk": _UUID_TEXT}, _UUID_VALUE
     ),
+    UrlByAnnotationResolveCase(
+        "annotated_coerce_int", "pk", Annotated[DUrl[int], "tenant"], {"pk": "123"}, 123
+    ),
+    UrlByAnnotationResolveCase(
+        "annotated_named_key",
+        "note_id",
+        Annotated[DUrl["id", int], "tenant"],
+        {"id": "42"},
+        42,
+    ),
 )
 
 
@@ -138,6 +148,21 @@ class PlanCase:
     func: Callable[..., object]
     kwargs: dict[str, object]
     expected: dict[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class ContextMarkerCase:
+    """One `Context` marker source, resolved against one template context.
+
+    `source` is what the marker was built with, a name, a callable, a constant,
+    or None for the parameter name, and `expected` the value both the plain
+    resolve and the compiled filler have to answer.
+    """
+
+    id: str
+    source: object
+    context_data: dict[str, object]
+    expected: object
 
 
 # Sentinels the matrix reads specially: RAISE makes the hook raise

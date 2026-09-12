@@ -73,7 +73,8 @@ Modules
 
 ``next.deps.plan``.
    ``compile_plan``, the ``ParameterPlan`` entry, and the ``InjectionPlan`` tuple the resolver replays.
-   An entry carries the parameter name, the runtime candidates, the terminal provider, the fallback value, and the parameter with its annotation already resolved.
+   An entry carries the parameter name, the runtime candidates, the fallback value, the parameter with its annotation already resolved, and the filler the terminal provider compiled.
+   The filler stands for that provider, so a parameter no signature settled is exactly one whose filler is ``None``.
    The resolved annotation keeps the metadata of an ``Annotated[...]`` hint, so a provider matching on a marker looks past that wrapper and one matching on the metadata reads it.
 
 The signature, type-hint, and plan caches are bounded and evict the least recently used entry once they are full, and a hit moves its entry back to the fresh end.
@@ -121,10 +122,20 @@ A resolve compares the registry version before it trusts a cached plan, which is
 Registering a named dependency does not touch the plan, because the ``DependsProvider`` reads the dependency map at resolve time.
 ``provides`` answers from the same plan, so the system checks and the resolver never disagree on which parameters a provider fills.
 
+Compiled fillers
+~~~~~~~~~~~~~~~~
+
+A terminal provider is asked once more, through the optional ``compile_resolve`` hook, for the call that fills the parameter from a context alone.
+Whatever that call needs from the signature is read at compile time, so the replay of a ``DUrl["id", int]`` parameter is left with one lookup in the URL kwargs and the coercion itself, rather than taking the annotation apart again on every request.
+The three marker providers implement it, and a provider that returns ``None`` from it, or defines no hook at all, keeps its plain ``resolve`` on the replay path.
+The fillers belong to the plan, so every recompile builds them again from the provider list the plan saw.
+
 Depends forms
 -------------
 
 ``DependsProvider`` handles a parameter whose default is a ``Depends`` marker, see :doc:`/content/topics/dependency-injection` for the four marker forms.
+A dependency whose own signature offers nothing to inject is noted the first time it is called and afterwards called directly, because no provider can add a parameter to a signature that has none.
+The note is held per name and checked by identity, so rebinding the name goes back through the full path.
 
 ResolutionContext
 -----------------
@@ -142,6 +153,16 @@ The names in ``RESERVED_KEYS`` (``request``, ``form``, ``cleaned_data``, ``_cach
 
 Cache
 -----
+
+Two caches with different lifetimes sit behind a resolve.
+The introspection memos live for the process, and the ``DependencyCache`` lives for one resolution pass.
+
+``cached_signature`` and ``cached_type_hints`` in ``next.deps.resolver`` hold the inspected signature and the resolved type hints of a callable, and a third memo of the same shape holds whether it declares ``**kwargs``.
+A callable is inspected once per process rather than once per call, so neither the plan compile nor anything the replay asks later reads its annotations again.
+The memo key is the callable itself, or its underlying ``__func__`` paired with a bound flag when it is a method, because a bound method object is recreated on every attribute access and would otherwise miss the memo each time.
+The same key carries the compiled plan, see `Injection plan`_ for the compile and the providers version that invalidates it.
+A callable no mapping can key is inspected afresh instead of being refused.
+The bounds these memos are held under, and the reload that clears them, are described under `Modules`_.
 
 Each resolution pass owns a ``DependencyCache``.
 It lives on the ``ResolutionContext`` for that pass and holds named dependency values.
@@ -189,6 +210,8 @@ Extension points
 - Subclass ``RegisteredParameterProvider`` to handle a custom marker or a custom annotation.
 - Override ``static_can_handle`` on a provider to give the plan compiler a context-free verdict.
   The ``RegisteredParameterProvider`` default returns ``None``, which keeps the provider as a runtime candidate for every parameter, so a subclass that does not override it is consulted on every resolve.
+- Override ``compile_resolve`` on a provider that claims parameters with ``True`` to fold the work its ``resolve`` repeats into a call the plan holds.
+  The default returns ``None``, which leaves the parameter on the plain ``resolve`` path.
 - Use ``resolver.dependency("name")`` to register a callable for ``Depends("name")``.
 - Raise ``UnknownDependencyError`` from a provider that resolves by name.
   The resolve that was replaying the plan attaches the callable it was filling, so the message names the innermost one of a nested chain.

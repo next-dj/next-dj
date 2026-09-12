@@ -50,7 +50,7 @@ The next request observes the fresh URL tree without a process restart. Tests co
 
 ### 3. DI provider for the slug
 
-`wiki.providers.ArticleProvider` claims any parameter annotated as `DArticle[Article]`. It reads `context.url_kwargs["slug"]` and either returns the matching row or raises `Http404`. The catchall page and both contexts of the edit page use it, so the slug-to-row lookup lives in one place.
+`wiki.providers.ArticleProvider` claims any parameter annotated as `DArticle[Article]`. It reads `context.url_kwargs.get("slug")`, returns the matching row, raises `Http404` when no row carries that slug, and answers `None` when the call captured no slug at all. The catchall page and both contexts of the edit page use it, so the slug-to-row lookup lives in one place. `static_can_handle` settles the claim from the annotation, so the plan compiler picks the provider once per callable, and `compile_resolve` unpacks the model out of `DArticle[Article]` once per plan, leaving each request the query alone.
 
 The edit form does not go through the provider. A `ModelForm` names the URL kwarg that identifies its row with `Meta.instance_from_url = "slug"`, and the framework loads that row onto `self.instance` when it builds the form, which is what the object-level permission hook in section 8 reads.
 

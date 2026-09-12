@@ -1,12 +1,12 @@
 """Resolve callable parameters from request, URL kwargs, forms, and context.
 
-The public surface covers the annotation base class `DDependencyBase`, the
-`Depends` marker, the `DependencyResolver` class and its singleton, the
-`UnknownDependencyError` exception, the `RegisteredParameterProvider` ABC, the
-`ParameterProvider` protocol, the `ProviderRegistry` and its singleton, and the
-`RESERVED_KEYS` set. Deeper helpers live under `next.deps.cache`,
-`next.deps.providers`, `next.deps.markers`, and `next.deps.plan`, whose
-`compile_plan`, `InjectionPlan`, and `ParameterPlan` spell the compiled contract.
+The public surface covers the annotation base class `DDependencyBase`, the `Depends`
+marker, the `DependencyResolver` and its singleton, the `UnknownDependencyError`
+exception, the `RegisteredParameterProvider` ABC, the `ParameterProvider` protocol, the
+`ProviderRegistry` and its singleton, and the `RESERVED_KEYS` set. Deeper helpers live
+under `next.deps.cache`, `next.deps.markers`, and `next.deps.providers`, whose
+`CompilingParameterProvider` spells the optional compile hook, while `next.deps.plan`
+spells the compiled contract, cached per callable and replayed on every resolve.
 """
 
 from __future__ import annotations

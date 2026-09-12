@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
 import pytest
@@ -12,13 +13,25 @@ from flags.metrics import RENDER_INDEX_KEY, record_render, render_counts
 from flags.models import Flag
 from flags.panels._chunks.feature_guard import component as guard
 from flags.panels.admin.page import BulkToggleForm
-from flags.providers import WRITE_GATE_FLAG, FlagService, flag_service
+from flags.providers import (
+    WRITE_GATE_FLAG,
+    DFlag,
+    FlagProvider,
+    FlagService,
+    flag_service,
+)
 from flags.receivers import DENIED_COUNT_KEY, _page_key, access_denied_count
 
-from next.testing import resolve_call
+from next.testing import make_resolution_context, resolve_call
 
 
 pytestmark = pytest.mark.django_db
+
+
+def _param(annotation: object) -> inspect.Parameter:
+    return inspect.Parameter(
+        "flag", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=annotation
+    )
 
 
 class TestDemoFlags:
@@ -89,6 +102,49 @@ class TestFlagProviderErrors:
     def test_missing_flag_name_raises(self) -> None:
         with pytest.raises(LookupError):
             resolve_call(guard.render)
+
+
+class TestFlagProvider:
+    """`FlagProvider` settles `DFlag[...]` from the signature alone."""
+
+    @pytest.mark.parametrize(
+        ("annotation", "expected"),
+        [(DFlag[Flag], True), (int, False)],
+        ids=["dflag-subscript", "plain-int"],
+    )
+    def test_verdict_follows_the_annotation(self, annotation, expected) -> None:
+        provider = FlagProvider()
+        param = _param(annotation)
+        assert provider.static_can_handle(param) is expected
+        assert provider.can_handle(param, make_resolution_context()) is expected
+
+    @pytest.mark.parametrize(
+        ("url_kwargs", "context_data", "expected"),
+        [
+            ({"name": "beta"}, {}, ("beta", True)),
+            ({}, {"flag_name": "beta"}, ("beta", True)),
+            ({}, {"flag_name": "unseeded"}, ("unseeded", False)),
+        ],
+        ids=["url-kwarg", "template-context", "absent-flag"],
+    )
+    def test_compiled_filler_matches_resolve(
+        self, make_flag, url_kwargs, context_data, expected
+    ) -> None:
+        make_flag("beta", label="Beta", enabled=True)
+        provider = FlagProvider()
+        param = _param(DFlag[Flag])
+        ctx = make_resolution_context(url_kwargs=url_kwargs, context_data=context_data)
+        filled = provider.compile_resolve(param)(ctx)
+        resolved = provider.resolve(param, ctx)
+        assert (filled.name, filled.enabled) == expected
+        assert (resolved.name, resolved.enabled) == expected
+
+    def test_compiled_filler_needs_a_flag_name(self) -> None:
+        provider = FlagProvider()
+        param = _param(DFlag[Flag])
+        fill = provider.compile_resolve(param)
+        with pytest.raises(LookupError, match="DFlag requires"):
+            fill(make_resolution_context())
 
 
 class TestRenderCounts:

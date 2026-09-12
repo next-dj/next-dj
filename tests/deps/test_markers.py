@@ -5,6 +5,7 @@ from django.http import HttpRequest
 
 from next.deps import DependencyResolver, Depends, UnknownDependencyError, resolver
 from next.deps.markers import DependsProvider
+from next.testing import make_resolution_context
 from tests.support import _ctx, _minimal_resolver, bound_dependency, inspect_parameter
 
 
@@ -226,3 +227,55 @@ class TestUnknownDependency:
         assert message.endswith(
             'Register it with resolver.dependency("tehme") or fix the name.'
         )
+
+
+def _built(theme: str = Depends("theme")) -> str:
+    return f"built-{theme}"
+
+
+class TestDependsFormsTakeBothPaths:
+    """Every `Depends` form answers the same through `resolve` and through the filler."""
+
+    def _provider(self) -> DependsProvider:
+        instance = DependencyResolver()
+        instance.dependency("theme")(lambda: "dark")
+        return DependsProvider(resolver=instance)
+
+    @pytest.mark.parametrize(
+        ("dependency", "name", "expected"),
+        [
+            ("theme", "value", "dark"),
+            (None, "theme", "dark"),
+            (_built, "value", "built-dark"),
+            (123, "value", 123),
+        ],
+        ids=["named", "bare", "callable", "constant"],
+    )
+    def test_resolve_and_compiled_filler_agree(
+        self, dependency, name, expected
+    ) -> None:
+        provider = self._provider()
+        param = inspect_parameter(name, default=Depends(dependency))
+        fill = provider.compile_resolve(param)
+        assert fill is not None
+        assert provider.resolve(param, make_resolution_context()) == expected
+        assert fill(make_resolution_context()) == expected
+
+    def test_resolve_ignores_a_default_that_is_no_marker(self) -> None:
+        param = inspect_parameter("value", default="plain")
+        assert self._provider().resolve(param, make_resolution_context()) is None
+
+    @pytest.mark.parametrize("dependency", ["missing", None], ids=["named", "bare"])
+    def test_an_unregistered_name_raises_through_both_paths(self, dependency) -> None:
+        provider = self._provider()
+        param = inspect_parameter("missing", default=Depends(dependency))
+        fill = provider.compile_resolve(param)
+        assert fill is not None
+        for call in (
+            lambda: provider.resolve(param, make_resolution_context()),
+            lambda: fill(make_resolution_context()),
+        ):
+            with pytest.raises(UnknownDependencyError) as exc_info:
+                call()
+            assert exc_info.value.name == "missing"
+            assert exc_info.value.param_name == "missing"

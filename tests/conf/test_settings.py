@@ -201,6 +201,55 @@ class TestUrlResolverSetting:
         assert errors == []
 
 
+class TestDependencyResolverSetting:
+    """DEPENDENCY_RESOLVER default, string merge, and check acceptance."""
+
+    def test_default_is_the_core_resolver_path(self) -> None:
+        """The setting defaults to the core dependency resolver dotted path."""
+        assert (
+            NextFrameworkSettings.DEFAULTS["DEPENDENCY_RESOLVER"]
+            == "next.deps.DependencyResolver"
+        )
+        next_framework_settings.reload()
+        assert (
+            next_framework_settings.DEPENDENCY_RESOLVER
+            == "next.deps.DependencyResolver"
+        )
+
+    def test_string_override_reaches_merged_settings(self) -> None:
+        """A dotted-path string lands in next_framework_settings unchanged."""
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEPENDENCY_RESOLVER": "tests.deps.test_setting.WideSkipResolver"
+            }
+        ):
+            assert (
+                next_framework_settings.DEPENDENCY_RESOLVER
+                == "tests.deps.test_setting.WideSkipResolver"
+            )
+
+    @pytest.mark.parametrize(
+        "raw",
+        [123, None, ["next.deps.DependencyResolver"]],
+        ids=["int", "none", "list"],
+    )
+    def test_non_string_override_keeps_default(self, raw: object) -> None:
+        """A non-string value is ignored by the merge and the default stays."""
+        with override_settings(NEXT_FRAMEWORK={"DEPENDENCY_RESOLVER": raw}):  # type: ignore[dict-item]
+            assert (
+                next_framework_settings.DEPENDENCY_RESOLVER
+                == "next.deps.DependencyResolver"
+            )
+
+    def test_key_passes_unknown_key_check(self) -> None:
+        """System checks accept DEPENDENCY_RESOLVER as a known top-level key."""
+        with override_settings(
+            NEXT_FRAMEWORK={"DEPENDENCY_RESOLVER": "next.deps.DependencyResolver"}
+        ):
+            errors = check_next_framework_unknown_top_level_keys()
+        assert errors == []
+
+
 class TestNextFrameworkChecksUnknownKeys:
     """System checks reject keys that are not part of the supported schema."""
 
@@ -505,11 +554,12 @@ class TestMergedSettingsAreImmutable:
         [
             ("URL_NAME_TEMPLATE", "page_{name}"),
             ("URL_RESOLVER", "next.urls.TrieURLResolver"),
+            ("DEPENDENCY_RESOLVER", "next.deps.DependencyResolver"),
             ("STRICT_CONTEXT", False),
             ("JS_CONTEXT_SERIALIZER", None),
             ("FORM_ANCHOR_FILES", None),
         ],
-        ids=["template", "resolver", "strict", "serializer", "anchors"],
+        ids=["template", "resolver", "deps", "strict", "serializer", "anchors"],
     )
     def test_scalars_are_returned_untouched(self, key: str, expected: object) -> None:
         """Freezing leaves strings, bools, and None exactly as they were."""
