@@ -24,6 +24,8 @@ from next.deps import (
 )
 from next.deps.cache import _IN_PROGRESS, DependencyCache
 from next.deps.resolver import (
+    _CLAIMED_RESERVED,
+    _UNCLAIMED_RESERVED,
     _introspect_key,
     _signature_cache,
     _type_hints_cache,
@@ -466,6 +468,10 @@ class TestResolverResolveDependencies:
         instance.prepend_provider(_Recording(None))
         instance.resolve_dependencies(fn, kept="url", extra="taken")
         assert seen == [{"kept": "url"}]
+
+    def test_the_hand_written_pops_stay_in_step_with_the_reserved_names(self) -> None:
+        """The spelled-out pops and the loop together cover `RESERVED_KEYS` exactly."""
+        assert _CLAIMED_RESERVED | frozenset(_UNCLAIMED_RESERVED) == RESERVED_KEYS
 
     def test_a_cache_of_another_type_starts_a_private_one(self) -> None:
         """A `_cache` that is neither a dict nor a cache leaves the resolve untouched."""

@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Generator
 
 import pytest
@@ -64,6 +65,31 @@ class TestSettingsReloadedSignal:
             settings_reloaded.disconnect(failing)
             settings_reloaded.disconnect(following)
         assert ran == ["failing", "following"]
+
+    def test_a_failure_behind_the_first_one_is_logged(self, caplog) -> None:
+        """The second failing receiver leaves a record instead of vanishing."""
+        first_message = "first bad value"
+        second_message = "second bad value"
+
+        def failing(**kwargs) -> None:
+            raise ImproperlyConfigured(first_message)
+
+        def also_failing(**kwargs) -> None:
+            raise ImproperlyConfigured(second_message)
+
+        settings_reloaded.connect(failing)
+        settings_reloaded.connect(also_failing)
+        try:
+            with (
+                caplog.at_level(logging.ERROR, logger="next.conf.signals"),
+                pytest.raises(ImproperlyConfigured, match=first_message),
+            ):
+                next_framework_settings.reload()
+        finally:
+            settings_reloaded.disconnect(failing)
+            settings_reloaded.disconnect(also_failing)
+        assert "also_failing" in caplog.text
+        assert second_message in caplog.text
 
     def test_does_not_fire_for_unrelated_setting(
         self, capture_settings_reloaded: SignalRecorder

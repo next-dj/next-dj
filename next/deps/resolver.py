@@ -714,26 +714,31 @@ def apply_resolver_setting() -> None:
     """Retype the resolver singleton to the configured resolver class.
 
     Retyped in place rather than replaced, because the framework and its test helpers
-    hold the singleton by reference and a fresh object would strand every holder.
+    hold the singleton by reference and a fresh object would strand every holder. The
+    swap runs under the resolver lock, so it never interleaves with a provider rebuild
+    moving the same version counter.
     """
     cls = _configured_resolver_class()
-    if type(resolver) is cls:
-        return
-    try:
-        resolver.__class__ = cls
-    except TypeError as exc:
-        msg = (
-            f"NEXT_FRAMEWORK['DEPENDENCY_RESOLVER'] {cls.__name__!r} has an "
-            "object layout the singleton cannot take on in place. A resolver "
-            f"subclass adds no instance slots and no second base: {exc}"
-        )
-        raise ImproperlyConfigured(msg) from exc
-    # `skips` is public so a subclass may widen what the resolver refuses, and that
-    # verdict decides both which parameters a plan carries and which dependency fills
-    # nothing. Both memos were taken under the class just replaced.
-    resolver._providers_version += 1
-    resolver._plan_cache.clear()
-    resolver._leaf_dependencies.clear()
+    with resolver._lock:
+        if type(resolver) is cls:
+            return
+        try:
+            resolver.__class__ = cls
+        except TypeError as exc:
+            msg = (
+                f"NEXT_FRAMEWORK['DEPENDENCY_RESOLVER'] {cls.__name__!r} has an "
+                "object layout the singleton cannot take on in place. A resolver "
+                f"subclass adds no instance slots and no second base: {exc}"
+            )
+            raise ImproperlyConfigured(msg) from exc
+        # `skips` is public so a subclass may widen what the resolver refuses, and that
+        # verdict decides both which parameters a plan carries and which dependency
+        # fills nothing. Both memos were taken under the class just replaced.
+        resolver._plan_cache.clear()
+        resolver._leaf_dependencies.clear()
+        # The version moves last, the way a provider rebuild publishes its list, so a
+        # plan compiled under the class being replaced is stamped stale, not fresh.
+        resolver._providers_version += 1
 
 
 def _on_settings_reloaded(**kwargs) -> None:

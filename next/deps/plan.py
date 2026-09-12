@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import inspect
 from functools import partial
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 
 if TYPE_CHECKING:
@@ -49,12 +49,23 @@ def _filler(provider: ParameterProvider, param: inspect.Parameter) -> ParameterF
 
     The hook is read off the instance, so a provider that defines none keeps the plain
     `resolve` path. The bound method is captured here either way, not on every replay.
+    A hook that compiles something uncallable raises here, where the provider is named,
+    rather than on every replay of the plan it went into.
     """
     hook: _CompileHook | None = getattr(provider, "compile_resolve", None)
     if callable(hook):
-        compiled = hook(param)
+        # Widened from the declared return, because the compiler guards against a
+        # third-party hook that hands back something no replay could call.
+        compiled: object = hook(param)
         if compiled is not None:
-            return compiled
+            if not callable(compiled):
+                msg = (
+                    f"{type(provider).__name__}.compile_resolve returned "
+                    f"{compiled!r} for parameter {param.name!r}, expected a "
+                    "callable or None."
+                )
+                raise TypeError(msg)
+            return cast("ParameterFiller", compiled)
     return partial(provider.resolve, param)
 
 

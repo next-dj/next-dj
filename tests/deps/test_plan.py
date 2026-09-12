@@ -806,6 +806,14 @@ class _NullCompileProvider:
         self.compiled.append(param.name)
 
 
+class _ValueCompileProvider(_NullCompileProvider):
+    """Provider whose hook hands back the value instead of the call that fills it."""
+
+    def compile_resolve(self, param: inspect.Parameter) -> object:
+        self.compiled.append(param.name)
+        return self.value
+
+
 def _fillers(planned: DependencyResolver, func) -> dict[str, object]:
     return {
         name: fill
@@ -849,6 +857,18 @@ class TestCompiledFillers:
         assert provider.compiled == ["plain"]
         assert planned.resolve_dependencies(_plain) == {"plain": "PLAIN"}
         assert provider.compiled == ["plain"]
+
+    def test_a_hook_that_compiles_a_non_callable_is_refused(self) -> None:
+        planned = DependencyResolver()
+        planned.prepend_provider(_ValueCompileProvider())
+        with pytest.raises(
+            TypeError,
+            match=(
+                r"_ValueCompileProvider.compile_resolve returned 'PLAIN' "
+                r"for parameter 'plain'"
+            ),
+        ):
+            planned.resolve_dependencies(_plain)
 
     def test_a_provider_without_the_hook_keeps_the_resolve_path(self) -> None:
         planned = DependencyResolver()
