@@ -14,6 +14,7 @@ from next.backends import (
 from next.conf import next_framework_settings
 from next.conf.frozen import FrozenDict, FrozenList
 from tests.support.backends import (
+    ABSTRACT,
     ALPHA,
     BETA,
     CONCRETE,
@@ -229,6 +230,18 @@ class TestAbstractFamilyRoot:
 
         assert type(backend) is ConcreteFakeBackend
         assert backend.run() == "ok"
+
+    def test_resolve_refuses_the_abstract_root_itself(self) -> None:
+        with pytest.raises(ImproperlyConfigured, match="is abstract"):
+            resolve_backend_class({"BACKEND": ABSTRACT}, base=AbstractFakeBackend)
+
+    def test_load_skips_an_entry_naming_the_abstract_root(self, caplog) -> None:
+        with caplog.at_level(logging.ERROR, logger="next.backends"):
+            assert (
+                load_backends([{"BACKEND": ABSTRACT}], base=AbstractFakeBackend) == []
+            )
+
+        assert "is abstract" in caplog.text
 
     def test_load_names_the_abstract_root_in_its_log(self, caplog) -> None:
         with caplog.at_level(logging.ERROR, logger="next.backends"):

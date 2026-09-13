@@ -520,11 +520,10 @@ _REGISTERED_LOADERS_CACHE: dict[str, tuple[TemplateLoader, ...] | None] = {
 def build_registered_loaders() -> Sequence[TemplateLoader]:
     """Instantiate `TEMPLATE_LOADERS` dotted paths into `TemplateLoader` instances.
 
-    Entries that cannot be imported or are not `TemplateLoader` subclasses
-    are skipped with a debug-level log. `check_template_loaders` is the
-    user-visible report for the same misconfigurations. The result is
-    memoised as a tuple and reset on `settings_reloaded`, so a caller
-    cannot reorder the chain every later render reads.
+    Entries that cannot be imported or are not `TemplateLoader` subclasses are skipped
+    with a debug-level log. `check_template_loaders` is the user-visible report for the
+    same misconfigurations. The result is memoised as a tuple and reset on
+    `settings_reloaded`, so a caller cannot reorder the chain every later render reads.
     """
     cached = _REGISTERED_LOADERS_CACHE["value"]
     if cached is not None:

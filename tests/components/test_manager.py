@@ -1,3 +1,4 @@
+import logging
 import os
 from collections.abc import Generator
 from pathlib import Path
@@ -20,6 +21,7 @@ from next.components import (
     FileComponentsBackend,
     ModuleLoader,
     SimpleComponentRenderer,
+    component_watch_roots,
     components_manager,
     get_component,
     get_component_paths_for_watch,
@@ -46,9 +48,12 @@ from next.testing import capture_signals
 from tests.support import (
     BOOM_COMPONENTS_BACKEND,
     DUMMY_COMPONENTS_BACKEND,
+    MALFORMED_WATCH_COMPONENTS_BACKEND,
+    RAISING_WATCH_COMPONENTS_BACKEND,
     DummyComponentsBackend,
     RaisingRootsRouter,
     RootPagesRouter,
+    failing_watch_components_entry,
     next_framework_settings_component_backends_list as _next_framework_settings_component_backends_list,
     watching_components_entry,
 )
@@ -1592,6 +1597,51 @@ class TestGetComponentPathsForWatch:
             paths = get_component_paths_for_watch()
         next_framework_settings.reload()
         assert (root / "solo.djx").resolve() in paths
+
+    def test_a_backend_that_cannot_report_its_roots_contributes_none(
+        self, caplog
+    ) -> None:
+        """A raising backend costs its own trees, not the scan around it."""
+        entry = failing_watch_components_entry(RAISING_WATCH_COMPONENTS_BACKEND)
+        with (
+            override_settings(
+                NEXT_FRAMEWORK={"PAGE_BACKENDS": [], "COMPONENT_BACKENDS": [entry]}
+            ),
+            caplog.at_level(logging.ERROR, logger="next.components.watch"),
+        ):
+            assert component_watch_roots() == []
+            logged_once = caplog.text.count("failed to report the trees")
+            assert component_watch_roots() == []
+            assert caplog.text.count("failed to report the trees") == logged_once == 1
+        next_framework_settings.reload()
+
+    def test_a_reconfigure_re_arms_the_watch_root_diagnostic(self, caplog) -> None:
+        """The report of one failure returns once the framework is reconfigured."""
+        entry = failing_watch_components_entry(RAISING_WATCH_COMPONENTS_BACKEND)
+        with (
+            override_settings(
+                NEXT_FRAMEWORK={"PAGE_BACKENDS": [], "COMPONENT_BACKENDS": [entry]}
+            ),
+            caplog.at_level(logging.ERROR, logger="next.components.watch"),
+        ):
+            assert component_watch_roots() == []
+            next_framework_settings.reload()
+            assert component_watch_roots() == []
+            assert caplog.text.count("failed to report the trees") == 2
+        next_framework_settings.reload()
+
+    def test_a_backend_reporting_no_path_contributes_none(self, caplog) -> None:
+        """A root of the wrong type never reaches a caller that stats it."""
+        entry = failing_watch_components_entry(MALFORMED_WATCH_COMPONENTS_BACKEND)
+        with (
+            override_settings(
+                NEXT_FRAMEWORK={"PAGE_BACKENDS": [], "COMPONENT_BACKENDS": [entry]}
+            ),
+            caplog.at_level(logging.ERROR, logger="next.components.watch"),
+        ):
+            assert component_watch_roots() == []
+            assert "no path" in caplog.text
+        next_framework_settings.reload()
 
     def test_oserror_scanning_extra_root(self, tmp_path: Path) -> None:
         """OSError when listing an extra component root is handled."""

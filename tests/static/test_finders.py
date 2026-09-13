@@ -326,6 +326,22 @@ class TestFinderFreshness:
     @pytest.mark.parametrize(
         "watched_tree", [_TEMPLATE_ONLY], indirect=["watched_tree"]
     )
+    def test_an_answer_read_without_watching_goes_when_watching_starts(
+        self, watched_tree: Path
+    ) -> None:
+        asset = watched_tree / "about" / "template.js"
+        asset.unlink()
+        finder = NextStaticFilesFinder()
+        with override_settings(DEBUG=False):
+            assert finder.find("next/about.js") is None
+
+        asset.write_text("//")
+        with override_settings(DEBUG=True):
+            assert finder.find("next/about.js") == str(asset)
+
+    @pytest.mark.parametrize(
+        "watched_tree", [_TEMPLATE_ONLY], indirect=["watched_tree"]
+    )
     def test_a_process_watching_no_edit_still_follows_the_trees(
         self, watched_tree: Path
     ) -> None:

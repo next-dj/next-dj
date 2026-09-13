@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from next.components import components_manager
+from next.components import component_watch_roots
 from next.pages.watch import (
     get_pages_directories_for_watch,
     iter_pages_roots_with_components_folder_names,
@@ -64,8 +64,7 @@ def _iter_default_autoreload_watch_specs() -> list[tuple[Path, str]]:
         (root, f"**/{comp_name}/**/component.py")
         for root, comp_name in iter_pages_roots_with_components_folder_names()
     )
-    for backend in components_manager.backends:
-        specs.extend((root, "**/component.py") for root in backend.watch_roots())
+    specs.extend((root, "**/component.py") for root in component_watch_roots())
     return specs
 
 

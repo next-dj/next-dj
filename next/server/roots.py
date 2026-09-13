@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from next.components import components_manager
+from next.components import component_watch_roots
 from next.pages.watch import get_pages_directories_for_watch
 
 
@@ -23,6 +23,5 @@ def get_framework_filesystem_roots_for_linking() -> list[Path]:
     The page trees arrive resolved, so only the component roots are normalised.
     """
     roots: set[Path] = set(get_pages_directories_for_watch())
-    for backend in components_manager.backends:
-        roots.update(root.resolve() for root in backend.watch_roots())
+    roots.update(root.resolve() for root in component_watch_roots())
     return sorted(roots)

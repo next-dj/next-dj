@@ -1,8 +1,7 @@
 """HTML helpers for next-dj tests.
 
-Django's own assertions do not cover picking one anchor or form out of a
-rendered page, so these helpers locate elements with `html.parser` and return
-the verbatim source span of the match.
+Django's own assertions do not cover picking one anchor or form out of a rendered page,
+so these helpers locate elements with `html.parser` and return the source span.
 """
 
 from __future__ import annotations
@@ -182,12 +181,8 @@ def _json_object_at(text: str, start: int) -> str:
 def find_anchor(html: str, *, href: str | None = None, text: str | None = None) -> str:
     """Return the first `<a>...</a>` substring that matches the filters.
 
-    `href` is compared for exact equality with the anchor's `href`
-    attribute. `text` is matched as a substring against the anchor's
-    stripped inner text. With no filters, returns the first anchor in
-    document order. An anchor inside a comment or a script body is
-    markup to neither a browser nor the parser here, so it never
-    matches. Raises `LookupError` when nothing matches.
+    `href` matches exactly, `text` as a substring of the stripped inner text. An anchor
+    inside a comment or a script body never matches.
     """
     for anchor in _elements(html, "a"):
         if href is not None and anchor.attrs.get("href") != href:
@@ -208,11 +203,8 @@ def find_form(
 ) -> str:
     """Return the first `<form>...</form>` substring that matches the filters.
 
-    `action` is compared for exact equality with the form's `action` attribute,
-    `contains` and `excludes` are substrings that must and must not appear in the
-    block. With no filters, returns the first form in document order. A form inside
-    a comment or a script body never matches, same as for `find_anchor`. Raises
-    `LookupError` when nothing matches.
+    `action` matches exactly, `contains` and `excludes` are substrings the block must
+    and must not hold. A form inside a comment or a script body never matches.
     """
     for form in _elements(html, "form"):
         if action is not None and form.attrs.get("action") != action:

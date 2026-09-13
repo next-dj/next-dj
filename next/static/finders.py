@@ -10,8 +10,7 @@ two layers agree on every URL.
 
 Staticfiles asks per referenced asset, so the answer is held until something it was
 read from moves. The freshness token is the one the asset plans use, a generation per
-registry compared always and a directory snapshot compared only where template edits
-are watched.
+registry and a directory snapshot taken only where template edits are watched.
 """
 
 from __future__ import annotations
@@ -25,7 +24,7 @@ from django.contrib.staticfiles.utils import matches_patterns
 from django.core.files import File
 from django.core.files.storage import Storage
 
-from next.components import components_manager, get_component_paths_for_watch
+from next.components import component_watch_roots, get_component_paths_for_watch
 from next.pages.registry import (
     get_layout_djx_paths_for_watch,
     get_template_djx_paths_for_watch,
@@ -166,6 +165,7 @@ class _Scan(NamedTuple):
     storage: _MappedSourceStorage
     roots: _ScanRoots
     registries: tuple[int, int]
+    watched: bool
     directories: tuple[tuple[Path, int | None], ...]
 
 
@@ -181,12 +181,7 @@ def _registry_generation() -> tuple[int, int]:
 def _scan_roots() -> _ScanRoots:
     """Return the page trees and the component trees a scan reads."""
     return _ScanRoots(
-        tuple(get_pages_directories_for_watch()),
-        tuple(
-            root
-            for backend in components_manager.backends
-            for root in backend.watch_roots()
-        ),
+        tuple(get_pages_directories_for_watch()), tuple(component_watch_roots())
     )
 
 
@@ -214,10 +209,8 @@ def _child_directories(directory: Path) -> list[Path]:
 def _scan_directories(roots: _ScanRoots) -> tuple[tuple[Path, int | None], ...]:
     """Snapshot the mtime of every directory the trees of `roots` hold.
 
-    A directory that does not stat is recorded as `None`, which no real mtime
-    equals, so a tree that appears later rebuilds the scan that walked past it.
-    Ending a symlink cycle needs the inode of each directory, and the stat the
-    snapshot takes already carries it.
+    A directory that does not stat is recorded as `None`, which no real mtime equals,
+    so a tree that appears later rebuilds the scan that walked past it.
     """
     out: list[tuple[Path, int | None]] = []
     seen: set[tuple[int, int]] = set()
@@ -246,25 +239,30 @@ def _build_scan() -> _Scan:
     """
     registries = _registry_generation()
     roots = _scan_roots()
-    directories = _scan_directories(roots) if template_edits_watched() else ()
+    watched = template_edits_watched()
+    directories = _scan_directories(roots) if watched else ()
     mapping = discover_colocated_static_assets()
-    return _Scan(mapping, _MappedSourceStorage(mapping), roots, registries, directories)
+    return _Scan(
+        mapping, _MappedSourceStorage(mapping), roots, registries, watched, directories
+    )
 
 
 def _scan_stale(scan: _Scan) -> bool:
     """Whether anything the scan was read from has moved since.
 
-    A registration moves no file and a reconfigured tree no mtime, so the
-    generations and the roots are compared whatever the process watches. Only a
-    process watching template edits pays the stats, and there a file created or
-    deleted moves the mtime of the directory holding it, as does a directory
-    that comes or goes.
+    A registration moves no file and a reconfigured tree no mtime, so the generations
+    and the roots are compared whatever the process watches, and only a process
+    watching template edits pays the stats. A scan taken while nothing was watched
+    snapshotted no directory, so it reads as stale the moment watching starts.
     """
     if scan.registries != _registry_generation():
         return True
     if scan.roots != _scan_roots():
         return True
-    if not template_edits_watched():
+    watched = template_edits_watched()
+    if watched != scan.watched:
+        return True
+    if not watched:
         return False
     return any(
         stat_mtime_ns(directory) != mtime for directory, mtime in scan.directories

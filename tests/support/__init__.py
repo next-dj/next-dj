@@ -8,6 +8,8 @@ from tests.support.attribution import (
 from tests.support.backends import (
     BOOM_COMPONENTS_BACKEND,
     DUMMY_COMPONENTS_BACKEND,
+    MALFORMED_WATCH_COMPONENTS_BACKEND,
+    RAISING_WATCH_COMPONENTS_BACKEND,
     BoomComponentsBackend,
     DummyComponentsBackend,
     MockAutoreloadSender,
@@ -15,6 +17,7 @@ from tests.support.backends import (
     RecordingStaticBackend,
     StaticAssetProvider,
     WatchingComponentsBackend,
+    failing_watch_components_entry,
     file_components_entry,
     watching_components_entry,
 )
@@ -102,6 +105,8 @@ __all__ = [
     "BOOM_COMPONENTS_BACKEND",
     "COERCE_URL_VALUE_CASES",
     "DUMMY_COMPONENTS_BACKEND",
+    "MALFORMED_WATCH_COMPONENTS_BACKEND",
+    "RAISING_WATCH_COMPONENTS_BACKEND",
     "URL_BY_ANNOTATION_RESOLVE_CASES",
     "URL_KWARGS_RESOLVE_CASES",
     "AForm",
@@ -144,6 +149,7 @@ __all__ = [
     "build_zone_request",
     "counting_provider",
     "default_page_router_config",
+    "failing_watch_components_entry",
     "file_components_entry",
     "file_router_backend_from_params",
     "file_router_config_entry",

@@ -1105,6 +1105,19 @@ class TestRouterFactory:
         with pytest.raises(ImproperlyConfigured, match=missing_key):
             RouterFactory.create_backend(config)
 
+    def test_create_backend_when_dirs_is_no_sequence(self) -> None:
+        """A scalar DIRS answers the type the whole backend family answers."""
+        config = {
+            "BACKEND": "next.urls.FileRouterBackend",
+            "PAGES_DIR": "pages",
+            "APP_DIRS": True,
+            "OPTIONS": {},
+            "DIRS": 5,
+        }
+
+        with pytest.raises(ImproperlyConfigured, match="sequence of trees"):
+            RouterFactory.create_backend(config)
+
     def test_create_backend_without_a_backend_key(self) -> None:
         """An entry naming no backend is a misconfiguration like any other."""
         with pytest.raises(ImproperlyConfigured, match="BACKEND"):

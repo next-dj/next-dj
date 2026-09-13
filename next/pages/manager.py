@@ -59,7 +59,7 @@ logger = logging.getLogger(__name__)
 
 
 # Mtimes of every source behind one composition, keyed by its page path.
-type _SourceMtimes = dict[Path, dict[Path, int]]
+type _SourceMtimes = OrderedDict[Path, dict[Path, int]]
 
 # The bound the three per-page template layers share, so the composed source, the
 # compiled form of it and the layout skeleton of one page fall out of use together.
@@ -110,9 +110,9 @@ class Page:
         """
         self._template_registry: OrderedDict[Path, str] = OrderedDict()
         self._compiled_registry: OrderedDict[Path, Template] = OrderedDict()
-        self._template_source_mtimes: _SourceMtimes = {}
+        self._template_source_mtimes: _SourceMtimes = OrderedDict()
         self._skeleton_registry: OrderedDict[Path, str] = OrderedDict()
-        self._skeleton_source_mtimes: _SourceMtimes = {}
+        self._skeleton_source_mtimes: _SourceMtimes = OrderedDict()
         self._context_manager = PageContextRegistry(None)
         self._layout_loader = LayoutTemplateLoader()
 
@@ -339,19 +339,8 @@ class Page:
     ) -> tuple[str, StaticCollector]:
         """Render `template` and inject collected static assets.
 
-        `template` is either a precompiled `Template` (reused as-is) or
-        raw template source, which is parsed before rendering.
-
-        The method seeds a fresh `StaticCollector`, hydrates it with
-        the JS context that `build_render_context` left under the
-        `_next_js_context` key, discovers co-located assets for the
-        page, renders the Django template, and replaces placeholders
-        through the static assets port. The active `request` reaches
-        the static backend so request-aware subclasses can rewrite
-        URLs. Both the rendered HTML and the collector are returned so
-        callers can reuse the collector for telemetry without a second
-        rendering pass. Suitable for the canonical page render path
-        and for partial paths such as form-error rerenders.
+        `template` is either a precompiled `Template` or raw source parsed here. The
+        collector comes back with the HTML, so telemetry needs no second render.
         """
         assets = static_assets_slot.get()
         collector = assets.create_collector()
@@ -435,12 +424,8 @@ class Page:
     def composed_template_for(self, file_path: Path) -> Template:
         """Return the compiled composed template for the static body.
 
-        The composed source is cached in `_template_registry` and
-        invalidated by source-mtime staleness. The compiled `Template`
-        layer keys off the same registry, so both caches go stale
-        together and a warm hit performs no file reads and no parsing.
-        The source is held in a local rather than read back out, because
-        the bound lets a concurrent write evict it between the two reads.
+        Both caches key off `_template_registry` and go stale together. The source is
+        held in a local, because the bound may evict it between two reads.
         """
         composed = self._template_registry.get(file_path)
         if composed is None or self._is_template_stale(
@@ -645,7 +630,9 @@ class Page:
             if mtime is not None:
                 mtimes[p] = mtime
         if mtimes:
-            store[file_path] = mtimes
+            # Bounded with the registry it shadows, so an evicted page leaves
+            # no snapshot of sources nothing composes from any more.
+            store_capped(store, file_path, mtimes, _TEMPLATE_REGISTRY_MAX_SIZE)
 
     def _is_template_stale(self, file_path: Path, store: _SourceMtimes) -> bool:
         """Return whether any source tracked in `store` changed on disk.

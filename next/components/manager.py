@@ -38,9 +38,8 @@ def _configured_template_loader_class() -> type[ComponentTemplateLoader]:
     return resolve_setting_class(
         "COMPONENT_TEMPLATE_LOADER",
         base=ComponentTemplateLoader,
-        # The package binds `CachedComponentTemplateLoader` only after importing
-        # this module, so the import helper would hit a half-initialised
-        # `next.components`.
+        # The package binds `CachedComponentTemplateLoader` only after importing this
+        # module, so the import helper would hit a half-initialised `next.components`.
         shipped=CachedComponentTemplateLoader,
         base_path="next.components.ComponentTemplateLoader",
     )
@@ -110,10 +109,8 @@ class ComponentsManager:
     def reload(self, *, notify: bool = True) -> None:
         """Rebuild the backends from the current `NEXT_FRAMEWORK` settings.
 
-        The render pipeline and the router-walk claims go with the old backends, so the
-        next render resolves against the freshly configured sources. Pass `notify=False`
-        for a manager nobody renders from, so a throwaway build announces no backend the
-        process will never consult.
+        The render pipeline and the router-walk claims go with the old backends. A
+        manager nobody renders from passes `notify=False` and announces nothing.
         """
         self._invalidate()
         self._backends = load_backends(

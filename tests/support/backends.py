@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, ClassVar, override
+from typing import Any, ClassVar, cast, override
 
 from django.core.exceptions import ImproperlyConfigured
 
@@ -91,6 +91,7 @@ FOREIGN = f"{__name__}.ForeignBackend"
 RAISING = f"{__name__}.RaisingBackend"
 COUNTING = f"{__name__}.CountingBackend"
 CONCRETE = f"{__name__}.ConcreteFakeBackend"
+ABSTRACT = f"{__name__}.AbstractFakeBackend"
 NOT_A_CLASS = f"{__name__}.not_a_class"
 MISSING = f"{__name__}.NoSuchBackend"
 
@@ -124,6 +125,25 @@ class WatchingComponentsBackend(DummyComponentsBackend):
         return tuple(Path(entry) for entry in self.config.get("WATCH_ROOTS", ()))
 
 
+class RaisingWatchComponentsBackend(DummyComponentsBackend):
+    """Components backend whose watch-root read fails the way a third party's can."""
+
+    @override
+    def watch_roots(self) -> tuple[Path, ...]:
+        """Raise the kind of error the watch layer never lets out."""
+        msg = "boom"
+        raise RuntimeError(msg)
+
+
+class MalformedWatchComponentsBackend(DummyComponentsBackend):
+    """Components backend reporting watch roots of the wrong type."""
+
+    @override
+    def watch_roots(self) -> tuple[Path, ...]:
+        """Answer strings where the contract spells paths."""
+        return cast("tuple[Path, ...]", ("not-a-path",))
+
+
 class BoomComponentsBackend(ComponentsBackend):
     """Components backend that raises from `__init__` for load error paths."""
 
@@ -149,6 +169,8 @@ class BoomComponentsBackend(ComponentsBackend):
 FILE_COMPONENTS_BACKEND = "next.components.FileComponentsBackend"
 DUMMY_COMPONENTS_BACKEND = f"{__name__}.DummyComponentsBackend"
 WATCHING_COMPONENTS_BACKEND = f"{__name__}.WatchingComponentsBackend"
+RAISING_WATCH_COMPONENTS_BACKEND = f"{__name__}.RaisingWatchComponentsBackend"
+MALFORMED_WATCH_COMPONENTS_BACKEND = f"{__name__}.MalformedWatchComponentsBackend"
 BOOM_COMPONENTS_BACKEND = f"{__name__}.BoomComponentsBackend"
 
 
@@ -159,6 +181,11 @@ def file_components_entry(*dirs: Path) -> dict[str, Any]:
         "DIRS": [str(p) for p in dirs],
         "COMPONENTS_DIR": "_components",
     }
+
+
+def failing_watch_components_entry(dotted: str) -> dict[str, Any]:
+    """Build one entry whose backend cannot report the trees it watches."""
+    return {"BACKEND": dotted, "DIRS": [], "COMPONENTS_DIR": "_components"}
 
 
 def watching_components_entry(*watch_roots: Path) -> dict[str, Any]:

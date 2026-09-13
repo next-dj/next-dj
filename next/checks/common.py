@@ -152,8 +152,7 @@ def errors_for_unknown_keys(
     ]
 
 
-# One manager per `manage.py check` run instead of rescanning the page
-# tree for every registered check.
+# One manager per check run instead of rescanning the page tree per check.
 _ROUTER_MANAGER_CACHE: dict[
     str, tuple[RouterManager | None, list[CheckMessage]] | None
 ] = {"value": None}

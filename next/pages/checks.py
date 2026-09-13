@@ -376,8 +376,7 @@ def _route_name_error(name: str) -> str | None:
 def _converter_error(converter: str) -> str | None:
     """Return why Django knows no such converter, or `None` when it knows one.
 
-    The registry is read per check, so a converter a project registers of its
-    own counts as one Django knows.
+    The registry is read per check, so a converter a project registers counts too.
     """
     registered = get_converters()
     if converter in registered:

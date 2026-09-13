@@ -106,14 +106,9 @@ class RouterManager:
         does for every other backend family. Anything else a router raises
         while it is built is a bug in that router and reaches the caller.
 
-        The Django URL resolver caches resolved patterns. The cache is
-        cleared here so the next request sees the freshly built backend
-        list. The `router_reloaded` signal fires after the rebuild and
-        the cache flush so receivers observe a consistent state. The lock
-        is reentrant, so a receiver reloading again from this thread is
-        answered rather than deadlocked. Pass `notify=False` for a manager
-        nobody serves from, so a throwaway build leaves the process-wide
-        URL caches and the memos hanging off the signal alone.
+        The URL caches are cleared and `router_reloaded` fires after the rebuild, so
+        receivers see one consistent state. The reentrant lock answers a receiver that
+        reloads again from this thread, and `notify=False` leaves both alone.
         """
         with self._lock:
             self.version += 1

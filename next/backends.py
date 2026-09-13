@@ -1,5 +1,6 @@
 """Shared loading and lazy management of the settings-driven backend families."""
 
+import inspect
 import logging
 from collections.abc import Callable, Iterable, Mapping
 from functools import cached_property
@@ -39,6 +40,12 @@ def resolve_backend_class[T](
     klass: type[Any] = import_class_cached(dotted)
     if not (isinstance(klass, type) and issubclass(klass, root)):
         msg = f"Backend {dotted!r} is not a {root.__name__} subclass."
+        raise ImproperlyConfigured(msg)
+    if inspect.isabstract(klass):
+        # The family roots are the abstract classes a settings entry is most
+        # likely to name by mistake, and instantiating one answers a TypeError
+        # no caller of this family is written to read.
+        msg = f"Backend {dotted!r} is abstract, so it names no usable backend."
         raise ImproperlyConfigured(msg)
     return klass
 

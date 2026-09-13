@@ -30,11 +30,8 @@ class PagePathInfo:
     ancestors: tuple[Path, ...]
 
 
-# Bounded because a router is free to name a page path no earlier read named, and
-# each entry pins an ancestor tuple until the process ends. The bound catches
-# that growth rather than working as an eviction policy, because a project holds
-# far fewer pages than it allows, so the stalest insert is the one to drop and a
-# hit reorders nothing.
+# Bounded because a router may name a page path no earlier read named, and each
+# entry pins an ancestor tuple until the process ends.
 _PAGE_PATH_INFO_CACHE_MAX_SIZE = 2048
 
 _PAGE_PATH_INFO_CACHE: OrderedDict[Path, PagePathInfo] = OrderedDict()

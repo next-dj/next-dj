@@ -10,11 +10,10 @@ concrete on the default backend and selected per asset by `KindRegistry.renderer
 Custom backends extend the surface by adding more named methods such as
 `render_babel_script_tag` and registering kinds that point to them.
 
-Instances are built from `NEXT_FRAMEWORK['STATIC_BACKENDS']`
-entries by the static manager, which emits the `backend_loaded`
-signal for each one so user code may react to backend construction.
-The manager also drives `forget_urls` over that same list whenever a
-setting rebuilds the storage the memoised URLs were resolved against.
+Instances are built from `NEXT_FRAMEWORK['STATIC_BACKENDS']` entries by the static
+manager, which emits the `backend_loaded` signal for each one so user code may react to
+backend construction. The manager also drives `forget_urls` over that same list whenever
+a setting rebuilds the storage the memoised URLs were resolved against.
 """
 
 from __future__ import annotations
@@ -146,14 +145,8 @@ class StaticFilesBackend(StaticBackend):
     def register_file(self, source_path: Path, logical_name: str, kind: str) -> str:
         """Return the staticfiles URL for `next/<logical_name><suffix>`.
 
-        The suffix is taken from `source_path.suffix`, so a single kind
-        can serve multiple file extensions if a custom backend wishes to.
-        The answer is memoised per `(logical_name, suffix)` under a bound,
-        because staticfiles itself reads its manifest once per process. A
-        setting that moves that manifest drops the memo through `forget_urls`.
-        Missing entries in the manifest are reported as `RuntimeError` with a
-        hint about running `collectstatic`. The `kind` argument is part of the
-        contract and ignored here, the suffix alone names the file.
+        Memoised per `(logical_name, suffix)`, because staticfiles reads its manifest
+        once per process, and `forget_urls` drops it when that manifest moves.
         """
         del kind
         suffix = source_path.suffix

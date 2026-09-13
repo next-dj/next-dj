@@ -294,8 +294,7 @@ class ComponentNode(Node):
     ) -> SafeString:
         """Render the body, routing every slot body into `slots`.
 
-        A body holding no slot skips the collector push, so the plain component
-        pays nothing for the slot protocol.
+        A body holding no slot skips the collector push.
         """
         if not self.has_slots:
             return self.nodelist.render(context)
@@ -325,9 +324,8 @@ class ComponentNode(Node):
             render_ctx.pop(key, None)
         render_ctx.update(self._resolved_props(context))
         render_ctx["current_template_path"] = path
-        # Children arrive as finished markup, spliced in as written the way
-        # slot content already is. Whether the values inside were escaped is
-        # the calling template's business.
+        # Children arrive as finished markup, spliced in as written the way slot
+        # content is. Escaping inside them is the calling template's business.
         render_ctx["children"] = children
         render_ctx[COMPONENT_PROPS_CONTEXT_KEY] = self.prop_names
 

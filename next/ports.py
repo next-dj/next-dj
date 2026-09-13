@@ -32,7 +32,7 @@ class PortSlot[T]:
     slot never rebinds itself once the app is ready.
     """
 
-    _unbound_message: ClassVar[str]
+    _unbound_message: ClassVar[str] = _unbound("port")
 
     def __init__(self) -> None:
         """Start unbound so a missing composition step fails loudly."""

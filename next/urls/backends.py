@@ -365,6 +365,25 @@ class FileRouterBackend(RouterBackend):
         yield from dispatcher.walk(pages_path)
 
 
+def _dirs_entries(
+    backend_class: type[RouterBackend], config: Mapping[str, Any]
+) -> list[Any]:
+    """Return the `DIRS` entries of one router entry as a list.
+
+    A scalar under the key is a settings mistake like any other, so it answers the type
+    the whole family answers rather than the `TypeError` of the iteration it refuses.
+    """
+    raw = config.get("DIRS") or []
+    try:
+        return list(raw)
+    except TypeError as exc:
+        msg = (
+            f"A {backend_class.__name__} entry takes a sequence of trees "
+            f"under DIRS, got {raw!r}."
+        )
+        raise ImproperlyConfigured(msg) from exc
+
+
 def _construction_error(
     backend_class: type[RouterBackend], exc: TypeError
 ) -> ImproperlyConfigured:
@@ -434,8 +453,9 @@ class RouterFactory:
         raw_opts = config.get("OPTIONS")
         if not isinstance(raw_opts, dict):
             raw_opts = {}
-        dirs_list = list(config.get("DIRS") or [])
-        path_roots, segment_names = classify_dirs_entries(dirs_list, base_dir)
+        path_roots, segment_names = classify_dirs_entries(
+            _dirs_entries(backend_class, config), base_dir
+        )
         components_dir = FileRouterBackend._resolve_components_folder_name()
         try:
             return backend_class(

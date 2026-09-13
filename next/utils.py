@@ -81,10 +81,8 @@ def store_bounded[K, V](cache: OrderedDict[K, V], key: K, value: V, size: int) -
 def store_capped[K, V](cache: OrderedDict[K, V], key: K, value: V, size: int) -> None:
     """Write `key` under a bound that evicts by age of insert and costs reads nothing.
 
-    For a cache keyed by files of the project tree, whose working set stays far
-    below the bound. Nothing is ever evicted there, so recency order and
-    insertion order hold the same entries and the reorder a read would pay to
-    keep recency buys nothing.
+    For a cache keyed by files of the project tree, whose working set stays far below
+    the bound, so insertion order and recency hold the same entries.
     """
     cache[key] = value
     if len(cache) > size:

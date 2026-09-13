@@ -22,8 +22,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-# One manager per `manage.py check` run instead of rescanning the component
-# trees for every registered check.
+# One manager per check run instead of rescanning the component trees per check.
 _COMPONENTS_MANAGER_CACHE: dict[str, ComponentsManager | None] = {"value": None}
 
 
@@ -69,11 +68,8 @@ settings_reloaded.connect(reset_components_manager_cache)
 def iter_serialized_component_context_keys() -> Iterator[tuple[Path, str]]:
     """Yield the `component.py` path and key of every keyed `serialize=True` context.
 
-    A keyless `serialize=True` callable spreads the keys of the dict it
-    returns at render time, so those keys exist only at runtime and never
-    travel through here. Reading the keys imports every `component.py`, since
-    the decorator state is the truth, so a check calling this pays that import
-    even under `LAZY_COMPONENT_MODULES`.
+    Reading the keys imports every `component.py`, even under `LAZY_COMPONENT_MODULES`.
+    The keys of a keyless callable exist only at render time.
     """
     manager = get_components_manager()
     for backend in manager.backends:

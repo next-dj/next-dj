@@ -204,6 +204,20 @@ class TestForgetManagerBackendUrls:
             with override_settings(STATIC_URL="/assets/"):
                 assert [backend._url_cache for backend in manager._backends] == [{}, {}]
 
+    def test_a_manifest_setting_also_drops_the_runtime_bundle_url(
+        self, reset_default: None
+    ) -> None:
+        """The script tag and the preload hint read that URL through the same storage."""
+        reset_default_manager()
+        manager = get_static_manager()
+        before = manager._next_script_builder().url
+
+        with override_settings(STATIC_URL="/assets/"):
+            after = manager._next_script_builder().url
+
+        assert before.startswith("/static/")
+        assert after.startswith("/assets/")
+
     def test_an_unrelated_setting_keeps_every_memo(self, reset_default: None) -> None:
         """Only a setting that rebuilds the storage moves the URLs it answered."""
         reset_default_manager()

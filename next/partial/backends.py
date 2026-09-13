@@ -19,12 +19,8 @@ _SSE_EVENT_NAME = "next-patches"
 class PartialProtocolBackend(ABC):
     """Pluggable strategy for the wire format of patch envelopes.
 
-    The constructor accepts the full backend entry from `PARTIAL_BACKENDS`, which has
-    the shape `{"BACKEND": "...", "OPTIONS": {...}}`. The base class exposes the
-    OPTIONS mapping on the `options` property and leaves `content_type`,
-    `serialize_envelope`, and `sse_event` to the subclass, so a third party may swap
-    the wire format, for example to emulate Turbo Streams, without touching shaping
-    or the registries.
+    The constructor takes the full `PARTIAL_BACKENDS` entry and exposes its OPTIONS on
+    `options`, leaving the wire format to the subclass.
     """
 
     content_type: str

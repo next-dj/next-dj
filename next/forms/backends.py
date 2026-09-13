@@ -269,12 +269,11 @@ class FormActionBackend(ABC):
     def register_action(self, registration: ActionRegistration) -> None:
         """Record an action from the decorator or __init_subclass__.
 
-        Lookups without a page scope resolve a bare name to the first
-        registration that used it, unless a later one sets
-        `claims_name_binding` and takes the name over. Registrations arrive
-        through `FormActionManager.register_action`, which moves the token the
-        URL patterns are cached against, so an action stored by a caller that
-        reached a backend directly waits for the next move of that token.
+        Lookups without a page scope resolve a bare name to the first registration that
+        used it, unless a later one sets `claims_name_binding` and takes the name over.
+        Registrations arrive through `FormActionManager.register_action`, which moves
+        the token the URL patterns are cached against, so an action stored by a caller
+        that reached a backend directly waits for the next move of that token.
         """
 
     @abstractmethod

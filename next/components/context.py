@@ -31,11 +31,8 @@ if TYPE_CHECKING:
     from next.static.serializers import JsContextSerializer
 
 
-# Bounded because a render is free to spell a component path no earlier render
-# spelled, and the memo answers within one registry version for every one of them.
-# The bound catches that rather than working as an eviction policy, because a
-# project holds far fewer components than it allows, so the stalest insert is the
-# one to drop and a hit reorders nothing.
+# Bounded because a render may spell a component path no earlier render spelled,
+# and a project holds far fewer components than the bound ever reaches.
 _LOOKUP_CACHE_MAX_SIZE = 2048
 
 

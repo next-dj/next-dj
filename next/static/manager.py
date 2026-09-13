@@ -347,11 +347,9 @@ class StaticManager:
     def _resolve_collector_strategies(self) -> None:
         """Read the pipeline-level facts the first backend settles for a render.
 
-        One render holds one collector, so it holds one dedup strategy and one
-        JS-context policy. The first entry of `STATIC_BACKENDS` settles both for
-        the whole pipeline, which is the same entry every other caller reaches
-        through `default_backend`, and the later entries are read for nothing
-        but their own rendering.
+        One render holds one collector, so the first entry of `STATIC_BACKENDS` settles
+        the dedup strategy and the JS-context policy for the whole pipeline. Later
+        entries are read for nothing but their own rendering.
         """
         backend = self._backends[0]
         self._rewrites_urls = _rewrites_asset_urls(backend)
@@ -384,8 +382,10 @@ class StaticManager:
         Driven from the backend list rather than from one class, so a
         third-party backend that memoises what `register_file` resolved is
         invalidated on the same terms as the bundled one. A manager holding no
-        backend has nothing to tell and stays unloaded.
+        backend has nothing to tell and stays unloaded. The script builder goes
+        too, because it holds the runtime bundle URL read through that storage.
         """
+        self._script_builder = None
         for backend in self._backends:
             backend.forget_urls()
 
@@ -483,10 +483,9 @@ def _on_settings_reloaded(**kwargs) -> None:
 def _on_setting_changed(*, setting: str, **kwargs) -> None:
     """Drop the derived state a Django setting moved out from under.
 
-    `settings_reloaded` covers only the `NEXT_FRAMEWORK` half. The trees of a
-    router with `APP_DIRS` move with `INSTALLED_APPS`, and every asset URL a
-    backend memoised answers for a staticfiles storage the manifest settings
-    rebuild.
+    `settings_reloaded` covers only the `NEXT_FRAMEWORK` half. The trees of a router
+    with `APP_DIRS` move with `INSTALLED_APPS`, and a memoised asset URL answers for a
+    staticfiles storage the manifest settings rebuild.
     """
     if setting == "INSTALLED_APPS":
         forget_manager_page_roots()

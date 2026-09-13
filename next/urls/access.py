@@ -1,8 +1,7 @@
 """Router builder bound into the `next.ports` slot at app startup.
 
-The urls area routes to pages and so imports `next.pages`. The watcher and the
-system checks need routers without closing that loop, so they read the port
-this class fills.
+The urls area routes to pages and so imports `next.pages`. The watcher and the system
+checks read this port instead, which keeps them out of that loop.
 """
 
 from __future__ import annotations

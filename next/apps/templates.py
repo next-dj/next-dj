@@ -7,7 +7,7 @@ from typing import Any, cast
 
 from django.conf import settings
 from django.core.signals import setting_changed
-from django.template import base as template_base
+from django.template import base as template_base, engines
 
 
 _BUILTIN_MODULES = (
@@ -70,21 +70,32 @@ def _engine_with_builtins(engine: dict[str, Any]) -> dict[str, Any] | None:
     return {**engine, "OPTIONS": {**options, "builtins": [*builtins, *missing]}}
 
 
+def _forget_engines() -> None:
+    """Drop engines built from the `TEMPLATES` value that carried no builtins.
+
+    Only a fresh read reaches an engine handler that already read the settings.
+    """
+    engines.__dict__.pop("templates", None)
+    engines._templates = None  # type: ignore[attr-defined]
+    engines._engines = {}  # type: ignore[attr-defined]
+
+
 def _install_builtins() -> None:
     """Point `TEMPLATES` at engines that carry the next-dj tag libraries."""
     # The stubs type the entries as a TypedDict, the settings module holds
     # plain dicts that carry whatever keys a backend reads.
-    engines = cast("list[dict[str, Any]]", list(settings.TEMPLATES))
+    updated = cast("list[dict[str, Any]]", list(settings.TEMPLATES))
     changed = False
-    for index, engine in enumerate(engines):
+    for index, engine in enumerate(updated):
         if engine.get("BACKEND") != _DJANGO_BACKEND:
             continue
-        updated = _engine_with_builtins(engine)
-        if updated is not None:
-            engines[index] = updated
+        carrying = _engine_with_builtins(engine)
+        if carrying is not None:
+            updated[index] = carrying
             changed = True
     if changed:
-        settings.TEMPLATES = engines
+        settings.TEMPLATES = updated
+        _forget_engines()
 
 
 def install() -> None:

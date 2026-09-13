@@ -334,9 +334,8 @@ class StaticCollector:
     def assets_in_slot(self, name: str) -> Sequence[StaticAsset]:
         """Return collected assets for the named slot in insertion order.
 
-        Answers an empty sequence when nothing was registered for the slot.
-        The read-only type keeps a caller from rewriting the bucket a later
-        `add` still appends to.
+        Answers an empty sequence when nothing was registered. The read-only type keeps
+        a caller from rewriting a bucket a later `add` still appends to.
         """
         return self._buckets.get(name, _EMPTY)
 
