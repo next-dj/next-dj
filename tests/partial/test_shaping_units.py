@@ -258,14 +258,19 @@ class TestOriginTarget:
         assert url_kwargs == {"id": 42}
 
 
-class TestFormOverridesWithoutAForm:
-    """`_form_overrides` yields an empty mapping when the outcome has no form."""
+class TestZoneOverrides:
+    """`_zone_overrides` hands the form tag the namespace it accepts."""
 
     def test_no_form_yields_no_overrides(self) -> None:
-        outcome = ActionOutcome(
-            kind=ActionOutcomeKind.INVALID, action_name="step_form", form=None
-        )
-        assert shaping_module._form_overrides(outcome) == {}
+        assert shaping_module._zone_overrides(None, None, "step_form") == {}
+
+    def test_the_action_key_carries_a_namespace_not_the_bare_form(self) -> None:
+        form = forms.Form()
+        overrides = shaping_module._zone_overrides(form, None, "step_form")
+        assert overrides["form"] is form
+        assert overrides["step_form"].form is form
+        assert overrides["step_form"].wizard is None
+        assert "wizard" not in overrides
 
 
 class TestResolveStepTarget:

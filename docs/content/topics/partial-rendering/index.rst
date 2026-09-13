@@ -33,6 +33,9 @@ It walks seven concrete tasks from markup to handler, and the rest of the sectio
 :doc:`zones`
    Why zones are an optimisation rather than required markup, what the extract default costs, and the keying rule for dynamic list rows.
 
+:doc:`layers`
+   Modals opened from a link or from a handler, the zone each one loads, and the CSS hooks the runtime leaves behind.
+
 :doc:`done-choreographies`
    The two ways a wizard inside a modal refreshes the list on the page beneath it, compared honestly.
 
@@ -68,6 +71,7 @@ It walks seven concrete tasks from markup to handler, and the rest of the sectio
    scenarios
    how-it-works
    zones
+   layers
    done-choreographies
    co-located-js
    framework-islands

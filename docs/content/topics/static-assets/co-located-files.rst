@@ -85,7 +85,7 @@ Editing during development
 --------------------------
 
 Discovery walks a page or a component folder once and reuses what it found there on later renders.
-Under ``DEBUG`` it re-checks the directories it read on every render, so an edit under the dev server takes effect the way it did before the plan existed.
+Under ``DEBUG`` it re-checks those directories on every render, so a file added or deleted under the dev server takes effect on the next request.
 
 - A ``template.css``, ``layout.js``, or ``component.css`` added next to its owner is picked up by the next request.
 - Deleting one of those files removes it from the next request.
@@ -99,6 +99,9 @@ Where no watch covers the module, the edit is read the next time the plan rebuil
 
 With ``DEBUG`` off the directory checks do not run, and only a registration still invalidates a plan.
 A production process is expected to publish assets with ``collectstatic`` and restart, so a file changed under a running server stays invisible until the next start.
+
+Set ``STATIC_DISCOVERY_CACHE`` to ``False`` to drop the plans altogether, so every render walks the folder again and no invalidation rule applies.
+The key defaults to ``True`` and is listed in :ref:`ref-settings`.
 
 Asset ownership
 ---------------

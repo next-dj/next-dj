@@ -36,6 +36,7 @@ Keep the fields minimal so the tutorial stays focused on the framework.
 
    from django.db import models
 
+
    class Note(models.Model):
        title = models.CharField(max_length=120)
        body = models.TextField(blank=True)
@@ -74,7 +75,9 @@ Create the page module.
    :caption: notes/pages/page.py
 
    from notes.models import Note
+
    from next import context
+
 
    @context("notes")
    def recent_notes() -> list[Note]:
@@ -139,7 +142,7 @@ Inspect through system checks
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 next.dj contributes Django system checks for the page configuration.
-They confirm each ``page.py`` has a render function or a paired template, that parameter directories carry a ``page.py``, and that the request context processor is installed.
+They confirm each ``page.py`` has a render function or a paired template, that a parameter directory carries a page file or a child page, and that the request context processor is installed.
 See :doc:`/content/ref/system-checks` for the full catalog.
 Run them and confirm no warnings remain.
 

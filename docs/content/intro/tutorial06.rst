@@ -76,7 +76,9 @@ Update ``notes/pages/page.py`` so the ``notes`` context honours ``q``, and publi
 
    from django.http import HttpRequest
    from notes.models import Note
+
    from next import context
+
 
    @context("site_name", inherit_context=True)
    def site_name() -> str:
@@ -107,6 +109,9 @@ The ``query`` context only feeds the input value, and the ``notes`` context driv
 See :doc:`/content/topics/context` for how a page publishes named values.
 The hand-parsed ``request.GET`` keeps the example explicit.
 The ``DQuery`` marker from ``next.urls`` reads the same query parameter declaratively, see :doc:`/content/topics/dependency-injection`.
+
+A context function bound with ``@context("notes", zone="note-list")`` is skipped only on a zone ``GET`` that asks for a different zone.
+A full page render passes no zone batch and still runs every callable, see :doc:`/content/topics/context`.
 
 There is no handler and no JavaScript.
 Typing ``gro`` debounces, then sends one zone ``GET``.
@@ -142,7 +147,7 @@ The runtime syncs the address bar with ``history.replaceState``, so ``/?q=gro`` 
 A new keystroke aborts an in-flight request, and a stale response that arrives after a fresher one is discarded.
 
 Without the runtime the same form is a plain ``GET`` that reloads the whole page with the filtered list.
-The provider reads ``request.GET`` either way, so the zone fetch reuses the exact query parsing the full page uses.
+The ``notes`` callable reads ``request.GET`` either way, so the zone fetch reuses the exact query parsing the full page uses.
 
 Create a note in place
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -156,8 +161,10 @@ Update the ``CreateNoteForm`` class in ``notes/forms.py`` and merge the new impo
 
    from django.http import HttpRequest, HttpResponse
    from notes.models import Note
+
    from next.forms import ModelForm
    from next.partial import Patches, is_partial_request
+
 
    class CreateNoteForm(ModelForm):
        class Meta:
@@ -174,6 +181,8 @@ Update the ``CreateNoteForm`` class in ``notes/forms.py`` and merge the new impo
 On that path the handler saves the note and returns a morph of the ``note-list`` zone, which re-renders the list from the ``notes`` context with the new note included.
 On the no-JavaScript path ``super().on_valid`` keeps the inherited behaviour.
 It saves and redirects to origin, and the reload shows the new note.
+``Patches(...).response()`` already answers a submission made without the runtime with a 303 to the posted origin, so the branch is not what keeps that path working.
+The branch stays explicit so the inherited ``Meta.success_url`` and ``Meta.success_message`` handling survives.
 
 The form tag itself does not change.
 
@@ -208,6 +217,42 @@ Add a second op that re-renders the form when it should be cleared, see :doc:`/c
 
 Submit a note with a title and watch it appear at the top of the list with no reload.
 Submit with an empty title and the form re-renders its error in place, the list untouched.
+
+Test the zone
+~~~~~~~~~~~~~
+
+Both partial paths are reachable from the test client of :doc:`tutorial05`.
+``get_zones`` sends the zone ``GET`` the search box makes, and ``post_action`` sends the partial submission the create form makes.
+
+.. code-block:: python
+   :caption: tests/test_notes_partial.py
+
+   from notes.models import Note
+
+   from next.testing.client import envelope_of
+
+
+   def test_zone_get_returns_one_morph(next_client, db) -> None:
+       Note.objects.create(title="Groceries", body="milk")
+       response = next_client.get_zones("/?q=gro", "note-list")
+       envelope = envelope_of(response)
+       assert envelope.op_verbs() == ["morph"]
+       assert "Groceries" in envelope.html_for_zone("note-list")
+
+   def test_partial_create_patches_the_list(next_client, db) -> None:
+       response = next_client.post_action(
+           "create_note_form",
+           {"title": "From test", "body": "body"},
+           origin="/",
+           partial=True,
+           zones="note-list",
+       )
+       envelope = envelope_of(response)
+       assert envelope.zone_targets() == ["note-list"]
+       assert Note.objects.filter(title="From test").exists()
+
+``envelope_of`` refuses a response that is not a patch envelope, so a test that loses the partial switch fails on the decode rather than on a weaker assertion.
+Drop ``partial=True`` from the second call and the same submission answers with the 303 the no-JavaScript path takes.
 
 How it degrades
 ~~~~~~~~~~~~~~~

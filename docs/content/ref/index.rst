@@ -44,13 +44,13 @@ The subsystem pages below are the reference for that wider surface.
    Those classes belong to the same subpackage and stay behind ``from next.pages import Context, ContextResult``.
 
 The laziness covers the package root, not the subsystems it fronts.
-Reading ``Depends`` imports ``next.deps``, which pulls in a small set of modules from ``django.dispatch`` and ``django.utils``.
+Reading ``Depends`` imports ``next.deps``, which pulls in ``django.core.exceptions`` and ``django.dispatch``, and with them a large part of ``django.core`` and ``django.utils``.
 Reading ``page``, ``context``, ``component``, or ``action`` loads a much larger part of Django.
 
 .. rubric:: API tiers and the cross-area contract
 
 Subsystem pages carry their own tier vocabularies.
-:doc:`forms` and :doc:`partial` group their surface into Stable, Advanced, and Internal hooks, while :doc:`components` uses Application Imports, Framework Extension, and Internal Infrastructure.
+:doc:`forms` and :doc:`partial` group their surface into Stable, Advanced, and Internal hooks, while :doc:`components` uses Application imports, Framework extension, and Internal infrastructure.
 The cross-area contract is a fourth category beside those tiers and replaces none of them.
 It covers underscore-free methods that one ``next`` area calls on another.
 Such a method is safe from removal without notice, but it carries no Stable-tier guarantee for application code.
@@ -96,6 +96,9 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
 
 :doc:`utils`
    ``next.utils`` for small helpers that the framework uses internally.
+
+:doc:`errors`
+   ``next.errors`` for the configuration exceptions shared by more than one subsystem.
 
 :doc:`backends`
    ``next.backends`` for the shared loading of settings-driven backend families.

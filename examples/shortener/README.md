@@ -60,8 +60,8 @@ The framework hardcodes neither name. `routes/` could be `screens/` or `panels/`
 
 A directory under `routes/` with a `page.py` becomes a URL. The framework composes a template in three layers:
 
-- **`layout.djx`** (any ancestor directory) — the outer shell. Must contain an empty placeholder `{% block template %}{% endblock template %}` where the child content is substituted.
-- **`template.djx`** (sibling of `page.py`) — the page body. Just HTML. No `{% block template %}` wrapping needed because the framework handles substitution.
+- **`layout.djx`** (any ancestor directory) — the outer shell. Must contain the placeholder `{% template %}` where the child content is substituted.
+- **`template.djx`** (sibling of `page.py`) — the page body. Just HTML. No `{% template %}` wrapping needed because the framework handles substitution.
 - **`page.py`** — Python side: context functions (`@context`), optional self-registering form classes (`next.forms.Form`/`ModelForm`), optional `template = "..."` module attribute, optional `render(request, ...) -> HttpResponse`.
 
 Ancestor layouts cascade: `routes/admin/stats/` inherits `routes/admin/layout.djx`, which itself is wrapped by [`host/layout.djx`](host/layout.djx). Look at the nested toolbar in [`admin/layout.djx`](shortener/routes/admin/layout.djx):
@@ -76,7 +76,7 @@ Ancestor layouts cascade: `routes/admin/stats/` inherits `routes/admin/layout.dj
     {% /slot %}
   {% /component %}
 
-  {% block template %}{% endblock template %}
+  {% template %}
 </div>
 ```
 

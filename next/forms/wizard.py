@@ -72,7 +72,7 @@ class FormWizardBackend(ABC):
 
     @abstractmethod
     def load(self, request: "HttpRequest", storage_id: str) -> dict[str, Any]:
-        """Return the `{step: cleaned_data}` mapping for the wizard, in step order."""
+        """Return the `{step: cleaned_data}` mapping in step-save order."""
 
     @abstractmethod
     def save_step(

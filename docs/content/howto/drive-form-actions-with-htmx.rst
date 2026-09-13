@@ -8,6 +8,22 @@ Problem
 
 You want a form to submit over htmx and swap only its own region, instead of a full page navigation.
 
+Prerequisites
+-------------
+
+The bundled client runtime is injected into every rendered page by default, and it claims the submit of any form carrying ``data-next-action``, which the ``{% form %}`` tag always writes.
+htmx drives the form only when that runtime is off the page, so a project that hands its forms to htmx turns the injection off.
+
+.. code-block:: python
+   :caption: config/settings.py
+
+   NEXT_FRAMEWORK = {
+       "NEXT_JS_OPTIONS": {"policy": "disabled"},
+   }
+
+The two runtimes never claim the same ``data-next-action`` form.
+See :ref:`Runtime script options <topics-static-js-runtime-script-options>` for the other injection policies.
+
 Solution
 --------
 
@@ -15,7 +31,7 @@ Pass ``hx-*`` attributes through the ``{% form %}`` tag.
 The tag reserves ``action``, ``method``, the ``data-next-*`` prefix, and the partial parameters ``validate``, ``trigger``, ``debounce``, ``zone``, and ``key``.
 Every ``hx-*`` attribute lands on the ``<form>`` element unchanged.
 Boost the form with ``hx-boost`` and carve its region out of the response with ``hx-select``.
-Verified with django-htmx 1.19 and later on Django 5.2 through 6.0.
+Verified with django-htmx 1.19 and later.
 
 The dispatcher answers an invalid submission with the complete origin page, not a fragment, so ``hx-select`` carves the form region out of it.
 

@@ -149,9 +149,7 @@ class TestPageContextRegistry:
         layout_dir = tmp_path / "layout_dir"
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
-        layout_file.write_text(
-            "<html>{% block template %}{% endblock template %}</html>"
-        )
+        layout_file.write_text("<html>{% template %}</html>")
 
         page_file = layout_dir / "page.py"
         page_file.write_text("")
@@ -197,16 +195,14 @@ class TestPageContextRegistry:
         root_dir = tmp_path / "root"
         root_dir.mkdir()
         root_layout = root_dir / "layout.djx"
-        root_layout.write_text(
-            "<html>{% block template %}{% endblock template %}</html>"
-        )
+        root_layout.write_text("<html>{% template %}</html>")
         root_page = root_dir / "page.py"
         root_page.write_text("")
 
         sub_dir = root_dir / "sub"
         sub_dir.mkdir()
         sub_layout = sub_dir / "layout.djx"
-        sub_layout.write_text("<div>{% block template %}{% endblock template %}</div>")
+        sub_layout.write_text("<div>{% template %}</div>")
         sub_page = sub_dir / "page.py"
         sub_page.write_text("")
 
@@ -249,9 +245,7 @@ class TestPageContextRegistry:
         layout_dir = tmp_path / "layout_dir"
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
-        layout_file.write_text(
-            "<html>{% block template %}{% endblock template %}</html>"
-        )
+        layout_file.write_text("<html>{% template %}</html>")
 
         child_dir = layout_dir / "child"
         child_dir.mkdir()
@@ -298,9 +292,7 @@ class TestPageContextRegistry:
         layout_dir = tmp_path / "layout_dir"
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
-        layout_file.write_text(
-            "<html>{% block template %}{% endblock template %}</html>"
-        )
+        layout_file.write_text("<html>{% template %}</html>")
 
         page_file = layout_dir / "page.py"
         page_file.write_text("")
@@ -327,9 +319,7 @@ class TestPageContextRegistry:
         layout_dir = tmp_path / "layout_dir"
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
-        layout_file.write_text(
-            "<html>{% block template %}{% endblock template %}</html>"
-        )
+        layout_file.write_text("<html>{% template %}</html>")
 
         page_file = layout_dir / "page.py"
         page_file.write_text("")

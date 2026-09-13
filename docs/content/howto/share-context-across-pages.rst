@@ -36,7 +36,7 @@ Use the value from the layout and from any descendant page.
    <header>
      There are {{ note_count }} notes.
    </header>
-   {% block template %}{% endblock template %}
+   {% template %}
 
 The value is injected into the shared context dict for that request, so both the layout wrappers and every descendant page template can read it.
 

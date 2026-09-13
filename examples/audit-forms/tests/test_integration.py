@@ -79,33 +79,15 @@ def _post_step_partial(next_client, step: str, data: dict[str, str]):
     )
 
 
-def _validate_zone() -> str:
-    """Return the synthetic queue key the runtime sends on a blur probe.
-
-    `triggers.ts` queues inline validation on `validate:<uid>` and `wire.ts`
-    ships that key in the zone header, so the origin page declares no such
-    zone and the server answers with the extract-morph of the form by uid.
-    """
-    uid = resolve_action_url(WIZARD_ACTION).rstrip("/").rsplit("/", 1)[1]
-    return f"validate:{uid}"
-
-
 def _validate_field(next_client, step: str, field: str, data: dict[str, str]):
     return next_client.post_action(
         WIZARD_ACTION,
         dict(data),
         origin=f"/request/{step}/",
         partial=True,
-        zones=_validate_zone(),
+        zones="access-wizard",
         HTTP_X_NEXT_VALIDATE=field,
     )
-
-
-def _morphed_form(response) -> str:
-    """Return the HTML the single morph op of a blur probe carries."""
-    ops = envelope_of(response).ops
-    assert len(ops) == 1
-    return ops[0]["html"]
 
 
 def _walk_three_steps(next_client) -> None:
@@ -669,9 +651,9 @@ class TestModalWizardFlagship:
 
 
 class TestBlurValidation:
-    """A blur probe surfaces one field's error and binds no data."""
+    """A blur probe morphs the wizard zone with the bound step and reports one field."""
 
-    def test_bad_email_blur_morphs_the_form_with_the_field_error(
+    def test_bad_email_blur_morphs_the_wizard_zone_with_the_field_verdict(
         self, next_client
     ) -> None:
         before = AccessRequest.objects.count()
@@ -681,14 +663,23 @@ class TestBlurValidation:
         assert response.status_code == 200
         envelope = envelope_of(response)
         assert envelope.op_verbs() == ["morph"]
-        assert envelope.zone_targets() == []
-        assert envelope.form_targets() == [_validate_zone().split(":")[1]]
+        assert envelope.zone_targets() == ["access-wizard"]
+        assert envelope.form_targets() == []
         meta = envelope.form_meta()
         assert meta is not None
         assert meta["valid"] is False
-        assert list(meta["errors"]) == ["email"]
-        assert "Enter a valid email address." in _morphed_form(response)
+        assert meta["errors"] == {"email": ["Enter a valid email address."]}
         assert AccessRequest.objects.count() == before == 0
+
+    def test_the_blur_zone_morph_carries_the_bound_step(self, next_client) -> None:
+        response = _validate_field(
+            next_client, "identity", "email", {**IDENTITY, "email": "not-an-email"}
+        )
+        html = envelope_of(response).html_for_zone("access-wizard")
+        assert 'data-next-target="access-wizard"' in html
+        assert 'data-step-section="identity" data-state="errors"' in html
+        assert "Ada Lovelace" in html
+        assert "Enter a valid email address." in html
 
     def test_blur_probe_writes_no_request_and_emits_no_redirect_ops(
         self, next_client
@@ -715,25 +706,25 @@ class TestBlurValidation:
 
 
 class TestAcknowledgementRoundTrip:
-    """The acknowledgement is a step field, so every re-render replays what was sent."""
+    """The acknowledgement is a step field, so a bound re-render shows what was sent."""
 
     def test_the_first_render_ticks_the_acknowledgement(self, next_client) -> None:
         body = next_client.get("/request/identity/").content.decode()
         assert "checked" in _policy_input(body)
 
-    def test_a_blur_morph_keeps_an_unticked_acknowledgement_unticked(
+    def test_a_blur_zone_morph_returns_an_unticked_box_unticked(
         self, next_client
     ) -> None:
         response = _validate_field(next_client, "identity", "email", IDENTITY)
-        assert "checked" not in _policy_input(_morphed_form(response))
+        html = envelope_of(response).html_for_zone("access-wizard")
+        assert "checked" not in _policy_input(html)
 
-    def test_a_blur_morph_keeps_a_ticked_acknowledgement_ticked(
-        self, next_client
-    ) -> None:
+    def test_a_blur_zone_morph_returns_a_ticked_box_ticked(self, next_client) -> None:
         response = _validate_field(
             next_client, "identity", "email", {**IDENTITY, "policy_acknowledged": "on"}
         )
-        assert "checked" in _policy_input(_morphed_form(response))
+        html = envelope_of(response).html_for_zone("access-wizard")
+        assert "checked" in _policy_input(html)
 
     def test_an_invalid_step_morph_keeps_the_acknowledgement_ticked(
         self, next_client

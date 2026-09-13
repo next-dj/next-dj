@@ -154,9 +154,7 @@ class TestErrorRerenderFileReadBudget:
         self, mock_http_request, tmp_path, monkeypatch
     ) -> None:
         """The first re-render reads the sources, a warm one reads nothing."""
-        (tmp_path / "layout.djx").write_text(
-            "<html>{% block template %}{% endblock template %}</html>"
-        )
+        (tmp_path / "layout.djx").write_text("<html>{% template %}</html>")
         leaf = tmp_path / "leaf"
         leaf.mkdir()
         page_file = leaf / "page.py"

@@ -27,12 +27,12 @@ collect_styles
        {% collect_styles %}
      </head>
      <body>
-       {% block template %}{% endblock template %}
+       {% template %}
      </body>
    </html>
 
 The tag takes no arguments.
-It emits a placeholder token when the template renders.
+It emits the ``<!-- next:styles -->`` placeholder token when the template renders.
 After the page renders, the static manager replaces the token with the rendered link tags for every asset in the ``styles`` slot.
 
 Place the tag inside ``<head>`` so the browser fetches stylesheets before rendering the body.
@@ -46,7 +46,7 @@ collect_scripts
    :caption: notes/pages/layout.djx
 
    <body>
-     {% block template %}{% endblock template %}
+     {% template %}
      {% collect_scripts %}
    </body>
 
@@ -69,6 +69,7 @@ use_style
 
 The asset is prepended to the collector so shared dependencies load before co-located styles.
 The CSS cascade therefore flows from generic dependencies to page specific styling.
+The tag takes no ``kind`` argument and always registers a ``css`` asset, so a URL of another kind goes through ``{% use_script %}`` with an explicit ``kind``.
 
 use_script
 ----------
@@ -138,6 +139,7 @@ Prepend a hash sign to open the block and pair it with the matching close tag.
 
 The framework wraps a ``{% #use_style %}`` body in a ``<style>`` element and a ``{% #use_script %}`` body in a ``<script>`` element on injection.
 The author writes only the inner CSS or JS, not the surrounding tag.
+Neither block form takes a ``kind`` argument, and the two are fixed to ``css`` and ``js``.
 
 The block body is rendered with the current template context, so inline blocks can interpolate page variables.
 Blank only blocks are dropped.

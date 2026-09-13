@@ -168,6 +168,7 @@ Static pipeline
 
    Registers an external CSS URL on the active collector.
    The asset is prepended so shared dependencies load before co-located styles.
+   The tag takes no ``kind`` argument and always registers a ``css`` asset, so a URL of another kind goes through ``{% use_script %}`` with an explicit ``kind``.
 
 .. describe:: {% use_script "<url>" [kind="<kind>"] %}
 
@@ -186,11 +187,13 @@ Static pipeline
 
    Inline CSS block.
    The body is rendered with the template context and deduplicated by content.
+   The block form takes no ``kind`` argument and is fixed to ``css``.
 
 .. describe:: {% #use_script %}...{% /use_script %}
 
    Inline JS block.
    The body is rendered with the template context and deduplicated by content.
+   The block form takes no ``kind`` argument and is fixed to ``js``.
 
 Partial rendering
 -----------------
@@ -227,14 +230,21 @@ The :doc:`zone placement checks </content/ref/system-checks>` enforce each rule 
 Layouts
 -------
 
-.. describe:: {% block template %}{% endblock %}
+.. describe:: {% template %}
 
-   Marks the slot inside a ``layout.djx`` where the page template is composed.
-   The layout loader replaces the empty block with the wrapped page body when it builds the final template string.
-   Both ``{% endblock %}`` and ``{% endblock template %}`` are accepted as the closing tag.
+   Void form.
+   Marks the hole inside a ``layout.djx`` where the wrapped content is composed, the page body or an inner composed layout.
+   Takes no arguments, and an argument raises ``TemplateSyntaxError`` at parse time.
 
-   A ``layout.djx`` without this block raises ``next.W001`` during ``manage.py check``, since the page body would have nowhere to render.
-   Nested layouts each carry their own ``{% block template %}`` and compose from innermost to outermost.
+.. describe:: {% #template %}...{% /template %}
+
+   Block form.
+   Marks the same hole and carries a fallback body, rendered only where composition never reached, such as a layout rendered outside its chain.
+   Takes no arguments either, and an argument raises ``TemplateSyntaxError`` at parse time.
+
+Composition fills the first placeholder a layout carries and leaves any later one as a real node that renders its own fallback body.
+A ``layout.djx`` carrying no placeholder reports ``next.W001`` during ``manage.py check`` and one carrying several reports ``next.W078``.
+Nested layouts each carry their own placeholder and compose from innermost to outermost.
 
 Tag loading
 -----------

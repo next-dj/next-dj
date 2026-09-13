@@ -233,6 +233,7 @@ class TestValidateInsideAZone:
         envelope = envelope_of(response)
         assert envelope.op_verbs() == ["morph"]
         assert envelope.zone_targets() == ["rename-board"]
+        assert "This field is required." in envelope.html_for_zone("rename-board")
 
 
 @pytest.mark.django_db()

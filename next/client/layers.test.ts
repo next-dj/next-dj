@@ -516,6 +516,22 @@ describe("urlFor resolves the page that owns an element", () => {
     expect(layers.urlFor(el)).toBe("/feed/?page=2");
   });
 
+  it("hostFor answers the opening host for an element inside a layer", async () => {
+    const { layers } = makeStack();
+    await layers.open(null, "/photos/1/", "photo");
+    const root = document.querySelector('dialog [data-next-zone="photo"]')!;
+    root.innerHTML = "<form></form>";
+    expect(layers.hostFor(root.querySelector("form")!)).toBe("/feed/");
+  });
+
+  it("hostFor answers nothing for an element outside every layer", async () => {
+    const { layers } = makeStack();
+    const el = document.createElement("form");
+    document.body.append(el);
+    await layers.open(null, "/photos/1/", "photo");
+    expect(layers.hostFor(el)).toBeUndefined();
+  });
+
   it("answers the opening host for an element inside a seeded layer", async () => {
     const { layers } = makeStack();
     await layers.open(null, undefined, "cart");

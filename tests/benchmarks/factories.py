@@ -72,7 +72,7 @@ def build_layout_page(
     directory = root
     for i in range(layouts):
         (directory / "layout.djx").write_text(
-            f'<div class="l{i}">{{% block template %}}{{% endblock template %}}</div>'
+            f'<div class="l{i}">{{% template %}}</div>'
         )
         directory = directory / f"seg_{i}"
         directory.mkdir()

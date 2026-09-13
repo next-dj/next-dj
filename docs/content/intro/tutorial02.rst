@@ -38,14 +38,14 @@ For the Notes application the most common layout sits at the root of the page tr
          <p>{{ tagline }}</p>
        </header>
        <main>
-         {% block template %}{% endblock template %}
+         {% template %}
        </main>
      </body>
    </html>
 
-Writing the ``{% block template %}`` placeholder explicitly is the recommended practice because it controls where the page body lands.
-The framework substitutes the body of each page into that block.
-When the page has no sibling ``layout.djx``, the framework wraps the page body in a ``{% block template %}`` block itself, so an ancestor layout's placeholder stays valid.
+Writing the ``{% template %}`` placeholder explicitly is the recommended practice because it controls where the page body lands.
+The framework substitutes the body of each page into that placeholder.
+When the page has no sibling ``layout.djx``, the framework wraps the page body in the paired ``{% #template %}`` form itself, so an ancestor layout's placeholder stays valid.
 
 Reverse names such as ``next:page_`` come from the file router.
 See :doc:`/content/topics/file-router` for how directories become URLs and :doc:`/content/topics/url-reversing` for helpers such as ``page_reverse``.
@@ -58,13 +58,13 @@ Remove the now redundant HTML envelope from ``notes/pages/template.djx`` and kee
    <ul>
      {% for note in notes %}
        <li>
-         <a href="{% url 'next:page_notes_id' id=note.id %}">{{ note.title }}</a>
+         {{ note.title }}
          <small>{{ note.created_at|date:"Y-m-d H:i" }}</small>
        </li>
      {% endfor %}
    </ul>
 
-Refresh ``http://127.0.0.1:8000/`` to confirm that the layout renders the title and the list now uses anchor tags.
+Refresh ``http://127.0.0.1:8000/`` and confirm that the layout renders the title above the list.
 
 Share site context
 ~~~~~~~~~~~~~~~~~~
@@ -78,7 +78,9 @@ Pass ``inherit_context=True`` so every descendant page can read the value too.
    :caption: notes/pages/page.py
 
    from notes.models import Note
+
    from next import context
+
 
    @context("site_name", inherit_context=True)
    def site_name() -> str:
@@ -109,8 +111,10 @@ The typed ``[int:id]`` directory form rejects non-numeric URLs at routing time b
 
    from django.shortcuts import get_object_or_404
    from notes.models import Note
+
    from next import context
    from next.urls import DUrl
+
 
    @context("note")
    def fetch_note(note_id: DUrl["id", int]) -> Note:
@@ -135,6 +139,17 @@ Add the matching template.
      <p><a href="{% url 'next:page_' %}">Back to all notes</a></p>
    </article>
 
+Now that the route exists, link the index to it.
+Update the list item inside ``notes/pages/template.djx``.
+
+.. code-block:: jinja
+   :caption: notes/pages/template.djx, the list item
+
+   <li>
+     <a href="{% url 'next:page_notes_id' id=note.id %}">{{ note.title }}</a>
+     <small>{{ note.created_at|date:"Y-m-d H:i" }}</small>
+   </li>
+
 Click a note from the index and confirm that the detail page renders the captured note.
 The URL name ``next:page_notes_id`` reverses with a single keyword argument ``id`` and is generated from the directory shape.
 
@@ -151,12 +166,12 @@ Drop a second layout inside ``notes/pages/notes/`` to wrap only the detail pages
      <nav>
        <a href="{% url 'next:page_' %}">All notes</a>
      </nav>
-     {% block template %}{% endblock template %}
+     {% template %}
    </section>
 
 Reload ``/notes/1/`` and you should see both layouts at once.
 The root layout wraps the inner layout which wraps the detail template.
-Composition works by folding each descendant body into the parent ``{% block template %}`` placeholder, so adding ancestor layouts never requires changes to the inner templates.
+Composition works by folding each descendant body into the parent ``{% template %}`` placeholder, so adding ancestor layouts never requires changes to the inner templates.
 
 Use counts across pages
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -211,13 +226,14 @@ Common pitfalls
 
 A layout's markup does not appear on the page.
    A ``layout.djx`` that omits the placeholder is skipped during composition.
-   Add ``{% block template %}{% endblock template %}`` to the layout whose markup disappeared.
+   Add ``{% template %}`` to the layout whose markup disappeared.
 
-``DUrl`` resolves to ``None`` when the captured segment is missing.
+``DUrl`` reads the wrong segment.
    ``DUrl[T]`` reads the segment whose name matches the parameter and coerces the value to ``T``.
    The supported types are documented in :doc:`/content/topics/dependency-injection`.
    ``DUrl["name"]`` returns the captured segment in string form.
    When the Python parameter name differs from the segment, use ``DUrl["id", int]`` for an ``[id]`` directory.
+   A parameter no provider handles receives ``None``, so check that the segment name in ``DUrl["name"]`` matches the bracketed directory.
 
 Inherited context not available in a descendant.
    Make sure the ``page.py`` that publishes the context sits in a directory above the page that consumes it, and the context function declares ``inherit_context=True``.

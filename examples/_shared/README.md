@@ -71,7 +71,7 @@ Each example houses the shared HTML envelope in a project-level page root listed
 <body class="min-h-screen flex flex-col">
   {% #component "app_shell" brand="🔗 My app" brand_href="/" %}
     {% #slot "content" %}
-      {% block template %}{% endblock template %}
+      {% template %}
     {% /slot %}
   {% /component %}
   {% collect_scripts %}

@@ -64,18 +64,22 @@ A custom backend can intercept one kind and resolve it elsewhere, then delegate 
            if kind != "jsx":
                return super().register_file(source_path, logical_name, kind)
            if self._dev_origin:
-               return self._build_dev_url(source_path)
+               return self._build_dev_url(source_path, logical_name)
            if self._manifest_path:
                return self._resolve_from_manifest(source_path, logical_name)
            return super().register_file(source_path, logical_name, kind)
 
-       def _build_dev_url(self, source_path: Path) -> str:
-           relative = source_path.relative_to(self._vite_root)
+       def _build_dev_url(self, source_path: Path, logical_name: str) -> str:
+           try:
+               relative = source_path.relative_to(self._vite_root)
+           except ValueError:
+               return super().register_file(source_path, logical_name, "jsx")
            return f"{self._dev_origin.rstrip('/')}/{relative.as_posix()}"
 
 The constructor reads its own keys from the ``OPTIONS`` mapping.
 ``register_file`` receives the absolute ``source_path``, the extension-free ``logical_name``, and the registered ``kind``.
 Every kind except ``jsx`` falls straight through to ``super().register_file``.
+A ``VITE_ROOT`` that does not contain the source file makes ``relative_to`` raise ``ValueError``, which discovery logs and swallows, so guard the call and fall back rather than losing the asset.
 
 Read the Vite manifest
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -127,6 +131,7 @@ The zero-argument ``super()`` call they use resolves only from there.
 
 ``_manifest_key`` builds the lookup key relative to ``VITE_ROOT`` and falls back to the bare filename.
 URL resolution delegates to ``staticfiles_storage`` so manifest storage, S3 storage, and CDN settings still apply to the hashed output.
+Override ``forget_urls`` to reset ``self._manifest_data`` alongside the base memo, so the parsed Vite manifest is dropped when the staticfiles storage is rebuilt.
 
 Register the kind
 ~~~~~~~~~~~~~~~~~
@@ -200,6 +205,8 @@ Discovery finds it because ``component`` is a registered stem and ``.jsx`` is no
      return <div data-kanban-card={id}>{title}</div>;
    }
 
+The ``_pieces`` directory name comes from the kanban example's ``COMPONENTS_DIR`` override, and the framework default is ``_components``.
+
 Verification
 ------------
 
@@ -235,5 +242,5 @@ See also
 .. seealso::
 
    :doc:`/content/howto/add-a-new-asset-kind` for registering a kind against a bundled renderer.
-   :doc:`/content/howto/write-a-static-backend` for attribute only and URL rewriting backends.
+   :doc:`/content/howto/write-a-static-backend` for attribute-only and URL rewriting backends.
    :doc:`/content/topics/static-assets/index` for the static pipeline overview.

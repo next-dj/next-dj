@@ -14,7 +14,7 @@ You want collected assets to render with extra attributes such as ``crossorigin`
 Solution
 --------
 
-For attribute only changes, set the ``css_tag``, ``js_tag``, and ``module_tag`` options on the default backend.
+For attribute-only changes, set the ``css_tag``, ``js_tag``, and ``module_tag`` options on the default backend.
 For URL rewriting, subclass ``StaticFilesBackend`` and override ``asset_url``.
 
 Walkthrough
@@ -61,7 +61,7 @@ When the URL itself must change, subclass ``StaticFilesBackend`` and override ``
            return f"{CDN}{url}"
 
 ``asset_url`` receives the URL and an optional ``request`` keyword.
-One override covers ``.css``, ``.js``, and ``.mjs`` assets plus the ``next.min.js`` runtime bundle and its preload hint, in a full page render and in the asset manifest of a partial patch envelope alike.
+One override covers ``.css``, ``.js``, and ``.mjs`` assets plus the ``next.min.js`` runtime bundle and its preload hint, in a full-page render and in the asset manifest of a partial patch envelope alike.
 The configured tag templates still shape the markup around the rewritten URL.
 
 Register the backend.
@@ -75,26 +75,12 @@ Register the backend.
        ]
    }
 
-Request aware output
-~~~~~~~~~~~~~~~~~~~~
-
-``asset_url`` and the renderer methods both read the request to vary their output per visitor.
-
-.. code-block:: python
-   :caption: notes/backends.py
-
-   from next.static import StaticFilesBackend
-
-   class TenantBackend(StaticFilesBackend):
-       def asset_url(self, url, *, request=None) -> str:
-           prefix = getattr(getattr(request, "tenant", None), "cdn", "")
-           return f"{prefix}{url}"
-
-The static manager passes the current request to ``asset_url`` and to every renderer call.
+.. _howto-static-backend-tenant-prefix:
 
 Tenant URL prefix
 ~~~~~~~~~~~~~~~~~
 
+The static manager passes the current request to ``asset_url`` and to every renderer call, so a backend can vary its output per visitor.
 A common multi-tenant pattern is to prefix every asset URL with a tenant slug so static files are scoped per tenant.
 Override ``asset_url`` and leave absolute URLs untouched.
 The shipped multi-tenant example implements this pattern, and the snippet below mirrors its backend.

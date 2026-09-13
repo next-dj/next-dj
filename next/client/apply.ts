@@ -44,10 +44,15 @@ export interface InnerPatch {
   html?: string;
 }
 
+/** How a merge row is matched against the container, the server's vocabulary. */
+export type DedupeMode = "key" | "id";
+
 export interface MergePatch {
   op: "append" | "prepend";
   target?: Target;
   html?: string;
+  // Absent from an older server's envelope, which keyed by data-next-key then id.
+  dedupe?: DedupeMode;
 }
 
 export interface RemovePatch {
@@ -750,11 +755,14 @@ export class Applier {
     this.#mark(node, patch.target, state);
   }
 
-  // append and prepend dedupe by data-next-key, then id, replacing a matching
+  // append and prepend dedupe rows under the patch's mode, replacing a matching
   // node in place so a re-fetched list cannot double its rows.
   #merge(patch: MergePatch, state: ApplyState): void {
     const node = this.#resolve(patch.target, state);
     if (node === null) return;
+    // Any spelling but "id" keys the default way, so a malformed wire value degrades to
+    // the documented default rather than losing every match.
+    const mode: DedupeMode = patch.dedupe === "id" ? "id" : "key";
     const fragment = this.#fragment(patch.html ?? "", patch.target);
     const incoming = Array.from(fragment.children);
     // New rows collect into a fragment so prepend inserts them all in their
@@ -770,12 +778,12 @@ export class Applier {
     // touch the container and stale the index snapshot.
     let fired = false;
     for (const child of incoming) {
-      const key = keyOf(child);
+      const key = keyOf(child, mode);
       if (key === null) {
         fresh.append(child);
         continue;
       }
-      index ??= keyIndex(node);
+      index ??= keyIndex(node, mode);
       const existing = index.get(key);
       // The index is a snapshot, and replaceWith on a detached node is a no-op
       // that would swallow this row. A hit that left the container reads as a miss.
@@ -798,7 +806,7 @@ export class Applier {
       // carrying the same key replaces what just landed, not the detached node.
       index.set(key, child);
     }
-    if (fired && missed.length > 0) this.#reconcile(node, missed);
+    if (fired && missed.length > 0) this.#reconcile(node, missed, mode);
     if (patch.op === "append") node.append(fresh);
     else node.prepend(fresh);
     this.#mark(node, patch.target, state);
@@ -808,8 +816,8 @@ export class Applier {
   // Match the missed rows against the container a hook has since rewritten. One
   // rebuild per merge, taken only when a hook ran and left rows unmatched, so an
   // adversarial hook cannot make the merge unbounded.
-  #reconcile(node: Element, missed: [string, Element][]): void {
-    const live = keyIndex(node);
+  #reconcile(node: Element, missed: [string, Element][], mode: DedupeMode): void {
+    const live = keyIndex(node, mode);
     for (const [key, child] of missed) {
       const existing = live.get(key);
       if (existing === undefined) continue;
@@ -968,18 +976,19 @@ function matchByTag(parsed: Document, target: Element): Element | null {
   return parsed.body.querySelector(tag);
 }
 
-// The dedup key of a list row: data-next-key first, then id. Absent both, the
-// row has no identity and is always inserted, never matched.
-function keyOf(el: Element): string | null {
+// The dedup key of a list row. "key" reads data-next-key then falls back to id, "id"
+// reads only id, so a row with a key but no id has no identity and always inserts.
+function keyOf(el: Element, mode: DedupeMode): string | null {
+  if (mode === "id") return el.id !== "" ? el.id : null;
   return el.getAttribute(ATTR_KEY) ?? (el.id !== "" ? el.id : null);
 }
 
-// Index the keyed children of a merge container, first holder of a key wins.
-// Keyless children stay out, a row with no identity never matches.
-function keyIndex(container: Element): Map<string, Element> {
+// Index the keyed children of a merge container under the keying rule the incoming rows
+// use, first holder of a key wins. A keyless child never matches.
+function keyIndex(container: Element, mode: DedupeMode): Map<string, Element> {
   const index = new Map<string, Element>();
   for (const child of container.children) {
-    const key = keyOf(child);
+    const key = keyOf(child, mode);
     if (key !== null && !index.has(key)) index.set(key, child);
   }
   return index;

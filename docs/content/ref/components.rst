@@ -48,6 +48,9 @@ Framework settings changes rebuild the manager on their own, so ``reload`` is fo
    :members:
 
 .. autodata:: next.components.components_manager
+   :no-value:
+
+   The process-wide ``ComponentsManager`` that the template tags and the module-level helpers resolve every component through.
 
 Framework extension
 -------------------
@@ -59,7 +62,8 @@ Backends
 
 ``ComponentsBackend.get_component`` and ``ComponentsBackend.collect_visible_components`` are the two abstract methods every backend implements, and the module-level helpers of the same name above delegate to them through the manager.
 The rest of the contract has defaults that decline, so a backend implements only what its source can answer.
-``discover`` is the eager population pass, ``import_component_modules`` executes the components' Python modules, ``register_walked_folder`` claims one components folder found during the page-tree walk, and ``iter_components`` with ``global_component_roots`` lets the system checks enumerate what the backend holds.
+``discover`` is the eager population pass, ``import_component_modules`` executes the components' Python modules, and ``register_walked_folder`` claims one components folder found during the page-tree walk.
+``iter_components`` with ``global_component_roots`` lets the system checks enumerate what the backend holds, and ``watch_roots`` names the trees the development watcher, the link tooling, and the staticfiles finder observe.
 
 .. autoclass:: next.components.ComponentsBackend
    :members:
@@ -104,6 +108,12 @@ Renderers
 .. autoclass:: next.components.CachedComponentTemplateLoader
    :members:
 
+.. autoclass:: next.components.renderers.TemplateSource
+   :members:
+
+``TemplateSource`` pairs the template ``text`` with the ``path`` of the file that text was read from.
+A custom ``COMPONENT_TEMPLATE_LOADER`` subclass overrides ``load_source`` and returns a ``TemplateSource``, which is how the caching subclass knows which file to revalidate.
+
 ``ComponentsManager`` wires one loader into its render pipeline, the class named by ``NEXT_FRAMEWORK['COMPONENT_TEMPLATE_LOADER']``.
 The default ``CachedComponentTemplateLoader`` keeps the compiled ``Template`` of each component, so a repeated render pays neither the read nor the parse.
 Under ``DEBUG`` the entry is revalidated against the mtime of the file the body was read from, and an edit reaches the next render.
@@ -145,7 +155,27 @@ The same name under a deeper route trail of one tree is the documented override 
 
 .. autofunction:: next.components.component_extra_roots_from_config
 
+.. autofunction:: next.components.component_watch_roots
+
+``component_watch_roots`` is the single reader of ``ComponentsBackend.watch_roots``, so the autoreload watcher, the link tooling, and the staticfiles finder all observe the same set of trees.
+
 .. autofunction:: next.components.get_component_paths_for_watch
+
+System checks
+-------------
+
+``next.components.checks`` registers the Django system checks for the components subsystem.
+They run through ``uv run python manage.py check``.
+
+The module exports five check callables.
+
+- ``check_component_context_registration_files``.
+- ``check_component_py_no_pages_context``.
+- ``check_cross_root_component_name_conflicts``.
+- ``check_duplicate_component_names``.
+- ``check_next_components_configuration``.
+
+See :doc:`system-checks` for each check identifier, its condition, and the full autodoc of ``next.components.checks``.
 
 Signals
 -------

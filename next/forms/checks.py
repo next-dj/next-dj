@@ -8,11 +8,12 @@ from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, re
 from django.forms import FileField, MultiValueField
 
 from next.checks import NEXT
+from next.checks.common import discover_page_registrations
 from next.components.facade import get_component
 from next.conf import import_class_cached, next_framework_settings
 
 from .backends import FormActionBackend
-from .diagnostics import registration_diagnostics
+from .diagnostics import RegistrationDiagnostics, registration_diagnostics
 from .manager import form_action_manager
 from .widgets import ComponentWidget
 from .wizard import CacheFormWizardBackend, FormWizardBackend, SessionFormWizardBackend
@@ -30,9 +31,22 @@ _FORM_ANCHOR_FILES_SETTINGS_KEY = "FORM_ANCHOR_FILES"
 
 
 def _iter_registered_actions() -> "Iterator[ActionMeta]":
-    """Yield every action meta from every configured form-action backend."""
+    """Yield every action meta from every configured form-action backend.
+
+    A page-scoped `@action` or `FormWizard` registers only as its `page.py` runs.
+    """
+    discover_page_registrations()
     for backend in form_action_manager.backends:
         yield from backend.iter_actions()
+
+
+def _diagnostics() -> RegistrationDiagnostics:
+    """Return the registration diagnostics with the page tree discovered first.
+
+    A page-scoped form class fills these buffers as its `page.py` executes.
+    """
+    discover_page_registrations()
+    return registration_diagnostics
 
 
 @register(NEXT)
@@ -46,7 +60,7 @@ def check_form_action_collisions(*args, **kwargs) -> list[CheckMessage]:
             obj=settings,
             id="next.E041",
         )
-        for name, fps in registration_diagnostics.action_collisions.items()
+        for name, fps in _diagnostics().action_collisions.items()
     ]
 
 
@@ -64,7 +78,7 @@ def check_shared_action_name_collisions(*args, **kwargs) -> list[CheckMessage]:
             obj=settings,
             id="next.E046",
         )
-        for name, scope_keys in registration_diagnostics.shared_name_collisions.items()
+        for name, scope_keys in _diagnostics().shared_name_collisions.items()
     ]
 
 
@@ -131,7 +145,7 @@ def check_forms_outside_base_dir(*args, **kwargs) -> list[CheckMessage]:
             "BASE_DIR. It won't be registered automatically.",
             id="next.W046",
         )
-        for cls_name, file_path in registration_diagnostics.outside_base_dir
+        for cls_name, file_path in _diagnostics().outside_base_dir
     ]
 
 
@@ -144,7 +158,7 @@ def check_invalid_form_meta_scope(*args, **kwargs) -> list[CheckMessage]:
             "Valid values are 'page' and 'shared'.",
             id="next.E047",
         )
-        for cls_name, bad_value in registration_diagnostics.invalid_meta_scope
+        for cls_name, bad_value in _diagnostics().invalid_meta_scope
     ]
     action_errors: list[CheckMessage] = [
         Error(
@@ -152,7 +166,7 @@ def check_invalid_form_meta_scope(*args, **kwargs) -> list[CheckMessage]:
             "Valid values are 'page' and 'shared'.",
             id="next.E047",
         )
-        for qualname, bad_value in registration_diagnostics.invalid_action_scope
+        for qualname, bad_value in _diagnostics().invalid_action_scope
     ]
     return class_errors + action_errors
 
@@ -166,7 +180,7 @@ def check_action_applied_to_class(*args, **kwargs) -> list[CheckMessage]:
             "Form classes register automatically through __init_subclass__.",
             id="next.E053",
         )
-        for cls_name in registration_diagnostics.action_applied_to_class
+        for cls_name in _diagnostics().action_applied_to_class
     ]
 
 
@@ -183,7 +197,7 @@ def check_instance_from_url_unknown_field(*args, **kwargs) -> list[CheckMessage]
             cls_name,
             model_label,
             field,
-        ) in registration_diagnostics.instance_from_url_unknown_field
+        ) in _diagnostics().instance_from_url_unknown_field
     ]
 
 
@@ -196,7 +210,7 @@ def check_instance_from_url_on_non_model_form(*args, **kwargs) -> list[CheckMess
             "ModelForm. Subclass next.forms.ModelForm to load instances by URL.",
             id="next.E049",
         )
-        for cls_name in registration_diagnostics.instance_from_url_on_non_model_form
+        for cls_name in _diagnostics().instance_from_url_on_non_model_form
     ]
 
 
@@ -209,7 +223,7 @@ def check_form_wizard_steps(*args, **kwargs) -> list[CheckMessage]:
             "Declare steps as a list of (name, FormClass) tuples.",
             id="next.E050",
         )
-        for cls_name in registration_diagnostics.wizard_without_steps
+        for cls_name in _diagnostics().wizard_without_steps
     ]
 
 

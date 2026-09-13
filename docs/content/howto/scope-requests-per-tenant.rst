@@ -99,15 +99,19 @@ The provider matches the bare ``DTenant`` annotation when a request carries a te
        def can_handle(self, param, context):
            if param.annotation is not DTenant:
                return False
-           request = getattr(context, "request", None)
+           request = context.request
            if request is None:
                return False
            return get_active_tenant(request) is not None
+
+       def static_can_handle(self, param):
+           return param.annotation is DTenant
 
        def resolve(self, _param, context):
            return get_active_tenant(context.request)
 
 Unlike ``DFlag[Flag]``, ``DTenant`` is matched by class identity rather than ``get_origin``, so it carries no type parameter and the provider compares ``param.annotation`` to the class directly.
+``static_can_handle`` settles the parameter from the annotation alone, so the plan claims it at compile time and no other provider is consulted for it per request.
 
 Import the module from ``AppConfig.ready`` so the auto-registry wires the provider once the app registry is populated.
 ``RegisteredParameterProvider`` registers the provider as a side effect of class definition, so importing the module is the whole registration step.
@@ -123,7 +127,7 @@ A top-level import in ``apps.py`` also registers the provider, but only when the
        name = "notes"
 
        def ready(self) -> None:
-           from notes import providers  # noqa: PLC0415
+           from notes import providers  # imported for its registration side effect
 
            _ = providers
 
@@ -143,6 +147,41 @@ Keep real annotations in these modules, because the resolver compares parameter 
    def notes(active_tenant: DTenant) -> list[Note]:
        """Return every note that belongs to the active tenant."""
        return list(Note.objects.filter(tenant=active_tenant))
+
+Share the tenant through a named dependency
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When several callables in one render need the tenant, register the accessor as a named dependency instead.
+
+.. code-block:: python
+   :caption: notes/deps.py
+
+   from django.http import HttpRequest
+   from next.deps import resolver
+   from notes.access import get_active_tenant
+   from notes.models import Tenant
+
+   @resolver.dependency("active_tenant")
+   def active_tenant(request: HttpRequest) -> Tenant | None:
+       return get_active_tenant(request)
+
+Any callable then asks for the value by name.
+
+.. code-block:: python
+   :caption: notes/workspaces/notes/page.py
+
+   from next import Depends, context
+   from notes.models import Note, Tenant
+
+   @context("note_count")
+   def note_count(tenant: Tenant | None = Depends("active_tenant")) -> int:
+       if tenant is None:
+           return 0
+       return Note.objects.filter(tenant=tenant).count()
+
+Import ``notes.deps`` from ``AppConfig.ready`` alongside the provider module so the decorator runs before the first request.
+The marker route re-resolves for every parameter that carries ``DTenant``, while the named dependency is resolved once and memoised for the rest of the pass.
+Keep the marker for callables that prefer to ask by type.
 
 Lift the tenant to every descendant page
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -21,8 +21,13 @@ Resolver
 .. data:: next.deps.resolver.resolver
 
    The shared resolver singleton used by pages, form actions, and component renderers throughout the framework.
-   It is built once at import time and never replaced, so every reference points at the same object.
+   The object is built once at import time and never swapped, so every reference points at the same instance for the life of the process.
+   ``DEPENDENCY_RESOLVER`` retypes that instance in place at startup and again on every settings reload, so a class named there adds no instance slots and no second base, and its ``__init__`` never runs.
    Import it as ``from next.deps import resolver`` when you need to call ``resolver.resolve_dependencies`` from a custom provider or a test helper.
+
+``DEPENDENCY_RESOLVER`` selects the class the singleton takes on, and it accepts any ``DependencyResolver`` subclass.
+Two classes ship with the framework, the default ``next.deps.DependencyResolver`` that compiles an injection plan per callable and ``next.deps.linear.LinearDependencyResolver``, the plan-free reference implementation the compiled path is checked against.
+See :doc:`settings` for the key and its default.
 
 Providers
 ~~~~~~~~~
@@ -39,12 +44,24 @@ The hint keeps the extras of an ``Annotated[...]`` annotation, so a provider may
 
 ``compile_resolve`` is the optional hook that folds the work of ``resolve`` into a call the plan makes with the context alone.
 The compiler asks it once, and only about a parameter ``static_can_handle`` claimed with ``True``, so whatever the answer reads off the signature is paid per plan rather than per resolve.
+The hook returns either ``None`` or a ``next.deps.plan.ParameterFiller``, a callable that takes the ``ResolutionContext`` and returns the parameter value, and an answer that is neither raises a ``TypeError`` naming the provider while the plan compiles.
 Returning ``None``, which is what the base class answers, leaves the parameter on the plain ``resolve`` path, and so does leaving the hook undefined altogether.
 The hook belongs to ``CompilingParameterProvider`` rather than to ``ParameterProvider``, so a provider written against the mandatory contract alone still passes an ``isinstance`` check against it.
 A ``compile_resolve`` that is present but not callable is refused with a ``TypeError`` naming the class, the way a missing ``static_can_handle`` is.
 
 .. automodule:: next.deps.providers
    :members:
+
+Plan
+~~~~
+
+.. automodule:: next.deps.plan
+   :members:
+   :exclude-members: ParameterFiller, ParameterPlan, InjectionPlan
+
+``ParameterFiller`` is a callable taking the ``ResolutionContext`` and returning one parameter value.
+``ParameterPlan`` pairs a parameter name with the providers the signature could not rule out, its marker, and the ``inspect.Parameter`` itself, and ``InjectionPlan`` is the tuple of those the resolver replays.
+The three are type aliases rather than classes, so they carry no members of their own.
 
 Registry
 ~~~~~~~~
@@ -69,6 +86,15 @@ Cache
 
 .. automodule:: next.deps.cache
    :members:
+
+Errors
+~~~~~~
+
+.. automodule:: next.deps.errors
+   :members:
+
+``DependencyCycleError`` carries the chain that closed the loop on ``cycle``, and ``UnknownDependencyError`` carries the missing ``name``, the ``param_name`` it was asked for, the ``suggestion`` a close registered name produced, and the ``func`` the failed resolve attributed it to.
+Both are re-exported from ``next.deps``, so a caller never imports the module directly.
 
 Context
 ~~~~~~~

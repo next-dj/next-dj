@@ -187,8 +187,22 @@ describe("trigger delegation", () => {
     expect(requests).toHaveLength(1);
     expect(requests[0]!.method).toBe("POST");
     expect(requests[0]!.headers?.["X-Next-Validate"]).toBe("email");
-    expect(requests[0]!.zone).toBe("validate:u");
+    expect(requests[0]!.queue).toBe("validate:u");
+    expect(requests[0]!.zone).toBeUndefined();
     expect(requests[0]!.abortable).toBe(true);
+  });
+
+  it("sends the form's declared zone on a validate post, not the queue key", () => {
+    document.body.innerHTML =
+      '<form action="/_next/form/u/" data-next-validate="blur" data-next-action="u"' +
+      ' data-next-target="wizard">' +
+      '<input name="email" value="a@b.c">' +
+      "</form>";
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    document.querySelector("input")!.dispatchEvent(new FocusEvent("blur"));
+    expect(requests[0]!.zone).toBe("wizard");
+    expect(requests[0]!.queue).toBe("validate:u");
   });
 
   it("aborts the in-flight validation when the form submits", () => {
@@ -236,6 +250,34 @@ describe("trigger delegation", () => {
       .querySelector("form")!
       .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     expect(requests[0]!.key).toBe("row-7");
+  });
+
+  it("stamps the layer host as the origin of a submit fired inside a layer", () => {
+    document.body.innerHTML =
+      '<div id="modal">' +
+      '<form action="/_next/form/u/" data-next-action="u" data-next-target="wizard">' +
+      "</form>" +
+      "</div>";
+    const modal = document.querySelector("#modal")!;
+    const { triggers, requests } = makeTriggers({
+      layerHost: (el) => (modal.contains(el) ? "/requests/" : undefined),
+    });
+    detach = triggers.install(document);
+    document
+      .querySelector("form")!
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    expect(requests[0]!.headers?.["X-Next-Origin"]).toBe("/requests/");
+  });
+
+  it("sends no origin header on a submit outside every layer", () => {
+    document.body.innerHTML =
+      '<form action="/_next/form/u/" data-next-action="u"></form>';
+    const { triggers, requests } = makeTriggers({ layerHost: () => undefined });
+    detach = triggers.install(document);
+    document
+      .querySelector("form")!
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    expect(requests[0]!.headers).toBeUndefined();
   });
 
   it("omits the key for a form without one", () => {
@@ -477,7 +519,7 @@ describe("trigger delegation", () => {
     expect(requests).toHaveLength(0);
   });
 
-  it("keys the validate zone empty when the form carries no action uid", () => {
+  it("keys the validate queue empty when the form carries no action uid", () => {
     document.body.innerHTML =
       '<form action="/f/" data-next-validate="blur">' +
       '<input name="email" value="a@b.c">' +
@@ -485,7 +527,7 @@ describe("trigger delegation", () => {
     const { triggers, requests } = makeTriggers();
     detach = triggers.install(document);
     document.querySelector("input")!.dispatchEvent(new FocusEvent("blur"));
-    expect(requests[0]!.zone).toBe("validate:");
+    expect(requests[0]!.queue).toBe("validate:");
   });
 
   it("falls back to the current path when a validate form has no action", () => {

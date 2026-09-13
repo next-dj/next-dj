@@ -153,12 +153,9 @@ A project can ship project-specific components alongside the shared kit.
        ]
    }
 
-When the same component name appears in two roots, the visibility resolver scores each candidate by scope specificity.
-A page-tree component visible from the template wins over a same-named component contributed through ``DIRS``.
-The full sort key is ``(-score, dirs_origin, component.name, registration_position)``, where ``dirs_origin`` orders page-tree candidates ahead of ``DIRS`` ones at equal score.
-When two ``DIRS`` roots score equally the resolver breaks the tie first by component name, then by registration order.
+At equal score a page-tree component visible from the template wins over a same-named component contributed through ``DIRS``.
 Roots are scanned in ``DIRS`` order, so an entry placed earlier in the list shadows a same-named component from a later entry.
-Prefer distinct names for project-specific components over relying on this ordering.
+See :doc:`/content/internals/component-pipeline` for the scoring rule behind both outcomes.
 
 Hot reload
 ----------
@@ -168,7 +165,7 @@ The shared ``_shared/_components/`` root participates the same way.
 Each project runs its own development server with its own reloader process.
 A change to a ``component.py`` inside ``_shared/_components/`` restarts only the project processes whose configuration includes that root.
 
-The ``components_registered`` signal includes the full set after each reload so long-lived processes can refresh their caches.
+The ``components_registered`` signal carries only the batch of one bulk registration call, so a receiver that needs the whole set reads ``ComponentsManager.backends`` and asks each backend for ``iter_components``.
 
 Common variations
 -----------------

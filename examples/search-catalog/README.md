@@ -87,7 +87,7 @@ The landing page exercises `DQuery` directly. The `featured` callable in [`catal
 
 ### 4. Three-level nested layouts
 
-The compose chain is automatic. When a listing is rendered the body is substituted into the innermost layout that has a `{% block template %}{% endblock %}` slot, then the next ancestor, and so on. For `/catalog/electronics/iphone-15/` the chain is
+The compose chain is automatic. When a listing is rendered the body is substituted into the innermost layout that has a `{% template %}` slot, then the next ancestor, and so on. For `/catalog/electronics/iphone-15/` the chain is
 
 ```
 catalog/storefront/catalog/[category]/[slug]/template.djx

@@ -18,6 +18,6 @@
   </nav>
 
   <section class="space-y-6 pt-4">
-    {% block template %}{% endblock template %}
+    {% template %}
   </section>
 </div>

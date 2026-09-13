@@ -12,5 +12,5 @@
     {% /slot %}
   {% /component %}
 
-  {% block template %}{% endblock template %}
+  {% template %}
 </div>

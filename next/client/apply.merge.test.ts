@@ -258,6 +258,82 @@ describe("append and prepend dedup", () => {
     expect(texts).toEqual(["old", "by id"]);
   });
 
+  it("dedupe id replaces the row sharing the id, whatever key it carries", () => {
+    document.body.innerHTML =
+      '<ul data-next-zone="rows"><li id="r1" data-next-key="a">old</li></ul>';
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "append",
+          target: { zone: "rows" },
+          dedupe: "id",
+          html: '<li id="r1" data-next-key="b">new</li>',
+        },
+      ]),
+    );
+    expect(document.querySelectorAll("li")).toHaveLength(1);
+    expect(document.querySelector("#r1")!.textContent).toBe("new");
+  });
+
+  it("dedupe id appends a row that carries a key but no id", () => {
+    document.body.innerHTML =
+      '<ul data-next-zone="rows"><li data-next-key="1">old</li></ul>';
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "append",
+          target: { zone: "rows" },
+          dedupe: "id",
+          html: '<li data-next-key="1">new</li>',
+        },
+      ]),
+    );
+    const texts = Array.from(document.querySelectorAll("li")).map(
+      (li) => li.textContent,
+    );
+    expect(texts).toEqual(["old", "new"]);
+  });
+
+  it("dedupe id indexes the container by id, so a keyed child never matches", () => {
+    document.body.innerHTML =
+      '<ul data-next-zone="rows"><li data-next-key="r1">old</li></ul>';
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "append",
+          target: { zone: "rows" },
+          dedupe: "id",
+          html: '<li id="r1">new</li>',
+        },
+      ]),
+    );
+    const texts = Array.from(document.querySelectorAll("li")).map(
+      (li) => li.textContent,
+    );
+    expect(texts).toEqual(["old", "new"]);
+  });
+
+  it("dedupe key keeps the data-next-key rule when the patch names it", () => {
+    document.body.innerHTML =
+      '<ul data-next-zone="rows"><li data-next-key="1">old</li></ul>';
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "prepend",
+          target: { zone: "rows" },
+          dedupe: "key",
+          html: '<li data-next-key="1">new</li>',
+        },
+      ]),
+    );
+    expect(document.querySelectorAll("li")).toHaveLength(1);
+    expect(document.querySelector("li")!.textContent).toBe("new");
+  });
+
   it("leaves keyless and foreign nodes of the container untouched", () => {
     document.body.innerHTML =
       '<ul data-next-zone="rows">' +

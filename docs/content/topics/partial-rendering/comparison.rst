@@ -32,7 +32,7 @@ The axes at a glance
        The wire carries zone names, and every address in an envelope is written by a handler.
      - The same URL answers the whole document, and the interaction stays an ordinary link or form post.
      - The project.
-       One protocol backend from ``PARTIAL_BACKENDS`` serialises every envelope.
+       One protocol backend from ``PARTIAL_BACKENDS`` serializes every envelope.
    * - htmx
      - The view the attribute points at, like any Django view.
      - In the markup, on the element that triggers the request.
@@ -70,7 +70,7 @@ A redirect, a login bounce, or a denial the page already performs therefore stan
 
 Rendering a zone of a different page is the one case that leaves that path, and it carries its own check.
 ``Patches.morph_foreign_zone`` re-runs the foreign page's body resolution and raises ``ForeignPageNotAuthorizedError`` when the requester may not render it, before the zone renders.
-The ``X-Next-Origin`` header is the exception a reader should know about, since it is client-supplied and validated same-site without being authorized, so a handler that morphs zones of the origin page re-checks access itself.
+The ``X-Next-Origin`` header is validated same-site before it is trusted, and the page it names is re-authorized through its own body resolution before its zone renders, so a denial surfaces as ``ForeignPageNotAuthorizedError`` rather than a silent morph.
 
 htmx and Turbo place the same responsibility on the view the request reaches, which is the ordinary Django position and is neither better nor worse in itself.
 The difference is that the region to update is chosen in the template rather than derived from the page the server has already authorized.
@@ -115,7 +115,7 @@ Who owns the wire format
 
 next.dj treats the wire as a project decision.
 ``PARTIAL_BACKENDS`` holds one active protocol backend, and ``PartialProtocolBackend`` requires ``serialize_envelope`` and ``sse_event`` over the same envelope object.
-The default serialises compact JSON under ``application/vnd.next.patches+json``, and a replacement changes the format without touching shaping or the registries.
+The default serializes compact JSON under ``application/vnd.next.patches+json``, and a replacement changes the format without touching shaping or the registries.
 The client side of the same seam is ``Next.partial.parseHook``, which turns a foreign content type into an envelope before the apply pipeline runs.
 The cost of owning the format is that a custom envelope becomes a compatibility surface the project maintains itself, against a client that has to learn to read it.
 
@@ -133,7 +133,7 @@ htmx
 Reach for htmx when the interactions are few and local, when the project keeps its existing views and URLconf, or when the server is not Django at all.
 Its model is smaller than a framework, its published body of patterns is far larger than this section, and it adds nothing to the request path on the server.
 It is also the right tool when the people writing the interactions are the people writing the templates, since the whole behaviour is visible in the element.
-next.dj does not compete with it on the same page, and :doc:`/content/howto/drive-form-actions-with-htmx` shows the two running together over the same form action.
+next.dj does not compete with it on the same page, and :doc:`/content/howto/drive-form-actions-with-htmx` shows htmx driving a next.dj form action on a page whose bundled runtime is switched off.
 
 Turbo
 ~~~~~
@@ -147,16 +147,14 @@ Django Unicorn
 
 Reach for Unicorn when the natural unit is a stateful component whose state lives on the server between interactions.
 A zone renders from the page context on every request, and next.dj keeps no per-component state between requests, so an interaction that needs remembered state puts it in the URL, the form, or the database.
-The one server-held exception is the multi-step wizard, which stores step drafts in the Django cache keyed by session, and that is a wizard rather than a general component-state mechanism.
+The one server-held exception is the multi-step wizard, which stores step drafts through its own backend, by default in the Django session, and that is a wizard rather than a general component-state mechanism.
 Unicorn is also the shorter path when a team wants reactive behaviour without writing an endpoint for each interaction.
 
 When zones are the better fit
 -----------------------------
 
-The case for zones is narrow and worth stating plainly.
-Zones fit a project that wants the server to remain the only author of what the browser does, so that no template attribute can address a region the server did not choose to expose.
-They fit a project that wants the partial path to inherit the page's authorization instead of re-deriving it, since a zone request runs the page view first.
-They fit a team that wants the no-script path to stay a structural fallback rather than a discipline, since the partial branch turns on only under a header the runtime sends.
+The case for zones is narrow.
+They fit a project that wants the server to stay the only author of what the browser does, so the partial path inherits the page's authorization and the no-script path stays structural rather than a discipline.
 
 Everything this section documents is optional, and a next.dj site that declares no zone at all serves ordinary full pages.
 :doc:`limitations` states where the model stops, and reading it beside this page completes the comparison.

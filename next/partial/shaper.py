@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
     from next.forms.backends import FormActionBackend
     from next.forms.dispatch.responses import ActionOutcome
+    from next.forms.wizard import FormWizard
     from next.ports import PartialIntentView
 
 
@@ -71,6 +72,7 @@ class PartialShaperImpl(PartialShaper):
         *,
         action_name: str,
         uid: str,
+        wizard: "FormWizard | None",
     ) -> "HttpResponse":
         """Return the form morph envelope of a validate-only pass."""
         return shape_validate(
@@ -79,6 +81,7 @@ class PartialShaperImpl(PartialShaper):
             form,
             cast("PartialIntent", intent),
             ActionRef(action_name=action_name, uid=uid),
+            wizard,
         )
 
 

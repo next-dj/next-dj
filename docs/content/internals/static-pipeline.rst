@@ -22,10 +22,11 @@ Asset plans
 An asset plan is what ``AssetDiscovery`` remembers about one page path or one component.
 It holds the co-located files the walk found, the assets built from the ``styles`` and ``scripts`` lists of the owning module, and the directories the walk read.
 A plan caches the disk, not the URLs.
+The whole mechanism is gated by ``STATIC_DISCOVERY_CACHE``, which defaults to true, and a process that sets it false rebuilds a plan on every render instead of caching one.
 
 The stem probes, the layout walk, and the module import happen once, and every file the plan holds still goes to ``register_file`` on every render, so a backend free to resolve the same file to a different URL per request is asked every time.
-The default backend answers those calls from its own ``(logical_name, suffix)`` memo, which lives as long as the backend does.
-The repeat therefore costs it a dictionary lookup, and its answer changes only when ``StaticManager.reload`` builds a new backend.
+The default backend answers those calls from its own ``(logical_name, suffix)`` memo.
+The repeat therefore costs it a dictionary lookup, and its answer changes when ``StaticManager.reload`` builds a new backend or when a ``STATIC_ROOT``, ``STATIC_URL``, or ``STORAGES`` change drops the memo through ``forget_urls``.
 Module-level URLs are literals the backend is never asked about, so the plan keeps them as finished ``StaticAsset`` records, and the same frozen instance rides every render and every collector.
 
 The page plan is keyed by the page file path.
@@ -82,7 +83,7 @@ Runtime script injection
 ------------------------
 
 Under the ``AUTO`` script injection policy the static manager wraps the rendered page with the ``next.min.js`` runtime through ``NextScriptBuilder``.
-The builder owns the markup of all three fragments, while the bundle URL comes from ``backend.asset_url``, so a request aware backend moves the runtime the same way it moves a co-located asset.
+The builder owns the markup of all three fragments, while the bundle URL comes from ``backend.asset_url``, so a request-aware backend moves the runtime the same way it moves a co-located asset.
 
 .. mermaid::
 
@@ -117,7 +118,7 @@ Modules
    Instances come from ``load_backends``, the shared loader every backend family uses.
 
 ``next.static.manager``.
-   ``StaticManager`` orchestrates discovery and the per request collector lifecycle.
+   ``StaticManager`` orchestrates discovery and the per-request collector lifecycle.
 
 ``next.static.scripts``.
    ``NextScriptBuilder`` and ``ScriptInjectionPolicy`` for the ``Next`` runtime script.
@@ -146,7 +147,8 @@ Dedup
 The collector holds one dedup strategy for the request.
 The strategy is selected by the dotted path under the ``DEDUP_STRATEGY`` key of the first static backend ``OPTIONS``, instantiated once per request, defaulting to ``UrlDedup`` when the key is absent.
 One render holds one collector, so it holds one strategy and one JS context policy, and the first entry of ``STATIC_BACKENDS`` settles both for the whole pipeline.
-That first entry is also the one ``StaticManager.default_backend`` returns, so a later entry is read for nothing but its own rendering.
+``StaticManager.default_backend`` is the first entry, and it is the only one the render path uses.
+A later entry is built and receives ``backend_loaded`` and ``forget_urls``, and renders nothing.
 :doc:`/content/topics/static-assets/deduplication` covers the bundled strategies and the custom-strategy protocol.
 
 Signals

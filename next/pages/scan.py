@@ -48,6 +48,15 @@ def iter_existing_scanned_pages(
         yield page_path
 
 
+def load_scanned_page_modules(router_manager: RouterManager) -> None:
+    """Execute every existing routed `page.py` once, through the mtime memo.
+
+    A page-scoped registration exists only once its `page.py` has run.
+    """
+    for page_path in iter_existing_scanned_pages(router_manager, set()):
+        _load_python_module_memo(page_path)
+
+
 def iter_serialized_page_context_keys() -> Iterator[tuple[Path, str]]:
     """Yield the `page.py` path and key of every keyed `serialize=True` context.
 
@@ -72,4 +81,5 @@ __all__ = [
     "iter_existing_scanned_page_pairs",
     "iter_existing_scanned_pages",
     "iter_serialized_page_context_keys",
+    "load_scanned_page_modules",
 ]

@@ -143,28 +143,43 @@ class TestLayoutChecks:
     """Checks over ``layout.djx`` files found in the page trees."""
 
     @pytest.mark.parametrize(
-        ("layout_body", "expected_warnings", "msg_substring"),
+        ("layout_body", "expected_id", "msg_substring"),
         [
-            ("<html>{% block template %}{% endblock template %}</html>", 0, None),
+            ("<html>{% template %}</html>", None, None),
+            ("<html>{%  template  %}</html>", None, None),
+            ("<html>{% #template %}<p>none</p>{% /template %}</html>", None, None),
             (
-                "<html><body>No template block</body></html>",
-                1,
-                "does not contain required {% block template %}",
+                "<html><body>No placeholder</body></html>",
+                "next.W001",
+                "carries no {% template %} placeholder",
+            ),
+            (
+                "<html>{% template %}<hr>{% template %}</html>",
+                "next.W078",
+                "carries 2 {% template %} placeholders",
+            ),
+            (
+                "<html>{% template %}{% #template %}<p>x</p>{% /template %}</html>",
+                "next.W078",
+                "Composition fills the first one",
             ),
         ],
-        ids=["with_block", "without_block"],
+        ids=["single", "padded", "paired", "missing", "repeated", "mixed_forms"],
     )
     def test_check_layout_templates_scenarios(
-        self, tmp_path, layout_body, expected_warnings, msg_substring
+        self, tmp_path, layout_body, expected_id, msg_substring
     ) -> None:
-        """Layout.djx with or without required ``{% block template %}``."""
+        """A ``layout.djx`` carrying anything but one placeholder is reported."""
         (tmp_path / "layout.djx").write_text(layout_body)
         page_file = tmp_path / "page.py"
         page_file.write_text("")
 
         with patch_checks_router_manager(pages_directory=tmp_path):
             warnings = check_layout_templates(None)
-        assert len(warnings) == expected_warnings
+
+        assert [w.id for w in warnings] == (
+            [] if expected_id is None else [expected_id]
+        )
         if msg_substring is not None:
             assert msg_substring in warnings[0].msg
 
@@ -226,7 +241,7 @@ class TestMissingPageContentChecks:
                 False,
                 None,
                 True,
-                "<html>{% block template %}{% endblock template %}</html>",
+                "<html>{% template %}</html>",
                 0,
                 0,
             ),

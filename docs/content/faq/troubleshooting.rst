@@ -26,9 +26,10 @@ The command runs Django's :doc:`system check framework <django:ref/checks>` toge
 Page renders without layout
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A layout must contain the placeholder block ``{% block template %}{% endblock template %}`` or its short form ``{% block template %}{% endblock %}``.
-Without the placeholder the framework skips that layout during composition, so its markup disappears from the rendered page while the body still renders through the remaining ancestor layouts.
-``manage.py check`` reports :ref:`next.W001 <ref-system-checks>`.
+A layout must contain the ``{% template %}`` placeholder, or the paired ``{% #template %}...{% /template %}`` form whose body is a fallback.
+Without one the framework skips that layout during composition, so its markup disappears from the rendered page while the body still renders through the remaining ancestor layouts.
+``manage.py check`` reports :ref:`next.W001 <ref-system-checks>` for a layout that carries no placeholder.
+A layout carrying more than one draws :ref:`next.W078 <ref-system-checks>`, because composition fills the first placeholder and every other renders its own fallback in place of the page.
 
 Confirm that ``layout.djx`` sits in the same directory as ``page.py`` or in an ancestor directory.
 
@@ -73,7 +74,7 @@ Give each callable a key such as ``@context("name")``, or merge them into a sing
 next.E029 on a keyless context function
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A keyless context callable must be annotated as returning a dict.
+A keyless context function must be annotated as returning a dict.
 Keyless means the decorator carries no key, whether written as ``@context``, ``@page.context``, an aliased import, or an ``async def`` context function.
 The check inspects every keyless form.
 
@@ -372,8 +373,7 @@ Captured parameter name differs from directory name
 
 The router normalises hyphens in directory names to underscores.
 A directory named ``[my-id]`` produces the parameter ``my_id``, not ``my-id``.
-Access it as ``DUrl[str]`` annotated ``my_id`` in your context function.
-Rename the directory to ``[my_id]`` to avoid confusion.
+Read it with a parameter named ``my_id`` annotated ``DUrl[str]``, or rename the directory to ``[my_id]`` so the two names agree.
 
 Two pages collide under the same URL pattern
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

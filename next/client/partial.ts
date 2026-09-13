@@ -167,10 +167,13 @@ export function createPartial(deps: PartialDeps): PartialSurface {
   function triggerDeps(adapters?: PartialAdapters) {
     return {
       fetch: (request: WireRequest) => void wire.fetch(request),
-      abort: (zone: string) => wire.abort(zone),
+      abort: (key: string) => wire.abort(key),
       // The owning page of an element, so a base-page zone keeps GETting the
       // host URL while a modal layer holds the address bar.
       pageUrl: (el: Element) => layers.urlFor(el),
+      // The host page of the layer a form sits in, so a mutation fired from inside a
+      // modal stamps the origin the server resolves its zones against.
+      layerHost: (el: Element) => layers.hostFor(el),
       ...opt("document", adapters?.document),
       ...opt("clock", adapters?.clock),
       ...opt("observer", adapters?.observer),

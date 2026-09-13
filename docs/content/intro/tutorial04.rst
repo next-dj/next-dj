@@ -31,7 +31,9 @@ Create ``notes/forms.py``.
    :caption: notes/forms.py
 
    from notes.models import Note
+
    from next.forms import BooleanField, Form, ModelForm
+
 
    class CreateNoteForm(ModelForm):
        class Meta:
@@ -61,7 +63,9 @@ The ``inherit_context=True`` flag on the three layout-scope callables stays from
    :caption: notes/pages/page.py
 
    from notes.models import Note
+
    from next import context
+
 
    @context("site_name", inherit_context=True)
    def site_name() -> str:
@@ -141,8 +145,10 @@ It receives the same DI-resolved parameters as any other callable, including URL
    from django.urls import reverse
    from notes.forms import CreateNoteForm
    from notes.models import Note
+
    from next import action, context
    from next.urls import DUrl
+
 
    @context("note")
    def fetch_note(note_id: DUrl["id", int]) -> Note:
@@ -221,7 +227,7 @@ Extend the detail template.
 The rendered form carries several hidden inputs from different sources.
 ``confirm`` is a real field on ``DeleteNoteForm``, so the template posts it explicitly.
 The ``{% form %}`` tag emits the framework fields itself.
-``csrfmiddlewaretoken`` carries the CSRF token and ``_next_form_origin`` records the page URL, such as ``/notes/7/``.
+``csrfmiddlewaretoken`` carries the CSRF token and ``_next_form_origin`` records the page URL with its query string, such as ``/notes/7/`` or ``/?q=gro``.
 The dispatcher resolves that path against the URLconf, which recovers the captured ``id`` through the URL converter.
 The action handler therefore resolves ``DUrl["id", int]`` without any extra argument on the tag.
 
@@ -242,8 +248,10 @@ The detail ``page.py`` only needs to add its own context.
    from django.shortcuts import get_object_or_404
    from django.urls import reverse
    from notes.models import Note
+
    from next import context
    from next.urls import DUrl
+
 
    @context("note")
    def fetch_note(note_id: DUrl["id", int]) -> Note:
@@ -260,8 +268,10 @@ The complete file now looks like this.
    from django.shortcuts import get_object_or_404
    from django.urls import reverse
    from notes.models import Note
+
    from next.forms import BooleanField, Form, ModelForm
    from next.urls import DUrl
+
 
    class CreateNoteForm(ModelForm):
        class Meta:
@@ -298,6 +308,7 @@ Mount them above the file router and send a successful login back to the index.
    :caption: config/urls.py
 
    from django.urls import include, path
+
 
    urlpatterns = [
        path("accounts/", include("django.contrib.auth.urls")),

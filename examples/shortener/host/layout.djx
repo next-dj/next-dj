@@ -7,7 +7,7 @@
       {% component "nav_link" url_name="next:page_admin" active_when="page_admin" label="admin" variant="bar" %}
     {% /slot %}
     {% #slot "content" %}
-      {% block template %}{% endblock template %}
+      {% template %}
     {% /slot %}
   {% /component %}
   {% collect_scripts %}

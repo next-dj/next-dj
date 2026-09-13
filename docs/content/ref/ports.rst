@@ -9,7 +9,7 @@ Module summary
 ``next.ports`` holds the narrow protocols one subsystem calls another through.
 Each port is a pair of a ``Protocol`` that states the method contract the caller depends on and a slot object that holds the one implementation composed at startup.
 The caller imports the slot instead of the implementing subsystem, so the two areas stay decoupled while the call still lands on real code.
-A slot binds once and never rebinds, which is what separates it from the settings-driven backend managers in :doc:`backends`.
+Each slot is bound once, in ``NextFrameworkConfig.ready()``, and nothing rebinds it afterwards, which is what separates it from the settings-driven backend managers in :doc:`backends` that rebuild themselves on a settings reload.
 
 ``PortSlot`` is the shared holder every port uses.
 It starts unbound and raises ``RuntimeError`` naming the missing binding when read too early, and each port subclasses it so the message names its own subject.

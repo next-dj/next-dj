@@ -32,7 +32,8 @@ The framework ships three strategies in ``next.static.collector``.
    Falls back to URL keying when ``source_path`` is absent.
    Inline assets are keyed by their rendered body, identical to ``UrlDedup``.
    The hash is read from disk once per source path and cached for the request.
-   An unreadable file raises ``OSError`` out of the render, so keep the strategy paired with a deploy that swaps ``STATIC_ROOT`` atomically.
+   An unreadable file raises ``OSError`` out of the render.
+   The hash is taken from the co-located source file, not from ``STATIC_ROOT``, so pair the strategy with a deploy that swaps the application tree atomically rather than editing it in place.
 
 ``IdentityDedup``.
    Disables deduplication.
@@ -111,7 +112,7 @@ Point the backend ``OPTIONS`` at the new strategy.
        ]
    }
 
-The strategy lives for one request, so it can hold per request state.
+The strategy lives for one request, so it can hold per-request state.
 
 Common patterns
 ---------------

@@ -19,6 +19,8 @@ _BOARD_FORMS_PAGE = _SITE_PAGES / "board_forms" / "page.py"
 _BOARD_SETTINGS_PAGE = _SITE_PAGES / "board_settings" / "page.py"
 _WIZARD_PAGE = _SITE_PAGES / "wizard" / "[step]" / "page.py"
 _WIZARD_PUSH_PAGE = _SITE_PAGES / "wizard_push" / "[step]" / "page.py"
+_TAGZONE_PAGE = _SITE_PAGES / "tagzone" / "page.py"
+_TAGWIZARD_PAGE = _SITE_PAGES / "tagwizard" / "[step]" / "page.py"
 
 _PARTIAL_MODULES = (
     _REGRESSION_FORMS,
@@ -28,6 +30,8 @@ _PARTIAL_MODULES = (
     _BOARD_SETTINGS_PAGE,
     _WIZARD_PAGE,
     _WIZARD_PUSH_PAGE,
+    _TAGZONE_PAGE,
+    _TAGWIZARD_PAGE,
 )
 
 

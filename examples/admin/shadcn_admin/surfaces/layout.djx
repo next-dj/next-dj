@@ -23,7 +23,7 @@
 {% endif %}
 
 {% component "flash_messages" %}
-{% block template %}{% endblock template %}
+{% template %}
 
 {% if is_auth_page %}
   </main>

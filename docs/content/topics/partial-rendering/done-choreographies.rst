@@ -114,7 +114,7 @@ The comparison
      - ``done`` names the zone of a foreign page
    * - List authorization
      - The list's own view, on a request with its cookies and middleware
-     - The shaping step re-runs the host page's body resolution
+     - The ``morph(page=)`` call re-runs the host page's body resolution before its zone renders
    * - Protocol surface
      - No new headers or addressing
      - Adds ``X-Next-Origin`` and the ``page=`` addressing of the builder

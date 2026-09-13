@@ -46,7 +46,8 @@ Modules
 
 ``next.urls.manager``.
    ``RouterManager`` builds the active pattern list, exposes ``reload``, and emits the ``router_reloaded`` signal.
-   The module-level ``urlpatterns`` is a list with one ``TrieURLResolver`` wrapping the lazy router and form-action pattern sequence.
+   The module-level ``urlpatterns`` is a one-element sequence holding the resolver named by ``URL_RESOLVER``, which ships as ``TrieURLResolver`` and wraps the lazy router and form-action pattern sequence.
+   It is a ``Sequence`` rather than a ``list``, so a root URLconf mounts it through ``include()`` and never concatenates or appends to it.
 
 ``next.urls.resolver``.
    ``TrieURLResolver`` narrows each ``resolve()`` call to a few candidates through a static route map and a segment trie, with the inherited linear scan as fallback.
@@ -116,6 +117,7 @@ Reload mechanics
 3. Clears the Django URL resolver cache.
 4. Emits the ``router_reloaded`` signal.
 
+Steps three and four are skipped when the caller passes ``notify=False``, which is what a receiver of ``router_reloaded`` uses to reload the backends without re-entering its own signal.
 The next request observes the new patterns without a process restart.
 Long lived processes such as websocket subscribers listen for the signal to refresh cached URL references.
 

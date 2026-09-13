@@ -54,15 +54,13 @@ class AccessRequestWizard(FormWizard):
     def check_permissions(cls, request: HttpRequest) -> PermissionOutcome:
         """Deny every binding step POST that omits the retention acknowledgement.
 
-        Every step form declares the `policy_acknowledged` field, so a
-        normal submission carries the tick and passes while a replayed or
-        forged action URL that never rendered the form is denied before any
-        PII binds. A denied step writes no draft and leaves only the
-        `form_access_denied` audit row behind.
+        Every step form declares the `policy_acknowledged` field, so a normal submission
+        carries the tick and passes while a replayed or forged action URL that never
+        rendered the form is denied before any PII binds. A denied step writes no draft
+        and leaves only the `form_access_denied` audit row behind.
 
-        A blur-validation probe binds no data and asks only whether one
-        field is well formed, so it is let through ahead of the
-        acknowledgement the user has not reached yet.
+        A blur-validation probe asks only whether one field is well formed, so it is let
+        through ahead of the acknowledgement the user has not reached yet.
         """
         if partial_intent(request).validate_fields:
             return True

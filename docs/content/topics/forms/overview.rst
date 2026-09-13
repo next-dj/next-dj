@@ -3,7 +3,7 @@
 Forms overview
 ==============
 
-A Django form usually costs a URL entry, a view, manual CSRF handling, and a redirect-on-success per action before it accepts a single POST.
+A Django form usually costs a URL entry, a view, a ``{% csrf_token %}`` tag, and a redirect-on-success per action before it accepts a single POST.
 The forms subsystem removes that wiring.
 Declaring a subclass of ``next.forms.Form`` or ``next.forms.ModelForm`` is enough to make that form reachable by name from every template its scope covers, with a POST endpoint, CSRF, and re-render-on-failure already attached.
 No decorator, no manual registry call, and no URL wiring is required.
@@ -39,6 +39,9 @@ The framework also records which file the class was declared in and uses that to
        def on_valid(self, request: HttpRequest):
            self.save()
            return redirect_to_origin(request)
+
+``next.forms.Form`` and ``next.forms.ModelForm`` also pin their own ``default_renderer``, so ``{{ form }}`` always renders through Django's ``div`` form template and every widget through its stock Django template.
+A project-level ``FORM_RENDERER`` setting therefore never reaches a next.dj form.
 
 Why a stable URL
 ----------------
@@ -81,41 +84,10 @@ Set ``NEXT_FRAMEWORK["FORM_AUTODISCOVER"] = False`` to disable the automatic imp
 Handling submissions
 --------------------
 
-Override ``on_valid`` to run code after the form passes validation.
-The framework injects the current request only into a parameter annotated ``HttpRequest``, an unannotated ``request`` parameter resolves to ``None``.
-The method may declare any other parameter the dependency injector knows how to resolve.
-
-.. code-block:: python
-
-   from django.http import HttpRequest
-
-   def on_valid(self, request: HttpRequest):
-       self.save()
-       return redirect_to_origin(request)
-
-The default implementation redirects to the origin page, and a ModelForm saves first.
-See :doc:`actions` for the exact default behaviour and return contract.
-
-``Meta.success_url`` and ``Meta.success_message`` declare the redirect target and a flash message without writing ``on_valid`` by hand.
-The default ``on_valid`` reads both, so a save-and-redirect form can skip the method entirely.
-
-``get_initial`` prepopulates the form before the first render.
-Declare it as a ``classmethod`` with the same DI-friendly signature.
-
-.. code-block:: python
-
-   from django.http import HttpRequest
-
-   @classmethod
-   def get_initial(cls, request: HttpRequest, note_id: int | None = None):
-       if note_id is None:
-           return {}
-       return Note.objects.get(pk=note_id)
-
-The framework calls ``get_initial`` through the dependency injector, never application code.
-The framework supplies ``request`` to any parameter annotated ``HttpRequest``, an unannotated ``request`` parameter resolves to ``None``.
-A parameter named after a URL segment is filled from the URL, and the rest resolve through providers.
-See :doc:`actions` for the full signature rules.
+Override ``on_valid`` to run code after the form passes validation, and declare ``get_initial`` as a classmethod to prepopulate the form before its first render.
+The framework calls both through the dependency injector, so each may declare any parameter the injector resolves.
+The default ``on_valid`` saves first on a ``ModelForm``, then follows ``Meta.success_url`` when it is declared and the origin page otherwise, with ``Meta.success_message`` queued as a flash message.
+See :doc:`actions` for the default behaviour, the return contract, and the full signature rules of both hooks.
 
 .. _topics-forms-overview-cbv-map:
 
@@ -174,25 +146,10 @@ See :doc:`validation-rerender` for the cache mechanics and the access path.
 Form-less actions
 -----------------
 
-Use ``@action`` to register a plain function when no form fields are needed.
-A logout button or a delete confirmation is a typical case.
-The name is optional.
-A bare ``@action`` registers the function under its own name.
-
-.. code-block:: python
-   :caption: page.py
-
-   from django.http import HttpRequest
-   from next import action
-   from next.forms import redirect_to_origin
-   from next.urls import DUrl
-
-   @action("delete_article")
-   def delete_article(article_id: DUrl["id", int], request: HttpRequest):
-       Article.objects.filter(pk=article_id).delete()
-       return redirect_to_origin(request)
-
+Use ``@action`` to register a plain function when no form fields are needed, such as a logout button or a delete confirmation.
+The name is optional, and a bare ``@action`` registers the function under its own name.
 The template tag works the same way, but ``form`` is ``None`` inside the block because there is no form class.
+See :doc:`actions` for the decorator arguments, the handler signature, and the return contract.
 
 Template usage
 --------------

@@ -69,7 +69,8 @@ Mass assignment.
 Origin spoofing.
    The only page identity a form submission carries is the ``_next_form_origin`` URL path, which the dispatcher resolves through the URLconf with :func:`django.urls.resolve`.
    The client never supplies a filesystem path, so an error re-render can target only pages that are reachable through the routing table anyway.
-   A value that does not resolve returns HTTP 400.
+   A value that does not resolve returns HTTP 400 on the paths that need the origin page, a validation failure, a wizard step, and a handler that returns ``None`` and so re-renders the origin in place.
+   A handler that answers a successful submission with its own response never reads the origin, so the field is not consulted there.
    Substituting the origin of another routed page remains possible and is an authorization question, so guard mutating actions as described under `Access control`_.
 
 Open redirect.
@@ -142,6 +143,9 @@ The framework system checks cover configuration mistakes that affect security.
 - ``next.E041`` reports two actions registered under the same name from different handlers.
 - ``next.E045`` reports a form action backend that does not subclass ``FormActionBackend``.
 - ``next.E020`` reports a component registered more than once within the same scope.
+- ``next.E046`` reports one shared action name declared by two different modules, where a lookup by bare name resolves to whichever module imported first.
+- ``next.W060`` reports an action that declares ``permission_required`` while ``django.contrib.auth`` is out of ``INSTALLED_APPS``, so the guard described under `Access control`_ cannot resolve users or permissions.
+- ``next.W061`` reports an action that declares ``Meta.success_message`` while the messages framework is not fully installed, which makes the submission raise ``MessageFailure``.
 
 Run them with ``uv run python manage.py check``.
 

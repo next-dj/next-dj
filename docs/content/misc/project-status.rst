@@ -30,30 +30,31 @@ How NEXT_FRAMEWORK keys change
 
 :doc:`/content/ref/settings` lists every key, its default, and its accepted shape, and that page is the contract.
 The framework merges those defaults under the project dict, so a key a project never sets keeps the documented default and an upgrade that adds a key leaves an existing configuration working.
-A key the framework no longer knows is reported as ``next.E035`` at ``manage.py check``, a value the settings merge would discard is ``next.E076``, a ``NEXT_FRAMEWORK`` that is no dict at all is ``next.E077``, and a non-bool value for a bool flag is ``next.W072``.
+``manage.py check`` reports a settings mistake under one of four codes.
+
+.. list-table:: Settings check codes
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Code
+     - Reported for
+   * - ``next.E035``
+     - A top-level key the framework no longer knows.
+   * - ``next.E076``
+     - A value whose type the settings merge would discard.
+   * - ``next.E077``
+     - A ``NEXT_FRAMEWORK`` that is no dict at all.
+   * - ``next.W072``
+     - A non-bool value for a bool flag.
+
 A renamed or removed key therefore fails a check run instead of degrading a deployment silently.
 See :doc:`/content/deployment/settings` for the values a production deployment sets explicitly.
 
 Supported Python and Django
 ---------------------------
 
-The distribution requires Python 3.12 or newer and Django 5.2 or newer below 6.2.
-Continuous integration installs the built wheel and runs the full test suite against every combination in the table below.
-
-.. list-table:: Tested combinations
-   :header-rows: 1
-   :widths: 30 70
-
-   * - Python
-     - Django
-   * - 3.12
-     - 5.2, 6.0 and 6.1
-   * - 3.13
-     - 5.2, 6.0 and 6.1
-   * - 3.14
-     - 6.0 and 6.1
-
-The matrix excludes Python 3.14 against Django 5.2, so Python 3.14 runs against Django 6.0 and 6.1.
+The *Requirements* list in :doc:`/content/intro/install` names the supported Python and Django releases in one place.
+Continuous integration installs the built wheel and runs the full test suite against every combination that list names.
 :doc:`/content/contributing/quality-gates` describes how that matrix runs.
 
 Where a change is announced

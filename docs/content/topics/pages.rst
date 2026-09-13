@@ -22,18 +22,13 @@ Body sources
 A page module can supply its body through these sources.
 
 ``render`` function on the page module.
-   Highest priority.
-   Receives :doc:`DI-resolved <dependency-injection>` arguments.
-   Returns either a string body or any :class:`~django.http.HttpResponseBase` subclass, including :class:`~django.http.StreamingHttpResponse` and :class:`~django.http.FileResponse`.
+   A module-level ``def render(...)`` that takes :doc:`DI-resolved <dependency-injection>` arguments and returns the body.
 
 ``template`` module attribute.
    A plain string assigned at module level.
-   Used as the page body when no ``render`` function exists, and checked before any template loader.
 
 Registered template loaders.
-   The ordered list under ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]``.
-   ``DjxTemplateLoader`` is the default first entry and resolves the sibling ``template.djx``.
-   Loaders run in declared order and the first one whose ``can_load`` returns ``True`` supplies the body.
+   The ordered list under ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]``, whose default first entry ``DjxTemplateLoader`` resolves the sibling ``template.djx``.
 
 A page directory may instead host only a sibling ``layout.djx``.
 That directory has no body source, and the layout chain renders with an empty body slot.
@@ -41,7 +36,7 @@ See *Layout-only directories* under :doc:`layouts` for the wrapping rules, and n
 
 See *Render order* below for the per-request sequence and the ``render`` short-circuit.
 Processor ordering and ``STRICT_CONTEXT`` behaviour are documented in :doc:`context` and :ref:`ref-settings`.
-Multiple body sources trigger :ref:`next.W043 <ref-system-checks>`, see *Priority resolution*.
+Multiple body sources trigger :ref:`next.W043 <ref-system-checks>`, and the full priority table lives under *Priority resolution* below.
 
 Render order
 ------------
@@ -66,7 +61,8 @@ Broken page modules
 -------------------
 
 A ``page.py`` whose body raises while importing is a broken module rather than an absent one.
-The loader records the failure against the modification time of the file that executed, and ``logger.exception`` writes the traceback on every load attempt.
+The loader records the failure against the modification time of the file that executed, and the traceback is written once per version of that file because the module memo keys on its mtime.
+A later request for the same unchanged file answers from the memo without a second log record.
 ``ImportError``, ``SyntaxError``, and ``AttributeError`` are the common causes, not a closed list.
 
 What the request does with that record depends on one predicate, ``next.conf.fail_loudly``, which is true when ``settings.DEBUG`` or ``NEXT_FRAMEWORK["STRICT_LOADING"]`` is set.
@@ -96,6 +92,7 @@ The most common shape is ``request`` plus captured URL parameters and marker-dri
    :caption: notes/pages/reports/[int:report_id]/page.py
 
    from next.urls import DUrl
+
    from notes.models import Report
 
    def render(request, report_id: DUrl[int]) -> str:
@@ -197,7 +194,7 @@ It publishes the value to every descendant page rather than to the declaring pag
 See :doc:`context` for that flag and the other ways to vary the decorator.
 
 Including values in the JS context
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Pass ``serialize=True`` to include the return value in ``window.Next.context`` on the client side.
 The value must be JSON-encodable by the active serializer.
@@ -255,18 +252,10 @@ Register additional loaders in ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`` to support
 A user-provided ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`` replaces the default list entirely.
 Include ``DjxTemplateLoader`` explicitly when you still want sibling ``template.djx`` files to load.
 A class repeated in the list is instantiated once, and the later entry is dropped.
-
-``next.pages.page.register_template(file_path, template_str)`` seeds the composed-template cache that ``composed_template_for`` reads.
-That cache serves direct ``Page.render`` calls, including ``next.testing.render_page``, the form re-render after a validation failure, standalone zone renders, and the full-page render of a page without a module-level ``render()``.
-A page whose body comes from ``render()`` resolves that body per request, so a registered string never serves it at its URL.
-
-The method stores the supplied body verbatim, with no layout composition, so no ancestor ``layout.djx`` wraps it.
-Pre-compose the body through the layout chain before registering it when wrapping is required.
-See :doc:`/content/ref/pages` for the full ``Page`` surface.
 See :doc:`/content/howto/add-a-custom-template-loader` for the recipe-shaped walkthrough of a loader class.
 
 Loader contract
-~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~
 
 A loader sets one class attribute, implements two required methods, and may override one optional method.
 
@@ -314,6 +303,17 @@ The template loaders have no fixed numbering between them.
 
 When a page directory declares more than one body source, :ref:`next.W043 <ref-system-checks>` reports it.
 The highest-priority source is used and the others are never consulted.
+
+Seeding a composed body from code
+---------------------------------
+
+``next.pages.page.register_template(file_path, template_str)`` seeds the composed-template cache that ``composed_template_for`` reads.
+That cache serves direct ``Page.render`` calls, including ``next.testing.render_page``, the form re-render after a validation failure, standalone zone renders, and the full-page render of a page without a module-level ``render()``.
+A page whose body comes from ``render()`` resolves that body per request, so a registered string never serves it at its URL.
+
+The method stores the supplied body verbatim, with no layout composition, so no ancestor ``layout.djx`` wraps it.
+Pre-compose the body through the layout chain before registering it when wrapping is required.
+See :doc:`/content/ref/pages` for the full ``Page`` surface.
 
 .. _topics-pages-plain-django-views:
 
@@ -368,9 +368,12 @@ What a plain view does get
 Two of them read a context value the router publishes, and a hand-written view supplies that value itself.
 
 ``{% component %}``.
-   The tag resolves a name against the components visible from ``current_template_path``, and produces no component when that key is absent from the context.
+   The tag resolves a name against the components visible from ``current_template_path``, and an absent key leaves it nothing to resolve against.
+   With ``DEBUG`` and ``STRICT_LOADING`` both off the tag renders nothing and records a log warning.
+   Under ``DEBUG`` it renders an HTML comment naming the skipped component, and under ``STRICT_LOADING`` it raises ``TemplateSyntaxError``.
    A component root listed in ``COMPONENT_BACKENDS["DIRS"]`` is visible from any path, so pointing the key at the rendering template is enough for shared components.
    A ``_components`` folder inside a page tree is visible only to templates under its own directory, so name a path inside that tree to reach one.
+   See :doc:`/content/ref/template-tags` for the full tag reference.
 
 ``{% form %}``.
    The tag reads the page anchor from ``current_page_module_path`` and falls back to the shared registry when the key is absent.
@@ -406,21 +409,23 @@ Common patterns
 Paginated list page
 ~~~~~~~~~~~~~~~~~~~
 
-Django's :class:`~django.core.paginator.Paginator` works unchanged inside a context callable.
+Django's :class:`~django.core.paginator.Paginator` works unchanged inside a context function.
 Publish its page under the name the template expects, and read the requested page number from the query string with ``DQuery[int]``.
 
 .. code-block:: python
    :caption: notes/pages/page.py
 
-   from django.core.paginator import Page, Paginator
+   from django.core.paginator import Page as PaginatorPage, Paginator
+
    from next import context
-   from notes.models import Note
    from next.urls import DQuery
+
+   from notes.models import Note
 
    PER_PAGE = 20
 
    @context("page_obj")
-   def note_page(page: DQuery[int] = 1) -> Page:
+   def note_page(page: DQuery[int] = 1) -> PaginatorPage:
        paginator = Paginator(Note.objects.order_by("-created_at"), PER_PAGE)
        return paginator.get_page(page)
 
@@ -454,6 +459,7 @@ A page that always redirects elsewhere uses a ``render`` function that returns `
    :caption: notes/pages/login/page.py
 
    from django.http import HttpResponseRedirect
+
    from next.urls import page_reverse
 
    def render(request) -> HttpResponseRedirect:
@@ -484,7 +490,9 @@ Reach for ``StreamingHttpResponse`` when the body is produced incrementally, suc
    from collections.abc import Iterator
 
    from django.http import StreamingHttpResponse
+
    from next.urls import DUrl
+
    from notes.models import Note
 
    def event_stream(note_id: int) -> Iterator[bytes]:

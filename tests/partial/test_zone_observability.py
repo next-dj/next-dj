@@ -309,7 +309,7 @@ class TestLayoutAndComponentComposites:
         self, page_instance: Page, tmp_path: Path
     ) -> None:
         (tmp_path / "layout.djx").write_text(
-            "<html><body>{% block template %}{% endblock template %}"
+            "<html><body>{% template %}"
             '{% zone "footer" %}<p>{{ f }}</p>{% endzone %}</body></html>'
         )
         page_dir = tmp_path / "sub"

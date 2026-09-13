@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -218,15 +219,36 @@ def get_router_manager() -> tuple[RouterManager | None, list[CheckMessage]]:
     return result
 
 
+# One page-import pass per check run, sharing the router cache's lifetime.
+_PAGE_DISCOVERY_DONE: dict[str, bool] = {"value": False}
+
+
+def discover_page_registrations() -> None:
+    """Execute every routed `page.py` once so registration-driven checks see them.
+
+    Django iterates its checks in set order, so none may rely on another going first.
+    """
+    if _PAGE_DISCOVERY_DONE["value"]:
+        return
+    _PAGE_DISCOVERY_DONE["value"] = True
+    router_manager, _errors = get_router_manager()
+    if router_manager is None:
+        return
+    # Imported here because `next.pages` reaches this module through its own checks.
+    scan = importlib.import_module("next.pages.scan")
+    scan.load_scanned_page_modules(router_manager)
+
+
 def reset_router_manager_cache(**kwargs) -> None:
     """Drop the cached `RouterManager` and everything read off its routers.
 
-    The scans and contract answers belong to this manager's routers, so they go too.
+    The scans, the contract answers and the page-import pass go with it.
     """
     _ROUTER_MANAGER_CACHE["value"] = None
     _SCANNED_TREES_CACHE.clear()
     _ROUTER_CONTRACT_CACHE.clear()
     _CACHED_ROUTERS.clear()
+    _PAGE_DISCOVERY_DONE["value"] = False
 
 
 settings_reloaded.connect(reset_router_manager_cache)
@@ -415,6 +437,7 @@ def iter_page_tree_component_folders(
 
 __all__ = [
     "PageRootsError",
+    "discover_page_registrations",
     "errors_for_unknown_keys",
     "first_visit",
     "get_page_roots",

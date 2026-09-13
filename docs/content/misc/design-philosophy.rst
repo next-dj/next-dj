@@ -41,7 +41,7 @@ Layouts compose by string substitution
 The rejected alternative is Django template inheritance.
 A page rendered through ``{% extends %}`` names its parent in its own first line, which puts the layout chain back into the templates and defeats the filesystem rule the rest of the framework keeps.
 next.dj composes instead.
-The loader walks ancestor directories, reads each ``layout.djx``, and substitutes the page body into the single ``{% block template %}{% endblock template %}`` slot the layout declares.
+The loader walks ancestor directories, reads each ``layout.djx``, and substitutes the page body into the single ``{% template %}`` slot the layout declares.
 
 The cost is one slot per layout and no override across the chain.
 A layout offers exactly one placeholder, the substitution fills it once, and a layout that declares no placeholder contributes nothing to the composed template.
@@ -72,7 +72,9 @@ The built-in set is fixed at ``morph``, ``replace``, ``inner``, ``append``, ``pr
 
 The cost is that a new behaviour is a two-sided change.
 A custom verb is registered on the server with ``register_patch_op`` and supplied on the client with ``Next.partial.defineOp``, so a template author cannot express a new DOM operation from markup alone.
-The gain is that a response cannot ask a page to do anything the application never named, an unregistered verb raises instead of reaching the browser, and ``next.E066`` reports the mismatch at ``manage.py check``.
+The gain is that a response cannot ask a page to do anything the application never named.
+``Patches.op()`` refuses an unregistered verb on the call that builds it, so the op never reaches the browser.
+``next.E066`` covers the registry side at ``manage.py check``, reporting a custom verb whose name is malformed or shadows a built-in one.
 See :doc:`/content/topics/partial-rendering/extending` for the three seams and :doc:`/content/topics/partial-rendering/limitations` for what the closed set does not cover.
 
 Stable URLs
@@ -114,7 +116,6 @@ The cost is that a signal carries no ordering guarantee and no failure contract,
 Lock-in stops at the UI layer
 -----------------------------
 
-The heading names a boundary rather than claiming that no lock-in exists.
 Data lives in Django models, migrations and the admin are untouched, and ordinary ``.html`` templates keep rendering.
 The routed UI layer is the part that depends on next.dj, covering page modules, layout composition, ``@context`` callables, form actions, and the framework template tags.
 Removing the framework therefore costs a view for every ``page.py``, a ``path()`` entry for every routed directory, a ``get_context_data`` for every ``@context`` callable, and a view plus a URL entry for every registered form action.
@@ -141,27 +142,9 @@ String composition of layouts.
    The composed template is cached and compiled per page and invalidated by source mtime under ``DEBUG``, while a production process holds it until a restart.
    A body produced by a ``render`` function stays out of that cache, and only the layout chain around it is cached and refilled per render.
 
-Convention based naming.
-   Directories must respect the naming rules.
-   Renaming a captured directory changes the URL name.
-
-Name-based resolution.
-   A parameter bound by name has no static checker behind it.
-   A rename on either side yields ``None`` rather than an error.
-
 Block tag parsing changes process wide.
    The framework widens the ``{% ... %}`` alternative of Django's tag pattern, so a block tag may span lines in every template the process loads.
    A template that relies on a newline ending a block tag needs adjusting first, while variables and comments keep their stock behaviour.
-
-Two-sided protocol extensions.
-   A custom patch verb is registered on the server and defined on the client.
-   Neither half is useful without the other.
-
-Unauthenticated action endpoints.
-   A registered form action accepts a POST from any visitor until the form declares a guard.
-   The framework makes registration free and leaves authorization explicit.
-
-These trade-offs are the cost of keeping the developer model simple and the file router predictable.
 
 See also
 --------

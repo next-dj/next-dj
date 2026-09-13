@@ -1,0 +1,4 @@
+<h1>tag wizard page</h1>
+{% zone "signup" %}
+{% form "tagged_wizard" zone="signup" %}<div data-step="{{ wizard.current_step }}">{{ form.full_name }}{{ form.full_name.errors }}{{ form.email }}{{ form.email.errors }}{{ form.team }}{{ form.team.errors }}</div>{% endform %}
+{% endzone %}

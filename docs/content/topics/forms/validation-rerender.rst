@@ -17,7 +17,7 @@ This page explains the validation and re-render flow end to end.
 The origin page
 ---------------
 
-Every rendered ``{% form %}`` tag emits a hidden ``_next_form_origin`` field that carries the URL path of the page that rendered the form, such as ``/notes/42/``.
+Every rendered ``{% form %}`` tag emits a hidden ``_next_form_origin`` field that carries the URL the page was rendered under with its query string, such as ``/notes/42/?tab=history``.
 On the re-render branch the dispatcher resolves that path against the URLconf with :func:`django.urls.resolve`.
 The file router stamps every routed view with a ``next_page_path`` attribute, so the match yields the origin page module, and the URL kwargs come through the real URL converters.
 An ``[int:id]`` capture therefore arrives as ``int`` on the re-render exactly as on the canonical GET, and a ``uuid`` capture arrives as ``UUID``.
@@ -48,7 +48,8 @@ A request to ``/_next/form/<uid>/`` follows a fixed pipeline.
 4. The form class resolves through the dependency resolver and ``check_permissions`` runs on it, see :ref:`topics-forms-actions-dynamic-guards`.
 5. The form is constructed with POST data, uploaded files, and the initial data that ``get_initial`` returns.
 6. ``has_object_permission`` runs on the bound form.
-7. A request that names validate fields short circuits here with a field-level answer, and ``is_valid`` never runs for it.
+7. A request that names validate fields short circuits here.
+   The form validates, the response carries only the errors of the named fields, and the handler never runs.
 8. ``form.is_valid()`` runs.
    On a valid form the handler is called with the dependency-resolved parameters and its return value goes to the client.
    On an invalid form the dispatcher loads the origin page, reattaches the cached dependencies, and re-renders the template with ``form`` set to the bound failing form.
@@ -155,15 +156,17 @@ The ``redirect_to_origin`` helper sends the user back to whichever page rendered
        Note.objects.filter(pk=note_id).update(favourite=True)
        return redirect_to_origin(request, fallback="/notes/")
 
-``redirect_to_origin(request, fallback="/")`` reads the hidden ``_next_form_origin`` field that the ``{% form %}`` tag sets to ``request.path`` verbatim at render time.
-It accepts the value only when it is a string that starts with a single ``/``.
-A protocol-relative input beginning with ``//`` is rejected, which blocks open-redirect input.
+``redirect_to_origin(request, fallback="/")`` reads the hidden ``_next_form_origin`` field that the ``{% form %}`` tag sets to the rendering URL with its query string, so the redirect lands back on the same filtered view.
+It accepts the value only when it is a string, and it strips the surrounding whitespace before any other test.
+A tab or a newline inside the stripped value refuses it, because a browser drops those code points before it resolves a URL and a value the check read as same-site would become a jump off site.
+Every backslash is then read as a forward slash, so the value passes only when it starts with a single ``/`` and ``/\evil.example`` is refused as protocol-relative.
 When the field is absent or fails validation the helper redirects to ``fallback`` instead.
 
 One field, two roles
 ~~~~~~~~~~~~~~~~~~~~
 
 The single hidden ``_next_form_origin`` field serves both directions of the round trip.
+The query string rides along in that one value, so the success redirect returns the visitor to the same filters, search terms, and page they submitted from.
 
 Re-render path.
    The dispatcher resolves the field through the URLconf to recover the origin page module and the typed URL kwargs, as :ref:`topics-forms-validation-rerender-origin` describes.

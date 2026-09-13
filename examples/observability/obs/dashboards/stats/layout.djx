@@ -12,6 +12,6 @@
   {% component "stats_nav" %}
 
   <div class="rounded-md border border-border bg-card p-6 shadow-sm">
-    {% block template %}{% endblock template %}
+    {% template %}
   </div>
 </div>

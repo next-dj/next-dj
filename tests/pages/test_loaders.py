@@ -265,9 +265,7 @@ class TestLayoutTemplateLoader:
 
         if create_layout:
             layout_file = tmp_path / "layout.djx"
-            layout_file.write_text(
-                "<html><body>{% block template %}{% endblock template %}</body></html>"
-            )
+            layout_file.write_text("<html><body>{% template %}</body></html>")
 
         if create_template:
             template_file = sub_dir / "template.djx"
@@ -398,19 +396,13 @@ class TestLayoutTemplateLoader:
                 False,
                 True,
                 "<h1>Test Content</h1>",
-                "{% block template %}<h1>Test Content</h1>{% endblock template %}",
+                "{% #template %}<h1>Test Content</h1>{% /template %}",
             ),
-            (
-                "no_template_file",
-                False,
-                False,
-                None,
-                "{% block template %}{% endblock template %}",
-            ),
+            ("no_template_file", False, False, None, "{% template %}"),
         ],
         ids=["with_local_layout", "without_local_layout", "no_template_file"],
     )
-    def test_wrap_in_template_block_scenarios(
+    def test_wrap_in_placeholder_scenarios(
         self,
         tmp_path,
         test_case,
@@ -419,7 +411,7 @@ class TestLayoutTemplateLoader:
         template_content,
         expected_result,
     ) -> None:
-        """A body is wrapped in a ``template`` block only when no local layout owns it."""
+        """A body becomes a paired placeholder only when no local layout owns it."""
         loader = LayoutTemplateLoader()
 
         if create_layout:
@@ -431,7 +423,7 @@ class TestLayoutTemplateLoader:
             template_file.write_text(template_content)
 
         page_file = tmp_path / "page.py"
-        result = loader._wrap_in_template_block(page_file)
+        result = loader._wrap_in_placeholder(page_file)
 
         assert result == expected_result
 
@@ -545,13 +537,11 @@ class TestLayoutTemplateLoader:
         assert additional_layout in result
 
     def test_load_template_with_single_layout(self, tmp_path) -> None:
-        """One ancestor layout wraps the body and keeps its ``template`` block."""
+        """One ancestor layout wraps the body it composes into its placeholder."""
         loader = LayoutTemplateLoader()
 
         layout_file = tmp_path / "layout.djx"
-        layout_content = (
-            "<html><body>{% block template %}{% endblock template %}</body></html>"
-        )
+        layout_content = "<html><body>{% template %}</body></html>"
         layout_file.write_text(layout_content)
 
         sub_dir = tmp_path / "sub"
@@ -564,10 +554,10 @@ class TestLayoutTemplateLoader:
         result = loader.load_template(page_file)
 
         assert result is not None
-        assert template_content in result
-        assert "<html><body>" in result
-        assert "</body></html>" in result
-        assert "{% block template %}" in result
+        assert result == (
+            "<html><body>{% #template %}<h1>Test Content</h1>"
+            "{% /template %}</body></html>"
+        )
 
     def test_load_template_with_multiple_layouts(self, tmp_path) -> None:
         """Nested layouts compose outermost first, with the body innermost."""
@@ -575,15 +565,13 @@ class TestLayoutTemplateLoader:
 
         root_layout = tmp_path / "layout.djx"
         root_layout.write_text(
-            "<html><head><title>Root</title></head><body>{% block template %}{% endblock template %}</body></html>"
+            "<html><head><title>Root</title></head><body>{% template %}</body></html>"
         )
 
         sub_dir = tmp_path / "sub"
         sub_dir.mkdir()
         sub_layout = sub_dir / "layout.djx"
-        sub_layout.write_text(
-            "<div class='sub-layout'>{% block template %}{% endblock template %}</div>"
-        )
+        sub_layout.write_text("<div class='sub-layout'>{% template %}</div>")
 
         nested_dir = sub_dir / "nested"
         nested_dir.mkdir()
@@ -595,19 +583,18 @@ class TestLayoutTemplateLoader:
         result = loader.load_template(page_file)
 
         assert result is not None
-        assert template_content in result
-        assert "<html><head><title>Root</title></head>" in result
-        assert "<div class='sub-layout'>" in result
-        assert "{% block template %}" in result
+        assert result == (
+            "<html><head><title>Root</title></head><body>"
+            "<div class='sub-layout'>{% #template %}<h1>Test Content</h1>"
+            "{% /template %}</div></body></html>"
+        )
 
     def test_load_template_without_template_djx(self, tmp_path) -> None:
         """A layout with no body behind it composes to an empty ``template`` block."""
         loader = LayoutTemplateLoader()
 
         layout_file = tmp_path / "layout.djx"
-        layout_file.write_text(
-            "<html><body>{% block template %}{% endblock template %}</body></html>"
-        )
+        layout_file.write_text("<html><body>{% template %}</body></html>")
 
         page_file = tmp_path / "page.py"
 
@@ -616,22 +603,52 @@ class TestLayoutTemplateLoader:
         assert result is not None
         assert "<html><body>" in result
         assert "</body></html>" in result
-        assert "{% block template %}{% endblock template %}" in result
+        assert "{% template %}" in result
 
-    def test_load_template_layout_accepts_unnamed_endblock(self, tmp_path) -> None:
-        """Compose works when layout uses {% endblock %} instead of {% endblock template %}."""
+    @pytest.mark.parametrize(
+        "placeholder",
+        ["{% template %}", "{%  template  %}", "{%\n  template\n%}"],
+        ids=["tight", "padded", "multiline"],
+    )
+    def test_load_template_layout_accepts_whitespace_inside_the_tag(
+        self, tmp_path, placeholder
+    ) -> None:
+        """Whitespace inside the placeholder tag composes the same as the tight form."""
         loader = LayoutTemplateLoader()
-        layout_file = tmp_path / "layout.djx"
-        layout_file.write_text(
-            "<html><body>{% block template %}{% endblock %}</body></html>"
+        (tmp_path / "layout.djx").write_text(f"<html>{placeholder}</html>")
+        (tmp_path / "template.djx").write_text("<h1>Body</h1>")
+
+        result = loader.load_template(tmp_path / "page.py")
+
+        assert result == "<html><h1>Body</h1></html>"
+
+    def test_load_template_replaces_the_paired_placeholder_and_its_fallback(
+        self, tmp_path
+    ) -> None:
+        """A composed page takes the place of the whole paired construct."""
+        loader = LayoutTemplateLoader()
+        (tmp_path / "layout.djx").write_text(
+            "<html>{% #template %}<p>no page here</p>{% /template %}</html>"
         )
-        page_file = tmp_path / "page.py"
-        result = loader.load_template(page_file)
-        assert result is not None
-        assert "<html><body>" in result
-        assert "</body></html>" in result
-        assert "{% block template %}" in result
-        assert "{% block template %}{% endblock template %}" in result
+        (tmp_path / "template.djx").write_text("<h1>Body</h1>")
+
+        result = loader.load_template(tmp_path / "page.py")
+
+        assert result == "<html><h1>Body</h1></html>"
+
+    def test_load_template_fills_only_the_first_placeholder(self, tmp_path) -> None:
+        """A layout with two placeholders composes the page into the first one."""
+        loader = LayoutTemplateLoader()
+        (tmp_path / "layout.djx").write_text(
+            "<html>{% template %}<hr>{% #template %}<p>spare</p>{% /template %}</html>"
+        )
+        (tmp_path / "template.djx").write_text("<h1>Body</h1>")
+
+        result = loader.load_template(tmp_path / "page.py")
+
+        assert result == (
+            "<html><h1>Body</h1><hr>{% #template %}<p>spare</p>{% /template %}</html>"
+        )
 
     def test_find_layout_files(self, tmp_path) -> None:
         """The walk collects every ``layout.djx`` from the page up to the tree root."""
@@ -756,9 +773,7 @@ class TestLayoutTemplateLoader:
         ids=["none", "sibling", "ancestor", "chain"],
     )
     @pytest.mark.parametrize(
-        "body",
-        ["<p>b</p>", "", "{% block template %}{% endblock template %}"],
-        ids=["body", "empty", "placeholder"],
+        "body", ["<p>b</p>", "", "{% template %}"], ids=["body", "empty", "placeholder"]
     )
     def test_filled_skeleton_equals_a_direct_compose(
         self, tmp_path, layouts, body
@@ -772,10 +787,7 @@ class TestLayoutTemplateLoader:
         page_file.write_text("x = 1")
         for index, relative in enumerate(layouts):
             target = (page_dir / relative).resolve() / "layout.djx"
-            target.write_text(
-                f'<div class="l{index}">'
-                "{% block template %}{% endblock template %}</div>"
-            )
+            target.write_text(f'<div class="l{index}">{{% template %}}</div>')
 
         skeleton = loader.compose_skeleton(page_file)
 

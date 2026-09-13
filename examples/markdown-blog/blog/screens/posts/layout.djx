@@ -10,6 +10,6 @@
   </header>
 
   <div class="prose prose-slate max-w-none text-foreground">
-    {% block template %}{% endblock template %}
+    {% template %}
   </div>
 </article>

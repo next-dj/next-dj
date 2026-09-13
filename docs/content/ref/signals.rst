@@ -18,7 +18,8 @@ Receivers connected with a matching ``sender`` only fire for that sender.
 
 Most of the catalog is built with ``use_caching=True``, which makes Django key the receiver lookup on a weak reference to the sender.
 Code that sends one of those signals itself has to pass a weak-referenceable sender, so ``None``, a string, and an instance of a slots class without ``__weakref__`` all raise ``TypeError``.
-``asset_registered`` sends the ``StaticAsset`` itself, which carries no ``__weakref__``, and ``collector_finalized`` sends a collector built for a single render, so both stay uncached and accept any sender.
+Four signals stay uncached and accept any sender.
+``asset_registered`` sends the ``StaticAsset`` itself, which carries no ``__weakref__``, ``collector_finalized`` sends a collector built for a single render, and ``provider_registered`` and ``settings_reloaded`` fire rarely enough that the weak-key bookkeeping buys nothing.
 
 The dispatch-time form signals (``action_dispatched``, ``form_validation_failed``, ``wizard_step_submitted``, ``wizard_completed``, ``form_access_denied``) share two keyword arguments.
 ``uid`` is the registry identity of the action, the value the dispatch URL and the ``data-next-action`` markup attribute carry, or ``None`` when a custom backend stores no uid in its meta.
@@ -82,7 +83,7 @@ The dispatch-time form signals (``action_dispatched``, ``form_validation_failed`
    * - ``context_registered``
      - ``PageContextRegistry``
      - ``file_path``, ``key``
-     - After a context callable is attached to a page module.
+     - After a context function is attached to a page module.
    * - ``field_validated``
      - The active partial protocol backend class
      - ``action_name``, ``uid``, ``request``, ``field_names``, ``error_count``

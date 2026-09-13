@@ -56,7 +56,7 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    Recognise a new file extension during static collection.
 
 :doc:`add-a-custom-stem`
-   Treat additional filenames as component assets.
+   Recognise additional filenames as page, layout, or component assets.
 
 :doc:`write-a-static-backend`
    Customise the rendered link and script tags.
@@ -65,7 +65,7 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    Replace the default JSON serializer for the ``Next`` object.
 
 :doc:`build-a-custom-asset-backend`
-   Add a custom asset kind with its own renderer.
+   Resolve asset URLs through a Vite manifest instead of staticfiles.
 
 .. rubric:: Forms
 

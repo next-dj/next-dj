@@ -180,7 +180,7 @@ class TestRenderInvalidPage:
         backend = form_action_manager.default_backend
 
         layout = tmp_path / "layout.djx"
-        layout.write_text("<html>{% block template %}{% endblock template %}</html>")
+        layout.write_text("<html>{% template %}</html>")
         leaf = tmp_path / "leaf"
         leaf.mkdir()
         page_file = leaf / "page.py"
@@ -200,7 +200,7 @@ class TestRenderInvalidPage:
         )
         assert "<p>v2</p>" in second
 
-        layout.write_text("<main>{% block template %}{% endblock template %}</main>")
+        layout.write_text("<main>{% template %}</main>")
         third = backend.render_invalid_page(
             request, "simple_form", form, page_file_path=page_file
         )

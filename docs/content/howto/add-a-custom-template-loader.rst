@@ -27,6 +27,7 @@ A loader whose ``source_name`` is empty is left out of that report.
    :caption: notes/loaders.py
 
    from pathlib import Path
+
    from next.pages.loaders import TemplateLoader
 
    class MarkdownTemplateLoader(TemplateLoader):
@@ -74,13 +75,7 @@ That loader owns the body, and a ``load_template`` that then returns ``None`` yi
 With the settings above, a page directory holding both ``template.djx`` and ``template.md`` renders the DJX file and never reads the Markdown.
 
 The chain is only the third body source.
-``Page`` resolves a page body in this order.
-
-1. A ``render`` function in ``page.py``, which returns a body string or an ``HttpResponseBase`` that short-circuits layout composition and the static pipeline.
-2. A module-level ``template`` attribute on ``page.py``, used when its value is a string.
-3. The first registered loader whose ``can_load`` answers ``True``.
-4. An empty body, so an ancestor ``layout.djx`` still renders with an empty slot.
-
+See *Priority resolution* in :doc:`/content/topics/pages` for the full order.
 Registering a loader never overrides a ``render`` function or a ``template`` attribute on the same page.
 
 Constructor and entry rules

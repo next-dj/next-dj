@@ -40,7 +40,8 @@ The first positional argument is ``func_or_key``.
 Called bare as ``@component.context`` it merges the function's returned dict into the component template scope.
 The merge is guarded, so a returned key naming one of the reserved render keys, or any key starting with ``slot_``, raises ``ValueError`` at render time.
 Rendering through ``{% component %}`` extends the guard to the props of that one call site, and ``ComponentWidget`` and the ``props`` mapping of ``render_component_by_name`` extend it the same way to the names they pass, while a bare ``render_component`` guards the reserved keys alone.
-See :doc:`/content/topics/components` for the reserved set.
+See :doc:`/content/topics/components` for the reserved render set.
+Registration guards a different set, the six dependency-injection names ``request``, ``form``, ``cleaned_data``, ``_cache``, ``_stack``, and ``_context_data``, documented as ``RESERVED_KEYS`` in :doc:`deps`.
 Called as ``@component.context("greeting")`` it binds the function's return value to that key.
 Pass ``serialize=True`` to include the return value in ``window.Next.context``.
 The value must be JSON-encodable by the active serializer, the same contract documented under :ref:`Serialization for the browser <topics-context-serialization>`.
@@ -109,8 +110,10 @@ DQuery
 Type annotation that injects a query string value.
 Supports ``DQuery[str]``, ``DQuery[int]``, ``DQuery[bool]``, ``DQuery[float]``, ``DQuery[UUID]``, ``DQuery[Decimal]``, ``DQuery[date]``, and ``DQuery[datetime]``.
 ``DQuery[list[T]]`` accepts any of those scalars as the element type.
-The list form reads three wire formats, in order: the plain repeated key ``?brand=a&brand=b``, the bracket suffix ``?brand[]=a&brand[]=b`` that axios and other front-end clients emit, and the comma-delimited ``?brand=a,b`` that ``qs.stringify`` produces with the comma array format.
-A parameter whose key is absent from all three receives its default, or ``None`` where no default is given.
+The list form reads three wire formats in order.
+The plain repeated key ``?brand=a&brand=b`` comes first, then the bracket suffix ``?brand[]=a&brand[]=b`` that axios and other front-end clients emit, then the comma-delimited ``?brand=a,b`` that ``qs.stringify`` produces with the comma array format.
+A parameter whose key is absent from all three receives its default.
+Without a default a ``DQuery[list[T]]`` parameter receives an empty list, and a scalar ``DQuery[T]`` parameter receives ``None``.
 
 DForm
 ~~~~~
@@ -142,7 +145,8 @@ RegisteredParameterProvider
    :no-index:
 
 Base class for custom parameter providers.
-Implement ``can_handle`` and ``resolve`` to plug a custom data source into the resolver.
+``can_handle`` and ``resolve`` are the two abstract methods, and together they plug a custom data source into the resolver.
+Override ``static_can_handle`` to settle a parameter from its signature alone, and ``compile_resolve`` to fold the work ``resolve`` repeats into one call the plan holds.
 
 See also
 --------

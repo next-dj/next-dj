@@ -40,14 +40,10 @@ def build_nested_page(root: Path, *, body: str = "<h1>{{ title }}</h1>") -> Path
     The ancestor layouts wrap the body in ``<html>`` and ``<main>``, so a
     composition reads back as the chain that produced it.
     """
-    (root / "layout.djx").write_text(
-        "<html>{% block template %}{% endblock template %}</html>"
-    )
+    (root / "layout.djx").write_text("<html>{% template %}</html>")
     mid = root / "mid"
     mid.mkdir()
-    (mid / "layout.djx").write_text(
-        "<main>{% block template %}{% endblock template %}</main>"
-    )
+    (mid / "layout.djx").write_text("<main>{% template %}</main>")
     leaf = mid / "leaf"
     leaf.mkdir()
     page_file = leaf / "page.py"

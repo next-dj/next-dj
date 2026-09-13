@@ -93,9 +93,7 @@ class TestBenchLayoutLoader:
         for i in range(10):
             leaf = leaf / f"d_{i}"
             leaf.mkdir()
-            (leaf / "layout.djx").write_text(
-                "{% block template %}{% endblock template %}"
-            )
+            (leaf / "layout.djx").write_text("{% template %}")
         page_path = leaf / "page.py"
         page_path.write_text(_PY_SRC)
         loader = LayoutTemplateLoader()
@@ -132,7 +130,7 @@ class TestBenchLoaderChain:
         """No ``.djx`` sibling, so the chain falls through to a layout."""
         leaf = tmp_path / "d_0"
         leaf.mkdir()
-        (leaf / "layout.djx").write_text("{% block template %}{% endblock template %}")
+        (leaf / "layout.djx").write_text("{% template %}")
         page_path = leaf / "page.py"
         page_path.write_text(_PY_SRC)
         loaders = build_registered_loaders()
@@ -157,7 +155,7 @@ class TestBenchComposeLayoutHierarchy:
             leaf = leaf / f"d_{i}"
             leaf.mkdir()
             layout = leaf / "layout.djx"
-            layout.write_text("{% block template %}{% endblock template %}")
+            layout.write_text("{% template %}")
             layouts.append(layout)
         page_path = leaf / "page.py"
         page_path.write_text(_PY_SRC)

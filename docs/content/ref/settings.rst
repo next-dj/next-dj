@@ -46,10 +46,12 @@ Each key accepts one shape, and a value of any other type is dropped in favour o
 
 - The list keys (``PAGE_BACKENDS``, ``COMPONENT_BACKENDS``, ``STATIC_BACKENDS``, ``FORM_ACTION_BACKENDS``, ``PARTIAL_BACKENDS``, ``TEMPLATE_LOADERS``, ``FORM_ANCHOR_FILES``) accept a list.
 - The mapping keys (``NEXT_JS_OPTIONS``, ``FORM_WIZARD_BACKEND``) accept a dict.
-- The dotted-path keys (``URL_RESOLVER``, ``URL_NAME_TEMPLATE``, ``DEPENDENCY_RESOLVER``, ``COMPONENT_TEMPLATE_LOADER``) accept a string, and ``JS_CONTEXT_SERIALIZER`` accepts a string or ``None``.
+- The dotted-path keys (``URL_RESOLVER``, ``DEPENDENCY_RESOLVER``, ``COMPONENT_TEMPLATE_LOADER``) accept a string naming an importable class, and ``JS_CONTEXT_SERIALIZER`` accepts such a dotted path or ``None``.
+- ``URL_NAME_TEMPLATE`` also accepts a string, but a format template such as ``page_{name}`` rather than a dotted path.
 - The bool flags (``STRICT_CONTEXT``, ``STRICT_LOADING``, ``LAZY_COMPONENT_MODULES``, ``FORM_AUTODISCOVER``, ``STATIC_DISCOVERY_CACHE``) accept any value and pass through ``bool()``.
 
 A dropped value is reported at ``manage.py check`` as ``next.E076``, or under the code the key owns where it carries one, and a bool flag holding a non-bool is reported as ``next.W072``.
+A top-level key that is not in this catalog is reported as ``next.E035``, and the merged view raises ``AttributeError`` for it, so a typo never reaches a read site as a default.
 See :doc:`system-checks` for the conditions.
 
 To change one key of a default backend entry without writing the entry out, build the replacement value with ``next.conf.extend_default_backend``, described under `Patching defaults`_.
@@ -216,7 +218,7 @@ Default value.
 
 The ``OPTIONS`` keys tune the active backend.
 ``VERSION`` is the source of the ``X-Next-Version`` stamp.
-The sentinel ``"manifest"`` hashes the staticfiles manifest when the active storage hashes its files, and an explicit string pins the version yourself.
+The sentinel ``"manifest"`` hashes the staticfiles manifest when the active storage hashes its files, and an explicit string pins the version by hand.
 The resolved string is memoised for the life of the configuration, so a manifest replaced under a running process keeps serving the version resolved before it until a settings reload or a restart.
 Without a manifest storage the version guard stays silent at runtime, and ``manage.py check`` reports ``next.W069``.
 ``PUSH_WIZARD_STEPS`` is the global default for pushing wizard steps to browser history, which a wizard's ``Meta.push_steps`` overrides per wizard.
@@ -268,7 +270,7 @@ Default value ``"next.deps.DependencyResolver"``.
 The class owns every injection the framework performs, from page views and ``@context`` callables to form actions and component renderers.
 A custom value must name a ``next.deps.DependencyResolver`` subclass.
 The framework ships a second one, ``next.deps.linear.LinearDependencyResolver``, which resolves each parameter by walking the providers instead of replaying a compiled plan.
-It answers identically and costs about three times as much, so it earns its place as a differential oracle in the test suite rather than as a production choice.
+It answers identically but pays the whole provider walk for every parameter of every call, where the default resolver compiles that work into a plan once and replays it, so it earns its place as a differential oracle in the test suite rather than as a production choice.
 Widening the public ``skips`` predicate is the usual reason to subclass, because it decides which parameters a compiled plan carries at all.
 A path that fails to import, or one that names anything other than a ``DependencyResolver`` subclass, raises :exc:`~django.core.exceptions.ImproperlyConfigured`.
 The key is read through ``next.backends.resolve_setting_class``, documented in :doc:`backends`, the same helper ``URL_RESOLVER`` goes through.

@@ -89,7 +89,8 @@ Override with ``Meta.scope``.
    Any other value triggers ``next.E047`` and the class is not registered.
 
 Customise the set of anchor file names through ``NEXT_FRAMEWORK["FORM_ANCHOR_FILES"]``.
-The default set is ``["page.py", "component.py"]``.
+The setting defaults to ``None``, which means the built-in set of ``page.py`` and ``component.py``.
+A list replaces that set outright rather than extending it, so keep ``page.py`` in it unless page modules really should register shared actions.
 
 Lookup order in templates.
    ``{% form %}`` and ``{% action_url %}`` resolve a name against the nearest anchor first.
@@ -176,7 +177,7 @@ The framework uses it as the ``instance`` kwarg when constructing the form.
 
 You never call ``get_initial`` yourself.
 The dispatcher calls it through the dependency injector before the initial render.
-``request`` is supplied by the framework only to a parameter annotated ``HttpRequest``, an unannotated ``request`` parameter resolves to ``None``.
+``request`` follows the same annotation rule as ``on_valid`` above.
 A parameter whose name matches a captured URL segment is filled from the URL, so ``note_id`` above receives the ``note_id`` route kwarg.
 Any other parameter resolves through a registered provider, the same as on a handler.
 The base signatures carry no positional arguments of their own.
@@ -264,7 +265,7 @@ Mark such a class abstract, or move the handler logic into its ``on_valid``.
 
    import next.forms
    from next import action
-   from next.forms.markers import DForm
+   from next.forms import DForm
 
    class ContactForm(next.forms.ModelForm):
        class Meta:
@@ -548,6 +549,7 @@ An empty return value sends nothing.
 
 The message is sent only when the action outcome shapes into a response with a status below 400, so a failed validation flashes nothing.
 On a ``FormWizard`` the message is sent once, after ``done`` succeeds, interpolated over the merged step data.
+Under the partial runtime a pending message becomes a toast patch of its own, one per message, see :doc:`/content/topics/partial-rendering/reference`.
 
 The messages framework must be fully installed, with ``django.contrib.messages`` in ``INSTALLED_APPS`` and ``MessageMiddleware`` in ``MIDDLEWARE``.
 Without it a valid submission raises ``MessageFailure`` rather than silently dropping the message, and the ``next.W061`` check reports the gap at ``manage.py check`` time.
@@ -575,7 +577,7 @@ Success redirects
 ``Meta.success_url`` names where the default ``on_valid`` redirects after a valid submission.
 An explicit ``success_url`` wins over the ``redirect_to_origin`` default.
 The value is a path string, a lazy object, or a zero-argument callable returning the path, evaluated when the response is built.
-:func:`next.urls.page_reverse_lazy` is the lazy companion of ``page_reverse`` for exactly this position, because ``Meta`` evaluates at class definition, before the URLconf is ready.
+``next.urls.page_reverse_lazy`` is the lazy companion of ``page_reverse`` for exactly this position, because ``Meta`` evaluates at class definition, before the URLconf is ready.
 
 .. code-block:: python
 
@@ -596,6 +598,10 @@ Returning the instance redirects to its ``get_absolute_url()``, the ``CreateView
    def on_valid(self, request: HttpRequest):
        return self.save()
 
+The default ``on_valid`` is the only reader of ``Meta.success_url``.
+A ``FormWizard``, a handler registered through ``@action(..., form_class=...)``, and any custom ``on_valid`` each return a response of their own, so the key is ignored on those three paths.
+``Meta.success_message`` keeps working on the handler path, where the dispatcher flashes it from the bound form once the handler's response comes back.
+
 System checks
 -------------
 
@@ -603,8 +609,9 @@ The forms subsystem contributes Django system checks that run through ``python m
 The registration and scope checks are listed here, the wizard checks on :doc:`wizard`, the backend-configuration checks on :doc:`backends`, and the component-widget checks on :doc:`field-components`.
 
 ``next.E041``
-   Two or more registrations share the same action name but come from different handlers.
-   Rename one of them or move one to a different scope.
+   One scope registered the same action name twice with two different handlers, for example two decorated functions sharing a name in one file.
+   Rename one of them, or move one declaration to a different file so the two get distinct scope keys.
+   The same name in two different page scopes is legal and raises nothing, and a clash between two shared declarations is reported by ``next.E046`` instead.
 
 ``next.E046``
    Two distinct modules declare a shared form action with the same derived name.

@@ -26,7 +26,7 @@ What to include
 A complete report contains the following.
 
 - Dependency versions that match your environment (for example a lock file or the output of ``pip freeze``) so maintainers can reproduce the stack.
-- The affected subsystem (pages, components, forms, static, deps, server, conf).
+- The affected subsystem (pages, components, forms, urls, partial, static, deps, server, conf).
 - A reproducible test case or at minimum a step by step description.
 - The observed impact, including any account or data exposure.
 - Suggested mitigations if you have any.

@@ -48,9 +48,15 @@ A ``500.html`` template renders with an empty context because the failure may ha
            "BACKEND": "django.template.backends.django.DjangoTemplates",
            "DIRS": [BASE_DIR / "templates"],
            "APP_DIRS": True,
-           "OPTIONS": {"context_processors": []},
+           "OPTIONS": {
+               "context_processors": [
+                   "django.template.context_processors.request",
+               ],
+           },
        },
    ]
+
+The request processor stays in the list because ``next.E019`` reports its absence and ``{% form %}`` needs it.
 
 .. code-block:: html
    :caption: templates/404.html

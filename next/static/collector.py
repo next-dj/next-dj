@@ -63,8 +63,7 @@ class DedupStrategy(Protocol):
 class UrlDedup:
     """Dedupe inline assets by rendered body and URL-form assets by URL.
 
-    This is the process-wide default. It mirrors the behavior of the
-    original hand-rolled dedup built into the earlier collector.
+    This is the process-wide default.
     """
 
     def key(self, asset: StaticAsset) -> Hashable:

@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
     from next.forms.backends import FormActionBackend
     from next.forms.dispatch.responses import ActionOutcome
+    from next.forms.wizard import FormWizard
     from next.static import StaticCollector
     from next.urls import RouterBackend, RouterManager
 
@@ -108,6 +109,7 @@ class PartialShaper(Protocol):
         *,
         action_name: str,
         uid: str,
+        wizard: FormWizard | None,
     ) -> HttpResponse:
         """Return the form morph envelope of a validate-only pass."""
         ...

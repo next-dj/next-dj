@@ -1,0 +1,4 @@
+<h1>tag zone page</h1>
+{% zone "profile" %}
+{% form "tagged_profile_form" zone="profile" %}<div>{{ form.full_name }}{{ form.full_name.errors }}{{ form.email }}{{ form.email.errors }}</div>{% endform %}
+{% endzone %}

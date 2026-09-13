@@ -535,6 +535,43 @@ describe("Wire abortable validation", () => {
     expect(h.envelopes).toHaveLength(0);
   });
 
+  it("stamps the declared zone, not the queue key, on an abortable POST", async () => {
+    const h = makeWire(async () => envelopeResponse(ENVELOPE));
+    await h.wire.fetch({
+      url: "/f/",
+      method: "POST",
+      zone: "wizard",
+      queue: "validate:u",
+      abortable: true,
+    });
+    const headers = h.calls[0]!.init.headers as Record<string, string>;
+    expect(headers["X-Next-Zone"]).toBe("wizard");
+  });
+
+  it("queues an abortable POST on its own key, not on the declared zone", async () => {
+    const signals: AbortSignal[] = [];
+    let resolveFirst!: (r: Response) => void;
+    let n = 0;
+    const h = makeWire((_url, init) => {
+      signals.push(init.signal!);
+      n += 1;
+      if (n === 1) return new Promise<Response>((r) => (resolveFirst = r));
+      return Promise.resolve(envelopeResponse(ENVELOPE));
+    });
+    const first = h.wire.fetch({
+      url: "/f/",
+      method: "POST",
+      zone: "wizard",
+      queue: "validate:u",
+      abortable: true,
+    });
+    h.wire.abort("validate:u");
+    resolveFirst(envelopeResponse(ENVELOPE));
+    await first;
+    expect(signals[0]!.aborted).toBe(true);
+    expect(h.envelopes).toHaveLength(0);
+  });
+
   it("abort on an idle zone is a no-op", () => {
     const h = makeWire(async () => envelopeResponse(ENVELOPE));
     expect(() => h.wire.abort("nothing")).not.toThrow();

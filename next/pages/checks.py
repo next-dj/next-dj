@@ -36,6 +36,7 @@ from next.checks.common import (
 from next.conf import import_class_cached, next_framework_settings
 from next.deps import RESERVED_KEYS, ResolutionContext, resolver
 from next.deps.cache import DependencyCache
+from next.templatetags.pages import PLACEHOLDER, PLACEHOLDER_OPEN, PLACEHOLDER_PATTERN
 from next.utils import callable_name, walk_page_tree
 
 from .loaders import (
@@ -574,26 +575,46 @@ def _has_template_or_djx(file_path: Path) -> bool:
     return any(loader.can_load(file_path) for loader in build_registered_loaders())
 
 
+def _missing_placeholder_warning(layout_file: Path) -> CheckMessage:
+    """Build the `next.W001` report for a layout that holds no placeholder."""
+    return DjangoWarning(
+        f"Layout file {layout_file} carries no {PLACEHOLDER} placeholder, so "
+        "composition drops the layout and the pages under it render without its "
+        f"markup. Add {PLACEHOLDER} where the page body belongs, or the paired "
+        f"{PLACEHOLDER_OPEN} form whose body is the fallback.",
+        obj=str(layout_file),
+        id="next.W001",
+    )
+
+
+def _repeated_placeholder_warning(layout_file: Path, found: int) -> CheckMessage:
+    """Build the `next.W078` report for a layout that holds several placeholders."""
+    return DjangoWarning(
+        f"Layout file {layout_file} carries {found} {PLACEHOLDER} placeholders. "
+        "Composition fills the first one and every other renders its own fallback "
+        "instead of the page, so keep exactly one.",
+        obj=str(layout_file),
+        id="next.W078",
+    )
+
+
 def _check_layout_file(layout_file: Path) -> CheckMessage | None:
-    """Check if layout file has required `{% block template %}`."""
+    """Report a `layout.djx` that carries no placeholder or more than one."""
     try:
         content = layout_file.read_text(encoding="utf-8")
-        if "{% block template %}" not in content:
-            return DjangoWarning(
-                f"Layout file {layout_file} does not contain required "
-                "{% block template %} block. "
-                "This may cause template inheritance issues.",
-                obj=str(layout_file),
-                id="next.W001",
-            )
     except (OSError, UnicodeDecodeError):
-        pass
+        return None
+    found = len(PLACEHOLDER_PATTERN.findall(content))
+    if found == 0:
+        return _missing_placeholder_warning(layout_file)
+    if found > 1:
+        return _repeated_placeholder_warning(layout_file, found)
     return None
 
 
 @register(Tags.templates, NEXT)
 def check_layout_templates(*args, **kwargs) -> list[CheckMessage]:
-    """Check `layout.djx` files for the `{% block template %}` structure."""
+    """Check every `layout.djx` for exactly one page-body placeholder."""
     warnings: list[CheckMessage] = []
 
     router_manager, init_errors = get_router_manager()

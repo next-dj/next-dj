@@ -28,8 +28,8 @@ An area adds a module when it owns the concern, not to complete a template.
 
 ``registry.py``
    An ordered list of registrations plus a dict index over it.
-   Present in ``pages``, ``components``, and ``partial``.
-   A ``_version`` counter appears only where a derived cache needs invalidation, which today means ``next/components/registry.py`` alone.
+   Present in ``pages``, ``components``, ``deps``, and ``partial``.
+   A ``_version`` counter joins it wherever a derived cache has to be invalidated, which today means the page, component, and provider registries.
 
 ``manager.py``
    A façade over the area with lazy backend initialisation.
@@ -39,10 +39,32 @@ An area adds a module when it owns the concern, not to complete a template.
    A Protocol or ABC contract with settings-driven selection.
    Present in ``components``, ``forms``, ``partial``, ``static``, and ``urls``.
 
+``errors.py``
+   The area's public exceptions, each re-exported from the area's ``__init__.py`` so callers never import the module directly.
+   Present in ``deps``, ``forms``, ``pages``, ``partial``, and ``urls``.
+
 ``dispatch.py``, ``markers.py``, ``providers.py``, ``signals.py``, ``checks.py``
    Appear when the area dispatches actions, declares frozen dataclass markers, provides dependencies, emits signals, or validates configuration.
 
-The number of submodules varies from a handful in ``conf`` to nearly twenty in ``partial``, so no area serves as a size template for another.
+The number of submodules varies from four in ``server`` to seventeen in ``partial``, so no area serves as a size template for another.
+
+Where an area does ship the full set, the modules form one chain from the settings mapping to the structures a request reads.
+
+.. mermaid::
+
+   flowchart LR
+       Settings["NEXT_FRAMEWORK"]
+       Backends["backends.py"]
+       Manager["manager.py"]
+       Registry["registry.py"]
+       Checks["checks.py"]
+       Signals["signals.py"]
+
+       Settings -- "backend entries" --> Backends
+       Backends -- "instantiated backends" --> Manager
+       Manager -- "discovered entries" --> Registry
+       Manager -- "configuration to validate" --> Checks
+       Manager -- "lifecycle emissions" --> Signals
 
 Legitimate deviations
 ---------------------

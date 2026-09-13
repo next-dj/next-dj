@@ -39,6 +39,8 @@ The six tutorial parts build a small Notes application from there.
 :doc:`tutorial06`
    Make the index live with zones and partial rendering, with a no-JavaScript fallback.
 
+.. rubric:: After the tutorial
+
 :doc:`limitations`
    The deliberate boundaries of the framework, from the synchronous pipeline to the single partial backend.
 

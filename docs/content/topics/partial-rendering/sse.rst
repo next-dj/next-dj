@@ -16,7 +16,7 @@ The stream helper
 
 ``PatchEventStream`` is a :class:`~django.http.StreamingHttpResponse` returned from a page's ``render`` escape hatch.
 There is no dedicated SSE endpoint and no new public URL.
-The page view authorises the subscriber, the same as any other page.
+The page view authorizes the subscriber, the same as any other page.
 
 .. code-block:: python
    :caption: stream/page.py
@@ -41,7 +41,7 @@ The page view authorises the subscriber, the same as any other page.
        """Open the patch event stream for one poll."""
        return PatchEventStream(request, patch_source(request, poll.pk))
 
-Each ``Patches`` the source yields becomes one ``next-patches`` event, serialised by the active protocol backend, the same shape an HTTP response carries.
+Each ``Patches`` the source yields becomes one ``next-patches`` event, serialized by the active protocol backend, the same shape an HTTP response carries.
 A ``data-next-sse="/url/"`` element on the page opens the ``EventSource`` and routes each event into the same apply pipeline an HTTP response uses.
 
 The refresh fan-out
@@ -78,7 +78,7 @@ The application channel threads the mutation's ``X-Next-Request-Id`` to the stre
 
    Patches(request, echo_of=change.request_id).refresh(zone="poll-results")
 
-The serialiser stamps ``echo_of`` as the envelope's ``request_id``.
+The builder carries ``echo_of`` into the envelope as its ``request_id``, and every protocol backend serializes it unchanged.
 The client keeps the last 25 of its own ``X-Next-Request-Id`` values and drops an event whose id matches.
 Past 25 concurrent in-flight mutations the oldest id falls out of the ring and the subscriber applies one extra ``refresh``, which is safe.
 
@@ -104,6 +104,7 @@ Under WSGI the stream also occupies one worker for the full life of the connecti
 An async source under ASGI receives heartbeat comments.
 The stream interleaves a heartbeat during a quiet period through :func:`asyncio.wait`, so a buffering proxy keeps the connection.
 The heartbeat period is ``SSE.HEARTBEAT_SECONDS`` in ``PARTIAL_BACKENDS``.
+One stream overrides the period with ``PatchEventStream(request, source, heartbeat_seconds=10)``, which leaves the backend default in place for every other stream.
 
 .. list-table::
    :header-rows: 1
@@ -137,6 +138,36 @@ A tab hidden for less than three seconds reconnects the stream and skips the re-
 Each connection tracks at most 64 zones for the resume re-GET, so a long sleep cannot storm the server.
 Events missed while paused are not lost, because ``refresh`` is idempotent.
 The re-fetch brings the current state regardless of how many fan-outs were missed.
+
+Stream telemetry
+----------------
+
+``PatchEventStream`` announces its own life through two signals, both sent with the stream class as the sender.
+``sse_stream_opened`` carries the ``request`` and fires when the response is built.
+``sse_stream_closed`` carries the ``request``, the ``duration_ms`` the connection lived, and the ``envelopes_sent`` count flushed over it, and fires when the source is exhausted or the client is gone.
+
+.. code-block:: python
+   :caption: notes/receivers.py
+
+   import logging
+
+   from django.dispatch import receiver
+
+   from next.signals import sse_stream_closed
+
+   logger = logging.getLogger(__name__)
+
+
+   @receiver(sse_stream_closed)
+   def log_stream_close(sender, **kwargs) -> None:
+       logger.info(
+           "stream closed after %.0fms, %d envelopes",
+           kwargs["duration_ms"],
+           kwargs["envelopes_sent"],
+       )
+
+A receiver connects once at startup, see :doc:`/content/topics/signals` for the ``ready`` idiom.
+The full payloads of every partial signal are listed in :doc:`/content/ref/signals`.
 
 See also
 --------

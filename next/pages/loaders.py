@@ -29,6 +29,12 @@ from next.conf import next_framework_settings
 from next.conf.imports import import_class_cached
 from next.conf.signals import settings_reloaded
 from next.pages.errors import PageModuleImportError
+from next.templatetags.pages import (
+    PLACEHOLDER,
+    PLACEHOLDER_CLOSE,
+    PLACEHOLDER_OPEN,
+    PLACEHOLDER_PATTERN,
+)
 from next.utils import (
     MAX_ANCESTOR_WALK_DEPTH,
     classify_dirs_entries,
@@ -327,6 +333,14 @@ class DjxTemplateLoader(TemplateLoader):
         return djx_file if djx_file.exists() else None
 
 
+def _as_placeholder_fallback(body: str) -> str:
+    """Return `body` as the fallback of a paired placeholder.
+
+    Only a chain rendered without its ancestor layout ever shows the fallback.
+    """
+    return f"{PLACEHOLDER_OPEN}{body}{PLACEHOLDER_CLOSE}"
+
+
 class LayoutTemplateLoader(TemplateLoader):
     """Compose nested `layout.djx` wrappers around the page template."""
 
@@ -342,7 +356,7 @@ class LayoutTemplateLoader(TemplateLoader):
         if not layout_files:
             return None
 
-        template_content = self._wrap_in_template_block(file_path)
+        template_content = self._wrap_in_placeholder(file_path)
         return self._compose_layout_hierarchy(template_content, layout_files)
 
     def compose_skeleton(self, file_path: Path) -> str:
@@ -360,22 +374,17 @@ class LayoutTemplateLoader(TemplateLoader):
     def compose_body(self, body: str, file_path: Path) -> str:
         """Wrap `body` through the ancestor layout chain for `file_path`.
 
-        Returns `body` verbatim when no layouts apply. When a sibling
-        `layout.djx` exists the innermost layout owns the `{% block template %}`
-        slot, so `body` is substituted as-is. Otherwise `body` is wrapped in
-        a `{% block template %}` block before substitution so the ancestor
-        layout's placeholder remains a valid block.
+        Returns `body` verbatim when no layouts apply. When a sibling `layout.djx`
+        exists the innermost layout owns the placeholder, so `body` is substituted
+        as-is. Otherwise `body` becomes the fallback of a paired placeholder, which
+        renders it wherever the ancestor layout puts the hole.
         """
         layout_files = self._find_layout_files(file_path)
         if not layout_files:
             return body
 
         sibling_layout = (file_path.parent / "layout.djx").exists()
-        wrapped = (
-            body
-            if sibling_layout
-            else f"{{% block template %}}{body}{{% endblock template %}}"
-        )
+        wrapped = body if sibling_layout else _as_placeholder_fallback(body)
         return self._compose_layout_hierarchy(wrapped, layout_files)
 
     def layout_sources(self, file_path: Path) -> tuple[list[Path], list[Path]]:
@@ -464,8 +473,8 @@ class LayoutTemplateLoader(TemplateLoader):
         path_roots, _ = classify_dirs_entries(config.get("DIRS"), resolve_base_dir())
         return list(path_roots)
 
-    def _wrap_in_template_block(self, file_path: Path) -> str:
-        """Return the page body wrapped in `{% block template %}` when needed."""
+    def _wrap_in_placeholder(self, file_path: Path) -> str:
+        """Return the page body as a placeholder fallback when needed."""
         template_file = file_path.parent / "template.djx"
         if template_file.exists():
             with contextlib.suppress(OSError, UnicodeDecodeError):
@@ -473,25 +482,29 @@ class LayoutTemplateLoader(TemplateLoader):
                 layout_file = file_path.parent / "layout.djx"
                 if layout_file.exists():
                     return content
-                return f"{{% block template %}}{content}{{% endblock template %}}"
-        return "{% block template %}{% endblock template %}"
+                return _as_placeholder_fallback(content)
+        return PLACEHOLDER
 
     def _compose_layout_hierarchy(
         self, template_content: str, layout_files: list[Path]
     ) -> str:
-        """Return layouts wrapped outermost last, with the page in the first slot."""
+        """Return layouts wrapped outermost last, with the page in the first slot.
+
+        A layout carrying more than one placeholder is what `next.W078` reports.
+        """
         result = template_content
 
         for layout_file in layout_files:
             with contextlib.suppress(OSError, UnicodeDecodeError):
                 layout_content = layout_file.read_text(encoding="utf-8")
-                for placeholder in (
-                    "{% block template %}{% endblock template %}",
-                    "{% block template %}{% endblock %}",
-                ):
-                    if placeholder in layout_content:
-                        result = layout_content.replace(placeholder, result, 1)
-                        break
+                match = PLACEHOLDER_PATTERN.search(layout_content)
+                if match is not None:
+                    # Sliced in, because `re.sub` would read escapes in the body.
+                    result = (
+                        layout_content[: match.start()]
+                        + result
+                        + layout_content[match.end() :]
+                    )
         return result
 
 

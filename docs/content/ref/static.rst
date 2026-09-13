@@ -6,7 +6,7 @@ Static reference
 Module summary
 --------------
 
-``next.static`` exposes the asset discovery, the request-scoped collector, and the backend chain.
+``next.static`` exposes the asset discovery, the request-scoped collector, and the configured static backends.
 It also exposes the kind and placeholder registries, the ``next.min.js`` script builder, the staticfiles finder, and the JS context serializer.
 
 Public API

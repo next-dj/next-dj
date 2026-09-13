@@ -125,6 +125,7 @@ When you need to override a single key inside ``PAGE_BACKENDS`` without rewritin
    }
 
 The helper deep copies the default list and patches the first backend entry.
+Pass ``index=`` to patch a different entry when the default list carries more than one backend.
 Scalar and list overrides replace the existing value.
 Dict overrides such as ``OPTIONS`` are merged one level deep into the default dict.
 Use it for narrow overrides such as changing the page directory name.

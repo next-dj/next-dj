@@ -76,7 +76,7 @@ Verification
 ------------
 
 Open the page and confirm the card renders with the slot content.
-View the HTML source and confirm a ``<link>`` to ``info_card/component.css`` appears in ``<head>``.
+View the HTML source and confirm a ``<link>`` to ``/static/next/components/info_card.css`` appears in ``<head>``, because a component asset is named after the component rather than after the file stem.
 
 See also
 --------

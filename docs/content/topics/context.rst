@@ -56,7 +56,7 @@ The two path keys are seeded before any user-defined ``@context`` callable runs,
 
 A user ``@context`` callable reads ``request`` through an ``HttpRequest`` annotation rather than by parameter name.
 These path keys live in the template scope for the ``{% form %}`` and ``{% component %}`` tags to consume.
-They are not injected into a context callable by parameter name.
+They are not injected into a context function by parameter name.
 
 All four of these keys are reserved inside a component, so an unkeyed ``@component.context`` that returns ``request``, ``current_template_path``, ``current_page_module_path``, or ``current_component_module_path`` raises ``ValueError`` at render time.
 The two path anchors are guarded because ``{% form %}`` scopes its action lookup through them, so shadowing one would silently retarget a dispatch.
@@ -93,9 +93,10 @@ Unkeyed dict
 Decorating a function with bare ``@context`` and returning a dict merges every key into the template scope.
 
 .. code-block:: python
-   :caption: shared dependency
+   :caption: notes/pages/posts/[int:post_id]/page.py
 
    from next import context
+   from notes.models import Post
 
    @context
    def post_context(post: Post) -> dict[str, object]:
@@ -226,12 +227,13 @@ The framework computes the template scope in this order.
 1. URL kwargs from the matched route are seeded into the context dict.
 2. Inherited context functions from every ancestor ``page.py``, walked from the current page upward through every ancestor directory, bounded at 64 levels.
 3. Page level context functions declared in the current ``page.py``.
+   Within one ``page.py`` the keyless callable runs first and the keyed ones follow in the string order of their keys, so a dict merge never overwrites a value a keyed callable published.
    A callable tagged ``zone="name"`` runs only when that zone belongs to the batch the current zone GET asks for, and a callable of any other zone is never called.
    A full page render carries no batch and runs every page level callable, tagged or not.
 4. Context processors run after every ``@context`` callable.
    A processor is called with the request, and the callable must declare a parameter named ``request``.
    The first source is ``OPTIONS.context_processors`` on each page backend entry inside ``PAGE_BACKENDS``.
-   The second source is the ``context_processors`` list of the first ``TEMPLATES`` entry in Django settings.
+   The second source is the ``OPTIONS.context_processors`` list on the first ``TEMPLATES`` entry in Django settings.
    See :ref:`ref-settings` and :doc:`project-layout` for the backend layout.
    The two lists merge in that order with duplicate dotted paths dropped, so a processor listed twice runs once.
    Each processor return dict is applied with ``update``, so a processor key overwrites a page or inherited value.
@@ -296,7 +298,7 @@ Pass ``serializer=`` on that decorator for a per-key encoder, or set ``NEXT_FRAM
 A value marked ``serialize=True`` must be encodable by the active serializer.
 The default ``JsonJsContextSerializer`` runs values through Django ``DjangoJSONEncoder``.
 That encoder handles primitives, ``list``, ``dict``, ``datetime``, ``date``, ``time``, ``timedelta``, ``Decimal``, ``UUID``, and Django ``Promise`` instances such as lazy translation strings.
-Switching ``JS_CONTEXT_SERIALIZER`` to ``PydanticJsContextSerializer`` also unwraps :class:`pydantic.BaseModel` subclasses via ``model_dump``.
+Switching ``JS_CONTEXT_SERIALIZER`` to ``PydanticJsContextSerializer`` also unwraps ``pydantic.BaseModel`` subclasses via ``model_dump``.
 A ``QuerySet``, a ``Manager``, a bare model instance, a Django ``Form``, and any other unsupported type raises ``TypeError`` at render time with the offending key in the message.
 Materialise such values before returning.
 Use ``list(queryset)`` for collections and a plain ``dict`` projection for model instances.
@@ -345,7 +347,7 @@ Per page title
 Publish the page title from each page.
 
 .. code-block:: python
-   :caption: notes/pages/notes/[id]/page.py
+   :caption: notes/pages/notes/[int:note_id]/page.py
 
    from next import context
    from next.urls import DUrl

@@ -117,6 +117,9 @@ Route set change.
    A per-tree signature of directory mtimes and directory count gates the rescan, so an unchanged tree reuses the cached route set.
    A new or removed page directory calls ``notify_file_changed`` so Django restarts the process even when no watched file mtime changed.
 
+A scan that raises ``OSError``, ``ImportError``, or ``ValueError`` costs that tick its route-set comparison.
+The reloader logs the reason at debug level, keeps the set collected by the previous tick, and carries on watching ``.py`` mtimes, so a tree that cannot be walked never stops the development server.
+
 The route set diff is taken by ``NextStatReloader`` from the configured page roots.
 A custom router that builds routes from another source rebuilds them through ``router_manager.reload``, which is the public API covered in :doc:`/content/howto/reload-routes-from-code`.
 
@@ -151,7 +154,7 @@ Extension points
 ----------------
 
 - Register extra ``(path, glob)`` pairs from ``AppConfig.ready`` through ``register_autoreload_watch_spec``.
-- Subscribe to ``router_reloaded`` for in process cache refresh.
+- Subscribe to ``router_reloaded`` to refresh an in-process cache when the routers are rebuilt.
 - Subscribe to ``watch_specs_ready`` for diagnostic logging during development.
 
 Registering extra watch directories

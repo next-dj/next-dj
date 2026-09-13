@@ -77,6 +77,8 @@ export interface LayerStack {
   resolveSelector(selector: string, root: ParentNode): Element | null;
   /** The URL of the page that owns an element, a poll tick GETs this not the bar. */
   urlFor(el: Element): string;
+  /** The host page of the layer owning an element, absent outside every layer. */
+  hostFor(el: Element): string | undefined;
   /** Open a layer, building the dialog and zone container before the request. */
   open(opener: HTMLElement | null, href?: string, zone?: string): Promise<void>;
   /** Close the top layer, a result accepts and a dismiss rejects with a reason. */
@@ -160,6 +162,15 @@ export function createLayers(deps: LayerDeps): LayerStack {
     }
     const bottom = stack[0];
     return bottom === undefined ? currentUrl() : bottom.host;
+  }
+
+  // The opening page of the layer an element sits in. A mutation fired there rides it
+  // as X-Next-Origin, so the server resolves a foreign zone against the host.
+  function hostFor(el: Element): string | undefined {
+    for (const layer of Array.from(stack).reverse()) {
+      if (layer.root.contains(el)) return layer.host;
+    }
+    return undefined;
   }
 
   function busy(initiator: Element | null, target: Element | null): () => void {
@@ -359,6 +370,7 @@ export function createLayers(deps: LayerDeps): LayerStack {
     resolveZone,
     resolveSelector,
     urlFor,
+    hostFor,
     open,
     close,
     toast,

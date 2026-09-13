@@ -13,6 +13,7 @@ import {
   ATTR_KEY,
   ATTR_ZONE,
   HEADER_MERGE,
+  HEADER_ORIGIN,
   MAX_POLL_MS,
   MIN_POLL_MS,
   currentUrl,
@@ -63,13 +64,14 @@ export interface TriggerDeps {
     method?: string;
     uid?: string;
     zone?: string;
+    queue?: string;
     headers?: Record<string, string>;
     body?: BodyInit;
     abortable?: boolean;
     key?: string;
   }) => void;
-  // Abort the in-flight request on a zone queue, so a submit cancels its validation.
-  abort: (zone: string) => void;
+  // Abort the in-flight request on a queue, so a submit cancels its own validation.
+  abort: (key: string) => void;
   document?: Document;
   clock?: Clock;
   observer?: IntersectionAdapter;
@@ -78,6 +80,9 @@ export interface TriggerDeps {
   // The owning page of an element, answered by the layer stack. Absent, lazy and
   // poll GETs read the address bar.
   pageUrl?: (el: Element) => string;
+  // The host page of the layer an element sits in, answered by the layer stack. Absent,
+  // a submit inside a layer stamps no origin, the same as one outside.
+  layerHost?: (el: Element) => string | undefined;
   // The confirm gate. Absent, the default calls window.confirm.
   confirm?: ConfirmAdapter;
   // Dev builds warn on a hand-written value outside its closed set. A getter form
@@ -129,9 +134,10 @@ export function createTriggers(deps: TriggerDeps): Triggers {
   }
 
   const pageUrl = deps.pageUrl ?? (() => here());
+  const layerHost = deps.layerHost ?? ((): undefined => undefined);
 
-  // The abortable zone key of inline validation, shared by sender and canceller.
-  function validateZone(uid: string | null): string {
+  // The abortable queue key of inline validation, shared by sender and canceller.
+  function validateQueue(uid: string | null): string {
     return `validate:${uid ?? ""}`;
   }
 
@@ -199,9 +205,10 @@ export function createTriggers(deps: TriggerDeps): Triggers {
   }
 
   // Inline validation on blur. The FormData drops file fields so a multipart form
-  // does not re-upload on every blur, and the abortable zone collapses a burst.
+  // does not re-upload on every blur, and the abortable queue collapses a burst.
   function validateField(form: HTMLFormElement, field: string): void {
     const uid = form.getAttribute(ATTR_ACTION);
+    const zone = targetZone(form);
     const data = new FormData();
     for (const [name, value] of new FormData(form)) {
       if (value instanceof File) continue;
@@ -210,9 +217,11 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     deps.fetch({
       url: form.getAttribute("action") ?? here(),
       method: "POST",
-      // The validate POST carries a body but mutates nothing: keyed by zone and
-      // abortable, never taking the uid lock, so a fresh blur or submit aborts it.
-      zone: validateZone(uid),
+      // The validate POST carries a body but mutates nothing: an abortable queue of its
+      // own, never the uid lock, so a fresh blur or submit aborts it.
+      queue: validateQueue(uid),
+      // The declared zone, so the server can answer a validation with a zone morph.
+      ...(zone !== null ? { zone } : {}),
       abortable: true,
       headers: { [HEADER_VALIDATE]: field },
       body: data,
@@ -250,7 +259,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     if (uid === null) return;
     // A submit cancels its own in-flight validation, so a late answer never morphs
     // the form the server is about to re-render.
-    deps.abort(validateZone(uid));
+    deps.abort(validateQueue(uid));
     // Intercept as a partial mutation under the uid lock. Without the runtime the
     // form posts natively, so this is the enhancement, never the only path.
     event.preventDefault();
@@ -264,12 +273,16 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     const zone = targetZone(form);
     // The form's own key, so the response morphs this instance.
     const key = form.getAttribute(ATTR_KEY);
+    // A mutation fired from inside a layer names the host page, so the server resolves
+    // a foreign zone against the host and not the step page in the modal.
+    const origin = layerHost(form);
     deps.fetch({
       url: form.getAttribute("action") ?? here(),
       method: "POST",
       uid,
       ...(zone !== null ? { zone } : {}),
       ...(key !== null ? { key } : {}),
+      ...(origin !== undefined ? { headers: { [HEADER_ORIGIN]: origin } } : {}),
       body,
     });
   }

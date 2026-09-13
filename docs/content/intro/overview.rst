@@ -34,7 +34,7 @@ A team that wants component structure without a JavaScript build step.
 What next.dj adds
 -----------------
 
-next.dj layers six things on top of a regular Django project.
+next.dj layers seven things on top of a regular Django project.
 Each one starts from work a Django team does by hand today and names the mechanism that removes it.
 
 File router.
@@ -53,7 +53,7 @@ Layouts and context.
 Dependency injection.
    A Django view receives the request and the URL kwargs and fetches everything else itself, which repeats the same lookup in every view that needs it.
    Context functions, action handlers, and providers declare what they need as ordinary parameters instead, and the resolver fills them from the request, the URL, the query string, or a registered provider.
-   Markers such as ``DUrl`` and ``Depends`` name the source in the annotation.
+   Annotation markers such as ``DUrl`` name the source in the type position, and ``Depends(...)`` names it as the parameter default.
    See :doc:`/content/topics/dependency-injection`.
 
 Components.
@@ -74,6 +74,12 @@ Partial rendering.
    Every interaction degrades to a full page cycle when JavaScript is off.
    See :doc:`/content/topics/partial-rendering/index`.
 
+Co-located assets.
+   A stylesheet or a script for one page or component costs a static file path, a manual ``{% static %}`` tag, and the discipline to remove the tag when the markup goes.
+   A file whose stem matches the ``template.djx``, ``layout.djx``, or ``component.djx`` beside it is discovered as that owner's asset instead, so ``component.css`` and ``component.js`` belong to the component that owns them.
+   The ``{% collect_styles %}`` and ``{% collect_scripts %}`` tags mark the slots in the layout where the collected assets of the rendered page land.
+   See :doc:`/content/topics/static-assets/index`.
+
 .. _intro-overview-django-unchanged:
 
 What next.dj does not replace
@@ -89,8 +95,7 @@ A template that relies on a newline ending a block tag needs adjusting before ad
 
 For the design principles behind that split, read :doc:`/content/misc/design-philosophy`.
 
-The nouns *page*, *layout*, *component*, *action*, and *context function* appear on every documentation page.
-:doc:`/content/misc/glossary` defines each one.
+The nouns *page*, *layout*, *component*, *action*, and *context function* carry a specific meaning throughout this manual, and :doc:`/content/misc/glossary` defines each one.
 
 A minimal project
 -----------------

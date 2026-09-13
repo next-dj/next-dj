@@ -74,8 +74,11 @@ A dict maps a URL kwarg name to a different model lookup field for the case wher
            fields = ["slug", "title", "body"]
            instance_from_url = {"id": "pk"}
 
-Here the route captures ``id`` and the form loads the instance with ``Note.objects.get(pk=<captured value>)``.
+Here the route captures ``id`` and the form loads the instance with ``get_object_or_404(Note, pk=<captured value>)``.
 The dict key is the URL kwarg name and the value is the model field used in the lookup.
+
+The value may also traverse a relation with the usual double-underscore lookup, so ``{"author_slug": "author__slug"}`` finds the row through its related model.
+The ``next.E048`` check resolves only the first segment of such a value against the model, and the literal ``"pk"`` is accepted without being checked against the model fields at all.
 
 Lookup behaviour
 ~~~~~~~~~~~~~~~~
@@ -165,8 +168,6 @@ Every piece of that plumbing exists only to relocate the instance the page alrea
            instance_from_url = "slug"
 
 The default ``get_initial`` loads the article and the default ``on_valid`` saves it.
-The instance-loading plumbing collapses to one line.
-The hidden ``article_id`` field, the second :func:`~django.shortcuts.get_object_or_404`, and the field-by-field copy all give way to ``instance_from_url = "slug"``.
 A real ModelForm still carries whatever genuine logic the page needs, such as a custom ``on_valid``, a ``clean_slug`` validator, or widget overrides under ``Meta.widgets``.
 
 Create and edit with one class
@@ -208,7 +209,7 @@ Split the two when the create and edit fields diverge, when validation differs, 
 Handling submissions
 --------------------
 
-The default ``on_valid`` on ``ModelForm`` calls ``self.save()`` and then redirects to the origin page.
+The default ``on_valid`` on ``ModelForm`` calls ``self.save()``, then redirects to ``Meta.success_url`` when the class declares one and back to the origin page otherwise.
 Override it only when the redirect target differs or extra logic must run after saving.
 
 .. warning::

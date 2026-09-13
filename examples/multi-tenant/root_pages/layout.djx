@@ -15,7 +15,7 @@
 
   <main class="flex flex-1 flex-col">
     {% #component "container" extra="flex-1 py-8" %}
-      {% block template %}{% endblock template %}
+      {% template %}
     {% /component %}
   </main>
 

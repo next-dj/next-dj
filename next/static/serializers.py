@@ -1,10 +1,9 @@
 """Pluggable JS-context serializers for `@context(serialize=True)` values.
 
 `StaticCollector.add_js_context` delegates value encoding to a `JsContextSerializer`.
-The default implementation uses `DjangoJSONEncoder`, which handles the same set of types
-that the framework has always accepted. Applications that want to serialise pydantic
-models, msgspec structs, or any other type can point the `JS_CONTEXT_SERIALIZER` option
-at a class that implements the protocol.
+The default implementation uses `DjangoJSONEncoder`. Applications that want to
+serialise pydantic models, msgspec structs, or any other type can point the
+`JS_CONTEXT_SERIALIZER` option at a class that implements the protocol.
 """
 
 from __future__ import annotations
@@ -46,9 +45,8 @@ class JsContextSerializer(Protocol):
 class JsonJsContextSerializer:
     """Serialise values with Django's `DjangoJSONEncoder`.
 
-    This is the process-wide default. It mirrors the behaviour built
-    into the collector before serializers became pluggable. The output
-    uses compact separators so the inline init payload stays small.
+    This is the process-wide default, and its output uses compact separators
+    so the inline init payload stays small.
     """
 
     def dumps(self, value: object) -> str:

@@ -6,8 +6,7 @@ Zones save render and traffic
 A zone is an optimisation, not required markup.
 Partial rendering works on pages with no zones at all.
 This page explains what a zone buys, what the default costs without one, and the rule for dynamic list rows.
-The wire always carries the ``assets`` and ``form`` keys, serialised as ``[]`` and ``null`` when empty.
-The JSON examples on this page omit them when they are empty.
+The JSON examples on this page omit the empty ``assets`` and ``form`` keys, see :doc:`reference`.
 
 .. contents::
    :local:
@@ -37,8 +36,8 @@ The whole page renders even though one form is kept.
      "form": {"uid": "ab12cd34", "valid": false, "errors": {"title": ["…"]}}
    }
 
-The extract default costs no more than the no-runtime cycle, which re-renders the full page on every invalid submission.
-The runtime turns that same full render into a targeted DOM update for free.
+The extract default costs no more on the server than the no-runtime cycle, which re-renders the full page on every invalid submission.
+What the runtime adds is the targeted DOM update, at no extra render cost.
 
 Adding a zone
 -------------
@@ -83,7 +82,7 @@ The verb comes from the renderer registered for the asset kind, so a kind regist
 An inline body keeps that verb only when the kind wraps it in the element the runtime builds, so a body of a kind that wraps it differently, or not at all, also stays with the full render.
 On a zone ``GET`` the envelope also ships the values of the page's ``serialize=True`` context providers, introduced in :doc:`/content/topics/context`, as a ``context`` patch.
 ``Next.context`` therefore stays in step with the re-rendered zone.
-A zone declared inside the body of another renders as part of that body, so a standalone render of the outer zone also runs the context callables bound to the inner one.
+A zone declared inside the body of another renders as part of that body, so a standalone render of the outer zone also runs the context functions bound to the inner one.
 See :doc:`co-located-js` for what once-per-page execution means for behaviour.
 See :doc:`/content/topics/static-assets/asset-kinds` for the renderer that decides the verb, and :doc:`/content/topics/static-assets/index` for how the assets are discovered and bundled.
 
@@ -110,7 +109,7 @@ A hidden tab holds no poll timers.
 On its return to the foreground each zone refetches only when its own interval elapsed while hidden, and otherwise the countdown resumes with the remaining time.
 A brief flicker between tabs therefore fetches nothing, and switching windows does not storm the server.
 A polling zone shows its body, so it cannot also be ``lazy=``, the two modes are exclusive and combining them is a compile error.
-A context callable tagged ``@context(..., zone="name")`` does not run on a foreign poll tick.
+A context function tagged ``@context(..., zone="name")`` does not run on a foreign poll tick.
 A poll GET runs the zone-less callables plus the ones bound to the polled zone, see :doc:`/content/topics/context`.
 
 The wrapper element
@@ -129,7 +128,7 @@ Inside a ``<ul>``, a ``<select>``, or a ``<table>`` the parser would drop it, so
      {% endfor %}
    {% endzone %}
 
-Here ``page_obj`` is a Django :class:`~django.core.paginator.Page`, published by the paginated context callable of :ref:`topics-pages-pagination`.
+Here ``page_obj`` is a Django :class:`~django.core.paginator.Page`, published by the paginated context function of :ref:`topics-pages-pagination`.
 A ``Page`` iterates over its own rows, so the loop reads it directly.
 A table zone names ``tag="tbody"`` for the same reason, shown in the pagination scenario of :doc:`scenarios`.
 The wrapper carries ``data-next-zone`` regardless of the tag, so the zone stays addressable.
@@ -160,7 +159,7 @@ This is a documented limitation of a keyless morph, and the fix is one attribute
 ``data-next-key`` also drives the dedup of ``append`` and ``prepend``.
 A merge that brings a row whose key already exists replaces the existing row rather than duplicating it, which is what keeps infinite scroll free of duplicate rows under a race.
 
-The morph leaves an ``<input type="file">`` untouched, so a file the user already chose survives a morph of the surrounding zone.
+The morph never rewrites the live selection of an ``<input type="file">``, so a file the user already chose survives a morph of the surrounding zone.
 A multipart selection is never reset by a re-render of the form around it.
 
 A ``<details>`` the user toggled keeps its open state across a morph, because a ``toggle`` event marks the element touched and the morph then skips its ``open`` attribute for the life of the page.

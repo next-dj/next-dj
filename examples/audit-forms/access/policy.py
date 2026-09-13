@@ -7,9 +7,7 @@ POLICY_FIELD = "policy_acknowledged"
 class AcknowledgedStep(django_forms.Form):
     """Base step that carries the retention acknowledgement on every wizard step.
 
-    The acknowledgement is a real form field rather than raw markup so a
-    re-render reflects what the visitor actually submitted. Raw markup with a
-    hardcoded `checked` would let any partial morph put the tick back.
+    The acknowledgement is a real field, so a bound blur morph replays the tick sent.
     """
 
     policy_acknowledged = django_forms.BooleanField(

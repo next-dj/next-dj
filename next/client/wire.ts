@@ -43,14 +43,18 @@ export interface CsrfPayload {
 export interface WireRequest {
   url: string;
   method?: string;
-  // A mutation locks on the form uid, a safe GET queues on url plus zone.
+  // A mutation locks on the form uid, a safe GET queues on url plus queue key.
   // Absent both, the request runs unqueued and unlocked.
   uid?: string;
+  // The X-Next-Zone value, absent when the answer addresses the whole page.
   zone?: string;
+  // The queue and abort identity, defaulting to the zone. An inline validation names
+  // its own key, so the zone it declares still travels as the header.
+  queue?: string;
   headers?: Record<string, string>;
   body?: BodyInit;
-  // An inline validation rides a POST to carry the body but mutates nothing, so
-  // it joins the abortable zone queue and skips the mutation lock.
+  // An inline validation rides a POST to carry the body but mutates nothing, so it
+  // joins the abortable queue and skips the mutation lock.
   abortable?: boolean;
   // The initiating form's data-next-key, threaded to apply for a repeated form.
   key?: string;
@@ -156,17 +160,17 @@ export class Wire {
   }
 
   /**
-   * Abort the in-flight request on a zone queue without starting a new one, so
-   * a form submit can cancel its own inline validation. The bumped seq also
-   * makes any answer already on the wire discard itself.
+   * Abort the in-flight request on a queue without starting a new one, so a form submit
+   * can cancel its own inline validation. The bumped seq also makes any answer already
+   * on the wire discard itself.
    */
-  abort(zone: string): void {
-    const entry = this.#queues.get(zone);
+  abort(key: string): void {
+    const entry = this.#queues.get(key);
     if (entry === undefined) return;
     entry.controller.abort();
     // Bump the seq so a response that resolves before the abort is observed is
     // still dropped as stale.
-    this.#queues.set(zone, {
+    this.#queues.set(key, {
       controller: new AbortController(),
       seq: entry.seq + 1,
     });
@@ -196,14 +200,15 @@ export class Wire {
     }
   }
 
-  // A safe GET queues per path+zone so two pages sharing a zone name run
+  // A safe GET queues per path+key so two pages sharing a zone name run
   // independently while a re-filtered GET of the same page supersedes its
   // predecessor. The space separator cannot appear in either part. An abortable
-  // POST keeps the bare zone key that abort() addresses.
+  // POST keeps the bare queue key that abort() addresses.
   #queueKey(request: WireRequest, safe: boolean): string | undefined {
-    if (request.zone === undefined) return undefined;
-    if (safe) return `${request.url.split("?")[0]} ${request.zone}`;
-    return request.abortable === true ? request.zone : undefined;
+    const key = request.queue ?? request.zone;
+    if (key === undefined) return undefined;
+    if (safe) return `${request.url.split("?")[0]} ${key}`;
+    return request.abortable === true ? key : undefined;
   }
 
   // A new safe GET to a target aborts the in-flight one (latest-wins). The

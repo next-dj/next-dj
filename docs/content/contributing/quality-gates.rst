@@ -62,9 +62,10 @@ The suite runs with ``--cov=next`` and ``--cov-fail-under=100``, so a single unc
 The gate is identical locally and in continuous integration, which runs the suite against the installed wheel rather than the source tree.
 A ``[tool.coverage.paths]`` mapping collapses ``next/`` and ``*/site-packages/next/`` so the two runs report the same numbers.
 
-System check modules are excluded from that gate.
-The ``omit`` list in ``pyproject.toml`` covers ``next/checks/`` and every per-area ``checks.py`` module, so a contributor writing a new system check does not chase coverage there.
-Every other module under ``next/`` is inside the gate.
+Most system check modules are excluded from that gate.
+The ``omit`` list in ``pyproject.toml`` names ``next/checks/`` together with the per-area ``checks.py`` modules of ``apps``, ``components``, ``conf``, ``forms``, ``pages``, ``partial``, and ``urls``.
+``next/static/checks.py`` is not in that list and stays inside the gate, so a static check still carries its own tests.
+The generic ``*/settings.py`` entry lifts ``next/conf/settings.py`` out of the gate as well, which is why new configuration logic belongs in another module of the ``conf`` area.
 
 Each example project carries its own gate.
 ``make test-examples`` requires a ``tests/`` directory or a ``tests.py`` file in every example that ships a ``manage.py``, and it runs each one with ``--cov-fail-under=100``.
@@ -116,7 +117,7 @@ Support matrix
 
 A dedicated ``build`` job produces the wheel and the source distribution once, and the matrix jobs install that wheel rather than running from the source tree.
 Each matrix job then pins its Django with ``uv pip install "django==<version>"`` after the wheel is installed, which is deliberate and not a broken lockfile.
-The matrix covers Python 3.12, 3.13, and 3.14 against Django 5.2, 6.0, and 6.1, and excludes Python 3.14 against Django 5.2.
+The matrix covers every combination the *Requirements* list in :doc:`/content/intro/install` names.
 
 A separate ``test-compat`` job runs ``pytest tests/compat`` with the ``compat`` dependency group, which pins django-crispy-forms, crispy-bootstrap5, django-widget-tweaks, django-htmx, and django-allauth.
 That job checks the framework against the ecosystem packages a project is likely to have installed already.
@@ -126,7 +127,12 @@ Client runtime
 
 The ``test-js`` job type-checks the TypeScript sources with ``tsc --noEmit``, checks formatting with Prettier, lints with ESLint, and bundles ``next/client/next.ts`` with esbuild.
 It then enforces a hard budget of 14 KB gzipped on ``next/static/next/next.min.js``, because the runtime ships on every page, and that budget check runs in continuous integration only.
+Growth past the budget calls for a lazily loaded chunk rather than a larger single file.
 The job finishes with the vitest run and its coverage thresholds.
+
+``next/client/next.ts`` is the single entry point that mounts ``window.Next`` and pulls in the morph, apply, wire, layer, trigger, asset, and stream modules.
+``make build-js`` runs the same esbuild pass locally, minifying the bundle to ``next/static/next/next.min.js`` with a source map beside it and targeting ES2022.
+The compiled file is a build product rather than a tracked source file, and the packaging configuration lists it as a build artefact so a distribution carries it.
 
 Supply chain
 ------------

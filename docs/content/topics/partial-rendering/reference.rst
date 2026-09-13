@@ -3,12 +3,47 @@
 Partial rendering reference
 ===========================
 
-The patch verbs, the request and response headers, the ``data-next-*`` attributes, and the ``PARTIAL_BACKENDS`` settings, in tables.
+The envelope fields, the patch verbs, the request and response headers, the ``data-next-*`` attributes, and the ``PARTIAL_BACKENDS`` settings, in tables.
 For the narrative behind any of these, read the scenario that uses it in :doc:`scenarios`.
 
 .. contents::
    :local:
    :depth: 1
+
+Envelope fields
+---------------
+
+Every partial response is one JSON envelope, and the six top-level keys below are its whole surface.
+A protocol backend that authors its own wire format carries the same fields under whatever names it chooses.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 18 22 60
+
+   * - Field
+     - When
+     - Semantics
+   * - ``version``
+     - Always
+     - The asset version the envelope was built under, the value the client compares against the one it holds.
+   * - ``ops``
+     - Always
+     - The ordered patch list, ``[]`` when the response carries no operation.
+   * - ``assets``
+     - Always
+     - The asset manifest of the rendered targets, ``[]`` when empty.
+   * - ``form``
+     - Always
+     - The form meta of a submitted action, its ``uid``, ``valid`` flag and ``errors`` mapping, and ``null`` when the response answers no form.
+   * - ``csrf``
+     - A token rotation
+     - The ``header`` and ``token`` pair the runtime switches to.
+       The client rewrites every ``csrfmiddlewaretoken`` input in the document and sends the new token on the next mutation.
+   * - ``request_id``
+     - A stream envelope
+     - The id of the mutation the envelope echoes, which a subscriber matches against its echo ring to drop its own write, see :doc:`sse`.
+
+The JSON examples on this page omit ``assets`` and ``form`` when they are empty.
 
 Patch verbs
 -----------
@@ -16,7 +51,6 @@ Patch verbs
 A patch is one addressed DOM operation with a verb, an optional target, optional HTML, and verb-specific extras.
 The operations apply in list order.
 The server is the only author of a target, the client never names one.
-The envelope around the list always carries the ``assets`` and ``form`` keys, serialised as ``[]`` and ``null`` when empty, and the JSON examples in this section omit them.
 ``Patches(request)`` opens the builder in a handler.
 ``Patches.versioned(version)`` opens the same builder for code that holds no request, a test of a custom operation or a hand-assembled envelope.
 
@@ -34,6 +68,7 @@ The envelope around the list always carries the ``assets`` and ``form`` keys, se
        Morph the target into the HTML.
        The target names a zone or a form by uid.
        ``extract: true`` carries a whole document the client trims to the target.
+       ``morph(zone=, overrides=)`` merges a mapping into the zone's render context, so a handler can bind a value the zone body reads without registering a provider for it.
      - ``extract: false``
    * - ``replace``
      - ``replace()``
@@ -98,6 +133,11 @@ A target carries exactly one address key, and the client resolves ``zone``, then
 ``zone`` names a ``data-next-zone`` wrapper and ``form`` names an action uid.
 ``field`` is a ``[uid, name]`` pair addressing one named input of a form by its uid.
 ``css`` is a raw selector, the escape hatch a bare layer shell relies on.
+
+A handler that returns ``None`` under the runtime also drains the pending :doc:`django.contrib.messages <django:ref/contrib/messages>` into ``toast`` patches, one per message, with the message level mapped to the toast variant.
+The drained variants are ``info``, ``success``, ``warning``, and ``error``, with ``debug`` mapped to ``info``.
+An action that already sets ``Meta.success_message`` therefore shows a toast without a builder call.
+Draining marks the messages read, so a later full navigation does not replay them.
 
 A verb beyond this set is registered on both sides.
 ``register_patch_op("confetti")`` on the server registers the name, which the ``next.E066`` check validates at ``manage.py check``, and earns the generic ``op()`` channel on the builder.
@@ -175,7 +215,7 @@ All values are ASCII, and zone names are ASCII slugs.
      - Every intercepted request
      - ``application/vnd.next.patches+json, text/html;q=0.9``, the switch at the content-negotiation level.
    * - ``X-Next-Zone``
-     - Zone GET, refresh, filter
+     - Zone GET, poll, refresh, filter, and a zoned form submission
      - The zones to render, comma-joined for a batch.
    * - ``X-Next-Validate``
      - Inline validation
@@ -196,6 +236,10 @@ All values are ASCII, and zone names are ASCII slugs.
    * - CSRF header
      - Every unsafe method once the runtime holds a token
      - The name comes from ``CSRF_HEADER_NAME``, the token from the ``$csrf`` init payload and from any later rotation meta, the cookie is never read.
+
+An inline-validation POST carries an internal ``validate:<uid>`` value in ``X-Next-Zone`` instead of a declared zone, and the server ignores that name because no page declares it.
+A batch renders every declared name it carries and drops the rest, so one stale name never poisons a sweep.
+Only a batch in which no name is declared is a 400.
 
 Response headers
 ----------------
@@ -251,13 +295,14 @@ Status codes
        On a mutation the runtime stays in place and fires ``partial:error`` with the status and body.
        On a safe method it navigates fully.
    * - 400
-     - An intent that did not validate, such as an unknown zone, a bad origin, or a zone named on a dynamic page body.
+     - An intent that did not validate, such as a zone no name in the batch declares, a bad origin, or a zone named on a dynamic page body.
    * - 404
      - The request named a form uid the action registry does not hold.
    * - 409
      - A version mismatch on a safe method, with an empty body.
-       The runtime fully visits the current URL.
-       A mutation always runs, and a version mismatch surfaces in the envelope version, which the client reads to reload once into a full client visit.
+       The runtime fully visits the URL the request was made against, which is the page that owns the zone rather than whatever the address bar holds.
+       A mutation always runs.
+       The version mismatch then travels in the envelope version, and the client answers it with one full navigation under the reload-once flag.
    * - 5xx
      - No envelope.
        The runtime swaps nothing and fires ``partial:error``.
@@ -287,7 +332,8 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from its par
      - ``load`` or ``revealed``, the materialisation trigger.
        On a zone wrapper ``load`` fetches on ``ready`` and ``revealed`` waits for the viewport.
        On a pagination sentinel the attribute only marks the link observable, either value arms the observer that fires the merge GET.
-       A value outside the two is ignored, with a console warning in dev.
+       On a zone wrapper a value outside the two is ignored.
+       On a sentinel the value is not read at all, and either way a dev build warns about an unrecognised value.
    * - ``data-next-poll``
      - Zone wrapper
      - The poll interval in milliseconds, from the ``poll=`` literal, written on the full render and on the partial response wrapper.
@@ -390,6 +436,7 @@ The ``next:mounted``, ``next:removed``, and ``next:morph-*`` node events live on
    * - ``partial:before-apply``
      - Yes
      - ``{envelope}``, the op list is mutable.
+       The veto lives on the document event, so only a ``document.addEventListener`` listener can call ``preventDefault()``, while a ``Next.on`` listener merely observes.
    * - ``partial:applied``
      - No
      - ``{envelope, ok}``.
@@ -471,7 +518,7 @@ A member whose name starts with an underscore is a test seam rather than part of
    * - ``Next._init(context)``
      - Nothing
      - The bootstrap the injected init script calls once per page.
-       It opens the dev channel when the payload sets ``$dev`` to ``true``, seeds the context, mounts the document, and fires ``context-updated`` then ``ready``.
+       It opens the dev channel when the payload sets ``$dev`` to ``true``, seeds the context and fires ``context-updated``, mounts the document, then fires ``ready``, so a ``ready`` listener sees a mounted document and a ``context-updated`` listener does not.
    * - ``Next.partial.defineOp(name, handler)``
      - Nothing
      - Register a handler for a custom verb the server authors, dispatched through the same pipeline as the built-ins.
@@ -532,87 +579,12 @@ An ``ops`` or ``assets`` value that is not an array is dropped whole and earns i
 An asset whose insertion verb the envelope boundary cannot resolve is a ``console.debug`` skip naming its kind, because a kind with a custom renderer is a normal configuration rather than damage.
 A production page carries no ``$dev`` key, so it carries neither the measurements nor any of the console lines.
 
-How the bundle is built and shipped
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+How the bundle is shipped
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The runtime is written as TypeScript modules under ``next/client/``, with ``next.ts`` as the single entry point that mounts ``window.Next`` and pulls in the morph, apply, wire, layer, trigger, asset, and stream modules.
-``make build-js`` runs esbuild over that entry point, bundling and minifying it to ``next/static/next/next.min.js`` with a source map beside it, targeting ES2022.
-The compiled file is a build product rather than a tracked source file, and the packaging configuration lists it as a build artefact so a distribution carries it.
-
-Inside a project the file is an ordinary staticfiles asset of the ``next`` application, published under the path ``next/next.min.js``, which the script builder resolves through the active staticfiles storage before writing the preload hint and the script tag.
+Inside a project the runtime is an ordinary staticfiles asset of the ``next`` application, published under the path ``next/next.min.js``, which the script builder resolves through the active staticfiles storage before writing the preload hint and the script tag.
 A project therefore installs no Node toolchain of its own to serve the runtime, and the pipeline that fingerprints the rest of its static files fingerprints this one the same way.
-Continuous integration builds the bundle on every change and holds it to a fourteen kilobyte gzip budget, so growth past that point calls for a lazily loaded chunk rather than a larger single file.
-
-Intercepting modals
--------------------
-
-A ``data-next-layer`` link opens a modal over the current view and pushes the honest URL of the modal body.
-The pushed URL is the real address of the body rather than a masked URL of the page beneath it.
-A refresh or a shared link resolves that URL as its own standalone page through its own ``page.py``, and Back closes the top layer.
-There is no client router and no URL masking.
-A single ``popstate`` handler closes the layer whose pushed URL the browser moved past.
-
-``data-next-confirm`` and ``data-next-layer`` combine on one link.
-The confirm gate is a capture-phase click handler, the layer opener is a bubble-phase one, so the confirm runs first regardless of install order.
-A cancelled confirm stops the click before it reaches the opener, so the layer never opens.
-An accepted confirm lets the click through and the layer opens.
-The same gate protects every click-driven trigger, so a prompt fronts a layer open the same way it fronts a pagination merge.
-
-.. _partial-server-layers:
-
-Server-initiated layers
------------------------
-
-``Patches.layer_open`` opens a layer from a handler, the server counterpart of the ``data-next-layer`` opener.
-Its signature is ``layer_open(*, zone=None, href=None)``, and the two keywords select one of three forms.
-
-A layer shows a zone of a page, uniformly.
-There is no separate mechanism for a whole page in a modal.
-A page that opens in a layer declares a zone with ``{% zone "name" %}``, and that name travels to ``layer_open`` or to ``data-next-layer``.
-
-.. list-table::
-   :header-rows: 1
-   :widths: 40 60
-
-   * - Call
-     - Effect
-   * - ``layer_open()``
-     - Open a bare modal shell.
-       Its container carries no zone name, so only a css-targeted patch can address it.
-       Name a zone to fill the modal with zone patches.
-   * - ``layer_open(zone="cart")``
-     - Open a layer whose zone container is named ``cart``, so a following ``morph(zone="cart")`` in the same envelope lands inside the modal.
-   * - ``layer_open(href="/records/42/", zone="record")``
-     - Fetch the ``record`` zone of ``/records/42/`` and load it into the layer.
-       The page at that href declares ``{% zone "record" %}``.
-
-A modal that shows a page's content takes the third form.
-
-.. code-block:: python
-   :caption: page.py
-
-   def open_record(self, request: HttpRequest, record_id: int) -> HttpResponse:
-       """Open the record's detail zone in a layer."""
-       return (
-           Patches(request)
-           .layer_open(href=f"/records/{record_id}/", zone="record")
-           .response()
-       )
-
-An href without a zone raises ``LayerHrefWithoutZoneError``.
-A layer loads a zone, so an href that names no zone has nowhere to mount its content.
-To open a page in a layer, wrap the page content in a zone and pass the zone name.
-The href is validated same-site like every navigation sink, a cross-site value raises ``CrossSiteHrefError``.
-
-The client ``data-next-layer="record"`` opener and the server ``layer_open(href, zone)`` do the same work, both load a page zone into a layer.
-
-Foreign-zone authorisation
---------------------------
-
-A modal body and a page-addressed zone ride ``X-Next-Origin`` so the server resolves the host page that owns the zone.
-The server authorises that origin before rendering a foreign page's zone, raising ``ForeignPageNotAuthorizedError`` when the origin may not render it.
-This keeps a page-addressed out-of-band render from reaching a zone the requester has no claim on.
-A foreign page whose module fails to import raises ``PageModuleImportError`` from the same authorisation step, rather than turning the in-flight request into a 404 and dropping the patches already queued for it.
+See :doc:`/content/contributing/quality-gates` for how the bundle is built and what holds its size.
 
 Settings
 --------
@@ -624,7 +596,7 @@ The rest are ignored, multi-backend selection is not supported, and a list with 
 .. code-block:: python
    :caption: the default
 
-   "PARTIAL_BACKENDS": [
+   [
        {
            "BACKEND": "next.partial.JsonPartialProtocolBackend",
            "OPTIONS": {
@@ -662,62 +634,12 @@ The rest are ignored, multi-backend selection is not supported, and a list with 
 
 See :doc:`/content/ref/settings` for every key inside ``NEXT_FRAMEWORK``.
 
-Styling layers and toasts
--------------------------
-
-The runtime creates a bare ``<dialog data-next-dialog>`` for every layer and a ``<div data-next-toasts>`` container for toasts.
-No framework CSS is applied.
-The selectors are the hook.
-
-.. code-block:: css
-   :caption: plain CSS
-
-   [data-next-dialog] {
-     width: 100%;
-     max-width: 32rem;
-     border-radius: 0.5rem;
-     border: 1px solid hsl(var(--border));
-     background-color: hsl(var(--background));
-     color: hsl(var(--foreground));
-     padding: 1.5rem;
-     box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1);
-   }
-   [data-next-dialog]::backdrop {
-     background-color: rgb(0 0 0 / 0.4);
-   }
-   [data-next-toasts] {
-     position: fixed;
-     bottom: 1rem;
-     right: 1rem;
-     display: flex;
-     flex-direction: column;
-     gap: 0.5rem;
-   }
-   [data-next-toast] { /* default variant */ }
-   [data-next-toast="success"] { /* success variant */ }
-
-With Tailwind Play CDN ``@apply`` is available inside a ``<style type="text/tailwindcss">`` block in the layout template.
-
-.. code-block:: jinja
-   :caption: layout.djx
-
-   <style type="text/tailwindcss">
-     [data-next-dialog] {
-       @apply w-full max-w-lg rounded-lg border border-border
-              bg-background text-foreground shadow-xl p-6;
-     }
-     [data-next-dialog]::backdrop {
-       @apply bg-black/40;
-     }
-   </style>
-
-The ``next.dj`` examples use both patterns through the shared ``_shared/static/shared/css/base.css`` file.
-
 See also
 --------
 
 .. seealso::
 
    :doc:`scenarios` for each verb, header, and attribute in the context of a task.
+   :doc:`layers` for the modal narrative behind the layer verbs and attributes.
    :doc:`/content/ref/system-checks` for the zone and verb checks.
    :doc:`/content/topics/signals` for the partial subsystem signals.

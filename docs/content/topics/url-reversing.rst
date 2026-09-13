@@ -4,7 +4,7 @@ URL reversing
 =============
 
 next.dj generates a URL name for every file-routed page.
-This page covers ``page_reverse`` and ``with_query``, the two reverse helpers exported from ``next.urls``.
+This page covers ``page_reverse``, its lazy variant ``page_reverse_lazy``, and ``with_query``, the three reverse helpers exported from ``next.urls``.
 
 .. contents::
    :local:
@@ -17,6 +17,7 @@ File-routed pages register Django URL names of the form ``next:page_<segments>``
 Those names work with the standard ``django.urls.reverse`` function.
 ``page_reverse`` accepts the directory template instead of the computed name, and reads ``URL_NAME_TEMPLATE`` itself so it keeps working when the prefix changes.
 See :doc:`file-router` for the segment-naming rules and the ``URL_NAME_TEMPLATE`` setting.
+``page_reverse_lazy`` defers the resolution to the first coercion to ``str``, for values built at class-definition time.
 
 ``with_query`` composes the query string of a URL that already exists.
 Pass keyword arguments to add or replace query parameters, pass ``None`` to remove a key, pass a list or tuple to repeat a key.
@@ -56,7 +57,8 @@ See :doc:`file-router` for the setting and the segment-naming rules.
 Namespace override
 ~~~~~~~~~~~~~~~~~~
 
-The default namespace is ``next``, configured through ``next.urls.manager.app_name``.
+The default namespace is ``next``, the ``app_name`` that ``next.urls`` declares for Django's namespacing.
+It is a fixed constant rather than a setting, so a call that targets another namespace passes the ``namespace`` keyword.
 ``page_reverse`` joins ``namespace`` to the computed URL name with a colon and hands the single view name to ``django.urls.reverse``, so the value must name a Django URL namespace that already exists.
 The ``next`` namespace exists because ``next.urls`` sets ``app_name = "next"``, and a second namespace exists only when ``next.urls`` is mounted again under an explicit ``namespace`` argument.
 
@@ -274,7 +276,7 @@ Reading the query string back
 
 The helpers on this page write query strings.
 To read them in a page or component, annotate a parameter with the ``DQuery[T]`` marker.
-``with_query`` and ``DQuery`` are two ends of the same wire.
+``with_query`` writes the query string that ``DQuery`` reads back, so the two helpers share one set of wire formats.
 
 ``DQuery[list[T]]`` accepts several wire formats for a repeated parameter, and ``with_query`` emits the repeated-key form when you pass a list.
 To read a repeated parameter outside the resolver, call ``get_multi_values(request, name)`` from ``next.urls``, which returns every value for that key as a list.

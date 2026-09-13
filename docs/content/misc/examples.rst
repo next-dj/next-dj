@@ -6,6 +6,8 @@ Repository examples
 The ``examples/`` tree in the next.dj repository holds self-contained Django projects.
 Each runs on SQLite and in-process ``LocMemCache``.
 No Docker, Node, or external services are required beyond what the :repo:`examples README <blob/main/examples/README.md>` lists for a given folder.
+Every example renames ``PAGES_DIR`` and ``COMPONENTS_DIR`` on purpose and registers a project-level ``DIRS`` root in ``PAGE_BACKENDS``, so the settings show that neither directory name is fixed.
+The ``kanban`` and ``live-polls`` folders add a Vite toolchain on top of that and need Node installed.
 
 Catalog
 -------

@@ -82,7 +82,7 @@ Layout chain
 ~~~~~~~~~~~~
 
 The framework collects every ancestor ``layout.djx`` walking upward from the page directory through every ancestor, bounded at 64 levels.
-Each layout substitutes the wrapped content into its ``{% block template %}`` placeholder.
+Each layout substitutes the wrapped content into its ``{% template %}`` placeholder.
 The innermost layout wraps the page body, the outermost layout wraps everything.
 
 Static collector

@@ -9,7 +9,7 @@ For the full list of available keys, their defaults, and their semantics, see :d
 
 Each snippet below sets one key on an existing ``NEXT_FRAMEWORK`` dict.
 Declare ``NEXT_FRAMEWORK = {}`` once before the first override, or merge the keys into a single literal as shown under :ref:`combining-keys`.
-Keys left unset keep their framework default because the framework merges :doc:`/content/ref/settings` defaults under the user dict.
+Keys left unset keep their framework default, because the project dict merges over the framework defaults one level deep and a key the project leaves out is never replaced, see :ref:`ref-settings-merge`.
 
 Strict context
 --------------
@@ -20,7 +20,7 @@ Strict context
    NEXT_FRAMEWORK = {}
    NEXT_FRAMEWORK["STRICT_CONTEXT"] = True
 
-Use ``STRICT_CONTEXT: True`` in production so a misconfigured context processor fails loudly.
+Set ``STRICT_CONTEXT`` to ``True`` in production so a misconfigured context processor fails loudly.
 See :ref:`ref-settings` for behaviour and exception types.
 
 Strict loading
@@ -31,7 +31,7 @@ Strict loading
 
    NEXT_FRAMEWORK["STRICT_LOADING"] = True
 
-Use ``STRICT_LOADING: True`` in production so a ``page.py`` that fails to import or a ``{% component %}`` name that does not resolve fails the request instead of serving a silently degraded page.
+Set ``STRICT_LOADING`` to ``True`` in production so a ``page.py`` that fails to import or a ``{% component %}`` name that does not resolve fails the request instead of serving a silently degraded page.
 With ``DEBUG=False`` the client sees the generic 500 page, and the traceback appears only in the server log through ``logger.exception``.
 Without the flag a broken ``page.py`` answers a generic 404 and a missed component renders as an empty string, which monitoring rarely catches.
 See :ref:`ref-settings` for the loudness table across ``DEBUG`` and the strict flags.
@@ -44,7 +44,7 @@ Eager component loading
 
    NEXT_FRAMEWORK["LAZY_COMPONENT_MODULES"] = False
 
-``LAZY_COMPONENT_MODULES: False`` is the default, and production confirms it.
+``LAZY_COMPONENT_MODULES`` defaults to ``False``, and production confirms that value.
 The framework discovers the component tree eagerly in both modes, so the registry knows every component name before traffic.
 The flag controls only when each ``component.py`` module is imported.
 With the default ``False``, every ``component.py`` is imported during startup, so any import-time error surfaces before the first request.

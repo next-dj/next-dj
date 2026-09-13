@@ -26,13 +26,19 @@ Origin validation
 -----------------
 
 The framework adds a second hidden field named ``_next_form_origin``.
-The ``{% form %}`` tag sets it to the URL path the form was rendered under, so the HTML never exposes the server filesystem layout.
+The ``{% form %}`` tag sets it to the URL the form was rendered under with its query string, so the HTML never exposes the server filesystem layout.
 The dispatcher resolves the field on every POST to recover the origin page's URL kwargs for dependency injection.
 The checks below are enforced only when the dispatcher has to re-render the origin page, on a validation failure and when a form-backed handler returns ``None``.
 A missing or unresolvable origin never blocks a valid submission whose handler returns a response.
 
-The value must be a same-site path that starts with ``/`` and not with ``//``.
-It must resolve against the URLconf through :func:`django.urls.resolve`, and the resolved view must carry the ``next_page_path`` attribute the file router sets on every routed page.
+The value passes the same-site test only when all of the following hold.
+
+- The posted value is a string.
+- Its surrounding whitespace is stripped before any other test runs.
+- It contains no tab, no line feed, and no carriage return, because a browser drops those three code points before it resolves a URL and a value the check read as same-site would become a jump off site.
+- It starts with a single ``/`` once every backslash is read as a forward slash, so ``/\evil.example`` is refused as protocol-relative.
+
+The value must then resolve against the URLconf through :func:`django.urls.resolve`, and the resolved view must carry the ``next_page_path`` attribute the file router sets on every routed page.
 The client therefore never names a file, and a re-render can target only pages that are already reachable through the routing table.
 A re-render whose field fails these checks returns HTTP 400.
 
@@ -49,7 +55,7 @@ A hand crafted ``<form>`` element bypasses these guarantees, so prefer the tag.
 
 When a hand crafted form is unavoidable, render the tag once and copy the generated markup, or keep the form inside a ``{% form %}`` block and add only the extra fields you need.
 
-A fully manual form sets ``_next_form_origin`` to ``{{ request.path }}``, the same value the tag emits.
+A fully manual form sets ``_next_form_origin`` to the URL the page was rendered under with its query string, which ``{{ request.get_full_path }}`` produces, the same value the tag emits.
 A form rendered by a hand-written view outside the file router additionally needs the ``next_page_path`` attribute on that view before the error re-render works, see :ref:`topics-forms-templates-handwritten-views`.
 
 GET forms
@@ -79,7 +85,8 @@ AJAX submissions
 ----------------
 
 JavaScript that posts to the dispatch URL must supply the CSRF token, in the ``X-CSRFToken`` header or the ``csrfmiddlewaretoken`` body field, and the ``_next_form_origin`` value in the request body.
-The standard Django approach reads the token from the cookie or from a meta tag.
+Hand-written code takes the standard Django approach and reads the token from the cookie or from a meta tag.
+The bundled client runtime needs neither, because it takes its token from the ``$csrf`` init payload the page emits and never touches the cookie.
 
 The simplest way to obtain the origin is to read the hidden ``_next_form_origin`` field that the rendered ``{% form %}`` tag already emits.
 
@@ -105,8 +112,9 @@ The simplest way to obtain the origin is to read the hidden ``_next_form_origin`
 
 This works because every ``{% form %}`` block emits the ``_next_form_origin`` hidden field.
 
-To post without a rendered form, use ``window.location.pathname``.
-The origin is the URL path of the current page, so no server-published value is needed.
+To post without a rendered form, use ``window.location.pathname + window.location.search``.
+The origin is the path of the current page, so no server-published value is needed.
+The query string rides along with it, so a redirect back to the origin returns to the same filters and the same page of a listing rather than to its unfiltered first page.
 
 Wizard steps
 ------------
@@ -146,7 +154,8 @@ Use these cookie flags in production.
    CSRF_COOKIE_HTTPONLY = False
    CSRF_COOKIE_SAMESITE = "Lax"
 
-Keep ``CSRF_COOKIE_HTTPONLY`` false so that AJAX requests can read the token.
+Keep ``CSRF_COOKIE_HTTPONLY`` false only when project JavaScript reads the token out of the cookie, as the fetch wrapper above does.
+The bundled runtime reads the token from the ``$csrf`` init payload instead of the cookie, so a project that leaves unsafe requests to the runtime can set ``CSRF_COOKIE_HTTPONLY = True`` and keep the cookie out of reach of scripts.
 
 Common pitfalls
 ---------------

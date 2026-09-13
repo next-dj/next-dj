@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 import pytest
-from django.core.checks import run_checks
+from django.core.checks import Error, run_checks
 from django.core.checks.registry import registry
 from django.test import override_settings
 
@@ -15,6 +15,7 @@ from next.checks import NEXT, register_all
 from next.checks.common import (
     PageRootsError,
     RegistrationSubject,
+    discover_page_registrations,
     get_page_roots,
     get_pages_directories,
     get_router_manager,
@@ -29,7 +30,12 @@ from next.components.sources import reset_components_manager_cache
 from next.conf.signals import settings_reloaded
 from next.deps import resolver
 from next.deps.resolver import forget_dep_caches
-from next.pages.loaders import _PAGE_ROOTS_CACHE, _page_roots, forget_page_roots
+from next.pages.loaders import (
+    _MODULE_MEMO,
+    _PAGE_ROOTS_CACHE,
+    _page_roots,
+    forget_page_roots,
+)
 from next.pages.watch import (
     _BACKENDS_MEMO,
     _page_backends_for_watch,
@@ -183,6 +189,65 @@ class TestRouterManagerCache:
         assert second_manager is None
         assert errors is second_errors
         assert errors[0].id == "next.E007"
+
+
+@contextmanager
+def _manager_over(routers: list[object]) -> Iterator[None]:
+    """Point the discovery pass at exactly these routers."""
+    manager = MagicMock()
+    manager.backends = tuple(routers)
+    with patch("next.checks.common.get_router_manager", return_value=(manager, [])):
+        yield
+
+
+@contextmanager
+def _import_spy() -> Iterator[MagicMock]:
+    """Count the page-import passes the discovery seam runs."""
+    with patch("next.pages.scan.load_scanned_page_modules") as spy:
+        yield spy
+
+
+class TestPageRegistrationDiscovery:
+    """`discover_page_registrations` imports the routed pages once per run."""
+
+    def test_a_routed_page_module_is_executed(self, tmp_path: Path) -> None:
+        page_file = _write_page(tmp_path, "blog")
+        with _manager_over([_RootTreeRouter([tmp_path])]):
+            discover_page_registrations()
+        assert page_file in _MODULE_MEMO
+
+    def test_a_second_call_in_one_run_imports_nothing_again(
+        self, tmp_path: Path
+    ) -> None:
+        with _manager_over([_RootTreeRouter([tmp_path])]), _import_spy() as spy:
+            discover_page_registrations()
+            discover_page_registrations()
+        assert spy.call_count == 1
+
+    def test_an_uninitialised_manager_imports_nothing(self) -> None:
+        with (
+            patch(
+                "next.checks.common.get_router_manager",
+                return_value=(None, [Error("boom", id="next.E007")]),
+            ),
+            _import_spy() as spy,
+        ):
+            discover_page_registrations()
+        assert spy.call_count == 0
+
+    def test_explicit_reset_arms_the_pass_again(self, tmp_path: Path) -> None:
+        with _manager_over([_RootTreeRouter([tmp_path])]), _import_spy() as spy:
+            discover_page_registrations()
+            reset_router_manager_cache()
+            discover_page_registrations()
+        assert spy.call_count == 2
+
+    def test_settings_reloaded_signal_arms_the_pass_again(self, tmp_path: Path) -> None:
+        with _manager_over([_RootTreeRouter([tmp_path])]), _import_spy() as spy:
+            discover_page_registrations()
+            settings_reloaded.send(sender=None)
+            discover_page_registrations()
+        assert spy.call_count == 2
 
 
 class TestScannedPairsCache:

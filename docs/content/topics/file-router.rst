@@ -91,11 +91,9 @@ The bracket syntax accepts every Django path converter.
    * - ``[[name]]``
      - ``<path:name>``
      - Wildcard that matches one or more segments including slashes.
-       A route holds at most one, and a second ``[[name]]`` raises ``DuplicateURLParameterError`` at router build and reports :ref:`next.E028 <ref-system-checks>` at check time, whatever the two names are.
+       A route holds at most one, see *Route shapes* above.
 
-A bracket label is passed to Django verbatim, so any converter registered with :func:`django.urls.register_converter` works in ``[label:name]``.
-The parser handles three bracket forms.
-The typed captured segment is the captured form with a converter prefix, as covered in :doc:`/content/internals/url-router`.
+A bracket label is passed to Django verbatim, so any converter registered with :func:`django.urls.register_converter` works in ``[label:name]``, as :doc:`/content/internals/url-router` describes.
 
 The ``[[name]]`` wildcard requires at least one character.
 A request to the parent path with no trailing segment, such as ``/api/`` for an ``api/[[suffix]]/`` route, does not match, because the Django ``path`` converter never captures an empty string.
@@ -121,6 +119,7 @@ Both that refusal and ``DuplicateURLParameterError`` name the offending ``page.p
        return Note.objects.get(pk=post_id)
 
 ``DUrl[int]`` reads the captured segment whose name matches the parameter, so ``post_id`` resolves the ``[int:post_id]`` segment and the marker coerces it to ``int``.
+A plain ``post_id: int`` arrives already parsed as well, because the URL kwargs provider coerces the captured segment to the parameter annotation, so ``DUrl`` is only needed to read a segment under a different name.
 See :doc:`dependency-injection` for the full set of ``DUrl`` forms and the coercion table.
 
 Virtual routes
@@ -195,7 +194,8 @@ See :doc:`url-reversing` for the Python side.
 Page roots
 ----------
 
-The router resolves routes from app directories and project directories, in the same way ``staticfiles`` resolves static files, with one fallback shape.
+The router resolves routes from application directories and from project directories listed in ``DIRS``.
+A third shape covers the project that has neither, and it is described last.
 
 App directories.
    When ``APP_DIRS`` is ``True`` the router scans each installed application for a directory named ``PAGES_DIR``.
@@ -306,6 +306,9 @@ The name set in the first ``COMPONENT_BACKENDS`` entry under ``COMPONENTS_DIR`` 
 The default is ``_components``.
 Only that exact name is skipped, not every directory that starts with an underscore.
 
+A ``COMPONENT_BACKENDS`` list that is empty, or whose first entry carries no ``COMPONENTS_DIR``, leaves the router with no name to skip, and every file-router entry then refuses to build.
+The manager logs that refusal and skips the entry, so the symptom is a project that serves no file-routed page at all.
+
 Multiple backends
 -----------------
 
@@ -376,6 +379,8 @@ Hot reload
 A backend that reads from a database or other dynamic source needs to rebuild its pattern list when the data changes.
 ``router_manager.reload()`` rebuilds every backend and clears the Django URL resolver cache, and the call is idempotent.
 Each invocation emits a ``router_reloaded`` signal with the manager class as sender, so long lived processes can listen for it to refresh cached URL references.
+A receiver of that signal that rebuilds again calls ``router_manager.reload(notify=False)``, which skips the URL-cache clear and the signal so the receiver does not re-enter itself.
+
 Rebuilding drops the cached patterns, so the next request walks every page tree configured in ``PAGE_BACKENDS`` again.
 A burst of model writes that each triggers a reload can dominate that request.
 Receivers should debounce or batch invocations when one logical change triggers many model signals at once.
@@ -384,12 +389,11 @@ See :doc:`/content/howto/reload-routes-from-code` for the model-signal receiver 
 System checks
 -------------
 
-The router contributes Django system checks that validate the configuration at startup.
+The router contributes Django system checks that validate the configuration at startup, alongside two page checks that ``next.pages`` registers over the same tree the router scans.
 
 - ``check_next_pages_configuration`` validates the ``NEXT_FRAMEWORK`` structure and each backend entry.
 - ``check_pages_structure`` validates directory naming, captured parameter syntax, and the presence of ``page.py`` or ``template.djx``.
 - ``check_page_functions`` reports :ref:`next.E012 <ref-system-checks>` when a directory has no render function, no template attribute, no loader-backed source, and no sibling ``layout.djx``.
-- ``check_pages_structure`` and ``check_page_functions`` come from ``next.pages`` and appear here because they validate the same page tree the router scans.
 - ``check_url_patterns`` reports two routes that convert to exactly the same Django path string, whether they come from one tree or several (:ref:`next.E015 <ref-system-checks>`).
   The comparison is string equality after bracket conversion, so ``posts/[int:id]`` next to ``posts/[id]`` is not reported.
   While collecting patterns it also reports a route that repeats a captured parameter name (:ref:`next.E028 <ref-system-checks>`), listing every conflicting name, so parameter duplicates surface from every scanned tree.

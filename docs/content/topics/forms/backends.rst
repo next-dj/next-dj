@@ -88,6 +88,8 @@ A backend subclasses ``next.forms.FormActionBackend``, an abstract base class wi
 
 ``generate_urls()``.
    Returns the URLconf entries for every registered action.
+   The bundled backend contributes a single catch-all route and returns an empty list while it holds no actions, so a project whose declaring modules never imported has no ``/_next/form/`` route at all and answers a submission with a bare 404 rather than ``FormActionNotFoundError``.
+   The ``registry_empty`` hint on that exception, described in :doc:`/content/ref/forms`, names the same cause when the registry is reachable but empty.
 
 ``dispatch(request, uid)``.
    Runs the handler for the given action UID and returns an ``HttpResponse``.
@@ -134,7 +136,8 @@ A subclass of ``RegistryFormActionBackend`` inherits a working implementation.
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``clear_registry()`` drops every action the backend stores.
-``FormActionManager.clear_registries`` calls it on each configured backend, which is what ``next.testing.reset_form_actions`` runs between tests.
+``FormActionManager.clear_registries`` calls it on each configured backend, which is what ``next.testing.reset_form_registration_state`` runs between tests.
+The neighbouring ``next.testing.reset_form_actions`` drops actions by another route, calling ``reload()`` to rebuild the backend list from settings instead of clearing the registries in place.
 The base implementation does nothing, because a backend that answers each lookup from its source holds nothing to drop.
 Implement it in a backend that keeps its own store, or its actions survive an isolation reset and leak into the next test.
 

@@ -28,14 +28,19 @@ Public API
    See the topic guide for details.
 
 .. autodata:: next.pages.page
+   :no-value:
+
+   The process-wide ``Page`` coordinator that every router-built view renders through.
 
 Cross-area contract
 ~~~~~~~~~~~~~~~~~~~
 
-Four ``Page`` methods carry no leading underscore because other framework areas call them, not because application code should.
-``composed_template_for``, ``build_render_context``, ``render_with_static_assets``, and ``authorization_outcome`` serve ``next.forms`` and ``next.partial``.
+Nine ``Page`` methods carry no leading underscore because other framework areas call them, not because application code should.
+``composed_template_for``, ``build_render_context``, ``render_with_static_assets``, ``authorization_outcome``, ``has_template``, ``zone_bindings``, ``create_url_pattern``, ``render``, and ``clear_template_caches`` serve ``next.forms``, ``next.partial``, ``next.urls``, and ``next.testing``.
+``next.forms`` and ``next.partial`` read the first six, ``next.urls`` builds every page pattern through ``create_url_pattern``, and ``next.testing`` calls ``render`` and ``clear_template_caches`` from its rendering and isolation helpers.
 They follow the underscore rule of :doc:`/content/faq/general`, so they are safe from removal without notice.
 They do not carry the application-facing stability of a Stable tier, and their signatures may drift as partial rendering evolves.
+``register_template`` has no framework caller at all and serves application code seeding a composed body under the same underscore rule, again without the Stable tier's signature guarantee.
 
 Manager
 ~~~~~~~
@@ -79,13 +84,8 @@ It runs on a dedicated path and is not registered through ``TEMPLATE_LOADERS``.
 .. autoclass:: next.pages.loaders.LayoutTemplateLoader
    :members:
 
-``LayoutTemplateLoader`` keeps no cache of its own.
-Composition results live on ``Page``, where ``composed_template_for`` stores the composed source alongside the compiled ``Template``, so a warm render parses nothing and opens no template file.
-A page without a module-level ``render()`` in ``page.py`` answers every request from that cache, and so do the standalone zone render and the form re-render.
-Under ``DEBUG`` the read stats every source file behind the page and every directory the layout walk visits, so an edited, a created, and a deleted ``layout.djx`` all reach the next request without a restart, and both layers are dropped together once any tracked path moves.
-With ``DEBUG`` off the same read performs no stat at all and the composition is held for the life of the process, so a template edited on a running production server lands with the next deploy.
-A page whose body comes from ``render()`` keeps that body out of the cache and caches only the layout chain around it, as a skeleton whose body slot is filled per request.
-``Page.clear_template_caches`` drops every layer and the mtime snapshots together, for a caller rewriting a page or a layout in place inside one process.
+``LayoutTemplateLoader`` keeps no cache of its own, and composition results live on ``Page``, where ``composed_template_for`` stores the composed source alongside the compiled ``Template``.
+``Page.clear_template_caches`` drops every layer together, and :doc:`/content/internals/page-discovery` describes how ``DEBUG`` decides when the composition is revalidated.
 
 Module reads
 ~~~~~~~~~~~~
@@ -100,7 +100,9 @@ Scan
 ~~~~
 
 ``next.pages.scan`` walks the routed page tree for the system checks.
-``iter_existing_scanned_pages`` yields each existing ``page.py`` once across routers, and ``iter_serialized_page_context_keys`` yields the ``page.py`` path and key of every keyed ``serialize=True`` context callable.
+``iter_existing_scanned_pages`` yields each existing ``page.py`` once across routers.
+``iter_existing_scanned_page_pairs`` yields the routed URL trail beside each path, for a check that reports a page by its URL.
+``iter_serialized_page_context_keys`` yields the ``page.py`` path and key of every keyed ``serialize=True`` context function.
 
 .. automodule:: next.pages.scan
    :members:
@@ -108,29 +110,20 @@ Scan
 Import failures
 ~~~~~~~~~~~~~~~
 
-A ``page.py`` the loader cannot read, an ``OSError`` or a module spec that does not build, counts as a legitimately absent module and the page contributes no body without a log record.
-A ``page.py`` whose body raises any exception during execution is a broken module, and ``logger.exception`` records the traceback on every load attempt.
-``ImportError``, ``AttributeError``, and ``SyntaxError`` are common examples, not a closed list.
-On the request path the recorded failure re-raises as ``PageModuleImportError`` when ``settings.DEBUG`` or ``NEXT_FRAMEWORK["STRICT_LOADING"]`` is set.
-Under ``DEBUG`` the standard technical 500 page points at the failing line.
-Under ``STRICT_LOADING`` without ``DEBUG`` the client receives a generic 500 while the traceback stays in the server log.
-With both flags off the request answers 404, and the failure is visible only in the log record.
-An out-of-band zone morph of a broken foreign page raises ``PageModuleImportError`` in every mode, because the request that a 404 would answer belongs to another URL.
-The failure is scoped to the broken page.
-Sibling pages keep their URL patterns and keep serving in every mode, because the error surfaces at the view rather than while the urlconf is built.
-The recorded error is keyed by file mtime, so saving a fixed ``page.py`` clears it without a restart.
-``manage.py check`` reports the same failure as ``next.E017``, naming the exception type and message.
+A ``page.py`` whose body raises while importing is a broken module, as distinct from a file the loader cannot read at all.
+The recorded failure re-raises on the request path as ``PageModuleImportError``, which carries the original exception as ``__cause__`` and the offending path as ``file_path``.
+``settings.DEBUG`` and ``NEXT_FRAMEWORK["STRICT_LOADING"]`` decide how loudly that failure reaches the client.
+See *Broken page modules* in :doc:`/content/topics/pages` for the loudness table and the blast radius.
 
 .. autoclass:: next.pages.PageModuleImportError
    :members:
 
-The message reads ``<path> failed to import``, and the original exception travels as ``__cause__``.
-
 Processors
 ~~~~~~~~~~
 
-.. automodule:: next.pages.processors
-   :members:
+Context-processor discovery has no public callable of its own.
+The merged list comes from ``OPTIONS.context_processors`` on each ``PAGE_BACKENDS`` entry followed by ``OPTIONS.context_processors`` on the first ``TEMPLATES`` entry, deduplicated by dotted path with the first occurrence kept, and it is memoised until either source setting changes.
+See *Resolution order* in :doc:`/content/topics/context` for where the merged list sits among the other context sources.
 
 System checks
 ~~~~~~~~~~~~~
@@ -138,10 +131,11 @@ System checks
 ``next.pages.checks`` registers the Django system checks for the pages subsystem.
 They run through ``uv run python manage.py check``.
 
-The module exports eleven check callables.
+The module exports twelve check callables.
 
 - ``check_context_functions``.
 - ``check_context_processor_signature``.
+- ``check_context_reads_foreign_zone``.
 - ``check_context_registration_files``.
 - ``check_layout_templates``.
 - ``check_page_functions``.

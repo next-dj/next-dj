@@ -16,89 +16,89 @@ Choose the right helper
 -----------------------
 
 ``next.testing`` groups its helpers into focused submodules.
-The table below maps each testing goal to the helper and its import path.
+The table below maps each testing goal to the helper and the submodule that owns it.
+Every helper is importable from the ``next.testing`` package as well as from its own submodule, except the plugin options and fixtures, which pytest supplies once the plugin is loaded.
 
 .. list-table::
    :header-rows: 1
-   :widths: 35 35 30
+   :widths: 40 40 20
 
    * - Goal
      - Use
-     - Import
+     - Submodule
    * - Load pages and clear the cache from ``pytest.ini``
      - ``next_pages``, ``next_components``, ``next_clear_cache``
-     - ``next.testing.plugin``
+     - ``plugin``
    * - Take a ``NextClient`` as a pytest fixture
      - ``next_client``
-     - ``next.testing.plugin``
+     - ``plugin``
    * - HTTP request to a page or action
      - ``NextClient``
-     - ``next.testing`` or ``next.testing.client``
+     - ``client``
    * - POST to a registered action by name
      - ``NextClient.post_action``
-     - ``next.testing`` or ``next.testing.client``
+     - ``client``
    * - Resolve an action name to its dispatch URL without posting
      - ``NextClient.get_action_url``
-     - ``next.testing`` or ``next.testing.client``
+     - ``client``
    * - GET a URL as a partial zone request
      - ``NextClient.get_zones``
-     - ``next.testing`` or ``next.testing.client``
+     - ``client``
    * - Decode a partial response for structural assertions
      - ``envelope_of``
-     - ``next.testing`` or ``next.testing.client``
+     - ``client``
    * - Inspect ops, targets, and assets of a patch envelope
      - ``PartialEnvelope``
-     - ``next.testing`` or ``next.testing.client``
+     - ``client``
    * - Render a page body without HTTP
      - ``render_page``
-     - ``next.testing`` or ``next.testing.rendering``
+     - ``rendering``
    * - Render a component in isolation
      - ``render_component_by_name``
-     - ``next.testing`` or ``next.testing.rendering``
+     - ``rendering``
    * - Assert on rendered HTML structure
      - ``find_anchor``, ``assert_has_class``, ``assert_missing_class``
-     - ``next.testing`` or ``next.testing.html``
+     - ``html``
    * - Read a form's target, fields, and bootstrap payload
      - ``find_form``, ``form_action``, ``form_fields``, ``hidden_fields``, ``init_payload``
-     - ``next.testing`` or ``next.testing.html``
+     - ``html``
    * - Capture one or more signals explicitly
      - ``SignalRecorder`` or ``capture_signals``
-     - ``next.testing`` or ``next.testing.signals``
+     - ``signals``
    * - Capture every framework signal at once
      - ``capture_framework_signals``
-     - ``next.testing`` or ``next.testing.signals``
+     - ``signals``
    * - Inspect a captured signal payload
      - ``SignalEvent``
-     - ``next.testing`` or ``next.testing.signals``
+     - ``signals``
    * - Validate a form without HTTP
      - ``build_form_for``, ``resolve_action_url``
-     - ``next.testing`` or ``next.testing.actions``
+     - ``actions``
    * - Temporarily override ``NEXT_FRAMEWORK`` or framework wiring
      - ``override_next_settings``, ``override_dependency``, ``override_provider``, ``override_form_action``, ``override_component_backends``, ``patch_static_collector``
-     - ``next.testing`` or ``next.testing.patching``
+     - ``patching``
    * - Read the collector a patched block built
      - ``StaticCollectorProxy``
-     - ``next.testing`` or ``next.testing.patching``
+     - ``patching``
    * - Unit-test a custom provider or resolver path
      - ``resolve_call``, ``make_resolution_context``
-     - ``next.testing`` or ``next.testing.deps``
+     - ``deps``
    * - Force-import pages or components in tests
      - ``eager_load_components``, ``eager_load_pages``, ``clear_loaded_dirs``
-     - ``next.testing`` or ``next.testing.loaders``
+     - ``loaders``
    * - Reload backends after mutating settings or registries
      - ``reset_registries`` (opt-in), or narrower ``reset_components`` / ``reset_form_actions``
-     - ``next.testing`` or ``next.testing.isolation``
+     - ``isolation``
    * - Drop the page template cache after rewriting template files on disk
      - ``reset_page_cache``
-     - ``next.testing`` or ``next.testing.isolation``
+     - ``isolation``
    * - Drop the compiled component templates after rewriting a component on disk
      - ``reset_component_templates``
-     - ``next.testing`` or ``next.testing.isolation``
+     - ``isolation``
    * - Clear the form registries, diagnostics, and wizard backend
      - ``reset_form_registration_state``
-     - ``next.testing`` or ``next.testing.isolation``
+     - ``isolation``
 
-Every helper in the table is importable from the ``next.testing`` package or from its submodule, except the plugin options and fixtures, which pytest supplies once the plugin is loaded.
 See :doc:`/content/ref/testing` for generated signatures.
 
 Boot the suite
@@ -120,26 +120,26 @@ Pytest.
    Add ``-p next.testing.plugin`` to ``addopts`` on top of that to get the page loader, the cache isolation, and the ``next_client`` fixture, as `Pytest plugin`_ describes.
 
 Stdlib ``unittest``.
-   Call ``django.setup()`` once before importing any ``next.testing`` helper, then run the suite with the standard runner.
-   The helpers re-exported from ``next.testing`` carry no pytest fixtures, so a plain ``TestCase`` drives them through ``setUp`` and ``addCleanup``.
+   Call ``django.setup()`` once, then ``django.test.utils.setup_test_environment()``, before importing any ``next.testing`` helper, or run the suite through ``uv run python manage.py test`` so Django's own runner does both.
+   The second call is what adds ``testserver`` to ``ALLOWED_HOSTS``, and without it the test client gets a ``DisallowedHost`` response instead of the page.
+   The helpers re-exported from ``next.testing`` carry no pytest fixtures, so a ``django.test.TestCase`` drives them directly and the page import happens once in ``setUpModule``.
 
    .. code-block:: python
       :caption: tests/test_signals_unittest.py
 
       from pathlib import Path
-      from unittest import TestCase
+
+      from django.test import TestCase
 
       from next.signals import page_rendered
-      from next.testing import NextClient, SignalRecorder, clear_loaded_dirs, eager_load_pages
+      from next.testing import NextClient, SignalRecorder, eager_load_pages
 
       PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-      class IndexTest(TestCase):
-          def setUp(self) -> None:
-              clear_loaded_dirs()
-              self.addCleanup(clear_loaded_dirs)
-              eager_load_pages(PROJECT_ROOT / "notes" / "pages")
+      def setUpModule() -> None:
+          eager_load_pages(PROJECT_ROOT / "notes" / "pages")
 
+      class IndexTest(TestCase):
           def test_index_emits_page_rendered(self) -> None:
               with SignalRecorder(page_rendered) as recorder:
                   NextClient().get("/")
@@ -148,8 +148,9 @@ Stdlib ``unittest``.
 Pytest plugin
 -------------
 
-``next.testing.plugin`` is a pytest plugin that carries the wiring every next.dj suite used to copy into its own ``conftest.py``.
+``next.testing.plugin`` is a pytest plugin that carries the wiring a next.dj suite would otherwise keep in its own ``conftest.py``.
 A project turns it on by naming it in ``addopts``, which loads the plugin for that suite alone.
+The plugin is named explicitly rather than shipped as a ``pytest11`` entry point, so it never loads into an unrelated pytest run in the same environment and never imports the framework ahead of coverage measurement.
 
 .. code-block:: ini
    :caption: pytest.ini
@@ -161,14 +162,13 @@ A project turns it on by naming it in ``addopts``, which loads the plugin for th
    next_pages = myapp/routes
    next_clear_cache = true
 
-That file is the recommended starting point for a new suite.
-It configures Django through pytest-django, imports the pages so the decorators run, and isolates the cache between tests, without a single line of ``conftest.py``.
+That file is the recommended starting point for a new suite, and the options it sets are described below.
 
 Ini options
 ~~~~~~~~~~~
 
 The plugin registers three ini options.
-Each one is inert by default, so a suite that loads the plugin and sets none of them behaves exactly as it did before.
+Each one is inert by default, so a suite that loads the plugin and sets none of them behaves as it would without the plugin.
 
 .. list-table::
    :header-rows: 1
@@ -234,13 +234,6 @@ The other two fixtures are autouse and no test names them.
 ``next_pages`` reads the page and component options once per session, and ``next_cache_isolation`` clears the cache before each test.
 The session fixture shares its name with the ini option it reads.
 
-Why the plugin is opt-in
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-A ``pytest11`` entry point would load the plugin into every pytest run on the machine, and that turned out to cost more than it saved.
-Pytest imports entry-point plugins before pytest-cov starts measuring, so importing the framework from the plugin made every import-time line under ``next/`` read as unexecuted and dropped a full-coverage gate to roughly two thirds.
-An explicit ``-p next.testing.plugin`` keeps the coverage numbers honest and keeps next.dj out of unrelated suites that happen to share the same environment.
-
 Registry state between tests
 ----------------------------
 
@@ -271,10 +264,10 @@ Either route runs the ``@context`` and ``@action`` decorators before the first t
    When ``LAZY_COMPONENT_MODULES = True`` in ``NEXT_FRAMEWORK``, bulk import of ``component.py`` modules from configured component roots is skipped during ``AppConfig.ready``.
    Set ``next_components = true`` in ``pytest.ini``, or call ``eager_load_components()`` from ``next.testing.loaders`` once per session, to import every registered ``component.py`` regardless of the flag.
 
-   With the default ``LAZY_COMPONENT_MODULES = False``, the configured component roots are imported during ``AppConfig.ready``.
-   Components that live inside a page tree register during the URL router walk instead, so a suite that renders them without any HTTP request triggers the walk first, for example by reversing one route with ``page_reverse()``.
-   See :doc:`/content/howto/test-a-component-in-isolation` for the full recipe.
-   See :ref:`ref-settings` for the full description of ``LAZY_COMPONENT_MODULES``.
+With the default ``LAZY_COMPONENT_MODULES = False``, the configured component roots are imported during ``AppConfig.ready``.
+Components that live inside a page tree register during the URL router walk instead, so a suite that renders them without any HTTP request triggers the walk first, for example by reversing one route with ``page_reverse()``.
+See :doc:`/content/howto/test-a-component-in-isolation` for the full recipe.
+See :ref:`ref-settings` for the full description of ``LAZY_COMPONENT_MODULES``.
 
 Resetting registries
 ~~~~~~~~~~~~~~~~~~~~
@@ -293,10 +286,13 @@ Two narrower helpers reset a single registry.
    Do not call ``reset_registries()`` from an autouse fixture in an ordinary suite.
    Reserve it for tests that verify registry behaviour itself.
 
-A third helper, ``reset_page_cache()``, resets no registry.
+``reset_page_cache()`` resets no registry.
 It calls ``Page.clear_template_caches`` to drop the composed page template.
 The test environment runs with ``DEBUG`` off, and the composition cache stats its sources only under ``DEBUG``, so a template rewritten inside one process still renders from the composition built before the rewrite.
-Call ``reset_page_cache()`` after any such rewrite, or wrap the test in ``override_settings(DEBUG=True)`` to put the mtime check back on, which works on a composition built before the override because the snapshot it reads is taken either way.
+
+Call ``reset_page_cache()`` after any such rewrite.
+Wrapping the test in ``override_settings(DEBUG=True)`` works too, because it puts the mtime check back on.
+The check reaches a composition built before the override, because the mtime snapshot is recorded whether or not the process watches edits.
 
 ``reset_component_templates()`` is the component-side twin of that helper.
 It calls ``ComponentsManager.clear_template_caches`` to drop the compiled template of every component.
@@ -522,6 +518,21 @@ Two convenience wrappers cover the common multi-signal cases.
        assert dispatch.kwargs["action_name"] == "create_note"
 
 ``capture_framework_signals()`` attaches to every name in ``next.signals.__all__``, which helps integration tests assert ordering without listing signals by hand.
+It returns an already started recorder, and its receivers are connected without a weak reference, so a test either uses it in a ``with`` statement or calls ``stop()`` on it when the capture ends.
+A recorder left running keeps appending events for the rest of the session.
+
+.. code-block:: python
+   :caption: asserting emission order
+
+   from next.signals import form_validation_failed, page_rendered
+   from next.testing.client import NextClient
+   from next.testing.signals import capture_framework_signals
+
+   def test_failure_signals_before_rerender(db) -> None:
+       with capture_framework_signals() as recorder:
+           NextClient().post_action("create_note", {"title": ""}, origin="/")
+       order = [event.signal for event in recorder]
+       assert order.index(form_validation_failed) < order.index(page_rendered)
 
 Action helpers
 --------------
@@ -530,7 +541,7 @@ Action helpers
 ``resolve_action_url`` turns an action name into its dispatch URL.
 ``build_form_for`` builds a bound form for an action so a unit test can assert validation without HTTP.
 Both raise ``FormActionNotFoundError`` from ``next.forms`` for an unknown action name, with the closest registered names rendered into the message.
-``build_form_for`` raises ``LookupError`` for an action registered without a form class.
+``build_form_for`` raises ``LookupError`` for an action registered without a form class, which covers a handler-only action and a wizard alike, and the message points at posting to ``resolve_action_url`` with the test client instead.
 
 .. code-block:: python
    :caption: tests/test_action_helpers.py
@@ -546,7 +557,7 @@ HTML utilities
 --------------
 
 ``next.testing.html`` provides assertions for inspecting rendered HTML fragments.
-In the second example below, ``at`` is the template path the component is referenced from, and it drives which components are visible.
+``render_component_by_name`` takes ``at``, the template path the component is referenced from, which is what drives which components are visible.
 
 .. code-block:: python
    :caption: html assertions
@@ -571,6 +582,41 @@ In the second example below, ``at`` is the template path the component is refere
 See :doc:`/content/howto/test-a-component-in-isolation` for the full component recipe.
 ``find_anchor`` returns the matching anchor tag and raises ``LookupError`` when no anchor matches the filters, see :func:`next.testing.html.find_anchor` for the accepted keywords.
 ``assert_has_class`` and ``assert_missing_class`` check the class list of the first start tag in the fragment.
+
+``find_form`` picks a form out of a rendered page by its ``action``, by a substring the block must hold, or by one it must not hold.
+``form_action`` reads the ``action`` attribute of the fragment's first tag, ``form_fields`` returns every named input as a name to value mapping, and ``hidden_fields`` narrows that to the hidden inputs the dispatcher expects echoed back on submit.
+
+.. code-block:: python
+   :caption: tests/test_form_markup.py
+
+   from next.testing.actions import resolve_action_url
+   from next.testing.client import NextClient
+   from next.testing.html import find_form, form_action, form_fields, hidden_fields
+
+   def test_create_form_carries_its_origin() -> None:
+       html = NextClient().get("/").content.decode()
+       form = find_form(html, action=resolve_action_url("create_note"))
+       assert form_action(form) == resolve_action_url("create_note")
+       assert hidden_fields(form)["_next_form_origin"] == "/"
+       assert "title" in form_fields(form)
+
+The ``_next_form_origin`` value read back here is the same field ``NextClient.post_action`` fills through its ``origin`` keyword, so a test can assert that the page renders the origin the dispatcher later re-renders.
+
+``init_payload`` decodes the ``Next._init(...)`` bootstrap object the static manager writes into every rendered page, which is where the client runtime reads the CSRF header name and token.
+
+.. code-block:: python
+   :caption: tests/test_bootstrap.py
+
+   from next.testing.client import NextClient
+   from next.testing.html import init_payload
+
+   def test_page_bootstraps_csrf() -> None:
+       html = NextClient().get("/").content.decode()
+       payload = init_payload(html)
+       assert payload["$csrf"]["header"] == "X-CSRFToken"
+
+``find_form`` and ``find_anchor`` span from the start tag to the first matching end tag, so an element written without its closing tag is never found.
+Neither finder matches inside a comment or a script body.
 
 Patching
 --------
@@ -705,7 +751,7 @@ Pass ``form_class=`` to give the override a form, which is what ``build_form_for
 
 ``override_component_backends`` takes backend config dicts positionally and replaces ``COMPONENT_BACKENDS`` for the block.
 It reads the manager's backends on entry, so the swap takes effect immediately rather than on the next render.
-The example below points a temporary root at ``tmp_path``, whose ``_components/info_card/`` folder holds the component under test.
+The example below points a temporary root at ``tmp_path / "_components"``, the folder that directly holds the ``info_card/`` component directory, because the scanner reads only the immediate children of a ``DIRS`` root.
 
 .. code-block:: python
    :caption: temporary component root
@@ -716,8 +762,7 @@ The example below points a temporary root at ``tmp_path``, whose ``_components/i
    def test_component_from_temporary_root(tmp_path) -> None:
        config = {
            "BACKEND": "next.components.FileComponentsBackend",
-           "DIRS": [str(tmp_path)],
-           "COMPONENTS_DIR": "_components",
+           "DIRS": [str(tmp_path / "_components")],
        }
        with override_component_backends(config):
            html = render_component_by_name("info_card", at=tmp_path / "template.djx")
@@ -753,7 +798,10 @@ Pytest can run ``manage.py check`` as part of the suite.
    from django.core.management import call_command
 
    def test_no_check_warnings() -> None:
-       call_command("check", verbosity=0)
+       call_command("check", fail_level="WARNING", verbosity=0)
+
+``call_command("check")`` on its own raises only when a check reports an error, so a framework warning such as a shadowed component name passes silently.
+A suite that wants the warnings gated too passes ``fail_level="WARNING"``.
 
 See also
 --------

@@ -21,8 +21,7 @@ Define the row form and the formset.
 .. code-block:: python
    :caption: notes/forms.py
 
-   from django.forms import formset_factory
-   from next.forms import ModelForm
+   from next.forms import ModelForm, formset_factory
    from notes.models import Note
 
    class NoteRowForm(ModelForm):

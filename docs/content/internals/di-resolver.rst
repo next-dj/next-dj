@@ -44,12 +44,15 @@ Modules
 -------
 
 ``next.deps.resolver``.
-   ``DependencyResolver``, the ``UnknownDependencyError`` exception, and the singleton ``resolver`` instance.
+   ``DependencyResolver`` and the singleton ``resolver`` instance.
    Exposes ``resolve``, ``resolve_dependencies``, and ``resolve_with_template_context`` to run a callable with resolved parameters.
    The singleton is built at import time and never replaced, so every reference to it stays valid.
    ``resolve_with_template_context`` is the component entry point.
    It hands the template context over as it is, without copying it, and the reserved names stay invisible to the providers that read the context by name.
    A context key called ``request`` or ``form`` therefore cannot shadow the dedicated provider, on the component path and on the page path alike.
+
+``next.deps.linear``.
+   ``LinearDependencyResolver``, the plan-free reference resolver the compiled path is checked against, selectable through ``DEPENDENCY_RESOLVER``.
 
 ``next.deps.providers``.
    The ``ParameterProvider`` protocol and the ``RegisteredParameterProvider`` base class.
@@ -63,7 +66,10 @@ Modules
    An abstract intermediate base is skipped by that rebuild, because it is a legitimate class to register and no instance of it exists to place.
 
 ``next.deps.cache``.
-   ``DependencyCache`` accumulator, the ``REQUEST_DEP_CACHE_ATTR`` constant, the ``DependencyCycleError`` exception, and the ``get_request_dep_cache`` accessor.
+   ``DependencyCache`` accumulator, the ``REQUEST_DEP_CACHE_ATTR`` constant, and the ``get_request_dep_cache`` accessor.
+
+``next.deps.errors``.
+   ``DependencyCycleError`` and ``UnknownDependencyError``, the two exceptions a graph the resolver cannot serve raises.
 
 ``next.deps.context``.
    ``ResolutionContext`` value object passed to every provider, plus the ``RESERVED_KEYS`` frozenset of names excluded from name-based resolution.
@@ -111,12 +117,14 @@ On the first resolve of a callable it walks the signature and calls ``static_can
 A ``False`` verdict drops the provider for that parameter, ``None`` keeps it as a runtime candidate, and the first ``True`` becomes the terminal provider and ends the walk.
 A verdict outside those three raises ``TypeError`` from the compile rather than changing injection semantics silently, and since no plan is cached the next resolve raises again.
 A provider that defines no callable ``static_can_handle`` at all is refused with a ``TypeError`` naming the class as it joins the resolver, rather than failing later from inside the compiler.
+
 A marker parameter such as ``Depends`` or ``Context`` ends in its terminal with no candidates, so its resolve calls no ``can_handle`` at all.
-A parameter the signature cannot settle, such as ``theme: HttpRequest``, keeps every provider that returned ``None`` in list order and replays their ``can_handle`` at resolve time, so the priority verdict is the same one a full scan would reach.
+A parameter the signature cannot settle, such as ``request: HttpRequest``, keeps every provider that returned ``None`` in list order and replays their ``can_handle`` at resolve time, so the priority verdict is the same one a full scan would reach.
 
 The compiled plan is cached per callable together with the providers version it saw.
 Every mutation of the provider list, including ``add_provider``, ``prepend_provider``, ``remove_provider``, and a rebuild of the auto-registered instances, bumps that version, so the next resolve recompiles the plan.
 The version is read before the compile starts, so a plan built while another thread was replacing the list is stamped stale and compiled again rather than cached for good.
+
 A plan whose type hints did not resolve is never cached, so a name a later import defines is picked up on the next resolve.
 A resolve compares the registry version before it trusts a cached plan, which is what lets a provider class imported after the first resolve take effect.
 Registering a named dependency does not touch the plan, because the ``DependsProvider`` reads the dependency map at resolve time.
@@ -160,6 +168,7 @@ The introspection memos live for the process, and the ``DependencyCache`` lives 
 ``cached_signature`` and ``cached_type_hints`` in ``next.deps.resolver`` hold the inspected signature and the resolved type hints of a callable, and a third memo of the same shape holds whether it declares ``**kwargs``.
 A callable is inspected once per process rather than once per call, so neither the plan compile nor anything the replay asks later reads its annotations again.
 The memo key is the callable itself, or its underlying ``__func__`` paired with a bound flag when it is a method, because a bound method object is recreated on every attribute access and would otherwise miss the memo each time.
+
 The same key carries the compiled plan, see `Injection plan`_ for the compile and the providers version that invalidates it.
 A callable no mapping can key is inspected afresh instead of being refused.
 The bounds these memos are held under, and the reload that clears them, are described under `Modules`_.

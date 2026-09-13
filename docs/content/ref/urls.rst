@@ -10,6 +10,7 @@ Module summary
 It re-exports ``PageRoot`` from :doc:`utils`, the labelled page tree a backend reports from ``page_roots`` for the system checks to walk and for the development watcher to observe.
 It also exposes the ``RouterFactory`` and ``RouterManager`` that build and own them.
 The ``URLPatternParser`` for bracket-segment parsing is part of the public surface, together with the ``URLParameterError`` base and its ``DuplicateURLParameterError`` and ``InvalidURLParameterError`` refusals, and ``RouterConstructionError`` for a router the factory cannot build.
+
 It also exposes the ``page_reverse``, ``page_reverse_lazy``, and ``with_query`` reverse helpers, the ``get_multi_values`` query reader, and the Django integration name ``app_name``.
 The ``TrieURLResolver`` that dispatches URL resolution through a route trie completes the routing surface.
 The parameter providers and the dependency markers ``DUrl`` (captured path segments) and ``DQuery`` (query string parameters) round out the public surface.
@@ -29,9 +30,11 @@ The form dispatcher reads it when it resolves a posted origin URL back to the pa
 Manager
 ~~~~~~~
 
-``urlpatterns`` is a list holding a single ``TrieURLResolver`` that wraps a lazy sequence of router and form-action patterns.
+``urlpatterns`` is a one-element sequence holding the resolver named by ``URL_RESOLVER``, which ships as ``TrieURLResolver`` and wraps a lazy sequence of router and form-action patterns.
 :func:`~django.urls.include` therefore mounts one resolver, and the pattern collection is deferred to the first URL resolution instead of running while the root URLconf imports.
-Code that reads ``next.urls.urlpatterns`` directly observes that one-element list, not the individual page patterns.
+It is a ``Sequence`` rather than a ``list``, so a root URLconf mounts it through ``include()`` and never concatenates or appends to it.
+Code that reads ``next.urls.urlpatterns`` directly observes that one element, not the individual page patterns.
+
 The wrapped sequence caches the concatenated pattern list against a pair of version counters, one owned by ``RouterManager`` and one by the form-action manager.
 ``router_manager.reload()`` bumps the router counter, and registering or clearing form actions through ``form_action_manager`` bumps the forms counter, so the next access rebuilds the list exactly when something changed.
 
@@ -42,9 +45,12 @@ A page added on disk after that first collection needs ``router_manager.reload()
 Within a backend both the per-application pattern lists and the patterns from the roots configured in ``DIRS`` are memoised after the first scan, and a settings reload recreates the backend with fresh caches.
 
 Reverse-name population iterates the wrapped sequence with ``reversed()``, which it answers through an explicit ``__reversed__`` that builds the pattern list once per pass.
+
 ``RouterManager`` owns the active backend list, and the ``router_manager`` singleton exposes ``reload()`` to rebuild it.
-``reload()`` logs and skips a backend entry whose construction raises ``ValueError``, ``TypeError``, ``KeyError``, or ``ImportError``.
+``reload()`` logs and skips a backend entry whose construction raises ``ImproperlyConfigured``, the type ``RouterFactory`` reports for an unimportable ``BACKEND`` path, a malformed file-router entry, and a constructor that refuses the arguments the factory passes.
 Any other exception from a custom backend propagates and stops startup.
+``reload(notify=False)`` rebuilds the backends without clearing the Django URL caches and without sending ``router_reloaded``, for a caller that reloads from inside a receiver of that signal.
+
 ``backends`` returns the loaded list as a tuple and builds it from ``PAGE_BACKENDS`` on the first read, so a caller that asks before the first resolve reads the configured routers instead of an empty tuple.
 The build runs under a reentrant lock, so under a threaded server a read racing the first load waits for it rather than resolving against a list that is not there yet, while a backend consulting the manager while it is constructed still reads the pre-rebuild list.
 Iterating the manager yields URL patterns rather than backends, so the manager itself carries neither ``len`` nor indexing and ``backends`` answers both.
@@ -56,10 +62,11 @@ Iterating the manager yields URL patterns rather than backends, so the manager i
 Resolver
 ~~~~~~~~
 
-``TrieURLResolver`` subclasses :class:`~django.urls.URLResolver` and narrows each ``resolve()`` call to a handful of candidate patterns.
+``TrieURLResolver`` subclasses the Django ``URLResolver`` described in :doc:`django:ref/urls` and narrows each ``resolve()`` call to a handful of candidate patterns.
 A route without parameters hits a dictionary keyed by the full route string, and a parameterised route is collected by a walk over a trie of path segments.
 The candidates are then tried with the standard ``pattern.resolve()`` in their original list order, so overlapping routes keep Django's first-match-wins semantics and converters behave as in plain Django.
-A miss falls back to the inherited linear scan, which raises the canonical ``Resolver404`` with a complete ``tried`` list and also covers patterns the trie cannot index, such as ones built with :func:`~django.urls.re_path`.
+A pattern the trie cannot index, such as one built with :func:`~django.urls.re_path`, joins the candidate list of every lookup in its original list position.
+When every candidate misses, the inherited linear scan runs and raises the canonical ``Resolver404`` with a complete ``tried`` list.
 On a successful match ``ResolverMatch.tried`` lists only the candidates that were actually tried, not every pattern preceding the winner.
 
 The internal route index is versioned by the same counters as the pattern concat, so a router reload or a late form-action registration rebuilds it before the next resolution.
@@ -73,22 +80,32 @@ Parser
 ~~~~~~
 
 ``URLPatternParser`` raises a subclass of ``URLParameterError`` for a bracket segment it cannot turn into a Django route.
+The parser knows the route but not the file it came from, so the page manager catches whatever the ``parameter_error`` class attribute names and re-raises it through ``with_file``, which is what puts the offending ``page.py`` at the end of the message.
+A parser subclass that adds a refusal of its own points ``parameter_error`` at a base covering every refusal it raises, so the page manager keeps naming the file for the new one too.
+
+.. automodule:: next.urls.parser
+   :members:
+
+Errors
+~~~~~~
+
+``URLParameterError`` is the base of every bracket-segment refusal, and it carries the refused ``param_name``, the ``url_path`` it sat in, and the ``file_path`` that ``with_file`` fills in.
 ``DuplicateURLParameterError`` covers a normalised parameter name repeated within one trail and a second ``[[wildcard]]`` segment.
 ``InvalidURLParameterError`` covers a name that is no Python identifier once a hyphen is read as an underscore, which :func:`~django.urls.path` refuses while it compiles the route.
 ``RouterConstructionError`` covers the other refusal the area raises, a router class whose constructor does not take the arguments ``RouterFactory`` builds a router with.
-All three names are exported from ``next.urls``, so a caller catches one refusal on its own or both through the base.
-The parser knows the route but not the file it came from, so the page manager re-raises either refusal with the offending ``page.py`` named at the end of the message.
 
-.. automodule:: next.urls.parser
+All four names are exported from ``next.urls``.
+The two parameter refusals share the ``URLParameterError`` base, so a caller catches either one on its own or both through the base, while ``RouterConstructionError`` is an ``ImproperlyConfigured`` and is caught with the rest of the backend family.
+
+.. automodule:: next.urls.errors
    :members:
 
 Dispatcher
 ~~~~~~~~~~
 
-.. admonition:: Deep import path
+.. note::
 
-   The names in ``next.urls.dispatcher`` are not re-exported from ``next.urls``.
-   Import them through the submodule path when a custom backend or test needs to call them directly.
+   The names in ``next.urls.dispatcher`` are not re-exported from ``next.urls``, so import them through the submodule path when a custom backend or a test calls them directly.
 
 .. automodule:: next.urls.dispatcher
    :members:

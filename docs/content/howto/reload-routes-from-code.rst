@@ -68,6 +68,9 @@ Long lived processes that cache URL references can listen to ``router_reloaded``
    def drop_url_cache(**kwargs) -> None:
        my_cache.clear()
 
+A receiver that has to rebuild the routers again calls ``router_manager.reload(notify=False)``.
+That keyword skips the URL-cache clear and the signal, so the receiver does not re-enter itself.
+
 Verification
 ------------
 

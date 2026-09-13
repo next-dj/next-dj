@@ -31,6 +31,17 @@ The cached state covers the router and components managers, the composed-pages m
 Most of these caches also clear on ``settings_reloaded``, which a ``NEXT_FRAMEWORK`` change through ``override_settings`` triggers.
 Tests and scripts that invoke checks directly and mutate the page or component tree in place call ``reset_check_caches`` explicitly, since the caches otherwise freeze the scanned state for the lifetime of the process.
 
+Silencing a check
+~~~~~~~~~~~~~~~~~
+
+Django's ``SILENCED_SYSTEM_CHECKS`` setting takes a list of check ids and drops those messages from every run, framework ids included.
+Silence a check only when the condition it reports is a deliberate choice, and fix the cause otherwise.
+See :doc:`django:ref/checks` for the setting and the rest of the check framework.
+
+.. warning::
+
+   Silencing ``next.E077`` hides the one condition that means the whole ``NEXT_FRAMEWORK`` setting is ignored, so every value the project set in it is lost and the process runs on the framework defaults.
+
 Shared helpers
 ~~~~~~~~~~~~~~
 
@@ -150,7 +161,7 @@ Errors
      - An error was raised while checking page functions.
      - ``next.pages.checks``
    * - ``next.E012``
-     - A ``page.py`` has no body source: no ``render`` function, no ``template`` attribute, no loader match, and no sibling ``layout.djx``.
+     - A ``page.py`` has no body source, meaning no ``render`` function, no ``template`` attribute, no loader match, and no sibling ``layout.djx``.
      - ``next.pages.checks``
    * - ``next.E013``
      - A page ``render`` attribute is not callable.
@@ -330,8 +341,8 @@ Errors
    * - ``next.E076``
      - A ``NEXT_FRAMEWORK`` value has a type the settings merge silently drops in favour of the framework default.
        The check covers ``PAGE_BACKENDS``, ``COMPONENT_BACKENDS``, ``STATIC_BACKENDS``, and ``TEMPLATE_LOADERS`` as lists.
-       It also covers ``URL_NAME_TEMPLATE``, ``URL_RESOLVER``, and ``DEPENDENCY_RESOLVER`` as strings and ``NEXT_JS_OPTIONS`` as a dict.
-       ``PARTIAL_BACKENDS``, ``FORM_ACTION_BACKENDS``, and ``FORM_ANCHOR_FILES`` carry their own per-key checks, ``next.E067``, ``next.E044``, and ``next.E052``, so this probe leaves them out.
+       It also covers ``COMPONENT_TEMPLATE_LOADER``, ``DEPENDENCY_RESOLVER``, ``URL_NAME_TEMPLATE``, and ``URL_RESOLVER`` as strings and ``NEXT_JS_OPTIONS`` as a dict.
+       ``PARTIAL_BACKENDS``, ``FORM_ACTION_BACKENDS``, ``FORM_ANCHOR_FILES``, ``FORM_WIZARD_BACKEND``, and ``JS_CONTEXT_SERIALIZER`` carry their own per-key checks, ``next.E067``, ``next.E044``, ``next.E052``, ``next.E051``, and ``next.W042``, so this probe leaves them out.
      - ``next.conf.checks``
    * - ``next.E077``
      - ``NEXT_FRAMEWORK`` is not a dict, so the settings layer ignores it entirely and the project runs on the framework defaults.
@@ -367,7 +378,8 @@ Warnings
      - Condition
      - Emitted by
    * - ``next.W001``
-     - A ``layout.djx`` is missing the required ``{% block template %}``.
+     - A ``layout.djx`` carries no ``{% template %}`` placeholder, so composition drops the layout and the pages under it render without its markup.
+       The paired ``{% #template %}`` form, whose body is a fallback, counts as the placeholder too.
      - ``next.pages.checks``
    * - ``next.W002``
      - A directory named by ``PAGES_DIR`` sits beside the working directory, holds pages, and no configured router routes it, so nothing under it is served.
@@ -459,6 +471,11 @@ Warnings
      - ``next.static.checks``
    * - ``next.W077``
      - A ``@context`` parameter names the key of another ``@context`` bound to a zone the reader does not share, so a request outside that zone skips the provider and the reader runs with ``None``.
+     - ``next.pages.checks``
+   * - ``next.W078``
+     - A ``layout.djx`` carries more than one ``{% template %}`` placeholder.
+       Composition fills the first one and every other renders its own fallback instead of the page.
+       It carries its own code rather than sharing ``next.W001``, so silencing one layout mistake never silences the other.
      - ``next.pages.checks``
 
 .. note::

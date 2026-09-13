@@ -2,7 +2,7 @@
 
 A full Django admin UI rebuilt on next.dj. Every page reads data straight from `django.contrib.admin` (`AdminSite._registry`, `ModelAdmin.get_changelist_instance`, `ModelAdmin.get_form`, `get_inline_instances`, `get_action_choices`, `save_model`, `delete_model`, `log_addition` / `log_change` / `log_deletions`), and none of `django/contrib/admin/templates/` ends up in the response. The HTML is shadcn-style Tailwind from the shared kit in [`../_shared/_components/`](../_shared/_components/).
 
-The example shows seven reusable patterns. A request-aware `@action(form_class=...)` factory that turns each `ModelAdmin.get_form` result into a per-request `Form` class. A shared actions module ([`shadcn_admin/forms.py`](shadcn_admin/forms.py)) that owns the add and change factories and handlers, with all per-request state collapsed into one frozen `AdminFormSpec` dataclass shared through `Depends("admin_spec")` — the `admin_form` composite keeps only the template and its `form_state` render context. Declarative guards on every mutating action — `login_required=True` at registration plus the matching `ModelAdmin` permission check inside the handler. Inline-formset validation that runs inside the main form's `clean()`, so failures route through the framework's re-render path instead of a 400. A single layout that branches between admin chrome and the centered auth chrome through one `{% if is_auth_page %}` and one `{% block template %}`. An audit feed wired to `action_dispatched`, recording every admin dispatch through a single receiver without touching the handlers themselves. And `django.contrib.messages` plumbed end-to-end — handlers write through `messages.success` / `messages.error`, `ModelAdmin.message_user` from custom bulk actions flows through the same channel, and one `flash_messages` component drains the queue at the top of every page.
+The example shows seven reusable patterns. A request-aware `@action(form_class=...)` factory that turns each `ModelAdmin.get_form` result into a per-request `Form` class. A shared actions module ([`shadcn_admin/forms.py`](shadcn_admin/forms.py)) that owns the add and change factories and handlers, with all per-request state collapsed into one frozen `AdminFormSpec` dataclass shared through `Depends("admin_spec")` — the `admin_form` composite keeps only the template and its `form_state` render context. Declarative guards on every mutating action — `login_required=True` at registration plus the matching `ModelAdmin` permission check inside the handler. Inline-formset validation that runs inside the main form's `clean()`, so failures route through the framework's re-render path instead of a 400. A single layout that branches between admin chrome and the centered auth chrome through one `{% if is_auth_page %}` and one `{% template %}`. An audit feed wired to `action_dispatched`, recording every admin dispatch through a single receiver without touching the handlers themselves. And `django.contrib.messages` plumbed end-to-end — handlers write through `messages.success` / `messages.error`, `ModelAdmin.message_user` from custom bulk actions flows through the same channel, and one `flash_messages` component drains the queue at the top of every page.
 
 ## What you will see
 
@@ -47,7 +47,7 @@ The router walks two roots, listed in [`config/settings.py`](config/settings.py)
 - `DIRS = ["chrome"]` — the project-level page root. It contains a single [`chrome/layout.djx`](chrome/layout.djx) with the outermost HTML envelope: `<!DOCTYPE html>`, `<body>`, `{% component "page_head" %}`, and `{% collect_scripts %}`. Every page in the project gets wrapped by this layer first.
 - `APP_DIRS = True` and `PAGES_DIR = "surfaces"` — each installed app may ship a `surfaces/` tree. `shadcn_admin/surfaces/` owns the actual pages (dashboard, login, logout, changelist, add, change, delete, history, activity) and the single `surfaces/layout.djx` that wraps all of them.
 
-[`shadcn_admin/surfaces/layout.djx`](shadcn_admin/surfaces/layout.djx) sits **inside** the chrome envelope and keeps a single `{% block template %}` wrapped differently based on a context flag. Django rejects two `{% block template %}` placeholders in the same template, so the chrome branches sit **around** the block, not inside two competing branches.
+[`shadcn_admin/surfaces/layout.djx`](shadcn_admin/surfaces/layout.djx) sits **inside** the chrome envelope and keeps a single `{% template %}` wrapped differently based on a context flag. A layout carries exactly one placeholder — composition fills the first and `next.W078` flags the rest — so the chrome branches sit **around** the placeholder, not inside two competing branches.
 
 ```djx
 {% if is_auth_page %}
@@ -60,7 +60,7 @@ The router walks two roots, listed in [`config/settings.py`](config/settings.py)
 {% endif %}
 
 {% component "flash_messages" %}
-{% block template %}{% endblock template %}
+{% template %}
 ```
 
 `is_auth_page` comes from [`shadcn_admin/surfaces/page.py`](shadcn_admin/surfaces/page.py) through `@context("is_auth_page", inherit_context=True)`. It returns `request.path.startswith` against `/admin/login/` and `/admin/logout/`, so every descendant page picks it up without restating the rule.

@@ -100,9 +100,7 @@ class TestTemplateSourceSnapshot:
         """A source restored to an older mtime by a checkout counts as a change."""
         page_file = tmp_path / "page.py"
         layout_file = tmp_path / "layout.djx"
-        layout_file.write_text(
-            "<html>{% block template %}{% endblock template %}</html>"
-        )
+        layout_file.write_text("<html>{% template %}</html>")
         page_instance._template_source_mtimes[page_file] = {
             layout_file: stat_mtime_ns(layout_file) + 5_000_000_000
         }
@@ -162,14 +160,14 @@ class TestComposedTemplateCache:
     ) -> None:
         """An edited ancestor layout.djx invalidates the compiled cache too."""
         layout = tmp_path / "layout.djx"
-        layout.write_text("<html>{% block template %}{% endblock template %}</html>")
+        layout.write_text("<html>{% template %}</html>")
         page_dir = tmp_path / "sub"
         page_dir.mkdir()
         page_file = page_dir / "page.py"
         page_file.write_text("x = 1")
         (page_dir / "template.djx").write_text("<p>body</p>")
         assert "<html>" in page_instance.render(page_file)
-        layout.write_text("<main>{% block template %}{% endblock template %}</main>")
+        layout.write_text("<main>{% template %}</main>")
         assert "<main>" in page_instance.render(page_file)
 
     def test_register_template_drops_compiled_entry(
@@ -256,7 +254,7 @@ class TestStaticFastPathView:
         )
 
         (page_file.parent / "layout.djx").write_text(
-            "<article>{% block template %}{% endblock template %}</article>"
+            "<article>{% template %}</article>"
         )
 
         assert b"<article>" in view(build_page_request()).content
@@ -288,9 +286,7 @@ class TestStaticFastPathView:
         self, page_instance, tmp_path, watched_template_edits
     ) -> None:
         """A recomposed page reads `page.py` as it stands, not as it was built."""
-        (tmp_path / "layout.djx").write_text(
-            "<html>{% block template %}{% endblock template %}</html>"
-        )
+        (tmp_path / "layout.djx").write_text("<html>{% template %}</html>")
         leaf = tmp_path / "leaf"
         leaf.mkdir()
         page_file = leaf / "page.py"
@@ -301,9 +297,7 @@ class TestStaticFastPathView:
         stamp = page_file.stat().st_mtime + 10
         page_file.write_text('template = "<p>second</p>"')
         os.utime(page_file, (stamp, stamp))
-        (tmp_path / "layout.djx").write_text(
-            "<html><body>{% block template %}{% endblock template %}</body></html>"
-        )
+        (tmp_path / "layout.djx").write_text("<html><body>{% template %}</body></html>")
 
         assert b"second" in view(build_page_request()).content
 
@@ -330,9 +324,7 @@ class TestLayoutSkeletonCache:
         self, page_instance, tmp_path
     ) -> None:
         """The cached skeleton holds a slot where the per-request body goes."""
-        (tmp_path / "layout.djx").write_text(
-            "<html>{% block template %}{% endblock template %}</html>"
-        )
+        (tmp_path / "layout.djx").write_text("<html>{% template %}</html>")
         page_file = _build_dynamic_page(tmp_path / "leaf")
 
         response = unified_view(page_instance, page_file)(build_page_request())
@@ -345,9 +337,7 @@ class TestLayoutSkeletonCache:
         self, page_instance, tmp_path, monkeypatch
     ) -> None:
         """The skeleton is composed once and filled per request."""
-        (tmp_path / "layout.djx").write_text(
-            "<html>{% block template %}{% endblock template %}</html>"
-        )
+        (tmp_path / "layout.djx").write_text("<html>{% template %}</html>")
         page_file = _build_dynamic_page(tmp_path / "leaf")
         view = unified_view(page_instance, page_file)
 
@@ -365,9 +355,7 @@ class TestLayoutSkeletonCache:
         view = unified_view(page_instance, page_file)
         assert view(build_page_request()).content == b"<p>dynamic</p>"
 
-        (page_file.parent / "layout.djx").write_text(
-            "<html>{% block template %}{% endblock template %}</html>"
-        )
+        (page_file.parent / "layout.djx").write_text("<html>{% template %}</html>")
 
         assert view(build_page_request()).content == b"<html><p>dynamic</p></html>"
 
@@ -375,9 +363,7 @@ class TestLayoutSkeletonCache:
         self, page_instance, tmp_path, watched_template_edits
     ) -> None:
         """A deleted ``layout.djx`` drops out of the next dynamic GET."""
-        (tmp_path / "layout.djx").write_text(
-            "<html>{% block template %}{% endblock template %}</html>"
-        )
+        (tmp_path / "layout.djx").write_text("<html>{% template %}</html>")
         page_file = _build_dynamic_page(tmp_path / "leaf")
         view = unified_view(page_instance, page_file)
         assert view(build_page_request()).content == b"<html><p>dynamic</p></html>"
@@ -636,9 +622,7 @@ class TestTemplateStalenessGate:
         layout_file = tmp_path / "layout.djx"
         page_instance.render(page_file, title="One")
 
-        layout_file.write_text(
-            "<html data-old>{% block template %}{% endblock template %}</html>"
-        )
+        layout_file.write_text("<html data-old>{% template %}</html>")
         older = time.time() - 60
         os.utime(layout_file, (older, older))
         rendered = page_instance.render(page_file, title="One")
@@ -690,8 +674,7 @@ class TestTemplateStalenessGate:
     ) -> None:
         """The dev loop of a zone declared in an ancestor layout stays intact."""
         (tmp_path / "layout.djx").write_text(
-            '<html>{% zone "z" %}<p>first</p>{% endzone %}'
-            "{% block template %}{% endblock template %}</html>"
+            '<html>{% zone "z" %}<p>first</p>{% endzone %}{% template %}</html>'
         )
         leaf = tmp_path / "leaf"
         leaf.mkdir()
@@ -702,8 +685,7 @@ class TestTemplateStalenessGate:
         assert b"first" in view(build_zone_request("z")).content
 
         (tmp_path / "layout.djx").write_text(
-            '<html>{% zone "z" %}<p>second</p>{% endzone %}'
-            "{% block template %}{% endblock template %}</html>"
+            '<html>{% zone "z" %}<p>second</p>{% endzone %}{% template %}</html>'
         )
 
         assert b"second" in view(build_zone_request("z")).content

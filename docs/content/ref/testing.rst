@@ -12,6 +12,10 @@ Module summary
 Public API
 ----------
 
+.. automodule:: next.testing
+   :members:
+   :no-index:
+
 Pytest plugin
 ~~~~~~~~~~~~~
 
@@ -102,3 +106,4 @@ See also
 
    :doc:`/content/topics/testing` for the topic guide.
    :doc:`/content/howto/test-a-page-with-actions` for a recipe.
+   :doc:`/content/howto/test-a-component-in-isolation` for rendering one component without HTTP.

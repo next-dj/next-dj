@@ -29,10 +29,10 @@ Write the backend.
        """Registry backend that writes an audit row per dispatch."""
 
        def dispatch(self, request: HttpRequest, uid: str) -> HttpResponse:
-           key = self._uid_to_name.get(uid)
-           if key is None:
+           names = {meta["uid"]: meta["name"] for meta in self.iter_actions()}
+           action_name = names.get(uid)
+           if action_name is None:
                return super().dispatch(request, uid)
-           _scope_key, action_name = key
            response = super().dispatch(request, uid)
            AuditEntry.objects.create(
                action_name=action_name,
@@ -41,9 +41,7 @@ Write the backend.
            return response
 
 The override calls ``super().dispatch`` to run the standard validation and handler pipeline.
-The ``self._uid_to_name`` mapping is a private UID index.
-It maps each UID to a ``(scope_key, name)`` tuple.
-Unpack the tuple to extract the bare action name.
+``iter_actions()`` is the public hook that yields one ``ActionMeta`` per stored action, so indexing its ``uid`` key gives the bare action name without reaching into the backend's private maps.
 An unknown UID raises ``Http404`` from the parent dispatch, so the override skips the audit row for it.
 
 Register the backend.

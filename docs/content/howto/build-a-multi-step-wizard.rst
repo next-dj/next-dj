@@ -65,7 +65,8 @@ Under the default settings the same files live in ``access/pages/request/[step]/
 
 Subclassing registers the wizard as the ``access_request_wizard`` action, and the default ``Meta.url_param`` of ``"step"`` matches the ``[step]`` route segment with no extra configuration.
 Every step form subclasses ``django.forms`` directly because a step is not a standalone action and has nothing to register.
-A step built on a ``next.forms`` base would register as its own form action, whose default ``on_valid`` saves a partial row outside the wizard flow, unless it sets ``Meta.abstract = True``.
+A step built on a ``next.forms`` base registers as its own form action unless it sets ``Meta.abstract = True``, which leaves a live POST endpoint beside the wizard.
+On a ``ModelForm`` step that endpoint also saves a partial row outside the wizard flow, because the default ``on_valid`` saves before it redirects.
 :doc:`/content/topics/forms/wizard` covers the registration, scope, and ``Meta.steps`` semantics in depth.
 
 Route through the step segment

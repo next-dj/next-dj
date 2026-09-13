@@ -87,6 +87,7 @@ def shape_validate(
     form: "BaseForm | BaseFormSet",
     intent: "PartialIntent",
     action: ActionRef,
+    wizard: "FormWizard | None",
 ) -> HttpResponse:
     """Shape a validate-only pass as a form morph envelope.
 
@@ -96,7 +97,8 @@ def shape_validate(
     untouched. Errors are filtered to the fields the request named, never-submitted
     fields keep no premature required error, the cross-field non-field errors are always
     dropped, and file fields are excluded from the requested set. The response is always
-    200 with a form morph by uid plus the surviving errors in meta.
+    200 with the surviving errors in meta, morphing the form's own zone when it declares
+    one and the form by uid otherwise.
     """
     rotated = _csrf_rotated(request)
     form.is_valid()
@@ -108,7 +110,7 @@ def shape_validate(
     patches = Patches(request)
     zone = _form_zone(request, page_path)
     if zone is not None:
-        overrides = _bound_form_overrides(form, action.action_name)
+        overrides = _zone_overrides(form, wizard, action.action_name)
         patches.morph(zone=zone, overrides=overrides)
     else:
         html = backend.render_invalid_page(
@@ -153,7 +155,8 @@ def _shape_invalid(
     uid = outcome.uid or ""
     zone = _form_zone(request, outcome.page_path)
     if zone is not None:
-        patches.morph(zone=zone, overrides=_form_overrides(outcome))
+        overrides = _zone_overrides(form, outcome.wizard, outcome.action_name)
+        patches.morph(zone=zone, overrides=overrides)
     else:
         html = backend.render_invalid_page(
             request, outcome.action_name, form, outcome.page_path, outcome.url_kwargs
@@ -206,7 +209,7 @@ def _shape_advance(
     )
     form = next_wizard.current_form()
     patches = Patches(request)
-    overrides = _wizard_overrides(form, next_wizard, outcome.action_name)
+    overrides = _zone_overrides(form, next_wizard, outcome.action_name)
     # The hidden _next_form_origin must carry the next step URL, not the current
     # one from request.POST, or a blur probe morphs the previous step back in.
     overrides[FORM_ORIGIN_OVERRIDE_KEY] = redirect_to
@@ -349,31 +352,23 @@ def _declared_zones(page_path: "Path") -> frozenset[str]:
     return frozenset(zones_of(template))
 
 
-def _form_overrides(outcome: ActionOutcome) -> dict[str, object]:
-    """Return the context overrides that bind the failed form into the zone."""
-    form = outcome.form
+def _zone_overrides(
+    form: "BaseForm | BaseFormSet | None", wizard: "FormWizard | None", action_name: str
+) -> dict[str, object]:
+    """Return the overrides binding one form into a zone re-render.
+
+    The `{% form %}` tag honours the action key only when it carries a `.form`
+    attribute, so a bare form there makes the tag build an unbound replacement instead.
+    """
     if form is None:
         return {}
-    wizard = outcome.wizard
+    overrides: dict[str, object] = {
+        "form": form,
+        action_name: types.SimpleNamespace(form=form, wizard=wizard),
+    }
     if wizard is not None:
-        namespace = types.SimpleNamespace(form=form, wizard=wizard)
-        return {"form": form, "wizard": wizard, outcome.action_name: namespace}
-    return {"form": form, outcome.action_name: form}
-
-
-def _bound_form_overrides(
-    form: "BaseForm | BaseFormSet", action_name: str
-) -> dict[str, object]:
-    """Return the overrides binding an already-bound form into the zone."""
-    return {"form": form, action_name: form}
-
-
-def _wizard_overrides(
-    form: object, wizard: "FormWizard", action_name: str
-) -> dict[str, object]:
-    """Return the overrides binding the next step's unbound form into the zone."""
-    namespace = types.SimpleNamespace(form=form, wizard=wizard)
-    return {"form": form, "wizard": wizard, action_name: namespace}
+        overrides["wizard"] = wizard
+    return overrides
 
 
 def _resolve_step_target(

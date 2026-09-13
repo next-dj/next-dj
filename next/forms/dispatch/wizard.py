@@ -34,21 +34,28 @@ def _maybe_validate_only(
     form: "django_forms.Form",
     action_name: str,
     state: "_DispatchState",
+    wizard: "FormWizard | None",
 ) -> "HttpResponse | None":
     """Return a validate-only response when the request asks for one.
 
-    The branch only fires once both authorization layers have passed and
-    the form is already bound, so a guarded action's validator is never an
-    anonymous oracle. The handler never runs, success signals never fire,
-    and wizard storage stays untouched. A request without validate fields
-    falls through to the normal submit path.
+    The branch only fires once both authorization layers have passed and the form is
+    already bound, so a guarded action's validator is never an anonymous oracle. The
+    handler never runs, success signals never fire, and wizard storage stays untouched.
+    A request naming no validate field falls through to the submit path, and a wizard
+    step carries its live wizard so the re-rendered zone keeps reading it.
     """
     shaper = partial_shaper_slot.get()
     intent = shaper.intent(request)
     if not intent.validate_fields:
         return None
     return shaper.shape_validate(
-        backend, request, form, intent, action_name=action_name, uid=state.uid or ""
+        backend,
+        request,
+        form,
+        intent,
+        action_name=action_name,
+        uid=state.uid or "",
+        wizard=wizard,
     )
 
 
@@ -82,7 +89,7 @@ def _bind_wizard_step(
     denial = _enforce_object_permissions(form, request, action_name, state)
     if denial is not None:
         return denial
-    validated = _maybe_validate_only(backend, request, form, action_name, state)
+    validated = _maybe_validate_only(backend, request, form, action_name, state, wizard)
     if validated is not None:
         return validated
     return wizard, step_name, form

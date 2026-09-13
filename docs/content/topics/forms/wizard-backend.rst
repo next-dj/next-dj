@@ -21,7 +21,9 @@ The storage id is the ``snake_case`` of the wizard class name prefixed with a sh
 Backends treat the id as an opaque string.
 
 ``load(request, storage_id) -> dict``.
-   Returns the ``{step: cleaned_data}`` mapping for the wizard, in step order.
+   Returns the ``{step: cleaned_data}`` mapping for the wizard, in the order the steps were first saved.
+   That iteration order is the merge order of ``get_all_cleaned_data``, which walks the mapping as it comes and lets a later step overwrite a key an earlier one set.
+   A backend therefore returns the steps in save order rather than in the order ``Meta.steps`` declares them, or the merged value of a shared key changes with the storage.
 
 ``save_step(request, storage_id, step, data)``.
    Persists the cleaned data for a single step.
@@ -61,9 +63,9 @@ The backend encodes values through a typed codec instead of asking the step form
 The model round-trip has three consequences.
 The decoded instance is a fresh fetch, not a snapshot, so it reflects edits made to the row between steps.
 A row deleted between steps decodes to ``None``, so ``done`` must not assume the value survived the draft.
-An unsaved instance has no primary key to store, so encoding it raises ``ImproperlyConfigured`` at save time.
+An unsaved instance has no primary key to store, so encoding it raises ``next.forms.UnstorableWizardValueError`` at save time.
 
-A value the codec does not recognise raises ``ImproperlyConfigured`` naming the offending type.
+A value the codec does not recognise raises ``UnstorableWizardValueError``, an ``ImproperlyConfigured`` subclass that names the offending type and keeps the value on ``.value``.
 The error suggests the fix.
 Configure ``CacheFormWizardBackend`` or a custom ``FormWizardBackend`` for cleaned data that does not fit JSON.
 

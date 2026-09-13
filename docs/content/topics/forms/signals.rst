@@ -166,6 +166,9 @@ The dispatcher only builds the payload and sends the signal when at least one re
 
 The signal fires once per failed submission, so log volume scales with the failure rate rather than the request rate.
 
+A failing ``FormWizard`` step sends the same signal, with ``action_name`` set to the wizard's action name and ``error_count`` and ``field_names`` read off the step form that failed.
+The payload names no step, so a receiver that needs to know which one failed pairs this signal with ``wizard_step_submitted``.
+
 .. _topics-forms-signals-wizard-step-submitted:
 
 wizard_step_submitted
