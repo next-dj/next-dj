@@ -644,8 +644,10 @@ class TestComponentContextRegistryLookupBound:
 
         assert list(reg._lookup_cache) == [paths[1], paths[2]]
 
-    def test_two_spellings_of_one_file_share_one_entry(self, tmp_path: Path) -> None:
-        """A relative-looking spelling collapses onto the resolved path."""
+    def test_two_spellings_of_one_file_answer_the_same_functions(
+        self, tmp_path: Path
+    ) -> None:
+        """A relative-looking spelling reads the entry the resolved path registered."""
         reg = ComponentContextRegistry()
         module_path = tmp_path / "component.py"
         (tmp_path / "sub").mkdir()
@@ -656,13 +658,13 @@ class TestComponentContextRegistryLookupBound:
 
         reg.register(module_path, "n", provide)
 
-        assert reg.get_functions(spelled) is reg.get_functions(module_path)
-        assert list(reg._lookup_cache) == [module_path.resolve()]
+        assert reg.get_functions(spelled) == reg.get_functions(module_path)
+        assert list(reg._lookup_cache) == [spelled, module_path]
 
-    def test_a_symlinked_spelling_shares_the_entry_of_the_real_file(
+    def test_a_symlinked_spelling_answers_what_the_real_file_answers(
         self, tmp_path: Path
     ) -> None:
-        """A symlink to a component folder adds no second row to the memo."""
+        """A symlink to a component folder reads through to the registered file."""
         reg = ComponentContextRegistry()
         real_dir = tmp_path / "real"
         real_dir.mkdir()
@@ -679,4 +681,4 @@ class TestComponentContextRegistryLookupBound:
         assert [
             entry.func for entry in reg.get_functions(link_dir / "component.py")
         ] == [provide]
-        assert list(reg._lookup_cache) == [module_path.resolve()]
+        assert list(reg._lookup_cache) == [link_dir / "component.py"]

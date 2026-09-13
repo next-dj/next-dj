@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import inspect
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Annotated
@@ -12,6 +12,10 @@ from next.urls import DUrl
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from django.http import HttpRequest
+
+    from next.deps import DependencyResolver
 
 
 _UUID_TEXT = "12345678-1234-5678-1234-567812345678"
@@ -151,6 +155,35 @@ class PlanCase:
 
 
 @dataclass(frozen=True, slots=True)
+class TemplateContextCase:
+    """One callable resolved the way a component render resolves it.
+
+    `template_context` is the mapping the tag hands the resolver, and `expected` the
+    literal both the compile and the replay have to produce.
+    """
+
+    id: str
+    func: Callable[..., object]
+    request: HttpRequest | None
+    template_context: dict[str, object] | None
+    expected: dict[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class ParityCase:
+    """One callable and one loose kwargs mapping both resolvers have to agree on.
+
+    `build` installs whatever providers or dependencies the case needs, so the two
+    resolvers under comparison are set up identically and independently.
+    """
+
+    id: str
+    func: Callable[..., object]
+    kwargs: dict[str, object] = field(default_factory=dict)
+    build: Callable[[DependencyResolver], None] = lambda _r: None
+
+
+@dataclass(frozen=True, slots=True)
 class ContextMarkerCase:
     """One `Context` marker source, resolved against one template context.
 
@@ -208,6 +241,20 @@ PERMISSION_OUTCOME_CASES: tuple[PermissionHookCase, ...] = (
         raises_type_error=True,
     ),
 )
+
+
+@dataclass(frozen=True, slots=True)
+class WatchSourcesCase:
+    """What the reloader reports for one finder run, spelled relative to the tree.
+
+    `rooted` decides whether the tree is reported as a page root at all, which is what
+    tells a path under no page tree from one the finder can name.
+    """
+
+    rooted: bool = True
+    templates: tuple[str, ...] = ()
+    layouts: tuple[str, ...] = ()
+    components: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

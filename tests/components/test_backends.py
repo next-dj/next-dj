@@ -431,6 +431,18 @@ class TestWatchRoots:
 
         assert backend.watch_roots() == ()
 
+    def test_a_dir_created_later_becomes_a_tree_to_watch(
+        self, tmp_path: Path, min_component_config: dict
+    ) -> None:
+        """The roots are read again, so a folder written after startup is watched."""
+        late = tmp_path / "ui"
+        backend = FileComponentsBackend({**min_component_config, "DIRS": [str(late)]})
+        assert backend.watch_roots() == ()
+
+        late.mkdir()
+
+        assert backend.watch_roots() == (late,)
+
 
 class TestFileBackendFromConfig:
     """A merged `COMPONENT_BACKENDS` entry configures the file backend."""

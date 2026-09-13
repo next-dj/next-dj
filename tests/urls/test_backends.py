@@ -1099,20 +1099,25 @@ class TestRouterFactory:
         ],
     )
     def test_create_backend_names_the_missing_required_key(
-        self, config, missing_key
+        self, config: dict[str, object], missing_key: str
     ) -> None:
         """FileRouterBackend config must list PAGES_DIR, APP_DIRS, OPTIONS, and DIRS."""
         with pytest.raises(ImproperlyConfigured, match=missing_key):
             RouterFactory.create_backend(config)
 
-    def test_create_backend_when_dirs_is_no_sequence(self) -> None:
-        """A scalar DIRS answers the type the whole backend family answers."""
+    @pytest.mark.parametrize(
+        "dirs", [pytest.param(5, id="scalar"), pytest.param([7], id="entry_is_no_path")]
+    )
+    def test_create_backend_when_dirs_is_no_sequence_of_trees(
+        self, dirs: object
+    ) -> None:
+        """A scalar DIRS or an entry naming no path costs its own router alone."""
         config = {
             "BACKEND": "next.urls.FileRouterBackend",
             "PAGES_DIR": "pages",
             "APP_DIRS": True,
             "OPTIONS": {},
-            "DIRS": 5,
+            "DIRS": dirs,
         }
 
         with pytest.raises(ImproperlyConfigured, match="sequence of trees"):

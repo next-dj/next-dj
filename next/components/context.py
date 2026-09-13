@@ -144,21 +144,23 @@ class ComponentContextRegistry:
     def get_functions(self, component_path: Path) -> Sequence[ContextFunction]:
         """Return a tuple of registered context functions for `component_path`.
 
-        Results are memoised under the resolved path and thrown away when the
-        registry version moves, so a render pays neither the walk of the registry
-        nor the tuple build twice, and a symlinked spelling of one file shares the
-        entry of its plain one. The empty result is memoised too, because most
-        components register no context function at all.
+        Results are memoised under the path as passed and thrown away when the registry
+        version moves, so a warm render pays neither the resolve nor the tuple build. A
+        symlinked spelling costs its own entry and answers what its plain one answers,
+        because the registry behind both is keyed by the resolved path. The empty result
+        is memoised too, because most components register no context function at all.
         """
         if self._lookup_version != self._version:
             self._lookup_cache.clear()
             self._lookup_version = self._version
-        path = resolved_tree(component_path)
-        cached = self._lookup_cache.get(path)
+        cached = self._lookup_cache.get(component_path)
         if cached is not None:
             return cached
-        functions = tuple(self._registry.get(path, {}).values())
-        store_capped(self._lookup_cache, path, functions, _LOOKUP_CACHE_MAX_SIZE)
+        resolved = resolved_tree(component_path)
+        functions = tuple(self._registry.get(resolved, {}).values())
+        store_capped(
+            self._lookup_cache, component_path, functions, _LOOKUP_CACHE_MAX_SIZE
+        )
         return functions
 
     def _is_same_function(

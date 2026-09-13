@@ -1,6 +1,4 @@
 import inspect
-from collections.abc import Callable
-from dataclasses import dataclass, field
 from operator import attrgetter
 
 import pytest
@@ -20,7 +18,13 @@ from next.forms import DForm
 from next.pages.context import Context
 from next.testing import make_resolution_context
 from next.urls import DQuery, DUrl
-from tests.support import AForm, DeferringProvider, OtherForm, inspect_parameter
+from tests.support import (
+    AForm,
+    DeferringProvider,
+    OtherForm,
+    ParityCase,
+    inspect_parameter,
+)
 
 
 _REQUEST = RequestFactory().get("/?page=3&tags=a,b")
@@ -207,20 +211,6 @@ class TestLinearProvides:
         assert built.provides(_skipping, param, context) is False
 
 
-@dataclass(frozen=True, slots=True)
-class _ParityCase:
-    """One callable and one loose kwargs mapping both resolvers have to agree on.
-
-    `build` installs whatever providers or dependencies the case needs, so the
-    two resolvers under comparison are set up identically and independently.
-    """
-
-    id: str
-    func: Callable[..., object]
-    kwargs: dict[str, object] = field(default_factory=dict)
-    build: Callable[[DependencyResolver], None] = lambda _r: None
-
-
 def _bind_theme(built: DependencyResolver) -> None:
     built.dependency("theme")(lambda: "dark")
 
@@ -264,9 +254,9 @@ def _forms(
 
 _CONTEXT_DATA: dict[str, object] = {"page_value": 42, "named": "n", "value": "ctx"}
 
-PARITY_CASES: tuple[_ParityCase, ...] = (
-    _ParityCase("markers_bare", _markers, {}, _bind_theme),
-    _ParityCase(
+PARITY_CASES: tuple[ParityCase, ...] = (
+    ParityCase("markers_bare", _markers, {}, _bind_theme),
+    ParityCase(
         "markers_full",
         _markers,
         {
@@ -279,22 +269,22 @@ PARITY_CASES: tuple[_ParityCase, ...] = (
         },
         _bind_theme,
     ),
-    _ParityCase(
+    ParityCase(
         "markers_form",
         _markers,
         {"request": _REQUEST, "form": _FORM, "cleaned_data": {"a": 1}},
         _bind_theme,
     ),
-    _ParityCase("forms_bare", _forms),
-    _ParityCase("forms_filled", _forms, {"form": _FORM, "cleaned_data": {"a": 1}}),
-    _ParityCase(
+    ParityCase("forms_bare", _forms),
+    ParityCase("forms_filled", _forms, {"form": _FORM, "cleaned_data": {"a": 1}}),
+    ParityCase(
         "forms_context", _forms, {"_context_data": {"form": _FORM, "other": "o"}}
     ),
-    _ParityCase("nested_dependency", _outer, {"value": "u"}, _bind_nested),
-    _ParityCase("custom_provider", _plain, {}, _prepend_stub),
-    _ParityCase("custom_provider_outranked", _plain, {"value": "u"}, _prepend_stub),
-    _ParityCase("unresolvable_hint", _unresolvable, {"request": _REQUEST}),
-    _ParityCase("builtin", int, {"request": _REQUEST}),
+    ParityCase("nested_dependency", _outer, {"value": "u"}, _bind_nested),
+    ParityCase("custom_provider", _plain, {}, _prepend_stub),
+    ParityCase("custom_provider_outranked", _plain, {"value": "u"}, _prepend_stub),
+    ParityCase("unresolvable_hint", _unresolvable, {"request": _REQUEST}),
+    ParityCase("builtin", int, {"request": _REQUEST}),
 )
 
 _PARAMS: tuple[inspect.Parameter, ...] = (
@@ -350,7 +340,7 @@ class TestPathParity:
     """
 
     @pytest.mark.parametrize("case", PARITY_CASES, ids=attrgetter("id"))
-    def test_both_paths_fill_the_same_mapping(self, case: _ParityCase) -> None:
+    def test_both_paths_fill_the_same_mapping(self, case: ParityCase) -> None:
         planned = DependencyResolver()
         linear = LinearDependencyResolver()
         case.build(planned)
@@ -365,7 +355,7 @@ class TestPathParity:
 
     @pytest.mark.parametrize("case", PARITY_CASES, ids=attrgetter("id"))
     def test_both_paths_agree_on_the_component_entry_point(
-        self, case: _ParityCase
+        self, case: ParityCase
     ) -> None:
         planned = DependencyResolver()
         linear = LinearDependencyResolver()
@@ -384,7 +374,7 @@ class TestPathParity:
 
     @pytest.mark.parametrize("name", _PROVIDES_NAMES)
     @pytest.mark.parametrize("context_id", sorted(_CONTEXTS), ids=sorted(_CONTEXTS))
-    def test_both_paths_agree_on_provides(self, name, context_id) -> None:
+    def test_both_paths_agree_on_provides(self, name: str, context_id: str) -> None:
         planned = _with_theme(DependencyResolver)
         linear = _with_theme(LinearDependencyResolver)
         # Both implementations match the entry by name alone, so the parameter
@@ -411,7 +401,9 @@ class TestProviderContract:
         return list(built._providers)
 
     @pytest.mark.parametrize("param", _PARAMS, ids=attrgetter("name"))
-    def test_a_static_verdict_holds_in_every_context(self, param, providers) -> None:
+    def test_a_static_verdict_holds_in_every_context(
+        self, param: inspect.Parameter, providers: list[object]
+    ) -> None:
         for provider in providers:
             verdict = provider.static_can_handle(param)
             if verdict is None:
@@ -422,7 +414,7 @@ class TestProviderContract:
 
     @pytest.mark.parametrize("param", _PARAMS, ids=attrgetter("name"))
     def test_a_compiled_filler_answers_what_resolve_answers(
-        self, param, providers
+        self, param: inspect.Parameter, providers: list[object]
     ) -> None:
         for provider in providers:
             if provider.static_can_handle(param) is not True:

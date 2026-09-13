@@ -104,6 +104,7 @@ class FileComponentsBackend(ComponentsBackend):
         `COMPONENTS_DIR` is not read here. It names the folder the URL router skips
         inside a page tree, and `FileRouterBackend` reads it straight from the settings.
         """
+        self._config = config
         self._extra_component_roots = component_extra_roots_from_config(config)
 
         self._registry = ComponentRegistry()
@@ -188,8 +189,12 @@ class FileComponentsBackend(ComponentsBackend):
 
     @override
     def watch_roots(self) -> tuple[Path, ...]:
-        """Return the `DIRS` roots, which are known without a scan."""
-        return tuple(self._extra_component_roots)
+        """Return the `DIRS` roots, read again rather than taken from discovery.
+
+        A root named by `DIRS` that the disk did not hold at construction carries no
+        component yet, and a watch built from that snapshot would never notice one.
+        """
+        return tuple(component_extra_roots_from_config(self._config))
 
     @override
     def get_component(self, name: str, template_path: Path) -> ComponentInfo | None:

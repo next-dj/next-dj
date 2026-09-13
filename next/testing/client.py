@@ -33,11 +33,19 @@ class PartialEnvelope:
     """
 
     def __init__(self, data: dict[str, Any]) -> None:
-        """Wrap the decoded envelope mapping."""
+        """Wrap the decoded envelope mapping, rebuilt on the first read of it."""
         self.data = data
+        self._parsed: Envelope | None = None
 
     def _envelope(self) -> Envelope:
-        return Envelope.from_dict(self.data)
+        """Return the envelope objects behind the mapping, built once per view.
+
+        Deferred rather than built in the constructor, so a view over a mapping no
+        assertion reads costs nothing and a malformed one is refused where it is read.
+        """
+        if self._parsed is None:
+            self._parsed = Envelope.from_dict(self.data)
+        return self._parsed
 
     def _addressed(self, selector: str) -> list[str]:
         return [

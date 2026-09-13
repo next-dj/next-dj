@@ -98,13 +98,17 @@ class TestBlockTagLexingSpansLines:
     """Dot-matches-newline reaches block tags and nothing else."""
 
     @pytest.mark.parametrize("lexer_class", [Lexer, DebugLexer], ids=("plain", "debug"))
-    def test_multiline_block_tag_lexes_as_one_token(self, lexer_class) -> None:
+    def test_multiline_block_tag_lexes_as_one_token(
+        self, lexer_class: type[Lexer]
+    ) -> None:
         """Both lexers read the widened pattern from the same module global."""
         tokens = lexer_class(_MULTILINE_BLOCK_TAG).tokenize()
         assert [token.token_type for token in tokens] == [TokenType.BLOCK]
 
     @pytest.mark.parametrize("lexer_class", [Lexer, DebugLexer], ids=("plain", "debug"))
-    def test_multiline_comment_and_variable_stay_text(self, lexer_class) -> None:
+    def test_multiline_comment_and_variable_stay_text(
+        self, lexer_class: type[Lexer]
+    ) -> None:
         tokens = lexer_class(_UNLEXED_SOURCE).tokenize()
         assert [token.token_type for token in tokens] == [TokenType.TEXT]
 

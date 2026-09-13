@@ -27,9 +27,12 @@ from tests.support.cases import (
     URL_KWARGS_RESOLVE_CASES,
     CoerceUrlValueCase,
     ContextMarkerCase,
+    ParityCase,
     PlanCase,
+    TemplateContextCase,
     UrlByAnnotationResolveCase,
     UrlKwargsResolveCase,
+    WatchSourcesCase,
 )
 from tests.support.components import build_composite_component, component_info
 from tests.support.deps import (
@@ -123,6 +126,7 @@ __all__ = [
     "OddComponentsNameRouter",
     "OddSkipNamesRouter",
     "OtherForm",
+    "ParityCase",
     "PlainStaticBackend",
     "PlanCase",
     "PlanEntry",
@@ -134,8 +138,10 @@ __all__ = [
     "SignalSender",
     "SkippingRouter",
     "StaticAssetProvider",
+    "TemplateContextCase",
     "UrlByAnnotationResolveCase",
     "UrlKwargsResolveCase",
+    "WatchSourcesCase",
     "WatchingComponentsBackend",
     "_ctx",
     "_minimal_resolver",

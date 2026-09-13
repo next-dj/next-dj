@@ -8,6 +8,7 @@ from typing import Any, cast
 from django.conf import settings
 from django.core.signals import setting_changed
 from django.template import base as template_base, engines
+from django.template.engine import Engine
 
 
 _BUILTIN_MODULES = (
@@ -73,11 +74,13 @@ def _engine_with_builtins(engine: dict[str, Any]) -> dict[str, Any] | None:
 def _forget_engines() -> None:
     """Drop engines built from the `TEMPLATES` value that carried no builtins.
 
-    Only a fresh read reaches an engine handler that already read the settings.
+    Only a fresh read reaches an engine handler that already read the settings, and the
+    memo behind `Engine.get_default` is a second one, read by every bare `Template`.
     """
     engines.__dict__.pop("templates", None)
     engines._templates = None  # type: ignore[attr-defined]
     engines._engines = {}  # type: ignore[attr-defined]
+    Engine.get_default.cache_clear()  # type: ignore[attr-defined]
 
 
 def _install_builtins() -> None:

@@ -125,8 +125,9 @@ def _collect_component_paths_under_page_trees() -> set[Path]:
 def _collect_component_paths_from_backend_dirs() -> set[Path]:
     """Collect paths from the trees each components backend reports watching."""
     result: set[Path] = set()
+    # One scanner for the whole read, so a module two roots reach is loaded once.
+    scanner = ComponentScanner(module_loader=ModuleLoader())
     for root in component_watch_roots():
-        scanner = ComponentScanner(module_loader=ModuleLoader())
         try:
             for info in scanner.scan_directory(root, root, ""):
                 result |= _paths_from_component_info(info)

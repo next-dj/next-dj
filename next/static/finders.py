@@ -185,6 +185,9 @@ def _scan_roots() -> _ScanRoots:
     )
 
 
+_BYTECODE_CACHE_DIR = "__pycache__"
+
+
 def _stat_directory(directory: Path) -> os.stat_result | None:
     """Return the stat of `directory`, or `None` when it does not stat."""
     try:
@@ -194,14 +197,23 @@ def _stat_directory(directory: Path) -> os.stat_result | None:
 
 
 def _child_directories(directory: Path) -> list[Path]:
-    """Return the directories held directly by `directory`.
+    """Return the directories held directly by `directory` that can hold an asset.
 
-    A symlinked one counts, because the component glob reads through it and a
-    watch set narrower than what the scan reads would miss a file landing there.
+    A symlinked one counts, because the component glob reads through it and a watch
+    set narrower than what the scan reads would miss a file landing there. A bytecode
+    cache is left out, because the page and component imports the scan itself runs
+    write into one and the scan would invalidate its own answer. A dot directory is
+    left out with it, because tooling keeps no co-located asset either.
     """
     try:
         with os.scandir(directory) as entries:
-            return [Path(entry.path) for entry in entries if entry.is_dir()]
+            return [
+                Path(entry.path)
+                for entry in entries
+                if entry.is_dir()
+                and entry.name != _BYTECODE_CACHE_DIR
+                and not entry.name.startswith(".")
+            ]
     except OSError:
         return []
 

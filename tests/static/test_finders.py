@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 from contextlib import contextmanager
-from dataclasses import dataclass
 from io import StringIO
 from typing import TYPE_CHECKING
 from unittest import mock
@@ -22,6 +21,7 @@ from next.static.finders import (
 )
 from tests.support import (
     MalformedRootsRouter,
+    WatchSourcesCase,
     patched_watch_sources,
     restored_static_registries,
     watching_components_entry,
@@ -33,26 +33,12 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-@dataclass(frozen=True, slots=True)
-class _WatchSources:
-    """What the reloader reports for one finder run, spelled relative to the tree.
-
-    `rooted` decides whether the tree is reported as a page root at all, which
-    is what tells a path under no page tree from one the finder can name.
-    """
-
-    rooted: bool = True
-    templates: tuple[str, ...] = ()
-    layouts: tuple[str, ...] = ()
-    components: tuple[str, ...] = ()
-
-
-_TEMPLATE_AND_LAYOUT = _WatchSources(
+_TEMPLATE_AND_LAYOUT = WatchSourcesCase(
     templates=("about/template.djx",), layouts=("layout.djx",)
 )
-_TEMPLATE_ONLY = _WatchSources(templates=("about/template.djx",))
-_NOTHING_WATCHED = _WatchSources()
-_UNROOTED_TEMPLATE = _WatchSources(rooted=False, templates=("about/template.djx",))
+_TEMPLATE_ONLY = WatchSourcesCase(templates=("about/template.djx",))
+_NOTHING_WATCHED = WatchSourcesCase()
+_UNROOTED_TEMPLATE = WatchSourcesCase(rooted=False, templates=("about/template.djx",))
 
 
 @pytest.fixture()
@@ -71,8 +57,8 @@ def pages_tree(tmp_path: Path) -> Path:
 
 @pytest.fixture()
 def watched_tree(request: pytest.FixtureRequest, pages_tree: Path) -> Iterator[Path]:
-    """Patch the four watch seams from the `_WatchSources` row driving the test."""
-    sources: _WatchSources = request.param
+    """Patch the four watch seams from the `WatchSourcesCase` row driving the test."""
+    sources: WatchSourcesCase = request.param
     with patched_watch_sources(
         pages=[pages_tree] if sources.rooted else [],
         templates={pages_tree / rel for rel in sources.templates},
@@ -206,6 +192,17 @@ class TestScanDirectorySnapshot:
 
         assert walked.count(tmp_path) == 2
         assert walked.count(tmp_path / "inner") == 1
+
+    def test_a_bytecode_cache_and_a_dot_directory_stay_out(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "__pycache__").mkdir()
+        (tmp_path / ".git").mkdir()
+        (tmp_path / "about").mkdir()
+
+        walked = [path for path, _ in _scan_directories(_ScanRoots((tmp_path,), ()))]
+
+        assert walked == [tmp_path, tmp_path / "about"]
 
 
 class TestFinderFreshness:

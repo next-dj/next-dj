@@ -1,6 +1,4 @@
 import inspect
-from collections.abc import Callable
-from dataclasses import dataclass
 from operator import attrgetter
 from typing import Annotated
 
@@ -37,6 +35,7 @@ from tests.support import (
     OtherForm,
     PlanCase,
     PlanEntry,
+    TemplateContextCase,
     inspect_parameter,
     plan_by_name,
     plan_entries,
@@ -356,26 +355,11 @@ PLAN_CASES: tuple[PlanCase, ...] = (
 )
 
 
-@dataclass(frozen=True, slots=True)
-class _TemplateContextCase:
-    """One callable resolved the way a component render resolves it.
-
-    `template_context` is the mapping the tag hands the resolver, and
-    `expected` the literal both the compile and the replay have to produce.
-    """
-
-    id: str
-    func: Callable[..., object]
-    request: HttpRequest | None
-    template_context: dict[str, object] | None
-    expected: dict[str, object]
-
-
 # The component entry point differs from the kwargs one in three ways, and each
 # row below turns one of them into a literal: URL kwargs are always empty, the
 # form comes from the template context itself, and cleaned data never exists.
-TEMPLATE_CONTEXT_CASES: tuple[_TemplateContextCase, ...] = (
-    _TemplateContextCase(
+TEMPLATE_CONTEXT_CASES: tuple[TemplateContextCase, ...] = (
+    TemplateContextCase(
         "markers_request_and_context",
         _markers,
         _REQUEST,
@@ -392,7 +376,7 @@ TEMPLATE_CONTEXT_CASES: tuple[_TemplateContextCase, ...] = (
             "built": "True:42",
         },
     ),
-    _TemplateContextCase(
+    TemplateContextCase(
         "markers_context_without_request",
         _markers,
         None,
@@ -409,7 +393,7 @@ TEMPLATE_CONTEXT_CASES: tuple[_TemplateContextCase, ...] = (
             "built": "False:42",
         },
     ),
-    _TemplateContextCase(
+    TemplateContextCase(
         "markers_no_template_context",
         _markers,
         _REQUEST,
@@ -429,7 +413,7 @@ TEMPLATE_CONTEXT_CASES: tuple[_TemplateContextCase, ...] = (
     # A template key named like a `DUrl` parameter outranks the marker, because
     # the name provider sits ahead of it and hands the value over uncoerced,
     # while the marker itself only ever reads the empty `url_kwargs`.
-    _TemplateContextCase(
+    TemplateContextCase(
         "markers_template_names_shadow_the_url_markers",
         _markers,
         None,
@@ -446,35 +430,35 @@ TEMPLATE_CONTEXT_CASES: tuple[_TemplateContextCase, ...] = (
             "built": "False:None",
         },
     ),
-    _TemplateContextCase(
+    TemplateContextCase(
         "form_params_form_under_the_template_key",
         _form_params,
         None,
         {"form": _FORM, "named": "n", "cleaned_data": {"a": 1}},
         {**_FORM_PARAMS_UNFILLED, "form": _FORM, "named": "n"},
     ),
-    _TemplateContextCase(
+    TemplateContextCase(
         "form_params_without_a_form",
         _form_params,
         _REQUEST,
         {"page_value": 1},
         _FORM_PARAMS_UNFILLED,
     ),
-    _TemplateContextCase(
+    TemplateContextCase(
         "uncovered_reads_the_template_context_by_name",
         _uncovered,
         None,
         {"plain": "p", "ident": 5},
         {"plain": "p", "with_default": 7, "ident": 5},
     ),
-    _TemplateContextCase(
+    TemplateContextCase(
         "string_request_annotation",
         _string_request,
         _REQUEST,
         {},
         {"request": _REQUEST},
     ),
-    _TemplateContextCase("builtin", int, _REQUEST, {}, {}),
+    TemplateContextCase("builtin", int, _REQUEST, {}, {}),
 )
 
 
@@ -521,7 +505,7 @@ class TestTemplateContextGoldenMatrix:
 
     @pytest.mark.parametrize("case", TEMPLATE_CONTEXT_CASES, ids=attrgetter("id"))
     def test_plan_matches_the_pinned_literal(
-        self, case: _TemplateContextCase, resolver_class
+        self, case: TemplateContextCase, resolver_class
     ) -> None:
         planned = _with_theme(resolver_class)
         # The first call compiles the plan and the second replays the cached one.
