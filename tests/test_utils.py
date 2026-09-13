@@ -9,8 +9,8 @@ from unittest.mock import patch
 import pytest
 from django.test import override_settings
 
-from next.pages.loaders import _load_python_module
 from next.errors import InvalidDirsError
+from next.pages.loaders import _load_python_module
 from next.utils import (
     callable_name,
     classify_dirs_entries,
