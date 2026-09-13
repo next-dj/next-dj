@@ -9,7 +9,7 @@ Module summary
 ``next.urls`` exposes the router backends ``RouterBackend`` and ``FileRouterBackend``.
 It re-exports ``PageRoot`` from :doc:`utils`, the labelled page tree a backend reports from ``page_roots`` for the system checks to walk and for the development watcher to observe.
 It also exposes the ``RouterFactory`` and ``RouterManager`` that build and own them.
-The ``URLPatternParser`` for bracket-segment parsing is part of the public surface, together with the ``URLParameterError`` base and its ``DuplicateURLParameterError`` and ``InvalidURLParameterError`` refusals.
+The ``URLPatternParser`` for bracket-segment parsing is part of the public surface, together with the ``URLParameterError`` base and its ``DuplicateURLParameterError`` and ``InvalidURLParameterError`` refusals, and ``RouterConstructionError`` for a router the factory cannot build.
 It also exposes the ``page_reverse``, ``page_reverse_lazy``, and ``with_query`` reverse helpers, the ``get_multi_values`` query reader, and the Django integration name ``app_name``.
 The ``TrieURLResolver`` that dispatches URL resolution through a route trie completes the routing surface.
 The parameter providers and the dependency markers ``DUrl`` (captured path segments) and ``DQuery`` (query string parameters) round out the public surface.
@@ -75,6 +75,7 @@ Parser
 ``URLPatternParser`` raises a subclass of ``URLParameterError`` for a bracket segment it cannot turn into a Django route.
 ``DuplicateURLParameterError`` covers a normalised parameter name repeated within one trail and a second ``[[wildcard]]`` segment.
 ``InvalidURLParameterError`` covers a name that is no Python identifier once a hyphen is read as an underscore, which :func:`~django.urls.path` refuses while it compiles the route.
+``RouterConstructionError`` covers the other refusal the area raises, a router class whose constructor does not take the arguments ``RouterFactory`` builds a router with.
 All three names are exported from ``next.urls``, so a caller catches one refusal on its own or both through the base.
 The parser knows the route but not the file it came from, so the page manager re-raises either refusal with the offending ``page.py`` named at the end of the message.
 

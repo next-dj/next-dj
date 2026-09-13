@@ -29,6 +29,7 @@ from .base import (
     _to_snake_case,
 )
 from .diagnostics import registration_diagnostics
+from .errors import UnstorableWizardValueError
 from .manager import form_action_manager
 
 
@@ -163,16 +164,6 @@ _SCALAR_DECODERS: Final[dict[str, Callable[[str], object]]] = {
 }
 
 
-def _codec_error(value: object) -> ImproperlyConfigured:
-    """Build the error raised for a value the session codec cannot store."""
-    msg = (
-        f"SessionFormWizardBackend cannot store {type(value).__name__} values. "
-        "Configure CacheFormWizardBackend or a custom FormWizardBackend in "
-        "FORM_WIZARD_BACKEND for cleaned_data that does not fit JSON."
-    )
-    return ImproperlyConfigured(msg)
-
-
 def _encode_value(value: object) -> "_JSONValue":
     """Encode one cleaned-data value into a JSON-safe tagged form."""
     if value is None or isinstance(value, (bool, int, float, str)):
@@ -182,13 +173,13 @@ def _encode_value(value: object) -> "_JSONValue":
             return {_CODEC_KEY: tag, "value": encode(value)}
     if isinstance(value, Model):
         if value.pk is None:
-            raise _codec_error(value)
+            raise UnstorableWizardValueError(value)
         return {_CODEC_KEY: "model", "value": [value._meta.label_lower, str(value.pk)]}
     if isinstance(value, (list, tuple)):
         return [_encode_value(item) for item in value]
     if isinstance(value, dict):
         return _encode_mapping(value)
-    raise _codec_error(value)
+    raise UnstorableWizardValueError(value)
 
 
 def _encode_mapping(value: dict[Any, Any]) -> "dict[str, _JSONValue]":
@@ -196,7 +187,7 @@ def _encode_mapping(value: dict[Any, Any]) -> "dict[str, _JSONValue]":
     encoded: dict[str, _JSONValue] = {}
     for key, item in value.items():
         if not isinstance(key, str):
-            raise _codec_error(key)
+            raise UnstorableWizardValueError(key)
         encoded[key] = _encode_value(item)
     if _CODEC_KEY in encoded:
         return {_CODEC_KEY: "mapping", "value": encoded}

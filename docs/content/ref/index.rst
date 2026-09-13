@@ -136,6 +136,7 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
    testing
    apps
    utils
+   errors
    backends
    ports
    settings

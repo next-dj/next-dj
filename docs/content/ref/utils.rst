@@ -15,6 +15,7 @@ The ``DEBUG`` predicate ``template_edits_watched``, which the page, component, a
 
 ``resolve_base_dir`` returns ``settings.BASE_DIR`` coerced to ``pathlib.Path``, or ``None`` when it is unset, for backends that resolve project-relative paths.
 ``classify_dirs_entries`` splits a backend ``DIRS`` list into existing directory roots and plain skip-name segments, the same split the file router applies.
+A ``DIRS`` that is no sequence of trees raises :class:`~next.errors.InvalidDirsError`, a bare string included, because iterating a string would split it into characters.
 ``PageRoot`` pairs a page tree with the label a report names it by.
 It lives here rather than beside the router because the system checks build one too, and it is re-exported as ``next.urls.PageRoot`` for the router contract that produces it.
 
@@ -23,7 +24,7 @@ Public API
 
 .. automodule:: next.utils
    :members:
-   :exclude-members: callable_name, code_filename, defining_file, walk_page_tree, page_roots_shape_error, template_edits_watched, store_bounded, store_capped, touch_bounded, stat_mtime_ns, resolved_tree, forget_resolved_trees, MAX_ANCESTOR_WALK_DEPTH, MisattributedContext, MisattributionLog
+   :exclude-members: callable_name, code_filename, describe_callable, defining_file, walk_page_tree, page_roots_shape_error, template_edits_watched, store_bounded, store_capped, touch_bounded, stat_mtime_ns, resolved_tree, forget_resolved_trees, MAX_ANCESTOR_WALK_DEPTH, MisattributedContext, MisattributionLog
 
 See also
 --------

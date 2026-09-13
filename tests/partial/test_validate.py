@@ -12,6 +12,10 @@ User = get_user_model()
 _VALIDATE_HEADER = f"HTTP_{VALIDATE.upper().replace('-', '_')}"
 
 
+class _ForeignSender:
+    """A sender no validate pass ever sends under."""
+
+
 @pytest.fixture()
 def email_blur(next_client):
     """Blur-validate the email field of the sample form once for the class."""
@@ -139,11 +143,10 @@ class TestValidateBehindGuard:
 class TestValidateBehindViewPermissions:
     """A validate request denied by the view-permission layer runs no validator.
 
-    This form carries no action guard, only a `check_permissions` view
-    hook, so the denial proves the second authorization layer stops an
-    anonymous blur on its own, independent of the action guard. The hook
-    runs before the form binds, so the unique-email validator is never an
-    anonymous brute-force oracle.
+    This form carries no action guard, only a `check_permissions` view hook, so the
+    denial proves the second authorization layer stops an anonymous blur on its own,
+    independent of the action guard. The hook runs before the form binds, so the unique-
+    email validator is never an anonymous brute-force oracle.
     """
 
     def test_anonymous_validate_is_denied_not_an_envelope(
@@ -236,8 +239,7 @@ class TestValidateInsideAZone:
 class TestValidateOnAWizardStep:
     """A validate request on a wizard step shapes a morph without saving.
 
-    The wizard storage stays empty because the handler and `save_step`
-    never run on a blur, so a draft only lands on a real submit.
+    Wizard storage stays empty, because a blur runs neither the handler nor `save_step`.
     """
 
     def test_wizard_validate_returns_an_envelope(self, next_client: NextClient) -> None:
@@ -306,3 +308,25 @@ class TestValidateSignalAndFieldNames:
         assert len(received) == 1
         assert received[0]["field_names"] == ("email",)
         assert received[0]["error_count"] == 1
+
+    def test_a_receiver_bound_to_another_sender_hears_nothing(
+        self, next_client: NextClient
+    ) -> None:
+        """The guard reads the protocol backend class, so another sender stays quiet."""
+        received: list[dict] = []
+
+        def _record(**kwargs) -> None:
+            received.append(kwargs)
+
+        field_validated.connect(_record, sender=_ForeignSender)
+        try:
+            next_client.post_action(
+                "validate_form",
+                {"email": "bad"},
+                origin="/",
+                partial=True,
+                **{_VALIDATE_HEADER: "email"},
+            )
+        finally:
+            field_validated.disconnect(_record, sender=_ForeignSender)
+        assert received == []

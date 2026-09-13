@@ -165,19 +165,19 @@ The set of submodules differs by area, and :doc:`adding-an-area` states the cont
    * - Subsystem
      - Submodules
    * - ``next.pages``
-     - ``manager``, ``registry``, ``loaders``, ``context``, ``processors``, ``scan``, ``checks``, ``signals``, ``watch``.
+     - ``manager``, ``registry``, ``loaders``, ``context``, ``processors``, ``scan``, ``errors``, ``checks``, ``signals``, ``watch``.
    * - ``next.components``
      - ``manager``, ``registry``, ``scanner``, ``sources``, ``loading``, ``renderers``, ``context``, ``facade``, ``info``, ``backends``, ``watch``, ``checks``, ``signals``.
    * - ``next.urls``
-     - ``manager``, ``access``, ``backends``, ``dispatcher``, ``parser``, ``resolver``, ``markers``, ``reverse``, ``checks``, ``signals``.
+     - ``manager``, ``access``, ``backends``, ``dispatcher``, ``parser``, ``resolver``, ``markers``, ``reverse``, ``errors``, ``checks``, ``signals``.
    * - ``next.forms``
-     - ``manager``, ``dispatch`` (``build``, ``permissions``, ``responses``, ``wizard``), ``backends``, ``decorators``, ``base``, ``markers``, ``serializers``, ``formsets``, ``uid``, ``rendering``, ``autodiscover``, ``wizard``, ``widgets``, ``origin``, ``diagnostics``, ``checks``, ``signals``.
+     - ``manager``, ``dispatch`` (``build``, ``permissions``, ``responses``, ``wizard``), ``backends``, ``decorators``, ``base``, ``markers``, ``serializers``, ``formsets``, ``uid``, ``rendering``, ``autodiscover``, ``wizard``, ``widgets``, ``origin``, ``diagnostics``, ``errors``, ``checks``, ``signals``.
    * - ``next.static``
      - ``manager``, ``collector``, ``discovery``, ``backends``, ``assets``, ``scripts``, ``serializers``, ``defaults``, ``finders``, ``checks``, ``signals``.
    * - ``next.partial``
      - ``manager``, ``registry``, ``backends``, ``zone``, ``render``, ``envelope``, ``errors``, ``patches``, ``shaping``, ``shaper``, ``sse``, ``view``, ``headers``, ``keys``, ``origin``, ``checks``, ``signals``.
    * - ``next.deps``
-     - ``resolver``, ``providers``, ``cache``, ``context``, ``markers``, ``signals``.
+     - ``resolver``, ``providers``, ``cache``, ``context``, ``markers``, ``errors``, ``signals``.
    * - ``next.server``
      - ``autoreload``, ``watcher``, ``roots``, ``signals``.
    * - ``next.conf``
@@ -193,6 +193,8 @@ The set of submodules differs by area, and :doc:`adding-an-area` states the cont
        ``PartialShaper`` lets the page and form paths shape partial responses without importing ``next.partial``, ``RouterAccess`` lets the page watcher and the checks build routers without importing ``next.urls``, and ``StaticAssets`` lets the render path reach the static manager without importing ``next.static``.
    * - ``next.utils``
      - A single flat module holding the path helpers, the ``PageRoot`` value object, the ``template_edits_watched`` predicate, and the declaration-site attribution that several subsystems share.
+   * - ``next.errors``
+     - A single flat module holding the exceptions more than one subsystem raises, the ``DIRS`` shape refusal and the four a backend entry the loader cannot resolve produces.
    * - ``next.signals``
      - A single flat module that re-exports every signal its owning subpackage declares, for a receiver that subscribes across subsystems.
    * - ``next.checks``

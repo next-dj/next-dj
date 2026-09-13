@@ -12,7 +12,6 @@ import inspect
 import logging
 import threading
 from collections import OrderedDict
-from difflib import get_close_matches
 from operator import attrgetter
 from types import MethodType
 from typing import TYPE_CHECKING, Any, cast, get_type_hints, override
@@ -21,17 +20,18 @@ from django.core.exceptions import ImproperlyConfigured
 
 from next.backends import resolve_setting_class
 from next.conf.signals import settings_reloaded
-from next.utils import callable_name, code_filename, store_bounded, touch_bounded
+from next.utils import describe_callable, store_bounded, touch_bounded
 
-from .cache import _CACHE_MISS, _IN_PROGRESS, DependencyCache, DependencyCycleError
+from .cache import _CACHE_MISS, _IN_PROGRESS, DependencyCache
 from .context import RESERVED_KEYS, ResolutionContext
+from .errors import DependencyCycleError, UnknownDependencyError
 from .plan import EMPTY_PLAN, InjectionPlan, compile_plan
 from .providers import ParameterProvider, RegisteredParameterProvider
 from .registry import _Address, _address, provider_registry
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping
+    from collections.abc import Callable, Mapping
 
     from django.http import HttpRequest
 
@@ -73,13 +73,6 @@ _type_hints_cache: OrderedDict[_IntrospectKey, dict[str, Any]] = OrderedDict()
 _var_keyword_cache: OrderedDict[_IntrospectKey, bool] = OrderedDict()
 
 
-def _describe_callable(func: Callable[..., Any]) -> str:
-    """Return a human-readable name and source path for `func` in error messages."""
-    name = callable_name(func)
-    filename = code_filename(func)
-    return f'"{name}"' if filename is None else f'"{name}" ({filename})'
-
-
 class _Described:
     """Log argument that describes its callable only once a handler formats it.
 
@@ -96,52 +89,7 @@ class _Described:
     @override
     def __str__(self) -> str:
         """Describe the callable for the formatted record."""
-        return _describe_callable(self.func)
-
-
-class UnknownDependencyError(LookupError):
-    """Raised when `Depends` names a dependency that nothing has registered."""
-
-    def __init__(
-        self, name: str, param_name: str | None, *, registered: Iterable[str] = ()
-    ) -> None:
-        """Record the missing name, the parameter, and the closest registered name.
-
-        The callable being filled is attached afterwards by the resolve that
-        failed, so a successful replay owns no callable and pays nothing.
-        """
-        self.name = name
-        self.param_name = param_name
-        self.func: Callable[..., Any] | None = None
-        matches = get_close_matches(name, registered, n=1)
-        self.suggestion: str | None = str(matches[0]) if matches else None
-        # Both arguments reach `args`, so the exception survives the copy a
-        # process pool or a caching layer makes of it.
-        super().__init__(name, param_name)
-
-    def attribute_to(self, func: Callable[..., Any]) -> None:
-        """Name `func` as the owner unless an inner resolve already named one."""
-        if self.func is None:
-            self.func = func
-
-    @override
-    def __str__(self) -> str:
-        """Compose the message from the name, the parameter, and the owner.
-
-        A registered name close to the missing one replaces the generic advice,
-        because a near miss is almost always a typo at the `Depends` site.
-        """
-        where = "" if self.param_name is None else f' on parameter "{self.param_name}"'
-        owner = "" if self.func is None else f" of {_describe_callable(self.func)}"
-        advice = (
-            f'Register it with resolver.dependency("{self.name}") or fix the name.'
-            if self.suggestion is None
-            else f'Did you mean "{self.suggestion}"?'
-        )
-        return (
-            f'Depends("{self.name}"){where}{owner} names a dependency nothing '
-            f"registered. {advice}"
-        )
+        return describe_callable(self.func)
 
 
 def _adopt_provider[P](provider: P) -> P:

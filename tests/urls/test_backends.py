@@ -162,9 +162,8 @@ class TestFileRouterBackend:
     def test_get_app_pages_path_memoises_a_missing_tree(self, tmp_path) -> None:
         """An app without a pages tree is answered from the memo too.
 
-        The memo lives as long as this router, and a tree an app grows under
-        the development server reaches the watcher through a router built
-        after it, not through this one probing again.
+        The memo lives as long as this router, and a tree an app grows later reaches the
+        watcher through the next router, not through this one probing again.
         """
         app_dir = tmp_path / "shop"
         app_dir.mkdir()
@@ -256,9 +255,8 @@ class TestFileRouterBackend:
         """A caller spelling out both keywords skips no part of the contract.
 
         `page_roots` promises resolved absolute trees, and passing `skip_dir_names`
-        takes away the classification that normally does it. What the router keeps
-        is resolved once, and the trees that are not there drop out of the report
-        the same way a classified entry does.
+        takes away the classification that normally does it. What the router keeps is
+        resolved once, and a missing tree drops out like a classified entry.
         """
         tree = tmp_path / "tree"
         tree.mkdir()
@@ -384,8 +382,7 @@ class TestFileRouterBackend:
     ) -> None:
         """The `BASE_DIR` fallback is probed once and answered from the memo.
 
-        A project growing its first page tree under the development server
-        reaches the watcher through the router built for the next read.
+        A new page tree reaches the watcher through the router built for the next read.
         """
         mock_settings.BASE_DIR = tmp_path
         mock_settings.DEBUG = True
@@ -1106,7 +1103,12 @@ class TestRouterFactory:
             RouterFactory.create_backend(config)
 
     @pytest.mark.parametrize(
-        "dirs", [pytest.param(5, id="scalar"), pytest.param([7], id="entry_is_no_path")]
+        "dirs",
+        [
+            pytest.param(5, id="scalar"),
+            pytest.param("src/pages", id="string"),
+            pytest.param([7], id="entry_is_no_path"),
+        ],
     )
     def test_create_backend_when_dirs_is_no_sequence_of_trees(
         self, dirs: object

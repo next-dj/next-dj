@@ -16,6 +16,7 @@ from next.pages import page
 from next.utils import PageRoot, classify_dirs_entries, resolve_base_dir, resolved_tree
 
 from .dispatcher import FilesystemTreeDispatcher
+from .errors import RouterConstructionError
 from .parser import default_url_parser
 from .signals import route_registered
 
@@ -48,8 +49,7 @@ def _is_framework_app(app_name: str) -> bool:
 def _installed_app_directories() -> dict[str, Path]:
     """Map each installed app's dotted name to its directory.
 
-    Read live on every call, because `INSTALLED_APPS` changes without the
-    settings reload that rebuilds a backend.
+    Read live on every call, because `INSTALLED_APPS` changes without a settings reload.
     """
     try:
         configs = apps.get_app_configs()
@@ -230,8 +230,7 @@ class FileRouterBackend(RouterBackend):
     def page_roots(self) -> list[PageRoot]:
         """Report the app trees and root trees this router serves from.
 
-        The app reads share one registry snapshot, because a page-root listing
-        sits on the static finder and reloader paths.
+        The app reads share one snapshot, because the finder and the reloader ask often.
         """
         roots: list[PageRoot] = []
         if self.app_dirs:
@@ -251,8 +250,7 @@ class FileRouterBackend(RouterBackend):
     def _generate_app_urls(self) -> list[URLPattern | URLResolver]:
         """Return patterns from each installed app's `pages_dir` tree.
 
-        One registry snapshot serves the whole pass, because reading it per
-        app name rebuilds the map per app.
+        One snapshot serves the pass, because reading it per app name rebuilds the map.
         """
         directories = _installed_app_directories()
         urls: list[URLPattern | URLResolver] = []
@@ -278,8 +276,7 @@ class FileRouterBackend(RouterBackend):
     ) -> Generator[str, None, None]:
         """Yield the dotted name of every installed app that can hold pages.
 
-        The registry snapshot comes from the caller that opened the pass, so
-        nothing below it reads the registry again.
+        The snapshot comes from the caller, so nothing below opens the registry again.
         """
         for app_name in directories:
             if not _is_framework_app(app_name):
@@ -290,10 +287,8 @@ class FileRouterBackend(RouterBackend):
     ) -> Path | None:
         """Return `<app>/pages_dir` when that directory exists.
 
-        The answer is memoised per app directory, so an app that moves is
-        looked at again while a static lookup pays no probe per call. The memo
-        lives as long as this router, which the watch layer rebuilds per read
-        while the process watches the disk.
+        Memoised per app directory, so a static lookup pays no probe per call. The memo
+        dies with this router, which the watch layer rebuilds per read.
         """
         app_path = directories.get(app_name)
         if app_path is None:
@@ -311,9 +306,8 @@ class FileRouterBackend(RouterBackend):
     def _get_root_pages_paths(self) -> list[Path]:
         """Return paths from `DIRS` plus optional `BASE_DIR` / `pages_dir`.
 
-        Memoised per instance, because the roots this router serves belong to
-        the configuration it was built for and every reader asks per call. A
-        copy goes back, so a caller appending to the answer moves no root.
+        Memoised per instance, because the roots belong to this router's configuration
+        and every reader asks per call. A copy goes back, so appending moves no root.
         """
         if self._root_pages_paths_cache is None:
             result = [p for p in self._extra_root_paths if p.exists()]
@@ -365,36 +359,6 @@ class FileRouterBackend(RouterBackend):
         yield from dispatcher.walk(pages_path)
 
 
-def _dirs_roots(
-    backend_class: type[RouterBackend], config: Mapping[str, Any], base_dir: Path | None
-) -> tuple[list[Path], frozenset[str]]:
-    """Split the `DIRS` of one router entry into page trees and URL segment names.
-
-    A scalar under the key and an entry that is no path are settings mistakes like any
-    other, so both answer `ImproperlyConfigured` and not the `TypeError` of the read.
-    """
-    raw = config.get("DIRS") or []
-    try:
-        return classify_dirs_entries(list(raw), base_dir)
-    except TypeError as exc:
-        msg = (
-            f"A {backend_class.__name__} entry takes a sequence of trees "
-            f"under DIRS, got {raw!r}."
-        )
-        raise ImproperlyConfigured(msg) from exc
-
-
-def _construction_error(
-    backend_class: type[RouterBackend], exc: TypeError
-) -> ImproperlyConfigured:
-    """Name a router whose constructor refuses the arguments the factory passes."""
-    msg = (
-        f"{backend_class.__name__} does not take the arguments RouterFactory "
-        f"builds a router with: {exc}"
-    )
-    return ImproperlyConfigured(msg)
-
-
 class RouterFactory:
     """Build `RouterBackend` instances from `PAGE_BACKENDS`-style dicts."""
 
@@ -419,8 +383,7 @@ class RouterFactory:
     def is_registered(cls, name: str) -> bool:
         """Report whether `name` maps to a registered backend class.
 
-        Contract-only seam for system checks so adjacent
-        areas never read the class registry directly.
+        Contract-only seam, so adjacent areas never read the class registry directly.
         """
         return name in cls._backends
 
@@ -444,16 +407,17 @@ class RouterFactory:
         """Build one file router from the keys its entry carries."""
         for req in _FILE_ROUTER_KEYS:
             if req not in config:
+                rest = ", ".join(key for key in _FILE_ROUTER_KEYS if key != req)
                 msg = (
-                    f"A {backend_class.__name__} entry lists {req!r} alongside "
-                    f"{', '.join(_FILE_ROUTER_KEYS)}, got {config!r}."
+                    f"A {backend_class.__name__} entry needs {req!r} alongside "
+                    f"{rest}, got {config!r}."
                 )
                 raise ImproperlyConfigured(msg)
         base_dir = resolve_base_dir()
         raw_opts = config.get("OPTIONS")
         if not isinstance(raw_opts, dict):
             raw_opts = {}
-        path_roots, segment_names = _dirs_roots(backend_class, config, base_dir)
+        path_roots, segment_names = classify_dirs_entries(config.get("DIRS"), base_dir)
         components_dir = FileRouterBackend._resolve_components_folder_name()
         try:
             return backend_class(
@@ -465,7 +429,7 @@ class RouterFactory:
                 options=_narrow_file_router_options(raw_opts),
             )
         except TypeError as exc:
-            raise _construction_error(backend_class, exc) from exc
+            raise RouterConstructionError(backend_class.__name__, exc) from exc
 
     @classmethod
     def create_backend(cls, config: dict[str, Any]) -> RouterBackend:
@@ -482,7 +446,7 @@ class RouterFactory:
             # entry names it and nothing else reaches its constructor.
             return backend_class()
         except TypeError as exc:
-            raise _construction_error(backend_class, exc) from exc
+            raise RouterConstructionError(backend_class.__name__, exc) from exc
 
 
 __all__ = ["FileRouterBackend", "RouterBackend", "RouterFactory"]

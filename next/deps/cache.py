@@ -32,15 +32,6 @@ def get_request_dep_cache(request: object | None) -> dict[str, Any] | None:
     return cache if isinstance(cache, dict) else None
 
 
-class DependencyCycleError(Exception):
-    """Raised when dependency resolution re-enters a key already in progress."""
-
-    def __init__(self, cycle: list[str]) -> None:
-        """Record the offending dependency chain for the error message."""
-        self.cycle = cycle
-        super().__init__(f"Circular dependency: {' -> '.join(cycle)}")
-
-
 class DependencyCache:
     """Store resolved dependency values and detect cycles via in-progress keys.
 

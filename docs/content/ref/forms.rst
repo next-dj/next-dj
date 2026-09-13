@@ -72,6 +72,15 @@ When ``registry_empty`` is true the message also explains that no actions are re
 .. autoexception:: next.forms.FormActionNotFoundError
    :members:
 
+``UnstorableWizardValueError`` is raised by the session wizard backend for a cleaned value its JSON codec cannot store, and names the backend keys that serve such a value instead.
+``UnregisteredComponentError`` is raised while a ``ComponentWidget`` renders a component name nothing registered, with the closest visible component names rendered into the message.
+
+.. autoexception:: next.forms.UnstorableWizardValueError
+   :members:
+
+.. autoexception:: next.forms.UnregisteredComponentError
+   :members:
+
 Form base classes
 ~~~~~~~~~~~~~~~~~
 

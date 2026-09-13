@@ -269,6 +269,7 @@ DIRS entry types
 ~~~~~~~~~~~~~~~~
 
 Each entry in ``DIRS`` is classified by ``next.utils.classify_dirs_entries`` before the router uses it.
+``DIRS`` itself is a sequence of such entries, and a bare string in its place raises ``next.errors.InvalidDirsError`` rather than splitting into one entry per character.
 
 Path entry.
    An absolute path, or a relative path that resolves to an existing directory under ``settings.BASE_DIR``.

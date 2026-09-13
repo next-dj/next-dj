@@ -28,6 +28,7 @@ from django.core.signals import setting_changed
 from next.conf import next_framework_settings
 from next.conf.imports import import_class_cached
 from next.conf.signals import settings_reloaded
+from next.pages.errors import PageModuleImportError
 from next.utils import (
     MAX_ANCESTOR_WALK_DEPTH,
     classify_dirs_entries,
@@ -50,21 +51,6 @@ logger = logging.getLogger(__name__)
 
 # A token no real template source carries, so refilling the slot is unambiguous.
 _BODY_SLOT = "\x00next-page-body\x00"
-
-
-class PageModuleImportError(Exception):
-    """A `page.py` body raised while importing.
-
-    Covers any exception raised by the module body. ImportError,
-    SyntaxError, and AttributeError are common examples, not a closed
-    list. The original exception travels as `__cause__` and the
-    offending path as `file_path`.
-    """
-
-    def __init__(self, file_path: Path) -> None:
-        """Compose the message from the failing path."""
-        super().__init__(f"{file_path} failed to import")
-        self.file_path = file_path
 
 
 _LAST_LOAD_ERROR: dict[Path, tuple[float, Exception]] = {}
@@ -475,9 +461,7 @@ class LayoutTemplateLoader(TemplateLoader):
 
     def _get_pages_dirs_for_config(self, config: dict) -> list[Path]:
         """Return candidate roots from one router `DIRS` entry (paths only)."""
-        path_roots, _ = classify_dirs_entries(
-            list(config.get("DIRS") or []), resolve_base_dir()
-        )
+        path_roots, _ = classify_dirs_entries(config.get("DIRS"), resolve_base_dir())
         return list(path_roots)
 
     def _wrap_in_template_block(self, file_path: Path) -> str:

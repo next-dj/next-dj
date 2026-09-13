@@ -1,6 +1,5 @@
 """Backend abstractions and in-memory registry for form actions."""
 
-import difflib
 import hashlib
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -19,6 +18,7 @@ from next.ports import partial_shaper_slot
 from .diagnostics import registration_diagnostics
 from .dispatch import FormActionDispatch
 from .dispatch.responses import ActionOutcome
+from .errors import FormActionNotFoundError
 from .rendering import _ErrorRenderParams, render_form_page_with_errors
 from .signals import action_registered
 from .uid import URL_NAME_FORM_ACTION, reverse_form_action
@@ -33,98 +33,6 @@ if TYPE_CHECKING:
     from django.urls import URLPattern
 
     from .wizard import FormWizard
-
-
-class FormActionNotFoundError(LookupError):
-    """No registered form action matches the requested name."""
-
-    _suggestions: "tuple[str, ...] | None" = None
-
-    def __init__(
-        self,
-        message: str | None = None,
-        *,
-        name: str = "",
-        page_path: str | None = None,
-        candidates: "Callable[[], Iterable[str]] | Iterable[str]" = (),
-        registry_empty: bool = False,
-    ) -> None:
-        """Store the lookup context, deferring close-match work until rendered."""
-        # The manager probes backends by catching this, so raising stays cheap:
-        # one packed attribute now, difflib and the message only when rendered.
-        self._context: tuple[
-            str, str | None, Callable[[], Iterable[str]] | Iterable[str], bool
-        ] = (name, page_path, candidates, registry_empty)
-        if message is None:
-            super().__init__()
-        else:
-            super().__init__(message)
-
-    @property
-    def name(self) -> str:
-        """Return the action name the failed lookup asked for."""
-        return self._context[0]
-
-    @property
-    def page_path(self) -> str | None:
-        """Return the page scope the lookup searched, when any."""
-        return self._context[1]
-
-    @property
-    def registry_empty(self) -> bool:
-        """Return True when no actions were registered at raise time."""
-        return self._context[3]
-
-    @property
-    def candidates(self) -> tuple[str, ...]:
-        """Return the registered action names the close matches draw from."""
-        raw = self._context[2]
-        return tuple(raw() if callable(raw) else raw)
-
-    @property
-    def suggestions(self) -> tuple[str, ...]:
-        """Return close matches for the name, computed on first access."""
-        if self._suggestions is None:
-            self._suggestions = tuple(
-                difflib.get_close_matches(self.name, sorted(set(self.candidates)))
-            )
-        return self._suggestions
-
-    @override
-    def __str__(self) -> str:
-        """Render the message, composing and caching it on first access."""
-        if not self.args:
-            self.args = (self._compose(),)
-        return str(self.args[0])
-
-    @override
-    def __reduce__(self) -> "tuple[Any, ...]":
-        """Pickle the rendered message and drop the live candidates source."""
-        state = {
-            "_context": (self.name, self.page_path, (), self.registry_empty),
-            "_suggestions": self.suggestions,
-        }
-        return (self.__class__, (str(self),), state)
-
-    def _compose(self) -> str:
-        """Render the failure with scope, close matches, and registry state."""
-        if self.page_path is None:
-            searched = "Searched the shared registry (no page scope)."
-        else:
-            searched = (
-                f"Searched page scope for {self.page_path} and the shared registry."
-            )
-        message = f"Unknown form action {self.name!r}. {searched}"
-        if self.suggestions:
-            rendered = ", ".join(repr(suggestion) for suggestion in self.suggestions)
-            message = f"{message} Closest matches: {rendered}."
-        if self.registry_empty:
-            message = (
-                f"{message} No form actions are registered. Check that the "
-                "declaring module is imported. Autodiscover imports each "
-                "app's forms.py when FORM_AUTODISCOVER is enabled."
-            )
-        return message
 
 
 # Memoised by raw path, because both hit a syscall on every registration and
@@ -611,7 +519,6 @@ __all__ = [
     "ActionMeta",
     "ActionRegistration",
     "FormActionBackend",
-    "FormActionNotFoundError",
     "RegistryBackendSnapshot",
     "RegistryFormActionBackend",
     "build_action_guard",

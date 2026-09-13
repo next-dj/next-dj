@@ -10,6 +10,7 @@ import pytest
 from django.test import override_settings
 
 from next.pages.loaders import _load_python_module
+from next.errors import InvalidDirsError
 from next.utils import (
     callable_name,
     classify_dirs_entries,
@@ -208,6 +209,19 @@ class TestClassifyDirsEntries:
         roots, segs = classify_dirs_entries(["\\", "./"], tmp_path)
         assert roots == []
         assert segs == frozenset()
+
+    @pytest.mark.parametrize(
+        "entries",
+        [
+            pytest.param(5, id="scalar"),
+            pytest.param("src/pages", id="string"),
+            pytest.param(b"src/pages", id="bytes"),
+        ],
+    )
+    def test_a_value_that_is_no_sequence_of_trees(self, entries: object) -> None:
+        """A string splits into characters, so it is refused with the scalars."""
+        with pytest.raises(InvalidDirsError):
+            classify_dirs_entries(entries, Path("/tmp"))
 
 
 class TestTemplateEditsWatched:

@@ -11,6 +11,7 @@ from django.contrib.staticfiles.finders import get_finders
 from django.core.management import call_command
 from django.test import override_settings
 
+from next.conf.signals import settings_reloaded
 from next.static import NextStaticFilesFinder
 from next.static.discovery import default_stems
 from next.static.finders import (
@@ -24,7 +25,6 @@ from tests.support import (
     WatchSourcesCase,
     patched_watch_sources,
     restored_static_registries,
-    watching_components_entry,
 )
 
 
@@ -292,13 +292,25 @@ class TestFinderFreshness:
         finder.find("next/about.css")
 
         with (
-            override_settings(
-                NEXT_FRAMEWORK={
-                    "COMPONENT_BACKENDS": [watching_components_entry(watched_tree)]
-                }
+            mock.patch(
+                "next.static.finders.component_watch_roots", return_value=[watched_tree]
             ),
             self._counted_scan() as scan,
         ):
+            finder.find("next/about.css")
+
+        assert scan.call_count == 1
+
+    @pytest.mark.parametrize(
+        "watched_tree", [_TEMPLATE_ONLY], indirect=["watched_tree"]
+    )
+    def test_a_settings_reload_rebuilds_the_answer(self, watched_tree: Path) -> None:
+        assert watched_tree.exists()
+        finder = NextStaticFilesFinder()
+        finder.find("next/about.css")
+
+        with self._counted_scan() as scan:
+            settings_reloaded.send(sender=None)
             finder.find("next/about.css")
 
         assert scan.call_count == 1

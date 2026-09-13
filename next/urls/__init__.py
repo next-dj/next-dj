@@ -9,6 +9,12 @@ from next.utils import PageRoot
 
 from . import checks, signals
 from .backends import FileRouterBackend, RouterBackend, RouterFactory
+from .errors import (
+    DuplicateURLParameterError,
+    InvalidURLParameterError,
+    RouterConstructionError,
+    URLParameterError,
+)
 from .manager import RouterManager, app_name, router_manager, urlpatterns
 from .markers import (
     DQuery,
@@ -19,12 +25,7 @@ from .markers import (
     UrlKwargsProvider,
     get_multi_values,
 )
-from .parser import (
-    DuplicateURLParameterError,
-    InvalidURLParameterError,
-    URLParameterError,
-    URLPatternParser,
-)
+from .parser import URLPatternParser
 from .resolver import TrieURLResolver
 from .reverse import page_reverse, page_reverse_lazy, with_query
 
@@ -39,6 +40,7 @@ __all__ = [
     "PageRoot",
     "QueryParamProvider",
     "RouterBackend",
+    "RouterConstructionError",
     "RouterFactory",
     "RouterManager",
     "TrieURLResolver",

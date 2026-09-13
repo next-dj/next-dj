@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 
 from django.conf import settings
 
+from next.errors import InvalidDirsError
+
 
 if TYPE_CHECKING:
     from collections import OrderedDict
@@ -193,9 +195,7 @@ def _dir_entry_segment_name(item: Path) -> str:
     return Path(text).name if "/" in text else item.name
 
 
-def _iter_dir_entries(
-    entries: list[Any] | tuple[Any, ...] | None,
-) -> Generator[Path, None, None]:
+def _iter_dir_entries(entries: Iterable[Any] | None) -> Generator[Path, None, None]:
     """Yield every ``DIRS`` entry that names anything, as a path."""
     for raw in entries or ():
         if raw is None:
@@ -206,13 +206,30 @@ def _iter_dir_entries(
             yield item
 
 
+def describe_callable(func: Callable[..., Any]) -> str:
+    """Return a human-readable name and source path for `func` in diagnostics."""
+    name = callable_name(func)
+    filename = code_filename(func)
+    return f'"{name}"' if filename is None else f'"{name}" ({filename})'
+
+
 def classify_dirs_entries(
-    entries: list[Any] | tuple[Any, ...] | None, base_dir: Path | None
+    entries: Iterable[Any] | None, base_dir: Path | None
 ) -> tuple[list[Path], frozenset[str]]:
-    """Split ``DIRS`` into directory roots and URL segment names (file router)."""
+    """Split ``DIRS`` into directory roots and URL segment names (file router).
+
+    The shape is settled here rather than by each reader, because every caller
+    hands in what one settings entry carried.
+    """
+    if isinstance(entries, str | bytes):
+        raise InvalidDirsError(entries)
+    try:
+        items = list(_iter_dir_entries(entries))
+    except TypeError as exc:
+        raise InvalidDirsError(entries) from exc
     path_roots: list[Path] = []
     segments: set[str] = set()
-    for item in _iter_dir_entries(entries):
+    for item in items:
         candidate = _dir_entry_candidate(item, base_dir)
         # Resolved before the probe, so a `..` reaching past a directory that
         # does not exist still names the tree the entry means.

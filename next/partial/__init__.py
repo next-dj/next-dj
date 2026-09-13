@@ -3,12 +3,16 @@
 from . import signals
 from .backends import JsonPartialProtocolBackend, PartialProtocolBackend
 from .envelope import Asset, Envelope, FormMeta, Patch
-from .errors import ForeignPageNotAuthorizedError, LayerHrefWithoutZoneError
+from .errors import (
+    ForeignPageNotAuthorizedError,
+    LayerHrefWithoutZoneError,
+    UnknownZoneError,
+)
 from .headers import is_partial_request, partial_intent
 from .origin import resolve_partial_origin
 from .patches import Patches, PatchResponse
 from .registry import register_patch_op, zone_requested
-from .render import UnknownZoneError, ZoneRenderResult, render_zone
+from .render import ZoneRenderResult, render_zone
 from .shaping import shape_partial
 from .sse import PatchEventStream
 

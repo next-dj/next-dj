@@ -20,7 +20,8 @@ from next.conf.signals import settings_reloaded
 
 from .backends import FileRouterBackend, RouterBackend, RouterFactory
 from .dispatcher import scan_pages_tree
-from .parser import DuplicateURLParameterError, default_url_parser
+from .errors import DuplicateURLParameterError
+from .parser import default_url_parser
 
 
 if TYPE_CHECKING:

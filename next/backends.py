@@ -11,6 +11,12 @@ from django.dispatch import Signal
 
 from next.conf import import_class_cached, next_framework_settings
 from next.conf.defaults import DEFAULTS
+from next.errors import (
+    AbstractBackendError,
+    BackendImportError,
+    BackendNotSubclassError,
+    BackendPathError,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -32,21 +38,15 @@ def resolve_backend_class[T](
     root = _root_class(base)
     dotted = config.get("BACKEND", default)
     if not isinstance(dotted, str) or not dotted:
-        msg = (
-            f"A {root.__name__} entry names its backend by a dotted path "
-            f"under BACKEND, got {config!r}."
-        )
-        raise ImproperlyConfigured(msg)
+        raise BackendPathError(root.__name__, config)
     klass: type[Any] = import_class_cached(dotted)
     if not (isinstance(klass, type) and issubclass(klass, root)):
-        msg = f"Backend {dotted!r} is not a {root.__name__} subclass."
-        raise ImproperlyConfigured(msg)
+        raise BackendNotSubclassError(dotted, root.__name__)
     if inspect.isabstract(klass):
         # The family roots are the abstract classes a settings entry is most
         # likely to name by mistake, and instantiating one answers a TypeError
         # no caller of this family is written to read.
-        msg = f"Backend {dotted!r} is abstract, so it names no usable backend."
-        raise ImproperlyConfigured(msg)
+        raise AbstractBackendError(dotted)
     return klass
 
 
@@ -65,11 +65,9 @@ def resolve_setting_class[T](
         try:
             klass = import_class_cached(dotted)
         except ImportError as exc:
-            msg = f"NEXT_FRAMEWORK[{setting!r}] {dotted!r} could not be imported: {exc}"
-            raise ImproperlyConfigured(msg) from exc
+            raise BackendImportError(setting, exc, dotted) from exc
     if not isinstance(klass, type) or not issubclass(klass, base):
-        msg = f"NEXT_FRAMEWORK[{setting!r}] {dotted!r} is not a {base_path} subclass."
-        raise ImproperlyConfigured(msg)
+        raise BackendNotSubclassError(dotted, base_path, setting)
     return klass
 
 
@@ -155,11 +153,7 @@ class SingleBackendManager[T]:
                 config, base=self._base, default=self._default
             )
         except ImportError as exc:
-            msg = (
-                f"NEXT_FRAMEWORK[{self._setting!r}] names a backend that "
-                f"cannot be imported: {exc}"
-            )
-            raise ImproperlyConfigured(msg) from exc
+            raise BackendImportError(self._setting, exc) from exc
         return _instantiate_backend(klass, config)
 
     def get(self) -> T:

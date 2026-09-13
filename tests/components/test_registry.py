@@ -1,6 +1,9 @@
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+from django.core.exceptions import ImproperlyConfigured
+
 from next.components import (
     ComponentInfo,
     ComponentRegistry,
@@ -111,6 +114,15 @@ class TestComponentExtraRootsFromConfig:
         assert r3 == [a.resolve()]
 
         assert component_extra_roots_from_config({"DIRS": [str(missing)]}) == []
+
+    @pytest.mark.parametrize(
+        "dirs",
+        [pytest.param(5, id="scalar"), pytest.param("src/components", id="string")],
+    )
+    def test_dirs_that_is_no_sequence_of_trees(self, dirs: object) -> None:
+        """A scalar and a string alike answer ``ImproperlyConfigured``."""
+        with pytest.raises(ImproperlyConfigured, match="sequence of trees"):
+            component_extra_roots_from_config({"DIRS": dirs})
 
 
 class TestComponentVisibilityResolver:

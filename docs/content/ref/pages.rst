@@ -121,7 +121,7 @@ Sibling pages keep their URL patterns and keep serving in every mode, because th
 The recorded error is keyed by file mtime, so saving a fixed ``page.py`` clears it without a restart.
 ``manage.py check`` reports the same failure as ``next.E017``, naming the exception type and message.
 
-.. autoclass:: next.pages.loaders.PageModuleImportError
+.. autoclass:: next.pages.PageModuleImportError
    :members:
 
 The message reads ``<path> failed to import``, and the original exception travels as ``__cause__``.

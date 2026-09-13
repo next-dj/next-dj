@@ -69,10 +69,9 @@ def shape_partial(
 ) -> HttpResponse:
     """Shape one action outcome as a patch envelope for a partial request.
 
-    The CSRF rotation marker is read here, before any form or zone re-render mints a
-    token and sets the marker as a side effect, so a login on the submit path stamps the
-    fresh token onto whichever shape the outcome takes. Reading it after a re-render
-    would flag every response as rotated.
+    The marker is read before any re-render mints a token and sets it as a side effect,
+    so a login on the submit path stamps the fresh token onto whatever shape the outcome
+    takes. Reading it after a re-render would flag every response as rotated.
     """
     rotated = _csrf_rotated(request)
     if outcome.kind == ActionOutcomeKind.INVALID:
@@ -91,14 +90,13 @@ def shape_validate(
 ) -> HttpResponse:
     """Shape a validate-only pass as a form morph envelope.
 
-    The form is already bound and both authorization layers have passed,
-    so running `is_valid()` here never leaks a guarded validator to an
-    anonymous caller. The handler stays unrun, success signals stay
-    silent, and wizard storage stays untouched. Errors are filtered to the
-    fields the request named, never-submitted fields keep no premature
-    required error, the cross-field non-field errors are always dropped,
-    and file fields are excluded from the requested set. The response is
-    always 200 with a form morph by uid plus the surviving errors in meta.
+    The form is already bound and both authorization layers have passed, so running
+    `is_valid()` here never leaks a guarded validator to an anonymous caller. The
+    handler stays unrun, success signals stay silent, and wizard storage stays
+    untouched. Errors are filtered to the fields the request named, never-submitted
+    fields keep no premature required error, the cross-field non-field errors are always
+    dropped, and file fields are excluded from the requested set. The response is always
+    200 with a form morph by uid plus the surviving errors in meta.
     """
     rotated = _csrf_rotated(request)
     form.is_valid()
@@ -144,12 +142,11 @@ def _shape_invalid(
 ) -> HttpResponse:
     """Shape an invalid submission as a patch addressing only the failed form.
 
-    The target chain is the zone named by the partial intent, then the
-    form by uid. A named zone re-renders only that zone with the bound
-    form in overrides. Without a zone the whole origin page re-renders
-    and the patch carries `extract: true`, so the client trims the failed
-    form out of the document by its uid. Neighbouring forms and zones are
-    addressed by no operation. The existing invalid-form headers stay.
+    The target chain is the zone named by the partial intent, then the form by uid. A
+    named zone re-renders only that zone with the bound form in overrides. Without a
+    zone the whole origin page re-renders and the patch carries `extract: true`, so the
+    client trims the failed form out of the document by its uid. Neighbouring forms and
+    zones are addressed by no operation. The existing invalid-form headers stay.
     """
     patches = Patches(request)
     form = outcome.form
@@ -180,15 +177,13 @@ def _shape_advance(
 ) -> HttpResponse:
     """Shape a wizard step advance as a master-zone morph, never a redirect.
 
-    The advance carries a live wizard and the URL of the next step. The
-    URL resolves through the URLconf to the next step's page identity, a
-    second wizard binds to that page and yields the unbound next-step
-    form, and the master zone of the next step renders into a morph. A
-    whole-page wizard with no zone extract-morphs the next step's form so
-    the client trims it out of a full re-render, the same shape the invalid
-    path uses. The next step page view never runs, so wizard authorization
-    must live in the action guard. A history `url.push` rides along only
-    when the wizard opts into pushing steps, off by default.
+    The advance carries a live wizard and the URL of the next step. The URL resolves
+    through the URLconf to the next step's page identity, a second wizard binds to that
+    page and yields the unbound next-step form, and the master zone of the next step
+    renders into a morph. A whole-page wizard with no zone extract-morphs the next
+    step's form so the client trims it out of a full re-render, the shape the invalid
+    path uses. The next step page view never runs, so wizard authorization lives in the
+    action guard. A history `url.push` rides along only when the wizard opts in.
     """
     wizard = outcome.wizard
     redirect_to = outcome.redirect_to
@@ -243,10 +238,9 @@ def _advance_zone(
 ) -> None:
     """Render the next step's zone and morph it with its co-located assets.
 
-    The next step lives on a foreign page, so its zone renders directly
-    rather than through `morph_zone`, which resolves the origin page. The
-    manifest and js-context delta of the step's body ride along so a step
-    that first introduces an asset or a serialize provider still ships it.
+    The next step lives on a foreign page, so its zone renders directly rather than
+    through `morph_zone`, which resolves the origin. The manifest and js-context delta
+    ride along, so a step first introducing an asset or provider still ships it.
     """
     result = render_zone(
         page_path, (zone,), request, url_kwargs=url_kwargs, overrides=overrides
@@ -264,11 +258,10 @@ def _shape_result(
 ) -> HttpResponse:
     """Shape a successful outcome, packing redirects and the success funnel.
 
-    A handler that returned a `PatchResponse` already authored the
-    envelope and passes through. An `HttpResponseRedirect` is packed into
-    a `visit`. A `None` result is the success funnel: instead of a full
-    origin re-render the failed-form zone or the form is morphed in place
-    and pending messages drain to toasts.
+    A handler that returned a `PatchResponse` already authored the envelope and passes
+    through. An `HttpResponseRedirect` is packed into a `visit`. A `None` result is the
+    success funnel: instead of a full origin re-render the failed-form zone or the form
+    is morphed in place and pending messages drain to toasts.
     """
     raw = outcome.raw
     if isinstance(raw, PatchResponse):
@@ -285,11 +278,10 @@ def _redirect_as_visit(
 ) -> HttpResponse:
     """Pack a handler redirect into a `visit`, full-navigating external hosts.
 
-    A same-site URL travels as an internal visit the validator approves. A
-    server-authored external URL such as an OAuth or payment gateway travels with a
-    full-navigation marker so it is not rejected by the same-host validator. The
-    external branch trusts the handler's redirect target, so a handler must never build
-    it from user input or the page becomes an open redirect.
+    A same-site URL travels as an internal visit the validator approves. A server-
+    authored external URL such as an OAuth or payment page travels with a full-
+    navigation marker so the same-host validator lets it through. The external branch
+    trusts the handler's target, so building it from user input opens a redirect hole.
     """
     href = redirect["Location"]
     internal = url_has_allowed_host_and_scheme(
@@ -326,9 +318,8 @@ def _success_funnel(
 def _origin_target(request: "HttpRequest") -> "tuple[Path | None, dict[str, object]]":
     """Resolve the request origin to its page path and URL kwargs.
 
-    Both the validate pass and the success funnel re-render the origin
-    page, so they share one resolution. A request that names no resolvable
-    origin yields a None page path and empty kwargs.
+    Both the validate pass and the success funnel re-render the origin, so they share
+    one resolution. A request naming no resolvable origin yields an empty resolution.
     """
     match = resolve_origin(request)
     if match is None:
@@ -339,10 +330,9 @@ def _origin_target(request: "HttpRequest") -> "tuple[Path | None, dict[str, obje
 def _form_zone(request: "HttpRequest", page_path: "Path | None") -> str | None:
     """Return the zone the failed form lives in, or None for the form-by-uid path.
 
-    The zone named by the partial intent wins when the origin page
-    declares it, so a form submitted from inside a zone re-renders only
-    that zone. A request that names no declared zone falls through to the
-    extract-morph of the form by uid.
+    The zone named by the partial intent wins when the origin page declares it, so a
+    form submitted from inside a zone re-renders only that zone. A request that names no
+    declared zone falls through to the extract-morph of the form by uid.
     """
     if page_path is None:
         return None
@@ -391,10 +381,9 @@ def _resolve_step_target(
 ) -> "tuple[Path, dict[str, object]] | None":
     """Resolve the next step URL to its page identity and URL kwargs.
 
-    The URL travels through the same URLconf the origin uses, so the next
-    step's page path and captured kwargs come from one resolution without
-    running the step page view. The captured kwargs stay unfiltered so the
-    next step renders with every URL parameter it declares.
+    The URL travels through the same URLconf the origin uses, so the page path and
+    kwargs come from one resolution without running the step page view. The kwargs stay
+    unfiltered, so the next step renders with every URL parameter it declares.
     """
     match = resolve_url_to_match(href, request, filter_reserved=False)
     if match is None or match.page_path is None:
@@ -444,10 +433,9 @@ def _form_file_fields(form: "BaseForm") -> frozenset[str]:
 def _scrub_errors(form: "BaseForm | BaseFormSet", requested: frozenset[str]) -> None:
     """Drop every error the validate request did not ask to surface.
 
-    Only errors of the requested fields survive. The cross-field non-field
-    errors are always cleared because a `clean()` belongs to the submit,
-    not to a per-field blur. A formset scrubs each member by the member's
-    prefixed field names and clears its non-form errors too.
+    Only errors of the requested fields survive. The non-field errors are always
+    cleared, because a `clean()` belongs to the submit, not to a per-field blur. A
+    formset scrubs each member by its prefixed names and clears non-form errors too.
     """
     if isinstance(form, BaseFormSet):
         for member in form.forms:
@@ -487,9 +475,8 @@ def _keep_only(form: "BaseForm", survivors: set[str]) -> None:
 def _csrf_rotated(request: "HttpRequest") -> bool:
     """Return True when the request rotated its CSRF token.
 
-    Django flags a rotated token on `request.META`, so the marker is read
-    before any form re-render mints a token. A request whose META is not a
-    real mapping cannot rotate and reads as not rotated.
+    Django flags a rotated token on `request.META`, so the marker is read before a re-
+    render mints one. A META that is no mapping cannot rotate and reads unrotated.
     """
     meta = getattr(request, "META", None)
     if not isinstance(meta, dict):
@@ -510,8 +497,10 @@ def _emit_field_validated(
     form: "BaseForm | BaseFormSet",
 ) -> None:
     """Announce a validated pass when the signal has receivers, always behind guard."""
+    if not field_validated.receivers:
+        return
     sender = type(partial_backend_manager.get())
-    if not field_validated.receivers or not field_validated.has_listeners(sender):
+    if not field_validated.has_listeners(sender):
         return
     field_validated.send(
         sender=sender,
@@ -535,10 +524,9 @@ def _envelope_response(
 ) -> PatchResponse:
     """Serialise the builder's envelope into a partial response.
 
-    When a request rotated its CSRF token the fresh payload is stamped
-    here so every shaped outcome carries it, not only the validate path.
-    The `rotated` flag is read before any re-render by the caller, so the
-    re-render's own `get_token` never registers as a fresh rotation.
+    When a request rotated its CSRF token the fresh payload is stamped here so every
+    outcome carries it, not only the validate path. The `rotated` flag is read by the
+    caller before any re-render, so its own `get_token` never registers as a rotation.
     """
     if request is not None and rotated:
         _stamp_csrf(request, patches, rotated=rotated)

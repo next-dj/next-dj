@@ -10,13 +10,18 @@ from __future__ import annotations
 import re
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
-from typing import TYPE_CHECKING, ClassVar, Self, override
+from typing import TYPE_CHECKING, ClassVar
 from uuid import UUID
+
+from .errors import (
+    DuplicateURLParameterError,
+    InvalidURLParameterError,
+    URLParameterError,
+)
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
 
 def _coerce_bool(text: str) -> bool:
@@ -49,74 +54,6 @@ def _coerce_url_value(value: object, hint: object) -> object:
         return coercer(text)
     except (ValueError, InvalidOperation):
         return value
-
-
-class URLParameterError(ValueError):
-    """Raised when the parser refuses to turn a bracket segment into a route.
-
-    The parser knows the route but not the file it came from, so one base
-    carries the page file and every refusal reports it the same way.
-    """
-
-    def __init__(
-        self, param_name: str, url_path: str, file_path: Path | None = None
-    ) -> None:
-        """Build the message from the refused name, its route, and the page file."""
-        self.param_name = param_name
-        self.url_path = url_path
-        self.file_path = file_path
-        message = self._reason()
-        if file_path is not None:
-            message = f"{message} Page file: {file_path}."
-        super().__init__(message)
-
-    def with_file(self, file_path: Path) -> Self:
-        """Return the same refusal with `file_path` named in its message."""
-        return type(self)(self.param_name, self.url_path, file_path=file_path)
-
-    def _reason(self) -> str:
-        """Return the sentence explaining why the route cannot be built."""
-        return (
-            f"URL parameter '{self.param_name}' in URL pattern "
-            f"'{self.url_path}' cannot be turned into a Django route."
-        )
-
-
-class DuplicateURLParameterError(URLParameterError):
-    """Raised when bracket segments in one route conflict after normalisation.
-
-    Covers a repeated normalised parameter name (`-` maps to `_`) and a
-    second `[[wildcard]]` segment, both of which Django would otherwise
-    reject only at resolve time or resolve ambiguously.
-    """
-
-    @override
-    def _reason(self) -> str:
-        """Name the conflicting parameter and the rule it breaks."""
-        return (
-            f"Duplicate URL parameter '{self.param_name}' in URL pattern "
-            f"'{self.url_path}'. Parameter names must be unique after '-' to "
-            "'_' normalisation and a route can hold at most one [[wildcard]] "
-            "segment."
-        )
-
-
-class InvalidURLParameterError(URLParameterError):
-    """Raised when a bracket segment names something Django refuses as a route.
-
-    Django compiles a route the moment the pattern is built, so a name that is
-    no Python identifier would otherwise surface as an `ImproperlyConfigured`
-    traceback far from the directory that named it.
-    """
-
-    @override
-    def _reason(self) -> str:
-        """Name the refused parameter and the rule Django applies to it."""
-        return (
-            f"URL parameter '{self.param_name}' in URL pattern "
-            f"'{self.url_path}' is no valid Python identifier once '-' is read "
-            "as '_'. Django refuses such a name when it compiles the route."
-        )
 
 
 class URLPatternParser:

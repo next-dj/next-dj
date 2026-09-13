@@ -7,6 +7,26 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+class UnknownZoneError(LookupError):
+    """Raised when a partial request names a zone the page does not declare.
+
+    The unified view turns this into a 400 before any zone renders, so a
+    typo or a stale client never trips a partial render. The message names
+    the declared zones so a builder-path typo points at what is available.
+    """
+
+    def __init__(self, zone_name: str, declared: tuple[str, ...] = ()) -> None:
+        """Store the unknown zone name and the declared zone names available."""
+        self.zone_name = zone_name
+        self.declared = declared
+        if declared:
+            names = ", ".join(repr(name) for name in declared)
+            message = f'Unknown zone "{zone_name}". Declared zones: {names}.'
+        else:
+            message = f'Unknown zone "{zone_name}".'
+        super().__init__(message)
+
+
 class UnknownPatchOpError(LookupError):
     """Raised when the builder is asked to emit an unregistered verb.
 

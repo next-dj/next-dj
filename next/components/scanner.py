@@ -1,8 +1,7 @@
 """Filesystem scanner that produces `ComponentInfo` from a directory.
 
-`ComponentScanner` walks one directory and yields a `ComponentInfo`
-for each `.djx` file (simple component) or sub-directory containing
-`component.djx` / `component.py` (composite component).
+`ComponentScanner` walks one directory and yields a `ComponentInfo` per simple `.djx`
+file and per sub-directory holding a composite `component.djx` or `component.py`.
 """
 
 from __future__ import annotations
@@ -91,9 +90,7 @@ class ComponentScanner:
 
 def component_extra_roots_from_config(config: Mapping[str, Any]) -> list[Path]:
     """Return existing directory paths from the config `DIRS` entry."""
-    base_dir = resolve_base_dir()
-    dirs_list = list(config.get("DIRS") or [])
-    path_roots, _ = classify_dirs_entries(dirs_list, base_dir)
+    path_roots, _ = classify_dirs_entries(config.get("DIRS"), resolve_base_dir())
     return [p for p in path_roots if p.exists()]
 
 

@@ -4,9 +4,8 @@ The finder surfaces every `template.css`, `layout.js`, and `component.css` plus 
 stems registered on the stem registry under the `next/` staticfiles namespace. The usual
 `{% static "next/about.css" %}` call works without the user configuring anything.
 
-The logical-path and source-file mapping is computed by the co-located asset discovery
-helper below, which shares the same `PathResolver` used at request-time discovery. The
-two layers agree on every URL.
+The logical-path and source-file mapping comes from the discovery helper below, which
+shares the `PathResolver` of request-time discovery, so both agree on every URL.
 
 Staticfiles asks per referenced asset, so the answer is held until something it was
 read from moves. The freshness token is the one the asset plans use, a generation per
@@ -25,6 +24,7 @@ from django.core.files import File
 from django.core.files.storage import Storage
 
 from next.components import component_watch_roots, get_component_paths_for_watch
+from next.conf.signals import settings_reloaded
 from next.pages.registry import (
     get_layout_djx_paths_for_watch,
     get_template_djx_paths_for_watch,
@@ -51,10 +51,9 @@ def _collect_stem_static_files(
 ) -> None:
     """Add `{stem}.<kind>` files found in the directory to the output map.
 
-    Every registered kind is probed for each stem of the given role. Every
-    caller hands in a resolved directory, so a file that is no symlink is
-    already spelled the way request-time discovery spells it and only a
-    symlinked one is worth walking a whole path back to its target.
+    Every registered kind is probed for each stem of the given role. Every caller hands
+    in a resolved directory, so a file that is no symlink is already spelled the way
+    request-time discovery spells it, and only a symlinked one is worth resolving.
     """
     kinds = default_kinds.kinds()
     for stem in stems.stems(role):
@@ -71,9 +70,8 @@ def _collect_stem_static_files(
 def discover_colocated_static_assets() -> dict[str, Path]:
     """Map staticfiles logical paths to absolute source files on disk.
 
-    The helper scans every configured page-backend tree plus registered
-    components. It honors the process-wide stem and kind registries, so
-    custom stems registered during `AppConfig.ready` are picked up.
+    The helper scans every configured page-backend tree plus registered components, and
+    honors the stem and kind registries filled during `AppConfig.ready`.
     """
     out: dict[str, Path] = {}
     # Resolved already, because that is what the watch layer promises.
@@ -164,18 +162,30 @@ class _Scan(NamedTuple):
     mapping: dict[str, Path]
     storage: _MappedSourceStorage
     roots: _ScanRoots
-    registries: tuple[int, int]
+    registries: tuple[int, int, int]
     watched: bool
     directories: tuple[tuple[Path, int | None], ...]
 
 
-def _registry_generation() -> tuple[int, int]:
-    """Return the generation of every registry a scan reads while it is built.
+# Bumped by every settings reload, because a reconfiguration moves what the walk finds.
+_SETTINGS_GENERATION: dict[str, int] = {"value": 0}
 
-    The placeholder registry is left out, because the finder names files rather
-    than slots and no registration there moves which file a logical name means.
+
+def _forget_scans(**kwargs) -> None:
+    """Mark every held scan stale, so a reconfigure is walked again."""
+    _SETTINGS_GENERATION["value"] += 1
+
+
+settings_reloaded.connect(_forget_scans)
+
+
+def _registry_generation() -> tuple[int, int, int]:
+    """Return the generation of everything a scan reads while it is built.
+
+    The placeholder registry is left out, because the finder names files rather than
+    slots and no registration there moves which file a logical name means.
     """
-    return (default_stems.version, default_kinds.version)
+    return (default_stems.version, default_kinds.version, _SETTINGS_GENERATION["value"])
 
 
 def _scan_roots() -> _ScanRoots:
@@ -199,11 +209,10 @@ def _stat_directory(directory: Path) -> os.stat_result | None:
 def _child_directories(directory: Path) -> list[Path]:
     """Return the directories held directly by `directory` that can hold an asset.
 
-    A symlinked one counts, because the component glob reads through it and a watch
-    set narrower than what the scan reads would miss a file landing there. A bytecode
-    cache is left out, because the page and component imports the scan itself runs
-    write into one and the scan would invalidate its own answer. A dot directory is
-    left out with it, because tooling keeps no co-located asset either.
+    A symlinked one counts, because the component glob reads through it and a watch set
+    narrower than what the scan reads would miss a file landing there. A bytecode cache
+    is left out, because the imports the scan runs write into one and would invalidate
+    its own answer. A dot directory too, because tooling keeps no co-located asset.
     """
     try:
         with os.scandir(directory) as entries:
@@ -241,16 +250,14 @@ def _scan_directories(roots: _ScanRoots) -> tuple[tuple[Path, int | None], ...]:
     return tuple(out)
 
 
-def _build_scan() -> _Scan:
+def _build_scan(roots: _ScanRoots) -> _Scan:
     """Discover every co-located asset and note what the answer was read from.
 
-    The generations and the snapshot are taken before the walk, so a
-    registration or a file landing while it runs leaves the scan stale rather
-    than stamped as up to date. A process watching no template edit snapshots
-    nothing, because there only a reconfiguration moves what the walk finds.
+    The generations and the snapshot are taken before the walk, so anything landing
+    while it runs leaves the scan stale rather than fresh. A process watching no
+    template edit snapshots nothing, because there only a reconfigure moves the answer.
     """
     registries = _registry_generation()
-    roots = _scan_roots()
     watched = template_edits_watched()
     directories = _scan_directories(roots) if watched else ()
     mapping = discover_colocated_static_assets()
@@ -259,7 +266,7 @@ def _build_scan() -> _Scan:
     )
 
 
-def _scan_stale(scan: _Scan) -> bool:
+def _scan_stale(scan: _Scan, roots: _ScanRoots) -> bool:
     """Whether anything the scan was read from has moved since.
 
     A registration moves no file and a reconfigured tree no mtime, so the generations
@@ -269,7 +276,7 @@ def _scan_stale(scan: _Scan) -> bool:
     """
     if scan.registries != _registry_generation():
         return True
-    if scan.roots != _scan_roots():
+    if scan.roots != roots:
         return True
     watched = template_edits_watched()
     if watched != scan.watched:
@@ -289,10 +296,14 @@ class NextStaticFilesFinder(BaseFinder):
         self._scan: _Scan | None = None
 
     def _current_scan(self) -> _Scan:
-        """Return the held scan, rebuilding it when what it read has moved."""
+        """Return the held scan, rebuilding it when what it read has moved.
+
+        The roots are read once, because reading them builds every configured router.
+        """
+        roots = _scan_roots()
         scan = self._scan
-        if scan is None or _scan_stale(scan):
-            scan = _build_scan()
+        if scan is None or _scan_stale(scan, roots):
+            scan = _build_scan(roots)
             self._scan = scan
         return scan
 

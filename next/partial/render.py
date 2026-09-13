@@ -10,6 +10,7 @@ from next.pages.manager import page
 from next.static.collector import default_placeholders
 from next.static.manager import default_manager
 
+from .errors import UnknownZoneError
 from .registry import zones_of
 from .signals import zone_rendered
 from .zone import render_zone_body
@@ -24,26 +25,6 @@ if TYPE_CHECKING:
     from next.static import StaticCollector
 
     from .registry import ZoneInfo
-
-
-class UnknownZoneError(LookupError):
-    """Raised when a partial request names a zone the page does not declare.
-
-    The unified view turns this into a 400 before any zone renders, so a
-    typo or a stale client never trips a partial render. The message names
-    the declared zones so a builder-path typo points at what is available.
-    """
-
-    def __init__(self, zone_name: str, declared: tuple[str, ...] = ()) -> None:
-        """Store the unknown zone name and the declared zone names available."""
-        self.zone_name = zone_name
-        self.declared = declared
-        if declared:
-            names = ", ".join(repr(name) for name in declared)
-            message = f'Unknown zone "{zone_name}". Declared zones: {names}.'
-        else:
-            message = f'Unknown zone "{zone_name}".'
-        super().__init__(message)
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,4 +182,4 @@ def _emit_rendered(
         )
 
 
-__all__ = ["UnknownZoneError", "ZoneRenderResult", "render_zone"]
+__all__ = ["ZoneRenderResult", "render_zone"]

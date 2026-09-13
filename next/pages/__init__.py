@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from . import checks, signals
 from .context import Context, ContextResult
-from .loaders import PageModuleImportError
+from .errors import PageModuleImportError
 from .manager import Page, context, page
 
 

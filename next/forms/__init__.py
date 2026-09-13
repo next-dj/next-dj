@@ -27,7 +27,6 @@ from .backends import (
     ActionGuard,
     ActionRegistration,
     FormActionBackend,
-    FormActionNotFoundError,
     RegistryBackendSnapshot,
     RegistryFormActionBackend,
 )
@@ -81,6 +80,11 @@ from .base import (
 )
 from .decorators import action
 from .dispatch.responses import ActionOutcome, ActionOutcomeKind
+from .errors import (
+    FormActionNotFoundError,
+    UnregisteredComponentError,
+    UnstorableWizardValueError,
+)
 from .formsets import cleanup_extra_initial
 from .markers import DForm
 from .origin import (
@@ -196,6 +200,8 @@ __all__ = [
     "URLField",
     "URLInput",
     "UUIDField",
+    "UnregisteredComponentError",
+    "UnstorableWizardValueError",
     "ValidationError",
     "Widget",
     "action",
