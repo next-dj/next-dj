@@ -21,6 +21,7 @@ from next.forms import (
 from next.forms.manager import form_action_manager
 from next.forms.rendering import _ErrorRenderParams, render_form_page_with_errors
 from next.forms.wizard import FormWizard
+from next.templatetags.forms import FORM_KEY_ATTR, FORM_ZONE_ATTR, FormNode
 from tests.forms.actions import SimpleForm
 
 
@@ -179,7 +180,7 @@ class TestRenderInvalidPage:
         backend = form_action_manager.default_backend
 
         layout = tmp_path / "layout.djx"
-        layout.write_text("<html>{% block template %}{% endblock template %}</html>")
+        layout.write_text("<html>{% template %}</html>")
         leaf = tmp_path / "leaf"
         leaf.mkdir()
         page_file = leaf / "page.py"
@@ -199,7 +200,7 @@ class TestRenderInvalidPage:
         )
         assert "<p>v2</p>" in second
 
-        layout.write_text("<main>{% block template %}{% endblock template %}</main>")
+        layout.write_text("<main>{% template %}</main>")
         third = backend.render_invalid_page(
             request, "simple_form", form, page_file_path=page_file
         )
@@ -475,6 +476,24 @@ class TestFormTagRender:
         )
         assert 'name="_next_form_origin" value="/board/4/settings/"' in html
         assert 'value="/_next/form/abc123/"' not in html
+
+    def test_a_post_carrying_no_origin_falls_back_to_the_url(
+        self, form_engine, csrf_request
+    ) -> None:
+        """A POST straight at the page has no posted origin, so the URL answers."""
+        csrf_request.method = "POST"
+        csrf_request.path = "/board/4/settings/"
+        csrf_request.POST = {}
+        t = form_engine.from_string('{% form "simple_form" %}x{% endform %}')
+        html = t.render(
+            Context(
+                {
+                    "request": csrf_request,
+                    "current_page_module_path": str(PAGE_MODULE_FOR_FORM_TESTS),
+                }
+            )
+        )
+        assert 'name="_next_form_origin" value="/board/4/settings/"' in html
 
     def test_unknown_action_raises_form_action_not_found(
         self, form_engine, csrf_request
@@ -948,12 +967,41 @@ class TestFormTagMarkupIdentity:
         assert "multipart/form-data" not in html
 
 
+class TestFormNodePartialAttrs:
+    """`has_partial_attr` answers what wire attributes a compiled form carries."""
+
+    @staticmethod
+    def _node(form_engine, source: str) -> FormNode:
+        template = form_engine.from_string(source)
+        nodes = [node for node in template.nodelist if isinstance(node, FormNode)]
+        return nodes[0]
+
+    def test_zone_param_answers_under_the_zone_attribute(self, form_engine) -> None:
+        """A zone= param is visible under the attribute name it compiles to."""
+        node = self._node(
+            form_engine, '{% form "simple_form" zone="board" %}x{% endform %}'
+        )
+        assert node.has_partial_attr(FORM_ZONE_ATTR) is True
+        assert node.has_partial_attr(FORM_KEY_ATTR) is False
+
+    def test_key_param_answers_under_the_key_attribute(self, form_engine) -> None:
+        """A key= param is visible under the attribute name it compiles to."""
+        node = self._node(
+            form_engine, '{% form "simple_form" key="row-7" %}x{% endform %}'
+        )
+        assert node.has_partial_attr(FORM_KEY_ATTR) is True
+
+    def test_plain_form_carries_no_partial_attribute(self, form_engine) -> None:
+        """A form tag without partial params answers no to every attribute."""
+        node = self._node(form_engine, '{% form "simple_form" %}x{% endform %}')
+        assert node.has_partial_attr(FORM_ZONE_ATTR) is False
+        assert node.has_partial_attr(FORM_KEY_ATTR) is False
+
+
 class TestFormTagPartialParams:
     """The validate, trigger, debounce, and zone params compile to data-next-*.
 
-    The server authors the client attribute names so the markup never
-    carries a raw selector or swap mode. Without the params the opening
-    tag stays free of every partial attribute.
+    The server authors the names so the markup carries no raw selector or swap mode.
     """
 
     @staticmethod

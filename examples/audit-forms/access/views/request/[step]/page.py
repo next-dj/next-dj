@@ -54,33 +54,20 @@ class AccessRequestWizard(FormWizard):
     def check_permissions(cls, request: HttpRequest) -> PermissionOutcome:
         """Deny every binding step POST that omits the retention acknowledgement.
 
-        Every step form declares the `policy_acknowledged` field, so a
-        normal submission carries the tick and passes while a replayed or
-        forged action URL that never rendered the form is denied before any
-        PII binds. A denied step writes no draft and leaves only the
-        `form_access_denied` audit row behind.
-
-        A blur-validation probe binds no data and asks only whether one
-        field is well formed, so it is let through ahead of the
-        acknowledgement the user has not reached yet.
+        A replayed action URL that never rendered the form is denied before any PII
+        binds, while a blur-validation probe checking one field is let through unacked.
         """
         if partial_intent(request).validate_fields:
             return True
-        return request.POST.get(POLICY_FIELD) == "on"
+        return AcknowledgedStep.is_acknowledged(request)
 
     def done(
         self, request: HttpRequest, cleaned_data: dict[str, Any]
     ) -> PatchResponse | HttpResponse:
         """Create the request, close the wizard layer, and link the next dispatch.
 
-        The acknowledgement rides on every step, so it merges into the wizard
-        payload as a control field and never reaches the model.
-
-        With a live runtime the final step closes the modal with the new
-        request id and shows a success toast, then the opening link refreshes
-        the recent-requests zone on its own GET. Without the runtime the same
-        builder falls back to a redirect to the per-request audit page, so
-        the no-JS path lands on the result just as before.
+        The acknowledgement rides every step as a control field, so it is dropped here
+        before the fields reach the model instead of being declared on it.
         """
         fields = {k: v for k, v in cleaned_data.items() if k != POLICY_FIELD}
         access_request = AccessRequest.objects.create(**fields)

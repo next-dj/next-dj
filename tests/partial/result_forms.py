@@ -64,10 +64,7 @@ class RichResponseForm(Form):
 class RotatingResultForm(Form):
     """Form that rotates the CSRF token then succeeds with a None result.
 
-    A login mid-submit rotates the token, so this proves the success
-    funnel envelope carries the fresh CSRF payload, not only the validate
-    path. The rotation runs during initial resolution, before any zone or
-    form re-render mints a token.
+    A login mid-submit rotates the token, so the success envelope carries the fresh one.
     """
 
     name = forms.CharField(max_length=100)

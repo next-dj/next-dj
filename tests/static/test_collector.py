@@ -7,6 +7,7 @@ import pytest
 
 from next.static import StaticAsset, StaticCollector
 from next.static.collector import (
+    _EMPTY,
     HEAD_CLOSE,
     DeepMergePolicy,
     FirstWinsPolicy,
@@ -44,8 +45,21 @@ class TestStaticCollectorOrdering:
             collector.add(StaticAsset(url=url, kind="css"))
         assert [asset.url for asset in collector.assets_in_slot("styles")] == urls
 
-    def test_unknown_slot_returns_empty_list(self, collector: StaticCollector) -> None:
-        assert collector.assets_in_slot("never-registered") == []
+    def test_unknown_slot_returns_an_empty_sequence(
+        self, collector: StaticCollector
+    ) -> None:
+        assert collector.assets_in_slot("never-registered") == ()
+
+    def test_a_missed_slot_hands_back_one_shared_immutable_answer(
+        self, collector: StaticCollector
+    ) -> None:
+        """Nothing registered means no allocation and nothing to append to."""
+        first = collector.assets_in_slot("never-registered")
+
+        assert first is _EMPTY
+        assert first is collector.assets_in_slot("also-never-registered")
+        with pytest.raises(AttributeError):
+            first.append(StaticAsset(url=CSS_URL, kind="css"))
 
 
 class TestStaticCollectorDedup:
@@ -226,6 +240,16 @@ class TestHashContentDedup:
         collector.add(StaticAsset(url="/a.css", kind="css"))
         collector.add(StaticAsset(url="/a.css", kind="css"))
         assert len(collector.assets_in_slot("styles")) == 1
+
+    def test_inline_bodies_dedupe_by_body(self) -> None:
+        """An inline block carries no file, so its body is the whole key."""
+        collector = StaticCollector(dedup=HashContentDedup())
+        collector.add(StaticAsset(url="", kind="css", inline=".x {}"))
+        collector.add(StaticAsset(url="", kind="css", inline=".x {}"))
+        assert len(collector.assets_in_slot("styles")) == 1
+
+        collector.add(StaticAsset(url="", kind="css", inline=".y {}"))
+        assert len(collector.assets_in_slot("styles")) == 2
 
 
 class TestIdentityDedup:
@@ -439,6 +463,48 @@ class TestJsContextEncoded:
         collector.add_js_context("k", {"a": 2})
         assert "k" not in collector._js_context_encoded
         assert collector.js_context_encoded() == {"k": '{"a":1}'}
+
+
+class TestJsContextPayload:
+    """`js_context_payload` drops a reserved key from all three mappings at once."""
+
+    class _CustomSerializer:
+        """Serializer that wraps the value into a sentinel envelope."""
+
+        def dumps(self, value: object) -> str:
+            return f'{{"_custom":{value!r}}}'.replace("'", '"')
+
+    def test_nothing_reserved_hands_every_key_back(
+        self, collector: StaticCollector
+    ) -> None:
+        collector.add_js_context("theme", "dark")
+
+        payload = collector.js_context_payload()
+
+        assert payload.values == {"theme": "dark"}
+        assert payload.encoded == {"theme": '"dark"'}
+        assert payload.serializers == {}
+
+    def test_a_colliding_key_leaves_no_trace(self, collector: StaticCollector) -> None:
+        """Its fragment and its serializer go with its value, not one without."""
+        custom = self._CustomSerializer()
+        collector.add_js_context("$csrf", "stolen", serializer=custom)
+        collector.add_js_context("theme", "dark")
+
+        payload = collector.js_context_payload(reserved={"$csrf"})
+
+        assert payload.values == {"theme": "dark"}
+        assert payload.encoded == {"theme": '"dark"'}
+        assert payload.serializers == {}
+
+    def test_a_reserved_key_nobody_registered_costs_nothing(
+        self, collector: StaticCollector
+    ) -> None:
+        collector.add_js_context("theme", "dark")
+
+        payload = collector.js_context_payload(reserved={"$csrf"})
+
+        assert payload.values is collector.js_context()
 
 
 class TestPlaceholderRegistry:

@@ -33,11 +33,14 @@ A custom backend can intercept one kind and resolve it elsewhere, then delegate 
    :caption: kanban/backends.py
 
    from __future__ import annotations
+
    import json
    import logging
    from pathlib import Path
    from typing import TYPE_CHECKING, Any
+
    from django.contrib.staticfiles.storage import staticfiles_storage
+
    from next.static import StaticFilesBackend
 
    if TYPE_CHECKING:
@@ -70,12 +73,19 @@ A custom backend can intercept one kind and resolve it elsewhere, then delegate 
            return super().register_file(source_path, logical_name, kind)
 
        def _build_dev_url(self, source_path: Path) -> str:
-           relative = source_path.relative_to(self._vite_root)
-           return f"{self._dev_origin.rstrip('/')}/{relative.as_posix()}"
+           if self._vite_root:
+               try:
+                   rel = source_path.relative_to(Path(self._vite_root))
+               except ValueError:
+                   pass
+               else:
+                   return f"{self._dev_origin}/{rel}"
+           return f"{self._dev_origin}/{source_path.name}"
 
 The constructor reads its own keys from the ``OPTIONS`` mapping.
 ``register_file`` receives the absolute ``source_path``, the extension-free ``logical_name``, and the registered ``kind``.
 Every kind except ``jsx`` falls straight through to ``super().register_file``.
+A ``VITE_ROOT`` that does not contain the source file makes ``relative_to`` raise ``ValueError``, which discovery logs and swallows, so guard the call and fall back rather than losing the asset.
 
 Read the Vite manifest
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -127,6 +137,7 @@ The zero-argument ``super()`` call they use resolves only from there.
 
 ``_manifest_key`` builds the lookup key relative to ``VITE_ROOT`` and falls back to the bare filename.
 URL resolution delegates to ``staticfiles_storage`` so manifest storage, S3 storage, and CDN settings still apply to the hashed output.
+Override ``forget_urls`` to reset ``self._manifest_data`` alongside the base memo, so the parsed Vite manifest is dropped when the staticfiles storage is rebuilt.
 
 Register the kind
 ~~~~~~~~~~~~~~~~~
@@ -139,6 +150,7 @@ Register the ``page`` stem too so discovery picks up ``page.jsx`` alongside ``pa
    :caption: kanban/apps.py
 
    from django.apps import AppConfig
+
    from next.static import default_kinds
    from next.static.discovery import default_stems
 
@@ -200,6 +212,8 @@ Discovery finds it because ``component`` is a registered stem and ``.jsx`` is no
      return <div data-kanban-card={id}>{title}</div>;
    }
 
+The ``_pieces`` directory name comes from the kanban example's ``COMPONENTS_DIR`` override, and the framework default is ``_components``.
+
 Verification
 ------------
 
@@ -235,5 +249,5 @@ See also
 .. seealso::
 
    :doc:`/content/howto/add-a-new-asset-kind` for registering a kind against a bundled renderer.
-   :doc:`/content/howto/write-a-static-backend` for attribute only and URL rewriting backends.
+   :doc:`/content/howto/write-a-static-backend` for attribute-only and URL rewriting backends.
    :doc:`/content/topics/static-assets/index` for the static pipeline overview.

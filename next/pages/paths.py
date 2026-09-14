@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from next.caches import BoundedCache
 from next.utils import MAX_ANCESTOR_WALK_DEPTH
 
 
@@ -29,7 +30,9 @@ class PagePathInfo:
     ancestors: tuple[Path, ...]
 
 
-_PAGE_PATH_INFO_CACHE: dict[Path, PagePathInfo] = {}
+# Bounded because a router may name a page path no earlier read named, and each
+# entry pins an ancestor tuple until the process ends.
+_PAGE_PATH_INFO_CACHE: BoundedCache[Path, PagePathInfo] = BoundedCache()
 
 
 def page_path_info(file_path: Path) -> PagePathInfo:
@@ -60,7 +63,7 @@ def _build_page_path_info(file_path: Path) -> PagePathInfo:
 
 def forget_page_path_info(file_path: Path) -> None:
     """Drop the facts of one page so the next read consults the disk again."""
-    _PAGE_PATH_INFO_CACHE.pop(file_path, None)
+    _PAGE_PATH_INFO_CACHE.pop(file_path)
 
 
 def clear_page_path_info() -> None:

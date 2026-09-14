@@ -1,11 +1,7 @@
 """Pytest plugin wiring the next.dj test scaffold to ini options and fixtures.
 
-Enabled per project with `-p next.testing.plugin`, which gives a suite the
-page loader, the framework client, and cache isolation from its ini file
-instead of a conftest copied into every project. Opting in explicitly
-rather than through a `pytest11` entry point keeps the framework out of
-unrelated pytest runs, and keeps a coverage gate honest, because pytest
-imports entry-point plugins before pytest-cov starts measuring.
+Enabled per project with `-p next.testing.plugin` rather than a `pytest11` entry point,
+since pytest imports entry-point plugins before pytest-cov starts measuring.
 """
 
 from __future__ import annotations

@@ -1,6 +1,5 @@
 """Form widgets that render through next-component runtime."""
 
-import difflib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, override
 
@@ -16,6 +15,8 @@ from next.components.manager import components_manager
 from next.components.renderers import COMPONENT_PROPS_CONTEXT_KEY
 from next.static import StaticCollector, collect_component_assets
 
+from .errors import UnregisteredComponentError
+
 
 if TYPE_CHECKING:
     from django.forms.utils import ErrorList
@@ -26,22 +27,6 @@ if TYPE_CHECKING:
 # Per-request component lookup cache attached to the request object, mirroring
 # REQUEST_DEP_CACHE_ATTR in next.deps. Keyed by (component name, anchor path).
 COMPONENT_LOOKUP_CACHE_ATTR: Final[str] = "_next_component_lookup_cache"
-
-
-def _unregistered_component_error(name: str, anchor: "str | Path") -> RuntimeError:
-    """Build the render-time error for a component name that resolves to nothing."""
-    visible = sorted(components_manager.collect_visible_components(Path(anchor)))
-    matches = difflib.get_close_matches(name, visible)
-    msg = (
-        f"ComponentWidget references component {name!r} that is not "
-        f"registered. Searched from {anchor}. Create {name}.djx in a "
-        "_components directory visible from that path, or register the "
-        "component through a components backend."
-    )
-    if matches:
-        rendered = ", ".join(repr(match) for match in matches)
-        msg = f"{msg} Closest matches: {rendered}."
-    return RuntimeError(msg)
 
 
 class ComponentWidget(django_forms.Widget):
@@ -97,7 +82,11 @@ class ComponentWidget(django_forms.Widget):
         )
         info = self._resolve_component(anchor)
         if info is None:
-            raise _unregistered_component_error(self.component_name, anchor)
+            raise UnregisteredComponentError(
+                self.component_name,
+                anchor,
+                components_manager.collect_visible_components(Path(anchor)),
+            )
         collect_component_assets(info, self._static_collector)
         merged = self.build_attrs(self.attrs, attrs or {})
         # Hyphenated keys such as aria-invalid cannot be read as template vars,

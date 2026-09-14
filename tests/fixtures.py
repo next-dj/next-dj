@@ -41,9 +41,8 @@ def _reload_next_framework_settings_after_test() -> Generator[None, None, None]:
 def _reset_check_caches() -> Generator[None, None, None]:
     """Drop the per-run check caches and the page module memo around each test.
 
-    The caches freeze the scanned page and component trees for the life of
-    the process, and a leaked ``_LAST_LOAD_ERROR`` entry would keep the
-    unified view's fast-path guard engaged for every later test.
+    A leaked ``_LAST_LOAD_ERROR`` would keep the unified view's fast-path
+    guard wrongly engaged for every test that runs after the one that set it.
     """
     reset_check_caches()
     yield
@@ -94,7 +93,7 @@ def djx_template_loader():
 @pytest.fixture()
 def context_manager():
     """Create a PageContextRegistry instance for testing."""
-    return PageContextRegistry(None)
+    return PageContextRegistry()
 
 
 @pytest.fixture()
@@ -137,8 +136,7 @@ def reloader_tick_scenario(request):
 def intent_only_shaper():
     """Bind a shaper that refuses to shape, restore the real one after.
 
-    The slot is process-global, so the previously bound implementation is
-    captured and put back rather than dropped.
+    The slot is process-global, so the previous implementation is put back, not dropped.
     """
     bound = partial_shaper_slot.get()
     shaper = IntentOnlyShaper()

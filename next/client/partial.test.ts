@@ -87,6 +87,33 @@ describe("createPartial surface", () => {
     expect(document.querySelector("#d")!.hasAttribute("open")).toBe(true);
   });
 
+  it("reads the history and navigation seams of the latest configuration", () => {
+    const first: string[] = [];
+    const second: string[] = [];
+    const visited: string[] = [];
+    partial._configure({
+      document,
+      history: { push: (href) => first.push(href), replace: () => undefined },
+    });
+    partial._configure({
+      document,
+      history: { push: (href) => second.push(href), replace: () => undefined },
+      navigate: (url) => visited.push(url),
+    });
+    partial.apply({
+      version: "v1",
+      ops: [
+        { op: "url", href: "/second/" },
+        { op: "visit", href: "/away/" },
+      ],
+      assets: [],
+      form: null,
+    });
+    expect(first).toEqual([]);
+    expect(second).toEqual(["/second/"]);
+    expect(visited).toEqual(["/away/"]);
+  });
+
   it("defineOp registers a custom verb reachable from apply", () => {
     const seen: unknown[] = [];
     partial.defineOp("confetti", (patch) => seen.push(patch.origin));
@@ -114,7 +141,7 @@ describe("createPartial surface", () => {
     });
     partial.setCsrf({ header: "X-CSRFToken", token: "tok" });
     await partial.fetch({ url: "/_next/form/u1/", method: "POST", uid: "u1" });
-    expect((calls[0]!.headers as Record<string, string>)["X-CSRFToken"]).toBe("tok");
+    expect(new Headers(calls[0]!.headers).get("X-CSRFToken")).toBe("tok");
   });
 
   it("a csrf meta in an applied envelope rotates the token for the next mutation", async () => {
@@ -138,9 +165,7 @@ describe("createPartial surface", () => {
     partial.setCsrf({ header: "X-CSRFToken", token: "old" });
     await partial.fetch({ url: "/_next/form/u1/", method: "POST", uid: "u1" });
     await partial.fetch({ url: "/_next/form/u1/", method: "POST", uid: "u1" });
-    expect((calls[1]!.headers as Record<string, string>)["X-CSRFToken"]).toBe(
-      "rotated",
-    );
+    expect(new Headers(calls[1]!.headers).get("X-CSRFToken")).toBe("rotated");
   });
 
   it("parseHook reaches the applier for a foreign content-type", async () => {
@@ -293,9 +318,7 @@ describe("createPartial surface", () => {
     partial.ready();
     await Promise.resolve();
     expect(calls).toHaveLength(1);
-    expect((calls[0]!.init.headers as Record<string, string>)["X-Next-Zone"]).toBe(
-      "a,b",
-    );
+    expect(new Headers(calls[0]!.init.headers).get("X-Next-Zone")).toBe("a,b");
   });
 
   it("a refresh op re-GETs the zone through the wire", async () => {
@@ -317,9 +340,7 @@ describe("createPartial surface", () => {
     });
     await Promise.resolve();
     expect(calls).toHaveLength(1);
-    expect((calls[0]!.init.headers as Record<string, string>)["X-Next-Zone"]).toBe(
-      "poll",
-    );
+    expect(new Headers(calls[0]!.init.headers).get("X-Next-Zone")).toBe("poll");
   });
 
   it("_configure stops the pollers the previous configuration armed", async () => {
@@ -532,8 +553,7 @@ describe("createPartial surface", () => {
       }),
     );
     await Promise.resolve();
-    // Drop the refresh op's own fetch, so the next call proves the resume
-    // revalidation fired, not the stream event.
+    // Drop the refresh op's own fetch, so the next call can only be the revalidation.
     calls.length = 0;
     visibility.setHidden(true);
     clock = 5000;
@@ -541,9 +561,7 @@ describe("createPartial surface", () => {
     await Promise.resolve();
     nowSpy.mockRestore();
     expect(
-      calls.some(
-        (c) => (c.init.headers as Record<string, string>)["X-Next-Zone"] === "poll",
-      ),
+      calls.some((c) => new Headers(c.init.headers).get("X-Next-Zone") === "poll"),
     ).toBe(true);
   });
 

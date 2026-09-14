@@ -60,7 +60,7 @@ The left column names the Django idiom, the middle column names the shape that t
      - ``{% component "card" %}``, a folder carrying its own template, Python, CSS, and JS
      - :doc:`/content/topics/components`
    * - ``reverse("notes:detail", args=[note.id])``
-     - ``page_reverse("notes/[id]", id=note.id)``, with the generated ``next:page_...`` name still available to ``reverse``
+     - ``page_reverse("notes/[id]", id=note.id)``, with the generated ``next:page_...`` name still available to ``reverse``, though the tutorial keeps plain ``reverse``/``{% url %}`` for readers coming from Django
      - :doc:`/content/topics/url-reversing`
    * - ``django.test.Client``
      - ``NextClient``, a subclass that adds action and zone helpers

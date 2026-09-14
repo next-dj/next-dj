@@ -1,17 +1,11 @@
 """Router manager, lazy urlpatterns sequence, and settings-reload wiring.
 
-`RouterManager` owns the list of active `RouterBackend` instances and
-rebuilds it from `NEXT_FRAMEWORK["PAGE_BACKENDS"]` whenever framework
-settings change. `_LazyUrlPatterns` is the sequence wrapped by the
-resolver built from `NEXT_FRAMEWORK["URL_RESOLVER"]`, which
-`_LazyResolverSlot` holds back until first read so the first resolve
-triggers router and form-action resolution without walking the page tree
-or reading settings at import time.
+`_LazyResolverSlot` holds the resolver back until first read, so the first resolve wires
+routers and form actions without touching the page tree at import time.
 """
 
 from __future__ import annotations
 
-import logging
 import threading
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, overload, override
@@ -19,21 +13,17 @@ from typing import TYPE_CHECKING, Any, overload, override
 from django.urls import URLPattern, URLResolver, clear_url_caches
 from django.urls.resolvers import RoutePattern
 
-from next.backends import resolve_setting_class
-from next.conf import next_framework_settings
+from next.backends import backend_entries, load_backends, resolve_setting_class
 from next.conf.signals import settings_reloaded
 from next.forms.manager import form_action_manager
 
-from .backends import RouterBackend, RouterFactory
+from .backends import RouterBackend
 from .resolver import TrieURLResolver
 from .signals import router_reloaded
 
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Iterator
-
-
-logger = logging.getLogger(__name__)
 
 
 class RouterManager:
@@ -57,10 +47,8 @@ class RouterManager:
     def _ensure_loaded(self) -> None:
         """Build the backend list on the first read, whichever accessor asks.
 
-        The in-build escape is keyed on the building thread, so a backend
-        consulting the manager on construction cannot recurse while a
-        reader on another thread waits for the build instead of resolving
-        against the still-empty list.
+        The in-build escape is keyed on the building thread, so a backend consulting the
+        manager on construction cannot recurse while another thread waits for the build.
         """
         if self._loaded or self._building_thread == threading.get_ident():
             return
@@ -99,31 +87,21 @@ class RouterManager:
         for backend in self._backends:
             yield from backend.generate_urls()
 
-    def reload(self) -> None:
+    def reload(self, *, notify: bool = True) -> None:
         """Rebuild backends from `PAGE_BACKENDS` and notify listeners.
 
-        The Django URL resolver caches resolved patterns. The cache is
-        cleared here so the next request sees the freshly built backend
-        list. The `router_reloaded` signal fires after the rebuild and
-        the cache flush so receivers observe a consistent state. The lock
-        is reentrant, so a receiver reloading again from this thread is
-        answered rather than deadlocked.
+        The URL caches clear and `router_reloaded` fires after the rebuild. A reentrant
+        lock lets a receiver reload from this thread, and `notify=False` skips both.
         """
         with self._lock:
             self.version += 1
             self._config_cache = None
 
-            built: list[RouterBackend] = []
-            # Recorded for the whole build, so a backend reading the manager
-            # while it is constructed is answered instead of deadlocking on
-            # the lock this thread already holds.
+            # Recorded for the whole build, so a backend reading the manager during
+            # construction is answered instead of deadlocking on this thread's lock.
             self._building_thread = threading.get_ident()
             try:
-                for config in self._get_next_pages_config():
-                    try:
-                        built.append(RouterFactory.create_backend(config))
-                    except (ValueError, TypeError, KeyError, ImportError):
-                        logger.exception("error creating router from config %s", config)
+                built = load_backends(self._get_next_pages_config(), base=RouterBackend)
             finally:
                 self._building_thread = None
 
@@ -131,18 +109,14 @@ class RouterManager:
             self._backends = built
             # Set before the signal, so a receiver reading `backends` stays out.
             self._loaded = True
-            clear_url_caches()
-            router_reloaded.send(sender=type(self))
+            if notify:
+                clear_url_caches()
+                router_reloaded.send(sender=type(self))
 
     def _get_next_pages_config(self) -> list[dict[str, Any]]:
-        """Router list from `settings.NEXT_FRAMEWORK` (merged defaults, cached)."""
-        if self._config_cache is not None:
-            return self._config_cache
-        routers = next_framework_settings.PAGE_BACKENDS
-        if not isinstance(routers, list):
-            self._config_cache = []
-            return self._config_cache
-        self._config_cache = routers
+        """Router entries from `PAGE_BACKENDS`, read once per load."""
+        if self._config_cache is None:
+            self._config_cache = backend_entries("PAGE_BACKENDS")
         return self._config_cache
 
 
@@ -165,10 +139,8 @@ settings_reloaded.connect(_on_settings_reloaded)
 class _LazyUrlPatterns(Sequence["URLPattern | URLResolver"]):
     """Defer expanding router and form patterns until first use.
 
-    Not a `list` subclass, so `include()` defers materialisation to the
-    first resolve. Explicit `__reversed__` keeps the resolver's reverse
-    walk to one list build instead of one per index. The concat is cached
-    against the router and form-action manager versions.
+    Skips `list` so `include()` defers materialisation, overrides `__reversed__` to
+    avoid a per-index list build, and caches the concat against both manager versions.
     """
 
     def __init__(self) -> None:
@@ -236,10 +208,9 @@ def _build_url_resolver() -> URLResolver:
 class _LazyResolverSlot(Sequence["URLPattern | URLResolver"]):
     """Hold the outer resolver in one slot and build it on first read.
 
-    Building at import time would read `NEXT_FRAMEWORK` before Django
-    settings are configured, which keeps `next.urls` and everything
-    importing it out of reach of a pytest plugin, loaded before
-    pytest-django exports `DJANGO_SETTINGS_MODULE` from the ini file.
+    Building at import time would read `NEXT_FRAMEWORK` before Django settings are
+    configured, which a pytest plugin hits ahead of pytest-django exporting the ini
+    file's `DJANGO_SETTINGS_MODULE`.
     """
 
     def __init__(self) -> None:

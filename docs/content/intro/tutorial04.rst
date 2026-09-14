@@ -31,6 +31,7 @@ Create ``notes/forms.py``.
    :caption: notes/forms.py
 
    from notes.models import Note
+
    from next.forms import BooleanField, Form, ModelForm
 
    class CreateNoteForm(ModelForm):
@@ -61,6 +62,7 @@ The ``inherit_context=True`` flag on the three layout-scope callables stays from
    :caption: notes/pages/page.py
 
    from notes.models import Note
+
    from next import context
 
    @context("site_name", inherit_context=True)
@@ -141,6 +143,7 @@ It receives the same DI-resolved parameters as any other callable, including URL
    from django.urls import reverse
    from notes.forms import CreateNoteForm
    from notes.models import Note
+
    from next import action, context
    from next.urls import DUrl
 
@@ -159,6 +162,7 @@ It receives the same DI-resolved parameters as any other callable, including URL
 
 The reverse name ``next:page_notes_id`` assumes the untyped ``notes/[id]/`` directory used in this tutorial.
 A typed segment such as ``notes/[int:id]/`` produces ``page_notes_int_id`` instead.
+
 The factory passed to ``form_class`` is dependency-resolved at dispatch time, so it receives the captured URL ``id`` and returns the form class paired with the ``instance`` to bind.
 The dispatcher builds and validates that bound form before it calls ``update_note``, so the handler only saves it.
 An ``id`` that matches no note makes ``get_object_or_404`` return Django's standard 404 response.
@@ -221,7 +225,8 @@ Extend the detail template.
 The rendered form carries several hidden inputs from different sources.
 ``confirm`` is a real field on ``DeleteNoteForm``, so the template posts it explicitly.
 The ``{% form %}`` tag emits the framework fields itself.
-``csrfmiddlewaretoken`` carries the CSRF token and ``_next_form_origin`` records the page URL, such as ``/notes/7/``.
+``csrfmiddlewaretoken`` carries the CSRF token and ``_next_form_origin`` records the page URL with its query string, such as ``/notes/7/`` or ``/?q=gro``.
+
 The dispatcher resolves that path against the URLconf, which recovers the captured ``id`` through the URL converter.
 The action handler therefore resolves ``DUrl["id", int]`` without any extra argument on the tag.
 
@@ -238,10 +243,9 @@ The detail ``page.py`` only needs to add its own context.
 .. code-block:: python
    :caption: notes/pages/notes/[id]/page.py
 
-   from django.http import HttpResponseRedirect
    from django.shortcuts import get_object_or_404
-   from django.urls import reverse
    from notes.models import Note
+
    from next import context
    from next.urls import DUrl
 
@@ -260,6 +264,7 @@ The complete file now looks like this.
    from django.shortcuts import get_object_or_404
    from django.urls import reverse
    from notes.models import Note
+
    from next.forms import BooleanField, Form, ModelForm
    from next.urls import DUrl
 
@@ -274,7 +279,7 @@ The complete file now looks like this.
        class Meta:
            login_required = True
 
-       def on_valid(self, request: HttpRequest, note_id: DUrl["id", int]):
+       def on_valid(self, request: HttpRequest, note_id: DUrl["id", int]) -> HttpResponseRedirect:
            get_object_or_404(Note, pk=note_id).delete()
            return HttpResponseRedirect(reverse("next:page_"))
 

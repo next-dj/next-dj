@@ -1,6 +1,8 @@
 """Shared loading and lazy management of the settings-driven backend families."""
 
+import inspect
 import logging
+from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable, Mapping
 from functools import cached_property
 from typing import Any, cast
@@ -10,6 +12,14 @@ from django.dispatch import Signal
 
 from next.conf import import_class_cached, next_framework_settings
 from next.conf.defaults import DEFAULTS
+from next.errors import (
+    AbstractBackendError,
+    BackendImportError,
+    BackendNotSubclassError,
+    BackendPathError,
+    SettingImportError,
+    SettingNotSubclassError,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -31,15 +41,14 @@ def resolve_backend_class[T](
     root = _root_class(base)
     dotted = config.get("BACKEND", default)
     if not isinstance(dotted, str) or not dotted:
-        msg = (
-            f"A {root.__name__} entry names its backend by a dotted path "
-            f"under BACKEND, got {config!r}."
-        )
-        raise ImproperlyConfigured(msg)
+        raise BackendPathError(root.__name__, config)
     klass: type[Any] = import_class_cached(dotted)
     if not (isinstance(klass, type) and issubclass(klass, root)):
-        msg = f"Backend {dotted!r} is not a {root.__name__} subclass."
-        raise ImproperlyConfigured(msg)
+        raise BackendNotSubclassError(dotted, root.__name__)
+    if inspect.isabstract(klass):
+        # The abstract family roots are what a settings entry most likely names
+        # by mistake, and instantiating one answers a TypeError no caller reads.
+        raise AbstractBackendError(dotted)
     return klass
 
 
@@ -58,15 +67,13 @@ def resolve_setting_class[T](
         try:
             klass = import_class_cached(dotted)
         except ImportError as exc:
-            msg = f"NEXT_FRAMEWORK[{setting!r}] {dotted!r} could not be imported: {exc}"
-            raise ImproperlyConfigured(msg) from exc
+            raise SettingImportError(setting, dotted, exc) from exc
     if not isinstance(klass, type) or not issubclass(klass, base):
-        msg = f"NEXT_FRAMEWORK[{setting!r}] {dotted!r} is not a {base_path} subclass."
-        raise ImproperlyConfigured(msg)
+        raise SettingNotSubclassError(setting, dotted, base_path)
     return klass
 
 
-def _instantiate_backend[T](klass: type[T], config: Mapping[str, Any]) -> T:
+def instantiate_backend[T](klass: type[T], config: Mapping[str, Any]) -> T:
     """Build one backend from its config entry.
 
     Every backend family takes the whole entry as its single argument, a contract
@@ -93,10 +100,8 @@ def load_backends[T](
 ) -> list[T]:
     """Instantiate every configured backend, skipping the misconfigured entries.
 
-    An entry is misconfigured when its dotted path does not resolve into the family, or
-    when the backend itself answers `ImproperlyConfigured`. Such an entry costs its own
-    backend and nothing else, so a site keeps serving with the rest. Anything else a
-    constructor raises is a bug in that backend and reaches the caller.
+    A bad dotted path or an `ImproperlyConfigured` backend costs only its own entry, so
+    the site keeps serving. Anything else a constructor raises is a bug and propagates.
     """
     name = _root_class(base).__name__
     backends: list[T] = []
@@ -107,7 +112,7 @@ def load_backends[T](
             logger.exception("error resolving %s from config %s", name, config)
             continue
         try:
-            instance = _instantiate_backend(klass, config)
+            instance = instantiate_backend(klass, config)
         except ImproperlyConfigured:
             logger.exception("error creating %s from config %s", name, config)
             continue
@@ -115,6 +120,36 @@ def load_backends[T](
             signal.send(sender=klass, config=dict(config), instance=instance)
         backends.append(instance)
     return backends
+
+
+class BackendListManager[T](ABC):
+    """Holds a settings-driven backend list, loaded on the first access after a reset.
+
+    `reload` is the subclass's own read of its settings key, and `_mark_loaded` is
+    where a family says whether an empty result counts as a load at all.
+    """
+
+    def __init__(self, backends: Iterable[T] | None = None) -> None:
+        """Take an explicit list, or leave the settings read to the first access."""
+        self._backends: list[T] = list(backends) if backends is not None else []
+        self._loaded: bool = bool(self._backends)
+
+    @abstractmethod
+    def reload(self) -> None:
+        """Rebuild the backend list from the current `NEXT_FRAMEWORK` settings."""
+
+    def _ensure_backends(self) -> None:
+        """Load the backends once, on the first access after a reset."""
+        if not self._loaded:
+            self.reload()
+
+    def _mark_loaded(self, *, retry_when_empty: bool = False) -> None:
+        """Record the load, leaving the flag down where an empty list is no result.
+
+        A family that reads an empty load as a broken configuration rereads the
+        settings on the next access rather than serving nothing for good.
+        """
+        self._loaded = bool(self._backends) or not retry_when_empty
 
 
 class SingleBackendManager[T]:
@@ -148,12 +183,8 @@ class SingleBackendManager[T]:
                 config, base=self._base, default=self._default
             )
         except ImportError as exc:
-            msg = (
-                f"NEXT_FRAMEWORK[{self._setting!r}] names a backend that "
-                f"cannot be imported: {exc}"
-            )
-            raise ImproperlyConfigured(msg) from exc
-        return _instantiate_backend(klass, config)
+            raise BackendImportError(self._setting, exc) from exc
+        return instantiate_backend(klass, config)
 
     def get(self) -> T:
         """Return the configured backend, building it on first use."""
@@ -169,9 +200,11 @@ class SingleBackendManager[T]:
 
 
 __all__ = [
+    "BackendListManager",
     "BackendRoot",
     "SingleBackendManager",
     "backend_entries",
+    "instantiate_backend",
     "load_backends",
     "resolve_backend_class",
     "resolve_setting_class",

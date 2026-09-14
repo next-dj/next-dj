@@ -16,8 +16,7 @@ import type { SessionStore } from "./assets";
 
 const SAFE_METHODS = new Set(["GET", "HEAD"]);
 
-// Kept apart from the version guard's own flag in assets.ts. The two loops have
-// different causes and one must not clear the other.
+// Kept apart from the version guard's flag in assets.ts, one must not clear the other.
 const NAVIGATED_FLAG = "next:partial:navigated";
 
 /** Fetch stand-in so vitest can drive requests deterministically. */
@@ -43,14 +42,18 @@ export interface CsrfPayload {
 export interface WireRequest {
   url: string;
   method?: string;
-  // A mutation locks on the form uid, a safe GET queues on url plus zone.
+  // A mutation locks on the form uid, a safe GET queues on url plus queue key.
   // Absent both, the request runs unqueued and unlocked.
   uid?: string;
+  // The X-Next-Zone value, absent when the answer addresses the whole page.
   zone?: string;
+  // The queue and abort identity, defaulting to the zone. An inline validation names
+  // its own key, so the zone it declares still travels as the header.
+  queue?: string;
   headers?: Record<string, string>;
   body?: BodyInit;
-  // An inline validation rides a POST to carry the body but mutates nothing, so
-  // it joins the abortable zone queue and skips the mutation lock.
+  // An inline validation rides a POST to carry the body but mutates nothing, so it
+  // joins the abortable queue and skips the mutation lock.
   abortable?: boolean;
   // The initiating form's data-next-key, threaded to apply for a repeated form.
   key?: string;
@@ -156,17 +159,15 @@ export class Wire {
   }
 
   /**
-   * Abort the in-flight request on a zone queue without starting a new one, so
-   * a form submit can cancel its own inline validation. The bumped seq also
-   * makes any answer already on the wire discard itself.
+   * Abort the in-flight request on a queue without starting a new one, so a form submit
+   * can cancel its own inline validation and the bumped seq drops a late answer.
    */
-  abort(zone: string): void {
-    const entry = this.#queues.get(zone);
+  abort(key: string): void {
+    const entry = this.#queues.get(key);
     if (entry === undefined) return;
     entry.controller.abort();
-    // Bump the seq so a response that resolves before the abort is observed is
-    // still dropped as stale.
-    this.#queues.set(zone, {
+    // Bump the seq so a response resolving before the abort lands is still dropped.
+    this.#queues.set(key, {
       controller: new AbortController(),
       seq: entry.seq + 1,
     });
@@ -177,8 +178,7 @@ export class Wire {
     const method = (request.method ?? "GET").toUpperCase();
     const safe = SAFE_METHODS.has(method);
     const uid = request.uid;
-    // An abortable POST (inline validation) is queue-managed like a safe GET
-    // and never takes the mutation lock.
+    // An abortable POST (inline validation) queues like a safe GET, taking no lock.
     const locked = !safe && !request.abortable && uid !== undefined;
     if (locked) {
       // A second submit drops while busy, so a double click yields one fetch.
@@ -196,14 +196,15 @@ export class Wire {
     }
   }
 
-  // A safe GET queues per path+zone so two pages sharing a zone name run
+  // A safe GET queues per path+key so two pages sharing a zone name run
   // independently while a re-filtered GET of the same page supersedes its
   // predecessor. The space separator cannot appear in either part. An abortable
-  // POST keeps the bare zone key that abort() addresses.
+  // POST keeps the bare queue key that abort() addresses.
   #queueKey(request: WireRequest, safe: boolean): string | undefined {
-    if (request.zone === undefined) return undefined;
-    if (safe) return `${request.url.split("?")[0]} ${request.zone}`;
-    return request.abortable === true ? request.zone : undefined;
+    const key = request.queue ?? request.zone;
+    if (key === undefined) return undefined;
+    if (safe) return `${request.url.split("?")[0]} ${key}`;
+    return request.abortable === true ? key : undefined;
   }
 
   // A new safe GET to a target aborts the in-flight one (latest-wins). The
@@ -294,10 +295,8 @@ export class Wire {
       this.#deliver(hook(response, body), response, snapshot, request.key, page);
       return;
     }
-    // A non-envelope content-type or a redirect is a full navigation to the
-    // final URL. A non-redirect non-envelope on a mutation points at the action
-    // endpoint, not a page, so navigating there would 405: surface it as an
-    // error and leave the page in place instead.
+    // A non-envelope reply or a redirect is a full navigation to the final URL. On a
+    // mutation the URL is the action endpoint, so navigating there would 405.
     if (baseType !== CONTENT_TYPE || response.redirected) {
       if (response.redirected || SAFE_METHODS.has(method)) {
         this.#fallbackNavigate(response.url || request.url);
@@ -360,25 +359,26 @@ export class Wire {
     return response.text();
   }
 
-  #headers(request: WireRequest, method: string): Record<string, string> {
-    const headers: Record<string, string> = {
+  // Headers, not a plain record, so a caller writing a name in another case still
+  // collides with the runtime's own and each header is stamped exactly once.
+  #headers(request: WireRequest, method: string): Headers {
+    const headers = new Headers({
       [REQUEST_FLAG]: "1",
       [HEADER_ACCEPT]: ACCEPT,
       ...request.headers,
-    };
+    });
     // The version travels only once the client has learned one from an
     // envelope, so the first request of a page asserts no stale version.
     const version = this.#version();
-    if (version) headers[HEADER_VERSION] = version;
-    if (request.zone !== undefined) headers[HEADER_ZONE] = request.zone;
+    if (version) headers.set(HEADER_VERSION, version);
+    if (request.zone !== undefined) headers.set(HEADER_ZONE, request.zone);
     if (!SAFE_METHODS.has(method)) {
       const csrf = this.#csrf();
-      if (csrf !== undefined) headers[csrf.header] = csrf.token;
-      // A true mutation (not an abortable validate POST) carries a ring id so
-      // the SSE bridge suppresses its own echo.
-      if (request.abortable !== true && headers[HEADER_REQUEST_ID] === undefined) {
+      if (csrf !== undefined) headers.set(csrf.header, csrf.token);
+      // A true mutation carries a ring id so the SSE bridge suppresses its own echo.
+      if (request.abortable !== true && !headers.has(HEADER_REQUEST_ID)) {
         const id = newRequestId();
-        headers[HEADER_REQUEST_ID] = id;
+        headers.set(HEADER_REQUEST_ID, id);
         this.#rememberRequestId(id);
       }
     }

@@ -19,11 +19,14 @@ from django.core.checks import (
     register,
 )
 from django.http import HttpRequest
+from django.urls.converters import get_converters
+from django.utils.module_loading import import_string
 
 from next.checks import NEXT
 from next.checks.common import (
     PageRootsError,
     RegistrationSubject,
+    discover_page_registrations,
     first_visit,
     get_page_roots,
     get_router_manager,
@@ -35,7 +38,8 @@ from next.checks.common import (
 from next.conf import import_class_cached, next_framework_settings
 from next.deps import RESERVED_KEYS, ResolutionContext, resolver
 from next.deps.cache import DependencyCache
-from next.utils import callable_name, walk_page_tree
+from next.deps.introspect import HINT_ERRORS, cached_type_hints
+from next.utils import normalise_route_name, walk_page_tree
 
 from .loaders import (
     TemplateLoader,
@@ -44,7 +48,8 @@ from .loaders import (
     last_load_error,
 )
 from .manager import page
-from .scan import iter_existing_scanned_page_pairs, iter_existing_scanned_pages
+from .placeholder import PLACEHOLDER, PLACEHOLDER_OPEN, placeholder_spans
+from .scan import iter_existing_scanned_pages
 
 
 if TYPE_CHECKING:
@@ -59,7 +64,8 @@ logger = logging.getLogger(__name__)
 
 REQUEST_CONTEXT_PROCESSOR = "django.template.context_processors.request"
 
-EXPECTED_PARAMETER_PARTS = 2
+_PARAMETER_FORMAT_HINT = "Use [param] or [type:param] format."
+_ARGS_FORMAT_HINT = "Use [[args]] format."
 
 # A page declares a body-source conflict only when two or more sources claim it.
 _MIN_CONFLICTING_BODY_SOURCES = 2
@@ -74,8 +80,7 @@ _PAGE_CONTEXT_SUBJECT = RegistrationSubject(
 @register(Tags.templates, NEXT)
 def check_request_in_context(*args, **kwargs) -> list[CheckMessage]:
     """Ensure `request` is in the template context (required for `{% form %}`)."""
-    # Through the registry, so the check holds for an `INSTALLED_APPS` entry
-    # written as the framework's `AppConfig` path.
+    # Through the registry, so an `AppConfig` path in `INSTALLED_APPS` counts too.
     if not apps.is_installed("next"):
         return []
 
@@ -102,11 +107,10 @@ def check_request_in_context(*args, **kwargs) -> list[CheckMessage]:
 def check_pages_structure(*args, **kwargs) -> list[CheckMessage]:
     """Check each router's pages tree for layouts, naming, and structure."""
     errors: list[CheckMessage] = []
-    warnings: list[CheckMessage] = []
 
     router_manager, init_errors = get_router_manager()
     if router_manager is None:
-        return init_errors + warnings
+        return init_errors
 
     # Nested and doubly-mounted roots reach one directory through several trees.
     seen: set[Path] = set()
@@ -133,17 +137,15 @@ def check_pages_structure(*args, **kwargs) -> list[CheckMessage]:
         skip_dir_names = page_tree_skip_names(router)
         try:
             for root in roots:
-                root_errors, root_warnings = _check_pages_directory(
-                    root.path, root.label, seen, skip_dir_names
+                errors.extend(
+                    _check_pages_directory(root.path, root.label, seen, skip_dir_names)
                 )
-                errors.extend(root_errors)
-                warnings.extend(root_warnings)
         except (AttributeError, OSError) as e:
             errors.append(
                 Error(f"Error checking router pages: {e}", obj=settings, id="next.E030")
             )
 
-    return errors + warnings
+    return errors
 
 
 def _configured_pages_dir_names() -> list[str]:
@@ -173,9 +175,8 @@ def _working_directory_page_trees() -> list[Path]:
 def _touches_a_routed_tree(directory: Path, routed: set[Path]) -> bool:
     """Whether a routed page tree is this directory, or sits above or below it.
 
-    A routed tree nested inside the candidate makes the candidate part of a
-    served layout, which is the shape of an application package that happens
-    to carry the configured `PAGES_DIR` name.
+    A routed tree nested inside the candidate makes it part of a served layout, the
+    shape of an app package that happens to carry the `PAGES_DIR` name.
     """
     return any(
         root.is_relative_to(directory) or directory.is_relative_to(root)
@@ -195,9 +196,7 @@ def _holds_a_page(directory: Path) -> bool:
 def check_unrouted_working_directory_pages(*args, **kwargs) -> list[CheckMessage]:
     """Warn when a pages tree beside the process is routed by nobody (`next.W002`).
 
-    A project that lists no root in `DIRS` keeps writing pages under a directory the
-    router never reaches, and the pages are never served. Nothing else reports that,
-    because the checks walk the trees the routers report and this one is not among them.
+    Nothing else reports this, since the other checks only walk trees routers report.
     """
     router_manager, _init_errors = get_router_manager()
     if router_manager is None:
@@ -222,6 +221,16 @@ def check_unrouted_working_directory_pages(*args, **kwargs) -> list[CheckMessage
     ]
 
 
+def _is_bracket_segment(name: str) -> bool:
+    """Whether a directory name is bracketed, the shape of a routed parameter."""
+    return name.startswith("[") and name.endswith("]")
+
+
+def _is_args_segment(name: str) -> bool:
+    """Whether a directory name is the doubly bracketed wildcard segment."""
+    return name.startswith("[[") and name.endswith("]]")
+
+
 def _check_directory_syntax(
     directories: list[Path], pages_path: Path, context: str
 ) -> list[CheckMessage]:
@@ -232,27 +241,28 @@ def _check_directory_syntax(
         dir_name_str = item.name
         relative_path = item.relative_to(pages_path)
 
-        if dir_name_str.startswith("[") and dir_name_str.endswith("]"):
-            if not _is_valid_parameter_syntax(dir_name_str):
-                errors.append(
-                    Error(
-                        f"{context} pages: Invalid parameter syntax "
-                        f'"{dir_name_str}" in {relative_path}. '
-                        f"Use [param] or [type:param] format.",
-                        obj=settings,
-                        id="next.E008",
-                    )
-                )
-
-        elif dir_name_str.startswith("[[") and dir_name_str.endswith("]]"):
-            if not _is_valid_args_syntax(dir_name_str):
+        # The wildcard form is read first, because `[[args]]` also opens with `[`.
+        if _is_args_segment(dir_name_str):
+            reason = _args_syntax_error(dir_name_str)
+            if reason is not None:
                 errors.append(
                     Error(
                         f"{context} pages: Invalid args syntax "
-                        f'"{dir_name_str}" in {relative_path}. '
-                        f"Use [[args]] format.",
+                        f'"{dir_name_str}" in {relative_path}. {reason}',
                         obj=settings,
                         id="next.E009",
+                    )
+                )
+
+        elif _is_bracket_segment(dir_name_str):
+            reason = _parameter_syntax_error(dir_name_str)
+            if reason is not None:
+                errors.append(
+                    Error(
+                        f"{context} pages: Invalid parameter syntax "
+                        f'"{dir_name_str}" in {relative_path}. {reason}',
+                        obj=settings,
+                        id="next.E008",
                     )
                 )
 
@@ -281,9 +291,7 @@ def _check_missing_page_files(
 
     for item in directories:
         dir_name_str = item.name
-        if (dir_name_str.startswith("[") and dir_name_str.endswith("]")) or (
-            dir_name_str.startswith("[[") and dir_name_str.endswith("]]")
-        ):
+        if _is_bracket_segment(dir_name_str):
             page_file = item / "page.py"
             layout_file = item / "layout.djx"
             template_file = item / "template.djx"
@@ -334,51 +342,84 @@ def _iter_routed_directories(
 
 def _check_pages_directory(
     pages_path: Path, context: str, seen: set[Path], skip_dir_names: frozenset[str]
-) -> tuple[list[CheckMessage], list[CheckMessage]]:
+) -> list[CheckMessage]:
     """Check a specific pages directory for issues, skipping directories in `seen`."""
     if not pages_path.exists():
-        return [], []
-
-    errors: list[CheckMessage] = []
-    warnings: list[CheckMessage] = []
+        return []
 
     directories = [
         item
         for item in _iter_routed_directories(pages_path, skip_dir_names)
         if first_visit(item, seen)
     ]
-    errors.extend(_check_directory_syntax(directories, pages_path, context))
+    errors = _check_directory_syntax(directories, pages_path, context)
     errors.extend(
         _check_missing_page_files(directories, pages_path, context, skip_dir_names)
     )
+    return errors
 
-    return errors, warnings
+
+def _route_name_error(name: str) -> str | None:
+    """Return why Django refuses `name` between its angle brackets, or `None`.
+
+    Django compiles a route as the pattern is built, so a name it refuses is a
+    traceback out of the first URL resolution rather than a report here.
+    """
+    if normalise_route_name(name).isidentifier():
+        return None
+    return (
+        f"Parameter name {name!r} is no valid Python identifier once '-' is "
+        "read as '_', and Django refuses such a name when it compiles the route."
+    )
 
 
-def _is_valid_parameter_syntax(param_str: str) -> bool:
-    """Return True when single-bracket parameter syntax is valid."""
-    if not (param_str.startswith("[") and param_str.endswith("]")):
-        return False
+def _converter_error(converter: str) -> str | None:
+    """Return why Django knows no such converter, or `None` when it knows one.
+
+    The registry is read per check, so a converter a project registers counts too.
+    """
+    registered = get_converters()
+    if converter in registered:
+        return None
+    known = ", ".join(sorted(registered))
+    return (
+        f"No Django URL converter is registered under the name {converter!r}. "
+        f"Registered converters: {known}."
+    )
+
+
+def _parameter_syntax_error(param_str: str) -> str | None:
+    """Return why a `[param]` directory names no route, or `None` when it does."""
+    if not _is_bracket_segment(param_str):
+        return _PARAMETER_FORMAT_HINT
 
     content = param_str[1:-1]
-    if ":" in content:
-        parts = content.split(":", 1)
-        if len(parts) != EXPECTED_PARAMETER_PARTS:
-            return False
-        type_name, param_name = parts
-        if ":" in param_name:
-            return False
-        return bool(type_name.strip() and param_name.strip())
-    return bool(content.strip())
+    if ":" not in content:
+        name = content.strip()
+        return _PARAMETER_FORMAT_HINT if not name else _route_name_error(name)
+    type_name, param_name = content.split(":", 1)
+    if ":" in param_name:
+        return _PARAMETER_FORMAT_HINT
+    converter = type_name.strip()
+    name = param_name.strip()
+    if not converter or not name:
+        return _PARAMETER_FORMAT_HINT
+    return _converter_error(converter) or _route_name_error(name)
 
 
-def _is_valid_args_syntax(args_str: str) -> bool:
-    """Return True when double-bracket args syntax is valid."""
-    if not (args_str.startswith("[[") and args_str.endswith("]]")):
-        return False
+def _args_syntax_error(args_str: str) -> str | None:
+    """Return why a `[[args]]` directory names no route, or `None` when it does.
+
+    The name is read unstripped, because the router captures whatever sits
+    between the brackets and Django allows no whitespace in a route parameter.
+    """
+    if not _is_args_segment(args_str):
+        return _ARGS_FORMAT_HINT
 
     content = args_str[2:-2]
-    return bool(content.strip())
+    if not content.strip():
+        return _ARGS_FORMAT_HINT
+    return _route_name_error(content)
 
 
 @register(NEXT)
@@ -472,10 +513,8 @@ def _check_page_functions_in_directory(
 def _active_body_sources(page_file: Path) -> list[str]:
     """Return the body sources declared on `page_file` in priority order.
 
-    The priority order starts with `render()`, then the `template`
-    module attribute, and finally registered loaders in the order
-    declared under `NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`. Each loader
-    reports its file name via `TemplateLoader.source_name`.
+    Priority: `render()`, the `template` attribute, then
+    `NEXT_FRAMEWORK["TEMPLATE_LOADERS"]` entries.
     """
     module = _load_python_module_memo(page_file)
     sources: list[str] = []
@@ -533,32 +572,51 @@ def _has_template_or_djx(file_path: Path) -> bool:
     return any(loader.can_load(file_path) for loader in build_registered_loaders())
 
 
+def _missing_placeholder_warning(layout_file: Path) -> CheckMessage:
+    """Build the `next.W001` report for a layout that holds no placeholder."""
+    return DjangoWarning(
+        f"Layout file {layout_file} carries no {PLACEHOLDER} placeholder, so "
+        "composition drops the layout and the pages under it render without its "
+        f"markup. Add {PLACEHOLDER} where the page body belongs, or the paired "
+        f"{PLACEHOLDER_OPEN} form whose body is the fallback.",
+        obj=str(layout_file),
+        id="next.W001",
+    )
+
+
+def _repeated_placeholder_warning(layout_file: Path, found: int) -> CheckMessage:
+    """Build the `next.W078` report for a layout that holds several placeholders."""
+    return DjangoWarning(
+        f"Layout file {layout_file} carries {found} {PLACEHOLDER} placeholders. "
+        "Composition fills the first one and every other renders its own fallback "
+        "instead of the page, so keep exactly one.",
+        obj=str(layout_file),
+        id="next.W078",
+    )
+
+
 def _check_layout_file(layout_file: Path) -> CheckMessage | None:
-    """Check if layout file has required `{% block template %}`."""
+    """Report a `layout.djx` that carries no placeholder or more than one."""
     try:
         content = layout_file.read_text(encoding="utf-8")
-        if "{% block template %}" not in content:
-            return DjangoWarning(
-                f"Layout file {layout_file} does not contain required "
-                "{% block template %} block. "
-                "This may cause template inheritance issues.",
-                obj=str(layout_file),
-                id="next.W001",
-            )
     except (OSError, UnicodeDecodeError):
-        pass
+        return None
+    found = len(placeholder_spans(content))
+    if found == 0:
+        return _missing_placeholder_warning(layout_file)
+    if found > 1:
+        return _repeated_placeholder_warning(layout_file, found)
     return None
 
 
 @register(Tags.templates, NEXT)
 def check_layout_templates(*args, **kwargs) -> list[CheckMessage]:
-    """Check `layout.djx` files for the `{% block template %}` structure."""
-    warnings: list[CheckMessage] = []
-
+    """Check every `layout.djx` for exactly one page-body placeholder."""
     router_manager, init_errors = get_router_manager()
     if router_manager is None:
-        return init_errors + warnings
+        return init_errors
 
+    warnings: list[CheckMessage] = []
     # Nested roots and several routers reach one layout through more than one page.
     seen: set[Path] = set()
     for router in router_manager.backends:
@@ -574,29 +632,30 @@ def check_layout_templates(*args, **kwargs) -> list[CheckMessage]:
     return warnings
 
 
-_DICT_ANNOTATION_NAMES = frozenset({"dict", "Dict", "Mapping", "MutableMapping"})
-
-
 def _annotation_is_dict_like(annotation: object) -> bool:
     """Return True when the return annotation maps to a dict-like result."""
     if annotation is inspect.Signature.empty:
         return True
-    if annotation is dict or annotation is None:
-        return annotation is dict
     origin = get_origin(annotation)
-    if origin is not None:
-        candidate: object = origin
-    else:
-        candidate = annotation
-    if isinstance(candidate, type):
-        try:
-            return issubclass(candidate, Mapping)
-        except TypeError:
-            return False
-    name = getattr(candidate, "_name", None) or getattr(candidate, "__name__", None)
-    if isinstance(name, str):
-        return name in _DICT_ANNOTATION_NAMES
-    return False
+    candidate = annotation if origin is None else origin
+    if not isinstance(candidate, type):
+        return False
+    try:
+        return issubclass(candidate, Mapping)
+    except TypeError:
+        return False
+
+
+def _return_annotation(func: Callable[..., Any]) -> object:
+    """Return the resolved return annotation, read the way the DI resolver reads it.
+
+    A hint the resolver itself could not evaluate is no ground to block a page, so an
+    unreadable annotation answers the same as an absent one.
+    """
+    try:
+        return cached_type_hints(func).get("return", inspect.Signature.empty)
+    except HINT_ERRORS:
+        return inspect.Signature.empty
 
 
 def _check_context_function(
@@ -605,14 +664,9 @@ def _check_context_function(
     """Emit an error when keyless context callables are not annotated dict-like.
 
     The check is static, because executing user code at ``manage.py check`` time is
-    expensive and can hit databases that have not been migrated yet. Callables without a
-    return annotation are accepted. The runtime emits a clear ``TypeError`` on first
-    render if the result is not a mapping.
+    expensive and can hit databases that have yet to be migrated.
     """
-    try:
-        annotation = inspect.signature(func).return_annotation
-    except (TypeError, ValueError):
-        return None
+    annotation = _return_annotation(func)
     if _annotation_is_dict_like(annotation):
         return None
     annotation_name = getattr(annotation, "__name__", None) or repr(annotation)
@@ -627,21 +681,49 @@ def _check_context_function(
     )
 
 
-def _check_registered_context_functions(page_path: Path) -> list[CheckMessage]:
-    """Return keyless `@context` errors recorded for `page_path` in the registry.
+class _PageContexts(NamedTuple):
+    """A routed `page.py`, its URL trail, and the `@context` bindings it registered."""
 
-    The registry keys on the file declaring the callable, which for a `page.py`
-    is the absolute path importlib gave the module, the same path this check
-    loads it by, so a direct lookup needs no symlink resolution on either side.
+    url_path: str
+    page_path: Path
+    bindings: tuple[ZoneBinding, ...]
+
+
+def _load_routed_pages() -> tuple[list[CheckMessage], list[tuple[str, Path]]]:
+    """Import every routed `page.py`, answering with the ones that loaded.
+
+    The pass is the one the form checks run, and it takes the manager these checks
+    resolved so a caller that pointed them at a router tree reaches it here too.
     """
+    router_manager, init_errors = get_router_manager()
+    if router_manager is None:
+        return init_errors, []
+    return init_errors, discover_page_registrations(router_manager)
+
+
+def _loaded_page_contexts() -> tuple[list[CheckMessage], list[_PageContexts]]:
+    """Return the `@context` every routed `page.py` registered as it imported.
+
+    The registry keys on the path importlib gave the module, the same spelling the
+    walk reports, so a binding is looked up without resolving a symlink on either side.
+    """
+    init_errors, loaded = _load_routed_pages()
+    bindings = page.zone_bindings()
+    return init_errors, [
+        _PageContexts(url_path, page_path, bindings.get(page_path, ()))
+        for url_path, page_path in loaded
+    ]
+
+
+def _keyless_context_errors(
+    page_path: Path, bindings: tuple[ZoneBinding, ...]
+) -> list[CheckMessage]:
+    """Return the return-shape errors of the keyless `@context` of one page."""
     errors: list[CheckMessage] = []
-    registry = page._context_manager._context_registry.get(page_path, {})
-    for key, entry in registry.items():
-        if key is not None:
+    for binding in bindings:
+        if binding.key is not None:
             continue
-        error = _check_context_function(
-            callable_name(entry.func), entry.func, page_path
-        )
+        error = _check_context_function(binding.name, binding.func, page_path)
         if error is not None:
             errors.append(error)
     return errors
@@ -684,15 +766,10 @@ def check_page_module_imports(*args, **kwargs) -> list[CheckMessage]:
 @register(Tags.templates, NEXT)
 def check_context_functions(*args, **kwargs) -> list[CheckMessage]:
     """Require keyless `@context` callables to return a dict when invoked."""
-    router_manager, init_errors = get_router_manager()
-    if router_manager is None:
-        return init_errors
-
-    errors: list[CheckMessage] = []
-    for page_path in iter_existing_scanned_pages(router_manager, set()):
-        if _load_python_module_memo(page_path) is None:
-            continue
-        errors.extend(_check_registered_context_functions(page_path))
+    init_errors, pages = _loaded_page_contexts()
+    errors = list(init_errors)
+    for entry in pages:
+        errors.extend(_keyless_context_errors(entry.page_path, entry.bindings))
     return errors
 
 
@@ -700,16 +777,12 @@ def check_context_functions(*args, **kwargs) -> list[CheckMessage]:
 def check_context_registration_files(*args, **kwargs) -> list[CheckMessage]:
     """Flag a `@context` no page render collects (`next.E074`).
 
-    A registration keys on the file declaring the callable, so decorating an
-    imported helper binds it to that helper's module, and decorating a
-    callable from a sibling `page.py` binds it to that other page.
+    A registration keys on the file declaring the callable, so an imported helper
+    binds to its own module, and a sibling page's callable binds to that other page.
     """
-    router_manager, init_errors = get_router_manager()
-    if router_manager is None:
+    init_errors, _loaded = _load_routed_pages()
+    if init_errors:
         return init_errors
-
-    for page_path in iter_existing_scanned_pages(router_manager, set()):
-        _load_python_module_memo(page_path)
 
     return registration_file_errors(
         _PAGE_CONTEXT_SUBJECT,
@@ -724,28 +797,24 @@ def check_single_keyless_context(*args, **kwargs) -> list[CheckMessage]:
 
     Keyless callables share one slot, so only the last survives and runs.
     """
-    router_manager, init_errors = get_router_manager()
-    if router_manager is None:
-        return init_errors
-
-    errors: list[CheckMessage] = []
-    conflicts = page._context_manager._keyless_conflicts
-    for page_path in iter_existing_scanned_pages(router_manager, set()):
-        if _load_python_module_memo(page_path) is None:
+    init_errors, pages = _loaded_page_contexts()
+    errors = list(init_errors)
+    conflicts = page._context_manager.keyless_conflicts()
+    for entry in pages:
+        names = conflicts.get(entry.page_path)
+        if not names:
             continue
-        names = conflicts.get(page_path)
-        if names:
-            joined = ", ".join(names)
-            errors.append(
-                Error(
-                    f"page.py at {page_path} registers multiple keyless @context "
-                    f"callables ({joined}). Only the last one runs, so the "
-                    "earlier ones are ignored. Give each a key like "
-                    "@context('name'), or merge them into a single callable.",
-                    obj=str(page_path),
-                    id="next.E018",
-                )
+        joined = ", ".join(names)
+        errors.append(
+            Error(
+                f"page.py at {entry.page_path} registers multiple keyless @context "
+                f"callables ({joined}). Only the last one runs, so the "
+                "earlier ones are ignored. Give each a key like "
+                "@context('name'), or merge them into a single callable.",
+                obj=str(entry.page_path),
+                id="next.E018",
             )
+        )
     return errors
 
 
@@ -763,22 +832,11 @@ def check_context_reads_foreign_zone(*args, **kwargs) -> list[CheckMessage]:
     A zone request that does not name the bound zone skips the provider,
     while the reader still runs and receives `None` for the parameter.
     """
-    router_manager, init_errors = get_router_manager()
-    if router_manager is None:
-        return init_errors
-
-    # A `@context` registers as its `page.py` imports, so load before reading.
-    pairs = iter_existing_scanned_page_pairs(router_manager, set())
-    loaded = [
-        (url_path, page_path)
-        for url_path, page_path in pairs
-        if _load_python_module_memo(page_path) is not None
-    ]
-    bindings = page.zone_bindings()
-    warnings: list[CheckMessage] = []
-    for url_path, page_path in loaded:
+    init_errors, pages = _loaded_page_contexts()
+    warnings = list(init_errors)
+    for entry in pages:
         warnings.extend(
-            _foreign_zone_reads(page_path, url_path, bindings.get(page_path, ()))
+            _foreign_zone_reads(entry.page_path, entry.url_path, entry.bindings)
         )
     return warnings
 
@@ -859,13 +917,12 @@ def _context_parameters(func: Callable[..., Any]) -> list[inspect.Parameter]:
 def _url_parameter_names(url_path: str) -> list[str]:
     """Return the URL kwarg names the route captures, as the router parses them.
 
-    A route the parser refuses captures nothing here, because `next.E011`
-    reports the conflicting segments on its own.
+    A route the parser refuses captures nothing, because `next.E011` reports it.
     """
     parser = _url_parser()
     try:
         _pattern, parameters = parser.parse_url_pattern(url_path)
-    except parser.duplicate_parameter_error:
+    except ValueError:
         return []
     return list(parameters)
 
@@ -920,12 +977,17 @@ def check_context_processor_signature(*args, **kwargs) -> list[CheckMessage]:
 
 
 def _iter_page_backend_configs() -> list[tuple[int, dict[str, Any]]]:
-    """Return indexed page backend dicts from `NEXT_FRAMEWORK`."""
-    raw = getattr(settings, "NEXT_FRAMEWORK", {}) or {}
-    backends = raw.get("PAGE_BACKENDS", []) if isinstance(raw, dict) else []
+    """Return the indexed page backend dicts, read through the settings façade.
+
+    The façade is what every reader of the merged settings sees, so a project
+    naming no backend is checked on the defaults it actually runs.
+    """
+    configured = next_framework_settings.PAGE_BACKENDS
+    if not isinstance(configured, list):
+        return []
     return [
-        (idx, backend)
-        for idx, backend in enumerate(backends)
+        (index, backend)
+        for index, backend in enumerate(configured)
         if isinstance(backend, dict)
     ]
 
@@ -935,11 +997,9 @@ def _check_processor_request_parameter(
 ) -> CheckMessage | None:
     """Return an error when the callable at `processor_path` lacks `request`."""
     try:
-        processor = importlib.import_module(processor_path.rsplit(".", 1)[0])
-    except (ImportError, ValueError):
+        callable_obj = import_string(processor_path)
+    except ImportError:
         return None
-    attr_name = processor_path.rsplit(".", 1)[-1]
-    callable_obj = getattr(processor, attr_name, None)
     if not callable(callable_obj):
         return None
     try:

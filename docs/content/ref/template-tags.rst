@@ -104,6 +104,20 @@ Components
    Block form.
    Marks a slot location inside a component template, with a fallback body used when the caller omits the slot.
 
+Where a caller slot may sit
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A caller slot fills the component whose ``{% #component %}`` body it is written in.
+It may sit anywhere in that body, directly or inside ``{% if %}``, ``{% for %}``, or any other block tag, and the framework records which slots a body holds when it compiles the body.
+Wherever the slot sits, its content fills the named slot and never reaches ``children``.
+
+A slot the render never reaches, such as one under an ``{% if %}`` branch that is not taken, leaves its name unfilled, so the component's ``{% #set_slot %}`` fallback body renders.
+One name written more than once, such as a slot repeated per ``{% for %}`` iteration, keeps every body and joins them in render order.
+
+A ``{% #slot %}`` compiled into some other template, reached through ``{% include %}`` or an overridden ``{% block %}``, belongs to no component body.
+It renders its content where it stands, which inside a ``{% #component %}`` body means as part of ``children``.
+Put the slot in the component body itself to fill a slot.
+
 Resolution misses
 ~~~~~~~~~~~~~~~~~
 
@@ -128,12 +142,13 @@ One missed component inside an otherwise healthy page degrades to a comment in d
 Multiline tag bodies
 ~~~~~~~~~~~~~~~~~~~~
 
-The framework reinstalls Django's template tag pattern with the ``re.DOTALL`` flag so a single ``{% ... %}`` token may span several lines.
+The framework rebinds Django's template tag pattern during ``AppConfig.ready`` so that a dot matches a newline inside the ``{% ... %}`` alternative, and a single block tag may therefore span several lines.
 That allows readable block components and slots when the inner markup is long.
+The widening is scoped to that one alternative, so ``{{ ... }}`` and ``{# ... #}`` lex exactly as Django lexes them and a newline still ends a variable or a comment.
 
 .. warning::
 
-   This changes template parsing for **every** template the process loads, not only DJX files.
+   The wider block-tag rule reaches **every** template the process loads, not only DJX files, because the Django lexer reads the pattern from a module global that the rebind replaces.
    If you rely on Django's stock behaviour where a newline inside ``{% ... %}`` ends the tag, adjust those templates before adopting next.dj.
 
 Static pipeline
@@ -153,6 +168,7 @@ Static pipeline
 
    Registers an external CSS URL on the active collector.
    The asset is prepended so shared dependencies load before co-located styles.
+   The tag takes no ``kind`` argument and always registers a ``css`` asset, so a URL of another kind goes through ``{% use_script %}`` with an explicit ``kind``.
 
 .. describe:: {% use_script "<url>" [kind="<kind>"] %}
 
@@ -171,11 +187,13 @@ Static pipeline
 
    Inline CSS block.
    The body is rendered with the template context and deduplicated by content.
+   The block form takes no ``kind`` argument and is fixed to ``css``.
 
 .. describe:: {% #use_script %}...{% /use_script %}
 
    Inline JS block.
    The body is rendered with the template context and deduplicated by content.
+   The block form takes no ``kind`` argument and is fixed to ``js``.
 
 Partial rendering
 -----------------
@@ -198,6 +216,7 @@ Partial rendering
    It is mutually exclusive with ``lazy=``, and an interval below one second, above the browser timer ceiling, or malformed raises ``TemplateSyntaxError`` at parse time.
 
    An option without ``=`` and an unknown option key also raise ``TemplateSyntaxError`` at parse time, so a typo fails the compile rather than being silently dropped.
+   The name and every option value are quoted literals, so an unquoted bit raises rather than standing in for the variable it names.
 
 .. describe:: {% placeholder %}
 
@@ -212,14 +231,22 @@ The :doc:`zone placement checks </content/ref/system-checks>` enforce each rule 
 Layouts
 -------
 
-.. describe:: {% block template %}{% endblock %}
+.. describe:: {% template %}
 
-   Marks the slot inside a ``layout.djx`` where the page template is composed.
-   The layout loader replaces the empty block with the wrapped page body when it builds the final template string.
-   Both ``{% endblock %}`` and ``{% endblock template %}`` are accepted as the closing tag.
+   Void form.
+   Marks the hole inside a ``layout.djx`` where the wrapped content is composed, the page body or an inner composed layout.
+   Takes no arguments, and an argument raises ``TemplateSyntaxError`` at parse time.
 
-   A ``layout.djx`` without this block raises ``next.W001`` during ``manage.py check``, since the page body would have nowhere to render.
-   Nested layouts each carry their own ``{% block template %}`` and compose from innermost to outermost.
+.. describe:: {% #template %}...{% /template %}
+
+   Block form.
+   Marks the same hole and carries a fallback body, rendered only where composition never reached, such as a layout rendered outside its chain.
+   Takes no arguments either, and an argument raises ``TemplateSyntaxError`` at parse time.
+
+Composition fills the first placeholder a layout carries and leaves any later one as a real node that renders its own fallback body.
+Django's own lexer finds them, so a placeholder written inside ``{% verbatim %}`` or ``{% comment %}`` is text rather than a hole and neither composition nor the checks count it.
+A ``layout.djx`` carrying no placeholder reports ``next.W001`` during ``manage.py check`` and one carrying several reports ``next.W078``.
+Nested layouts each carry their own placeholder and compose from innermost to outermost.
 
 Tag loading
 -----------

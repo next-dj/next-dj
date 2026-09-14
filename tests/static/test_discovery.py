@@ -5,28 +5,25 @@ import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
 from django.test import override_settings
 
+from next.caches import BoundedCache
 from next.components import ComponentInfo
 from next.static import (
     AssetDiscovery,
     StaticCollector,
     StaticFilesBackend,
     default_kinds,
-    discovery as discovery_mod,
+    discovery as static_discovery,
 )
 from next.static.collector import HashContentDedup, default_placeholders
-from next.static.discovery import (
-    BackendProvider,
-    PathResolver,
-    StemRegistry,
-    default_stems,
-)
+from next.static.discovery import PathResolver, StemRegistry, _url_suffix, default_stems
 from next.static.signals import asset_registered
-from next.urls import FileRouterBackend
 from tests.support import (
     RecordingStaticBackend,
     StaticAssetProvider,
+    assert_bounded_by_insert_age,
     component_info,
     record_path_calls,
     restored_static_registries,
@@ -34,25 +31,8 @@ from tests.support import (
 
 
 if TYPE_CHECKING:
-    import pytest
-
     from next.static import StaticBackend
     from next.static.discovery import _AssetPlan
-
-
-class TestBackendProviderProtocol:
-    """Any object with default_backend + page_roots satisfies the protocol."""
-
-    def test_runtime_checkable(self, file_backend: StaticBackend) -> None:
-        provider = StaticAssetProvider(file_backend, ())
-        assert isinstance(provider, BackendProvider)
-
-    def test_non_conforming_object_fails(self) -> None:
-        assert not isinstance(object(), BackendProvider)
-
-    def test_a_router_backend_is_not_a_provider(self) -> None:
-        # Both carry `page_roots`, but a match also needs `default_backend`.
-        assert not isinstance(FileRouterBackend(app_dirs=False), BackendProvider)
 
 
 class TestStemRegistryDefaults:
@@ -114,6 +94,37 @@ class TestPathResolverFindPageRoot:
         resolver = PathResolver(lambda: (a.resolve(), b.resolve()))
         (a / "p.djx").write_text("")
         assert resolver.find_page_root(a / "p.djx") == a.resolve()
+
+    def test_a_warm_miss_is_answered_without_consulting_the_roots(
+        self, tmp_path: Path
+    ) -> None:
+        """A cached `None` answers from the memo, so the roots are read once."""
+        reads: list[int] = []
+
+        def roots() -> tuple[Path, ...]:
+            reads.append(1)
+            return (tmp_path.resolve() / "other",)
+
+        resolver = PathResolver(roots)
+        outside = tmp_path / "x.djx"
+
+        assert resolver.find_page_root(outside) is None
+        assert resolver.find_page_root(outside) is None
+        assert reads == [1]
+
+    def test_the_memo_holds_the_paths_resolved_last(self, tmp_path: Path) -> None:
+        """A full memo drops its oldest insert and a warm lookup reorders nothing."""
+        resolver = PathResolver(lambda: (tmp_path.resolve(),))
+
+        def install(bound: int) -> tuple[BoundedCache, ...]:
+            resolver._find_page_root_cache = BoundedCache(bound)
+            return (resolver._find_page_root_cache,)
+
+        assert_bounded_by_insert_age(
+            install,
+            resolver.find_page_root,
+            [tmp_path / f"{name}.djx" for name in ("a", "b", "c")],
+        )
 
 
 class TestPathResolverLogicalNameForTemplate:
@@ -183,8 +194,8 @@ class TestAssetDiscoveryPageTemplate:
 
         collector = StaticCollector()
         discovery.discover_page_assets(page_path, collector)
-        assert collector.assets_in_slot("styles") == []
-        assert collector.assets_in_slot("scripts") == []
+        assert collector.assets_in_slot("styles") == ()
+        assert collector.assets_in_slot("scripts") == ()
 
 
 class TestAssetDiscoveryLayoutChain:
@@ -308,7 +319,7 @@ class TestAssetDiscoveryModuleLists:
 
         collector = StaticCollector()
         discovery.discover_page_assets(broken_page, collector)
-        assert collector.assets_in_slot("styles") == []
+        assert collector.assets_in_slot("styles") == ()
         assert discovery._page_plan_cache[broken_page].module_assets == ()
 
 
@@ -336,7 +347,7 @@ class TestAssetDiscoveryPagePlanCache:
 
         collector = StaticCollector()
         discovery.discover_page_assets(page_path, collector)
-        assert collector.assets_in_slot("styles") == []
+        assert collector.assets_in_slot("styles") == ()
 
     def test_debug_notices_an_asset_that_appeared(
         self, tmp_path: Path, file_backend: StaticBackend
@@ -408,21 +419,32 @@ class TestAssetDiscoveryPagePlanCache:
 
             collector = StaticCollector()
             discovery.discover_page_assets(page_path, collector)
-        assert collector.assets_in_slot("styles") == []
+        assert collector.assets_in_slot("styles") == ()
 
-    def test_the_plan_cache_evicts_the_oldest_key(
-        self, tmp_path: Path, file_backend: StaticBackend, monkeypatch
+    def test_the_plan_cache_holds_the_pages_rendered_last(
+        self, tmp_path: Path, file_backend: StaticBackend
     ) -> None:
-        monkeypatch.setattr(discovery_mod, "_PAGE_PLAN_CACHE_MAX_SIZE", 1)
+        """A full cache drops its oldest insert and a warm render reorders nothing."""
         provider = StaticAssetProvider(file_backend, (tmp_path.resolve(),))
         discovery = AssetDiscovery(provider)
-        for i in range(2):
-            page_dir = tmp_path / f"p_{i}"
+
+        def install(bound: int) -> tuple[BoundedCache, ...]:
+            discovery._page_plan_cache = BoundedCache(bound)
+            return (discovery._page_plan_cache,)
+
+        pages = []
+        for name in ("a", "b", "c"):
+            page_dir = tmp_path / name
             page_dir.mkdir()
             page_path = page_dir / "page.djx"
             page_path.write_text("")
-            discovery.discover_page_assets(page_path, StaticCollector())
-        assert len(discovery._page_plan_cache) <= 1
+            pages.append(page_path)
+
+        assert_bounded_by_insert_age(
+            install,
+            lambda page: discovery.discover_page_assets(page, StaticCollector()),
+            pages,
+        )
 
     def test_a_warm_render_does_not_walk_the_disk_again(
         self, tmp_path: Path, file_backend: StaticBackend, monkeypatch
@@ -448,12 +470,12 @@ class TestAssetDiscoveryPagePlanCache:
             "/static/next/section.css"
         ]
 
-    def test_a_rebuilt_plan_becomes_the_freshest_entry(
+    def test_a_rebuilt_plan_keeps_the_age_of_its_first_insert(
         self, tmp_path: Path, file_backend: StaticBackend, monkeypatch
     ) -> None:
-        monkeypatch.setattr(discovery_mod, "_PAGE_PLAN_CACHE_MAX_SIZE", 2)
         provider = StaticAssetProvider(file_backend, (tmp_path.resolve(),))
         discovery = AssetDiscovery(provider)
+        discovery._page_plan_cache = BoundedCache(2)
         pages: list[Path] = []
         for name in ("first", "second", "third"):
             page_dir = tmp_path / name
@@ -469,14 +491,14 @@ class TestAssetDiscoveryPagePlanCache:
             discovery.discover_page_assets(pages[0], StaticCollector())
             discovery.discover_page_assets(pages[2], StaticCollector())
 
-        assert list(discovery._page_plan_cache) == [pages[0], pages[2]]
+        assert list(discovery._page_plan_cache) == [pages[1], pages[2]]
 
-    def test_a_warm_hit_keeps_a_full_cache_in_use_order(
+    def test_a_warm_hit_leaves_a_full_cache_in_insert_order(
         self, tmp_path: Path, file_backend: StaticBackend, monkeypatch
     ) -> None:
-        monkeypatch.setattr(discovery_mod, "_PAGE_PLAN_CACHE_MAX_SIZE", 2)
         provider = StaticAssetProvider(file_backend, (tmp_path.resolve(),))
         discovery = AssetDiscovery(provider)
+        discovery._page_plan_cache = BoundedCache(2)
         pages: list[Path] = []
         for name in ("first", "second", "third"):
             page_dir = tmp_path / name
@@ -490,14 +512,14 @@ class TestAssetDiscoveryPagePlanCache:
         discovery.discover_page_assets(pages[0], StaticCollector())
         discovery.discover_page_assets(pages[2], StaticCollector())
 
-        assert list(discovery._page_plan_cache) == [pages[0], pages[2]]
+        assert list(discovery._page_plan_cache) == [pages[1], pages[2]]
 
     def test_a_nested_render_cannot_push_the_cache_past_its_limit(
         self, tmp_path: Path, file_backend: StaticBackend, monkeypatch
     ) -> None:
-        monkeypatch.setattr(discovery_mod, "_PAGE_PLAN_CACHE_MAX_SIZE", 1)
         provider = StaticAssetProvider(file_backend, (tmp_path.resolve(),))
         discovery = AssetDiscovery(provider)
+        discovery._page_plan_cache = BoundedCache(1)
         pages: list[Path] = []
         for name in ("outer", "inner"):
             page_dir = tmp_path / name
@@ -588,19 +610,21 @@ class TestAssetDiscoveryWatchedDirectories:
         page_path.write_text("")
         provider = StaticAssetProvider(file_backend, (tmp_path.resolve(),))
         discovery = AssetDiscovery(provider)
-        probe = discovery._find_role_files
+        probe = static_discovery.find_role_files
 
         def _write_while_reading(
-            directory: Path, *, logical_name: str, role: str
+            directory: Path, *, logical_name: str, role: str, stems: StemRegistry
         ) -> list[object]:
-            found = probe(directory, logical_name=logical_name, role=role)
+            found = probe(directory, logical_name=logical_name, role=role, stems=stems)
             (page_dir / "template.css").write_text("body{}")
             return found
 
         with override_settings(DEBUG=True):
-            monkeypatch.setattr(discovery, "_find_role_files", _write_while_reading)
+            monkeypatch.setattr(
+                static_discovery, "find_role_files", _write_while_reading
+            )
             discovery.discover_page_assets(page_path, StaticCollector())
-            monkeypatch.setattr(discovery, "_find_role_files", probe)
+            monkeypatch.setattr(static_discovery, "find_role_files", probe)
             collector = StaticCollector()
             discovery.discover_page_assets(page_path, collector)
 
@@ -648,13 +672,15 @@ class _CssOnlyFailingBackend(RecordingStaticBackend):
 def _probe_counter(discovery: AssetDiscovery, monkeypatch) -> list[Path]:
     """Record every directory the stem probe reads."""
     probes: list[Path] = []
-    walk_disk = discovery._find_role_files
+    walk_disk = static_discovery.find_role_files
 
-    def _record(directory: Path, *, logical_name: str, role: str) -> list[object]:
+    def _record(
+        directory: Path, *, logical_name: str, role: str, stems: StemRegistry
+    ) -> list[object]:
         probes.append(directory)
-        return walk_disk(directory, logical_name=logical_name, role=role)
+        return walk_disk(directory, logical_name=logical_name, role=role, stems=stems)
 
-    monkeypatch.setattr(discovery, "_find_role_files", _record)
+    monkeypatch.setattr(static_discovery, "find_role_files", _record)
     return probes
 
 
@@ -948,7 +974,7 @@ class TestAssetDiscoveryRegistryGeneration:
             warm = StaticCollector()
             discovery.discover_page_assets(page_path, warm)
 
-        assert cold.assets_in_slot("styles") == []
+        assert cold.assets_in_slot("styles") == ()
         assert [a.url for a in warm.assets_in_slot("styles")] == [
             "/static/next/index.css"
         ]
@@ -972,7 +998,7 @@ class TestAssetDiscoveryRegistryGeneration:
             warm = StaticCollector()
             discovery.discover_component_assets(info, warm)
 
-        assert cold.assets_in_slot("scripts") == []
+        assert cold.assets_in_slot("scripts") == ()
         assert [a.url for a in warm.assets_in_slot("scripts")] == [
             "/static/next/components/widget.ts"
         ]
@@ -998,7 +1024,7 @@ class TestAssetDiscoveryRegistryGeneration:
             warm = StaticCollector()
             discovery.discover_page_assets(page_path, warm)
 
-        assert cold.assets_in_slot("preloads") == []
+        assert cold.assets_in_slot("preloads") == ()
         assert [a.url for a in warm.assets_in_slot("preloads")] == [
             "https://cdn.example.com/hero.avif"
         ]
@@ -1020,7 +1046,7 @@ class TestAssetDiscoveryRegistryGeneration:
         warm = StaticCollector()
         discovery.discover_page_assets(page_path, warm)
 
-        assert cold.assets_in_slot("styles") == []
+        assert cold.assets_in_slot("styles") == ()
         assert [a.url for a in warm.assets_in_slot("styles")] == [
             "/static/next/index.css"
         ]
@@ -1039,16 +1065,18 @@ class TestAssetDiscoveryRegistryGeneration:
         stems = StemRegistry()
         provider = StaticAssetProvider(file_backend, (tmp_path.resolve(),))
         discovery = AssetDiscovery(provider, stems=stems)
-        probe = discovery._find_role_files
+        probe = static_discovery.find_role_files
 
         def _register_while_reading(
-            directory: Path, *, logical_name: str, role: str
+            directory: Path, *, logical_name: str, role: str, stems: StemRegistry
         ) -> list[object]:
-            found = probe(directory, logical_name=logical_name, role=role)
+            found = probe(directory, logical_name=logical_name, role=role, stems=stems)
             stems.register("template", "hero")
             return found
 
-        monkeypatch.setattr(discovery, "_find_role_files", _register_while_reading)
+        monkeypatch.setattr(
+            static_discovery, "find_role_files", _register_while_reading
+        )
         discovery.discover_page_assets(page_path, StaticCollector())
 
         collector = StaticCollector()
@@ -1067,16 +1095,18 @@ class TestAssetDiscoveryRegistryGeneration:
         info = _component_at(directory, "widget", module=None)
         stems = StemRegistry()
         discovery = AssetDiscovery(StaticAssetProvider(file_backend, ()), stems=stems)
-        probe = discovery._find_role_files
+        probe = static_discovery.find_role_files
 
         def _register_while_reading(
-            folder: Path, *, logical_name: str, role: str
+            folder: Path, *, logical_name: str, role: str, stems: StemRegistry
         ) -> list[object]:
-            found = probe(folder, logical_name=logical_name, role=role)
+            found = probe(folder, logical_name=logical_name, role=role, stems=stems)
             stems.register("component", "hero")
             return found
 
-        monkeypatch.setattr(discovery, "_find_role_files", _register_while_reading)
+        monkeypatch.setattr(
+            static_discovery, "find_role_files", _register_while_reading
+        )
         discovery.discover_component_assets(info, StaticCollector())
 
         collector = StaticCollector()
@@ -1139,7 +1169,7 @@ class TestAssetDiscoveryPagePlanFailures:
 
         collector = StaticCollector()
         discovery.discover_page_assets(page_path, collector)
-        assert collector.assets_in_slot("styles") == []
+        assert collector.assets_in_slot("styles") == ()
         assert [a.url for a in collector.assets_in_slot("scripts")] == [
             "/static/next/index.js"
         ]
@@ -1291,6 +1321,25 @@ class TestAssetDiscoverySourcePaths:
         assert len(dedup._cache) == 1
 
 
+class TestUrlSuffix:
+    """The suffix comes from the URL path, never from what rides behind it."""
+
+    @pytest.mark.parametrize(
+        ("url", "expected"),
+        [
+            ("https://cdn.example.com/app.CSS", ".css"),
+            ("/static/app.css?v=1", ".css"),
+            ("/static/app.css#frag", ".css"),
+            ("/static/app.css#frag?v=1", ".css"),
+            ("/static/app.css?a=1?b=2", ".css"),
+            ("https://cdn.example.com", ""),
+            ("/static/v1.2/loader", ""),
+        ],
+    )
+    def test_suffix_of(self, url: str, expected: str) -> None:
+        assert _url_suffix(url) == expected
+
+
 class TestAssetDiscoveryModuleListUrlRouting:
     """`scripts`/`styles` list URLs are dropped when their suffix mismatches."""
 
@@ -1307,7 +1356,7 @@ class TestAssetDiscoveryModuleListUrlRouting:
 
         collector = StaticCollector()
         discovery.discover_page_assets(page_path, collector)
-        assert collector.assets_in_slot("scripts") == []
+        assert collector.assets_in_slot("scripts") == ()
 
     def test_url_with_unregistered_extension_is_dropped(
         self, tmp_path: Path, file_backend: StaticBackend
@@ -1322,7 +1371,7 @@ class TestAssetDiscoveryModuleListUrlRouting:
 
         collector = StaticCollector()
         discovery.discover_page_assets(page_path, collector)
-        assert collector.assets_in_slot("scripts") == []
+        assert collector.assets_in_slot("scripts") == ()
 
     def test_url_with_mismatched_slot_is_dropped(
         self,
@@ -1341,8 +1390,8 @@ class TestAssetDiscoveryModuleListUrlRouting:
         collector = StaticCollector()
         with caplog.at_level("DEBUG", logger="next.static.discovery"):
             discovery.discover_page_assets(page_path, collector)
-        assert collector.assets_in_slot("scripts") == []
-        assert collector.assets_in_slot("styles") == []
+        assert collector.assets_in_slot("scripts") == ()
+        assert collector.assets_in_slot("styles") == ()
 
         message = next(
             r.getMessage() for r in caplog.records if "styling.css" in r.getMessage()
@@ -1362,8 +1411,8 @@ class TestAssetDiscoveryComponents:
 
         collector = StaticCollector()
         discovery.discover_component_assets(simple_component, collector)
-        assert collector.assets_in_slot("styles") == []
-        assert collector.assets_in_slot("scripts") == []
+        assert collector.assets_in_slot("styles") == ()
+        assert collector.assets_in_slot("scripts") == ()
 
     def test_composite_component_picks_up_css_js_and_module_lists(
         self, file_backend: StaticBackend, composite_component: ComponentInfo
@@ -1525,7 +1574,7 @@ class TestAssetDiscoveryComponentPlanCache:
 
         collector = StaticCollector()
         discovery.discover_component_assets(info, collector)
-        assert collector.assets_in_slot("styles") == []
+        assert collector.assets_in_slot("styles") == ()
 
     def test_a_module_outside_the_component_folder_is_watched_too(
         self, tmp_path: Path, file_backend: StaticBackend
@@ -1557,7 +1606,7 @@ class TestAssetDiscoveryComponentPlanCache:
 
         collector = StaticCollector()
         discovery.discover_component_assets(info, collector)
-        assert collector.assets_in_slot("styles") == []
+        assert collector.assets_in_slot("styles") == ()
         key = _component_key(info)
         assert discovery._component_plan_cache[key].module_assets == ()
 
@@ -1593,39 +1642,28 @@ class TestAssetDiscoveryComponentPlanCache:
             shutil.rmtree(directory)
             assert discovery._plan_stale(plan) is True
 
-    def test_the_plan_cache_evicts_the_oldest_key(
-        self, tmp_path: Path, file_backend: StaticBackend, monkeypatch
+    def test_the_plan_cache_holds_the_components_mounted_last(
+        self, tmp_path: Path, file_backend: StaticBackend
     ) -> None:
-        monkeypatch.setattr(discovery_mod, "_COMPONENT_PLAN_CACHE_MAX_SIZE", 1)
+        """A full cache drops its oldest insert and a warm mount reorders nothing."""
         discovery = AssetDiscovery(StaticAssetProvider(file_backend, ()))
-        for i in range(2):
-            directory = tmp_path / f"widget_{i}"
-            directory.mkdir()
-            info = _component_at(directory, f"widget_{i}", module=None)
-            discovery.discover_component_assets(info, StaticCollector())
-        assert len(discovery._component_plan_cache) <= 1
 
-    def test_a_warm_hit_keeps_a_full_cache_in_use_order(
-        self, tmp_path: Path, file_backend: StaticBackend, monkeypatch
-    ) -> None:
-        """A component mounted again is the freshest entry, not the next evicted."""
-        monkeypatch.setattr(discovery_mod, "_COMPONENT_PLAN_CACHE_MAX_SIZE", 2)
-        discovery = AssetDiscovery(StaticAssetProvider(file_backend, ()))
+        def install(bound: int) -> tuple[BoundedCache, ...]:
+            discovery._component_plan_cache = BoundedCache(bound)
+            return (discovery._component_plan_cache,)
+
         infos = []
         for name in ("first", "second", "third"):
             directory = tmp_path / name
             directory.mkdir()
             infos.append(_component_at(directory, name, module=None))
 
-        discovery.discover_component_assets(infos[0], StaticCollector())
-        discovery.discover_component_assets(infos[1], StaticCollector())
-        discovery.discover_component_assets(infos[0], StaticCollector())
-        discovery.discover_component_assets(infos[2], StaticCollector())
-
-        assert list(discovery._component_plan_cache) == [
-            _component_key(infos[0]),
-            _component_key(infos[2]),
-        ]
+        assert_bounded_by_insert_age(
+            install,
+            lambda info: discovery.discover_component_assets(info, StaticCollector()),
+            infos,
+            key_of=_component_key,
+        )
 
     def test_a_simple_component_is_never_planned(
         self, file_backend: StaticBackend, simple_component: ComponentInfo
@@ -1634,8 +1672,8 @@ class TestAssetDiscoveryComponentPlanCache:
         collector = StaticCollector()
         discovery.discover_component_assets(simple_component, collector)
         discovery.discover_component_assets(simple_component, collector)
-        assert collector.assets_in_slot("styles") == []
-        assert discovery._component_plan_cache == {}
+        assert collector.assets_in_slot("styles") == ()
+        assert not discovery._component_plan_cache
 
 
 class TestAssetDiscoveryComponentPlanFolders:
@@ -1742,19 +1780,21 @@ class TestAssetDiscoveryComponentPlanFolders:
         directory.mkdir()
         info = _component_at(directory, "widget", module=None)
         discovery = AssetDiscovery(StaticAssetProvider(file_backend, ()))
-        probe = discovery._find_role_files
+        probe = static_discovery.find_role_files
 
         def _write_while_reading(
-            folder: Path, *, logical_name: str, role: str
+            folder: Path, *, logical_name: str, role: str, stems: StemRegistry
         ) -> list[object]:
-            found = probe(folder, logical_name=logical_name, role=role)
+            found = probe(folder, logical_name=logical_name, role=role, stems=stems)
             (directory / "component.css").write_text(".w{}")
             return found
 
         with override_settings(DEBUG=True):
-            monkeypatch.setattr(discovery, "_find_role_files", _write_while_reading)
+            monkeypatch.setattr(
+                static_discovery, "find_role_files", _write_while_reading
+            )
             discovery.discover_component_assets(info, StaticCollector())
-            monkeypatch.setattr(discovery, "_find_role_files", probe)
+            monkeypatch.setattr(static_discovery, "find_role_files", probe)
             collector = StaticCollector()
             discovery.discover_component_assets(info, collector)
 
@@ -1780,8 +1820,212 @@ class TestAssetDiscoveryComponentPlanFolders:
         assert [a.url for a in composite_collector.assets_in_slot("styles")] == [
             "/static/next/components/widget.css"
         ]
-        assert simple_collector.assets_in_slot("styles") == []
+        assert simple_collector.assets_in_slot("styles") == ()
         assert list(discovery._component_plan_cache) == [_component_key(composite)]
+
+
+class TestStaticDiscoveryCacheSwitch:
+    """`STATIC_DISCOVERY_CACHE` bypasses the plan caches without changing output."""
+
+    @staticmethod
+    def _discovery(
+        backend: StaticBackend, roots: tuple[Path, ...] = ()
+    ) -> AssetDiscovery:
+        """Build a discovery instance the way the static manager does."""
+        return AssetDiscovery(StaticAssetProvider(backend, roots))
+
+    def test_the_default_caches_plans(self, file_backend: StaticBackend) -> None:
+        """A project that sets nothing keeps the planning cache."""
+        assert self._discovery(file_backend)._cache_plans is True
+
+    def test_turning_the_key_off_reaches_the_instance(
+        self, file_backend: StaticBackend
+    ) -> None:
+        """The switch is read when the discovery is built, not per render."""
+        with override_settings(NEXT_FRAMEWORK={"STATIC_DISCOVERY_CACHE": False}):
+            discovery = self._discovery(file_backend)
+        assert discovery._cache_plans is False
+
+    def test_an_instance_built_before_the_override_keeps_its_answer(
+        self, file_backend: StaticBackend
+    ) -> None:
+        """A live discovery never rereads the key, so a render pays no lookup."""
+        discovery = self._discovery(file_backend)
+        with override_settings(NEXT_FRAMEWORK={"STATIC_DISCOVERY_CACHE": False}):
+            assert discovery._cache_plans is True
+
+    def test_an_uncached_page_render_stores_no_plan(self, tmp_path: Path) -> None:
+        """Nothing accumulates in the page plan cache while the key is off."""
+        page_path = _tree_with_every_asset_shape(tmp_path)
+        with override_settings(NEXT_FRAMEWORK={"STATIC_DISCOVERY_CACHE": False}):
+            discovery = self._discovery(RecordingStaticBackend(), (tmp_path.resolve(),))
+        for _ in range(3):
+            discovery.discover_page_assets(page_path, StaticCollector())
+        assert not discovery._page_plan_cache
+
+    def test_an_uncached_page_render_walks_the_disk_every_time(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Every render probes the role directories again, which is the whole cost."""
+        page_path = _tree_with_every_asset_shape(tmp_path)
+        with override_settings(NEXT_FRAMEWORK={"STATIC_DISCOVERY_CACHE": False}):
+            discovery = self._discovery(RecordingStaticBackend(), (tmp_path.resolve(),))
+        probes = _probe_counter(discovery, monkeypatch)
+        reads = _module_list_counter(discovery, monkeypatch)
+
+        for _ in range(3):
+            discovery.discover_page_assets(page_path, StaticCollector())
+
+        assert len(probes) == 9
+        assert len(reads) == 3
+
+    def test_an_uncached_component_render_stores_no_plan(
+        self, composite_component: ComponentInfo
+    ) -> None:
+        """Nothing accumulates in the component plan cache while the key is off."""
+        with override_settings(NEXT_FRAMEWORK={"STATIC_DISCOVERY_CACHE": False}):
+            discovery = self._discovery(RecordingStaticBackend())
+        for _ in range(3):
+            discovery.discover_component_assets(composite_component, StaticCollector())
+        assert not discovery._component_plan_cache
+
+    def test_fifty_uncached_instances_probe_the_folder_each_time(
+        self, composite_component: ComponentInfo, monkeypatch
+    ) -> None:
+        """Each instance walks the component folder again with the key off."""
+        with override_settings(NEXT_FRAMEWORK={"STATIC_DISCOVERY_CACHE": False}):
+            discovery = self._discovery(RecordingStaticBackend())
+        probes = _probe_counter(discovery, monkeypatch)
+
+        collector = StaticCollector()
+        for _ in range(50):
+            discovery.discover_component_assets(composite_component, collector)
+
+        assert len(probes) == 50
+
+    def test_a_simple_component_is_still_skipped(
+        self, simple_component: ComponentInfo, monkeypatch
+    ) -> None:
+        """The folderless early return sits ahead of the switch either way."""
+        with override_settings(NEXT_FRAMEWORK={"STATIC_DISCOVERY_CACHE": False}):
+            discovery = self._discovery(RecordingStaticBackend())
+        probes = _probe_counter(discovery, monkeypatch)
+
+        discovery.discover_component_assets(simple_component, StaticCollector())
+
+        assert probes == []
+
+
+class TestStaticDiscoveryCacheSwitchAgrees:
+    """Both settings of the key produce the same assets, only at a different cost."""
+
+    @staticmethod
+    def _collect_page(
+        page_path: Path, roots: tuple[Path, ...], *, cache: bool, renders: int
+    ) -> tuple[list[tuple[str, str, str, str | None]], list[tuple[str, str, str]]]:
+        """Discover one page `renders` times and report the assets and backend calls."""
+        backend = RecordingStaticBackend()
+        with override_settings(NEXT_FRAMEWORK={"STATIC_DISCOVERY_CACHE": cache}):
+            discovery = AssetDiscovery(StaticAssetProvider(backend, roots))
+        collector = StaticCollector()
+        for _ in range(renders):
+            discovery.discover_page_assets(page_path, collector)
+        return _asset_fields(collector), list(backend.calls)
+
+    @staticmethod
+    def _collect_component(
+        info: ComponentInfo, *, cache: bool, renders: int
+    ) -> tuple[list[tuple[str, str, str, str | None]], list[tuple[str, str, str]]]:
+        """Discover one component `renders` times and report assets and calls."""
+        backend = RecordingStaticBackend()
+        with override_settings(NEXT_FRAMEWORK={"STATIC_DISCOVERY_CACHE": cache}):
+            discovery = AssetDiscovery(StaticAssetProvider(backend, ()))
+        collector = StaticCollector()
+        for _ in range(renders):
+            discovery.discover_component_assets(info, collector)
+        return _asset_fields(collector), list(backend.calls)
+
+    @pytest.mark.parametrize("renders", [1, 3], ids=["cold", "warm"])
+    def test_a_page_yields_the_same_assets_either_way(
+        self, tmp_path: Path, renders: int
+    ) -> None:
+        """A page tree with every asset shape agrees asset for asset."""
+        page_path = _tree_with_every_asset_shape(tmp_path)
+        roots = (tmp_path.resolve(),)
+
+        cached_assets, cached_calls = self._collect_page(
+            page_path, roots, cache=True, renders=renders
+        )
+        uncached_assets, uncached_calls = self._collect_page(
+            page_path, roots, cache=False, renders=renders
+        )
+
+        assert uncached_assets == cached_assets
+        assert uncached_calls == cached_calls
+        assert cached_assets != []
+
+    @pytest.mark.parametrize("renders", [1, 3], ids=["cold", "warm"])
+    def test_a_component_yields_the_same_assets_either_way(
+        self, composite_component: ComponentInfo, renders: int
+    ) -> None:
+        """A composite component agrees asset for asset and call for call."""
+        cached_assets, cached_calls = self._collect_component(
+            composite_component, cache=True, renders=renders
+        )
+        uncached_assets, uncached_calls = self._collect_component(
+            composite_component, cache=False, renders=renders
+        )
+
+        assert uncached_assets == cached_assets
+        assert uncached_calls == cached_calls
+        assert cached_assets != []
+
+    def test_a_page_outside_every_tree_agrees_too(self, tmp_path: Path) -> None:
+        """The unbounded-walk branch answers the same with the cache off."""
+        page_dir = tmp_path / "loose"
+        page_dir.mkdir()
+        (page_dir / "layout.djx").write_text("")
+        (page_dir / "layout.css").write_text("body{}")
+        (page_dir / "template.js").write_text("/* js */")
+        page_path = page_dir / "page.py"
+        page_path.write_text("")
+
+        cached_assets, _ = self._collect_page(page_path, (), cache=True, renders=2)
+        uncached_assets, _ = self._collect_page(page_path, (), cache=False, renders=2)
+
+        assert uncached_assets == cached_assets
+        assert cached_assets != []
+
+    def test_an_asset_added_later_is_seen_without_the_cache(
+        self, tmp_path: Path
+    ) -> None:
+        """Off DEBUG the cached plan hides a late file and the bypass does not."""
+        (tmp_path / "template.js").write_text("/* js */")
+        page_path = tmp_path / "page.py"
+        page_path.write_text("")
+        roots = (tmp_path.resolve(),)
+
+        with override_settings(NEXT_FRAMEWORK={"STATIC_DISCOVERY_CACHE": False}):
+            uncached = AssetDiscovery(
+                StaticAssetProvider(RecordingStaticBackend(), roots)
+            )
+        cached = AssetDiscovery(StaticAssetProvider(RecordingStaticBackend(), roots))
+
+        for discovery in (cached, uncached):
+            discovery.discover_page_assets(page_path, StaticCollector())
+
+        (tmp_path / "template.css").write_text("body{}")
+
+        cached_second = StaticCollector()
+        uncached_second = StaticCollector()
+        with override_settings(DEBUG=False):
+            cached.discover_page_assets(page_path, cached_second)
+            uncached.discover_page_assets(page_path, uncached_second)
+
+        assert cached_second.assets_in_slot("styles") == ()
+        assert [a.url for a in uncached_second.assets_in_slot("styles")] == [
+            "/static/next/index.css"
+        ]
 
 
 class TestAssetDiscoveryErrorHandling:
@@ -1799,7 +2043,7 @@ class TestAssetDiscoveryErrorHandling:
         with caplog.at_level("WARNING", logger="next.static.discovery"):
             discovery.discover_page_assets(page_path, collector)
 
-        assert collector.assets_in_slot("styles") == []
+        assert collector.assets_in_slot("styles") == ()
         assert any(
             "Failed to register static asset" in r.getMessage() for r in caplog.records
         )

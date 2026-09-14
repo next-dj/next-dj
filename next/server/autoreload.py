@@ -27,10 +27,8 @@ logger = logging.getLogger(__name__)
 def _tree_dir_signature(root: Path) -> tuple[float, int]:
     """Return `(max mtime, directory count)` across every subdirectory.
 
-    Walks directories with `os.scandir` and uses each `DirEntry`'s
-    cached stat, avoiding a second `Path.stat()` syscall per node.
-    The entry count guards against two independent renames that happen
-    to preserve the latest mtime.
+    `os.scandir` hands back a cached stat per `DirEntry`, sparing a second syscall, and
+    the count catches two renames that preserve the latest mtime.
     """
     try:
         root_st = root.stat()
@@ -75,9 +73,9 @@ class NextStatReloader(StatReloader):
         if prev is None or current == prev:
             self._previous_routes = current
             return
+        # The sets differ, so one side of the difference always holds a route.
         diff = (current - prev) or (prev - current)
-        if diff:
-            self.notify_file_changed(next(iter(diff))[1])
+        self.notify_file_changed(next(iter(diff))[1])
         self._previous_routes = current
 
     def _collect_routes(self) -> set[tuple[str, Path]]:

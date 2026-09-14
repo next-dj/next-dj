@@ -152,6 +152,22 @@ class TestZoneTagSyntax:
         with pytest.raises(TemplateSyntaxError, match="Template variables"):
             Template('{% zone "z" poll=interval %}b{% endzone %}')
 
+    def test_a_variable_name_is_refused_rather_than_read_as_a_zone(self) -> None:
+        with pytest.raises(TemplateSyntaxError, match="name must be a quoted literal"):
+            Template("{% zone name %}body{% endzone %}")
+
+    def test_a_half_quoted_name_is_refused(self) -> None:
+        with pytest.raises(TemplateSyntaxError, match="must be a quoted literal"):
+            Template("{% zone \"z' %}body{% endzone %}")
+
+    def test_an_unquoted_option_value_is_refused(self) -> None:
+        with pytest.raises(TemplateSyntaxError, match="lazy= must be a quoted"):
+            Template('{% zone "z" lazy=load %}b{% placeholder %}p{% endzone %}')
+
+    def test_an_escaped_quote_survives_the_name_literal(self) -> None:
+        template = Template('{% zone "a\\"b" %}body{% endzone %}')
+        assert template.nodelist.get_nodes_by_type(ZoneNode)[0].name == 'a"b'
+
 
 class TestZonePartialStandalone:
     """The zone body partial renders alone with the full page context."""

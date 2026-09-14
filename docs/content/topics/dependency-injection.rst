@@ -20,7 +20,7 @@ The form dispatch resolves the form-class factory, ``get_initial``, ``@action`` 
 Every call site shares one provider list and one set of markers.
 Custom providers and tests can import ``resolver`` from ``next.deps`` and call ``resolver.resolve_dependencies``.
 
-Built in providers
+Built-in providers
 ------------------
 
 The framework discovers a fixed list of providers and instantiates them on first use.
@@ -42,6 +42,8 @@ Each one carries an explicit ``priority`` value, the resolver consults them from
    A parameter annotated ``DUrl[T]`` reads the captured URL segment and coerces it to ``T``.
 8. URL kwargs provider (priority 70).
    A parameter whose name matches a captured URL segment resolves to that value.
+   The value is coerced to the parameter annotation when one is present and is left as the captured string otherwise.
+   A plain ``note_id: int`` on a ``[note_id]`` route therefore arrives already parsed, so ``DUrl`` is only needed to read a segment under a different name.
 9. Query string provider (priority 80).
    A parameter annotated ``DQuery[T]`` reads ``request.GET`` by parameter name and coerces to ``T``.
 
@@ -88,6 +90,7 @@ The URL path provider coerces the captured segment to the requested type.
    :caption: notes/pages/notes/[int:note_id]/page.py
 
    from notes.models import Note
+
    from next import context
    from next.urls import DUrl
 
@@ -100,10 +103,12 @@ In the simplest form ``DUrl[T]`` matches the captured segment whose name equals 
 A value that already satisfies ``T`` passes through untouched.
 A Django converter that pre-coerced the segment, such as ``[uuid:id]`` producing a :class:`~uuid.UUID`, reaches the handler in that shape.
 A failed parse falls back to the raw captured value rather than raising.
+
 A segment the route never captured resolves to ``None``, not to the parameter default, because the marker claims the parameter on its annotation alone.
 This differs from ``DQuery``, which falls back to the default when the key is absent.
 ``bool`` treats ``"1"``, ``"true"``, and ``"yes"`` as ``True`` and everything else as ``False``.
 ``date`` and ``datetime`` parse the ISO 8601 forms accepted by :meth:`date.fromisoformat <datetime.date.fromisoformat>` and :meth:`datetime.fromisoformat <datetime.datetime.fromisoformat>`.
+
 For wildcard ``[[name]]`` segments the captured value is the matched path string.
 Annotate as ``DUrl[str]`` or leave it unannotated.
 
@@ -162,6 +167,7 @@ The query provider reads from ``request.GET``.
    :caption: notes/pages/search/page.py
 
    from notes.models import Note
+
    from next import context
    from next.urls import DQuery
 
@@ -296,12 +302,12 @@ Re-entering a name that is already on the stack raises ``DependencyCycleError``.
 .. code-block:: text
    :caption: the error
 
-   next.deps.cache.DependencyCycleError: Circular dependency: profile -> settings -> profile
+   next.deps.errors.DependencyCycleError: Circular dependency: profile -> settings -> profile
 
 The chain in the message is the resolution path that closed the loop, read left to right.
-The traceback lists the fully qualified path ``next.deps.cache.DependencyCycleError`` because that is where the exception class is defined.
+The traceback lists the fully qualified path ``next.deps.errors.DependencyCycleError`` because that is where the exception class is defined.
 Import the exception from the public ``next.deps`` namespace with ``from next.deps import DependencyCycleError``.
-The deeper ``next.deps.cache`` path is an implementation detail and is not part of the supported import surface.
+The deeper ``next.deps.errors`` path is an implementation detail and is not part of the supported import surface.
 Break the cycle by removing one ``Depends`` edge.
 Here ``settings`` does not need ``profile`` at all, so the fix is to drop that parameter.
 
@@ -324,15 +330,16 @@ When both dependencies genuinely need shared data, move that data into a third d
 Writing a custom provider
 -------------------------
 
-For data sources that do not fit the built ins, register a parameter provider.
+For data sources the built-in providers do not cover, register a parameter provider.
 The base classes are ``RegisteredParameterProvider`` and ``DDependencyBase``.
 
 .. code-block:: python
    :caption: notes/providers.py
 
    from typing import get_args, get_origin
+
    from django.http import Http404
-   from notes.models import Note
+
    from next.deps import DDependencyBase, RegisteredParameterProvider
 
    class DNote[T](DDependencyBase[T]):
@@ -368,6 +375,7 @@ Use the new marker.
 
    from notes.models import Note
    from notes.providers import DNote
+
    from next import context
 
    @context("note")
@@ -406,7 +414,6 @@ A provider that answers ``True`` may go one step further and implement ``compile
 That hook is spelled by ``CompilingParameterProvider``, a second protocol extending ``ParameterProvider``, so a provider that stops at the mandatory three methods still satisfies the first one.
 ``NoteProvider`` above would read ``get_args(param.annotation)`` there, once per plan, and return a closure that is left with the lookup and the query.
 Returning ``None`` from the hook keeps the parameter on the plain ``resolve`` path, and so does leaving the hook undefined.
-See :doc:`/content/internals/di-resolver` for how a plan is compiled, cached, and invalidated.
 
 Resolution cache
 ----------------
@@ -416,8 +423,8 @@ The wrapper is new per call, but the backing store is shared across every ``@con
 The cache memoises ``Depends("name")`` callables only, keyed by the registered name.
 
 A second context function in the same page render that asks for the same ``Depends("name")`` dependency receives the memoised value, not a fresh call.
-To share one value across several context functions in the same render, publish it through a named dependency such as ``Depends("active_tenant")``.
-See :doc:`/content/howto/share-context-across-pages` for a worked example.
+To share one value across several context functions in the same render, register it with ``resolver.dependency("active_tenant")`` and ask for it through ``Depends("active_tenant")`` in each callable that needs it.
+The first callable to ask pays the resolution, and every later callable in the same pass reads the value the cache already holds.
 
 The cache lives for one form dispatch.
 Every stage of that POST, from ``get_initial`` through the validation-failure re-render, shares it.
@@ -428,6 +435,7 @@ The function returns ``None`` outside a form dispatch, so callers handle the mis
    :caption: reading the cache
 
    from django.http import HttpRequest
+
    from next.deps import get_request_dep_cache
 
    def render(request: HttpRequest) -> str:
@@ -450,12 +458,14 @@ The cost of a resolve therefore follows the number of parameters the callable de
 Values behind ``Depends("name")`` are reused for the rest of the pass, as `Resolution cache`_ above describes.
 
 ``DEPENDENCY_RESOLVER`` in ``NEXT_FRAMEWORK`` names the class that performs every injection.
-It is an extension point for a ``DependencyResolver`` subclass rather than a switch between shipped implementations, and it is read at startup and on every settings reload, never per request.
-See :doc:`/content/internals/di-resolver` for how a plan is compiled, cached, and invalidated, and :doc:`/content/ref/settings` for the setting.
+The key selects between the two shipped resolvers, ``next.deps.DependencyResolver`` and ``next.deps.linear.LinearDependencyResolver``, and it equally accepts a ``DependencyResolver`` subclass of your own.
+The framework reads it at startup and on every settings reload, never per request.
+See :doc:`/content/internals/di-resolver` for how a plan is compiled, cached, and invalidated, :doc:`/content/ref/settings` for the setting, and :doc:`extending` for where it sits among the extension mechanisms.
 
-Avoid ``from __future__ import annotations`` in DI modules
-----------------------------------------------------------
+Future annotations and DI
+-------------------------
 
+A module the resolver inspects never carries ``from __future__ import annotations``.
 The resolver resolves the annotations of each callable once through :func:`typing.get_type_hints`, so a string annotation carries only as far as its names are importable at runtime.
 A hint that fails to evaluate leaves the raw string in the injection plan, and a marker such as ``DUrl[int]`` stops matching, because ``typing.get_origin`` returns ``None`` for a string.
 Real annotations remove that failure mode outright, which is why a ``page.py`` or a ``component.py`` never carries the future import.
@@ -463,19 +473,14 @@ Real annotations remove that failure mode outright, which is why a ``page.py`` o
 Two rules.
 
 Do not use future annotations in modules with DI parameters.
-   ``page.py``, ``component.py``, and ``providers.py`` need real annotations.
+   ``page.py``, ``component.py``, action handlers, and any ``get_initial`` need real annotations.
    Plain Python files that only import the framework can use future annotations freely.
+   A custom provider module such as ``notes/providers.py`` is never introspected by :func:`typing.get_type_hints`, so it can use future annotations freely too.
 
 Keep DI types runtime importable.
    A hint the resolver cannot evaluate never becomes the type a provider matches on.
    Types hidden behind ``if TYPE_CHECKING``, and types defined inside a function body, are invisible to that evaluation.
    Keep DI-touching annotations on classes that import at module top level.
-
-Resolver lifecycle
-------------------
-
-The resolver instantiates the registered provider classes on first use and catches up with the ones that register later, so importing a custom provider from ``AppConfig.ready`` keeps its place in the order predictable.
-See :doc:`/content/internals/di-resolver` for the full lifecycle.
 
 See also
 --------

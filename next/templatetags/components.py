@@ -1,10 +1,6 @@
 """Template tags for next-dj components (void/block ``{% component %}``, slots).
 
-Resolve from ``current_template_path``, collect nested ``{% #slot %}`` /
-``{% slot %}`` blocks, and pass props and slot HTML to the renderer.
-
-In component templates, use ``{% #set_slot %}`` … ``{% /set_slot %}`` or the
-short void ``{% set_slot "name" %}`` when there is no default slot body.
+Props and slot HTML resolve from ``current_template_path`` and pass to the renderer.
 """
 
 from __future__ import annotations
@@ -18,7 +14,6 @@ from pathlib import Path
 from typing import Any, cast, override
 
 from django import template
-from django.template import base as template_base
 from django.template.base import (
     FilterExpression,
     Node,
@@ -26,41 +21,37 @@ from django.template.base import (
     Parser,
     Token,
     Variable,
+    token_kwargs,
 )
 from django.utils.safestring import SafeString
 
 from next.components import collect_visible_components, get_component, render_component
 from next.components.renderers import COMPONENT_PROPS_CONTEXT_KEY, SLOT_KEY_PREFIX
 from next.conf import fail_loudly, next_framework_settings
+from next.seeding import COLLECTOR_KEY
 from next.static import collect_component_assets
 from next.utils import on_forget_resolved_trees
 
-
-# Component tags span several lines, which Django's tag regex refuses by default.
-template_base.tag_re = re.compile(template_base.tag_re.pattern, re.DOTALL)
 
 logger = logging.getLogger(__name__)
 
 register = template.Library()
 
-_COMPONENT_NAME_INDEX = 1
 _SLOT_ARG_COUNT = 2
-_COMPONENT_MIN_BITS = 2
 
-# Distinct ``current_template_path`` strings the process memoises, the same
-# bound the other path-keyed component caches use.
+# Distinct ``current_template_path`` strings memoised, matching the other path caches.
 _PATH_MEMO_MAX_ENTRIES = 2048
 
 _END_BLOCK_COMPONENT = ("/component",)
 _END_BLOCK_SLOT = ("/slot",)
 _END_BLOCK_SET_SLOT = ("/set_slot",)
 
-_SHORT_SLOT_EMPTY_NAME = "{% slot %} tag requires a quoted slot name"
-_SHORT_SET_SLOT_EMPTY_NAME = "{% set_slot %} tag requires a quoted slot name"
+# The key a component pushes for its body to write slots into.
+_SLOT_COLLECTOR_KEY = "_component_slots"
 
-# The key slot collection writes while the parent ``{% #component %}`` body
-# renders. ``_component_props`` stays out because every node overwrites it.
-_INTERNAL_CONTEXT_KEYS = frozenset({"_component_slots"})
+# Keys the component body sees but the component scope must not. The collector
+# is one. ``_component_props`` stays out because every node overwrites it.
+_INTERNAL_CONTEXT_KEYS = frozenset({_SLOT_COLLECTOR_KEY})
 
 _DASH_BEFORE_DASH = re.compile(r"-(?=-)")
 
@@ -77,9 +68,8 @@ def _strip_quotes(raw: str) -> str:
 def _resolve_template_path(raw: str) -> Path:
     """Return the resolved file for a raw ``current_template_path`` string.
 
-    One page path reaches every node the page renders, so the memo is
-    process-wide and keyed by the string the node carries rather than by a path
-    built per read. It is dropped with the shared page-tree resolutions.
+    Memoised process-wide and keyed by the raw string, since one page path reaches
+    every node it renders, and dropped along with the shared page-tree resolutions.
     """
     return Path(raw).resolve()
 
@@ -96,67 +86,104 @@ def _comment_safe(text: str) -> str:
     return _DASH_BEFORE_DASH.sub("- ", text)
 
 
-def _parse_props(
-    parser: Parser, bits: list[str], start: int
-) -> dict[str, FilterExpression]:
-    """Parse ``key=expr`` pairs from tag bits starting at *start*.
+def _parse_component(
+    parser: Parser, token: Token, tag: str
+) -> tuple[str, dict[str, FilterExpression]]:
+    """Parse ``tag "name" key=expr …`` into the component name and its props.
 
-    Each ``expr`` is compiled into a Django :class:`FilterExpression`
-    so the value resolves against the template context at render time.
-    Quoted strings, numbers, dotted attribute lookups, and filter
-    chains all work through the same mechanism. Bits without ``=``
-    are skipped to keep the tag tolerant of stray tokens.
+    Django reads the props, so each value compiles to a `FilterExpression` that
+    resolves against the context at render time and a filter argument may hold spaces.
     """
+    bits = token.split_contents()[1:]
+    if not bits:
+        msg = f"{tag} tag requires at least a component name"
+        raise template.TemplateSyntaxError(msg)
+    name = _strip_quotes(bits.pop(0))
+    if not name:
+        msg = f"{tag} tag requires a quoted component name"
+        raise template.TemplateSyntaxError(msg)
+    return name, _parse_props(parser, bits)
+
+
+def _parse_props(parser: Parser, bits: list[str]) -> dict[str, FilterExpression]:
+    """Parse the `key=expr` props a component tag carries, consuming `bits`."""
     props: dict[str, FilterExpression] = {}
-    for part in bits[start:]:
-        if "=" not in part:
-            continue
-        key, _, raw = part.partition("=")
-        props[key.strip()] = FilterExpression(raw, parser)
+    while bits:
+        props.update(token_kwargs(bits, parser))
+        if bits:
+            # Django stops at the first bit that is no pair, which is a word the
+            # dialect never gave a meaning to, so it is dropped rather than refused.
+            del bits[0]
     return props
 
 
 @dataclass(frozen=True, slots=True)
-class _NamedBlockSpec:
-    """Arguments shared by ``{% #slot %}`` and ``{% #set_slot %}`` compilation."""
+class _NamedTagSpec:
+    """What one named slot tag needs to compile, in its paired or its short form."""
 
-    end_tokens: tuple[str, ...]
-    expected_bits: int
     empty_name_message: str
     wrong_arity_message: str
+    end_tokens: tuple[str, ...] = ()
 
 
-def _parse_one_named_block(
-    parser: Parser, token: Token, spec: _NamedBlockSpec
+def _parse_named_tag(
+    parser: Parser, token: Token, spec: _NamedTagSpec
 ) -> tuple[str, NodeList]:
-    """Parse ``tag "name"`` … ``/end`` into a name and inner node list."""
+    """Parse ``tag "name"`` into a name and the body only the paired form carries."""
     bits = token.split_contents()
-    if len(bits) != spec.expected_bits:
+    if len(bits) != _SLOT_ARG_COUNT:
         raise template.TemplateSyntaxError(spec.wrong_arity_message)
-    name = _strip_quotes(bits[_COMPONENT_NAME_INDEX])
+    name = _strip_quotes(bits[1])
     if not name:
         raise template.TemplateSyntaxError(spec.empty_name_message)
+    if not spec.end_tokens:
+        return name, NodeList()
     nodelist = parser.parse(spec.end_tokens)
     parser.delete_first_token()
     return name, nodelist
 
 
+@dataclass(frozen=True, slots=True)
+class _SlotCollector:
+    """The slot dict a rendering component offers to the slots it owns."""
+
+    owner: ComponentNode
+    slots: dict[str, str]
+
+
 class SlotNode(Node):
-    """Renders the slot body and records it by name when under ``{% #component %}``."""
+    """Fills a named slot of the component whose body holds it."""
 
     def __init__(self, name: str, nodelist: NodeList) -> None:
         """Remember the slot name and nested nodes."""
         self.name = name
         self.nodelist = nodelist
+        # Claimed by the component that compiles this node into its body. A
+        # slot reached from another template, through an include, fills nothing.
+        self.owner: ComponentNode | None = None
+
+    def collect(self, context: template.Context, slots: dict[str, str]) -> None:
+        """Append the rendered body to the entry this slot name holds.
+
+        A repeat appends rather than replaces, so a slot written once per
+        ``{% for %}`` iteration keeps every body in render order.
+        """
+        body = self.nodelist.render(context)
+        previous = slots.get(self.name)
+        slots[self.name] = body if previous is None else previous + body
 
     @override
     def render(self, context: template.Context) -> str:
-        """Render the body and write into ``_component_slots`` when that dict exists."""
-        body = self.nodelist.render(context)
-        slots = context.get("_component_slots")
-        if isinstance(slots, dict):
-            slots[self.name] = body
-        return body
+        """Fill the owning component's slot, or render the body where it stands.
+
+        Filling contributes nothing to ``children``, and a slot whose owner isn't
+        the component rendering around it renders its body in place instead.
+        """
+        collector = context.get(_SLOT_COLLECTOR_KEY)
+        if isinstance(collector, _SlotCollector) and collector.owner is self.owner:
+            self.collect(context, collector.slots)
+            return ""
+        return self.nodelist.render(context)
 
 
 class ComponentNode(Node):
@@ -171,16 +198,24 @@ class ComponentNode(Node):
         self.nodelist = nodelist
         # Prop names are fixed at compile time, so the guard rebuilds nothing.
         self.prop_names = frozenset(props)
+        # Which slots a body holds is settled once the body is compiled, so
+        # the recursive walk runs here and the render pays nothing. Django's
+        # ``get_nodes_by_type`` also descends into a nested ``{% #component %}``,
+        # which parses first and has already claimed the slots of its own body.
+        claimed = [
+            node
+            for node in cast("list[SlotNode]", nodelist.get_nodes_by_type(SlotNode))
+            if node.owner is None
+        ]
+        for node in claimed:
+            node.owner = self
+        self.has_slots = bool(claimed)
 
     def _resolved_props(self, context: template.Context) -> dict[str, Any]:
         """Resolve every prop expression against the active template context.
 
-        Django's ``FilterExpression`` marks bare string literals as safe so
-        ``{% tag "x" %}`` style arguments would render unescaped if interpolated
-        through ``{{ x }}``. Component props are user-facing text by default,
-        so we strip the safe marker from plain string literals. Callers who
-        want raw HTML can opt in explicitly with ``prop=value|safe`` or with
-        a variable that already holds a ``SafeString``.
+        ``FilterExpression`` marks a bare string literal safe, so the marker is stripped
+        from plain literals and raw HTML needs an explicit ``|safe``.
         """
         resolved: dict[str, Any] = {}
         for key, expr in self.props.items():
@@ -207,8 +242,8 @@ class ComponentNode(Node):
     def _close_match(self, path: Path) -> str | None:
         """Return the closest visible component name for a did-you-mean hint.
 
-        The visibility map for `path` was just built by the failed
-        `get_component` lookup, so this read is a cache hit, not a rescan.
+        The visibility map for `path` was just built by the failed `get_component`
+        lookup, so this read is a cache hit, not a rescan.
         """
         names = collect_visible_components(path)
         matches = difflib.get_close_matches(self.name, sorted(names))
@@ -217,8 +252,7 @@ class ComponentNode(Node):
     def _on_missing_path(self) -> str:
         """Report a render whose context carries no `current_template_path`.
 
-        The context names no template, so there is no visibility scope to
-        draw a did-you-mean hint from.
+        The context names no template, so there is no scope for a did-you-mean hint.
         """
         if not fail_loudly():
             logger.warning(
@@ -252,6 +286,18 @@ class ComponentNode(Node):
             f"(not-found){hint} -->"
         )
 
+    def _render_children(
+        self, context: template.Context, slots: dict[str, str]
+    ) -> SafeString:
+        """Render the body, routing every slot body into `slots`.
+
+        A body holding no slot skips the collector push.
+        """
+        if not self.has_slots:
+            return self.nodelist.render(context)
+        with context.push(**{_SLOT_COLLECTOR_KEY: _SlotCollector(self, slots)}):
+            return self.nodelist.render(context)
+
     @override
     def render(self, context: template.Context) -> str:
         """Merge props, slots, and children, then render the component."""
@@ -263,16 +309,10 @@ class ComponentNode(Node):
         if info is None:
             return self._on_not_found(path)
 
-        collect_component_assets(info, context.get("_static_collector"))
+        collect_component_assets(info, context.get(COLLECTOR_KEY))
 
         slots: dict[str, str] = {}
-        child_chunks: list[str] = []
-        with context.push(_component_slots=slots):
-            for node in self.nodelist:
-                if isinstance(node, SlotNode):
-                    node.render(context)
-                else:
-                    child_chunks.append(node.render(context))
+        children = self._render_children(context, slots)
 
         # ``flatten`` returns a dict built for this call alone, so the render
         # context is filled in place instead of through another copy.
@@ -281,10 +321,9 @@ class ComponentNode(Node):
             render_ctx.pop(key, None)
         render_ctx.update(self._resolved_props(context))
         render_ctx["current_template_path"] = path
-        # Children arrive as finished markup, so the join is spliced in as
-        # written, the way slot content already is. Whether the values inside
-        # were escaped is the calling template's business.
-        render_ctx["children"] = SafeString("".join(child_chunks))
+        # Children arrive as finished markup, spliced in as written the way slot
+        # content is. Escaping inside them is the calling template's business.
+        render_ctx["children"] = children
         render_ctx[COMPONENT_PROPS_CONTEXT_KEY] = self.prop_names
 
         for slot_name, content in slots.items():
@@ -310,11 +349,8 @@ class SetSlotNode(Node):
     def render(self, context: template.Context) -> str:
         """Render injected slot HTML when present, otherwise the fallback body.
 
-        Slot content is looked up under the prefixed ``slot_<name>`` key only.
-        Props live in the unprefixed namespace and never shadow slot defaults,
-        even when a prop happens to share a slot's name. An explicitly empty
-        slot (``{% #slot "x" %}{% /slot %}``) renders as the empty string. Only
-        a missing slot key falls back to the inner template.
+        The prefixed ``slot_<name>`` key never collides with a same-named prop, and
+        only a missing key falls back, not an explicitly empty slot.
         """
         slot_content = context.get(f"{SLOT_KEY_PREFIX}{self.name}", _SLOT_MISSING)
         if slot_content is _SLOT_MISSING:
@@ -325,48 +361,40 @@ class SetSlotNode(Node):
 @register.tag(name="component")
 def do_component(parser: Parser, token: Token) -> ComponentNode:
     """Compile void ``{% component "name" … %}`` (no body, no closing tag)."""
-    bits = token.split_contents()
-    if len(bits) < _COMPONENT_MIN_BITS:
-        msg = "{% component %} tag requires at least a component name"
-        raise template.TemplateSyntaxError(msg)
-    name = _strip_quotes(bits[_COMPONENT_NAME_INDEX])
-    if not name:
-        msg = "{% component %} tag requires a quoted component name"
-        raise template.TemplateSyntaxError(msg)
-    props = _parse_props(parser, bits, 2)
+    name, props = _parse_component(parser, token, "{% component %}")
     return ComponentNode(name=name, props=props, nodelist=NodeList())
 
 
 @register.tag(name="#component")
 def do_block_component(parser: Parser, token: Token) -> ComponentNode:
     """Compile ``{% #component "name" … %}`` … ``{% /component %}``."""
-    bits = token.split_contents()
-    if len(bits) < _COMPONENT_MIN_BITS:
-        msg = "{% #component %} tag requires at least a component name"
-        raise template.TemplateSyntaxError(msg)
-    name = _strip_quotes(bits[_COMPONENT_NAME_INDEX])
-    if not name:
-        msg = "{% #component %} tag requires a quoted component name"
-        raise template.TemplateSyntaxError(msg)
-    props = _parse_props(parser, bits, 2)
+    name, props = _parse_component(parser, token, "{% #component %}")
     nodelist = parser.parse(_END_BLOCK_COMPONENT)
     parser.delete_first_token()
     return ComponentNode(name=name, props=props, nodelist=nodelist)
 
 
-_BLOCK_SLOT_SPEC = _NamedBlockSpec(
-    end_tokens=_END_BLOCK_SLOT,
-    expected_bits=_SLOT_ARG_COUNT,
+_BLOCK_SLOT_SPEC = _NamedTagSpec(
     empty_name_message="{% #slot %} tag requires a quoted slot name",
     wrong_arity_message="{% #slot %} tag requires exactly one argument: slot name",
+    end_tokens=_END_BLOCK_SLOT,
 )
 
-_SET_SLOT_SPEC = _NamedBlockSpec(
-    end_tokens=_END_BLOCK_SET_SLOT,
-    expected_bits=_SLOT_ARG_COUNT,
+_SHORT_SLOT_SPEC = _NamedTagSpec(
+    empty_name_message="{% slot %} tag requires a quoted slot name",
+    wrong_arity_message="{% slot %} short form requires exactly one quoted slot name",
+)
+
+_SET_SLOT_SPEC = _NamedTagSpec(
     empty_name_message="{% #set_slot %} tag requires a quoted slot name",
+    wrong_arity_message="{% #set_slot %} tag requires exactly one argument: slot name",
+    end_tokens=_END_BLOCK_SET_SLOT,
+)
+
+_SHORT_SET_SLOT_SPEC = _NamedTagSpec(
+    empty_name_message="{% set_slot %} tag requires a quoted slot name",
     wrong_arity_message=(
-        "{% #set_slot %} tag requires exactly one argument: slot name"
+        "{% set_slot %} short form requires exactly one quoted slot name"
     ),
 )
 
@@ -374,38 +402,26 @@ _SET_SLOT_SPEC = _NamedBlockSpec(
 @register.tag(name="#slot")
 def do_block_slot(parser: Parser, token: Token) -> SlotNode:
     """Compile ``{% #slot "name" %}`` … ``{% /slot %}``."""
-    name, nodelist = _parse_one_named_block(parser, token, _BLOCK_SLOT_SPEC)
+    name, nodelist = _parse_named_tag(parser, token, _BLOCK_SLOT_SPEC)
     return SlotNode(name=name, nodelist=nodelist)
 
 
 @register.tag(name="slot")
-def do_short_slot(_parser: Parser, token: Token) -> SlotNode:
+def do_short_slot(parser: Parser, token: Token) -> SlotNode:
     """Compile empty ``{% slot "name" %}`` (short slot, no body)."""
-    bits = token.split_contents()
-    if len(bits) != _SLOT_ARG_COUNT:
-        msg = "{% slot %} short form requires exactly one quoted slot name"
-        raise template.TemplateSyntaxError(msg)
-    name = _strip_quotes(bits[_COMPONENT_NAME_INDEX])
-    if not name:
-        raise template.TemplateSyntaxError(_SHORT_SLOT_EMPTY_NAME)
-    return SlotNode(name=name, nodelist=NodeList())
+    name, nodelist = _parse_named_tag(parser, token, _SHORT_SLOT_SPEC)
+    return SlotNode(name=name, nodelist=nodelist)
 
 
 @register.tag(name="#set_slot")
 def do_block_set_slot(parser: Parser, token: Token) -> SetSlotNode:
     """Compile ``{% #set_slot "name" %}`` … ``{% /set_slot %}``."""
-    name, nodelist = _parse_one_named_block(parser, token, _SET_SLOT_SPEC)
+    name, nodelist = _parse_named_tag(parser, token, _SET_SLOT_SPEC)
     return SetSlotNode(name=name, nodelist=nodelist)
 
 
 @register.tag(name="set_slot")
-def do_short_set_slot(_parser: Parser, token: Token) -> SetSlotNode:
+def do_short_set_slot(parser: Parser, token: Token) -> SetSlotNode:
     """Compile empty ``{% set_slot "name" %}`` (no default body, no closing tag)."""
-    bits = token.split_contents()
-    if len(bits) != _SLOT_ARG_COUNT:
-        msg = "{% set_slot %} short form requires exactly one quoted slot name"
-        raise template.TemplateSyntaxError(msg)
-    name = _strip_quotes(bits[_COMPONENT_NAME_INDEX])
-    if not name:
-        raise template.TemplateSyntaxError(_SHORT_SET_SLOT_EMPTY_NAME)
-    return SetSlotNode(name=name, nodelist=NodeList())
+    name, nodelist = _parse_named_tag(parser, token, _SHORT_SET_SLOT_SPEC)
+    return SetSlotNode(name=name, nodelist=nodelist)

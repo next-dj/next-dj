@@ -7,4 +7,4 @@ class CatalogConfig(AppConfig):
 
     def ready(self) -> None:
         """Import providers so they auto-register on startup."""
-        from catalog import providers  # noqa: F401, PLC0415
+        from catalog import providers

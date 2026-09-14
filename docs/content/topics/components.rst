@@ -63,6 +63,7 @@ Component folder discovery
 The URL router reads the component folder name from the ``COMPONENTS_DIR`` key of the first ``COMPONENT_BACKENDS`` entry and treats every directory with that name as a component namespace.
 ``FileComponentsBackend`` itself never reads the key.
 The key is required in every entry, an entry that omits it is reported by the ``next.E031`` system check, and only the value of the first entry takes effect.
+A first entry without the key also raises ``ImproperlyConfigured`` while the file router builds its patterns, because that is where the router reads the folder name it skips.
 
 When the URL router walks the page trees it skips directories that match a configured ``COMPONENTS_DIR``, so component folders never become URL segments.
 
@@ -122,19 +123,8 @@ Global scope.
 
 Two components with the same name are valid when their scopes differ, for example one in a page tree and one in a ``DIRS`` root, or one at a tree root and one under a route below it.
 One name in each of two page trees is valid too, because neither tree is visible from the other.
-What is rejected is a name the resolver cannot decide: two components under one route scope (``next.E020``), or one name at the root scope of two ``DIRS`` roots, which are both visible everywhere (``next.E034``).
+The resolver rejects a name it cannot decide between two components under one route scope (``next.E020``) or one name at the root scope of two ``DIRS`` roots, both visible everywhere (``next.E034``).
 Both clashes are reported by system checks, covered in the `System checks`_ section below.
-
-Lookup performance
-------------------
-
-A ``{% component %}`` tag resolves its name through the mapping of names visible from the calling template, so a render costs a dictionary lookup rather than a scan over the registered components.
-That mapping and the scope index behind it are derived from the version counter of the registry, so they are rebuilt when a component registers or a backend reloads, not on every render.
-
-The ``component.py`` of a component is imported once per process and kept between requests.
-Its template body is parsed once and reused until the file it was read from changes, so an edited ``.djx`` reaches the next render without a restart.
-A process that does not watch template edits skips that comparison, and a warm render there costs neither a read nor a parse.
-See :doc:`/content/internals/component-pipeline` for the module cache, the template loader, and the visibility resolver.
 
 Calling a component
 -------------------
@@ -203,13 +193,13 @@ Multiline tags
 ~~~~~~~~~~~~~~
 
 Both the void form and the block form accept line breaks inside the tag body, which is useful when a component takes many props.
-The framework enables ``re.DOTALL`` for Django's tag lexer at startup, so tag bodies wrap across lines in every template type.
+The framework widens the ``{% ... %}`` alternative of Django's tag pattern at startup, so a block tag body wraps across lines in every template type.
 
 .. warning::
 
-   This changes template parsing for **every** template the process loads, not only DJX files.
+   The wider block-tag rule reaches **every** template the process loads, not only DJX files.
    If you rely on Django's stock behaviour where a newline inside ``{% ... %}`` ends the tag, adjust those templates before adopting next.dj.
-   The patch is applied once at import time and is one-way, so the original Django pattern is not restored when the components template tag library is unloaded.
+   Variables and comments are left alone, and the rebind happens once during ``AppConfig.ready`` and is one-way, so the stock Django pattern does not come back while the process runs.
 
 .. code-block:: jinja
    :caption: multiline void tag
@@ -312,6 +302,40 @@ Both the void ``{% slot "name" %}`` and the block ``{% #slot %}`` forms are supp
 The void caller slot marks the slot explicitly empty and suppresses the ``{% #set_slot %}`` fallback body.
 Caller slot content reaches the component scope under the ``slot_<name>`` key.
 
+Conditional and repeated slots
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A slot may sit anywhere inside the ``{% #component %}`` body, not only as its direct child.
+A slot under an ``{% if %}`` fills the slot when the branch is taken and leaves it unfilled otherwise, which is how a component shows a fallback body for one audience and caller content for another.
+
+.. code-block:: jinja
+   :caption: filling a slot for some callers only
+
+   {% #component "card" title="News" %}
+     {% if user.is_staff %}
+       {% #slot "actions" %}<button>Edit</button>{% /slot %}
+     {% endif %}
+   {% /component %}
+
+When the branch is not taken the ``actions`` name stays unfilled and the component's ``{% #set_slot "actions" %}`` fallback body renders.
+A slot never contributes to ``children``, wherever in the body it sits.
+
+One slot name written more than once keeps every body and joins them in render order, so a slot repeated per ``{% for %}`` iteration collects the whole list.
+
+.. code-block:: jinja
+   :caption: one row per iteration in a single slot
+
+   {% #component "table" %}
+     {% for note in notes %}
+       {% #slot "rows" %}<tr><td>{{ note.title }}</td></tr>{% /slot %}
+     {% endfor %}
+   {% /component %}
+
+The component template renders ``{{ slot_rows }}`` once and receives every row.
+
+A ``{% #slot %}`` written in another template and pulled into the body by ``{% include %}`` belongs to no component body, so it renders where it stands and reaches the component as part of ``children``.
+Write the slot in the component body to fill a slot.
+
 Component context
 -----------------
 
@@ -322,6 +346,7 @@ Use ``@component.context("key")`` to publish a value under that key for the temp
    :caption: _components/note_card/component.py
 
    from notes.models import Note
+
    from next import component
 
    @component.context("preview")
@@ -346,7 +371,8 @@ The framework resolves parameters from the surrounding template scope, from URL 
 
 .. note::
 
-   Registration raises ``ValueError`` for a key reserved for dependency injection, such as ``request``.
+   Registration raises ``ValueError`` for one of the six keys reserved for dependency injection, ``request``, ``form``, ``cleaned_data``, ``_cache``, ``_stack``, and ``_context_data``.
+   These are a different set from the eight render-time reserved keys listed below, and :doc:`/content/ref/deps` documents them as ``RESERVED_KEYS``.
    It also raises ``ValueError`` for a duplicate registration of two different functions under the same key, or of two different unkeyed callables, in one ``component.py``.
    Re-registering the same function under the same key replaces the stored entry rather than raising.
    These are the registration failures, and the unkeyed form raises one more ``ValueError`` at render time, described below.
@@ -358,7 +384,8 @@ See :doc:`static-assets/js-context` for the serialization options and :ref:`Seri
 An unkeyed ``@component.context`` returning a dict serializes each key of that dict separately.
 A ``serializer=`` on such an unkeyed callable applies to every key of the returned dict.
 A keyed ``@component.context`` serializes its return value under the given key.
-An unkeyed callable that returns anything other than a mapping is silently dropped from the template scope.
+An unkeyed callable that returns anything other than a ``dict`` is silently dropped from the template scope.
+A custom mapping type has to be converted to a ``dict`` before it is returned.
 
 An unkeyed ``@component.context`` merges its dict into the component scope, so the framework guards the names that merge would quietly take over.
 The render raises ``ValueError`` when the returned dict carries a prop passed by the ``{% component %}`` tag being rendered, a reserved render key, or any key that starts with ``slot_``.
@@ -367,7 +394,10 @@ The whole ``slot_`` prefix is reserved, so a returned ``slot_count`` raises even
 Register the value under an explicit ``@component.context("key")`` instead, which is the deliberate override and is never guarded.
 
 An ordinary page context key that reaches the component through the surrounding scope stays outside the guard, so an unkeyed dict may still shadow it for the component body.
-The ``{% component %}`` tag publishes the prop names of its own call site, ``ComponentWidget`` publishes the names it fills for its field, and ``render_component_by_name`` publishes the keys of its ``props`` mapping while leaving its ``context`` mapping ambient, so a bare ``render_component`` is the one path left guarding the reserved keys alone.
+
+Every render path that has a call site publishes its prop names, so the guard knows them.
+The ``{% component %}`` tag publishes the props of its own call, ``ComponentWidget`` publishes the names it fills for its field, and ``render_component_by_name`` publishes the keys of its ``props`` mapping while leaving its ``context`` mapping ambient.
+A bare ``render_component`` has no call site, so it guards the reserved keys alone.
 The same component code therefore raises under ``{% component "note_card" preview=text %}`` and merges quietly under ``{% component "note_card" %}``.
 This failure leaves the render rather than degrading to an empty string, so ``STRICT_LOADING`` and ``DEBUG`` do not change it.
 
@@ -393,6 +423,13 @@ The static collector picks up each asset by stem.
 
 The collector emits each asset exactly once per request, even when multiple components reference the same file.
 See :doc:`static-assets/deduplication` for the dedup rules.
+
+Lookup performance
+------------------
+
+A ``{% component %}`` tag resolves its name through the mapping of names visible from the calling template, so a render costs a dictionary lookup rather than a scan over the registered components.
+The imported ``component.py`` and the parsed template body are both kept between requests, and ``settings.DEBUG`` decides whether an edited file is picked up without a restart.
+See :doc:`/content/internals/component-pipeline` for those caches and their bounds.
 
 Module loading
 --------------
@@ -457,7 +494,8 @@ Hot reload
 
 The development server reloads when a ``component.py`` changes inside a watched component folder.
 The watched folders are the ``DIRS`` roots configured on a backend and the page-tree component folders the URL router walks.
-Template-only edits to ``.djx`` files are reflected on the next request without a process restart.
+Template-only edits to ``.djx`` files trigger no reload and are instead picked up on the next request, because the template cache revalidates its entries under ``DEBUG``.
+With ``DEBUG`` off neither mechanism applies and an edited ``.djx`` waits for a restart, which :doc:`/content/deployment/settings` covers.
 
 Component backends
 ------------------
@@ -465,9 +503,14 @@ Component backends
 ``COMPONENT_BACKENDS`` lists the sources the framework asks for components.
 A backend subclasses ``next.components.ComponentsBackend`` and receives its whole settings entry as the single constructor argument.
 Every entry declares ``BACKEND``, ``DIRS``, and ``COMPONENTS_DIR``, and ``next.E031`` reports an entry that omits one of them.
+The entry carries no other key, and any additional key reports ``next.E035``, so a custom backend reads its configuration from ``DIRS`` rather than from an options mapping of its own.
 
 A backend answers with ``ComponentInfo`` records and never renders.
 ``ComponentsManager`` owns the render pipeline and shares it across every configured backend, which is why the contract asks for only two methods.
+
+An entry that names a class outside the ``ComponentsBackend`` family, or a path that cannot be imported, is logged and skipped, and the remaining entries still load.
+A backend that raises ``ImproperlyConfigured`` from its own ``__init__`` is skipped the same way, and any other exception a constructor raises reaches the caller.
+The manager seeds nothing in place of a skipped entry, so a list where nothing survives resolves no component at all.
 
 Required methods
 ~~~~~~~~~~~~~~~~
@@ -487,7 +530,7 @@ A backend that stores markup anywhere else materialises it in one of those two p
 Optional hooks
 ~~~~~~~~~~~~~~
 
-The remaining five methods carry defaults that decline.
+The remaining six methods carry defaults that decline.
 Leaving a hook alone is a supported answer, and it keeps the backend out of the behaviour that hook feeds.
 A backend that resolves names on demand implements the two required methods and touches none of these.
 
@@ -515,6 +558,11 @@ A backend that resolves names on demand implements the two required methods and 
    Return the scope roots whose root-scope components resolve from every template.
    The cross-root name check reads it to tell a shared root from a page tree.
    The default returns an empty iterable.
+
+``watch_roots()``.
+   Return the trees the development watcher, the link tooling, and the staticfiles finder observe.
+   A backend that computes its roots from somewhere other than its config entry names them here, which is the only way they reach autoreload.
+   The default returns an empty iterable, so a backend that leaves it alone contributes no watched tree.
 
 A worked backend
 ~~~~~~~~~~~~~~~~
@@ -627,6 +675,8 @@ The components subsystem contributes Django system checks.
   Use ``@component.context`` from ``next.components`` instead.
 - ``next.E034`` reports one name at the root scope of two roots the same template resolves against with neither taking precedence.
   Rename one of the colliding components or move it under a route scope.
+- ``next.E035`` reports a ``COMPONENT_BACKENDS`` entry carrying a key beyond ``BACKEND``, ``DIRS``, and ``COMPONENTS_DIR``.
+  Drop the extra key and read the backend configuration from ``DIRS``.
 - ``next.E075`` reports a ``@component.context`` registration bound to a file no component render collects.
   Decorate callables defined in the ``component.py`` itself.
 
@@ -653,3 +703,4 @@ See also
    :doc:`/content/howto/build-a-composite-component` for a recipe.
    :doc:`/content/internals/component-pipeline` for the discovery and render pipeline.
    :doc:`/content/ref/components` for the public API.
+   :doc:`/content/ref/template-tags` for the ``{% component %}`` tag reference.

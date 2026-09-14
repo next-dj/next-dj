@@ -40,14 +40,10 @@ def build_nested_page(root: Path, *, body: str = "<h1>{{ title }}</h1>") -> Path
     The ancestor layouts wrap the body in ``<html>`` and ``<main>``, so a
     composition reads back as the chain that produced it.
     """
-    (root / "layout.djx").write_text(
-        "<html>{% block template %}{% endblock template %}</html>"
-    )
+    (root / "layout.djx").write_text("<html>{% template %}</html>")
     mid = root / "mid"
     mid.mkdir()
-    (mid / "layout.djx").write_text(
-        "<main>{% block template %}{% endblock template %}</main>"
-    )
+    (mid / "layout.djx").write_text("<main>{% template %}</main>")
     leaf = mid / "leaf"
     leaf.mkdir()
     page_file = leaf / "page.py"
@@ -58,7 +54,7 @@ def build_nested_page(root: Path, *, body: str = "<h1>{{ title }}</h1>") -> Path
 
 def unified_view(page: Page, page_file: Path) -> Callable[..., HttpResponseBase]:
     """Return the view of `page_file` the way the URL builder creates it."""
-    return page._create_unified_view(page_file, {}, _load_python_module_memo(page_file))
+    return page._create_unified_view(page_file, _load_python_module_memo(page_file))
 
 
 def path_under(root: Path) -> Callable[[Path], bool]:
@@ -77,8 +73,7 @@ def record_path_calls(
 ) -> list[Path]:
     """Collect the paths `method` is called on for the rest of the test.
 
-    The real method still runs, so a recorded call reports a syscall the
-    render performed rather than replacing it.
+    The real method still runs, so a recorded call reports a syscall the render made.
     """
     calls: list[Path] = []
     original = getattr(Path, method)

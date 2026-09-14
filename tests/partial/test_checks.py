@@ -20,7 +20,7 @@ def _scanned_root(root: Path) -> Iterator[None]:
     manager.backends = (MagicMock(),)
     with (
         patch("next.partial.checks.get_router_manager", return_value=(manager, [])),
-        patch("next.checks.common.get_pages_directories", return_value=[root]),
+        patch("next.discovery.get_pages_directories", return_value=[root]),
     ):
         yield
 
@@ -29,10 +29,8 @@ def _scanned_root(root: Path) -> Iterator[None]:
 def _context_pages(*pages: tuple[Path, str, str]) -> Iterator[None]:
     """Point the page-scanning checks at real on-disk page directories.
 
-    Each entry is a `page.py` path, its source, and the `template.djx` body
-    next to it. The composed-template walk imports the source and the global
-    page instance compiles the body through its layout loader, so a zone tag
-    and a `@context` registration both land as they do in production.
+    Real imports and compiles mimic production, so a zone tag and a
+    `@context` registration land here the same way they do live.
     """
     root = pages[0][0].parent.parent
     for page_file, source, body in pages:
@@ -390,10 +388,8 @@ class TestZoneInComponentCheck:
 @pytest.fixture()
 def restore_op_registry():
     """Snapshot and restore the patch-op registry around a test."""
-    ops = set(patch_op_registry._ops)
     custom = set(patch_op_registry._custom)
     yield
-    patch_op_registry._ops = ops
     patch_op_registry._custom = custom
 
 
@@ -436,7 +432,9 @@ def _form_backends(*backends, partial_active: bool) -> Iterator[None]:
     manager.backends = tuple(backends)
     settings_ns = MagicMock()
     settings_ns.PARTIAL_BACKENDS = (
-        [{"BACKEND": "next.partial.PartialProtocolBackend"}] if partial_active else []
+        [{"BACKEND": "next.partial.JsonPartialProtocolBackend"}]
+        if partial_active
+        else []
     )
     with (
         patch("next.partial.checks.form_action_manager", manager),
@@ -480,15 +478,14 @@ _PLAIN_STORAGE = "django.contrib.staticfiles.storage.StaticFilesStorage"
 def _partial_version(version: object) -> Iterator[None]:
     """Point the W069 check at a partial backend with the given VERSION option.
 
-    A version of None means the OPTIONS mapping omits the key, so the check
-    sees the implicit manifest sentinel.
+    A version of None omits the key, so the check sees the implicit manifest sentinel.
     """
     options: dict[str, object] = {}
     if version is not None:
         options["VERSION"] = version
     settings_ns = MagicMock()
     settings_ns.PARTIAL_BACKENDS = [
-        {"BACKEND": "next.partial.PartialProtocolBackend", "OPTIONS": options}
+        {"BACKEND": "next.partial.JsonPartialProtocolBackend", "OPTIONS": options}
     ]
     with patch("next.partial.checks.next_framework_settings", settings_ns):
         yield
@@ -549,7 +546,7 @@ def _partial_backends(configs: object) -> Iterator[None]:
         yield
 
 
-_BACKEND_DICT = {"BACKEND": "next.partial.PartialProtocolBackend"}
+_BACKEND_DICT = {"BACKEND": "next.partial.JsonPartialProtocolBackend"}
 
 
 class TestSinglePartialBackendCheck:
@@ -607,7 +604,7 @@ class TestBackendsShapeCheck:
 
     @pytest.mark.parametrize(
         "configs",
-        [(_BACKEND_DICT,), _BACKEND_DICT, "next.partial.PartialProtocolBackend"],
+        [(_BACKEND_DICT,), _BACKEND_DICT, "next.partial.JsonPartialProtocolBackend"],
         ids=["tuple", "bare_dict", "dotted_path"],
     )
     def test_non_list_value_errors(self, configs: object) -> None:

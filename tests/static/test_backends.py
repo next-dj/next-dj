@@ -192,6 +192,34 @@ class TestStaticFilesBackendRegisterFile:
             backend.register_file(tmp_path / "x.css", "x", "css")
 
 
+class TestUrlMemoInvalidation:
+    """The memoised URL lives only as long as the manifest that answered it."""
+
+    def _register(self, backend: StaticFilesBackend, tmp_path: Path, url: str) -> str:
+        with mock.patch(
+            "next.static.backends.staticfiles_storage.url", return_value=url
+        ):
+            return backend.register_file(tmp_path / "a.css", "a", "css")
+
+    def test_forget_urls_sends_the_next_lookup_back_to_the_manifest(
+        self, tmp_path: Path
+    ) -> None:
+        backend = StaticFilesBackend()
+        first = self._register(backend, tmp_path, "/static/next/a.css")
+        backend.forget_urls()
+        second = self._register(backend, tmp_path, "/static/next/a.9f1.css")
+        assert (first, second) == ("/static/next/a.css", "/static/next/a.9f1.css")
+
+    def test_the_hook_reaches_a_backend_of_any_other_shape(self) -> None:
+        """The memo and the hook that drops it both sit on the base contract."""
+        backend = _CollectingBackend()
+        backend._url_cache[("a", ".css")] = "/static/next/a.css"
+
+        backend.forget_urls()
+
+        assert not backend._url_cache
+
+
 class TestStaticBackendReexport:
     """Public re-export from next.static matches the direct import."""
 

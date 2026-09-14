@@ -15,15 +15,14 @@ from next.checks import (
     check_next_components_configuration,
     register_all,
 )
-from next.checks.common import get_components_manager
 from next.components import ComponentInfo, FileComponentsBackend
 from next.components.context import ComponentContextRegistry, component
 from next.components.manager import components_manager
+from next.components.sources import get_components_manager
 from tests.support import (
     file_router_config_entry,
     importable_dir,
-    next_framework_settings_component_backends_list as _next_framework_settings_component_backends_list,
-    next_framework_settings_for_checks_backends_value as _next_framework_settings_for_checks_backends_value,
+    next_framework_settings_stand_in as _stand_in,
     patch_checks_components_manager,
 )
 
@@ -35,14 +34,14 @@ class TestChecks:
         self, min_component_config: dict
     ) -> None:
         """check_duplicate_component_names returns [] when backends is not a list."""
-        mock_ns = _next_framework_settings_for_checks_backends_value(None)
+        mock_ns = _stand_in(COMPONENT_BACKENDS=None)
         with patch("next.components.checks.next_framework_settings", mock_ns):
             assert check_duplicate_component_names() == []
 
     def test_backend_failing_at_import_is_reported(self) -> None:
         """A backend module raising at import becomes next.E032, not a traceback."""
-        mock_ns = _next_framework_settings_component_backends_list(
-            [
+        mock_ns = _stand_in(
+            COMPONENT_BACKENDS=[
                 {
                     "BACKEND": "myapp.backends.Broken",
                     "DIRS": [],
@@ -63,7 +62,7 @@ class TestChecks:
 
     def test_check_component_py_no_pages_context_empty_when_no_config(self) -> None:
         """check_component_py_no_pages_context returns [] when backends is not a list."""
-        mock_ns = _next_framework_settings_for_checks_backends_value(None)
+        mock_ns = _stand_in(COMPONENT_BACKENDS=None)
         with patch("next.components.checks.next_framework_settings", mock_ns):
             assert check_component_py_no_pages_context() == []
 
@@ -379,8 +378,7 @@ class TestChecks:
 class TestPageTreeComponentsReachTheChecks:
     """Every check reading the per-run store sees a page-tree component.
 
-    No router has walked during these runs, so the store has to find the
-    folders under the page trees itself.
+    No router has walked here, so the store finds the page-tree folders itself.
     """
 
     def _write_project(self, tmp_path: Path) -> Path:
@@ -529,7 +527,35 @@ class TestPageTreeComponentsReachTheChecks:
 
         with (
             override_settings(NEXT_FRAMEWORK=self._framework_settings(pages)),
-            patch("next.checks.common.get_router_manager", return_value=(None, [])),
+            patch(
+                "next.components.sources.get_router_manager", return_value=(None, [])
+            ),
         ):
             manager = get_components_manager()
             assert manager._walk_registered_folders == set()
+
+
+class TestComponentConfigurationCodes:
+    """Each `COMPONENT_BACKENDS` mistake carries a code of its own."""
+
+    def test_non_dict_backend_entry_is_e079(self) -> None:
+        mock_ns = _stand_in(
+            COMPONENT_BACKENDS=["next.components.FileComponentsBackend"]
+        )
+        with patch("next.components.checks.next_framework_settings", mock_ns):
+            errors = check_next_components_configuration()
+        assert [e.id for e in errors] == ["next.E079"]
+
+    def test_non_string_components_dir_is_e080(self) -> None:
+        mock_ns = _stand_in(
+            COMPONENT_BACKENDS=[
+                {
+                    "BACKEND": "next.components.FileComponentsBackend",
+                    "DIRS": [],
+                    "COMPONENTS_DIR": 1,
+                }
+            ]
+        )
+        with patch("next.components.checks.next_framework_settings", mock_ns):
+            errors = check_next_components_configuration()
+        assert [e.id for e in errors] == ["next.E080"]

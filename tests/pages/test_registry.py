@@ -21,12 +21,6 @@ class TestPageContextRegistry:
         """A fresh registry holds no entries."""
         assert context_manager._context_registry == {}
 
-    def test_get_resolver_returns_injected_resolver(self) -> None:
-        """When resolver is injected, _get_resolver() returns it."""
-        r = DependencyResolver()
-        cm = PageContextRegistry(resolver=r)
-        assert cm._get_resolver() is r
-
     @pytest.mark.parametrize(
         ("key", "func_return", "expected_result"),
         [
@@ -149,9 +143,7 @@ class TestPageContextRegistry:
         layout_dir = tmp_path / "layout_dir"
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
-        layout_file.write_text(
-            "<html>{% block template %}{% endblock template %}</html>"
-        )
+        layout_file.write_text("<html>{% template %}</html>")
 
         page_file = layout_dir / "page.py"
         page_file.write_text("")
@@ -175,12 +167,7 @@ class TestPageContextRegistry:
     def test_collect_inherited_context_bounded_depth(
         self, context_manager, tmp_path
     ) -> None:
-        """The ancestor walk is bounded by `MAX_ANCESTOR_WALK_DEPTH`.
-
-        This test fabricates a 70-level deep tree, past the 64 cap,
-        and asserts the call returns in bounded time with an empty
-        merged context rather than iterating all 70 ancestors.
-        """
+        """The ancestor walk is bounded by `MAX_ANCESTOR_WALK_DEPTH`."""
         deep = tmp_path
         for i in range(70):
             deep = deep / f"d{i}"
@@ -197,16 +184,14 @@ class TestPageContextRegistry:
         root_dir = tmp_path / "root"
         root_dir.mkdir()
         root_layout = root_dir / "layout.djx"
-        root_layout.write_text(
-            "<html>{% block template %}{% endblock template %}</html>"
-        )
+        root_layout.write_text("<html>{% template %}</html>")
         root_page = root_dir / "page.py"
         root_page.write_text("")
 
         sub_dir = root_dir / "sub"
         sub_dir.mkdir()
         sub_layout = sub_dir / "layout.djx"
-        sub_layout.write_text("<div>{% block template %}{% endblock template %}</div>")
+        sub_layout.write_text("<div>{% template %}</div>")
         sub_page = sub_dir / "page.py"
         sub_page.write_text("")
 
@@ -249,9 +234,7 @@ class TestPageContextRegistry:
         layout_dir = tmp_path / "layout_dir"
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
-        layout_file.write_text(
-            "<html>{% block template %}{% endblock template %}</html>"
-        )
+        layout_file.write_text("<html>{% template %}</html>")
 
         child_dir = layout_dir / "child"
         child_dir.mkdir()
@@ -263,13 +246,7 @@ class TestPageContextRegistry:
     def test_collect_inherited_context_without_sibling_layout(
         self, context_manager, tmp_path
     ) -> None:
-        """`inherit_context=True` works without a sibling ``layout.djx``.
-
-        The shared HTML envelope can live in a project-level page root
-        registered via ``PAGE_BACKENDS["DIRS"]``, in which case
-        intermediate ``page.py`` modules do not need a layout sibling
-        for their inheritable context to surface on descendant routes.
-        """
+        """`inherit_context=True` works without a sibling ``layout.djx``."""
         section_dir = tmp_path / "section"
         section_dir.mkdir()
         section_page = section_dir / "page.py"
@@ -298,9 +275,7 @@ class TestPageContextRegistry:
         layout_dir = tmp_path / "layout_dir"
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
-        layout_file.write_text(
-            "<html>{% block template %}{% endblock template %}</html>"
-        )
+        layout_file.write_text("<html>{% template %}</html>")
 
         page_file = layout_dir / "page.py"
         page_file.write_text("")
@@ -327,9 +302,7 @@ class TestPageContextRegistry:
         layout_dir = tmp_path / "layout_dir"
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
-        layout_file.write_text(
-            "<html>{% block template %}{% endblock template %}</html>"
-        )
+        layout_file.write_text("<html>{% template %}</html>")
 
         page_file = layout_dir / "page.py"
         page_file.write_text("")

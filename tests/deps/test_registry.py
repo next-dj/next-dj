@@ -64,9 +64,7 @@ def _index_of(planned: DependencyResolver, cls: type) -> int:
 def _declare_in_page_module(path: str) -> type:
     """Declare one provider the way the file router execs a `page.py`.
 
-    Every page module is loaded under the one name `page_module`, so two page
-    files declaring the same class name differ only by the path their bodies
-    were compiled from.
+    Every page module loads under the name `page_module`, so only the path differs.
     """
 
     def can_handle(self, param, context) -> bool:

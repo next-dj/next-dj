@@ -73,27 +73,18 @@ STATICFILES_DIRS = [BASE_DIR / "static", SHARED_DIR / "static"]
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# `obs/apps.py` registers the `jsx` kind with a custom Babel renderer, so the
-# client has no insertion verb for it and next.W074 fires. Browser-side Babel is
-# a full-page technique and the sparkline sits outside every zone, so no patch
-# envelope ever has to load its `component.jsx`.
+# `obs/apps.py` registers the `jsx` kind with a custom Babel renderer, so the client has
+# no insertion verb and next.W074 fires. The sparkline sits outside every zone anyway.
 SILENCED_SYSTEM_CHECKS = ["next.W074"]
 
-# Naming, custom backend, dedup policy, and JS-context serializer wiring
-# all live under one settings dict. The custom components backend counts
-# every name resolution. The dedup policy counts every asset filtered as
-# a duplicate. The pluggable serializer encodes every value reaching
-# `window.Next.context` through a pydantic-aware encoder by default. One
-# decorator on the live stats page swaps this serializer for the same
-# class explicitly so the override path is exercised end to end.
+# The custom components backend counts every name resolution, the dedup policy counts
+# every filtered duplicate, and the serializer encodes `window.Next.context`.
 NEXT_FRAMEWORK = {
     "PAGE_BACKENDS": [
         {
             "BACKEND": "next.urls.FileRouterBackend",
             "APP_DIRS": True,
-            # `instrument/` owns the shared HTML envelope. The file router
-            # walks both this project-level root and `obs/dashboards/` so
-            # every dashboard sees the same chrome.
+            # `instrument/` owns the shared HTML envelope every dashboard renders into.
             "DIRS": [str(BASE_DIR / "instrument")],
             "PAGES_DIR": "dashboards",
             "OPTIONS": {"context_processors": []},

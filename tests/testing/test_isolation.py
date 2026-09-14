@@ -39,7 +39,7 @@ class TestResetFormActions:
         )
         assert any(name == "alpha" for _, name in backend._registry)
         backend.clear_registry()
-        assert backend._registry == {}
+        assert not backend._registry
         backend.register_action(
             ActionRegistration(
                 name="alpha",
@@ -54,7 +54,7 @@ class TestResetFormActions:
         original = form_action_manager.default_backend
         try:
             reset_form_actions()
-            assert form_action_manager.default_backend._registry == {}
+            assert not form_action_manager.default_backend._registry
             assert form_action_manager.default_backend._uid_to_name == {}
         finally:
             # The reload built fresh backends, so the populated one goes back
@@ -106,7 +106,7 @@ class TestResetRegistries:
         try:
             reset_registries()
             refreshed = form_action_manager.default_backend
-            assert refreshed._registry == {}
+            assert not refreshed._registry
             assert refreshed._uid_to_name == {}
             components_manager._ensure_backends()
             assert sentinel not in components_manager._backends
@@ -138,7 +138,7 @@ class TestResetFormRegistrationState:
         try:
             reset_form_registration_state()
 
-            assert backend._registry == {}
+            assert not backend._registry
             assert backend._name_index == {}
             assert registration_diagnostics.outside_base_dir == []
             assert registration_diagnostics.action_applied_to_class == []
@@ -160,7 +160,7 @@ class TestResetComponentTemplates:
 
         reset_component_templates()
 
-        assert loader._compiled == {}
+        assert not loader._compiled
         path.write_text("<i>two</i>")
         assert render_component(info, {}) == "<i>two</i>"
 
@@ -170,13 +170,13 @@ class TestResetPageCache:
 
     def test_clears_all_dicts(self) -> None:
         fp = Path("/tmp/synthetic_page.py")
-        page._template_registry[fp] = "<p>x</p>"
-        page._compiled_registry[fp] = Template("<p>x</p>")
-        page._template_source_mtimes[fp] = {}
+        page._templates.composed[fp] = "<p>x</p>"
+        page._templates.compiled[fp] = Template("<p>x</p>")
+        page._templates.composed_sources[fp] = {}
         reset_page_cache()
-        assert fp not in page._template_registry
-        assert fp not in page._compiled_registry
-        assert fp not in page._template_source_mtimes
+        assert fp not in page._templates.composed
+        assert fp not in page._templates.compiled
+        assert fp not in page._templates.composed_sources
 
 
 class _StatelessBackend(FormActionBackend):

@@ -1,9 +1,7 @@
 """Merged view of `settings.NEXT_FRAMEWORK` with framework defaults.
 
-The `NextFrameworkSettings` class reads the user mapping lazily and merges it with
-`DEFAULTS` on first access. Merge results are cached until `reload()` drops the cache
-and emits `settings_reloaded`. Package managers that depend on the merged values
-subscribe to that signal and reset their own state.
+The merge runs on first access and caches until `reload()` emits `settings_reloaded`.
+The `setting_changed` receiver reloads the singleton this module owns.
 """
 
 from __future__ import annotations
@@ -11,17 +9,21 @@ from __future__ import annotations
 from typing import Any, ClassVar, override
 
 from django.conf import settings
+from django.core.signals import setting_changed
 
 from .defaults import DEFAULTS, USER_SETTING
-from .frozen import freeze
 from .imports import clear_import_cache
+from .merge import BOOL_KEYS, LIST_KEYS, STR_KEYS, merge_user_settings
+from .signals import dispatch_settings_reloaded
 
 
 class NextFrameworkSettings:
     """Lazy merged view of top-level keys declared in `DEFAULTS`."""
 
     DEFAULTS: ClassVar[dict[str, Any]] = DEFAULTS
-    IMPORT_STRINGS: ClassVar[frozenset[str]] = frozenset()
+    LIST_KEYS: ClassVar[frozenset[str]] = LIST_KEYS
+    STR_KEYS: ClassVar[frozenset[str]] = STR_KEYS
+    BOOL_KEYS: ClassVar[frozenset[str]] = BOOL_KEYS
 
     def __init__(self) -> None:
         """Initialise empty merge and attribute caches."""
@@ -37,77 +39,27 @@ class NextFrameworkSettings:
         self._merged_cache = None
         self._attr_value_cache.clear()
         clear_import_cache()
-        # Deferred because next.conf.signals imports this module, which would
-        # close the next.conf.settings <-> next.conf.signals cycle.
-        from .signals import dispatch_settings_reloaded  # noqa: PLC0415
-
         dispatch_settings_reloaded(type(self))
 
     def _raw_user(self) -> dict[str, Any] | None:
+        """Return the mapping the user set, or None for anything else under the key.
+
+        An empty mapping needs no case of its own, the merge answers the defaults.
+        """
         raw = getattr(settings, USER_SETTING, None)
-        if raw is None or raw == {}:
-            return None
-        if not isinstance(raw, dict):
-            return None
-        return raw
+        return raw if isinstance(raw, dict) else None
 
     def _merged(self) -> dict[str, Any]:
         if self._merged_cache is None:
-            self._merged_cache = self._build_flat_merged(self._raw_user())
+            self._merged_cache = merge_user_settings(self.DEFAULTS, self._raw_user())
         return self._merged_cache
 
-    LIST_KEYS: ClassVar[frozenset[str]] = frozenset(
-        {
-            "PAGE_BACKENDS",
-            "COMPONENT_BACKENDS",
-            "STATIC_BACKENDS",
-            "FORM_ACTION_BACKENDS",
-            "PARTIAL_BACKENDS",
-            "TEMPLATE_LOADERS",
-            "FORM_ANCHOR_FILES",
-        }
-    )
-    STR_KEYS: ClassVar[frozenset[str]] = frozenset(
-        {"DEPENDENCY_RESOLVER", "URL_NAME_TEMPLATE", "URL_RESOLVER"}
-    )
-    BOOL_KEYS: ClassVar[frozenset[str]] = frozenset(
-        {
-            "STRICT_CONTEXT",
-            "STRICT_LOADING",
-            "LAZY_COMPONENT_MODULES",
-            "FORM_AUTODISCOVER",
-        }
-    )
+    def __getattr__(self, attr: str) -> Any:
+        """Return merged values for keys declared in `DEFAULTS`.
 
-    def _build_flat_merged(self, user: dict[str, Any] | None) -> dict[str, Any]:
-        out: dict[str, Any] = {
-            key: freeze(value) for key, value in self.DEFAULTS.items()
-        }
-        if not user:
-            return out
-        user = dict(user)
-        for key in self.DEFAULTS:
-            if key not in user:
-                continue
-            raw = user[key]
-            if key in self.STR_KEYS and isinstance(raw, str):
-                out[key] = raw
-            elif key == "FORM_WIZARD_BACKEND" and isinstance(raw, dict):
-                out[key] = freeze({**self.DEFAULTS[key], **raw})
-            elif (key in self.LIST_KEYS and isinstance(raw, list)) or (
-                key == "NEXT_JS_OPTIONS" and isinstance(raw, dict)
-            ):
-                out[key] = freeze(raw)
-            elif key in self.BOOL_KEYS:
-                out[key] = bool(raw)
-            elif key == "JS_CONTEXT_SERIALIZER" and (
-                raw is None or isinstance(raw, str)
-            ):
-                out[key] = raw
-        return out
-
-    def __getattr__(self, attr: str) -> Any:  # noqa: ANN401
-        """Return merged values for keys declared in `DEFAULTS`."""
+        `DEFAULTS` is open for third-party keys, so no narrower return type fits, and
+        `Any` lets each read site re-validate the shape it needs.
+        """
         if attr in self._attr_value_cache:
             return self._attr_value_cache[attr]
         if attr not in self.DEFAULTS:
@@ -143,3 +95,12 @@ def fail_loudly() -> bool:
     `DEBUG` cannot drift apart between the page loader and the component tag.
     """
     return bool(next_framework_settings.STRICT_LOADING or settings.DEBUG)
+
+
+def _on_setting_changed(*, setting: str, **kwargs) -> None:
+    """Reload framework settings when Django reports a matching change."""
+    if setting == USER_SETTING:
+        next_framework_settings.reload()
+
+
+setting_changed.connect(_on_setting_changed)

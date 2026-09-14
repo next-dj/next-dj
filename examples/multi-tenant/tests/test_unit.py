@@ -9,10 +9,10 @@ import pytest
 from django.core.management import call_command
 from django.http import HttpRequest, QueryDict
 from django.test import override_settings
+from markup import render_markdown
 from notes.backends import TenantPrefixStaticBackend
 from notes.context_processors import tenant_theme
 from notes.demo import DEMO_TENANTS, seed_demo
-from notes.markdown_render import render_markdown
 from notes.middleware import TenantMiddleware
 from notes.models import Note, Tenant
 from notes.providers import DTenant, TenantProvider
@@ -107,6 +107,41 @@ class TestTenantMiddleware:
         middleware = TenantMiddleware(Mock())
         response = middleware(self._request(meta={"HTTP_X_TENANT": "nope"}))
         assert response.status_code == 404
+
+    @pytest.mark.django_db()
+    @override_settings(DEBUG=False)
+    def test_unknown_slug_body_never_repeats_the_slug(self) -> None:
+        """Echoing the slug would enumerate tenants and inject HTML into the body."""
+        middleware = TenantMiddleware(Mock())
+        forged = "<script>alert(1)</script>"
+        response = middleware(self._request(meta={"HTTP_X_TENANT": forged}))
+        assert response.status_code == 404
+        assert response.content == b"Unknown tenant."
+
+    @override_settings(DEBUG=False)
+    def test_missing_tenant_body_is_fixed_in_production(self) -> None:
+        middleware = TenantMiddleware(Mock())
+        response = middleware(self._request())
+        assert response.content == b"Missing X-Tenant header."
+
+    @override_settings(DEBUG=True)
+    def test_missing_tenant_body_names_the_affordance_only_in_debug(self) -> None:
+        middleware = TenantMiddleware(Mock())
+        response = middleware(self._request())
+        assert response.content.startswith(b"Missing X-Tenant header.")
+        assert b"?tenant=<slug>" in response.content
+
+    @pytest.mark.django_db()
+    @override_settings(DEBUG=True)
+    def test_debug_redirect_cannot_leave_the_site(self, payer_tenant: Tenant) -> None:
+        """A `//host/...` path would otherwise redirect off-site protocol-relatively."""
+        request = self._request(
+            path="//evil.example.com/", get=QueryDict(f"tenant={payer_tenant.slug}")
+        )
+        middleware = TenantMiddleware(Mock())
+        response = middleware(request)
+        assert response.status_code == 302
+        assert response.url == "/"
 
     @pytest.mark.django_db()
     @override_settings(DEBUG=False)

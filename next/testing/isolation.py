@@ -1,8 +1,7 @@
 """Helpers to drop registry state between tests.
 
-Most Django tests expect module-level registrations to persist. These
-helpers are opt-in and intended for tests that explicitly verify
-registry behaviour or need to reload backends after swapping settings.
+Opt-in, since most Django tests expect module-level registrations to persist, for
+tests that verify registry behaviour or reload backends after swapping settings.
 """
 
 from __future__ import annotations
@@ -17,10 +16,8 @@ from next.pages.manager import page
 def reset_form_actions() -> None:
     """Drop cached form-action backends and reload them from settings.
 
-    Forms register imperatively at import time, so the manager does not
-    auto-rebuild on `settings_reloaded`. Tests that swap
-    `NEXT_FRAMEWORK["FORM_ACTION_BACKENDS"]` call this helper to
-    discard the stale backend list and pick the new one up on next use.
+    Forms register imperatively at import time, so the manager does not auto-rebuild on
+    `settings_reloaded` and a swapped backend list needs this call.
     """
     form_action_manager.reload()
 
@@ -40,8 +37,8 @@ def reset_form_registration_state() -> None:
 def reset_registries() -> None:
     """Reset form and component registries in one call.
 
-    Opt-in helper. Invoke when a test deliberately changes
-    `NEXT_FRAMEWORK` settings or registers conflicting fixtures.
+    Opt-in helper. Invoke when a test deliberately changes `NEXT_FRAMEWORK` settings or
+    registers conflicting fixtures.
     """
     reset_form_actions()
     reset_components()
@@ -50,9 +47,8 @@ def reset_registries() -> None:
 def reset_component_templates() -> None:
     """Drop compiled component templates so the next render reads sources again.
 
-    Needed between renders against a component rewritten on disk (for
-    example in `tmp_path`), because outside `DEBUG` the loader reuses a
-    compiled template without checking its source for an edit.
+    Needed between renders against a component rewritten on disk, because outside
+    `DEBUG` the loader reuses a compiled template without checking its source.
     """
     components_manager.clear_template_caches()
 
@@ -60,9 +56,8 @@ def reset_component_templates() -> None:
 def reset_page_cache() -> None:
     """Drop the page template cache and source-mtime bookkeeping.
 
-    Needed between iterations of `render_page` against rewritten files
-    on disk (for example in `tmp_path`), because `page.render` memoises
-    composed template strings per file path.
+    Needed between `render_page` runs against rewritten files on disk, because
+    `page.render` memoises the composed template string per file path.
     """
     page.clear_template_caches()
 

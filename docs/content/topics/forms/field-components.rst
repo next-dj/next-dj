@@ -3,7 +3,7 @@
 Field components
 ================
 
-Changing an input's classes or accessibility markup across a project usually means editing every form, or overriding Django's project-wide ``FORM_RENDERER`` and its widget templates.
+Changing an input's classes or accessibility markup across a project usually means editing every form or shadowing Django's widget templates, because a next.dj form pins its own renderer and the project-wide ``FORM_RENDERER`` setting never reaches it.
 ``ComponentWidget`` keeps that change in one place.
 It is a form widget that renders a registered next.dj component instead of a Django widget template.
 One field maps to one component.
@@ -34,9 +34,10 @@ A ``ModelForm`` declares the same widgets through ``Meta.widgets``, mapping each
 .. code-block:: python
    :caption: a ModelForm with Meta.widgets
 
+   from wiki.models import Article
+
    import next.forms
    from next.forms import ComponentWidget
-   from wiki.models import Article
 
    class ArticleEditForm(next.forms.ModelForm):
        class Meta:
@@ -147,7 +148,9 @@ A page-local component placed in the page's own component folder also works when
 
 The ``next.W054`` system check warns at startup when a ``ComponentWidget`` references a component that does not resolve.
 It is a warning rather than an error because the component may come from an app imported later in the boot sequence.
-A reference that still fails to resolve at render time raises ``RuntimeError``.
+Both ``next.W054`` and the field-type check ``next.W055`` described under `When not to use it`_ walk the registered form-class actions only, so a ``ComponentWidget`` on a wizard step form or on a form marked ``Meta.abstract = True`` is never inspected and surfaces at render time instead.
+A form built by a ``form_class`` factory is out of reach for the same reason, because the registry holds the callable rather than the class it returns.
+A reference that still fails to resolve at render time raises ``next.forms.UnregisteredComponentError``, a ``LookupError`` subclass whose message names the search anchor and the closest visible component names.
 
 Before and after
 ----------------

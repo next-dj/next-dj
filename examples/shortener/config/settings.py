@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 from next.conf import extend_default_backend
@@ -69,6 +70,9 @@ USE_TZ = True
 STATIC_URL = "static/"
 
 SHARED_DIR = BASE_DIR.parent / "_shared"
+# The shared kit ships Python helpers next to its components, so the directory joins the
+# import path the way `pytest.ini` already adds it for the test run.
+sys.path.insert(0, str(SHARED_DIR))
 STATICFILES_DIRS = [BASE_DIR / "static", SHARED_DIR / "static"]
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
@@ -78,10 +82,7 @@ NEXT_FRAMEWORK = {
         {
             "BACKEND": "next.urls.FileRouterBackend",
             "APP_DIRS": True,
-            # `host/` is the project-level page root: it owns the shared
-            # HTML envelope (layout.djx) and may host project-shared
-            # components under `_widgets/`. Listed alongside `APP_DIRS=True`
-            # so per-app routes under `shortener/routes/` still apply.
+            # The project-level page root `host/` owns the shared `layout.djx` envelope.
             "DIRS": [str(BASE_DIR / "host")],
             "PAGES_DIR": "routes",
             "OPTIONS": {"context_processors": []},

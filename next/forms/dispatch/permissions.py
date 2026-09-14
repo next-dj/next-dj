@@ -42,9 +42,8 @@ if TYPE_CHECKING:
 def _redirect_to_login(next_url: str) -> HttpResponseRedirect:
     """Build the LOGIN_URL redirect carrying `next_url`.
 
-    Mirrors `django.contrib.auth.views.redirect_to_login` without importing
-    contrib.auth.views, whose module-level `get_user_model()` call requires
-    django.contrib.auth in INSTALLED_APPS.
+    Mirrors `django.contrib.auth.views.redirect_to_login` without importing that module,
+    whose `get_user_model()` call requires `django.contrib.auth` installed.
     """
     scheme, netloc, path, query, fragment = urlsplit(resolve_url(settings.LOGIN_URL))
     querystring = QueryDict(query, mutable=True)
@@ -96,8 +95,8 @@ def _emit_form_access_denied(
     reason: Literal["raised", "denied", "response"],
     sender: type,
 ) -> None:
-    """Send `form_access_denied` when any receiver is connected."""
-    if form_access_denied.receivers:
+    """Send `form_access_denied` when a receiver listens for this sender."""
+    if form_access_denied.has_listeners(sender):
         form_access_denied.send(
             sender=sender,
             action_name=action_name,

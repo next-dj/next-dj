@@ -96,7 +96,6 @@ Place a CSS file next to ``component.djx`` and the :doc:`static pipeline </conte
 
 The framework finds ``component.css`` by :term:`stem`, the filename without its extension.
 When a page renders a component that has co-located styles, the static collector adds the file to the current request slot.
-Asset discovery picks up files co-located with the component folder.
 See :doc:`/content/topics/components` for the full component model.
 
 Wire the collector into the layout
@@ -119,7 +118,7 @@ Tell the layout where to emit the collected style and script tags.
          <p>{{ tagline }} ({{ note_count }} notes)</p>
        </header>
        <main>
-         {% block template %}{% endblock template %}
+         {% template %}
        </main>
        {% collect_scripts %}
      </body>
@@ -159,8 +158,8 @@ The collector emits one ``<script>`` tag for the file at the location of ``{% co
 Composite components with component context
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A component that pairs a template with a ``component.py`` is a composite component.
-Some components need Python logic.
+A component living in its own folder, like ``note_card``, is a composite component.
+Composite components can add Python logic through a ``component.py`` module, which the note card does next.
 The note card formats a short preview from the body when one is present.
 Add a ``component.py`` next to the template.
 
@@ -168,6 +167,7 @@ Add a ``component.py`` next to the template.
    :caption: notes/pages/_components/note_card/component.py
 
    from notes.models import Note
+
    from next import component
 
    @component.context("preview")

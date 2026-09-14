@@ -5,17 +5,19 @@ from unittest.mock import MagicMock, patch
 from django.test import override_settings
 
 import next.components as next_components_mod
+import next.components.backends as backends_mod
 from next.components import (
     ComponentInfo,
     ComponentsManager,
-    DummyBackend,
     FileComponentsBackend,
     ModuleCache,
     ModuleLoader,
     component_extra_roots_from_config,
 )
 from tests.support import (
-    next_framework_settings_component_backends_list as _next_framework_settings_component_backends_list,
+    DUMMY_COMPONENTS_BACKEND,
+    DummyComponentsBackend,
+    next_framework_settings_stand_in as _stand_in,
 )
 
 
@@ -32,6 +34,13 @@ class TestComponentsModuleExports:
         """Every name in ``__all__`` exists on the module."""
         for name in next_components_mod.__all__:
             assert hasattr(next_components_mod, name)
+
+    def test_ships_no_test_doubles(self) -> None:
+        """The shipped package carries no backend fixtures of its own."""
+        assert not hasattr(next_components_mod, "DummyBackend")
+        assert not hasattr(next_components_mod, "BoomBackend")
+        assert not hasattr(backends_mod, "DummyBackend")
+        assert not hasattr(backends_mod, "BoomBackend")
 
 
 class TestComponentInfo:
@@ -303,7 +312,7 @@ class TestFileComponentsBackend:
 
     def test_a_backend_without_modules_inherits_the_no_op_import_hook(self) -> None:
         """The contract default reports no modules rather than failing."""
-        assert DummyBackend({}).import_component_modules() == ()
+        assert DummyComponentsBackend({}).import_component_modules() == ()
 
 
 class TestWalkedFolderHook:
@@ -313,7 +322,10 @@ class TestWalkedFolderHook:
         self, tmp_path: Path
     ) -> None:
         """The contract default answers False so the walk moves on."""
-        assert DummyBackend({}).register_walked_folder(tmp_path, tmp_path, "") is False
+        assert (
+            DummyComponentsBackend({}).register_walked_folder(tmp_path, tmp_path, "")
+            is False
+        )
 
     def test_the_file_backend_claims_and_registers(
         self, tmp_path: Path, min_component_config: dict
@@ -354,7 +366,7 @@ class TestEnumerationHooks:
 
     def test_a_backend_without_a_list_enumerates_nothing(self) -> None:
         """The contract default keeps an on-demand backend out of the checks."""
-        backend = DummyBackend({})
+        backend = DummyComponentsBackend({})
         assert list(backend.iter_components()) == []
         assert list(backend.global_component_roots()) == []
 
@@ -390,6 +402,48 @@ class TestEnumerationHooks:
         assert tree not in roots
 
 
+class TestWatchRoots:
+    """`watch_roots` is how a backend puts its trees under the file watcher."""
+
+    def test_a_backend_that_names_no_tree_watches_nothing(self) -> None:
+        """The contract default keeps an on-demand backend out of autoreload."""
+        assert tuple(DummyComponentsBackend({}).watch_roots()) == ()
+
+    def test_the_file_backend_watches_its_dirs_without_scanning(
+        self, tmp_path: Path, min_component_config: dict
+    ) -> None:
+        """The roots are known from the entry, so naming them costs no discovery."""
+        (tmp_path / "card.djx").write_text("<div/>")
+        backend = FileComponentsBackend(
+            {**min_component_config, "DIRS": [str(tmp_path)]}
+        )
+
+        assert backend.watch_roots() == (tmp_path,)
+        assert backend._loaded is False
+
+    def test_a_missing_dir_is_no_tree_to_watch(
+        self, min_component_config: dict
+    ) -> None:
+        """A root that is not there yet contributes nothing until it is."""
+        backend = FileComponentsBackend(
+            {**min_component_config, "DIRS": ["/no/such/component/root"]}
+        )
+
+        assert backend.watch_roots() == ()
+
+    def test_a_dir_created_later_becomes_a_tree_to_watch(
+        self, tmp_path: Path, min_component_config: dict
+    ) -> None:
+        """The roots are read again, so a folder written after startup is watched."""
+        late = tmp_path / "ui"
+        backend = FileComponentsBackend({**min_component_config, "DIRS": [str(late)]})
+        assert backend.watch_roots() == ()
+
+        late.mkdir()
+
+        assert backend.watch_roots() == (late,)
+
+
 class TestFileBackendFromConfig:
     """A merged `COMPONENT_BACKENDS` entry configures the file backend."""
 
@@ -422,8 +476,8 @@ class TestComponentsManagerLoading:
     def test_entry_without_backend_falls_back_to_the_file_backend(self) -> None:
         """An entry naming no ``BACKEND`` still gets the filesystem source."""
         mgr = ComponentsManager()
-        mock_ns = _next_framework_settings_component_backends_list(
-            [{"DIRS": [], "COMPONENTS_DIR": "_components"}]
+        mock_ns = _stand_in(
+            COMPONENT_BACKENDS=[{"DIRS": [], "COMPONENTS_DIR": "_components"}]
         )
         with patch("next.backends.next_framework_settings", mock_ns):
             mgr.reload()
@@ -432,46 +486,46 @@ class TestComponentsManagerLoading:
     def test_backend_receives_its_own_config_entry(self) -> None:
         """The whole entry is handed to the backend constructor."""
         mgr = ComponentsManager()
-        mock_ns = _next_framework_settings_component_backends_list(
-            [{"BACKEND": "next.components.DummyBackend", "OPTIONS": {"marker": 7}}]
+        mock_ns = _stand_in(
+            COMPONENT_BACKENDS=[
+                {"BACKEND": DUMMY_COMPONENTS_BACKEND, "OPTIONS": {"marker": 7}}
+            ]
         )
         with patch("next.backends.next_framework_settings", mock_ns):
             mgr.reload()
         backend = mgr._backends[0]
-        assert isinstance(backend, DummyBackend)
+        assert isinstance(backend, DummyComponentsBackend)
         assert backend.config["OPTIONS"]["marker"] == 7
 
     def test_entry_outside_the_family_is_skipped(self) -> None:
         """A class that is no ``ComponentsBackend`` never joins the list."""
         mgr = ComponentsManager()
-        mock_ns = _next_framework_settings_component_backends_list(
-            [{"BACKEND": "builtins.dict"}]
-        )
+        mock_ns = _stand_in(COMPONENT_BACKENDS=[{"BACKEND": "builtins.dict"}])
         with patch("next.backends.next_framework_settings", mock_ns):
             mgr.reload()
         assert mgr._backends == []
 
     def test_dummy_backend_lookups_are_empty(self) -> None:
-        """DummyBackend does not resolve names and reports no visible components."""
-        b = DummyBackend({})
+        """The dummy backend resolves no name and reports no visible component."""
+        b = DummyComponentsBackend({})
         assert b.get_component("x", Path("/t.djx")) is None
         assert b.collect_visible_components(Path("/t.djx")) == {}
 
     def test_a_backend_without_eager_discovery_answers_the_hook(self) -> None:
         """`discover` is a no-op a backend resolving on demand can inherit."""
-        assert DummyBackend({}).discover() is None
+        assert DummyComponentsBackend({}).discover() is None
 
     def test_manager_skips_non_list_config_and_non_dict_entries(self) -> None:
         """If ``COMPONENT_BACKENDS`` is not a list, return early. Non-dict entries are skipped."""
         mgr = ComponentsManager()
-        mock_ns = _next_framework_settings_component_backends_list("bad")
+        mock_ns = _stand_in(COMPONENT_BACKENDS="bad")
         with patch("next.backends.next_framework_settings", mock_ns):
             mgr.reload()
             assert mgr._backends == []
 
         mgr2 = ComponentsManager()
-        mock_ns2 = _next_framework_settings_component_backends_list(
-            [
+        mock_ns2 = _stand_in(
+            COMPONENT_BACKENDS=[
                 None,
                 {
                     "BACKEND": "next.components.FileComponentsBackend",

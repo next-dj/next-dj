@@ -42,6 +42,7 @@ FormSpec.
    Includes a tuple of ``FormSectionSpec`` plus non field errors.
 
 Use these specs when you need to inspect a form structure from Python or to render in a custom template engine.
+A spec describes a form rather than replacing it, so the handler keeps working with the bound Django form and only the rendering layer reads the spec.
 
 Building a spec
 ----------------
@@ -51,7 +52,7 @@ The module provides three constructor helpers.
 .. code-block:: python
    :caption: building specs
 
-   from next.forms import field_spec, formset_spec, form_spec
+   from next.forms import field_spec, form_spec, formset_spec
 
    spec_one_field = field_spec(form["title"])
    spec_one_formset = formset_spec(my_formset)
@@ -63,6 +64,7 @@ The module provides three constructor helpers.
 The second argument of ``form_spec`` is a Django admin style ``fieldsets`` sequence of ``(label, options)`` pairs.
 Each ``options`` mapping carries a ``fields`` list and an optional ``description``.
 A field the fieldsets never name is omitted from the resulting ``FormSpec`` entirely, matching the Django admin contract, so list every field you want rendered.
+Fieldsets that name no field at all are the exception, the leftover section then holds every field, the same shape ``fieldsets=None`` produces.
 Each helper returns a frozen instance ready to pass into a template.
 
 ``field_spec`` accepts an ``is_extra`` keyword argument that defaults to ``False``.
@@ -146,18 +148,6 @@ Admin ``RelatedFieldWidgetWrapper`` widgets are unwrapped to their inner widget 
 The framework classifies the widget once when constructing the spec.
 Custom renderers can branch on ``kind`` without re instantiating the widget.
 
-Spec vs bound form
-------------------
-
-Specs are descriptors, not replacements.
-A handler still works with a normal Django bound form and calls ``form.is_valid()`` and ``form.save()``.
-A template can choose either path.
-
-- The default ``{% form %}`` tag renders the bound form directly.
-- A custom template engine or a server-rendered design system uses the spec for layout.
-
-Pick the spec when the rendering engine cannot consume Django bound fields directly.
-
 Common patterns
 ---------------
 
@@ -182,11 +172,6 @@ Compare on stable attributes instead.
 
    added = set(field_names(new_spec)) - set(field_names(old_spec))
    removed = set(field_names(old_spec)) - set(field_names(new_spec))
-
-System integration
-~~~~~~~~~~~~~~~~~~
-
-Use ``form_spec`` to render a form inside another rendering layer such as the Django admin while keeping dispatch on next.dj.
 
 See also
 --------

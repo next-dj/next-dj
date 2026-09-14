@@ -57,7 +57,7 @@ Call the helper with the setting name and the keys to override.
 The helper returns the default ``PAGE_BACKENDS`` list with the first entry ``PAGES_DIR`` set to ``routes`` and every other key kept.
 
 Override a nested OPTIONS key
------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Nested dicts such as ``OPTIONS`` are merged, not replaced.
 Adjacent keys survive.
@@ -75,7 +75,7 @@ Adjacent keys survive.
    }
 
 Patch a specific entry
-----------------------
+~~~~~~~~~~~~~~~~~~~~~~
 
 The ``index`` keyword selects which entry of the default list to patch.
 The default is ``0``, the first entry.
@@ -86,7 +86,7 @@ The default is ``0``, the first entry.
    extend_default_backend("PAGE_BACKENDS", index=0, APP_DIRS=False)
 
 When to write the list by hand
-------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``extend_default_backend`` patches an existing default entry.
 It does not add a new backend.

@@ -1,24 +1,13 @@
 """Discover and render DJX components for templates.
 
-Each subsystem lives in a small submodule. `info` holds the value
-object, `loading` the module cache, `scanner` the filesystem walk,
-`registry` the ordered store and visibility resolver, `context` the
-`@component.context` decorator, `renderers` the render strategies,
-`backends` the backend contract, `manager` the orchestrator,
-`watch` the read-only autoreload scan, and `facade` the short helpers
-used from templates. Internal classes are reachable with deep imports
-of the form `from next.components.registry import ComponentRegistry`.
+Each subsystem lives in its own submodule, and internal classes stay reachable through
+deep imports such as `from next.components.registry import ComponentRegistry`.
 """
 
 from __future__ import annotations
 
 from . import checks, signals
-from .backends import (
-    BoomBackend,
-    ComponentsBackend,
-    DummyBackend,
-    FileComponentsBackend,
-)
+from .backends import ComponentsBackend, FileComponentsBackend
 from .context import (
     ComponentContextManager,
     ComponentContextRegistry,
@@ -49,11 +38,10 @@ from .renderers import (
     SimpleComponentRenderer,
 )
 from .scanner import ComponentScanner, component_extra_roots_from_config
-from .watch import get_component_paths_for_watch
+from .watch import component_watch_roots, get_component_paths_for_watch
 
 
 __all__ = [
-    "BoomBackend",
     "CachedComponentTemplateLoader",
     "ComponentContextManager",
     "ComponentContextRegistry",
@@ -68,7 +56,6 @@ __all__ = [
     "ComponentsManager",
     "CompositeComponentRenderer",
     "ContextFunction",
-    "DummyBackend",
     "FileComponentsBackend",
     "ModuleCache",
     "ModuleLoader",
@@ -77,6 +64,7 @@ __all__ = [
     "collect_visible_components",
     "component",
     "component_extra_roots_from_config",
+    "component_watch_roots",
     "components_manager",
     "context",
     "get_component",

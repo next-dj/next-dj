@@ -130,7 +130,7 @@ No `template = "..."`, no `render()`, no `render_markdown` call. `post` carries 
 
 ### 5. Nested layout wraps the rendered Markdown
 
-[`screens/posts/layout.djx`](blog/screens/posts/layout.djx) adds the back link, the meta bar with the reading time and the share button, and a `prose` container that receives the article HTML through `{% block template %}`. The loader returns the body with no wrapper of its own, so the chrome lives entirely in the layout and every post under `screens/posts/` inherits it.
+[`screens/posts/layout.djx`](blog/screens/posts/layout.djx) adds the back link, the meta bar with the reading time and the share button, and a `prose` container that receives the article HTML through `{% template %}`. The loader returns the body with no wrapper of its own, so the chrome lives entirely in the layout and every post under `screens/posts/` inherits it.
 
 The outer [`site/layout.djx`](site/layout.djx) wraps that article in turn, which makes the post pages a two-level layout composition across two page roots.
 

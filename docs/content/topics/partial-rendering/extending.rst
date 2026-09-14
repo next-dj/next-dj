@@ -94,7 +94,6 @@ A value is pushed by the name of a registered ``serialize=True`` provider on the
    from next import action, context
    from next.partial import Patches
 
-
    @context("cart_count", serialize=True)
    def cart_count(request: HttpRequest) -> int:
        """Expose the cart size to the client context."""
@@ -128,6 +127,21 @@ The event payload carries the whole merged store in ``context`` and the keys of 
 A stream source cannot build a ``context`` patch, because it has no page-render origin to read a provider value from.
 A stream that needs to push fresh context drives a ``refresh`` instead, and the re-fetched zone delivers the new context through its own render, see :doc:`sse`.
 
+A value the zone template reads rather than a client listener rides the render context instead of the client one.
+``morph(zone=, overrides=)`` merges a mapping into the context the zone renders under, so a handler binds a value it computed without registering a provider for it.
+
+.. code-block:: python
+   :caption: cart/page.py
+
+   @action("apply_coupon")
+   def apply_coupon(request: HttpRequest) -> HttpResponse:
+       """Re-render the cart zone with the coupon already applied."""
+       cart = Cart.for_request(request)
+       cart.apply_coupon(request.POST["code"])
+       return Patches(request).morph(zone="cart", overrides={"cart": cart}).response()
+
+The mapping wins over the providers of the same names for that render only, and it reaches the zone body alone rather than the whole page.
+
 Firing an event
 ---------------
 
@@ -143,7 +157,6 @@ It is the seam for a server-authored signal that no morph expresses, a notificat
    from next import action
    from next.forms.markers import DForm
    from next.partial import Patches
-
 
    @action("place_order", form_class=OrderForm)
    def place_order(request: HttpRequest, form: DForm[OrderForm]) -> HttpResponse:
@@ -173,10 +186,8 @@ One active backend
 
 The three seams above extend the envelope from inside.
 The wire format itself is replaced rather than extended, and the replacement lives in the protocol backend.
-``PARTIAL_BACKENDS`` holds the protocol backends and only the first entry is active.
-The rest are ignored, so multi-backend selection is not a supported seam.
-A configuration with more than one entry earns the ``next.W071`` warning at ``manage.py check``.
-An application that needs a different envelope shape subclasses ``PartialProtocolBackend``, serialises its own wire format, and makes the subclass the single entry of ``PARTIAL_BACKENDS``.
+``PARTIAL_BACKENDS`` activates its first entry and ignores the rest, so multi-backend selection is not a supported seam, see :doc:`reference`.
+An application that needs a different envelope shape subclasses ``PartialProtocolBackend`` or the shipped ``JsonPartialProtocolBackend``, serializes its own wire format, and makes the subclass the single entry of ``PARTIAL_BACKENDS``.
 See :doc:`/content/ref/partial` for the ``PartialProtocolBackend`` API.
 
 See also

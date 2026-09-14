@@ -8,6 +8,7 @@ from django.template.engine import Engine
 
 from next.components import components_manager
 from next.components.backends import FileComponentsBackend
+from next.utils import forget_resolved_trees
 
 
 if TYPE_CHECKING:
@@ -29,6 +30,11 @@ _INCLUDE_TAG = (
 _INCLUSION_TAG = '{% bench_card "Bench" "Body text" %}'
 
 _PAGE_TAG_COUNT = 10
+
+# A cold round rereads and recompiles the component template, so the count stays
+# modest and the warmup rounds keep the backend discovery out of the median.
+_COLD_ROUNDS = 50
+_COLD_WARMUP_ROUNDS = 5
 
 _CACHED_LOADER = (
     "django.template.loaders.cached.Loader",
@@ -64,6 +70,52 @@ def _vanilla_page(root: Path, source: str, count: int) -> CompiledTemplate:
         builtins=["tests.benchmarks.templatetags.vanilla"],
     )
     return engine.from_string(source * count)
+
+
+class TestBenchColdComponentTag:
+    """The tag rendering a page whose component caches were just dropped.
+
+    The compiled component template and the page-path memo both go, as after a reload.
+    """
+
+    @pytest.mark.benchmark(group="templatetags.component")
+    def test_one_component_tag_cold(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, benchmark
+    ) -> None:
+        template, context = _component_page(tmp_path, monkeypatch, 1)
+        template.render(context)
+
+        def setup() -> tuple[tuple[Context], dict[str, object]]:
+            components_manager.clear_template_caches()
+            forget_resolved_trees()
+            return (context,), {}
+
+        benchmark.pedantic(
+            template.render,
+            setup=setup,
+            rounds=_COLD_ROUNDS,
+            warmup_rounds=_COLD_WARMUP_ROUNDS,
+        )
+
+    @pytest.mark.benchmark(group="templatetags.component")
+    def test_ten_component_tags_cold(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, benchmark
+    ) -> None:
+        """Ten tags of one component, so the round prices the reread once."""
+        template, context = _component_page(tmp_path, monkeypatch, _PAGE_TAG_COUNT)
+        template.render(context)
+
+        def setup() -> tuple[tuple[Context], dict[str, object]]:
+            components_manager.clear_template_caches()
+            forget_resolved_trees()
+            return (context,), {}
+
+        benchmark.pedantic(
+            template.render,
+            setup=setup,
+            rounds=_COLD_ROUNDS,
+            warmup_rounds=_COLD_WARMUP_ROUNDS,
+        )
 
 
 class TestBenchComponentTag:

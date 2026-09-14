@@ -7,7 +7,9 @@ A morph replaces DOM nodes.
 A node that arrives in a patch was not in the document when the page loaded, and a node that a morph removes takes any listener bound to it with it.
 Co-located JavaScript has to survive that, and the rule is to attach behaviour to something that outlives the morph rather than to the markup itself.
 
-Each asset runs exactly once per page lifetime, a URL deduped by its address resolved against the document base, query included and fragment ignored, and an inline body by its content.
+Each asset runs exactly once per page lifetime.
+A URL is deduped by its address resolved against the document base, with the query kept and the fragment dropped.
+An inline body is deduped by its content under the verb that inserts it.
 The registry behind that promise is built from the document while it parses.
 An asset a third party inserts after parsing ends stays outside it, so a later manifest naming the same URL or the same inline body inserts it a second time.
 A module loaded for the first zone that needs it is not re-run when a later patch brings more of the same markup.
@@ -102,7 +104,7 @@ The asset URL is already in the runtime's loaded registry from the first open, s
 Migrate a module-load scan to one of the three idioms above.
 The search catalogue's minimum-length hint and the wiki's markdown preview both register through ``onMount`` for exactly this reason.
 With the runtime's dev mode on, that is with Django ``DEBUG``, the runtime prints a ``console.warn`` for every ``<script>`` it neutralises out of a patch.
-That surfaces a widget which died silently rather than letting it fail in quiet.
+The warning names the widget whose initialiser was stripped, so a dead widget is visible during development.
 
 Scripts in patches never run
 ----------------------------
@@ -120,7 +122,7 @@ A stylesheet, a classic script, or a module URL the page has not seen is inserte
 An inline body it has not seen is inserted the same way when its kind wraps it in the element the verb builds.
 The runtime inserts an asset by the verb the server derived from the kind's renderer.
 A custom kind registered with ``render_link_tag``, ``render_script_tag``, or ``render_module_tag`` therefore arrives the same way the built-in kinds do.
-A kind registered with a custom renderer carries no verb and is skipped, which the ``next.W074`` check reports at ``manage.py check``.
+A kind registered with a custom renderer carries no verb and is skipped, see :doc:`reference` for the check that reports it.
 Behaviour co-located with a zone therefore arrives on a standalone zone render.
 It must still use the three idioms above because of the once-per-page execution, not because a delivery channel is missing.
 

@@ -81,10 +81,8 @@ EVENT_BRIDGE = """
 def pytest_configure() -> None:
     """Let the suite reach the ORM from the thread playwright parks its loop in.
 
-    The sync API keeps a running asyncio loop in a greenlet of the main thread, so
-    Django's async guard fires on the ORM calls `transactional_db` makes from there
-    and every browser test errors out before it starts. Living in the plugin rather
-    than in a conftest keeps the guard armed for every suite that never loads it.
+    Django's async guard fires on ORM calls from that greenlet, so this lives in
+    the plugin rather than a conftest to stay armed for every suite that loads it.
     """
     os.environ.setdefault("DJANGO_ALLOW_ASYNC_UNSAFE", "1")
 
@@ -173,8 +171,7 @@ class PageProbe:
         """Return responses the runtime stamped as partial, optionally one zone.
 
         A batched trigger sends every target in one comma-separated header, so a
-        zone matches when it appears in that list rather than equalling it. The
-        `since` index skips the responses a caller already accounted for.
+        zone matches when it appears in that list rather than equalling it.
         """
         matched = []
         for response in self.responses[since:]:
@@ -207,9 +204,7 @@ def _serve_from_cache(route: Route) -> None:
     if not path.exists():
         fetched = route.fetch()
         if not fetched.ok:
-            # An error page cached under a script name would be replayed as a valid
-            # bundle by every later run on this machine, so nothing is stored and the
-            # test sees the real status instead.
+            # Caching a failed fetch would replay the error page as a bundle forever.
             route.fulfill(response=fetched)
             return
         CDN_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -235,9 +230,8 @@ def _test_failed(request: pytest.FixtureRequest) -> bool:
 def pytest_runtest_call(item: pytest.Item) -> Generator[None, object, object]:
     """Fail the call phase, not the teardown, on the noise the probe collected.
 
-    pytest-playwright keeps the retain-on-failure trace, video and screenshot only
-    when `rep_call` failed, so a probe failing in teardown would delete its own
-    evidence.
+    pytest-playwright keeps the retain-on-failure trace, video and screenshot only when
+    `rep_call` failed, so a failure raised in teardown deletes its own evidence.
     """
     outcome = yield
     probe = item.stash.get(PROBE_KEY, None)
@@ -338,11 +332,8 @@ def expect_no_partial_request(
 ) -> None:
     """Fail unless the interaction since the baseline left the server untouched.
 
-    The runtime dispatches `partial:before-request` synchronously before it awaits the
-    fetch, so the event is already recorded once the playwright call that triggered it
-    returns. The response listener alone would pass while the request is still in
-    flight, which is the very regression these assertions guard against, and it stays
-    only as a second reading that catches a bridge which never installed.
+    The runtime records `partial:before-request` before the triggering call returns,
+    so the response-count check alone would still pass while a request is in flight.
     """
     sent = _requested_count(page) - since.sent
     if sent > 0:

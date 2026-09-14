@@ -7,16 +7,10 @@ from next.conf import extend_default_backend
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Vue asset resolution rule, in priority order.
-#  1. `VITE_DEV_ORIGIN` env var, an empty value included: an explicit
-#     override wins, and an empty one asks for the built manifest.
-#  2. Pytest without that variable: a stub origin, so no test depends
-#     on a build and every machine reads the same asset URLs.
-#  3. A built manifest exists on disk: production-shaped run after
-#     `npm run build`. The backend reads hashed bundle URLs.
-#  4. Neither: assume the developer is running `npm run dev` and
-#     default to the local Vite dev server. `runserver` plus
-#     `npm run dev` then works without env-var ceremony.
+# `VITE_DEV_ORIGIN` wins when set, an empty value included, so an empty one asks for the
+# built manifest. Under pytest a stub origin keeps asset URLs identical everywhere
+# without a build, and with no manifest on disk the local Vite dev server is the
+# default, so `runserver` plus `npm run dev` needs no env-var ceremony.
 _VITE_MANIFEST_PATH = BASE_DIR / "polls/static/polls/dist/.vite/manifest.json"
 VITE_DEV_ORIGIN = os.environ.get("VITE_DEV_ORIGIN", "")
 if "VITE_DEV_ORIGIN" not in os.environ:

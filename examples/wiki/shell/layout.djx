@@ -8,7 +8,7 @@
       {% component "button" href="/articles/new/" text="New article" variant="default" size="sm" %}
     {% /slot %}
     {% #slot "content" %}
-      {% block template %}{% endblock template %}
+      {% template %}
     {% /slot %}
     {% #slot "page_footer" %}
       <footer class="border-t border-border bg-background py-4 text-center text-xs text-muted-foreground">

@@ -4,13 +4,7 @@ from tests.support import action_uid
 
 
 class TestInvalidEnvelopeAddressesOnlyTheFailedForm:
-    """An invalid submit on a three-form page touches only the failed form.
-
-    The settings page renders three independent forms. Submitting the
-    rename form empty addresses one extract-morph of the rename form by
-    its uid. The two neighbouring forms are named by no operation, so
-    their unsent input is untouched by construction, not by discipline.
-    """
+    """An invalid submit on a three-form page touches only the failed form."""
 
     def test_only_the_failed_form_is_a_target(self, next_client: NextClient) -> None:
         response = next_client.post_action(
@@ -74,12 +68,7 @@ class TestInvalidFormMetaIsMachineReadable:
 
 
 class TestInvalidWithZoneMorphsTheZone:
-    """A form inside a zone re-renders only that zone with the bound form.
-
-    The page declares the `rename-board` zone, and the partial intent
-    names it, so the failed submit morphs the zone instead of extract-
-    morphing the whole document. The bound form rides the zone context.
-    """
+    """A form inside a zone re-renders only that zone with the bound form."""
 
     def test_zone_morph_replaces_extract(self, next_client: NextClient) -> None:
         response = next_client.post_action(
@@ -177,9 +166,7 @@ class TestResultRichResponseFallsThrough:
 class TestSuccessFunnelMorphsAndDrainsMessages:
     """A None result morphs the form zone and drains messages to toasts.
 
-    The zoned rename form flashes a success message and an info note on a
-    valid submit. The success funnel morphs the zone in place and drains
-    both pending messages into toast patches.
+    The zoned rename form flashes a success message and an info note on a valid submit.
     """
 
     def test_zone_morph_and_message_toasts(self, next_client: NextClient) -> None:

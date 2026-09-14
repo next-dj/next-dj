@@ -13,7 +13,7 @@ Overview
 --------
 
 Discovery runs lazily on the first URL access and again whenever the autoreload watcher fires.
-The result is a set of Django URL patterns plus the context callables and layout chains attached to each ``page.py``.
+The result is a set of Django URL patterns plus the context functions and layout chains attached to each ``page.py``.
 
 Pipeline
 --------
@@ -59,8 +59,17 @@ Modules
 ``next.pages.scan``.
    Walks the routed page tree once per check run and yields the existing ``page.py`` paths, plus the keyed ``serialize=True`` context keys the static reserved-key check reads.
 
+``next.pages.paths``.
+   Memoises the path facts of one ``page.py``, its module path, its template path, and its ancestor chain, in a bounded cache the composition lifecycle clears.
+
+``next.pages.errors``.
+   Defines ``PageModuleImportError``, the exception a broken ``page.py`` raises on the request path.
+
+``next.pages.checks``.
+   Registers the Django system checks for the pages subsystem, listed with their identifiers in :doc:`/content/ref/system-checks`.
+
 ``next.pages.watch``.
-   Returns the watch specs that the autoreloader uses to track page directories.
+   Reports the page roots of each router backend and the components folder name each root carries, which ``next.server.watcher`` turns into the ``(path, glob)`` watch specs the autoreloader consumes.
 
 Render path
 -----------
@@ -69,7 +78,7 @@ Render path
    A page whose module raised at build time is the exception, and its view re-reads the memo on every request so a fixed file recovers without a restart.
 2. The body source produces the page body string.
 3. The framework composes the ancestor layout chain, the innermost layout wrapping the page body first and each outer layout wrapping the result.
-   Each layout substitutes the wrapped content into ``{% block template %}{% endblock template %}``.
+   Each layout substitutes the wrapped content into ``{% template %}``.
 4. ``Page.build_render_context`` assembles the template scope, see `Context resolution`_ below.
 5. The composed template string renders against the assembled scope.
 6. The static manager replaces the ``{% collect_styles %}`` and ``{% collect_scripts %}`` placeholder tokens with the rendered tags accumulated by the request-scoped ``StaticCollector``.
@@ -79,31 +88,31 @@ When the body source is a ``render`` function that returns an ``HttpResponseBase
 Composed-template cache
 -----------------------
 
-``Page`` keeps parallel dicts that short-circuit layout composition.
-Three of them back ``composed_template_for``, read by the canonical full-page render of a page without ``render()``, by the form re-render after a validation failure, by the standalone zone render, and by direct ``Page.render`` calls such as ``next.testing.render_page``.
+``Page`` holds a ``PageTemplateCache`` whose layers short-circuit layout composition.
+Two of them back ``composed_template_for``, read by the canonical full-page render of a page without ``render()``, by the form re-render after a validation failure, by the standalone zone render, and by direct ``Page.render`` calls such as ``next.testing.render_page``.
 A page whose body comes from ``render()`` resolves that body per request and caches only the layout chain around it.
 
-``_template_registry``.
+``composed``.
    Maps a ``page.py`` path to its already-composed template string.
 
-``_compiled_registry``.
+``compiled``.
    Maps a ``page.py`` path to the compiled Django ``Template`` built from the composed source, carrying an ``Origin`` so a compile error names the page path.
    Writing the source registry drops the compiled entry with it.
 
-``_template_source_mtimes``.
+``composed_sources``.
    Snapshots the modification time of every file that contributed to the composition, including the page body source and each ancestor ``layout.djx``, and of every directory the layout walk visited.
    The directories are tracked because a ``layout.djx`` that appears or disappears moves no mtime of a file the snapshot already holds.
    Only the directories inside the page tree are tracked, so an unrelated write to a shared parent such as the home directory evicts nothing, and a ``layout.djx`` created above the tree joins the chain on the next composition instead.
 
-``_skeleton_registry``.
+``skeleton``.
    Maps a ``page.py`` path whose body comes from ``render()`` to its layout chain with an empty body slot, filled with the resolved body on each request.
    No dynamic body enters the composed-source registry.
-   Its own snapshot lives in ``_skeleton_source_mtimes``, so an eviction on the composed side never reads as freshness here.
+   Its own snapshot lives in ``skeleton_sources``, so an eviction on the composed side never reads as freshness here.
 
 The snapshot is taken on every composition, and only the check reading it is gated on ``DEBUG`` through ``next.utils.template_edits_watched``, read per call so an override takes effect at once and sees the sources of a composition built before it.
 The dev watcher deliberately ignores ``.djx``, so under ``DEBUG`` this is the only mechanism that makes a template edit visible without a restart, and with ``DEBUG`` off a warm read performs no stat and holds the composition for the life of the process.
 
-On each cache read ``_is_template_stale`` compares the current mtimes against the snapshot.
+On each cache read ``composed_is_stale`` or ``skeleton_is_stale`` compares the current mtimes against the snapshot.
 A change to any contributing path evicts the entry, the composition step rebuilds the template string, and the new snapshot is stored.
 A tracked path that no longer stats counts as a change, so a deleted ``layout.djx`` evicts the entry exactly like an edited one.
 
@@ -113,7 +122,8 @@ A rewrite landing on the same mtime tick is invisible to the staleness check, wh
 Layout composition
 ------------------
 
-The framework reads each ancestor ``layout.djx`` from disk and replaces its ``{% block template %}{% endblock template %}`` region with the wrapped content.
+The framework reads each ancestor ``layout.djx`` from disk and replaces its ``{% template %}`` region with the wrapped content.
+Django's own lexer locates that region, so a placeholder written inside ``{% verbatim %}`` or ``{% comment %}`` is text the composition leaves alone.
 The innermost layout wraps the page body, the outermost layout wraps everything.
 Composition is string substitution, not Django template inheritance, so no page needs an explicit ``{% extends %}``.
 
@@ -138,7 +148,7 @@ Context resolution
    b. Page-level context.
       The ``@context`` callables declared in the current ``page.py``, evaluated after inherited values are in place so the page can shadow any inherited key.
 
-3. Context processors merge ``OPTIONS.context_processors`` from each page backend entry with ``context_processors`` from the **first** ``TEMPLATES`` entry.
+3. Context processors merge ``OPTIONS.context_processors`` from each page backend entry with ``OPTIONS.context_processors`` from the **first** ``TEMPLATES`` entry.
    The page backend paths are concatenated ahead of the Django paths.
    Deduplication by dotted path keeps the first occurrence, so a path shared by both sources runs once with the page backend taking precedence.
    Each surviving processor returns a dict that updates the merged scope, so a later processor overrides an earlier key on a collision.

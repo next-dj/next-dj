@@ -31,21 +31,8 @@ The :doc:`/content/intro/install` *Requirements* list names the tested Python an
 Is next.dj production ready
 ---------------------------
 
-The answer has two halves, and the second one is the limiting factor.
-The engineering gates are strict and verifiable, and the public API is not frozen.
-
-Every merge passes the same gates.
-The test suite enforces 100 percent line coverage of ``next/``, with only the per-area ``checks.py`` modules excluded.
-A benchmark workflow runs on every pull request and fails at a ``median:99%`` regression gate, so a hot-path slowdown blocks the merge.
-Ruff runs with ``select = ["ALL"]``, mypy runs strict over ``next/``, the documentation builds with warnings as errors, and the client runtime bundle is held to a gzip size budget.
-
-The support matrix is tested rather than declared.
-Continuous integration runs the suite against Python 3.12, 3.13, and 3.14 crossed with Django 5.2, 6.0, and 6.1, excluding Python 3.14 on Django 5.2, and it runs against the built wheel rather than the source tree.
-A separate compatibility suite runs against django-allauth, django-crispy-forms, django-htmx, and django-widget-tweaks, and every project under ``examples/`` ships tests held to 100 percent coverage of its own.
-A deployment verifies its own configuration with ``manage.py check``, which runs the framework system checks contributed by eight subsystems (see :doc:`/content/ref/system-checks`).
-
-The boundary is API stability.
-The documented public surface is the contract, and :ref:`faq-safe-symbols` below defines exactly what it covers.
+Every merge passes the same strict and verifiable gates, and :doc:`/content/contributing/quality-gates` states what each one measures and which command reproduces it.
+The public API is not frozen, so the documented public surface is the contract rather than a guarantee, and :ref:`faq-safe-symbols` below defines exactly what it covers.
 That contract can still change in ways that require edits to application code, and the manual carries no release history by policy, so each change states its own impact in the pull request that makes it.
 Pin the Python and Django releases the matrix tests (see :doc:`/content/intro/install`), pin an exact next.dj release, and read the pull requests behind an upgrade before taking it.
 
@@ -90,7 +77,7 @@ Which symbols are safe to depend on
 
 Two rules define the public surface.
 First, anything exported from a top-level ``next.*`` package is safe to import, and so is any module the :doc:`/content/ref/index` pages document with an ``automodule`` entry.
-The ``next.testing`` submodules are documented that way, so :doc:`/content/intro/tutorial05` and :doc:`/content/topics/testing` import ``NextClient``, ``SignalRecorder``, and ``eager_load_pages`` from ``next.testing.client``, ``next.testing.signals``, and ``next.testing.loaders`` directly.
+The ``next.testing`` submodules are documented that way, so :doc:`/content/intro/tutorial05` imports ``SignalRecorder`` from ``next.testing.signals`` and :doc:`/content/topics/testing` imports ``NextClient`` and ``eager_load_pages`` from ``next.testing.client`` and ``next.testing.loaders`` directly.
 
 Second, symbols whose names start with a single underscore are internal and may change without notice, even when they appear in a module ``__all__``.
 The underscore rule is binding and overrides any incidental re-export.

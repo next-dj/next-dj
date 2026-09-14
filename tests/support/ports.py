@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from django.forms import BaseForm, BaseFormSet
     from django.http import HttpRequest
 
+    from next.forms.wizard import FormWizard
     from next.partial.headers import PartialIntent
 
 
@@ -66,7 +67,8 @@ class IntentOnlyShaper:
         *,
         action_name: str,
         uid: str,
+        wizard: FormWizard | None = None,
     ) -> NoReturn:
         """Fail because a submission naming no validate field must never reach here."""
-        del backend, request, form, intent, action_name, uid
+        del backend, request, form, intent, action_name, uid, wizard
         _shaping_refused("shape_validate")

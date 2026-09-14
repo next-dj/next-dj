@@ -1,14 +1,7 @@
 """Pluggable builder for the `next.min.js` preload, script, and init tags.
 
-The builder produces the three HTML fragments that wire `window.Next` into the rendered
-page. The first fragment is a preload hint injected before `</head>` so the browser
-starts downloading during HTML parsing. The second fragment is a blocking script tag for
-the compiled runtime. The third fragment is an inline script that feeds the serialized
-JS context into `Next._init`.
-
-Every template is an instance attribute, so users can override
-any single tag without subclassing. An injection policy
-controls whether the static manager emits those tags at all.
+Every template is an instance attribute, overridable without subclassing, and an
+injection policy decides whether the tags are emitted at all.
 """
 
 from __future__ import annotations
@@ -36,8 +29,7 @@ NEXT_JS_STATIC_PATH: Final = "next/next.min.js"
 
 CSRF_PAYLOAD_KEY: Final = "$csrf"
 
-# Present in the init payload only while Django runs with `DEBUG = True`, so a
-# production render carries no dev-only bytes.
+# Present in the init payload only under `DEBUG`, so production carries no dev bytes.
 DEV_PAYLOAD_KEY: Final = "$dev"
 
 # The init-payload keys the framework owns. A colliding js-context key never
@@ -60,10 +52,8 @@ _SCRIPT_ESCAPES: Final[dict[int, str]] = {
 def csrf_header_name() -> str:
     """Return the CSRF header name in HTTP wire form from Django settings.
 
-    Django stores `CSRF_HEADER_NAME` in WSGI `request.META` form, for
-    example `HTTP_X_CSRFTOKEN`. The runtime sends the header by its HTTP
-    name, so the META form is unmangled with the same rule Django uses
-    to expose headers. The cookie is never read.
+    Django stores `CSRF_HEADER_NAME` in WSGI `META` form, so it is unmangled to the
+    wire name with the same rule Django uses to expose headers.
     """
     raw = settings.CSRF_HEADER_NAME
     name = HttpHeaders.parse_header_name(raw)
@@ -80,11 +70,8 @@ def csrf_payload(request: HttpRequest) -> dict[str, str]:
 def csrf_payload_for(request: HttpRequest | None) -> dict[str, str] | None:
     """Return the `$csrf` payload, or None when the request cannot mint a token.
 
-    A request whose `META` is not a real mapping (a unit-test stand-in or
-    a non-CSRF-capable request) yields no payload, so the rendered page
-    stays byte-identical to the pre-partial output for those renders. A
-    real request always yields the header name and token the runtime
-    needs to submit partial mutations.
+    A request whose `META` is not a real mapping yields no payload, so a render from a
+    test stand-in stays byte-identical to the pre-partial output.
     """
     if request is None or not isinstance(getattr(request, "META", None), dict):
         return None
@@ -94,12 +81,8 @@ def csrf_payload_for(request: HttpRequest | None) -> dict[str, str] | None:
 class ScriptInjectionPolicy(enum.Enum):
     """Controls whether `next.min.js` is automatically injected.
 
-    The `AUTO` value is the default. Under `AUTO` the static manager emits the preload
-    hint, the `<script>` tag, and the `Next._init` call into every rendered page. The
-    `DISABLED` value skips injection entirely and is useful when a page does not need
-    `window.Next`, for example a raw API response rendered through the page machinery.
-    The `MANUAL` value skips automatic injection but still builds the fragments on
-    request so users can emit the tags themselves from a template.
+    `AUTO` emits every tag automatically. `DISABLED` skips injection entirely.
+    `MANUAL` still builds the fragments but leaves emitting them to the template.
     """
 
     AUTO = "auto"
@@ -110,14 +93,8 @@ class ScriptInjectionPolicy(enum.Enum):
 class NextScriptBuilder:
     """Builds the preload hint, script tag, and init script for `window.Next`.
 
-    The `next_js_url` argument is the public URL of the compiled
-    `next.min.js` asset. The optional `preload_template`,
-    `script_tag_template`, and `init_template` arguments override the
-    defaults. The preload and script templates must contain the `{url}`
-    placeholder. The init template must contain the `{payload}`
-    placeholder, which receives the JSON-serialized JS context. The
-    `policy` argument is consulted by the static manager before
-    injection and defaults to `ScriptInjectionPolicy.AUTO`.
+    `preload_template`, `script_tag_template`, and `init_template` override the
+    defaults, the first two needing `{url}` and the last `{payload}`.
     """
 
     DEFAULT_PRELOAD: ClassVar[str] = '<link rel="preload" as="script" href="{url}">'
@@ -175,14 +152,8 @@ class NextScriptBuilder:
     ) -> str:
         """Return the inline script that passes the context to `Next._init`.
 
-        Assembles the payload from per-key fragments so a value
-        `StaticCollector.add_js_context` already encoded is reused through
-        `encoded` rather than serialised a second time. A key missing from
-        `encoded` falls back to its serializer. Compact top-level separators
-        keep the output byte-identical to a whole-dict dump for the compact
-        serializers the framework ships. The assembled payload is escaped for
-        the inline `<script>` context so a `serialize=True` value whose text
-        holds `</script>` cannot break out of the element.
+        An already-encoded value is reused rather than serialised twice, and the payload
+        is escaped so a `</script>` inside it cannot break out of the element.
         """
         default = resolve_serializer()
         serializers = key_serializers or {}
@@ -203,10 +174,7 @@ class NextScriptBuilder:
     ) -> NextScriptBuilder:
         """Build a script builder from an options mapping.
 
-        The recognised keys are `preload_template`, `script_tag_template`,
-        `init_template`, and `policy`. The `policy` value may be a
-        `ScriptInjectionPolicy` member or the string value of one of its
-        members. Any other value raises `ValueError`.
+        `policy` accepts a `ScriptInjectionPolicy` member or its string value.
         """
         options = options or {}
         raw_policy = options.get("policy", ScriptInjectionPolicy.AUTO)

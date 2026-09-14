@@ -60,6 +60,7 @@ Register stems in ``AppConfig.ready``.
    :caption: notes/apps.py
 
    from django.apps import AppConfig
+
    from next.static.discovery import default_stems
 
    class NotesConfig(AppConfig):
@@ -84,29 +85,8 @@ Stem and kind interaction
 -------------------------
 
 A new stem participates in every registered kind, so a registration combines with every kind extension automatically.
+A stem does not change ownership, so a ``vendor.css`` inside a component folder still belongs to the component and a ``page.css`` next to ``template.djx`` still belongs to the page.
 See :doc:`/content/howto/add-a-custom-stem` for a worked example, and :doc:`asset-kinds` for pairing a stem with a custom kind.
-
-Owner resolution
-----------------
-
-A stem does not change ownership.
-A ``vendor.css`` inside a component folder is still owned by the component.
-A ``page.css`` next to ``template.djx`` is still owned by the page.
-
-The owner determines when the collector adds the asset.
-
-Common patterns
----------------
-
-Alternative page filename
-~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Register a ``page`` stem under the ``template`` role so the page asset can be named ``page.css`` to match the ``page.py`` module.
-
-Vendor assets per component
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Register a ``vendor`` stem under the ``component`` role for third party files that ship next to the component that depends on them.
 
 See also
 --------

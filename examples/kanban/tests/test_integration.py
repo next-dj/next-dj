@@ -120,7 +120,7 @@ class TestBoardView:
     ) -> None:
         body = _board_html(next_client, board)
         assert body.count('placeholder="New card"') == board.columns.count()
-        assert 'name="column_id"' in body
+        assert 'name="column"' in body
 
     def test_nested_layout_chain(self, next_client: NextClient, board: Board) -> None:
         body = _board_html(next_client, board)
@@ -235,7 +235,7 @@ class TestMoveCard:
         card = backlog.cards.first()
         response = next_client.post_action(
             "move_card_form",
-            {"card_id": card.pk, "target_column_id": done.pk, "target_position": "0"},
+            {"card_id": card.pk, "target_column": done.pk, "target_position": "0"},
         )
         assert response.status_code == 302
         card.refresh_from_db()
@@ -247,7 +247,7 @@ class TestMoveCard:
         card = backlog.cards.first()
         next_client.post_action(
             "move_card_form",
-            {"card_id": card.pk, "target_column_id": done.pk, "target_position": "0"},
+            {"card_id": card.pk, "target_column": done.pk, "target_position": "0"},
         )
         positions = list(
             done.cards.order_by("position").values_list("position", flat=True)
@@ -262,15 +262,20 @@ class TestMoveCard:
         card = board.columns.first().cards.first()
         response = next_client.post_action(
             "move_card_form",
-            {
-                "card_id": card.pk,
-                "target_column_id": other_col.pk,
-                "target_position": "0",
-            },
+            {"card_id": card.pk, "target_column": other_col.pk, "target_position": "0"},
         )
         assert response.status_code == 400
         card.refresh_from_db()
         assert card.column.board_id == board.pk
+
+    def test_forged_card_id_rejected(
+        self, next_client: NextClient, done: Column
+    ) -> None:
+        response = next_client.post_action(
+            "move_card_form",
+            {"card_id": "99999", "target_column": done.pk, "target_position": "0"},
+        )
+        assert response.status_code == 400
 
     def test_negative_position_rejected(
         self, next_client: NextClient, backlog: Column, done: Column
@@ -278,7 +283,7 @@ class TestMoveCard:
         card = backlog.cards.first()
         response = next_client.post_action(
             "move_card_form",
-            {"card_id": card.pk, "target_column_id": done.pk, "target_position": "-1"},
+            {"card_id": card.pk, "target_column": done.pk, "target_position": "-1"},
         )
         assert response.status_code == 400
 
@@ -292,7 +297,7 @@ class TestPreviewComponent:
         card = backlog.cards.first()
         next_client.post_action(
             "move_card_form",
-            {"card_id": card.pk, "target_column_id": done.pk, "target_position": "0"},
+            {"card_id": card.pk, "target_column": done.pk, "target_position": "0"},
         )
         response = next_client.get(f"/board/{board.pk}/?moved={card.pk}")
         body = response.content.decode()
@@ -318,7 +323,7 @@ class TestCreateCard:
     ) -> None:
         before = backlog.cards.count()
         response = next_client.post_action(
-            "create_card_form", {"column_id": backlog.pk, "title": "Extra"}
+            "create_card_form", {"column": backlog.pk, "title": "Extra"}
         )
         assert response.status_code == 302
         backlog.refresh_from_db()
@@ -331,7 +336,7 @@ class TestCreateCard:
         self, next_client: NextClient, board: Board, backlog: Column
     ) -> None:
         response = next_client.post_action(
-            "create_card_form", {"column_id": backlog.pk, "title": "Extra"}
+            "create_card_form", {"column": backlog.pk, "title": "Extra"}
         )
         new = backlog.cards.order_by("-position").first()
         assert response["Location"] == f"/board/{board.pk}/?created={new.pk}"
@@ -341,7 +346,7 @@ class TestCreateCard:
     ) -> None:
         Card.objects.create(column=progress, title="Second", position=1)
         response = next_client.post_action(
-            "create_card_form", {"column_id": progress.pk, "title": "Over the limit"}
+            "create_card_form", {"column": progress.pk, "title": "Over the limit"}
         )
         assert response.status_code == 400
         assert progress.cards.filter(title="Over the limit").count() == 0
@@ -351,7 +356,7 @@ class TestCreateCard:
     ) -> None:
         for index in range(5):
             response = next_client.post_action(
-                "create_card_form", {"column_id": backlog.pk, "title": f"Card {index}"}
+                "create_card_form", {"column": backlog.pk, "title": f"Card {index}"}
             )
             assert response.status_code == 302
         assert backlog.cards.count() >= 5

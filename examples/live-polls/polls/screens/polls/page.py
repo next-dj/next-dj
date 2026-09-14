@@ -9,9 +9,7 @@ from next import context
 def polls() -> QuerySet[Poll]:
     """Return polls annotated with aggregate counts for the index page.
 
-    Each row carries ``choice_count`` and ``total_votes`` so the
-    ``poll_card`` template reads pre-computed attributes instead of
-    issuing per-row aggregate queries.
+    The annotations let `poll_card` read counts instead of issuing per-row queries.
     """
     return Poll.objects.annotate(
         choice_count=Count("choices", distinct=True),

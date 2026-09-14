@@ -32,13 +32,13 @@ The tag does the following.
 
 1. Looks up the action name against the nearest anchor, the enclosing ``component.py`` first when the template is a component's own, then the current page's ``page.py``, then the shared registry.
 2. Resolves the stable dispatch URL for that action.
-3. Emits ``<form action="..." method="post" data-next-action="...">`` plus an automatic ``enctype="multipart/form-data"`` for a multipart form, then any attributes passed to the tag.
+3. Emits ``<form action="..." method="post" data-next-action="...">``, then the compiled partial ``data-next-*`` attributes, then an automatic ``enctype="multipart/form-data"`` for a multipart form, then the remaining attributes passed to the tag.
 4. Emits a hidden ``csrfmiddlewaretoken`` input.
-5. Emits a hidden ``_next_form_origin`` input set to ``request.path``, used by ``redirect_to_origin`` on success and resolved through the URLconf on the error re-render.
+5. Emits a hidden ``_next_form_origin`` input set to the URL the page was rendered under, query string included, used by ``redirect_to_origin`` on success and resolved through the URLconf on the error re-render.
 6. Publishes ``form`` inside the block body (see `The form variable`_ below).
 7. Publishes ``wizard`` alongside ``form`` when the action is a ``FormWizard``.
 
-On the validation-error re-render the request targets the dispatch endpoint, so the tag re-emits the posted origin of the original page instead of ``request.path``.
+On the validation-error re-render the request targets the dispatch endpoint, so the tag re-emits the posted origin of the original page instead of the URL of the current request.
 On a wizard advance in a partial render the shaping layer sets the ``FORM_ORIGIN_OVERRIDE_KEY`` context key to the next step URL, and that value wins over the posted origin.
 
 The ``data-next-action`` attribute carries the action UID, the registry identity that also names the dispatch URL.
@@ -134,7 +134,7 @@ Form-less action.
    When the action is a plain function registered with ``@action`` (no form class), ``form`` resolves to ``None``.
    The block body should not attempt to render field widgets in this case.
 
-Published by a context callable.
+Published by a context function.
    When the render context already holds a variable named after the action and that object exposes a ``form`` attribute, the tag uses it verbatim instead of building the form itself.
    Declare it with ``@context("<action_name>")`` returning ``SimpleNamespace(form=...)`` to control construction, as :doc:`formsets` shows.
 
@@ -222,7 +222,7 @@ Manual CSRF
 The tag emits ``csrfmiddlewaretoken`` automatically.
 Only add Django's ``{% csrf_token %}`` manually when you build the ``<form>`` element by hand and skip the tag entirely.
 A hand-crafted form must also include the ``_next_form_origin`` hidden field or the dispatcher cannot re-render on failure.
-Set it to the URL path of the page, the same value the tag emits, with ``{{ request.path }}`` as the natural source.
+Set it to the URL the page was rendered under with its query string, which ``{{ request.get_full_path }}`` produces, the same value the tag emits.
 
 The ``{% action_url %}`` tag resolves the dispatch URL by action name with the same page scoping as ``{% form %}``, so a hand-crafted form never hard-codes a UID.
 It also supports ``as`` assignment for reuse, see :doc:`/content/ref/template-tags`.
@@ -232,7 +232,7 @@ It also supports ``as`` assignment for reuse, see :doc:`/content/ref/template-ta
 
    <form action="{% action_url 'contact_form' %}" method="post">
      {% csrf_token %}
-     <input type="hidden" name="_next_form_origin" value="{{ request.path }}">
+     <input type="hidden" name="_next_form_origin" value="{{ request.get_full_path }}">
      <button type="submit">Send</button>
    </form>
 

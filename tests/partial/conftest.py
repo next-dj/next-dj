@@ -19,6 +19,8 @@ _BOARD_FORMS_PAGE = _SITE_PAGES / "board_forms" / "page.py"
 _BOARD_SETTINGS_PAGE = _SITE_PAGES / "board_settings" / "page.py"
 _WIZARD_PAGE = _SITE_PAGES / "wizard" / "[step]" / "page.py"
 _WIZARD_PUSH_PAGE = _SITE_PAGES / "wizard_push" / "[step]" / "page.py"
+_TAGZONE_PAGE = _SITE_PAGES / "tagzone" / "page.py"
+_TAGWIZARD_PAGE = _SITE_PAGES / "tagwizard" / "[step]" / "page.py"
 
 _PARTIAL_MODULES = (
     _REGRESSION_FORMS,
@@ -28,6 +30,8 @@ _PARTIAL_MODULES = (
     _BOARD_SETTINGS_PAGE,
     _WIZARD_PAGE,
     _WIZARD_PUSH_PAGE,
+    _TAGZONE_PAGE,
+    _TAGWIZARD_PAGE,
 )
 
 
@@ -35,10 +39,8 @@ _PARTIAL_MODULES = (
 def _partial_form_registries():
     """Register the partial-suite forms and restore the clean baseline after.
 
-    The snapshot is taken before the partial modules load, so the teardown drops every
-    action and provider they registered. A later forms suite then sees the registry
-    exactly as it was, not the partial fixtures. Re-execution each test is idempotent
-    because registration keys on the file path.
+    The snapshot predates the partial modules, so teardown drops what they registered,
+    and re-execution is idempotent because registration keys on the file path.
     """
     with isolated_form_registries():
         for module_path in _PARTIAL_MODULES:

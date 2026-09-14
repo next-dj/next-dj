@@ -5,6 +5,7 @@ from shortener.models import Link
 from next import action, context
 from next.forms import ModelForm
 from next.partial import Patches
+from next.urls import page_reverse_lazy
 
 
 @context("recent_links", inherit_context=True)
@@ -21,7 +22,7 @@ class EditLinkForm(ModelForm):
     class Meta:
         model = Link
         fields = ("url",)
-        success_url = "/admin/"
+        success_url = page_reverse_lazy("admin")
         success_message = "Destination updated."
 
     @classmethod
@@ -37,9 +38,7 @@ class EditLinkForm(ModelForm):
 def delete_link(request: HttpRequest) -> HttpResponse:
     """Delete the posted link and drop its row from the list in place.
 
-    A live runtime removes the addressed row by its slug key without a
-    reload. Without the runtime the builder falls back to a redirect to
-    the admin index so the no-JS path re-renders the trimmed list.
+    A live runtime removes the addressed row by its slug key without a reload.
     """
     slug = request.POST.get("slug", "")
     deleted, _ = Link.objects.filter(slug=slug).delete()

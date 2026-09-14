@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from django import forms as django_forms
+from django.contrib.auth.models import Group
 from django.contrib.sessions.backends.db import SessionStore
 from django.http import (
     HttpRequest,
@@ -404,8 +405,7 @@ class TestFormDispatchRenderInvalidPageBranches:
         request = mock_http_request(method="POST", POST=QueryDict())
 
         file_path = PAGE_MODULE_FOR_FORM_TESTS
-        original_registry = page._template_registry.copy()
-        page._template_registry[file_path] = "{{ form.name }}"
+        page._templates.composed[file_path] = "{{ form.name }}"
         try:
             form = TestForm(initial={"name": "test"})
             html = backend.render_invalid_page(
@@ -413,8 +413,7 @@ class TestFormDispatchRenderInvalidPageBranches:
             )
             assert isinstance(html, str)
         finally:
-            page._template_registry.clear()
-            page._template_registry.update(original_registry)
+            page._templates.composed.pop(file_path)
 
     def test_render_invalid_page_without_page_path_returns_empty(
         self, mock_http_request
@@ -469,10 +468,7 @@ class TestFormDispatchRenderInvalidPageBranches:
 
             @classmethod
             def get_initial(cls, request: HttpRequest) -> object:
-                mock_instance = MagicMock()
-                mock_instance._meta = MagicMock()
-                mock_instance._meta.model = MagicMock()
-                return mock_instance
+                return Group(name="editors")
 
         def handler(request: HttpRequest, form: CustomForm) -> HttpResponseRedirect:
             return HttpResponseRedirect("/")
@@ -506,7 +502,6 @@ class TestFormDispatchRenderInvalidPageBranches:
         post = QueryDict(mutable=True)
         request = mock_http_request(method="POST", POST=post, FILES=None)
 
-        # Construct meta manually without form_class or handler.
         meta = {
             "handler": None,
             "form_class": None,
@@ -602,8 +597,7 @@ class TestDispatchOnValid:
         meta = backend.get_meta("none_form")
         assert meta is not None
 
-        # None → ensure_http_response(None, request, action_name, backend)
-        # → origin re-render → no resolvable origin → 400
+        # A None result re-renders the origin, which resolves to nothing, so 400.
         response = FormActionDispatch.dispatch(backend, request, "none_form", meta)
         assert response.status_code == 400
 
@@ -803,6 +797,16 @@ class TestResolveFormClass:
         with pytest.raises(TypeError, match=expected):
             _resolve_form_class(bad_factory, request, {}, action_name=action_name)
 
+    def test_a_pair_that_is_no_class_and_kwargs_raises(self, mock_http_request) -> None:
+        """Only `(cls, init_kwargs)` is the pair form, any other pair is the error."""
+
+        def bad_factory(request: HttpRequest) -> object:
+            return ("not-a-class", "not-a-mapping")
+
+        request = mock_http_request(method="POST")
+        with pytest.raises(TypeError, match="factory must return a Form subclass"):
+            _resolve_form_class(bad_factory, request, {})
+
 
 class _CustomInitForm(django_forms.Form):
     """Form whose constructor takes extra kwargs (mimicking AuthenticationForm)."""
@@ -955,10 +959,7 @@ class TestDispatchSharedDepCache:
     ) -> None:
         """A ``Depends("name")`` shared by factory and handler resolves exactly once.
 
-        The dispatcher threads a single ``dep_cache`` through
-        ``_resolve_form_class``, ``form.get_initial``, and the handler.
-        The resolver's named-dependency cache keys on the ``Depends`` name,
-        so any subsequent phase that asks for the same name hits the cache.
+        The dispatcher threads one ``dep_cache`` keyed by name, so reuse hits cache.
         """
         calls = {"n": 0}
 

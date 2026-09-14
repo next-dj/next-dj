@@ -1,11 +1,7 @@
 """Dependency injection markers and providers for URL-derived parameters.
 
-`DUrl` is an annotation marker used in `@context` and view-derived
-callables to pull a value from URL kwargs. `DQuery` is the parallel
-marker that reads `request.GET` query-string parameters. The provider
-classes plug into the `next.deps` resolver via
-`RegisteredParameterProvider` and expose `HttpRequest`, `DUrl[...]`
-values, raw URL kwargs by name, and `DQuery[...]` values.
+`DUrl` pulls a value from URL kwargs and `DQuery` from `request.GET`, and the providers
+plug into the `next.deps` resolver through `RegisteredParameterProvider`.
 """
 
 from __future__ import annotations
@@ -47,12 +43,9 @@ class DUrl[T](DDependencyBase[T]):
     def __class_getitem__(cls, item: object) -> object:
         """Build the marker for the type, named-key, and named-key-with-type forms.
 
-        A plain type follows the standard generic path. A string, or a
-        `(string, type)` tuple, is wrapped so the provider can read the
-        captured segment by an explicit name rather than the parameter name.
-        The name travels as a `Literal`, because `typing.get_type_hints`
-        reads a bare string inside an alias as a forward reference and would
-        resolve the segment name away into whatever global carries it.
+        The name travels as a `Literal` rather than a bare string, because
+        `typing.get_type_hints` would otherwise read it as a forward reference and
+        resolve it away into whatever global happens to carry that name.
         """
         if isinstance(item, (str, tuple)):
             raw = item if isinstance(item, tuple) else (item,)
@@ -64,9 +57,8 @@ class DUrl[T](DDependencyBase[T]):
 class DQuery[T](DDependencyBase[T]):
     """Annotation marker for a `request.GET` parameter.
 
-    A query string carries neither a type nor an arity of its own, so the
-    annotation supplies both and the list form takes the several shapes a
-    front-end client may spell one repeated key in.
+    A query string carries neither a type nor an arity of its own, so the annotation
+    supplies both, and the list form covers a repeated key spelled several ways.
     """
 
     __slots__ = ()
@@ -75,10 +67,9 @@ class DQuery[T](DDependencyBase[T]):
 def _request_annotation_class(annotation: object) -> type | None:
     """Return the request class an annotation names, or `None` for every other shape.
 
-    A union that mixes a request with another concrete type is refused because
-    the provider has no way to choose between them. Both union origins are
-    tested, since `Optional[HttpRequest]` spells `typing.Union` on 3.12 and
-    3.13 while the PEP 604 form spells `types.UnionType`.
+    A union mixing a request with another concrete type is refused since the provider
+    cannot choose between them, and both union origins are tested because `Optional`
+    spells `typing.Union` on 3.12 and 3.13 but `types.UnionType` under PEP 604.
     """
     if annotation is HttpRequest:
         return HttpRequest
@@ -102,10 +93,8 @@ def _is_http_request_annotation(annotation: object) -> bool:
 class HttpRequestProvider(RegisteredParameterProvider):
     """Supply `HttpRequest` from `context.request`.
 
-    The provider claims parameters annotated as `HttpRequest`, one of its
-    subclasses, or the optional form of either. The optional form lets
-    handlers keep `request: HttpRequest | None = None` for direct unit-test
-    calls without giving up dependency injection.
+    The optional `request: HttpRequest | None = None` form is claimed too, so a handler
+    keeps it for a direct unit-test call without giving up injection.
     """
 
     priority = 50
@@ -114,11 +103,8 @@ class HttpRequestProvider(RegisteredParameterProvider):
     def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:
         """Return True when the request in context inhabits the annotated class.
 
-        A handler asking for one concrete subclass under a server that serves
-        another gets the parameter default rather than a request whose
-        interface it would go on to call. The bare `HttpRequest` annotation
-        asks for no subclass and takes whatever the context carries, which is
-        what lets a test hand the handler a stand-in.
+        A handler asking for a concrete subclass under a server serving another takes
+        the default, while the bare `HttpRequest` takes whatever the context carries.
         """
         request = context.request
         if request is None:
@@ -204,9 +190,8 @@ def _url_key(args: tuple[object, ...]) -> str | None:
 def _url_type_hint(args: tuple[object, ...]) -> type:
     """Return the coercion type carried by a `DUrl` annotation, or `str`.
 
-    `DUrl[SomeType]` carries the type at position 0. `DUrl["param", SomeType]`
-    carries the key at position 0 and the type at position 1. Every other
-    shape, including the bare `DUrl["param"]`, coerces to `str`.
+    Reads position 0 for `DUrl[SomeType]` and position 1 for `DUrl["param", SomeType]`.
+    Every other shape, including the bare `DUrl["param"]`, coerces to `str`.
     """
     if args and isinstance(args[0], type):
         return args[0]

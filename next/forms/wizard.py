@@ -29,6 +29,7 @@ from .base import (
     _to_snake_case,
 )
 from .diagnostics import registration_diagnostics
+from .errors import UnstorableWizardValueError
 from .manager import form_action_manager
 
 
@@ -71,7 +72,7 @@ class FormWizardBackend(ABC):
 
     @abstractmethod
     def load(self, request: "HttpRequest", storage_id: str) -> dict[str, Any]:
-        """Return the `{step: cleaned_data}` mapping for the wizard, in step order."""
+        """Return the `{step: cleaned_data}` mapping in step-save order."""
 
     @abstractmethod
     def save_step(
@@ -79,9 +80,7 @@ class FormWizardBackend(ABC):
     ) -> None:
         """Persist cleaned data for a single step.
 
-        Implementations must persist `data` so a later `load` returns an
-        equivalent mapping for the step. The wizard write-through cache
-        assumes saved data round-trips verbatim.
+        The write-through cache assumes a later `load` round-trips `data` verbatim.
         """
 
     @abstractmethod
@@ -163,16 +162,6 @@ _SCALAR_DECODERS: Final[dict[str, Callable[[str], object]]] = {
 }
 
 
-def _codec_error(value: object) -> ImproperlyConfigured:
-    """Build the error raised for a value the session codec cannot store."""
-    msg = (
-        f"SessionFormWizardBackend cannot store {type(value).__name__} values. "
-        "Configure CacheFormWizardBackend or a custom FormWizardBackend in "
-        "FORM_WIZARD_BACKEND for cleaned_data that does not fit JSON."
-    )
-    return ImproperlyConfigured(msg)
-
-
 def _encode_value(value: object) -> "_JSONValue":
     """Encode one cleaned-data value into a JSON-safe tagged form."""
     if value is None or isinstance(value, (bool, int, float, str)):
@@ -182,13 +171,13 @@ def _encode_value(value: object) -> "_JSONValue":
             return {_CODEC_KEY: tag, "value": encode(value)}
     if isinstance(value, Model):
         if value.pk is None:
-            raise _codec_error(value)
+            raise UnstorableWizardValueError(value)
         return {_CODEC_KEY: "model", "value": [value._meta.label_lower, str(value.pk)]}
     if isinstance(value, (list, tuple)):
         return [_encode_value(item) for item in value]
     if isinstance(value, dict):
         return _encode_mapping(value)
-    raise _codec_error(value)
+    raise UnstorableWizardValueError(value)
 
 
 def _encode_mapping(value: dict[Any, Any]) -> "dict[str, _JSONValue]":
@@ -196,7 +185,7 @@ def _encode_mapping(value: dict[Any, Any]) -> "dict[str, _JSONValue]":
     encoded: dict[str, _JSONValue] = {}
     for key, item in value.items():
         if not isinstance(key, str):
-            raise _codec_error(key)
+            raise UnstorableWizardValueError(key)
         encoded[key] = _encode_value(item)
     if _CODEC_KEY in encoded:
         return {_CODEC_KEY: "mapping", "value": encoded}
@@ -441,9 +430,8 @@ class FormWizard:
     def save_step(self, step: str, data: dict[str, Any]) -> None:
         """Persist cleaned data for one step through the backend.
 
-        Any already-loaded mapping is updated in place instead of being
-        invalidated, so the request avoids a reload round-trip after a
-        save and sibling instances sharing the request memo see the save.
+        Any already-loaded mapping is updated in place rather than invalidated, so the
+        request skips a reload round-trip and sibling instances sharing its memo see it.
         """
         self._backend.save_step(self.request, self.storage_id, step, data)
         stored = self._loaded
@@ -479,9 +467,9 @@ class FormWizard:
     def current_step(self) -> str:
         """Return the active step from the URL kwarg, defaulting to the first.
 
-        URL kwargs that exist but lack the `Meta.url_param` key signal a route whose
-        step segment is named differently, which would pin the wizard to its first step
-        forever, so that misconfiguration raises instead of falling back.
+        URL kwargs that exist but lack the `Meta.url_param` key signal a step segment
+        named differently, so that misconfiguration raises rather than pinning the
+        wizard to its first step forever.
         """
         names = self.step_names()
         raw = self.url_kwargs.get(self.url_param)

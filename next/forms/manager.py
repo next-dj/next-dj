@@ -5,10 +5,11 @@ from typing import TYPE_CHECKING, override
 
 from django.core.exceptions import ImproperlyConfigured
 
-from next.backends import backend_entries, load_backends
+from next.backends import BackendListManager, backend_entries, load_backends
 
-from .backends import FormActionBackend, FormActionNotFoundError
+from .backends import FormActionBackend
 from .dispatch.build import _form_action_context_callable
+from .errors import FormActionNotFoundError
 from .origin import _url_kwargs_for_request
 
 
@@ -25,7 +26,7 @@ type ActionsSnapshot = tuple[tuple[FormActionBackend, object], ...]
 """Per-backend opaque tokens, each paired with the backend that minted it."""
 
 
-class FormActionManager:
+class FormActionManager(BackendListManager[FormActionBackend]):
     """Holds one or more backends and yields their URL patterns."""
 
     version: int = 0
@@ -39,9 +40,7 @@ class FormActionManager:
 
     def __init__(self, backends: "list[FormActionBackend] | None" = None) -> None:
         """Initialise with explicit backends or defer loading to settings."""
-        self._backends: list[FormActionBackend] = list(backends) if backends else []
-        # An empty list is a legitimate load result, so only a flag knows.
-        self._loaded: bool = bool(self._backends)
+        super().__init__(backends)
 
     @override
     def __repr__(self) -> str:
@@ -54,12 +53,12 @@ class FormActionManager:
         for backend in self._backends:
             yield from backend.generate_urls()
 
+    @override
     def reload(self) -> None:
         """Rebuild the backends from the current `NEXT_FRAMEWORK` settings.
 
-        The actions registered against the old backends go with them, so a
-        caller that swaps `FORM_ACTION_BACKENDS` under a live manager lets
-        the forms register again afterwards.
+        The actions registered on the old backends go with them, so a caller that swaps
+        `FORM_ACTION_BACKENDS` live must let the forms register again.
         """
         configs = backend_entries("FORM_ACTION_BACKENDS")
         self.version += 1
@@ -68,11 +67,7 @@ class FormActionManager:
         # An empty load is a broken config, not a result, so the next access
         # rereads settings. A settings_reloaded receiver cannot do that instead,
         # because dropping the backends drops their actions.
-        self._loaded = bool(self._backends) or not configs
-
-    def _ensure_backends(self) -> None:
-        if not self._loaded:
-            self.reload()
+        self._mark_loaded(retry_when_empty=bool(configs))
 
     def _require_backends(self) -> None:
         """Load the backends and refuse a lookup that has none to consult."""
@@ -130,21 +125,29 @@ class FormActionManager:
         self.version += 1
 
     def get_action_url(self, action_name: str, *, page_path: str | None = None) -> str:
-        """Return the reverse URL from the first backend that knows `action_name`."""
+        """Return the reverse URL from the first backend that knows `action_name`.
+
+        One backend or several, the refusal a caller sees is the one composed here,
+        so the shape of the failure never follows the length of the settings list.
+        """
         self._require_backends()
-        if len(self._backends) == 1:
-            return self._backends[0].get_action_url(action_name, page_path=page_path)
-        caught: list[FormActionNotFoundError] = []
-        for backend in self._backends:
+        backends = self._backends
+        if len(backends) == 1:
+            return backends[0].get_action_url(action_name, page_path=page_path)
+        registry_empty = True
+        for backend in backends:
             try:
                 return backend.get_action_url(action_name, page_path=page_path)
             except FormActionNotFoundError as exc:
-                caught.append(exc)
+                if not exc.registry_empty:
+                    registry_empty = False
         raise FormActionNotFoundError(
             name=action_name,
             page_path=page_path,
-            candidates=tuple(name for exc in caught for name in exc.candidates),
-            registry_empty=all(exc.registry_empty for exc in caught),
+            candidates=lambda: [
+                meta["name"] for backend in backends for meta in backend.iter_actions()
+            ],
+            registry_empty=registry_empty,
         )
 
     def get_action_meta(

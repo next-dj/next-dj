@@ -18,7 +18,7 @@ from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 
 from next.conf import next_framework_settings
-from next.utils import defining_file
+from next.introspect import defining_file
 
 from .backends import (
     ActionGuard,
@@ -169,9 +169,8 @@ def _find_frame_outside() -> str:
 def _module_declared_file(cls: type) -> str | None:
     """Return the file of the module that still binds cls under its own name.
 
-    The file router execs every `page.py` under one throwaway module name it
-    never registers, so a same-named module a project happens to import must
-    not answer for a class it never declared.
+    The file router execs every `page.py` under one throwaway module name, so a module a
+    project imports under that name must not answer for a class it never declared.
     """
     module = sys.modules.get(getattr(cls, "__module__", "") or "")
     if module is None or getattr(module, cls.__name__, None) is not cls:
@@ -187,9 +186,8 @@ def _module_declared_file(cls: type) -> str | None:
 def _definition_file_of(cls: type) -> str:
     """Return the file where cls was declared, empty when no frame names one.
 
-    `__init_subclass__` runs while the declaring frame is still on the stack,
-    so the walk answers wherever the module cannot. A foreign file never
-    survives it, which is why the caller needs no framework arm.
+    `__init_subclass__` runs while the declaring frame is still on the stack, so the
+    walk answers wherever the module cannot, and a foreign file never survives it.
     """
     file_path = _module_declared_file(cls)
     if file_path is None or _is_foreign_file(file_path):
@@ -199,8 +197,7 @@ def _definition_file_of(cls: type) -> str:
 
 def _registration_gate(cls: type) -> tuple[str, str, str] | None:
     """Run the shared registration policy, returning (scope, name, file_path)."""
-    # Like Django model Meta, abstract is never inherited, so only the class's
-    # own namespace opts it out of registration.
+    # Like Django model Meta, abstract never inherits, only the own namespace opts out.
     if getattr(cls.__dict__.get("Meta"), "abstract", False):
         return None
 
@@ -258,8 +255,7 @@ def _format_success_message(cls: type, cleaned_data: dict[str, Any]) -> str:
 
 def _is_self_registered(cls: type) -> bool:
     """Return True when auto-registration stamped this exact class."""
-    # The lookup is own-dict on purpose, a concrete subclass of a registered
-    # base must not inherit the marker.
+    # Own-dict on purpose, a subclass of a registered base must not inherit the marker.
     return _SELF_REGISTERED_ATTR in cls.__dict__
 
 
@@ -303,8 +299,7 @@ def _stamp_hook_flag(base_hook: object, override_hook: object) -> bool:
 class _PermissionHooks:
     """Opt-in DI-resolved permission gates layered over the static ActionGuard.
 
-    `__init_subclass__` stamps a presence flag per hook so an undeclared hook
-    costs the dispatcher no resolver call.
+    The presence flag spares the dispatcher a resolver call for an undeclared hook.
     """
 
     _has_check_permissions: bool = False

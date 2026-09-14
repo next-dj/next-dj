@@ -43,10 +43,8 @@ def render_form_page_with_errors(
 ) -> str:
     """Render the page template for `page_file_path` with a bound form in context.
 
-    The rendered HTML flows through `Page.render_with_static_assets`
-    so co-located CSS and JS land in the response and any
-    request-aware backend (such as a per-tenant URL prefix) sees the
-    same `request` it does on the canonical render path.
+    The HTML flows through `Page.render_with_static_assets`, so co-located CSS and JS
+    land in the response and a request-aware backend sees the same `request`.
     """
     file_path = page_file_path
     action_name = params.action_name

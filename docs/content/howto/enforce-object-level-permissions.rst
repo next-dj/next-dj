@@ -31,9 +31,9 @@ The route segment ``[slug]`` captures the lookup value.
    :caption: notes/pages/notes/edit/[slug]/page.py
 
    from django.http import HttpRequest
+   from notes.models import Note
 
    import next.forms
-   from notes.models import Note
 
    class NoteEditForm(next.forms.ModelForm):
        class Meta:
@@ -94,8 +94,9 @@ A test signs in as the owner, edits the row, then signs in as another user and c
    :caption: tests/test_object_permissions.py
 
    from django.contrib.auth import get_user_model
-   from next.testing.client import NextClient
    from notes.models import Note
+
+   from next.testing.client import NextClient
 
    def test_owner_edits_and_stranger_is_denied(db) -> None:
        User = get_user_model()

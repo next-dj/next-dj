@@ -33,13 +33,15 @@ The framework emits these signals on hot rendering paths, so receivers stay sync
    :caption: obs/receivers.py
 
    from django.dispatch import receiver
-   from next.pages.signals import page_rendered
+
    from next.components.signals import component_rendered
    from next.forms.signals import (
        action_dispatched,
        form_access_denied,
        form_validation_failed,
    )
+   from next.pages.signals import page_rendered
+
    from .metrics import incr
 
    @receiver(page_rendered)
@@ -95,6 +97,7 @@ The ``html_injected`` payload carries ``injected_bytes``, which is useful as a p
    :caption: obs/receivers.py
 
    from django.dispatch import receiver
+
    from next.static.signals import (
        asset_registered,
        backend_loaded,
@@ -133,7 +136,9 @@ The URL subsystem emits ``route_registered`` for each route discovered during a 
    :caption: obs/receivers.py
 
    from django.dispatch import receiver
+
    from next.urls.signals import route_registered, router_reloaded
+
    from .metrics import incr
 
    @receiver(route_registered)
@@ -143,6 +148,28 @@ The URL subsystem emits ``route_registered`` for each route discovered during a 
    @receiver(router_reloaded)
    def on_router_reloaded(**kwargs) -> None:
        incr("urls", "router_reloaded")
+
+Invalidate a cache on a settings reload
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``settings_reloaded`` fires after ``NextFrameworkSettings`` drops its caches, which is the moment anything a receiver memoised from ``NEXT_FRAMEWORK`` goes stale.
+The signal carries no keyword arguments, so a receiver that holds its own memo drops it and lets the next read rebuild from the merged settings.
+
+.. code-block:: python
+   :caption: obs/receivers.py
+
+   from django.dispatch import receiver
+
+   from next.conf.signals import settings_reloaded
+
+   from .metrics import reset_backend_labels
+
+   @receiver(settings_reloaded)
+   def on_settings_reloaded(**kwargs) -> None:
+       reset_backend_labels()
+
+Every receiver runs even when one raises, so a receiver that drops a cache never loses its turn to a receiver that failed before it.
+The first error reaches the caller that asked for the reload once the whole chain has run.
 
 Connect receivers at startup
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -158,7 +185,7 @@ Import the receivers module from ``AppConfig.ready`` so the ``@receiver`` decora
        name = "obs"
 
        def ready(self) -> None:
-           from obs import receivers  # noqa: F401, PLC0415
+           from obs import receivers  # noqa: F401
 
 Verification
 ------------

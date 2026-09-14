@@ -1,8 +1,6 @@
 """Template tags for static asset injection slots.
 
-The collect tags emit placeholder tokens and the use tags register assets on
-the request's ``StaticCollector``, so ``StaticManager.inject`` owns the final
-markup once ``Page.render`` has seen every referenced asset.
+Collect tags emit placeholders, use tags register assets `StaticManager.inject` fills.
 """
 
 from __future__ import annotations
@@ -13,6 +11,7 @@ from django import template
 from django.template.base import Node, NodeList
 from django.utils.safestring import SafeString
 
+from next.seeding import COLLECTOR_KEY
 from next.static import StaticAsset, StaticCollector, default_placeholders
 
 
@@ -80,7 +79,7 @@ def _register_asset(context: template.Context, url: str, kind: str) -> None:
     """
     if not isinstance(url, str) or not url:
         return
-    collector = context.get("_static_collector")
+    collector = context.get(COLLECTOR_KEY)
     if not isinstance(collector, StaticCollector):
         return
     collector.add(StaticAsset(url=url, kind=kind), prepend=True)
@@ -89,9 +88,8 @@ def _register_asset(context: template.Context, url: str, kind: str) -> None:
 class _InlineAssetNode(Node):
     """Render an inline asset body and push it onto the active collector.
 
-    The body renders with the current context so it can interpolate page
-    variables, and the node emits nothing in place because the collector owns
-    final placement inside the matching slot.
+    The body renders with the current context, and nothing is emitted in place because
+    the collector owns final placement inside the matching slot.
     """
 
     def __init__(self, kind: str, nodelist: NodeList) -> None:
@@ -102,7 +100,7 @@ class _InlineAssetNode(Node):
     @override
     def render(self, context: template.Context) -> str:
         """Render the body, register the HTML on the collector, and emit nothing."""
-        collector = context.get("_static_collector")
+        collector = context.get(COLLECTOR_KEY)
         if not isinstance(collector, StaticCollector):
             return ""
         body = self.nodelist.render(context)

@@ -43,7 +43,7 @@ The caption below assumes a single settings module.
 A project that split its settings places this in ``config/settings/base.py`` instead.
 
 .. code-block:: python
-   :caption: config/settings/base.py
+   :caption: config/settings.py
 
    INSTALLED_APPS = [
        "django.contrib.admin",
@@ -80,6 +80,7 @@ Use ``reverse`` from inside the file router.
    :caption: notes/pages/page.py
 
    from django.urls import reverse
+
    from next import context
 
    @context("admin_url")

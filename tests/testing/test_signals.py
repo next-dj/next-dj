@@ -9,6 +9,7 @@ from next.forms.signals import (
 )
 from next.testing import SignalEvent, SignalRecorder
 from next.testing.signals import capture_framework_signals, capture_signals
+from tests.support import SignalSender
 
 
 class TestSignalRecorder:
@@ -129,7 +130,7 @@ class TestCaptureFrameworkSignals:
 
     def test_covers_action_dispatched(self) -> None:
         with capture_framework_signals() as rec:
-            action_dispatched.send(sender=None, action_name="test")
+            action_dispatched.send(sender=SignalSender(), action_name="test")
         assert len(rec.events_for(action_dispatched)) == 1
 
     def test_covers_every_exported_signal(self) -> None:
@@ -139,7 +140,9 @@ class TestCaptureFrameworkSignals:
 
     def test_covers_wizard_signals(self) -> None:
         with capture_framework_signals() as rec:
-            wizard_step_submitted.send(sender=None, step="one", cleaned_data={})
-            wizard_completed.send(sender=None, cleaned_data={})
+            wizard_step_submitted.send(
+                sender=SignalSender(), step="one", cleaned_data={}
+            )
+            wizard_completed.send(sender=SignalSender(), cleaned_data={})
         assert len(rec.events_for(wizard_step_submitted)) == 1
         assert len(rec.events_for(wizard_completed)) == 1

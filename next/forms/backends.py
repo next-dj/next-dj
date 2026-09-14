@@ -1,6 +1,5 @@
 """Backend abstractions and in-memory registry for form actions."""
 
-import difflib
 import hashlib
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -19,6 +18,7 @@ from next.ports import partial_shaper_slot
 from .diagnostics import registration_diagnostics
 from .dispatch import FormActionDispatch
 from .dispatch.responses import ActionOutcome
+from .errors import FormActionNotFoundError
 from .rendering import _ErrorRenderParams, render_form_page_with_errors
 from .signals import action_registered
 from .uid import URL_NAME_FORM_ACTION, reverse_form_action
@@ -33,98 +33,6 @@ if TYPE_CHECKING:
     from django.urls import URLPattern
 
     from .wizard import FormWizard
-
-
-class FormActionNotFoundError(LookupError):
-    """No registered form action matches the requested name."""
-
-    _suggestions: "tuple[str, ...] | None" = None
-
-    def __init__(
-        self,
-        message: str | None = None,
-        *,
-        name: str = "",
-        page_path: str | None = None,
-        candidates: "Callable[[], Iterable[str]] | Iterable[str]" = (),
-        registry_empty: bool = False,
-    ) -> None:
-        """Store the lookup context, deferring close-match work until rendered."""
-        # The manager probes backends by catching this, so raising stays cheap:
-        # one packed attribute now, difflib and the message only when rendered.
-        self._context: tuple[
-            str, str | None, Callable[[], Iterable[str]] | Iterable[str], bool
-        ] = (name, page_path, candidates, registry_empty)
-        if message is None:
-            super().__init__()
-        else:
-            super().__init__(message)
-
-    @property
-    def name(self) -> str:
-        """Return the action name the failed lookup asked for."""
-        return self._context[0]
-
-    @property
-    def page_path(self) -> str | None:
-        """Return the page scope the lookup searched, when any."""
-        return self._context[1]
-
-    @property
-    def registry_empty(self) -> bool:
-        """Return True when no actions were registered at raise time."""
-        return self._context[3]
-
-    @property
-    def candidates(self) -> tuple[str, ...]:
-        """Return the registered action names the close matches draw from."""
-        raw = self._context[2]
-        return tuple(raw() if callable(raw) else raw)
-
-    @property
-    def suggestions(self) -> tuple[str, ...]:
-        """Return close matches for the name, computed on first access."""
-        if self._suggestions is None:
-            self._suggestions = tuple(
-                difflib.get_close_matches(self.name, sorted(set(self.candidates)))
-            )
-        return self._suggestions
-
-    @override
-    def __str__(self) -> str:
-        """Render the message, composing and caching it on first access."""
-        if not self.args:
-            self.args = (self._compose(),)
-        return str(self.args[0])
-
-    @override
-    def __reduce__(self) -> "tuple[Any, ...]":
-        """Pickle the rendered message and drop the live candidates source."""
-        state = {
-            "_context": (self.name, self.page_path, (), self.registry_empty),
-            "_suggestions": self.suggestions,
-        }
-        return (self.__class__, (str(self),), state)
-
-    def _compose(self) -> str:
-        """Render the failure with scope, close matches, and registry state."""
-        if self.page_path is None:
-            searched = "Searched the shared registry (no page scope)."
-        else:
-            searched = (
-                f"Searched page scope for {self.page_path} and the shared registry."
-            )
-        message = f"Unknown form action {self.name!r}. {searched}"
-        if self.suggestions:
-            rendered = ", ".join(repr(suggestion) for suggestion in self.suggestions)
-            message = f"{message} Closest matches: {rendered}."
-        if self.registry_empty:
-            message = (
-                f"{message} No form actions are registered. Check that the "
-                "declaring module is imported. Autodiscover imports each "
-                "app's forms.py when FORM_AUTODISCOVER is enabled."
-            )
-        return message
 
 
 # Memoised by raw path, because both hit a syscall on every registration and
@@ -214,16 +122,21 @@ def build_action_guard(
     return ActionGuard(login_required=bool(login_required), permissions=permissions)
 
 
-class ActionMeta(TypedDict, total=False):
-    """Per-action data stored in the registry backend."""
+class _ActionIdentity(TypedDict):
+    """The keys every registration stores, whatever the action dispatches to."""
 
     name: str
-    handler: "Callable[..., Any] | None"
-    form_class: "type[django_forms.Form] | Callable[..., Any] | None"
-    wizard_class: "type[FormWizard] | None"
     uid: str
     file_path: str
     scope: str
+
+
+class ActionMeta(_ActionIdentity, total=False):
+    """Per-action data stored in the registry backend."""
+
+    handler: "Callable[..., Any] | None"
+    form_class: "type[django_forms.Form] | Callable[..., Any] | None"
+    wizard_class: "type[FormWizard] | None"
     guard: ActionGuard | None
 
 
@@ -240,9 +153,8 @@ class RegistryBackendSnapshot:
 class ActionRegistration:
     """A form action to register with its name, declaration site, and target.
 
-    Exactly one of `handler`, `form_class`, or `wizard_class`
-    is the action target, except the `@action(form_class=...)`
-    path which supplies a handler and a form-factory together.
+    Exactly one of `handler`, `form_class`, or `wizard_class` is the target, except
+    `@action(form_class=...)`, which supplies a handler and a form factory together.
     """
 
     name: str
@@ -269,9 +181,9 @@ class FormActionBackend(ABC):
     def register_action(self, registration: ActionRegistration) -> None:
         """Record an action from the decorator or __init_subclass__.
 
-        Lookups without a page scope resolve a bare name to the first
-        registration that used it, unless a later one sets
-        `claims_name_binding` and takes the name over.
+        A bare name resolves to the first registration unless a later one sets
+        `claims_name_binding`, and only `FormActionManager.register_action` moves the
+        URL-pattern cache token, which a direct backend caller otherwise misses.
         """
 
     @abstractmethod
@@ -291,10 +203,8 @@ class FormActionBackend(ABC):
     ) -> "ActionMeta | None":
         """Return optional per-action metadata for subclasses.
 
-        A lookup with `page_path` returns the exact page-scoped meta for that
-        path or a shared-scoped fallback, never a page-scoped meta registered
-        under a different path. The template tags rely on this to tell an
-        exact anchor hit apart from the fallback.
+        A lookup with `page_path` returns that path's meta or a shared fallback, never
+        another path's, so the template tags can tell an exact hit from the fallback.
         """
         del action_name, page_path
         return None
@@ -314,9 +224,8 @@ class FormActionBackend(ABC):
     def snapshot(self) -> object:
         """Return an opaque token holding the actions this backend stores.
 
-        The token travels back into `restore` untouched, so a backend picks
-        whatever representation suits its storage. A backend that keeps no
-        state of its own returns None and ignores it again on restore.
+        The token travels back into `restore` untouched, so a backend keeps its own
+        representation, or returns None when it holds no state to snapshot.
         """
         return None
 
@@ -397,9 +306,8 @@ class RegistryFormActionBackend(FormActionBackend):
     def snapshot(self) -> "RegistryBackendSnapshot":
         """Capture the registered actions so a later `restore` rolls them back.
 
-        A test that registers extra actions takes a snapshot first and
-        restores it afterwards, so a later suite sees the registry exactly
-        as it was without reaching into the backend's private maps.
+        Lets a test register extra actions and restore afterwards without reaching
+        into the backend's private maps.
         """
         return RegistryBackendSnapshot(
             registry=dict(self._registry),
@@ -481,10 +389,12 @@ class RegistryFormActionBackend(FormActionBackend):
             self._name_index[name] = key
         else:
             bound_key = self._name_index.setdefault(name, key)
+        bound_meta = self._registry.get(bound_key)
         if (
             scope == "shared"
             and bound_key != key
-            and self._registry.get(bound_key, {}).get("scope") == "shared"
+            and bound_meta is not None
+            and bound_meta["scope"] == "shared"
         ):
             registration_diagnostics.shared_name_collisions.setdefault(
                 name, {bound_key[0]}
@@ -521,20 +431,18 @@ class RegistryFormActionBackend(FormActionBackend):
         if meta is None:
             meta = self._fallback_meta(action_name, scoped=page_path is not None)
         if meta is not None:
-            uid = meta.get("uid")
-            if uid is not None:
-                # The script prefix is request-scoped state and reverse() bakes
-                # it into the URL, so it must be part of the cache key.
-                cache_key = (get_script_prefix(), uid)
-                url = self._url_cache.get(cache_key)
-                if url is None:
-                    url = reverse_form_action(uid)
-                    if not self._url_cache:
-                        # Only a backend that cached a URL needs the
-                        # ROOT_URLCONF signal, so the hookup is lazy.
-                        _url_caching_backends.add(self)
-                    self._url_cache[cache_key] = url
-                return url
+            # The script prefix is request-scoped state and reverse() bakes it
+            # into the URL, so it must be part of the cache key.
+            cache_key = (get_script_prefix(), meta["uid"])
+            url = self._url_cache.get(cache_key)
+            if url is None:
+                url = reverse_form_action(meta["uid"])
+                if not self._url_cache:
+                    # Only a backend that cached a URL needs the ROOT_URLCONF signal,
+                    # so the hookup is lazy.
+                    _url_caching_backends.add(self)
+                self._url_cache[cache_key] = url
+            return url
 
         raise FormActionNotFoundError(
             name=action_name,
@@ -609,7 +517,6 @@ __all__ = [
     "ActionMeta",
     "ActionRegistration",
     "FormActionBackend",
-    "FormActionNotFoundError",
     "RegistryBackendSnapshot",
     "RegistryFormActionBackend",
     "build_action_guard",

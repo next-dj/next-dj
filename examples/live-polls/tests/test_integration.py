@@ -45,9 +45,8 @@ def _consume_one_change(
 ) -> Change | None:
     """Drain one change a worker captures after the main thread publishes.
 
-    A consumer thread starts on the lazy `changes` generator and captures
-    its baseline revision before the main thread publishes, so the wake
-    is race-free without depending on the generator's start timing.
+    Starting the consumer thread on the lazy `changes` generator captures its baseline
+    revision before the main thread publishes, keeping the wake race-free.
     """
     captured: list[Change] = []
     stream = target.changes(poll_id)
@@ -64,9 +63,8 @@ def _consume_one_change(
 def primed_broker(poll: Poll) -> PollBroker:
     """Stand-alone broker with `poll`'s snapshot cached for change tests.
 
-    Tests use a local instance so revision counters do not leak across cases. The cache
-    is process-wide, so seeding through `store_snapshot` is enough for a `changes`
-    consumer to read the snapshot on its first wake.
+    A local instance keeps revision counters from leaking across cases, and the cache is
+    process-wide so `store_snapshot` alone primes the first wake.
     """
     store_snapshot(build_snapshot(poll))
     return PollBroker()
@@ -342,9 +340,8 @@ class TestPartialVote:
 class TestZoneAssetsCarryInsertionVerbs:
     """The asset manifest of a zone morph names how the client inserts each file.
 
-    `PollsConfig.ready` registers the `vue` kind with `render_module_tag`,
-    so the co-located `component.vue` files travel with `load: "module"`
-    and the shared stylesheet with `load: "link"`.
+    `PollsConfig.ready` registers the `vue` kind with `render_module_tag`, so
+    `component.vue` files travel with `load: "module"` and the stylesheet with `"link"`.
     """
 
     def _vote_envelope(self, next_client: NextClient, poll: Poll) -> PartialEnvelope:
@@ -392,9 +389,8 @@ class TestBroadcastReceiver:
     ) -> None:
         """A vote ends with a fresh snapshot in cache, written by the receiver alone.
 
-        The vote handler no longer writes to the cache so the cached
-        payload after a successful POST proves the receiver path
-        executed and called `broker.publish`.
+        The vote handler never writes to the cache, so a cached payload after the POST
+        proves the receiver ran and called `broker.publish`.
         """
         choice = poll.choices.get(text="Tabs")
         next_client.post_action("vote_form", {"poll": poll.pk, "choice": choice.pk})
@@ -410,10 +406,8 @@ class TestBroadcastReceiver:
     ) -> None:
         """A spy on `broker.publish` confirms the receiver is the publish source.
 
-        The handler runs `UPDATE` only, so any wake of the SSE stream
-        has to come from the `action_dispatched` receiver. Replacing
-        `broker.publish` with a spy that delegates to the real method
-        keeps the cache state intact while making the call site observable.
+        The handler runs `UPDATE` only, so any SSE wake has to come from the receiver.
+        Delegating the spy to the real method keeps the cache state intact.
         """
         captured: list[Snapshot] = []
         real_publish = broker.publish
@@ -461,10 +455,7 @@ class TestStreamEndpoint:
     ) -> None:
         """The first byte frame is the retry hint, proving the page wires the stream.
 
-        Reading the leading frame off the actual streaming response is the only way to
-        verify the HTTP path end to end without blocking on the broker condition. The
-        frame is consumed in a `try/finally` so the response closes even if the
-        assertion fails before the read.
+        Reading just the leading frame keeps the test from blocking on the broker.
         """
         response = next_client.get(f"/polls/{poll.pk}/stream/")
         try:
@@ -553,9 +544,8 @@ class TestEchoThreading:
 class TestStreamPatchFrame:
     """A change over the open HTTP stream yields a refresh patch with the echo.
 
-    The poll is committed so the streaming response, consumed on a worker thread, builds
-    the envelope from its own database connection. The refresh fan-out carries the
-    change's request id so the initiator's own tab drops the echo.
+    The poll is committed so the streaming response, built on its own worker-thread
+    connection, sees it, and the fan-out's request id lets the initiator drop the echo.
     """
 
     def test_change_frame_carries_refresh_and_echo(

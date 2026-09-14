@@ -30,12 +30,12 @@ The static pipeline discovers co-located CSS, JS, and module files, deduplicates
    Built-in kinds and how to register new ones.
 
 :doc:`custom-stems`
-   Recognise additional filenames as component assets.
+   Recognise additional filenames as page, layout, or component assets.
 
 .. rubric:: Extending
 
 :doc:`backends`
-   Customizing the collector and the injection format through backends.
+   Resolving asset URLs and customising the rendered tags through a static backend.
 
 :doc:`signals`
    Every signal the static subsystem emits.

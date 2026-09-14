@@ -19,7 +19,8 @@ VERSION = "X-Next-Version"
 REQUEST_ID = "X-Next-Request-Id"
 ORIGIN = "X-Next-Origin"
 
-RESPONSE_VERSION = "X-Next-Version"
+# The response echoes the version under the same name the request asserts it.
+RESPONSE_VERSION = VERSION
 RESPONSE_FORM = "X-Next-Form"
 RESPONSE_ACTION = "X-Next-Action"
 
@@ -44,10 +45,8 @@ class MergeMode(enum.StrEnum):
 class PartialIntent:
     """Parsed partial-request headers naming what the client asks for.
 
-    The fields mirror the request-header table of the wire protocol. A
-    request without the `X-Next-Request` switch is not partial and every
-    derived field stays empty. Names are server-registry indices, never
-    selectors or swap strategies.
+    Without the `X-Next-Request` switch a request is not partial and every derived field
+    stays empty. Names are server-registry indices, never selectors.
     """
 
     partial: bool = False

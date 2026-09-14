@@ -9,7 +9,7 @@
     {% /slot %}
     {% #slot "content" %}
       <p class="-mt-4 mb-6 text-sm text-muted-foreground">{{ site_tagline }}</p>
-      {% block template %}{% endblock template %}
+      {% template %}
     {% /slot %}
     {% #slot "page_footer" %}
       {% component "site_footer" %}

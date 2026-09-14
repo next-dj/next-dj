@@ -3,8 +3,8 @@
 from django.dispatch import Signal
 
 
-route_registered: Signal = Signal()
-router_reloaded: Signal = Signal()
+route_registered: Signal = Signal(use_caching=True)
+router_reloaded: Signal = Signal(use_caching=True)
 
 
 __all__ = ["route_registered", "router_reloaded"]

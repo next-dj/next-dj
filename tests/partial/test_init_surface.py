@@ -25,6 +25,7 @@ _CURATED = frozenset(
         "Envelope",
         "ForeignPageNotAuthorizedError",
         "FormMeta",
+        "JsonPartialProtocolBackend",
         "LayerHrefWithoutZoneError",
         "Patch",
         "PartialProtocolBackend",

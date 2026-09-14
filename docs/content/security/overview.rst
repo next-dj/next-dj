@@ -66,10 +66,18 @@ SQL injection.
 Mass assignment.
    Whitelist editable fields on ``ModelForm``, see :doc:`di-and-untrusted-input` for the rule.
 
+File uploads.
+   An upload writes attacker-supplied bytes that the server keeps and later hands to another visitor.
+   The dispatch passes ``request.FILES`` into the form and adds no size check, no content sniff, and no filename rewrite of its own, so every limit is Django field validation plus project code.
+   Cap the request, validate the bytes rather than the declared media type, generate the stored name on the server, and serve user media from a separate origin as an attachment.
+   An accepted SVG is the sharpest edge, because the browser runs script inside it.
+   See :doc:`file-uploads`.
+
 Origin spoofing.
    The only page identity a form submission carries is the ``_next_form_origin`` URL path, which the dispatcher resolves through the URLconf with :func:`django.urls.resolve`.
    The client never supplies a filesystem path, so an error re-render can target only pages that are reachable through the routing table anyway.
-   A value that does not resolve returns HTTP 400.
+   A value that does not resolve returns HTTP 400 on the paths that need the origin page, a validation failure, a wizard step, and a handler that returns ``None`` and so re-renders the origin in place.
+   A handler that answers a successful submission with its own response never reads the origin, so the field is not consulted there.
    Substituting the origin of another routed page remains possible and is an authorization question, so guard mutating actions as described under `Access control`_.
 
 Open redirect.
@@ -114,6 +122,10 @@ Enforce access at one of these layers.
 An action that mutates data and an action that loads an instance through ``instance_from_url`` both need this guard.
 The :ref:`howto-enforce-object-level-permissions` recipe shows the owner-only edit on a ``ModelForm``.
 
+Rate limiting.
+   The ``/_next/form/<uid>/`` endpoint ships no built-in throttling, so a guarded action still answers as many requests as a client sends.
+   A custom ``FormActionBackend`` that wraps every dispatch is the documented extension point for rate limiting, see the ``FORM_ACTION_BACKENDS`` example in :doc:`/content/deployment/settings`.
+
 The out-of-band morph path enforces page-level access on its own.
 A ``morph(zone=..., page=...)`` onto a foreign page re-runs that page's authorization chain and raises ``ForeignPageNotAuthorizedError`` on a denial or ``DynamicForeignPageError`` for a dynamic body, see :doc:`/content/topics/partial-rendering/reference`.
 
@@ -142,6 +154,9 @@ The framework system checks cover configuration mistakes that affect security.
 - ``next.E041`` reports two actions registered under the same name from different handlers.
 - ``next.E045`` reports a form action backend that does not subclass ``FormActionBackend``.
 - ``next.E020`` reports a component registered more than once within the same scope.
+- ``next.E046`` reports one shared action name declared by two different modules, where a lookup by bare name resolves to whichever module imported first.
+- ``next.W060`` reports an action that declares ``permission_required`` while ``django.contrib.auth`` is out of ``INSTALLED_APPS``, so the guard described under `Access control`_ cannot resolve users or permissions.
+- ``next.W061`` reports an action that declares ``Meta.success_message`` while the messages framework is not fully installed, which makes the submission raise ``MessageFailure``.
 
 Run them with ``uv run python manage.py check``.
 
@@ -153,5 +168,6 @@ See also
    :doc:`csrf-and-forms` for the form pipeline.
    :doc:`static-assets` for the static pipeline.
    :doc:`di-and-untrusted-input` for the dependency surface.
+   :doc:`file-uploads` for user-supplied files and the media origin.
    :doc:`/content/topics/static-assets/js-context` for runtime script options that interact with CSP.
    :doc:`reporting` for vulnerability disclosure.

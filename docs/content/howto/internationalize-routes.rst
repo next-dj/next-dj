@@ -97,6 +97,7 @@ A ``@context`` callable returns the already-translated string.
    :caption: shop/routes/page.py
 
    from django.utils.translation import gettext as _
+
    from next import context
 
    @context("heading")

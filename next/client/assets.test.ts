@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createAssets } from "./assets";
+import { createAssets, nativeLinkLoader } from "./assets";
 import type { Assets, LinkLoader, SessionStore } from "./assets";
 import type { Asset } from "./apply";
 import type { Clock } from "./wire";
@@ -366,8 +366,7 @@ describe("assets registry and delta", () => {
       [{ kind: "js", url: "http://x/odd.css", load: "link" }],
       () => undefined,
     );
-    // A url of its own, so only the verb guard (not the dedup key) can keep it
-    // out of the head.
+    // A url of its own, so only the verb guard can keep it out of the head.
     assets.loadJs([{ kind: "js", url: "http://x/other.css", load: "link" }]);
     expect(loaded).toEqual(["http://x/odd.css"]);
     expect(document.head.querySelectorAll("script")).toHaveLength(0);
@@ -401,8 +400,7 @@ describe("assets registry and delta", () => {
     document.head.innerHTML = "<script>mount()</script>";
     const { assets } = makeAssets();
     assets.seed();
-    // The seeded body ran as a classic script, so the module form of the same
-    // source still has to be inserted.
+    // The seeded body ran as a classic script, so the module form still inserts.
     assets.loadJs([inlineModule("mount()")]);
     const scripts =
       document.head.querySelectorAll<HTMLScriptElement>("script:not([src])");
@@ -538,8 +536,7 @@ describe("url dedup keys", () => {
       '<script type="module" src="http://cdn.example.com/build/app.mjs"></script>';
     const { assets } = makeAssets();
     assets.seed();
-    // Keyed against the location, the relative url would resolve elsewhere and
-    // the module would evaluate twice.
+    // Keyed against the location, or the relative url would evaluate twice.
     assets.loadJs([{ kind: "module", url: "app.mjs", load: "module" }]);
     expect(document.head.querySelectorAll("script[src]")).toHaveLength(1);
   });
@@ -675,8 +672,7 @@ describe("seeding across the parse window", () => {
     const { assets } = makeAssets();
     assets.seed();
     parseTag('<script src="/static/d.js"></script>');
-    // A deferred script runs once readyState has flipped but before the event,
-    // so the pending catch-up gates the rescan.
+    // readyState flipped but the event has not fired, so the catch-up gates the rescan.
     readyState("interactive");
     assets.loadJs([{ kind: "js", url: "/static/d.js" }]);
     expect(document.querySelectorAll('script[src="/static/d.js"]')).toHaveLength(1);
@@ -822,5 +818,89 @@ describe("version safeguard and reload-once", () => {
     expect(session.get("next:partial:reloaded")).toBe("1");
     assets.acceptVersion("v2");
     expect(session.get("next:partial:reloaded")).toBeNull();
+  });
+});
+
+describe("the native stylesheet loader", () => {
+  // A manual clock, so the timeout is a call rather than a wait.
+  function timerClock(): Clock & { fire(): void; cleared: number[] } {
+    const cleared: number[] = [];
+    let pending: (() => void) | null = null;
+    return {
+      now: () => 0,
+      setTimeout: (handler) => {
+        pending = handler;
+        return 7;
+      },
+      clearTimeout: (handle) => void cleared.push(handle),
+      cleared,
+      fire() {
+        const handler = pending;
+        pending = null;
+        handler?.();
+      },
+    };
+  }
+
+  function inserted(): HTMLLinkElement {
+    return document.head.querySelector("link[rel=stylesheet]")!;
+  }
+
+  beforeEach(() => {
+    document.head.querySelectorAll("link[rel=stylesheet]").forEach((el) => el.remove());
+  });
+
+  it("inserts the sheet with its nonce and reports a load", () => {
+    const clock = timerClock();
+    const outcomes: boolean[] = [];
+    nativeLinkLoader(document)(
+      "/a.css",
+      "sha256-abc",
+      (ok) => outcomes.push(ok),
+      clock,
+      3000,
+    );
+    const link = inserted();
+    expect(link.href).toContain("/a.css");
+    expect(link.nonce).toBe("sha256-abc");
+    link.dispatchEvent(new Event("load"));
+    expect(outcomes).toEqual([true]);
+    expect(clock.cleared).toEqual([7]);
+  });
+
+  it("leaves the nonce off a page that carries none", () => {
+    const clock = timerClock();
+    nativeLinkLoader(document)("/a.css", undefined, () => undefined, clock, 3000);
+    expect(inserted().nonce).toBe("");
+  });
+
+  it("reports a failed sheet", () => {
+    const clock = timerClock();
+    const outcomes: boolean[] = [];
+    nativeLinkLoader(document)(
+      "/a.css",
+      undefined,
+      (ok) => outcomes.push(ok),
+      clock,
+      10,
+    );
+    inserted().dispatchEvent(new Event("error"));
+    expect(outcomes).toEqual([false]);
+  });
+
+  it("gives up on the timeout and ignores the sheet that lands afterwards", () => {
+    const clock = timerClock();
+    const outcomes: boolean[] = [];
+    nativeLinkLoader(document)(
+      "/a.css",
+      undefined,
+      (ok) => outcomes.push(ok),
+      clock,
+      10,
+    );
+    clock.fire();
+    expect(outcomes).toEqual([false]);
+    inserted().dispatchEvent(new Event("load"));
+    expect(outcomes).toEqual([false]);
   });
 });

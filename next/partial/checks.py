@@ -1,8 +1,7 @@
 """System checks for the partial-rendering subsystem.
 
-This module is excluded from coverage like every other area `checks.py`. The zone checks
-read the same compiled page templates the renderer uses, so a misconfigured zone is
-caught at `manage.py check` time rather than on a partial request.
+Zone checks read the same compiled page templates the renderer uses, so a misconfigured
+zone is caught at `manage.py check` time instead of on a partial request.
 """
 
 import re
@@ -23,19 +22,16 @@ from django.template.base import Node, NodeList, TextNode
 from django.template.defaulttags import ForNode, IfNode, WithNode
 
 from next.checks import NEXT
-from next.checks.common import (
-    first_visit,
-    get_components_manager,
-    get_router_manager,
-    iter_scanned_page_pairs,
-)
+from next.checks.common import first_visit, get_router_manager, iter_scanned_page_pairs
+from next.components.sources import get_components_manager
 from next.conf import import_class_cached, next_framework_settings
 from next.conf.signals import settings_reloaded
 from next.forms.backends import FormActionBackend
 from next.forms.manager import form_action_manager
 from next.pages import page
-from next.templatetags.forms import FormNode
+from next.templatetags.forms import FORM_KEY_ATTR, FORM_ZONE_ATTR, FormNode
 
+from .manager import PARTIAL_BACKENDS_KEY, pinned_version
 from .registry import BUILTIN_OPS, patch_op_registry
 from .zone import ZoneNode
 
@@ -47,8 +43,6 @@ if TYPE_CHECKING:
 
     from next.pages.registry import ZoneBinding
     from next.urls import RouterBackend, RouterManager
-
-    _ComposedMemo = tuple[RouterManager, list[tuple[Path, Template]]] | None
 
 
 E_DUPLICATE_ZONE: Final = "next.E060"
@@ -69,38 +63,43 @@ W_MANIFEST_VERSION_NO_STORAGE: Final = "next.W069"
 W_FORM_IN_FOR_NO_KEY: Final = "next.W070"
 W_TOO_MANY_BACKENDS: Final = "next.W071"
 
-_PARTIAL_BACKENDS_KEY: Final = "PARTIAL_BACKENDS"
 _MIN_DUPLICATE_COUNT: Final = 2
-_FORM_TARGET_ATTR: Final = "data-next-target"
-_FORM_KEY_ATTR: Final = "data-next-key"
 
 
 _ZONE_SLUG = re.compile(r"\A[A-Za-z0-9_-]+\Z")
 
 
-# One walk of the page tree shared by every zone check per run. Comparing the
-# stored manager by identity invalidates the memo when the manager is rebuilt.
-_COMPOSED_PAGES_MEMO: "dict[str, _ComposedMemo]" = {"value": None}
+class _ComposedPagesMemo:
+    """One walk of the page tree shared by every zone check of a run.
+
+    The manager is held rather than compared by value, so a rebuilt one
+    invalidates the pages that were read through the previous one.
+    """
+
+    def __init__(self) -> None:
+        """Start with no walk on record."""
+        self.router_manager: RouterManager | None = None
+        self.pages: list[tuple[Path, Template]] = []
+
+
+_composed_pages = _ComposedPagesMemo()
 
 
 def _iter_composed_pages() -> "Iterator[tuple[Path, Template]]":
     """Yield each page path with its compiled composed template.
 
-    Pages whose body is produced dynamically by `render()` have no
-    static composed template and are skipped. A page that fails to
-    compile is skipped here and reported by
-    `check_composed_templates_compile`. The result is memoised per
-    router-manager instance so all zone checks share one walk.
+    Skips a dynamic `render()` page and a compile failure, both reported by
+    `check_composed_templates_compile`, and memoises the walk per router manager.
     """
     router_manager, _errors = get_router_manager()
     if router_manager is None:
         return
-    memo = _COMPOSED_PAGES_MEMO["value"]
-    if memo is not None and memo[0] is router_manager:
-        yield from memo[1]
+    if _composed_pages.router_manager is router_manager:
+        yield from _composed_pages.pages
         return
     pages = list(_collect_composed_pages(router_manager))
-    _COMPOSED_PAGES_MEMO["value"] = (router_manager, pages)
+    _composed_pages.router_manager = router_manager
+    _composed_pages.pages = pages
     yield from pages
 
 
@@ -116,12 +115,11 @@ def _collect_composed_pages(
 def reset_composed_pages_memo(**kwargs) -> None:
     """Drop the memoised composed-page list for the next check run.
 
-    Identity against the router manager already invalidates the memo when the
-    manager is rebuilt. Call this explicitly after editing a `.djx` in place
-    under a live manager, since `settings_reloaded` only fires when
-    `NEXT_FRAMEWORK` itself changes.
+    Manager identity already invalidates the memo, so this is for a `.djx` edited in
+    place under a live manager, which `settings_reloaded` never reports.
     """
-    _COMPOSED_PAGES_MEMO["value"] = None
+    _composed_pages.router_manager = None
+    _composed_pages.pages = []
 
 
 settings_reloaded.connect(reset_composed_pages_memo)
@@ -168,9 +166,8 @@ def _significant(nodelist: NodeList) -> list[Node]:
 def check_composed_templates_compile(*args, **kwargs) -> list[CheckMessage]:
     """Error when a composed page template fails to compile (`next.E072`).
 
-    The zone checks skip a page whose composed template does not
-    compile, so without this check the syntax error would surface only
-    as a 500 on the first request to the page.
+    The zone checks skip a page whose composed template does not compile, so without
+    this check the syntax error would surface only as a 500 on the first request.
     """
     messages: list[CheckMessage] = []
     router_manager, _errors = get_router_manager()
@@ -314,20 +311,15 @@ def _forms_in_loop(nodelist: NodeList, *, inside: bool = False) -> "Iterator[For
             yield from _forms_in_loop(child, inside=now_inside)
 
 
-def _form_has_partial_attr(node: FormNode, attr: str) -> bool:
-    """Return True when the form tag wrote the given `data-next-*` attribute."""
-    return any(name == attr for name, _expr in node.partial_attrs)
-
-
 @register(Tags.templates, NEXT)
 def check_repeated_form_has_key(*args, **kwargs) -> list[CheckMessage]:
     """Warn when a looped `{% form %}` has no key or zone (`next.W070`)."""
     messages: list[CheckMessage] = []
     for page_path, template in _iter_composed_pages():
         for node in _forms_in_loop(template.nodelist):
-            if _form_has_partial_attr(node, _FORM_TARGET_ATTR):
+            if node.has_partial_attr(FORM_ZONE_ATTR):
                 continue
-            if _form_has_partial_attr(node, _FORM_KEY_ATTR):
+            if node.has_partial_attr(FORM_KEY_ATTR):
                 continue
             messages.append(
                 DjangoWarning(
@@ -439,9 +431,8 @@ def _zone_bound_contexts(
 ) -> "Iterator[tuple[str, str]]":
     """Yield the label and bound zone name of every zone-bound `@context` of a page.
 
-    The registry keys on the file declaring the callable, which for a
-    `page.py` is the path the page scan walked, so the composed-page path
-    looks the bindings up directly.
+    The registry keys on the file declaring the callable, which for a `page.py` is the
+    path the page scan walked, so the composed-page path looks the bindings up directly.
     """
     for binding in bindings:
         if binding.zones is None:
@@ -503,11 +494,8 @@ _OP_TOKEN = re.compile(r"\A[A-Za-z0-9_.-]+\Z")
 def check_custom_patch_ops_well_formed(*args, **kwargs) -> list[CheckMessage]:
     """Error when a custom patch verb is malformed or shadows a built-in (`next.E066`).
 
-    The runtime guard in `Patches.op()` rejects an unregistered verb on
-    every call. This check turns the registry side of that contract into
-    a startup error: a verb registered with a non-token name or one that
-    silently shadows a built-in verb is caught at `manage.py check`
-    rather than only when an op of that name reaches a client.
+    Mirrors the runtime guard in `Patches.op()` at startup, so a bad verb name is caught
+    at `manage.py check` time instead of only when an op of that name reaches a client.
     """
     messages: list[CheckMessage] = []
     for name in sorted(patch_op_registry.custom_names()):
@@ -537,11 +525,8 @@ def check_custom_patch_ops_well_formed(*args, **kwargs) -> list[CheckMessage]:
 def check_form_backend_partial_aware(*args, **kwargs) -> list[CheckMessage]:
     """Warn when partial rendering is on but a form backend is not aware (`next.W068`).
 
-    The base `FormActionBackend.shape_response` routes partial requests
-    to the patch shaping path. A custom backend that overrides
-    `shape_response` without that branch would silently drop the patch
-    envelope and serve a full page to the runtime. The check stays silent
-    on the default backend, which inherits the partial-aware method.
+    A backend that overrides `shape_response` without the partial branch drops the patch
+    envelope and serves a full page, so only an override is warned about.
     """
     if not _partial_backends_active():
         return []
@@ -571,20 +556,18 @@ def check_form_backend_partial_aware(*args, **kwargs) -> list[CheckMessage]:
 def check_partial_backends_is_a_list(*args, **kwargs) -> list[CheckMessage]:
     """Error when `PARTIAL_BACKENDS` is not a list (`next.E067`).
 
-    The settings layer merges the key only when it holds a list, so a tuple
-    or a bare dict is dropped and the default protocol backend loads in its
-    place. This check owns the shape probe for the key, which the
-    configuration checks leave out so the drop is reported once.
+    The settings layer silently drops a non-list value and falls back to the default
+    protocol backend, so this check is the only place the drop is reported.
     """
     raw = getattr(settings, "NEXT_FRAMEWORK", None)
     if not isinstance(raw, dict):
         return []
-    configs = raw.get(_PARTIAL_BACKENDS_KEY)
+    configs = raw.get(PARTIAL_BACKENDS_KEY)
     if configs is None or isinstance(configs, list):
         return []
     return [
         Error(
-            f"NEXT_FRAMEWORK[{_PARTIAL_BACKENDS_KEY!r}] must be a list. The "
+            f"NEXT_FRAMEWORK[{PARTIAL_BACKENDS_KEY!r}] must be a list. The "
             "value is ignored, so the default protocol backend loads instead "
             "of the configured one.",
             obj=settings,
@@ -595,7 +578,7 @@ def check_partial_backends_is_a_list(*args, **kwargs) -> list[CheckMessage]:
 
 def _partial_backend_configs() -> list[object]:
     """Return PARTIAL_BACKENDS as a list, tolerating any malformed shape."""
-    configs = getattr(next_framework_settings, _PARTIAL_BACKENDS_KEY, ())
+    configs = getattr(next_framework_settings, PARTIAL_BACKENDS_KEY, ())
     if isinstance(configs, list | tuple):
         return list(configs)
     return []
@@ -610,9 +593,7 @@ def _partial_backends_active() -> bool:
 def check_single_partial_backend(*args, **kwargs) -> list[CheckMessage]:
     """Warn when more than one partial protocol backend is configured (`next.W071`).
 
-    Partial rendering uses a single protocol backend. Only
-    the first valid PARTIAL_BACKENDS entry is instantiated,
-    so a second entry is dead config that silently never runs.
+    Only the first valid PARTIAL_BACKENDS entry runs, any other is dead config.
     """
     valid = [
         config for config in _partial_backend_configs() if isinstance(config, dict)
@@ -629,8 +610,6 @@ def check_single_partial_backend(*args, **kwargs) -> list[CheckMessage]:
     ]
 
 
-_VERSION_OPTION: Final = "VERSION"
-_MANIFEST_VERSION: Final = "manifest"
 _STATICFILES_ALIAS: Final = "staticfiles"
 
 
@@ -638,9 +617,7 @@ _STATICFILES_ALIAS: Final = "staticfiles"
 def check_partial_backend_names_a_path(*args, **kwargs) -> list[CheckMessage]:
     """Error when a PARTIAL_BACKENDS entry omits its BACKEND key (`next.E073`).
 
-    Such an entry falls back to the default protocol backend, so the
-    intended wire format would silently never load. The check names the
-    entry that lacks a dotted path at startup instead.
+    Such an entry falls back to the default backend, so the wire format never loads.
     """
     messages: list[CheckMessage] = []
     for index, config in enumerate(_partial_backend_configs()):
@@ -661,12 +638,8 @@ def check_partial_backend_names_a_path(*args, **kwargs) -> list[CheckMessage]:
 def check_manifest_version_has_manifest_storage(*args, **kwargs) -> list[CheckMessage]:
     """Warn when manifest versioning has no manifest storage (`next.W069`).
 
-    The `VERSION: "manifest"` option asks the version stamp to track the
-    staticfiles manifest, so a deploy of new assets bumps the version and
-    the client reloads. That guard is silent unless the active staticfiles
-    storage hashes its files into a manifest. The check pairs with the
-    runtime fallback that resolves the sentinel to a stable default when no
-    manifest storage is configured, surfacing the dead guard at startup.
+    `VERSION: "manifest"` bumps on a deploy by hashing files into a manifest, so without
+    manifest storage the guard silently never asks a client to reload.
     """
     if not _manifest_version_requested():
         return []
@@ -685,13 +658,13 @@ def check_manifest_version_has_manifest_storage(*args, **kwargs) -> list[CheckMe
 
 
 def _manifest_version_requested() -> bool:
-    """Return True when a partial backend resolves VERSION to the sentinel."""
+    """Return True when a partial backend resolves VERSION to the manifest."""
     for config in _partial_backend_configs():
         if not isinstance(config, dict):
             continue
         options = config.get("OPTIONS")
-        version = options.get(_VERSION_OPTION) if isinstance(options, dict) else None
-        if version is None or version == _MANIFEST_VERSION:
+        options = options if isinstance(options, dict) else {}
+        if pinned_version(options) is None:
             return True
     return False
 
@@ -699,9 +672,8 @@ def _manifest_version_requested() -> bool:
 def _staticfiles_storage_is_manifest() -> bool:
     """Return True when the configured staticfiles storage hashes its files.
 
-    The storage class is read from its dotted path rather than the resolved
-    `staticfiles_storage` proxy, so the check stays side-effect-free and
-    never fails on a project that has not set STATIC_ROOT.
+    Reads the dotted path rather than the resolved `staticfiles_storage` proxy, staying
+    side-effect-free on a project that has not set STATIC_ROOT.
     """
     backend_path = _staticfiles_storage_path()
     if backend_path is None:

@@ -20,6 +20,7 @@ The ``form`` value in the handler is the bound formset, not an individual form.
 
 The ``next.forms.Form`` and ``next.forms.ModelForm`` base classes apply to each row form inside the formset.
 Use Django's standard :doc:`factory functions <django:topics/forms/formsets>` to build the formset class.
+``next.forms`` re-exports ``formset_factory``, ``modelformset_factory``, ``inlineformset_factory``, and ``modelform_factory`` unchanged, so one import line covers the row form and its factory.
 
 Registering a formset action
 ----------------------------
@@ -29,9 +30,9 @@ Pass the formset class as ``form_class``.
 .. code-block:: python
    :caption: notes/forms.py
 
-   from django.forms import formset_factory
-   from next.forms import ModelForm
    from notes.models import Note
+
+   from next.forms import ModelForm, formset_factory
 
    class NoteRowForm(ModelForm):
        class Meta:
@@ -45,32 +46,34 @@ Mark the row form ``abstract``.
 Without the flag, ``__init_subclass__`` registers ``NoteRowForm`` as a standalone single-row save action next to the formset action.
 ``formset_factory`` accepts the abstract class as usual, see :ref:`Preventing registration <topics-forms-actions-abstract>`.
 
+``formset_factory`` builds an ordinary set of row forms, where each row saves itself and the set exposes no ``save()`` of its own, which is why the handler below loops over the rows.
+Reach for ``modelformset_factory`` when the set has to load an existing queryset and save it as a unit, because that factory adds the ``queryset`` argument and a ``save()`` covering every row.
+
 .. code-block:: python
    :caption: notes/pages/notes/bulk/page.py
 
    from django.forms.formsets import BaseFormSet
-   from django.http import HttpResponseRedirect
-   from django.urls import reverse
-   from next import action
+   from django.http import HttpRequest, HttpResponseRedirect
    from notes.forms import NoteFormSet
+
+   from next import action
+   from next.forms import redirect_to_origin
 
    def build_bulk_formset() -> tuple[type[BaseFormSet], dict]:
        return NoteFormSet, {"initial": [{"title": "Draft"}]}
 
    @action("bulk_create_notes", form_class=build_bulk_formset)
-   def bulk_create_notes(form: NoteFormSet) -> HttpResponseRedirect:
+   def bulk_create_notes(request: HttpRequest, form: NoteFormSet) -> HttpResponseRedirect:
        for row in form:
            if row.cleaned_data and not row.cleaned_data.get("DELETE"):
                row.save()
-       return HttpResponseRedirect(reverse("next:page_"))
+       return redirect_to_origin(request)
 
 Passing a formset class directly to ``form_class`` is accepted at decoration time but fails at request time, because the dispatcher calls ``get_initial`` on a directly passed class and Django formset classes have none.
 Register a factory callable that returns a ``(FormSetClass, init_kwargs)`` tuple instead.
 The ``init_kwargs`` reach the formset constructor, and a non-empty dict makes the dispatcher skip the ``get_initial`` step.
 An empty dict routes back into ``get_initial``, so keep ``init_kwargs`` non-empty, even when the only entry is a ``prefix`` or the neutral ``{"initial": {}}``.
 See :doc:`/content/howto/use-formsets` for the recipe built on this rule.
-
-The ``page_{name}`` URL name follows the file-router naming convention, see :doc:`/content/topics/file-router`.
 
 Rendering the formset
 ---------------------
@@ -115,9 +118,11 @@ Build the formset inside a ``@context`` callable named after the action and retu
    :caption: notes/pages/notes/bulk/page.py
 
    from types import SimpleNamespace
+
+   from notes.forms import NoteFormSet
+
    from next import context
    from next.forms import cleanup_extra_initial
-   from notes.forms import NoteFormSet
 
    def build_formset(initial: list[dict]) -> NoteFormSet:
        formset = NoteFormSet(initial=initial)
@@ -139,9 +144,9 @@ Use ``modelformset_factory`` for editing several existing instances.
 .. code-block:: python
    :caption: notes/forms.py
 
-   from django.forms import modelformset_factory
-   from next.forms import ModelForm
    from notes.models import Note
+
+   from next.forms import ModelForm, modelformset_factory
 
    class NoteForm(ModelForm):
        class Meta:
@@ -157,11 +162,12 @@ Use ``modelformset_factory`` for editing several existing instances.
    from types import SimpleNamespace
 
    from django.forms.formsets import BaseFormSet
-   from django.http import HttpResponseRedirect
-   from django.urls import reverse
-   from next import action, context
+   from django.http import HttpRequest, HttpResponseRedirect
    from notes.forms import NoteEditFormSet
    from notes.models import Note
+
+   from next import action, context
+   from next.forms import redirect_to_origin
 
    @context("edit_all_notes")
    def edit_formset() -> SimpleNamespace:
@@ -172,9 +178,9 @@ Use ``modelformset_factory`` for editing several existing instances.
        return NoteEditFormSet, {"queryset": Note.objects.all()}
 
    @action("edit_all_notes", form_class=build_edit_formset)
-   def edit_all_notes(form: NoteEditFormSet) -> HttpResponseRedirect:
+   def edit_all_notes(request: HttpRequest, form: NoteEditFormSet) -> HttpResponseRedirect:
        form.save()
-       return HttpResponseRedirect(reverse("next:page_"))
+       return redirect_to_origin(request)
 
 The ``@context("edit_all_notes")`` callable publishes a bound formset under the action-named key the ``{% form %}`` tag reads.
 The handler receives the same formset for save.
@@ -191,17 +197,18 @@ Validating an inline formset
 A parent form that owns an inline formset attaches the formset on construction and validates it inside ``clean``.
 Raising ``ValidationError`` from ``clean`` routes the failure through the standard re-render pipeline.
 
-Use a factory callable as ``form_class`` so the dispatcher binds the inline formset to the parent form before calling ``form.is_valid()``.
+Pass the parent instance through a ``form_class`` factory, because the constructor needs ``instance=`` before it can rebind the inline formset to the POST data.
 The factory returns ``(FormClass, init_kwargs)`` and the dispatcher passes those kwargs to the constructor.
 ``NoteForm.__init__`` rebinds ``row_formset`` to ``self.data`` with ``instance=self.instance`` so the formset validates against the same POST as the parent form.
+A parent form that declares ``Meta.instance_from_url`` gets the same ``instance=`` from the default ``get_initial``, which replaces both the factory and the handler when the page needs no extra logic.
 The parent form is ``abstract`` because it dispatches only through the ``update_note`` factory action, not as a standalone ``note_form`` action.
 
 .. code-block:: python
    :caption: notes/forms.py
 
-   from django.forms import inlineformset_factory
-   from next.forms import ModelForm
    from notes.models import Note, Row
+
+   from next.forms import ModelForm, inlineformset_factory
 
    RowFormSet = inlineformset_factory(Note, Row, fields=("label",), extra=1)
 
@@ -230,10 +237,11 @@ The parent form is ``abstract`` because it dispatches only through the ``update_
 
    from django.http import HttpResponseRedirect
    from django.shortcuts import get_object_or_404
-   from next import action
-   from next.urls import DUrl
    from notes.forms import NoteForm
    from notes.models import Note
+
+   from next import action
+   from next.urls import DUrl
 
    def note_form_factory(note_id: DUrl["id", int]) -> tuple:
        note = get_object_or_404(Note, pk=note_id)

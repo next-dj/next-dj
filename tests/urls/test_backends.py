@@ -3,7 +3,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
-from django.core.exceptions import AppRegistryNotReady
+from django.core.exceptions import AppRegistryNotReady, ImproperlyConfigured
 from django.test import RequestFactory, override_settings
 
 from next.pages import page
@@ -12,11 +12,29 @@ from next.urls import FileRouterBackend, PageRoot, RouterBackend, RouterFactory
 from next.urls.backends import _installed_app_directories, _is_framework_app
 from next.utils import forget_resolved_trees
 from tests.support import (
-    file_router_backend_from_params,
+    EntryRouter,
+    file_router,
     file_router_config_entry,
     importable_dir,
     record_path_calls,
 )
+
+
+class NarrowFileRouter(FileRouterBackend):
+    """File router subclass that refuses the entry the family contract passes."""
+
+    def __init__(self) -> None:
+        """Take nothing, so the entry the factory hands over is a TypeError."""
+        super().__init__(file_router_config_entry())
+
+
+class WidgetsFileRouter(FileRouterBackend):
+    """File router subclass registering components from a folder of its own."""
+
+    @staticmethod
+    def _resolve_components_folder_name() -> str:
+        """Answer the folder this subclass walks instead of reading the settings."""
+        return "widgets"
 
 
 class TestRouterBackend:
@@ -32,45 +50,33 @@ class TestFileRouterBackend:
     """FileRouterBackend initialization, paths, and URL generation."""
 
     @pytest.mark.parametrize(
-        (
-            "test_case",
-            "pages_dir",
-            "app_dirs",
-            "options",
-            "expected_pages_dir",
-            "expected_app_dirs",
-            "expected_options",
-        ),
-        [
-            ("defaults", None, None, None, "pages", True, {}),
-            ("custom", "views", False, {"custom": "value"}, "views", False, {}),
-        ],
+        ("pages_dir", "app_dirs", "options", "expected_options"),
+        [("pages", True, {}, {}), ("views", False, {"custom": "value"}, {})],
         ids=["defaults", "custom"],
     )
-    def test_init_variations(
-        self,
-        test_case,
-        pages_dir,
-        app_dirs,
-        options,
-        expected_pages_dir,
-        expected_app_dirs,
-        expected_options,
-    ) -> None:
-        """Constructor sets pages_dir, app_dirs, options, and empty pattern cache."""
-        kwargs = {}
-        if pages_dir is not None:
-            kwargs["pages_dir"] = pages_dir
-        if app_dirs is not None:
-            kwargs["app_dirs"] = app_dirs
-        if options is not None:
-            kwargs["options"] = options
+    def test_init_variations(self, pages_dir, app_dirs, options, expected_options):
+        """The entry sets pages_dir, app_dirs, options, and an empty pattern cache."""
+        router = file_router(pages_dir=pages_dir, app_dirs=app_dirs, options=options)
 
-        router = FileRouterBackend(**kwargs)
-        assert router.pages_dir == expected_pages_dir
-        assert router.app_dirs == expected_app_dirs
+        assert router.pages_dir == pages_dir
+        assert router.app_dirs == app_dirs
         assert router.options == expected_options
         assert router._patterns_cache == {}
+
+    @pytest.mark.parametrize("missing", ["PAGES_DIR", "APP_DIRS", "DIRS", "OPTIONS"])
+    def test_entry_missing_one_key_is_refused(self, missing: str) -> None:
+        """A partial entry is a settings mistake rather than a shorthand."""
+        entry = file_router_config_entry()
+        del entry[missing]
+
+        with pytest.raises(ImproperlyConfigured, match=missing):
+            FileRouterBackend(entry)
+
+    def test_non_dict_options_are_read_as_empty(self) -> None:
+        """OPTIONS naming no mapping narrows to nothing rather than refusing."""
+        entry = {**file_router_config_entry(), "OPTIONS": None}
+
+        assert FileRouterBackend(entry).options == {}
 
     @pytest.mark.parametrize(
         ("pages_dir", "app_dirs", "expected_repr"),
@@ -82,46 +88,8 @@ class TestFileRouterBackend:
     )
     def test_repr_variations(self, pages_dir, app_dirs, expected_repr) -> None:
         """``repr`` reflects pages_dir and app_dirs."""
-        router = FileRouterBackend(pages_dir, app_dirs=app_dirs)
+        router = file_router(pages_dir=pages_dir, app_dirs=app_dirs)
         assert repr(router) == expected_repr
-
-    @pytest.mark.parametrize(
-        ("test_case", "router1_params", "router2_params", "expected_equal"),
-        [
-            (
-                "same_instance",
-                ("pages", True, {"opt": "val"}),
-                ("pages", True, {"opt": "val"}),
-                True,
-            ),
-            ("different_instance", ("pages", True), ("views", True), False),
-            ("wrong_type", "not a router", "also not a router", False),
-        ],
-        ids=["same_instance", "different_instance", "wrong_type"],
-    )
-    def test_equality_variations(
-        self, test_case, router1_params, router2_params, expected_equal
-    ) -> None:
-        """Equality and inequality for matching config, different config, and wrong type."""
-        router1 = file_router_backend_from_params(router1_params)
-        router2 = file_router_backend_from_params(router2_params)
-
-        if expected_equal:
-            assert router1 == router2
-        else:
-            assert router1 != router2
-
-    def test_equality_with_different_type(self) -> None:
-        """Router does not equal a non router object."""
-        router = FileRouterBackend("pages")
-        other = "not a router"
-        assert router != other
-
-    def test_hash(self) -> None:
-        """Same config yields equal hashes."""
-        router1 = FileRouterBackend("pages", app_dirs=True, options={"opt": "val"})
-        router2 = FileRouterBackend("pages", app_dirs=True, options={"opt": "val"})
-        assert hash(router1) == hash(router2)
 
     @pytest.mark.parametrize(
         ("app_dirs", "method_to_patch", "expected_urls"),
@@ -135,7 +103,7 @@ class TestFileRouterBackend:
         self, app_dirs, method_to_patch, expected_urls
     ) -> None:
         """Delegates to app or root URL generators based on app_dirs."""
-        router = FileRouterBackend(app_dirs=app_dirs)
+        router = file_router(app_dirs=app_dirs)
         with patch.object(router, method_to_patch, return_value=expected_urls):
             urls = router.generate_urls()
             assert urls == expected_urls
@@ -153,13 +121,12 @@ class TestFileRouterBackend:
     def test_get_app_pages_path_memoises_a_missing_tree(self, tmp_path) -> None:
         """An app without a pages tree is answered from the memo too.
 
-        The memo lives as long as this router, and a tree an app grows under
-        the development server reaches the watcher through a router built
-        after it, not through this one probing again.
+        The memo lives as long as this router, and a tree an app grows later reaches the
+        watcher through the next router, not through this one probing again.
         """
         app_dir = tmp_path / "shop"
         app_dir.mkdir()
-        router = FileRouterBackend()
+        router = file_router()
         directories = {"shop": app_dir}
 
         with override_settings(DEBUG=True):
@@ -172,7 +139,7 @@ class TestFileRouterBackend:
         """A tree that is there is looked up once and answered from the memo."""
         app_dir = tmp_path / "shop"
         (app_dir / "pages").mkdir(parents=True)
-        router = FileRouterBackend()
+        router = file_router()
         directories = {"shop": app_dir}
 
         first = router._get_app_pages_path("shop", directories)
@@ -196,17 +163,12 @@ class TestFileRouterBackend:
         assert router._get_app_pages_path("not_an_installed_app", {}) is None
 
     @pytest.mark.parametrize(
-        ("test_case", "base_dir", "exists", "expected_result"),
-        [
-            ("with_base_dir", "/path/to/project", True, "mock_path_instance"),
-            ("string_base_dir", "/path/to/project", True, "mock_path_instance"),
-            ("no_base_dir", None, None, None),
-            ("does_not_exist", "/path/to/project", False, None),
-        ],
-        ids=["with_base_dir", "string_base_dir", "no_base_dir", "does_not_exist"],
+        ("base_dir", "exists"),
+        [("/path/to/project", True), (None, None), ("/path/to/project", False)],
+        ids=["with_base_dir", "no_base_dir", "does_not_exist"],
     )
     def test_get_root_pages_path_variations(
-        self, router, mock_settings, test_case, base_dir, exists, expected_result
+        self, router, mock_settings, base_dir, exists
     ) -> None:
         """Root pages paths from BASE_DIR when directory exists or missing."""
         mock_settings.BASE_DIR = base_dir
@@ -215,7 +177,7 @@ class TestFileRouterBackend:
             result = router._get_root_pages_paths()
             assert result == []
         else:
-            root_router = FileRouterBackend(app_dirs=False)
+            root_router = file_router(app_dirs=False)
             mock_pages_path = Mock()
             mock_pages_path.exists.return_value = exists
             mock_base = Mock()
@@ -230,44 +192,18 @@ class TestFileRouterBackend:
 
     def test_get_root_pages_paths_from_extra_roots(self, tmp_path) -> None:
         """Paths in ``extra_root_paths`` are resolved when they exist."""
-        router = FileRouterBackend(extra_root_paths=[tmp_path])
+        router = file_router(dirs=[tmp_path])
         result = router._get_root_pages_paths()
         assert len(result) == 1
         assert result[0] == tmp_path.resolve()
 
     def test_get_root_pages_paths_skips_nonexistent(self) -> None:
         """Nonexistent ``extra_root_paths`` entries are omitted."""
-        router = FileRouterBackend(
-            extra_root_paths=[Path("/nonexistent/path"), Path("/also/nonexistent")]
+        router = file_router(
+            dirs=[Path("/nonexistent/path"), Path("/also/nonexistent")]
         )
         result = router._get_root_pages_paths()
         assert result == []
-
-    def test_both_keywords_still_normalise_the_roots(self, tmp_path) -> None:
-        """A caller spelling out both keywords skips no part of the contract.
-
-        `page_roots` promises resolved absolute trees, and passing `skip_dir_names`
-        takes away the classification that normally does it. What the router keeps
-        is resolved once, and the trees that are not there drop out of the report
-        the same way a classified entry does.
-        """
-        tree = tmp_path / "tree"
-        tree.mkdir()
-        router = FileRouterBackend(
-            app_dirs=False,
-            extra_root_paths=[
-                tree / ".." / "tree",
-                Path("relative/pages"),
-                Path("/nope/does/not/exist"),
-            ],
-            skip_dir_names=frozenset(),
-        )
-        assert router._extra_root_paths == [
-            tree.resolve(),
-            Path("relative/pages").resolve(),
-            Path("/nope/does/not/exist"),
-        ]
-        assert [root.path for root in router.page_roots()] == [tree.resolve()]
 
     def test_a_classified_dirs_entry_is_resolved_once(
         self, tmp_path, monkeypatch
@@ -279,25 +215,11 @@ class TestFileRouterBackend:
 
         with override_settings(BASE_DIR=tmp_path):
             seen = record_path_calls(monkeypatch, "resolve")
-            router = FileRouterBackend(app_dirs=False, extra_root_paths=["site"])
+            router = file_router(app_dirs=False, dirs=["site"])
             held = list(router._extra_root_paths)
 
         assert held == [expected]
         assert seen == [tmp_path / "site"]
-
-    def test_a_root_created_later_leaves_two_routers_equal(self, tmp_path) -> None:
-        """Identical configuration compares equal whether or not the tree is there."""
-        tree = tmp_path / "late"
-        before = FileRouterBackend(
-            app_dirs=False, extra_root_paths=[tree], skip_dir_names=frozenset()
-        )
-        tree.mkdir()
-        after = FileRouterBackend(
-            app_dirs=False, extra_root_paths=[tree], skip_dir_names=frozenset()
-        )
-
-        assert before == after
-        assert hash(before) == hash(after)
 
     def test_get_root_pages_paths_fallback_when_app_dirs_false(
         self, mock_settings, tmp_path
@@ -306,20 +228,20 @@ class TestFileRouterBackend:
         pages_dir = tmp_path / "pages"
         pages_dir.mkdir()
         mock_settings.BASE_DIR = tmp_path
-        router = FileRouterBackend(app_dirs=False)
+        router = file_router(app_dirs=False)
         result = router._get_root_pages_paths()
         assert len(result) == 1
         assert result[0] == pages_dir
 
     def test_get_root_pages_paths_empty_when_app_dirs_true_no_extra_roots(self) -> None:
         """With app_dirs True and no extra roots, returns an empty list."""
-        router = FileRouterBackend(app_dirs=True)
+        router = file_router(app_dirs=True)
         result = router._get_root_pages_paths()
         assert result == []
 
     def test_generate_root_urls_cached_across_calls(self, tmp_path) -> None:
         """A second generate_urls reuses cached root patterns without re-walking."""
-        router = FileRouterBackend(app_dirs=False, extra_root_paths=[tmp_path])
+        router = file_router(app_dirs=False, dirs=[tmp_path])
         with patch.object(
             router, "_generate_patterns_from_directory", return_value=iter(["p1"])
         ) as mock_gen:
@@ -342,7 +264,9 @@ class TestFileRouterBackend:
                 urls.append("extra")
                 return urls
 
-        router = _AppendingRouter(app_dirs=False, extra_root_paths=[tmp_path])
+        router = _AppendingRouter(
+            file_router_config_entry(app_dirs=False, dirs=[tmp_path])
+        )
         with patch.object(
             router, "_generate_patterns_from_directory", return_value=iter(["p1"])
         ):
@@ -353,7 +277,7 @@ class TestFileRouterBackend:
 
     def test_get_root_pages_paths_answers_from_the_memo(self, tmp_path) -> None:
         """A second call answers the held list without touching the disk."""
-        router = FileRouterBackend(extra_root_paths=[tmp_path])
+        router = file_router(dirs=[tmp_path])
         first = router._get_root_pages_paths()
         with patch.object(Path, "exists") as looked:
             second = router._get_root_pages_paths()
@@ -363,7 +287,7 @@ class TestFileRouterBackend:
 
     def test_get_root_pages_paths_hands_back_a_copy(self, tmp_path) -> None:
         """A caller appending to the answer moves no root this router serves."""
-        router = FileRouterBackend(extra_root_paths=[tmp_path])
+        router = file_router(dirs=[tmp_path])
         first = router._get_root_pages_paths()
         first.append(Path("/appended"))
 
@@ -375,12 +299,11 @@ class TestFileRouterBackend:
     ) -> None:
         """The `BASE_DIR` fallback is probed once and answered from the memo.
 
-        A project growing its first page tree under the development server
-        reaches the watcher through the router built for the next read.
+        A new page tree reaches the watcher through the router built for the next read.
         """
         mock_settings.BASE_DIR = tmp_path
         mock_settings.DEBUG = True
-        router = FileRouterBackend(app_dirs=False)
+        router = file_router(app_dirs=False)
 
         assert router._get_root_pages_paths() == []
         (tmp_path / "pages").mkdir()
@@ -391,7 +314,7 @@ class TestFileRouterBackend:
         self, tmp_path
     ) -> None:
         """With app_dirs and extra root paths, root directory patterns are generated."""
-        router = FileRouterBackend(app_dirs=True, extra_root_paths=[tmp_path])
+        router = file_router(app_dirs=True, dirs=[tmp_path])
         with (
             patch.object(router, "_generate_app_urls", return_value=[]),
             patch.object(
@@ -456,7 +379,7 @@ class TestFileRouterBackend:
 
     def test_generate_patterns_from_directory(self) -> None:
         """Builds URL patterns from scan results via create_url_pattern."""
-        router = FileRouterBackend()
+        router = file_router()
         mock_pages_path = Mock()
 
         with (
@@ -472,17 +395,15 @@ class TestFileRouterBackend:
             patterns = list(router._generate_patterns_from_directory(mock_pages_path))
             assert patterns == ["pattern1", "pattern2"]
 
-    def test_scan_pages_directory_empty(self) -> None:
-        """Empty iterdir yields no routes."""
-        router = FileRouterBackend()
+    def test_scan_pages_directory_empty(self, tmp_path) -> None:
+        """A directory holding nothing yields no routes."""
+        router = file_router()
 
-        with patch("pathlib.Path.iterdir", return_value=[]):
-            pages = list(router._scan_pages_directory(Path("/tmp")))
-            assert pages == []
+        assert list(router._scan_pages_directory(tmp_path)) == []
 
     def test_scan_pages_directory_with_files(self) -> None:
         """Mix of subdirs and page.py delegates to recursive scan."""
-        router = FileRouterBackend()
+        router = file_router()
 
         mock_dir = Mock()
         mock_dir.name = "dir1"
@@ -503,7 +424,7 @@ class TestFileRouterBackend:
 
     def test_scan_pages_directory_recursive(self) -> None:
         """Nested directories produce multiple route entries."""
-        router = FileRouterBackend()
+        router = file_router()
 
         root_dir = Path("/tmp/pages")
 
@@ -522,7 +443,7 @@ class TestFileRouterBackend:
 
     def test_create_url_pattern_with_args_parameter(self, tmp_path) -> None:
         """View wrapper accepts args string when URL pattern includes [[args]]."""
-        router = FileRouterBackend()
+        router = file_router()
 
         page_py = tmp_path / "page.py"
         page_py.write_text(
@@ -549,7 +470,7 @@ class TestPageRoots:
         app_tree.mkdir()
         root_tree = tmp_path / "root_pages"
         root_tree.mkdir()
-        router = FileRouterBackend(app_dirs=True, extra_root_paths=[root_tree])
+        router = file_router(app_dirs=True, dirs=[root_tree])
 
         with (
             patch.object(router, "_get_installed_apps", return_value=["shop"]),
@@ -566,7 +487,7 @@ class TestPageRoots:
         """An app with no pages tree contributes no root."""
         app_tree = tmp_path / "shop_pages"
         app_tree.mkdir()
-        router = FileRouterBackend(app_dirs=True)
+        router = file_router(app_dirs=True)
 
         with (
             patch.object(
@@ -582,7 +503,7 @@ class TestPageRoots:
         """A root-only backend never reports app trees."""
         root_tree = tmp_path / "root_pages"
         root_tree.mkdir()
-        router = FileRouterBackend(app_dirs=False, extra_root_paths=[root_tree])
+        router = file_router(app_dirs=False, dirs=[root_tree])
 
         with patch.object(router, "_get_installed_apps") as installed_apps:
             roots = router.page_roots()
@@ -596,7 +517,7 @@ class TestPageRoots:
         first.mkdir()
         second = tmp_path / "second"
         second.mkdir()
-        router = FileRouterBackend(app_dirs=False, extra_root_paths=[first, second])
+        router = file_router(app_dirs=False, dirs=[first, second])
 
         labels = [root.label for root in router.page_roots()]
 
@@ -604,7 +525,7 @@ class TestPageRoots:
 
     def test_no_configured_tree_reports_no_roots(self) -> None:
         """A backend whose configuration resolves to nothing stays silent."""
-        router = FileRouterBackend(app_dirs=True)
+        router = file_router(app_dirs=True)
 
         with patch.object(router, "_get_installed_apps", return_value=[]):
             assert router.page_roots() == []
@@ -617,11 +538,12 @@ class TestComponentsFolderName:
         """A backend that walks no tree names no components folder."""
         assert custom_backend_class().components_folder_name() is None
 
-    def test_file_router_reports_its_configured_name(self) -> None:
-        """The file router answers the name its walk skips and registers."""
-        router = FileRouterBackend(components_folder_name="widgets")
+    def test_file_router_reports_the_name_its_own_class_resolves(self) -> None:
+        """A subclass renaming the folder is read, not the base class it inherits."""
+        router = WidgetsFileRouter(file_router_config_entry())
 
         assert router.components_folder_name() == "widgets"
+        assert "widgets" in router.skip_dir_names()
 
 
 class TestSkipDirNames:
@@ -683,7 +605,7 @@ class TestInstalledAppSpellings:
     def _routed(self, tmp_path: Path, settings, entry: str, name: str) -> tuple:
         """Return the page roots and routes an app produces under one spelling."""
         self._write_app(tmp_path, name, config_class="." in entry)
-        router = FileRouterBackend(app_dirs=True)
+        router = file_router(app_dirs=True)
         with importable_dir(tmp_path):
             settings.INSTALLED_APPS = [*settings.INSTALLED_APPS, entry]
             roots = [(root.label, root.path) for root in router.page_roots()]
@@ -712,7 +634,7 @@ class TestInstalledAppSpellings:
         """An installed app with no pages tree reports no root."""
         (tmp_path / "bare" / "__init__.py").parent.mkdir(parents=True)
         (tmp_path / "bare" / "__init__.py").write_text("")
-        router = FileRouterBackend(app_dirs=True)
+        router = file_router(app_dirs=True)
 
         with importable_dir(tmp_path):
             settings.INSTALLED_APPS = [*settings.INSTALLED_APPS, "bare"]
@@ -770,7 +692,7 @@ class TestAppDirectoryResolution:
     ) -> None:
         """A PEP 420 app has no `__init__.py`, and the registry still knows its path."""
         pages = self._write_pages(tmp_path / "nsapp")
-        router = FileRouterBackend(app_dirs=True)
+        router = file_router(app_dirs=True)
 
         with importable_dir(tmp_path):
             settings.INSTALLED_APPS = [*settings.INSTALLED_APPS, "nsapp"]
@@ -791,7 +713,7 @@ class TestAppDirectoryResolution:
             '    name = "movedapp"\n'
             f'    path = "{elsewhere}"\n'
         )
-        router = FileRouterBackend(app_dirs=True)
+        router = file_router(app_dirs=True)
 
         with importable_dir(tmp_path):
             settings.INSTALLED_APPS = [
@@ -809,9 +731,9 @@ class TestAppDirectoryResolution:
 
         with importable_dir(tmp_path):
             settings.INSTALLED_APPS = [*settings.INSTALLED_APPS, "shop"]
-            healthy = FileRouterBackend(app_dirs=True).page_roots()
+            healthy = file_router(app_dirs=True).page_roots()
             with patch("next.urls.backends.apps.get_app_configs", return_value=[]):
-                blank = FileRouterBackend(app_dirs=True).page_roots()
+                blank = file_router(app_dirs=True).page_roots()
 
         assert healthy == [PageRoot(path=pages, label="App 'shop'")]
         assert blank == []
@@ -822,7 +744,7 @@ class TestAppDirectoryResolution:
         """`INSTALLED_APPS` moves without the settings reload that rebuilds a backend."""
         pages = self._write_pages(tmp_path / "latecomer")
         (tmp_path / "latecomer" / "__init__.py").write_text("")
-        router = FileRouterBackend(app_dirs=True)
+        router = file_router(app_dirs=True)
 
         assert router.page_roots() == []
 
@@ -838,7 +760,7 @@ class TestAppDirectoryResolution:
         """A router asked before the registry populates answers instead of raising."""
         self._write_pages(tmp_path / "early")
         (tmp_path / "early" / "__init__.py").write_text("")
-        router = FileRouterBackend(app_dirs=True)
+        router = file_router(app_dirs=True)
 
         with (
             importable_dir(tmp_path),
@@ -871,7 +793,7 @@ class TestAppRegistryPass:
     def test_page_roots_reads_the_registry_once(self, tmp_path, settings) -> None:
         """Reading it per app name rebuilds the whole map per app, which is quadratic."""
         names = self._install_apps(tmp_path, 3)
-        router = FileRouterBackend(app_dirs=True)
+        router = file_router(app_dirs=True)
 
         with importable_dir(tmp_path):
             settings.INSTALLED_APPS = [*settings.INSTALLED_APPS, *names]
@@ -887,7 +809,7 @@ class TestAppRegistryPass:
     def test_generate_urls_reads_the_registry_once(self, tmp_path, settings) -> None:
         """The URL build walks the same app list and takes the same one snapshot."""
         names = self._install_apps(tmp_path, 3)
-        router = FileRouterBackend(app_dirs=True)
+        router = file_router(app_dirs=True)
 
         with importable_dir(tmp_path):
             settings.INSTALLED_APPS = [*settings.INSTALLED_APPS, *names]
@@ -903,7 +825,7 @@ class TestAppRegistryPass:
         """Without `app_dirs` no app is resolved, so no snapshot is taken."""
         root = tmp_path / "shell"
         root.mkdir()
-        router = FileRouterBackend(app_dirs=False, extra_root_paths=[root])
+        router = file_router(app_dirs=False, dirs=[root])
 
         with patch(
             "next.urls.backends._installed_app_directories",
@@ -917,7 +839,7 @@ class TestAppRegistryPass:
     def test_the_snapshot_never_outlives_its_pass(self, tmp_path, settings) -> None:
         """An app installed between two passes is found by the second one."""
         names = self._install_apps(tmp_path, 1)
-        router = FileRouterBackend(app_dirs=True)
+        router = file_router(app_dirs=True)
 
         with importable_dir(tmp_path):
             assert router.page_roots() == []
@@ -931,7 +853,7 @@ class TestAppRegistryPass:
     ) -> None:
         """The snapshot is the whole input, so nothing below the pass re-reads."""
         names = self._install_apps(tmp_path, 1)
-        router = FileRouterBackend(app_dirs=True)
+        router = file_router(app_dirs=True)
 
         with importable_dir(tmp_path):
             settings.INSTALLED_APPS = [*settings.INSTALLED_APPS, *names]
@@ -961,7 +883,7 @@ class TestWorkingDirectoryRoot:
         self._pages_beside(tmp_path, monkeypatch)
 
         with patch("next.utils.settings", Mock(BASE_DIR=None)):
-            router = FileRouterBackend(app_dirs=False)
+            router = file_router(app_dirs=False)
             roots = router.page_roots()
             routes = router.generate_urls()
 
@@ -977,167 +899,91 @@ class TestWorkingDirectoryRoot:
         configured.mkdir()
 
         with patch("next.utils.settings", Mock(BASE_DIR=None)):
-            roots = FileRouterBackend(
-                app_dirs=False, extra_root_paths=[configured]
-            ).page_roots()
+            roots = file_router(app_dirs=False, dirs=[configured]).page_roots()
 
         assert roots == [PageRoot(path=configured.resolve(), label="Root")]
 
 
 class TestRouterFactory:
-    """RouterFactory.register_backend and create_backend."""
+    """`RouterFactory.create_backend` resolves one entry and builds its router."""
 
-    def test_register_backend(self, custom_backend_class) -> None:
-        """Registered name maps to the given class."""
-        RouterFactory.register_backend("custom", custom_backend_class)
-        assert RouterFactory.is_registered("custom")
+    def test_create_backend_builds_a_file_router_from_its_entry(self) -> None:
+        """A complete entry produces a router carrying the values it named."""
+        router = RouterFactory.create_backend(
+            file_router_config_entry(pages_dir_name="views", app_dirs=True)
+        )
 
-    def test_is_registered(self) -> None:
-        """Built-in backend name is registered, unknown names are not."""
-        assert RouterFactory.is_registered("next.urls.FileRouterBackend")
-        assert not RouterFactory.is_registered("app.routers.MissingBackend")
-
-    @pytest.mark.parametrize(
-        ("test_case", "config", "expected_type", "expected_attrs"),
-        [
-            (
-                "success",
-                {
-                    "BACKEND": "next.urls.FileRouterBackend",
-                    "PAGES_DIR": "pages",
-                    "APP_DIRS": True,
-                    "DIRS": [],
-                    "OPTIONS": {},
-                },
-                FileRouterBackend,
-                {"pages_dir": "pages", "app_dirs": True, "options": {}},
-            )
-        ],
-        ids=["success"],
-    )
-    def test_create_backend_variations(
-        self, test_case, config, expected_type, expected_attrs
-    ) -> None:
-        """Valid FileRouterBackend config produces a router with expected attributes."""
-        router = RouterFactory.create_backend(config)
-        assert isinstance(router, expected_type)
-
-        for attr, expected_value in expected_attrs.items():
-            assert getattr(router, attr) == expected_value
+        assert isinstance(router, FileRouterBackend)
+        assert (router.pages_dir, router.app_dirs, router.options) == (
+            "views",
+            True,
+            {},
+        )
 
     def test_create_backend_resolves_string_base_dir(self) -> None:
-        """``RouterFactory`` normalizes string ``BASE_DIR`` to ``Path``."""
-        cfg = {
-            "BACKEND": "next.urls.FileRouterBackend",
-            "PAGES_DIR": "pages",
-            "APP_DIRS": True,
-            "DIRS": [],
-            "OPTIONS": {},
-        }
+        """A string ``BASE_DIR`` is normalised to a ``Path`` while roots classify."""
         mock_s = Mock()
         with patch("next.utils.settings", mock_s):
             mock_s.BASE_DIR = "/tmp/next_base_str"
-            router = RouterFactory.create_backend(cfg)
+            router = RouterFactory.create_backend(
+                file_router_config_entry(app_dirs=True)
+            )
         assert isinstance(router, FileRouterBackend)
-
-    def test_create_backend_non_dict_options_treated_as_empty(self) -> None:
-        """Non-dict ``OPTIONS`` is coerced to ``{}`` before merge."""
-        cfg = {
-            "BACKEND": "next.urls.FileRouterBackend",
-            "PAGES_DIR": "pages",
-            "APP_DIRS": True,
-            "DIRS": [],
-            "OPTIONS": None,
-        }
-        mock_s = Mock()
-        with patch("next.utils.settings", mock_s):
-            mock_s.BASE_DIR = Path("/tmp")
-            router = RouterFactory.create_backend(cfg)
-        assert isinstance(router, FileRouterBackend)
-        assert router.options == {}
 
     @pytest.mark.parametrize(
-        ("config", "missing_key"),
+        "dirs",
         [
-            ({}, "BACKEND"),
-            ({"BACKEND": "next.urls.FileRouterBackend"}, "PAGES_DIR"),
-            (
-                {"BACKEND": "next.urls.FileRouterBackend", "PAGES_DIR": "pages"},
-                "APP_DIRS",
-            ),
-            (
-                {
-                    "BACKEND": "next.urls.FileRouterBackend",
-                    "PAGES_DIR": "pages",
-                    "APP_DIRS": True,
-                },
-                "OPTIONS",
-            ),
-            (
-                {
-                    "BACKEND": "next.urls.FileRouterBackend",
-                    "PAGES_DIR": "pages",
-                    "APP_DIRS": True,
-                    "OPTIONS": {},
-                },
-                "DIRS",
-            ),
-        ],
-        ids=[
-            "missing_backend",
-            "missing_pages_dir",
-            "missing_app_dirs",
-            "missing_options",
-            "missing_dirs",
+            pytest.param(5, id="scalar"),
+            pytest.param("src/pages", id="string"),
+            pytest.param([7], id="entry_is_no_path"),
         ],
     )
-    def test_create_backend_keyerror_when_required_key_missing(
-        self, config, missing_key
+    def test_create_backend_when_dirs_is_no_sequence_of_trees(
+        self, dirs: object
     ) -> None:
-        """FileRouterBackend config must list PAGES_DIR, APP_DIRS, OPTIONS, and DIRS."""
-        with pytest.raises(KeyError) as exc:
+        """A scalar DIRS or an entry naming no path costs its own router alone."""
+        config = {**file_router_config_entry(app_dirs=True), "DIRS": dirs}
+
+        with pytest.raises(ImproperlyConfigured, match="sequence of trees"):
             RouterFactory.create_backend(config)
-        assert exc.value.args[0] == missing_key
+
+    def test_create_backend_without_a_backend_key(self) -> None:
+        """An entry naming no backend is a misconfiguration like any other."""
+        with pytest.raises(ImproperlyConfigured, match="BACKEND"):
+            RouterFactory.create_backend({})
 
     def test_create_backend_unsupported(self) -> None:
-        """Unknown BACKEND string raises ValueError."""
-        config = {"BACKEND": "unsupported.backend"}
+        """An unimportable BACKEND path fails the way every backend family fails."""
+        with pytest.raises(ImportError):
+            RouterFactory.create_backend({"BACKEND": "unsupported.backend"})
 
-        with pytest.raises(ValueError, match="Unsupported backend"):
-            RouterFactory.create_backend(config)
-
-    def test_register_backend_typeerror_when_not_router_subclass(self) -> None:
-        """Registering a non RouterBackend class fails at registration time."""
-
-        class Plain:
-            pass
-
-        with pytest.raises(TypeError, match="RouterBackend"):
-            RouterFactory.register_backend("plain.not.Router", Plain)
-        assert not RouterFactory.is_registered("plain.not.Router")
-
-    def test_create_backend_typeerror_when_import_is_not_router_subclass(self) -> None:
-        """Importable BACKEND path that is not a RouterBackend raises TypeError."""
-        with pytest.raises(TypeError, match="RouterBackend"):
+    def test_create_backend_when_import_is_not_router_subclass(self) -> None:
+        """An importable BACKEND path outside the family is a misconfiguration."""
+        with pytest.raises(ImproperlyConfigured, match="RouterBackend"):
             RouterFactory.create_backend({"BACKEND": "unittest.mock.MagicMock"})
 
-    def test_create_backend_non_file_router_backend(self, custom_backend_class) -> None:
-        """Custom registered backend is instantiated without FileRouterBackend fields."""
-        RouterFactory.register_backend("custom.backend", custom_backend_class)
+    def test_create_backend_when_the_constructor_refuses_the_entry(self) -> None:
+        """A router refusing the family contract is a bug that reaches the caller."""
+        config = {
+            **file_router_config_entry(app_dirs=True),
+            "BACKEND": "tests.urls.test_backends.NarrowFileRouter",
+        }
 
-        config = {"BACKEND": "custom.backend"}
+        with pytest.raises(TypeError):
+            RouterFactory.create_backend(config)
+
+    def test_create_backend_hands_the_entry_to_a_third_party_router(self) -> None:
+        """A router of any other shape reads its own keys off the same entry."""
+        config = {"BACKEND": "tests.support.routers.EntryRouter", "ROOTS": ["site"]}
+
         router = RouterFactory.create_backend(config)
-        assert isinstance(router, custom_backend_class)
 
-    def test_create_backend_non_file_router_backend_else_branch(
-        self, custom_backend_class
-    ) -> None:
-        """Minimal config dict hits the non FileRouterBackend branch."""
-        RouterFactory.register_backend("custom", custom_backend_class)
+        assert isinstance(router, EntryRouter)
+        assert router.config == config
 
-        backend = RouterFactory.create_backend({"BACKEND": "custom"})
-        assert isinstance(backend, custom_backend_class)
-        assert not hasattr(backend, "pages_dir")
+
+class TestComponentsFolderResolution:
+    """The folder a file router skips comes from ``COMPONENT_BACKENDS``."""
 
     def test_resolve_components_folder_name_from_first_component_backend(self) -> None:
         """Skip-folder name comes from the first ``COMPONENT_BACKENDS`` entry."""
@@ -1146,10 +992,10 @@ class TestRouterFactory:
             assert FileRouterBackend._resolve_components_folder_name() == "custom_comp"
 
     def test_resolve_components_folder_name_raises_when_unavailable(self) -> None:
-        """Missing COMPONENTS_DIR and no valid component backend entry raises KeyError."""
+        """No usable component backend entry leaves the skipped folder unnamed."""
         with patch("next.urls.backends.next_framework_settings") as nfs:
             nfs.COMPONENT_BACKENDS = []
-            with pytest.raises(KeyError, match="COMPONENTS_DIR"):
+            with pytest.raises(ImproperlyConfigured, match="COMPONENTS_DIR"):
                 FileRouterBackend._resolve_components_folder_name()
 
     def test_resolve_components_folder_name_raises_when_first_entry_invalid(
@@ -1158,5 +1004,5 @@ class TestRouterFactory:
         """First component backend dict must contain COMPONENTS_DIR."""
         with patch("next.urls.backends.next_framework_settings") as nfs:
             nfs.COMPONENT_BACKENDS = [{}]
-            with pytest.raises(KeyError, match="COMPONENTS_DIR"):
+            with pytest.raises(ImproperlyConfigured, match="COMPONENTS_DIR"):
                 FileRouterBackend._resolve_components_folder_name()

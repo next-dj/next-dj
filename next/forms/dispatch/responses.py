@@ -3,9 +3,10 @@
 import warnings
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, TypeGuard, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from django.contrib import messages
+from django.db.models import Model
 from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseRedirect
 
 from next.forms.origin import resolve_origin
@@ -16,7 +17,6 @@ if TYPE_CHECKING:
     from typing import Protocol
 
     from django import forms as django_forms
-    from django.db.models import Model
     from django.http import HttpRequest
 
     from next.forms.backends import FormActionBackend
@@ -58,12 +58,6 @@ class ActionOutcome:
     origin: str | None = None
 
 
-def _is_model_instance(obj: object) -> "TypeGuard[Model]":
-    """Return True when `obj` quacks like a Django model instance."""
-    meta = getattr(obj, "_meta", None)
-    return meta is not None and hasattr(meta, "model")
-
-
 def _send_success_message(
     request: "HttpRequest", source: object, cleaned_data: dict[str, Any]
 ) -> None:
@@ -97,7 +91,7 @@ def _normalize_handler_response(
     """Coerce handler output to a string, response, redirect, or `None`."""
     if raw is None or isinstance(raw, (HttpResponse, str)):
         return raw
-    if _is_model_instance(raw):
+    if isinstance(raw, Model):
         get_absolute_url = getattr(raw, "get_absolute_url", None)
         if get_absolute_url is not None:
             # Mirrors Django's CreateView convention for a returned instance.
@@ -121,8 +115,7 @@ def _origin_rerender_response(
     """Re-render the origin page after a valid submission's handler returned None.
 
     The success response carries no invalid-submission headers and never re-enters
-    `backend.shape_response`, so envelopes keyed off `ActionOutcomeKind.INVALID` stay
-    untouched. An unresolvable origin yields 400.
+    `backend.shape_response`, so `ActionOutcomeKind.INVALID` envelopes stay untouched.
     """
     origin_match = resolve_origin(request)
     if origin_match is None or origin_match.page_path is None:

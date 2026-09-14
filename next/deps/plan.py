@@ -1,9 +1,7 @@
 """Compile a per-callable injection plan from the providers' static verdicts.
 
-A marker parameter is owned by one provider no matter the context, so the
-per-request scan of every provider is pure overhead for it. The compiler asks
-each provider once, keeps only the ones the signature cannot rule out, and the
-resolver replays that short-list on every call.
+A marker parameter is owned by one provider no matter the context, so the compiler asks
+each provider once and the resolver replays the short-list.
 """
 
 from __future__ import annotations
@@ -11,6 +9,8 @@ from __future__ import annotations
 import inspect
 from functools import partial
 from typing import TYPE_CHECKING, Any, cast
+
+from .introspect import prepared_parameter
 
 
 if TYPE_CHECKING:
@@ -47,10 +47,8 @@ EMPTY_PLAN: InjectionPlan = ()
 def _filler(provider: ParameterProvider, param: inspect.Parameter) -> ParameterFiller:
     """Return the single call that fills `param` for the provider owning it.
 
-    The hook is read off the instance, so a provider that defines none keeps the plain
-    `resolve` path. The bound method is captured here either way, not on every replay.
-    A hook that compiles something uncallable raises here, where the provider is named,
-    rather than on every replay of the plan it went into.
+    The hook is read off the instance, so a provider without one keeps the plain
+    `resolve`. One that compiles something uncallable raises here, where it is named.
     """
     hook: _CompileHook | None = getattr(provider, "compile_resolve", None)
     if callable(hook):
@@ -77,21 +75,15 @@ def compile_plan(
 ) -> InjectionPlan:
     """Return one plan entry per injectable parameter of `signature`.
 
-    Providers are walked in list order, which is already sorted by priority
-    and keeps custom insertions where they were put. A verdict outside the
-    three-valued contract raises from the compile rather than changing injection
-    semantics silently. The walk reaches every parameter of every callable, so one
-    such provider raises for all of them until it is fixed.
+    A verdict outside the three-valued contract raises immediately rather than
+    silently changing injection semantics, and does so for every parameter until
+    it is fixed.
     """
     entries: list[ParameterPlan] = []
-    empty = inspect.Parameter.empty
     for name, raw in signature.parameters.items():
         if skips(raw):
             continue
-        annotation = hints.get(name, raw.annotation)
-        param = raw
-        if annotation is not raw.annotation:
-            param = raw.replace(annotation=annotation)
+        param, fallback = prepared_parameter(name, raw, hints)
         candidates: list[ParameterProvider] = []
         terminal: ParameterProvider | None = None
         for provider in providers:
@@ -112,7 +104,6 @@ def compile_plan(
                 raise TypeError(msg)
             terminal = provider
             break
-        fallback = None if param.default is empty else param.default
         filler = None if terminal is None else _filler(terminal, param)
         entries.append((name, tuple(candidates), fallback, param, filler))
     return tuple(entries)

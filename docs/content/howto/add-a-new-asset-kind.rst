@@ -22,6 +22,7 @@ Register the kind.
    :caption: notes/apps.py
 
    from django.apps import AppConfig
+
    from next.static import default_kinds
 
    class NotesConfig(AppConfig):
@@ -74,12 +75,20 @@ A repeated ``register`` call with the same parameters is idempotent, but registe
 .. code-block:: python
    :caption: notes/apps.py
 
-   default_kinds.register(
-       "jsx",
-       extension=".jsx",
-       slot="scripts",
-       renderer="render_babel_tag",
-   )
+   from django.apps import AppConfig
+
+   from next.static import default_kinds
+
+   class NotesConfig(AppConfig):
+       name = "notes"
+
+       def ready(self) -> None:
+           default_kinds.register(
+               "jsx",
+               extension=".jsx",
+               slot="scripts",
+               renderer="render_babel_tag",
+           )
 
 .. code-block:: python
    :caption: config/settings.py

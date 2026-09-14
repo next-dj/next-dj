@@ -133,7 +133,7 @@ def _invalid_form_extract() -> GoldenCase:
     )
     envelope = (
         Patches.versioned("9f3c2e1b")
-        .morph({"form": "3f9ac21d75e04b88"}, html, extract=True)
+        .morph_form("3f9ac21d75e04b88", html)
         .set_form(form)
         .envelope()
     )
@@ -160,7 +160,7 @@ def _validate_form() -> GoldenCase:
     )
     envelope = (
         Patches.versioned("9f3c2e1b")
-        .morph({"form": "ab12cd34"}, html, extract=True)
+        .morph_form("ab12cd34", html)
         .set_form(form)
         .envelope()
     )
@@ -332,9 +332,7 @@ GOLDEN_CASES = [
 class TestGoldenFixturesArePinned:
     """The committed fixtures match a fresh serialisation, no silent drift.
 
-    The Python serialiser writes these bytes and vitest reads them back, so a drift
-    between the two toolchains would otherwise pass unnoticed. Run `GOLDEN_UPDATE=1` to
-    regenerate the committed fixtures after a deliberate wire change.
+    The two toolchains share these bytes, so a drift between them passes unnoticed.
     """
 
     @pytest.mark.skipif(_UPDATE_GOLDEN, reason="GOLDEN_UPDATE regenerates instead")

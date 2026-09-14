@@ -40,6 +40,8 @@ def file_backend() -> StaticBackend:
 
 @pytest.fixture()
 def reset_default() -> Generator[None, None, None]:
+    """Hand the test an unbuilt default manager and leave one behind."""
+    reset_default_manager()
     yield
     reset_default_manager()
 

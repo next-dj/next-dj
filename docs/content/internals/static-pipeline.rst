@@ -22,16 +22,17 @@ Asset plans
 An asset plan is what ``AssetDiscovery`` remembers about one page path or one component.
 It holds the co-located files the walk found, the assets built from the ``styles`` and ``scripts`` lists of the owning module, and the directories the walk read.
 A plan caches the disk, not the URLs.
+The whole mechanism is gated by ``STATIC_DISCOVERY_CACHE``, which defaults to true, and a process that sets it false rebuilds a plan on every render instead of caching one.
 
 The stem probes, the layout walk, and the module import happen once, and every file the plan holds still goes to ``register_file`` on every render, so a backend free to resolve the same file to a different URL per request is asked every time.
-The default backend answers those calls from its own ``(logical_name, suffix)`` memo, which lives as long as the backend does.
-The repeat therefore costs it a dictionary lookup, and its answer changes only when ``StaticManager.reload`` builds a new backend.
+The default backend answers those calls from its own ``(logical_name, suffix)`` memo.
+The repeat therefore costs it a dictionary lookup, and its answer changes when ``StaticManager.reload`` builds a new backend or when a ``STATIC_ROOT``, ``STATIC_URL``, or ``STORAGES`` change drops the memo through ``forget_urls``.
 Module-level URLs are literals the backend is never asked about, so the plan keeps them as finished ``StaticAsset`` records, and the same frozen instance rides every render and every collector.
 
 The page plan is keyed by the page file path.
 The component plan is keyed by the component's ``template_path``, ``module_path``, and ``name``, which is what identifies the component the plan was built for, so a rescan that produces an equal ``ComponentInfo`` reuses the entry and a renamed or moved component gets its own.
 A simple component owns no folder and reaches no plan at all, which keeps the entries the cache holds to the components that read the disk.
-Both caches are bounded and evict the least recently used entry.
+Both caches are bounded and evict the oldest entry once full, because the working set of a project sits far below the bound and a warm render answers from them without writing anything.
 
 Three things invalidate a plan.
 
@@ -81,8 +82,8 @@ Each slot matches the ``collector slot`` term in :doc:`/content/misc/glossary`.
 Runtime script injection
 ------------------------
 
-Under the ``AUTO`` script injection policy the static manager wraps the rendered page with the ``next.min.js`` runtime through ``NextScriptBuilder``.
-The builder owns the markup of all three fragments, while the bundle URL comes from ``backend.asset_url``, so a request aware backend moves the runtime the same way it moves a co-located asset.
+Under the ``AUTO`` script injection policy the injector wraps the rendered page with the ``next.min.js`` runtime through ``NextScriptBuilder``.
+The builder owns the markup of all three fragments, while the bundle URL comes from ``backend.asset_url``, so a request-aware backend moves the runtime the same way it moves a co-located asset.
 
 .. mermaid::
 
@@ -117,7 +118,13 @@ Modules
    Instances come from ``load_backends``, the shared loader every backend family uses.
 
 ``next.static.manager``.
-   ``StaticManager`` orchestrates discovery and the per request collector lifecycle.
+   ``StaticManager`` orchestrates discovery and the per-request collector lifecycle.
+
+``next.seeding``.
+   ``seed_collector`` hydrates one collector from the render context and binds it back under ``COLLECTOR_KEY``, and it sits at the root of the package because the page render reaches this area through a port rather than an import.
+
+``next.static.inject``.
+   ``PlaceholderInjector`` renders what a collector holds into the placeholder tokens of a finished page, and the manager delegates its ``inject`` to one.
 
 ``next.static.scripts``.
    ``NextScriptBuilder`` and ``ScriptInjectionPolicy`` for the ``Next`` runtime script.
@@ -128,6 +135,7 @@ Modules
 ``next.static.finders``.
    ``NextStaticFilesFinder`` exposes co-located page and component assets to Django staticfiles, so ``collectstatic`` copies them into ``STATIC_ROOT``.
    :doc:`/content/topics/static-assets/overview` covers the finder from the user side.
+   The finder holds the mapping it discovered and rebuilds it when the stem or kind registry moves, when the framework settings reload, when the reported page or component trees change, or, while ``DEBUG`` is true, when the mtime of any directory inside those trees moves.
 
 ``next.static.defaults``.
    ``register_defaults`` registers the built in ``css``, ``js``, and ``module`` kinds and the ``styles`` and ``scripts`` slots.
@@ -136,7 +144,7 @@ Asset kinds
 -----------
 
 Each kind maps an extension to a placeholder slot and a backend renderer method.
-The renderer name is a plain string the manager looks up with ``getattr`` on the active static backend per asset, so a backend supplies a renderer by exposing a method of that name.
+The renderer name is a plain string the injector looks up with ``getattr`` on the active static backend per asset, so a backend supplies a renderer by exposing a method of that name.
 :doc:`/content/topics/static-assets/asset-kinds` lists the bundled kinds and their renderer methods.
 
 Dedup
@@ -144,6 +152,9 @@ Dedup
 
 The collector holds one dedup strategy for the request.
 The strategy is selected by the dotted path under the ``DEDUP_STRATEGY`` key of the first static backend ``OPTIONS``, instantiated once per request, defaulting to ``UrlDedup`` when the key is absent.
+One render holds one collector, so it holds one strategy and one JS context policy, and the first entry of ``STATIC_BACKENDS`` settles both for the whole pipeline.
+``StaticManager.default_backend`` is the first entry, and it is the only one the render path uses.
+A later entry is built and receives ``backend_loaded`` and ``forget_urls``, and renders nothing.
 :doc:`/content/topics/static-assets/deduplication` covers the bundled strategies and the custom-strategy protocol.
 
 Signals
@@ -163,6 +174,7 @@ Extension points
 ----------------
 
 - Subclass ``StaticFilesBackend`` to change the rendered output.
+- Override ``StaticBackend.forget_urls`` when a backend memoises resolved URLs somewhere other than the base memo, and the manager drives it over every configured backend whenever ``STATIC_ROOT``, ``STATIC_URL``, or ``STORAGES`` changes.
 - Implement the ``DedupStrategy`` protocol and point ``DEDUP_STRATEGY`` at it.
 - Call ``default_kinds.register`` in ``AppConfig.ready`` to recognise a new extension.
 - Call ``default_stems.register`` in ``AppConfig.ready`` to recognise a new filename.

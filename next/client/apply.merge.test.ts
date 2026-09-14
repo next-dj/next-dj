@@ -206,8 +206,7 @@ describe("append and prepend dedup", () => {
   it("inserts both rows when one batch repeats a key absent from the container", () => {
     document.body.innerHTML = '<ul data-next-zone="rows"><li>keep</li></ul>';
     const { applier } = makeApplier();
-    // The fresh rows sit in the fragment, invisible to the container index, so
-    // neither matches the other and both land.
+    // Fresh rows sit in the fragment, invisible to the container index, so both land.
     applier.apply(
       envelope([
         {
@@ -258,6 +257,104 @@ describe("append and prepend dedup", () => {
     expect(texts).toEqual(["old", "by id"]);
   });
 
+  it("dedupe id replaces the row sharing the id, whatever key it carries", () => {
+    document.body.innerHTML =
+      '<ul data-next-zone="rows"><li id="r1" data-next-key="a">old</li></ul>';
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "append",
+          target: { zone: "rows" },
+          dedupe: "id",
+          html: '<li id="r1" data-next-key="b">new</li>',
+        },
+      ]),
+    );
+    expect(document.querySelectorAll("li")).toHaveLength(1);
+    expect(document.querySelector("#r1")!.textContent).toBe("new");
+  });
+
+  it("dedupes on the id attribute, not on a clobbered id property", () => {
+    document.body.innerHTML = '<ul data-next-zone="rows"><li id="r1">old</li></ul>';
+    // A browser exposes an <input name="id"> inside a form as an own id property,
+    // shadowing the attribute. jsdom models no named getter, so it is staged here.
+    Object.defineProperty(document.querySelector("li")!, "id", {
+      value: document.createElement("input"),
+    });
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "append",
+          target: { zone: "rows" },
+          dedupe: "id",
+          html: '<li id="r1">new</li>',
+        },
+      ]),
+    );
+    expect(document.querySelectorAll("li")).toHaveLength(1);
+    expect(document.querySelector("#r1")!.textContent).toBe("new");
+  });
+
+  it("dedupe id appends a row that carries a key but no id", () => {
+    document.body.innerHTML =
+      '<ul data-next-zone="rows"><li data-next-key="1">old</li></ul>';
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "append",
+          target: { zone: "rows" },
+          dedupe: "id",
+          html: '<li data-next-key="1">new</li>',
+        },
+      ]),
+    );
+    const texts = Array.from(document.querySelectorAll("li")).map(
+      (li) => li.textContent,
+    );
+    expect(texts).toEqual(["old", "new"]);
+  });
+
+  it("dedupe id indexes the container by id, so a keyed child never matches", () => {
+    document.body.innerHTML =
+      '<ul data-next-zone="rows"><li data-next-key="r1">old</li></ul>';
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "append",
+          target: { zone: "rows" },
+          dedupe: "id",
+          html: '<li id="r1">new</li>',
+        },
+      ]),
+    );
+    const texts = Array.from(document.querySelectorAll("li")).map(
+      (li) => li.textContent,
+    );
+    expect(texts).toEqual(["old", "new"]);
+  });
+
+  it("dedupe key keeps the data-next-key rule when the patch names it", () => {
+    document.body.innerHTML =
+      '<ul data-next-zone="rows"><li data-next-key="1">old</li></ul>';
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "prepend",
+          target: { zone: "rows" },
+          dedupe: "key",
+          html: '<li data-next-key="1">new</li>',
+        },
+      ]),
+    );
+    expect(document.querySelectorAll("li")).toHaveLength(1);
+    expect(document.querySelector("li")!.textContent).toBe("new");
+  });
+
   it("leaves keyless and foreign nodes of the container untouched", () => {
     document.body.innerHTML =
       '<ul data-next-zone="rows">' +
@@ -306,8 +403,7 @@ describe("append and prepend dedup", () => {
     );
     expect(document.querySelector<HTMLInputElement>("#kept")!.value).toBe("typed");
     expect(document.activeElement).toBe(kept);
-    // A keyed match is a replace, not a morph, so the swapped row loses its
-    // value exactly as it did before the index.
+    // A keyed match is a replace, not a morph, so the swapped row loses its value.
     expect(document.querySelector<HTMLInputElement>("#swapped")!.value).toBe("");
   });
 
@@ -344,8 +440,7 @@ describe("append and prepend dedup", () => {
       '<ul data-next-zone="rows"><li data-next-key="1">one</li></ul>';
     const list = document.querySelector("ul")!;
     let added = false;
-    // An island unmount hook that renders a placeholder row lands a key the
-    // index snapshot cannot know about.
+    // An unmount hook rendering a placeholder row lands a key the snapshot cannot know.
     list.addEventListener("next:removed", () => {
       if (added) return;
       added = true;
@@ -560,8 +655,7 @@ describe("append and prepend dedup", () => {
     const texts = Array.from(document.querySelectorAll("li")).map(
       (li) => li.textContent,
     );
-    // B replaces A, the row of its own batch, and the hook's row is left where
-    // the hook put it.
+    // B replaces A, the row of its own batch, the hook's row stays put.
     expect(texts).toEqual(["ghost", "B"]);
   });
 
@@ -635,12 +729,10 @@ describe("append and prepend dedup", () => {
     ).join("");
     const { applier } = makeApplier();
     const spy = vi.spyOn(Element.prototype, "getAttribute");
-    // A spy left on the prototype would poison every later test, so it comes off
-    // even if the apply throws.
+    // A spy left on the prototype would poison every later test.
     try {
       applier.apply(envelope([{ op: "append", target: { zone: "rows" }, html }]));
-      // A scan per row would cost 500 * 100 reads. The loose constant asserts
-      // linearity, not a jsdom call count.
+      // A scan per row would cost 500 * 100 reads, the constant asserts linearity.
       expect(spy.mock.calls.length).toBeLessThan(10 * (500 + 100));
     } finally {
       spy.mockRestore();
@@ -702,7 +794,11 @@ describe("refresh verb", () => {
       close: () => undefined,
       toast: () => undefined,
     };
-    const { applier } = makeApplier({ refresh, layers, here: () => "/modal/" });
+    const { applier } = makeApplier({
+      refresh,
+      layers: () => layers,
+      here: () => "/modal/",
+    });
     applier.apply(envelope([{ op: "refresh", zone: "feed" }]));
     expect(refresh).toHaveBeenCalledWith({
       url: "/owner/",
@@ -721,7 +817,11 @@ describe("refresh verb", () => {
       close: () => undefined,
       toast: () => undefined,
     };
-    const { applier } = makeApplier({ refresh, layers, here: () => "/page/" });
+    const { applier } = makeApplier({
+      refresh,
+      layers: () => layers,
+      here: () => "/page/",
+    });
     applier.apply(envelope([{ op: "refresh", zone: "gone" }]));
     expect(refresh).toHaveBeenCalledWith({
       url: "/page/",
@@ -863,7 +963,7 @@ describe("asset bridge pipeline", () => {
       versionMismatch: () => false,
       acceptVersion: () => undefined,
     };
-    const { applier } = makeApplier({ assets });
+    const { applier } = makeApplier({ assets: () => assets });
     applier.apply(envelope([{ op: "inner", target: { zone: "z" }, html: "new" }]));
     expect(order).toEqual(["css", "js"]);
     expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("new");
@@ -877,7 +977,7 @@ describe("asset bridge pipeline", () => {
       versionMismatch: () => true,
       acceptVersion: () => undefined,
     };
-    const { applier } = makeApplier({ assets });
+    const { applier } = makeApplier({ assets: () => assets });
     applier.apply(envelope([{ op: "inner", target: { zone: "z" }, html: "new" }]));
     expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("old");
   });

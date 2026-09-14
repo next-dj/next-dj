@@ -11,8 +11,10 @@ from next.deps.resolver import apply_resolver_setting, forget_dep_caches
 from next.forms.autodiscover import autodiscover_forms
 from next.pages.loaders import forget_page_roots
 from next.pages.watch import forget_watch_state
-from next.ports import partial_shaper_slot
-from next.static.manager import forget_manager_page_roots
+from next.partial.shaper import PartialShaperImpl
+from next.ports import partial_shaper_slot, router_access_slot, static_assets_slot
+from next.static.manager import default_manager, forget_manager_page_roots
+from next.urls.access import RouterAccessImpl
 from next.urls.signals import router_reloaded
 
 from . import autoreload, components, staticfiles, templates
@@ -38,15 +40,17 @@ class NextFrameworkConfig(AppConfig):
         # Ahead of every install, because component discovery and form autodiscovery
         # import user modules that must see the configured resolver, not the base one.
         apply_resolver_setting()
+        # For the same reason, and so a discovery failure leaves no process behind
+        # with an unbound port. The static handle stays lazy, because binding it
+        # stores the handle rather than reading through it.
+        partial_shaper_slot.set(PartialShaperImpl())
+        router_access_slot.set(RouterAccessImpl())
+        static_assets_slot.set(default_manager)
         autoreload.install()
         templates.install()
         staticfiles.install()
         components.install()
         autodiscover_forms()
-        # Deferred so importing next.apps stays free of next.partial.
-        from next.partial.shaper import PartialShaperImpl  # noqa: PLC0415
-
-        partial_shaper_slot.set(PartialShaperImpl())
 
 
 __all__ = ["NextFrameworkConfig"]

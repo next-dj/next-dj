@@ -24,7 +24,6 @@ def custom_op():
     """Register a custom patch verb for the test and drop it afterwards."""
     register_patch_op("confetti")
     yield "confetti"
-    patch_op_registry._ops.discard("confetti")
     patch_op_registry._custom.discard("confetti")
 
 
@@ -81,32 +80,44 @@ class TestMorphFormAndHtml:
         }
 
 
-class TestMorphFacadeUnknownKeys:
-    """The morph() facade refuses a stray or misspelled selector keyword."""
+class TestMorphFacadeRefusals:
+    """The morph() facade refuses a keyword the selected route does not own."""
 
-    def test_zone_rejects_a_misspelled_overrides_keyword(self) -> None:
-        with pytest.raises(TypeError, match="unexpected keyword"):
+    def test_a_misspelled_keyword_is_refused_by_the_interpreter(self) -> None:
+        with pytest.raises(TypeError, match="unexpected keyword argument"):
             Patches(partial_request()).morph(zone="alpha", overide={"x": 1})
 
-    def test_zone_lists_the_accepted_keywords(self) -> None:
-        with pytest.raises(TypeError, match="overrides"):
-            Patches(partial_request()).morph(zone="alpha", bogus=1)
+    def test_zone_refuses_html_rather_than_dropping_it(self) -> None:
+        with pytest.raises(TypeError, match=r"\['html'\]"):
+            Patches(partial_request()).morph(zone="alpha", html="<p>x</p>")
+
+    def test_zone_refuses_a_target_mapping(self) -> None:
+        with pytest.raises(TypeError, match=r"\['target'\]"):
+            Patches(partial_request()).morph({"zone": "alpha"}, zone="alpha")
 
     def test_zone_url_kwargs_without_page_is_refused(self) -> None:
-        with pytest.raises(TypeError, match="unexpected keyword"):
+        with pytest.raises(TypeError, match=r"\['url_kwargs'\]"):
             Patches(partial_request()).morph(zone="alpha", url_kwargs={"pk": 1})
 
-    def test_foreign_zone_rejects_an_unknown_keyword(self) -> None:
-        with pytest.raises(TypeError, match="unexpected keyword"):
+    def test_foreign_zone_refuses_overrides(self) -> None:
+        with pytest.raises(TypeError, match=r"\['overrides'\]"):
             Patches(partial_request()).morph(
                 zone="alpha", page="/zoned/", overrides={"x": 1}
             )
 
-    def test_form_rejects_any_extra_keyword(self) -> None:
-        with pytest.raises(TypeError, match="unexpected keyword"):
+    def test_form_refuses_a_zone_keyword_of_another_route(self) -> None:
+        with pytest.raises(TypeError, match=r"\['url_kwargs'\]"):
             Patches.versioned("v1").morph(
-                form="ab12", html="<form></form>", dedupe="key"
+                form="ab12", html="<form></form>", url_kwargs={"pk": 1}
             )
+
+    def test_target_route_refuses_a_foreign_page(self) -> None:
+        with pytest.raises(TypeError, match=r"\['page'\]"):
+            Patches.versioned("v1").morph({"zone": "list"}, "<ul></ul>", page="/zoned/")
+
+    def test_a_call_naming_nothing_is_refused(self) -> None:
+        with pytest.raises(TypeError, match="needs a target mapping"):
+            Patches.versioned("v1").morph()
 
 
 class TestStandaloneVerbs:
@@ -320,6 +331,12 @@ class TestContextPatch:
             Patches(partial_request()).context(secret="leak")
         assert "flag" in exc.value.available
         assert "flag" in str(exc.value)
+
+    def test_an_origin_with_no_providers_lists_none(self) -> None:
+        with pytest.raises(UnknownContextNameError) as exc:
+            Patches(partial_request(origin="/formzone/")).context(secret="leak")
+        assert exc.value.available == ()
+        assert "Available serialize providers" not in str(exc.value)
 
 
 class TestReservedContextKeys:

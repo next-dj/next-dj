@@ -27,8 +27,8 @@ Protocol.
 
 Strategy.
    Swap an internal algorithm.
-   Used for static deduplication, the JS context conflict policy, and the URL resolver.
-   A strategy is selected by dotted path and satisfies the contract its slot names.
+   Used for static deduplication, the JS context conflict policy, the URL resolver, the dependency resolver, and the component template loader.
+   A strategy is named by a dotted path in settings and satisfies the contract its settings key declares.
 
 Signal.
    Observe a lifecycle event without changing it.
@@ -70,11 +70,10 @@ A backend always implements the full contract.
 Every family checks the configured class against the base named above, so a class that does not subclass it is rejected with :class:`~django.core.exceptions.ImproperlyConfigured`.
 A custom backend usually subclasses the default so it inherits every default behaviour.
 
-Not every base is abstract.
-``RouterBackend``, ``ComponentsBackend``, ``FormActionBackend``, ``StaticBackend``, and ``FormWizardBackend`` are abstract base classes that declare methods a subclass must implement.
-``PartialProtocolBackend`` is a plain concrete class with no abstract methods, so a subclass overrides only the parts of the wire format it changes.
-Its override points are ``serialize_envelope``, which returns the HTTP response body for one patch envelope, ``sse_event``, which returns the same envelope as a server-sent-events frame, and the ``content_type`` class attribute that names the media type of the body.
-The ``_dumps`` helper the two methods share is internal and carries no stability promise, so override both public methods rather than reaching through it.
+Every base is an abstract base class that declares the methods a subclass must implement.
+``PartialProtocolBackend`` requires ``serialize_envelope``, which returns the HTTP response body for one patch envelope, ``sse_event``, which returns the same envelope as a server-sent-events frame, and ``deserialize_envelope``, which reads a response body back into an ``Envelope`` so a reader such as the test client parses the format its writer produced.
+It also expects the ``content_type`` class attribute that names the media type of the body, and it supplies the ``options`` property that reads ``OPTIONS`` out of the settings entry.
+The shipped ``next.partial.JsonPartialProtocolBackend`` implements that contract as compact JSON, and a subclass of it that only changes part of the wire format overrides both public methods rather than reaching through the internal ``_dumps`` helper, which carries no stability promise.
 
 ``PARTIAL_BACKENDS`` differs from the other backend lists in that only its first entry is active.
 ``FORM_WIZARD_BACKEND`` is singular rather than a list, so the key holds one configuration dict instead of a list of them.
@@ -88,6 +87,7 @@ Beyond the abstract methods, a base class carries optional hooks whose defaults 
 ``discover`` populates the registry and ``import_component_modules`` executes each discovered module.
 ``register_walked_folder`` claims a components folder the page-tree walk found.
 ``iter_components`` and ``global_component_roots`` let the system checks enumerate what the backend holds.
+``watch_roots`` names the trees the development reloader and the staticfiles finder observe, and it is how a backend that computes its roots outside its config entry reaches autoreload.
 Leaving a hook alone is a supported answer, and it keeps the backend out of the diagnostics that hook feeds.
 The full recipe with a worked backend is in :doc:`components`.
 
@@ -155,6 +155,7 @@ Call ``default_stems.register(...)`` from ``AppConfig.ready`` so the new stem is
    :caption: notes/apps.py
 
    from django.apps import AppConfig
+
    from next.static.discovery import default_stems
 
    class NotesConfig(AppConfig):
@@ -189,7 +190,9 @@ Register the spec from ``AppConfig.ready`` so it is in place before the watcher 
    :caption: notes/apps.py
 
    from pathlib import Path
+
    from django.apps import AppConfig
+
    from next.server import register_autoreload_watch_spec
 
    class NotesConfig(AppConfig):
@@ -204,7 +207,7 @@ Register the spec from ``AppConfig.ready`` so it is in place before the watcher 
 Edits to any ``*.yaml`` file under ``notes/rules`` now restart the development server.
 Duplicate ``(path, glob)`` pairs are dropped, so registering the same spec twice is safe.
 
-``register_autoreload_watch_spec`` is the only way to add extra trees to the watcher.
+``register_autoreload_watch_spec`` is how a project adds a tree with a glob of its own, and a custom components backend reaches the watcher instead through its ``watch_roots`` hook.
 ``iter_all_autoreload_watch_specs`` from ``next.server`` resolves the final spec set and sends the ``watch_specs_ready`` signal with ``sender`` set to the function itself.
 Subscribe to that signal to observe or audit the resolved spec set.
 See :doc:`/content/internals/autoreload` for the full watcher pipeline.
@@ -227,7 +230,7 @@ Implement the methods listed in the protocol and pass the class to the framework
      - ``next.static.JsContextSerializer``
 
 Select a serializer implementation with the ``JS_CONTEXT_SERIALIZER`` setting.
-The default is ``JsonJsContextSerializer``.
+The setting defaults to ``None``, which selects the built-in ``JsonJsContextSerializer``.
 
 ``next.pages.loaders.TemplateLoader`` is an abstract base class rather than a protocol.
 Subclass it explicitly and register the subclass through ``TEMPLATE_LOADERS``.
@@ -258,14 +261,30 @@ The framework calls the strategy at a well known point in the pipeline.
    * - URL resolver
      - ``URL_RESOLVER`` at the top level of ``NEXT_FRAMEWORK``
      - ``next.urls.TrieURLResolver``
+   * - Dependency resolver
+     - ``DEPENDENCY_RESOLVER`` at the top level of ``NEXT_FRAMEWORK``
+     - ``next.deps.DependencyResolver``
+   * - Component template loader
+     - ``COMPONENT_TEMPLATE_LOADER`` at the top level of ``NEXT_FRAMEWORK``
+     - ``next.components.CachedComponentTemplateLoader``
 
 Use a strategy when the customisation is a single algorithm rather than a complete subsystem.
 
-The URL resolver is the one strategy configured at the top level of ``NEXT_FRAMEWORK`` rather than inside a backend ``OPTIONS`` mapping.
-Its value is a dotted path to a ``django.urls.resolvers.URLResolver`` subclass, and the framework builds one instance of that class around the lazy list of page and form-action patterns.
+Three strategies are configured at the top level of ``NEXT_FRAMEWORK`` rather than inside a backend ``OPTIONS`` mapping.
+``URL_RESOLVER``, ``DEPENDENCY_RESOLVER``, and ``COMPONENT_TEMPLATE_LOADER`` each hold a single dotted path, and ``next.backends.resolve_setting_class`` reads all three against the base class its key declares.
+A value that is not a string is dropped by the settings merge for any of the three, which leaves the default in place with no error, and :ref:`next.E076 <ref-system-checks>` reports the dropped value on ``manage.py check``.
+
+``URL_RESOLVER`` names a ``django.urls.resolvers.URLResolver`` subclass, and the framework builds one instance of that class around the lazy list of page and form-action patterns.
 Swap it to change how a request path is matched against those patterns, for example to trade the default trie for a different index.
 A path that cannot be imported, and a class that is not a ``URLResolver`` subclass, both raise :class:`~django.core.exceptions.ImproperlyConfigured` while the URL configuration is built.
-A value that is not a string is dropped by the settings merge, which leaves the default in place with no error.
+
+``DEPENDENCY_RESOLVER`` names a ``next.deps.DependencyResolver`` subclass, and that class performs every injection the framework makes, from page views and ``@context`` callables to form actions and component renderers.
+The framework holds one resolver singleton behind a shared holder and adopts the named class by building an instance of it, so the subclass runs its own ``__init__`` and every reference reads the resolver in force.
+Widening the public ``skips`` predicate is the usual reason to subclass, because it decides which parameters a compiled injection plan carries at all.
+See :doc:`dependency-injection` for the resolver contract and :doc:`/content/ref/settings` for what a swap takes with it.
+
+``COMPONENT_TEMPLATE_LOADER`` names a ``next.components.ComponentTemplateLoader`` subclass, and the components manager builds one instance of it around the shared module loader.
+The loader decides where a component body comes from and how long a compiled template is reused, so the shipped ``CachedComponentTemplateLoader`` is the subclass to start from when only the caching policy changes.
 
 Signals
 -------
@@ -284,6 +303,9 @@ Use the entries below as a quick map.
 
 - **Add a new URL pattern source.** Subclass ``RouterBackend`` and register it under ``PAGE_BACKENDS``.
 - **Change how a path is matched against the built patterns.** Name a ``URLResolver`` subclass under ``URL_RESOLVER``.
+- **Change how an injected parameter is filled.** Name a ``DependencyResolver`` subclass under ``DEPENDENCY_RESOLVER``.
+  See :doc:`dependency-injection`.
+- **Change how a component template is read or cached.** Name a ``ComponentTemplateLoader`` subclass under ``COMPONENT_TEMPLATE_LOADER``.
 - **Recognise a new asset extension.** Register through the kind registry (``default_kinds``).
 - **Recognise a new asset filename next to a page, layout, or component.** Register a custom stem (``default_stems``).
 - **Validate every dispatch.** Implement a form action backend.

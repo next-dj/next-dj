@@ -52,7 +52,6 @@ The builder takes ``page=`` and ``url_kwargs=`` alongside ``zone=``, and the req
    from next.forms import FormWizard
    from next.partial import Patches, resolve_partial_origin
 
-
    class AccessRequestWizard(FormWizard):
        def done(
            self, request: HttpRequest, cleaned_data: dict[str, Any]
@@ -114,7 +113,7 @@ The comparison
      - ``done`` names the zone of a foreign page
    * - List authorization
      - The list's own view, on a request with its cookies and middleware
-     - The shaping step re-runs the host page's body resolution
+     - The ``morph(page=)`` call re-runs the host page's body resolution before its zone renders
    * - Protocol surface
      - No new headers or addressing
      - Adds ``X-Next-Origin`` and the ``page=`` addressing of the builder
@@ -125,8 +124,8 @@ The comparison
      - A one-GET gap between close and list
      - Close, list, and toast apply in one envelope
    * - Without the runtime
-     - Identical: a 303 to ``fallback``
-     - Identical
+     - A 303 to ``fallback``, and the list zone never renders because ``done`` builds no morph of it
+     - A 303 to ``fallback`` too, but the response still renders the foreign zone into the envelope the redirect then discards
 
 The recommendation is accept and re-GET as the default.
 The deciding argument is not the round trip but the authorization and the decoupling.

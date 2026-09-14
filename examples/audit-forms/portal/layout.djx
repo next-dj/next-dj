@@ -14,7 +14,7 @@
       {% component "nav_link" url_name="next:page_admin_audit" label="Audit log" variant="bar" %}
     {% /slot %}
     {% #slot "content" %}
-      {% block template %}{% endblock template %}
+      {% template %}
     {% /slot %}
   {% /component %}
   {% collect_scripts %}

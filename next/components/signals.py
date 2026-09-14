@@ -3,10 +3,10 @@
 from django.dispatch import Signal
 
 
-component_registered: Signal = Signal()
-components_registered: Signal = Signal()
-component_backend_loaded: Signal = Signal()
-component_rendered: Signal = Signal()
+component_registered: Signal = Signal(use_caching=True)
+components_registered: Signal = Signal(use_caching=True)
+component_backend_loaded: Signal = Signal(use_caching=True)
+component_rendered: Signal = Signal(use_caching=True)
 
 
 __all__ = [

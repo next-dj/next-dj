@@ -289,7 +289,7 @@ describe("layer golden fixtures apply through the layer stack", () => {
       dispatch: (event, detail) => dispatched.push({ event, detail }),
       mergeContext: () => undefined,
       document,
-      layers,
+      layers: () => layers,
     });
     return { applier, layers, dispatched };
   }

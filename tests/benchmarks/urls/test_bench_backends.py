@@ -4,32 +4,23 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from next.urls import FileRouterBackend
 from tests.benchmarks.factories import build_pages_tree
-from tests.support import importable_dir
+from tests.support import file_router, importable_dir
 
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
+    from next.urls import FileRouterBackend
+
 
 def _router_for(tree: Path) -> FileRouterBackend:
-    return FileRouterBackend(
-        app_dirs=False,
-        extra_root_paths=[tree],
-        skip_dir_names=frozenset(),
-        components_folder_name="_components",
-    )
+    return file_router(app_dirs=False, dirs=[tree])
 
 
 def _app_dirs_router() -> FileRouterBackend:
-    return FileRouterBackend(
-        app_dirs=True,
-        extra_root_paths=[],
-        skip_dir_names=frozenset(),
-        components_folder_name="_components",
-    )
+    return file_router(app_dirs=True)
 
 
 def _write_apps(
@@ -63,8 +54,7 @@ def installed_page_apps(tmp_path: Path, settings) -> Iterator[None]:
 def installed_many_apps(tmp_path: Path, settings) -> Iterator[None]:
     """Install 100 apps, two of them with pages, the shape of a large project.
 
-    App resolution is per installed app, so a small `INSTALLED_APPS` hides
-    anything quadratic in the number of apps.
+    App resolution is per installed app, so a small `INSTALLED_APPS` hides quadratics.
     """
     names = _write_apps(tmp_path, count=100, depth=2, fanout=3, with_pages=2)
     with importable_dir(tmp_path):
@@ -75,9 +65,8 @@ def installed_many_apps(tmp_path: Path, settings) -> Iterator[None]:
 class TestBenchFileRouter:
     """A fresh backend per round, because the second call is a cache copy.
 
-    The tree walk runs once per backend and every later `generate_urls` copies
-    `_root_patterns_cache`, so timing a reused backend times a list copy of the
-    leaf count instead of the discovery these sizes exist to measure.
+    `generate_urls` copies `_root_patterns_cache` after the first tree walk,
+    so reusing a backend would time a list copy instead of the discovery.
     """
 
     @pytest.mark.benchmark(group="urls.backends")

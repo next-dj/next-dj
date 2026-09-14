@@ -15,7 +15,8 @@ Overview
 
 The dispatcher runs at ``/_next/form/<uid>/`` where the UID is the first 16 hex characters of a SHA-256 digest of the scope key and the action name.
 The dispatcher loads the action handler, enforces the declared access guard, builds the form, runs the validation chain, and either calls the handler or re-renders the origin page.
-Any non-POST method short-circuits before that work and returns HTTP 405.
+A verb outside GET and POST is refused with HTTP 405 before the UID is looked up.
+A GET reaches the lookup, so an unknown UID answers HTTP 404 and a registered one answers HTTP 405.
 
 Pipeline
 --------
@@ -24,10 +25,11 @@ Pipeline
 
    flowchart TB
        Template["form tag in template"] --> Endpoint["form dispatch endpoint"]
-       Endpoint -- "non-POST" --> NotAllowed["HTTP 405"]
-       Endpoint -- POST --> Lookup["Resolve action by UID"]
+       Endpoint -- "not GET or POST" --> NotAllowed["HTTP 405"]
+       Endpoint --> Lookup["Resolve action by UID"]
        Lookup -- unknown UID --> NotFound["HTTP 404"]
-       Lookup -- found --> Guard{"Static access guard"}
+       Lookup -- "found, non-POST" --> NotAllowed
+       Lookup -- "found, POST" --> Guard{"Static access guard"}
        Guard -- anonymous --> LoginRedirect["HTTP 302 to LOGIN_URL"]
        Guard -- "missing permission" --> Forbidden["HTTP 403"]
        Guard -- "pass, no form_class" --> HandlerOnly["Run handler only"]
@@ -92,9 +94,18 @@ Modules
    Form construction and hook invocation, guard and permission enforcement, outcome types and response coercion, and wizard step dispatch.
 
 ``next.forms.backends``.
-   ``FormActionBackend`` abstract contract, ``RegistryFormActionBackend`` default implementation, and the ``FormActionNotFoundError`` exception.
+   ``FormActionBackend`` abstract contract and ``RegistryFormActionBackend`` default implementation.
    Turning the configured entries into instances is not the module's job.
    ``FormActionManager`` delegates that to the shared ``load_backends`` helper every backend family uses.
+
+``next.forms.errors``.
+   ``FormActionNotFoundError``, ``UnstorableWizardValueError``, and ``UnregisteredComponentError``, re-exported from the package.
+
+``next.forms.base``.
+   The form base classes, the ``__init_subclass__`` auto-registration gate, and the permission-hook presence flags the dispatcher reads.
+
+``next.forms.checks``.
+   The system checks that read the registration diagnostics and walk every configured backend.
 
 ``next.forms.uid``.
    ``redirect_to_origin``, ``reverse_form_action``, and ``validated_origin_path`` helpers for the origin page round trip, plus the ``ORIGIN_FIELD_NAME`` wire constant and the ``FORM_ORIGIN_OVERRIDE_KEY`` render-context key the partial shaping layer sets on a wizard advance.

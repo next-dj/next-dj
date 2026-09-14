@@ -23,6 +23,39 @@ A singular ``*_BACKEND`` key holds the one engine for a concern.
 A subsystem prefix (``PAGE_``, ``COMPONENT_``, ``STATIC_``, ``FORM_``, ``URL_``, ``TEMPLATE_``, ``JS_``, ``PARTIAL_``) groups related keys.
 ``NEXT_JS_OPTIONS`` stands outside the prefix scheme and configures the bundled client runtime.
 
+.. _ref-settings-merge:
+
+How values merge
+----------------
+
+``NEXT_FRAMEWORK`` merges over the framework defaults one level deep, and one level only.
+A key the project sets replaces the default for that key whole.
+A key the project leaves out keeps its default.
+Nothing below the top level is combined, so a nested ``OPTIONS`` dict, an entry inside a backend list, and a sub-key of a single backend dict all come from the project alone once the top-level key is present.
+The rule holds for every key, with no per-key exception.
+
+This is what Django does with its own configuration mappings.
+Defining :doc:`STORAGES <django:ref/settings>` overrides the default configuration rather than merging with it, and ``TEMPLATES``, ``DATABASES``, and ``CACHES`` each read the whole list or mapping the project wrote.
+Filling in what a single entry leaves out belongs to the code that consumes the entry, the same place Django fills a ``DATABASES`` alias with ``ATOMIC_REQUESTS`` or a ``TEMPLATES`` entry with ``APP_DIRS``.
+
+A single backend dict follows the rule like any other key.
+``FORM_WIZARD_BACKEND`` set to ``{"OPTIONS": {...}}`` alone carries no ``BACKEND``, which ``manage.py check`` reports as ``next.E051`` and the wizard manager answers with :exc:`~django.core.exceptions.ImproperlyConfigured` on first use.
+Write the whole entry, ``BACKEND`` included.
+
+Each key accepts one shape, and a value of any other type is dropped in favour of the default rather than merged into it.
+
+- The list keys (``PAGE_BACKENDS``, ``COMPONENT_BACKENDS``, ``STATIC_BACKENDS``, ``FORM_ACTION_BACKENDS``, ``PARTIAL_BACKENDS``, ``TEMPLATE_LOADERS``, ``FORM_ANCHOR_FILES``) accept a list.
+- The mapping keys (``NEXT_JS_OPTIONS``, ``FORM_WIZARD_BACKEND``) accept a dict.
+- The dotted-path keys (``URL_RESOLVER``, ``DEPENDENCY_RESOLVER``, ``COMPONENT_TEMPLATE_LOADER``) accept a string naming an importable class, and ``JS_CONTEXT_SERIALIZER`` accepts such a dotted path or ``None``.
+- ``URL_NAME_TEMPLATE`` also accepts a string, but a format template such as ``page_{name}`` rather than a dotted path.
+- The bool flags (``STRICT_CONTEXT``, ``STRICT_LOADING``, ``LAZY_COMPONENT_MODULES``, ``FORM_AUTODISCOVER``, ``STATIC_DISCOVERY_CACHE``) accept any value and pass through ``bool()``.
+
+A dropped value is reported at ``manage.py check`` as ``next.E076``, or under the code the key owns where it carries one, and a bool flag holding a non-bool is reported as ``next.W072``.
+A top-level key that is not in this catalog is reported as ``next.E035``, and the merged view raises ``AttributeError`` for it, so a typo never reaches a read site as a default.
+See :doc:`system-checks` for the conditions.
+
+To change one key of a default backend entry without writing the entry out, build the replacement value with ``next.conf.extend_default_backend``, described under `Patching defaults`_.
+
 Backends
 --------
 
@@ -153,6 +186,7 @@ The bundled ``CacheFormWizardBackend`` stores drafts in the Django cache instead
 It reads two keys from ``OPTIONS``.
 ``CACHE_ALIAS`` names the cache to use, defaulting to ``"default"``, and ``TIMEOUT`` sets the draft expiry in seconds, defaulting to ``SESSION_COOKIE_AGE``.
 Set ``BACKEND`` to a dotted path that subclasses ``FormWizardBackend`` to swap the persistence layer.
+A project value replaces the default dict whole, as :ref:`ref-settings-merge` describes, so the key names its ``BACKEND`` even when the point of setting it is ``OPTIONS``.
 See :doc:`/content/topics/forms/wizard-backend` for the contract, the codec, and a custom backend.
 
 PARTIAL_BACKENDS
@@ -170,7 +204,7 @@ Default value.
 
    [
        {
-           "BACKEND": "next.partial.PartialProtocolBackend",
+           "BACKEND": "next.partial.JsonPartialProtocolBackend",
            "OPTIONS": {
                "VERSION": "manifest",
                "PUSH_WIZARD_STEPS": False,
@@ -184,7 +218,7 @@ Default value.
 
 The ``OPTIONS`` keys tune the active backend.
 ``VERSION`` is the source of the ``X-Next-Version`` stamp.
-The sentinel ``"manifest"`` hashes the staticfiles manifest when the active storage hashes its files, and an explicit string pins the version yourself.
+The sentinel ``"manifest"`` hashes the staticfiles manifest when the active storage hashes its files, and an explicit string pins the version by hand.
 The resolved string is memoised for the life of the configuration, so a manifest replaced under a running process keeps serving the version resolved before it until a settings reload or a restart.
 Without a manifest storage the version guard stays silent at runtime, and ``manage.py check`` reports ``next.W069``.
 ``PUSH_WIZARD_STEPS`` is the global default for pushing wizard steps to browser history, which a wizard's ``Meta.push_steps`` overrides per wizard.
@@ -218,6 +252,7 @@ The default ``TrieURLResolver`` resolves a static route through a dictionary loo
 Set the key to ``"django.urls.resolvers.URLResolver"`` to opt out of the trie and run every resolution through Django's plain linear scan.
 A custom value must name a :class:`~django.urls.URLResolver` subclass whose constructor accepts the same pattern and pattern-sequence pair.
 A path that fails to import, or one that names anything other than a ``URLResolver`` subclass, raises :exc:`~django.core.exceptions.ImproperlyConfigured` at startup.
+The key is read through ``next.backends.resolve_setting_class``, documented in :doc:`backends`, which is also what raises those two errors.
 The resolver is rebuilt on settings reload, so ``override_settings`` swaps it without a restart.
 
 See :doc:`/content/internals/url-router` for the resolution algorithm.
@@ -233,16 +268,17 @@ Dotted path to the resolver class that fills dependency-injected parameters.
 Default value ``"next.deps.DependencyResolver"``.
 
 The class owns every injection the framework performs, from page views and ``@context`` callables to form actions and component renderers.
-A custom value must name a ``next.deps.DependencyResolver`` subclass, so the key is an extension point rather than a switch between two shipped implementations.
+A custom value must name a ``next.deps.DependencyResolver`` subclass.
+The framework ships a second one, ``next.deps.linear.LinearDependencyResolver``, which resolves each parameter by walking the providers instead of replaying a compiled plan.
+It answers identically but pays the whole provider walk for every parameter of every call, where the default resolver compiles that work into a plan once and replays it, so it earns its place as a differential oracle in the test suite rather than as a production choice.
 Widening the public ``skips`` predicate is the usual reason to subclass, because it decides which parameters a compiled plan carries at all.
 A path that fails to import, or one that names anything other than a ``DependencyResolver`` subclass, raises :exc:`~django.core.exceptions.ImproperlyConfigured`.
+The key is read through ``next.backends.resolve_setting_class``, documented in :doc:`backends`, the same helper ``URL_RESOLVER`` goes through.
 
 The key is read at startup and again on every settings reload, never per request, so ``override_settings`` swaps the resolver without a restart.
-The framework holds one resolver singleton that the rest of the code binds by reference, so the named class is adopted by retyping that object in place rather than by building a new one.
-Two constraints on the subclass follow from that.
-Its ``__init__`` never runs, because the state it would build already lives on the singleton the base class initialised.
-It adds no instance slots and no second base, because either changes the object layout and the retype then raises :exc:`~django.core.exceptions.ImproperlyConfigured`.
-An empty ``__slots__ = ()`` leaves the layout alone and is fine.
+The framework holds one resolver singleton behind a shared holder, so the named class is adopted by building an instance of it and putting it behind that holder, which every reference reads through.
+The subclass is built like any other object, so its ``__init__`` runs and it is free to declare slots and bases of its own.
+The object the swap replaces takes its state with it, the compiled plans as well as anything registered on it at runtime, so a dependency registered through ``resolver.dependency`` is registered again after a swap.
 
 See :doc:`/content/internals/di-resolver` for the resolution algorithm and :doc:`deps` for the resolver API.
 
@@ -326,7 +362,7 @@ See :doc:`pages` for the page-load contract, :doc:`template-tags` for the compon
 Loudness axes
 ~~~~~~~~~~~~~
 
-Five independent switches decide how loudly a broken piece fails.
+Several independent switches decide how loudly a broken piece fails.
 
 .. list-table::
    :header-rows: 1
@@ -345,13 +381,13 @@ Five independent switches decide how loudly a broken piece fails.
      - Django context processor exceptions
      - Raises regardless of ``DEBUG``.
    * - ``next.E076``
-     - Seven ``NEXT_FRAMEWORK`` keys whose mistyped value the settings merge silently drops
+     - The ``NEXT_FRAMEWORK`` keys whose mistyped value the settings merge silently drops
      - Always, on ``manage.py check``.
    * - ``next.E077``
      - A ``NEXT_FRAMEWORK`` that is not a dict at all, which the settings layer ignores entirely
      - Always, on ``manage.py check``.
    * - ``next.W072``
-     - The four ``NEXT_FRAMEWORK`` bool keys, where ``bool()`` coercion can invert the intent
+     - Every ``NEXT_FRAMEWORK`` bool key, where ``bool()`` coercion can invert the intent
      - Always, on ``manage.py check``, as a warning rather than an error.
 
 ``DEBUG=True`` turned on temporarily, for serving static files or profiling, also changes the error semantics of pages.
@@ -362,6 +398,26 @@ See :doc:`system-checks` for each check condition.
 Component loading
 -----------------
 
+COMPONENT_TEMPLATE_LOADER
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Dotted path to the loader class that reads and compiles component template bodies.
+
+Default value ``"next.components.CachedComponentTemplateLoader"``.
+
+The class is instantiated once with the shared module loader and handed to both render strategies, so one instance answers every component read in the process.
+The default ``CachedComponentTemplateLoader`` keeps a compiled ``Template`` per component and revalidates it against the modification time of the file the body came from, which costs a warm render one ``stat`` instead of a read plus a parse.
+Set the key to ``"next.components.ComponentTemplateLoader"`` to drop that cache and read and parse the body on every render.
+Both shipped classes produce the same HTML for the same sources, so the choice is a cost, not a behaviour.
+A custom value must name a ``next.components.ComponentTemplateLoader`` subclass.
+A path that fails to import, or one that names anything other than such a subclass, raises :exc:`~django.core.exceptions.ImproperlyConfigured`.
+The key is read through ``next.backends.resolve_setting_class``, documented in :doc:`backends`, the same helper ``URL_RESOLVER`` goes through.
+
+The key is read when the render pipeline is built, never per render.
+A settings reload drops the pipeline, so ``override_settings`` swaps the loader without a restart.
+
+See :doc:`components` for the loader API.
+
 LAZY_COMPONENT_MODULES
 ~~~~~~~~~~~~~~~~~~~~~~
 
@@ -371,6 +427,30 @@ Components discovered through ``_components`` directories beside page files are 
 
 Default value ``False``.
 See :doc:`/content/deployment/settings` for production defaults and :doc:`/content/topics/testing` for the ``eager_load_components`` helper.
+
+Static assets
+-------------
+
+STATIC_DISCOVERY_CACHE
+~~~~~~~~~~~~~~~~~~~~~~
+
+Controls whether asset discovery keeps the plan it built for a page or a component.
+
+Default value ``True``.
+
+A plan records the co-located files a page or component directory holds and the module-level ``styles`` and ``scripts`` URLs it declares.
+With the key on, discovery keeps one plan per page file and one per component, each bounded at 2048 entries, and rebuilds a plan once a watched directory moves or an asset registry changes.
+Every render still hands the planned files to the backend and the planned URLs to the collector, so a warm render collects what a cold one collected.
+
+When ``False``, both plan caches are bypassed and every render walks the role directories and reads the module lists again.
+The collected assets are the same, only the walk is paid on each render.
+Turn the key off when a deployment suspects a stale plan, because the uncached path reads the disk with no freshness heuristic in front of it.
+
+The key is read when the discovery instance is built, never per render.
+A settings reload drops the static manager and the discovery behind it, so ``override_settings`` takes effect without a restart.
+The page-root lookup that maps a page file to its tree is memoised separately and is not affected, because it is a pure function of the path and the configured roots and it is dropped whole whenever those roots move.
+
+See :doc:`/content/topics/static-assets/index` for the discovery rules.
 
 Patching defaults
 -----------------

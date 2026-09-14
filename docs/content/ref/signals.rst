@@ -16,6 +16,11 @@ Every signal below is a Django ``Signal``.
 The ``sender`` column lists the value passed to ``Signal.send``.
 Receivers connected with a matching ``sender`` only fire for that sender.
 
+Most of the catalog is built with ``use_caching=True``, which makes Django key the receiver lookup on a weak reference to the sender.
+Code that sends one of those signals itself has to pass a weak-referenceable sender, so ``None``, a string, and an instance of a slots class without ``__weakref__`` all raise ``TypeError``.
+Four signals stay uncached and accept any sender.
+``asset_registered`` sends the ``StaticAsset`` itself, which carries no ``__weakref__``, ``collector_finalized`` sends a collector built for a single render, and ``provider_registered`` and ``settings_reloaded`` fire rarely enough that the weak-key bookkeeping buys nothing.
+
 The dispatch-time form signals (``action_dispatched``, ``form_validation_failed``, ``wizard_step_submitted``, ``wizard_completed``, ``form_access_denied``) share two keyword arguments.
 ``uid`` is the registry identity of the action, the value the dispatch URL and the ``data-next-action`` markup attribute carry, or ``None`` when a custom backend stores no uid in its meta.
 ``request`` is the live ``HttpRequest`` being dispatched and must not be retained past the receiver call.
@@ -40,6 +45,7 @@ The dispatch-time form signals (``action_dispatched``, ``form_validation_failed`
      - ``action_name``, ``uid``, ``form_class``, ``wizard_class``, ``file_path``, ``scope``, ``handler``
      - After the backend stores an action target for a name.
        Exactly one of ``handler``, ``form_class``, or ``wizard_class`` identifies the target, except the ``@action(form_class=...)`` path which supplies a handler and a form factory together.
+       ``file_path`` is the module the form, wizard, or handler was declared in and ``scope`` is ``"page"`` or ``"shared"``, which together give a receiver a grouping key under the file-scoped model.
    * - ``asset_registered``
      - The ``StaticAsset`` instance
      - ``collector``, ``backend``
@@ -77,7 +83,7 @@ The dispatch-time form signals (``action_dispatched``, ``form_validation_failed`
    * - ``context_registered``
      - ``PageContextRegistry``
      - ``file_path``, ``key``
-     - After a context callable is attached to a page module.
+     - After a context function is attached to a page module.
    * - ``field_validated``
      - The active partial protocol backend class
      - ``action_name``, ``uid``, ``request``, ``field_names``, ``error_count``
@@ -106,7 +112,7 @@ The dispatch-time form signals (``action_dispatched``, ``form_validation_failed`
      - After ``Page.render`` produces HTML and injects static assets.
        ``duration_ms`` times the render.
        ``context_keys`` is the tuple of context keys.
-       Fired only when a receiver is connected, and the ``duration_ms`` timer runs under the same gate.
+       Fired only when a receiver for ``Page`` is connected, and the ``duration_ms`` timer runs under the same gate.
    * - ``patch_op_registered``
      - ``PatchOpRegistry``
      - ``name``
@@ -127,7 +133,7 @@ The dispatch-time form signals (``action_dispatched``, ``form_validation_failed`
      - ``NextFrameworkSettings``
      - none
      - After ``NextFrameworkSettings.reload`` drops its caches.
-       Every receiver runs even when one raises, so a receiver that validates a settings value never leaves the managers behind it holding state built from the settings just replaced.
+       Every receiver runs even when one raises, so a receiver that validates a settings value never leaves the managers behind it holding state built from the settings that reload discarded.
        The first error reaches the caller that asked for the reload once the chain is done.
    * - ``sse_stream_closed``
      - ``PatchEventStream``

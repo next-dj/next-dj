@@ -25,8 +25,9 @@ Each receiver is decorated with ``@receiver`` at module top level, and ``AppConf
 
    from django.db.models.signals import post_delete, post_save
    from django.dispatch import receiver
-   from next.urls import router_manager
    from notes.models import Note
+
+   from next.urls import router_manager
 
    @receiver(post_save, sender=Note)
    def reload_router_on_save(**kwargs) -> None:
@@ -62,11 +63,15 @@ Long lived processes that cache URL references can listen to ``router_reloaded``
    :caption: cache invalidation
 
    from django.dispatch import receiver
+
    from next.urls.signals import router_reloaded
 
    @receiver(router_reloaded)
    def drop_url_cache(**kwargs) -> None:
        my_cache.clear()
+
+A receiver that has to rebuild the routers again calls ``router_manager.reload(notify=False)``.
+That keyword skips the URL-cache clear and the signal, so the receiver does not re-enter itself.
 
 Verification
 ------------

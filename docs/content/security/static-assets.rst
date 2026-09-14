@@ -47,7 +47,9 @@ A custom backend overrides the renderer methods to add the ``integrity`` and ``c
 
    import base64
    import hashlib
+
    from django.contrib.staticfiles.storage import staticfiles_storage
+
    from next.static import StaticFilesBackend
 
    class SriBackend(StaticFilesBackend):

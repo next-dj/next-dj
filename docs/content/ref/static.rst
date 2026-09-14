@@ -6,7 +6,7 @@ Static reference
 Module summary
 --------------
 
-``next.static`` exposes the asset discovery, the request-scoped collector, and the backend chain.
+``next.static`` exposes the asset discovery, the request-scoped collector, and the configured static backends.
 It also exposes the kind and placeholder registries, the ``next.min.js`` script builder, the staticfiles finder, and the JS context serializer.
 
 Public API
@@ -45,6 +45,16 @@ Manager
 ``default_manager`` is the process-wide static manager handle exported from ``next.static``.
 It builds its wrapped ``StaticManager`` lazily on first access.
 ``reset_default_manager`` drops that wrapped instance so the next access rebuilds it, which keeps the manager consistent when ``NEXT_FRAMEWORK`` changes under ``override_settings``.
+``get_static_manager`` returns the live ``StaticManager`` instance behind the lazy ``default_manager`` handle, and ``next.testing.patching`` uses it to patch a backend directly in tests.
+``collect_component_assets`` is the entry point that folds a component's co-located assets into a caller-supplied collector, and ``next.templatetags.components`` and ``next.forms.widgets`` both call it.
+
+Injection
+~~~~~~~~~
+
+.. automodule:: next.static.inject
+   :members:
+
+``StaticManager.inject`` delegates to a ``PlaceholderInjector`` bound to the manager, which reads the active backend, the URL rewrite, and the script builder through it.
 
 Scripts
 ~~~~~~~
@@ -80,13 +90,21 @@ Staticfiles finder
 It maps assets such as ``template.css``, ``layout.js``, ``component.css``, and any registered stems to their source files under the ``next/`` staticfiles namespace.
 It surfaces every such asset to ``collectstatic`` for production output, to ``manage.py findstatic``, and to the staticfiles view that serves files directly while ``DEBUG`` is true.
 Asset URLs themselves come from ``staticfiles_storage.url``, not from the finder.
-The mapping is rebuilt on each lookup so assets added at runtime are picked up.
+
+Staticfiles asks the finder once per referenced asset, so the mapping is held rather than walked again for every lookup.
+It is rebuilt when a stem or kind registration changes which filenames count, when the page or component trees the routers report change, and, while ``DEBUG`` is true, when the mtime of any directory inside those trees moves.
+That last check is what picks up an asset added at runtime, and it is skipped when ``DEBUG`` is false, where only a reconfiguration moves what the walk finds.
 
 The finder is appended to ``STATICFILES_FINDERS`` automatically by ``NextFrameworkConfig.ready`` through ``next.apps.staticfiles.install``.
 The install step is idempotent and skips the entry when it is already present.
 You do not need to list it in ``STATICFILES_FINDERS`` yourself.
 The dotted path is ``next.static.NextStaticFilesFinder``.
 Confirm it is active by running ``manage.py findstatic next/components/note_card.css``.
+
+Replacing the finder means adding one rather than swapping one out.
+``next.apps.staticfiles.install`` appends the framework entry whenever it is absent, and its ``setting_changed`` receiver appends it again after an override rewrites the list, so the shipped finder cannot be configured away.
+A project that needs a different mapping subclasses ``NextStaticFilesFinder``, overrides ``find`` or ``list``, and lists the subclass in ``STATICFILES_FINDERS`` ahead of the framework entry.
+Staticfiles consults the finders in list order and the first match answers a lookup, so the subclass decides every path it claims while ``collectstatic`` still collects from both.
 
 Signals
 -------

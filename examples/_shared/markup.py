@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import re
 
 import markdown
@@ -16,18 +14,14 @@ UNSAFE_HREF = re.compile(
 
 
 def render_markdown(text: str) -> SafeString:
-    """Render Markdown text to safe HTML for the page or preview pane.
+    """Render Markdown to safe HTML for a page body or a live preview pane.
 
-    Inline HTML in the source is neutralised by escaping the body before
-    it reaches the Markdown renderer. Markdown syntax such as headings,
-    lists, fenced code, and links still resolves. After rendering, ``href``
-    values pointing at ``javascript:``, ``data:``, or ``vbscript:``
-    URLs are stripped because Markdown auto-link parsing accepts them.
+    Escaping neutralizes `<script>` before rendering, and stripping
+    `javascript:`/`data:` hrefs after closes the auto-link gap.
     """
     body = text or ""
     if not body.strip():
         return EMPTY_PREVIEW
     renderer = markdown.Markdown(extensions=["fenced_code", "tables"])
     rendered = renderer.convert(escape(body))
-    cleaned = UNSAFE_HREF.sub('href="#"', rendered)
-    return SafeString(cleaned)
+    return SafeString(UNSAFE_HREF.sub('href="#"', rendered))

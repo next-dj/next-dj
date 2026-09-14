@@ -1,8 +1,7 @@
 """Framework-level defaults for the `settings.NEXT_FRAMEWORK` mapping.
 
-The values stored here are deep-copied into the merged view on every reload. Nothing in
-this module imports from the rest of the framework, which keeps the configuration layer
-at the bottom of the dependency graph.
+The values are deep-copied into the merged view on every reload, and nothing here
+imports the rest of the framework, so the configuration layer has no dependencies.
 """
 
 from __future__ import annotations
@@ -32,13 +31,15 @@ DEFAULTS: dict[str, Any] = {
             "COMPONENTS_DIR": "_components",
         }
     ],
+    "COMPONENT_TEMPLATE_LOADER": "next.components.CachedComponentTemplateLoader",
     "STATIC_BACKENDS": [{"BACKEND": "next.static.StaticFilesBackend", "OPTIONS": {}}],
+    "STATIC_DISCOVERY_CACHE": True,
     "FORM_ACTION_BACKENDS": [
         {"BACKEND": "next.forms.RegistryFormActionBackend", "OPTIONS": {}}
     ],
     "PARTIAL_BACKENDS": [
         {
-            "BACKEND": "next.partial.PartialProtocolBackend",
+            "BACKEND": "next.partial.JsonPartialProtocolBackend",
             "OPTIONS": {
                 "VERSION": "manifest",
                 "PUSH_WIZARD_STEPS": False,

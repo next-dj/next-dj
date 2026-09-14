@@ -4,7 +4,8 @@ from unittest.mock import MagicMock, patch
 
 from django.core.checks import Error
 
-from next.pages.scan import iter_serialized_page_context_keys
+from next.pages.loaders import _MODULE_MEMO
+from next.pages.scan import iter_serialized_page_context_keys, load_scanned_page_modules
 from tests.support import MalformedRootsRouter, patch_checks_router_manager
 
 
@@ -37,7 +38,7 @@ class TestSerializedPageContextKeys:
         with (
             patch_checks_router_manager(pages_directory=tmp_path),
             patch(
-                "next.checks.common.walk_page_tree",
+                "next.discovery.walk_page_tree",
                 return_value=[("first", page_file), ("second", page_file)],
             ),
         ):
@@ -65,7 +66,7 @@ class TestSerializedPageContextKeys:
         with (
             patch_checks_router_manager(pages_directory=tmp_path),
             patch(
-                "next.checks.common.walk_page_tree",
+                "next.discovery.walk_page_tree",
                 return_value=[("real", page_file), ("link", linked)],
             ),
         ):
@@ -111,3 +112,28 @@ class TestSerializedPageContextKeys:
         manager.backends = (MalformedRootsRouter([tmp_path]),)
         with patch("next.pages.scan.get_router_manager", return_value=(manager, [])):
             assert list(iter_serialized_page_context_keys()) == []
+
+
+class TestLoadScannedPageModules:
+    """load_scanned_page_modules executes every existing routed page.py."""
+
+    def test_each_routed_page_module_is_executed(self, tmp_path: Path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text('template = "ok"\n')
+        with patch_checks_router_manager(pages_directory=tmp_path) as (manager, _r, _d):
+            load_scanned_page_modules(manager)
+        assert page_file in _MODULE_MEMO
+
+    def test_a_page_the_router_never_walked_stays_unexecuted(
+        self, tmp_path: Path
+    ) -> None:
+        routed = tmp_path / "routed"
+        routed.mkdir()
+        (routed / "page.py").write_text('template = "ok"\n')
+        unrouted = tmp_path / "unrouted"
+        unrouted.mkdir()
+        stray = unrouted / "page.py"
+        stray.write_text('template = "ok"\n')
+        with patch_checks_router_manager(pages_directory=routed) as (manager, _r, _d):
+            load_scanned_page_modules(manager)
+        assert stray not in _MODULE_MEMO

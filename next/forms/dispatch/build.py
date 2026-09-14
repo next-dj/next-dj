@@ -3,13 +3,12 @@
 import types
 from typing import TYPE_CHECKING, Any, cast
 
+from django.db.models import Model
 from django.forms.models import BaseModelForm as DjangoBaseModelForm
 
-from next.deps import resolver
-from next.deps.resolver import cached_accepts_var_keyword
+from next.deps.introspect import cached_accepts_var_keyword
+from next.deps.resolver import current_resolver
 from next.forms.origin import _url_kwargs_for_request
-
-from .responses import _is_model_instance
 
 
 if TYPE_CHECKING:
@@ -39,7 +38,7 @@ def _build_form(
         if bound:
             return form_class(data=post_data, files=files, **init_kwargs)
         return form_class(**init_kwargs)
-    if _is_model_instance(initial_data):
+    if isinstance(initial_data, Model):
         if not issubclass(form_class, DjangoBaseModelForm):
             msg = (
                 f"get_initial for {form_class.__name__} returned a "
@@ -97,7 +96,7 @@ def _resolve_and_call(
 ) -> object:
     """Resolve a hook's dependencies and call it, feeding url_kwargs to kwargs."""
     cache, stack = deps
-    resolved = resolver.resolve_dependencies(
+    resolved = current_resolver().resolve_dependencies(
         hook, request=request, _cache=cache, _stack=stack, **url_kwargs
     )
     if _accepts_var_keyword(hook):
@@ -149,7 +148,7 @@ def _resolve_form_class(
         )
         raise TypeError(msg)
     cache, stack = deps if deps is not None else ({}, [])
-    resolved = resolver.resolve_dependencies(
+    resolved = current_resolver().resolve_dependencies(
         form_class, request=request, _cache=cache, _stack=stack, **url_kwargs
     )
     produced = form_class(**resolved)

@@ -1,24 +1,23 @@
 """HTML helpers for next-dj tests.
 
-Thin conveniences for the narrow cases that Django's built-in
-assertions (`assertContains(html=True)`, `assertInHTML`, ...) do not
-cover cleanly: picking a specific anchor out of a rendered page and
-checking class-token membership without regex or BeautifulSoup.
-
-These helpers operate on HTML produced by Django template rendering.
+Django's own assertions do not cover picking one anchor or form out of a rendered page,
+so these helpers locate elements with `html.parser` and return the source span.
 """
 
 from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 from html.parser import HTMLParser
-from typing import Any, override
+from typing import Any, cast, override
 
 
-_ANCHOR_RE = re.compile(r"<a\b[^>]*>[\s\S]*?</a\s*>", re.IGNORECASE)
-_FORM_RE = re.compile(r"<form\b[^>]*>[\s\S]*?</form\s*>", re.IGNORECASE)
 _INIT_CALL_RE = re.compile(r"Next\._init\(\s*(?=\{)")
+
+# One object decoded from the offset the regex stopped at, so neither the tail of
+# the page nor the rest of the script body is scanned to find where it ends.
+_DECODER = json.JSONDecoder()
 
 
 class _FirstTagAttrs(HTMLParser):
@@ -35,19 +34,6 @@ class _FirstTagAttrs(HTMLParser):
         if self.tag is None:
             self.tag = tag
             self.attrs = {k: ("" if v is None else v) for k, v in attrs}
-
-
-class _TextOnly(HTMLParser):
-    """Collect text nodes, ignore tags and comments."""
-
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.parts: list[str] = []
-
-    @override
-    def handle_data(self, data: str) -> None:
-        """Append text data chunks."""
-        self.parts.append(data)
 
 
 class _InputFields(HTMLParser):
@@ -70,6 +56,91 @@ class _InputFields(HTMLParser):
         self.fields[name] = values.get("value", "")
 
 
+@dataclass(frozen=True, slots=True)
+class _Element:
+    """One complete element with its verbatim source span."""
+
+    fragment: str
+    attrs: dict[str, str]
+    text: str
+
+
+class _Elements(HTMLParser):
+    """Collect every complete element of one tag name in document order.
+
+    A same-name tag nested in an open one is invalid HTML, so the outermost
+    start tag opens the span and the first matching end tag closes it.
+    """
+
+    def __init__(self, tag: str, source: str) -> None:
+        super().__init__(convert_charrefs=True)
+        self.wanted = tag
+        self.source = source
+        self.line_starts = _line_starts(source)
+        self.start: int | None = None
+        self.attrs: dict[str, str] = {}
+        self.parts: list[str] = []
+        self.elements: list[_Element] = []
+
+    def current_offset(self) -> int:
+        """Return the absolute source offset of the tag being handled."""
+        line, column = self.getpos()
+        return self.line_starts[line - 1] + column
+
+    @override
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        """Open a span on the outermost start tag of the wanted name."""
+        if tag != self.wanted or self.start is not None:
+            return
+        self.start = self.current_offset()
+        self.attrs = {k: ("" if v is None else v) for k, v in attrs}
+        self.parts = []
+
+    @override
+    def handle_endtag(self, tag: str) -> None:
+        """Close the open span on the first end tag of the wanted name."""
+        if tag != self.wanted or self.start is None:
+            return
+        end = self.source.index(">", self.current_offset()) + 1
+        self.elements.append(
+            _Element(
+                fragment=self.source[self.start : end],
+                attrs=self.attrs,
+                text="".join(self.parts).strip(),
+            )
+        )
+        self.start = None
+
+    @override
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        """Skip a self-closed tag of the wanted name, a span needs an end tag."""
+        if tag == self.wanted:
+            return
+        super().handle_startendtag(tag, attrs)
+
+    @override
+    def handle_data(self, data: str) -> None:
+        """Collect the text of the open span."""
+        if self.start is not None:
+            self.parts.append(data)
+
+
+def _line_starts(source: str) -> list[int]:
+    offsets = [0]
+    index = source.find("\n")
+    while index != -1:
+        offsets.append(index + 1)
+        index = source.find("\n", index + 1)
+    return offsets
+
+
+def _elements(source: str, tag: str) -> list[_Element]:
+    parser = _Elements(tag, source)
+    parser.feed(source)
+    parser.close()
+    return parser.elements
+
+
 def _first_tag_attrs(fragment: str) -> dict[str, str]:
     parser = _FirstTagAttrs()
     parser.feed(fragment)
@@ -80,13 +151,6 @@ def _first_tag_attrs(fragment: str) -> dict[str, str]:
     return parser.attrs
 
 
-def _inner_text(fragment: str) -> str:
-    parser = _TextOnly()
-    parser.feed(fragment)
-    parser.close()
-    return "".join(parser.parts).strip()
-
-
 def _input_fields(fragment: str, *, hidden_only: bool) -> dict[str, str]:
     parser = _InputFields(hidden_only=hidden_only)
     parser.feed(fragment)
@@ -94,46 +158,18 @@ def _input_fields(fragment: str, *, hidden_only: bool) -> dict[str, str]:
     return parser.fields
 
 
-def _json_object_at(text: str, start: int) -> str:
-    depth = 0
-    in_string = False
-    escaped = False
-    for index, char in enumerate(text[start:], start=start):
-        if escaped:
-            escaped = False
-        elif in_string:
-            if char == "\\":
-                escaped = True
-            elif char == '"':
-                in_string = False
-        elif char == '"':
-            in_string = True
-        elif char == "{":
-            depth += 1
-        elif char == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start : index + 1]
-    msg = "Unterminated object in the Next._init call"
-    raise LookupError(msg)
-
-
 def find_anchor(html: str, *, href: str | None = None, text: str | None = None) -> str:
     """Return the first `<a>...</a>` substring that matches the filters.
 
-    `href` is compared for exact equality with the anchor's `href`
-    attribute. `text` is matched as a substring against the anchor's
-    stripped inner text. With no filters, returns the first anchor in
-    document order. Raises `LookupError` when nothing matches.
+    `href` matches exactly and `text` matches as a substring of the stripped inner text,
+    while an anchor inside a comment or a script body never matches.
     """
-    for match in _ANCHOR_RE.finditer(html):
-        fragment = match.group(0)
-        attrs = _first_tag_attrs(fragment)
-        if href is not None and attrs.get("href") != href:
+    for anchor in _elements(html, "a"):
+        if href is not None and anchor.attrs.get("href") != href:
             continue
-        if text is not None and text not in _inner_text(fragment):
+        if text is not None and text not in anchor.text:
             continue
-        return fragment
+        return anchor.fragment
     msg = f"Anchor not found: href={href!r} text={text!r}"
     raise LookupError(msg)
 
@@ -147,20 +183,17 @@ def find_form(
 ) -> str:
     """Return the first `<form>...</form>` substring that matches the filters.
 
-    `action` is compared for exact equality with the form's `action` attribute,
-    `contains` and `excludes` are substrings that must and must not appear in the
-    block. With no filters, returns the first form in document order. Raises
-    `LookupError` when nothing matches.
+    `action` matches exactly, `contains` and `excludes` are substrings the block must
+    and must not hold. A form inside a comment or a script body never matches.
     """
-    for match in _FORM_RE.finditer(html):
-        fragment = match.group(0)
-        if action is not None and _first_tag_attrs(fragment).get("action") != action:
+    for form in _elements(html, "form"):
+        if action is not None and form.attrs.get("action") != action:
             continue
-        if contains is not None and contains not in fragment:
+        if contains is not None and contains not in form.fragment:
             continue
-        if excludes is not None and excludes in fragment:
+        if excludes is not None and excludes in form.fragment:
             continue
-        return fragment
+        return form.fragment
     msg = (
         f"Form not found: action={action!r} contains={contains!r} excludes={excludes!r}"
     )
@@ -192,8 +225,7 @@ def form_fields(fragment: str) -> dict[str, str]:
 def hidden_fields(fragment: str) -> dict[str, str]:
     """Return the hidden `<input>` name to value pairs inside the fragment.
 
-    Same contract as `form_fields`, narrowed to the `type="hidden"` inputs a form
-    expects echoed back on submit.
+    Same contract as `form_fields`, narrowed to the `type="hidden"` inputs.
     """
     return _input_fields(fragment, hidden_only=True)
 
@@ -201,16 +233,19 @@ def hidden_fields(fragment: str) -> dict[str, str]:
 def init_payload(html: str) -> dict[str, Any]:
     """Return the payload of the `Next._init(...)` bootstrap call in a page.
 
-    The call is a script body rather than markup, so the object is located by regex
-    and then delimited by a brace scan that survives nesting and braces inside JSON
-    strings. Raises `LookupError` when the call is absent or unterminated.
+    The call is a script body rather than markup, so the object is located by regex and
+    decoded from there. Raises `LookupError` when the call is absent or malformed.
     """
     match = _INIT_CALL_RE.search(html)
     if match is None:
         msg = "Next._init call not found"
         raise LookupError(msg)
-    payload: dict[str, Any] = json.loads(_json_object_at(html, match.end()))
-    return payload
+    try:
+        payload, _ = _DECODER.raw_decode(html, match.end())
+    except json.JSONDecodeError as e:
+        msg = f"Malformed object in the Next._init call: {e}"
+        raise LookupError(msg) from e
+    return cast("dict[str, Any]", payload)
 
 
 def _class_tokens(fragment: str) -> set[str]:

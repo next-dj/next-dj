@@ -1,10 +1,10 @@
 import inspect
-from unittest.mock import MagicMock
 
 from django import forms as django_forms
 
 from next.forms import Form
 from next.forms.markers import CleanedDataProvider, DForm, FormProvider
+from next.testing import make_resolution_context
 
 
 class _RowForm(Form):
@@ -29,8 +29,7 @@ class TestDFormAndFormProvider:
         class MyForm(Form):
             name = django_forms.CharField()
 
-        context = MagicMock()
-        context.form = MyForm()
+        context = make_resolution_context(form=MyForm())
 
         param = inspect.Parameter("form", inspect.Parameter.POSITIONAL_OR_KEYWORD)
         assert provider.can_handle(param, context) is True
@@ -42,8 +41,7 @@ class TestDFormAndFormProvider:
         class MyForm(Form):
             name = django_forms.CharField()
 
-        context = MagicMock()
-        context.form = MyForm()
+        context = make_resolution_context(form=MyForm())
 
         param = inspect.Parameter(
             "my_form", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=MyForm
@@ -53,8 +51,7 @@ class TestDFormAndFormProvider:
     def test_form_provider_returns_false_when_no_form(self) -> None:
         """FormProvider.can_handle returns False when context has no form."""
         provider = FormProvider()
-        context = MagicMock()
-        context.form = None
+        context = make_resolution_context()
 
         param = inspect.Parameter("form", inspect.Parameter.POSITIONAL_OR_KEYWORD)
         assert provider.can_handle(param, context) is False
@@ -66,8 +63,7 @@ class TestDFormAndFormProvider:
         class MyForm(Form):
             name = django_forms.CharField()
 
-        context = MagicMock()
-        context.form = MyForm()
+        context = make_resolution_context(form=MyForm())
 
         param = inspect.Parameter(
             "other_param", inspect.Parameter.POSITIONAL_OR_KEYWORD
@@ -82,8 +78,7 @@ class TestDFormAndFormProvider:
             name = django_forms.CharField()
 
         form_instance = MyForm()
-        context = MagicMock()
-        context.form = form_instance
+        context = make_resolution_context(form=form_instance)
 
         param = inspect.Parameter("form", inspect.Parameter.POSITIONAL_OR_KEYWORD)
         result = provider.resolve(param, context)
@@ -96,8 +91,7 @@ class TestDFormAndFormProvider:
         class MyForm(Form):
             name = django_forms.CharField()
 
-        context = MagicMock()
-        context.form = MyForm()
+        context = make_resolution_context(form=MyForm())
 
         param = inspect.Parameter(
             "typed_form",
@@ -116,8 +110,7 @@ class TestDFormAndFormProvider:
         class FormB(Form):
             email = django_forms.EmailField()
 
-        context = MagicMock()
-        context.form = FormA()
+        context = make_resolution_context(form=FormA())
 
         param = inspect.Parameter(
             "typed_form",
@@ -130,8 +123,7 @@ class TestDFormAndFormProvider:
         """A bound formset fills a parameter annotated with its own class."""
         provider = FormProvider()
         formset = _RowFormset()
-        context = MagicMock()
-        context.form = formset
+        context = make_resolution_context(form=formset)
 
         param = inspect.Parameter(
             "rows", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=_RowFormset
@@ -155,8 +147,7 @@ class TestCleanedDataProvider:
     def test_can_handle_named_param_with_data(self) -> None:
         """can_handle returns True for `cleaned_data` when context carries data."""
         provider = CleanedDataProvider()
-        context = MagicMock()
-        context.cleaned_data = {"name": "Ada"}
+        context = make_resolution_context(cleaned_data={"name": "Ada"})
         param = inspect.Parameter(
             "cleaned_data", inspect.Parameter.POSITIONAL_OR_KEYWORD
         )
@@ -165,16 +156,14 @@ class TestCleanedDataProvider:
     def test_can_handle_rejects_other_names(self) -> None:
         """can_handle returns False for any other parameter name."""
         provider = CleanedDataProvider()
-        context = MagicMock()
-        context.cleaned_data = {"name": "Ada"}
+        context = make_resolution_context(cleaned_data={"name": "Ada"})
         param = inspect.Parameter("payload", inspect.Parameter.POSITIONAL_OR_KEYWORD)
         assert provider.can_handle(param, context) is False
 
     def test_can_handle_rejects_missing_data(self) -> None:
         """can_handle returns False when the context carries no cleaned data."""
         provider = CleanedDataProvider()
-        context = MagicMock()
-        context.cleaned_data = None
+        context = make_resolution_context()
         param = inspect.Parameter(
             "cleaned_data", inspect.Parameter.POSITIONAL_OR_KEYWORD
         )
@@ -183,8 +172,7 @@ class TestCleanedDataProvider:
     def test_resolve_returns_mapping_from_context(self) -> None:
         """CleanedDataProvider.resolve returns the mapping stored on the context."""
         provider = CleanedDataProvider()
-        context = MagicMock()
-        context.cleaned_data = {"name": "Ada"}
+        context = make_resolution_context(cleaned_data={"name": "Ada"})
         param = inspect.Parameter(
             "cleaned_data", inspect.Parameter.POSITIONAL_OR_KEYWORD
         )

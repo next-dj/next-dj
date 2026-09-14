@@ -4,7 +4,7 @@ Layouts
 =======
 
 A layout is a ``layout.djx`` file in any directory under a page root.
-The framework wraps every page below it through string substitution into a ``{% block template %}`` placeholder.
+The framework wraps every page below it through string substitution into a ``{% template %}`` placeholder.
 This page covers how layouts are discovered, how the layout chain composes, how to publish layout-level context, and how multiple page backends produce independent layout trees.
 
 .. contents::
@@ -17,7 +17,7 @@ Overview
 A page is wrapped by every ``layout.djx`` between the page directory and the page root.
 The closest layout is the innermost wrapper.
 The root layout is the outermost wrapper.
-The page body is substituted into a ``{% block template %}{% endblock template %}`` placeholder that each layout must contain.
+The page body is substituted into a ``{% template %}`` placeholder that each layout must contain.
 
 Layouts compose through string substitution, not through Django template inheritance.
 There is no ``{% extends %}`` directive and no parent template identifier.
@@ -67,9 +67,10 @@ Use this shape for landing routes whose whole markup belongs in the layout shell
 Layout template contract
 ------------------------
 
-Every layout must contain a ``{% block template %}`` placeholder where the body of the wrapped content is substituted.
-The closing tag can be written either way.
-``{% block template %}{% endblock template %}`` and ``{% block template %}{% endblock %}`` are both recognised.
+Every layout must contain a ``{% template %}`` placeholder where the body of the wrapped content is substituted.
+The tag takes no arguments and rejects any with a ``TemplateSyntaxError``.
+Whitespace inside the braces is free, so ``{%  template  %}`` and a tag broken across lines are read as the same placeholder.
+Composition fills the first placeholder a layout carries, so keep exactly one per file.
 
 .. code-block:: jinja
    :caption: notes/pages/layout.djx
@@ -83,22 +84,29 @@ The closing tag can be written either way.
      <body>
        <header>{{ site_name }}</header>
        <main>
-         {% block template %}{% endblock template %}
+         {% template %}
        </main>
        {% collect_scripts %}
      </body>
    </html>
 
 Without the placeholder that layout is skipped during composition, so its own markup vanishes from the output while the page body and every inner layout still render, with no error raised.
-The ``check_layout_templates`` system check emits ``next.W001`` for a ``layout.djx`` sitting next to a discovered page when it lacks a ``{% block template %}`` block.
-The check scans every page root each router serves, so ``next.W001`` surfaces for layouts under any page-bearing application, not only one of them.
+The ``check_layout_templates`` system check emits ``next.W001`` for a ``layout.djx`` sitting next to a discovered page when it carries no placeholder, and ``next.W078`` when it carries more than one.
+The check scans every page root each router serves, so both codes surface for layouts under any page-bearing application, not only one of them.
 A layout in an intermediate segment directory without a sibling page is not covered, so ``uv run python manage.py check`` does not catch every broken layout.
 
 Layouts can declare layout-level CSS and JS through the static collector tags shown above.
 The tags also live in inner layouts when you want a section-scoped style sheet.
 
+Fallback for an unfilled placeholder
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The paired form ``{% #template %}...{% /template %}`` marks the same hole and carries a body that renders only where composition never reached.
+A layout rendered on its own, outside the chain that would fill its hole, shows that body instead of an empty gap.
+Write the fallback where a layout doubles as a standalone template, such as a shell a plain Django view renders, and keep the single form everywhere else.
+
 Publishing context from a layout segment
------------------------------------------
+----------------------------------------
 
 A segment directory that contains a ``layout.djx`` can also have a sibling ``page.py``.
 Use it to publish values that the layout markup needs and, with ``inherit_context=True``, to make those values available to every descendant page.
@@ -106,8 +114,9 @@ Use it to publish values that the layout markup needs and, with ``inherit_contex
 .. code-block:: python
    :caption: notes/pages/page.py
 
-   from next import context
    from notes.models import Note
+
+   from next import context
 
    @context("site_name", inherit_context=True)
    def site_name() -> str:
@@ -138,7 +147,7 @@ Add a layout inside a section to share a sub navigation across every page under 
        <a href="{% url 'next:page_admin' %}">Overview</a>
        <a href="{% url 'next:page_admin_stats' %}">Stats</a>
      </nav>
-     {% block template %}{% endblock template %}
+     {% template %}
    </section>
 
 Empty pass through
@@ -150,7 +159,7 @@ Use an empty layout that contains only the placeholder.
 .. code-block:: jinja
    :caption: notes/pages/api/layout.djx
 
-   {% block template %}{% endblock template %}
+   {% template %}
 
 A sibling ``page.py`` in the same directory can publish inherited context for every page under ``/api/`` without that layout injecting any visible markup.
 
@@ -235,8 +244,9 @@ Common pitfalls
 ---------------
 
 Layout markup is missing from the output.
-   A ``{% block template %}`` placeholder is required, closed with either ``{% endblock %}`` or ``{% endblock template %}``.
-   Without it the framework drops that layout from the chain and renders the page body without its wrapper.
+   A ``{% template %}`` placeholder is required in every layout.
+   Without one the framework drops that layout from the chain and renders the page body without its wrapper, which ``next.W001`` reports at check time.
+   A layout carrying two placeholders draws ``next.W078`` instead, because composition fills the first one and the second renders its own fallback in place of the page.
 
 Inherited context not visible to a sub-page.
    The ``inherit_context=True`` flag is required on the ancestor ``page.py`` that declares the value.

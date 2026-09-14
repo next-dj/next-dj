@@ -115,7 +115,7 @@ See :doc:`/content/topics/file-router`.
 How do I share components across projects
 -----------------------------------------
 
-Place the shared components in one folder and reference it through ``COMPONENT_BACKENDS["DIRS"]``.
+Place the shared components in one folder and add it to the ``DIRS`` list of a ``COMPONENT_BACKENDS`` entry.
 See :doc:`/content/howto/share-components-across-projects`.
 
 How do I add context processors to pages
@@ -138,7 +138,8 @@ Reconstruct the query string from the validated fields instead.
 
    from django.http import HttpRequest, HttpResponseRedirect
    from django.urls import reverse
-   from next.forms import Form, CharField
+
+   from next.forms import CharField, Form
 
    class SearchForm(Form):
        q = CharField(required=False)
@@ -164,6 +165,7 @@ Return any ``HttpResponseBase`` subclass.
 
    from django.http import HttpRequest, HttpResponse
    from notes.models import Note
+
    from next.forms import ModelForm
 
    class NoteForm(ModelForm):

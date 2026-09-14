@@ -37,7 +37,7 @@ Modules
    ``RouterBackend`` is the abstract contract.
    Its concrete ``page_roots``, ``components_folder_name``, and ``skip_dir_names`` methods form the route introspection contract described below.
    ``FileRouterBackend`` implements file based routing.
-   ``RouterFactory`` looks up backends by dotted path.
+   ``RouterFactory`` builds the router one entry names, for the callers that build one at a time.
 
 ``next.urls.parser``.
    Turns directory names into URL patterns.
@@ -46,7 +46,8 @@ Modules
 
 ``next.urls.manager``.
    ``RouterManager`` builds the active pattern list, exposes ``reload``, and emits the ``router_reloaded`` signal.
-   The module-level ``urlpatterns`` is a list with one ``TrieURLResolver`` wrapping the lazy router and form-action pattern sequence.
+   The module-level ``urlpatterns`` is a one-element sequence holding the resolver named by ``URL_RESOLVER``, which ships as ``TrieURLResolver`` and wraps the lazy router and form-action pattern sequence.
+   It is a ``Sequence`` rather than a ``list``, so a root URLconf mounts it through ``include()`` and never concatenates or appends to it.
 
 ``next.urls.resolver``.
    ``TrieURLResolver`` narrows each ``resolve()`` call to a few candidates through a static route map and a segment trie, with the inherited linear scan as fallback.
@@ -116,6 +117,7 @@ Reload mechanics
 3. Clears the Django URL resolver cache.
 4. Emits the ``router_reloaded`` signal.
 
+Steps three and four are skipped when the caller passes ``notify=False``, which is what a receiver of ``router_reloaded`` uses to reload the backends without re-entering its own signal.
 The next request observes the new patterns without a process restart.
 Long lived processes such as websocket subscribers listen for the signal to refresh cached URL references.
 
@@ -148,7 +150,7 @@ Extension points
 ----------------
 
 - Subclass ``RouterBackend`` to feed the resolver from a different source, or subclass ``FileRouterBackend`` to add patterns or augment naming on the file-based backend.
-- Register a custom backend in ``RouterFactory`` and reference it through the settings dotted path.
+- Reference a custom backend through its dotted path under ``PAGE_BACKENDS``, and take the entry as the single constructor argument.
 - Subscribe to ``route_registered`` to observe each new pattern.
   It fires once per discovered pattern with ``sender=FileRouterBackend`` and the ``url_path`` and ``file_path`` keyword arguments.
   See :doc:`/content/ref/signals`.

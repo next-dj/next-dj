@@ -25,6 +25,7 @@ VALID_TYPED_VALUES: dict[str, object] = {
     "URL_NAME_TEMPLATE": "page_{name}",
     "URL_RESOLVER": "next.urls.TrieURLResolver",
     "DEPENDENCY_RESOLVER": "next.deps.DependencyResolver",
+    "COMPONENT_TEMPLATE_LOADER": "next.components.CachedComponentTemplateLoader",
     "NEXT_JS_OPTIONS": {},
 }
 
@@ -45,6 +46,7 @@ class TestValueTypeErrors:
             ("URL_NAME_TEMPLATE", []),
             ("URL_RESOLVER", []),
             ("DEPENDENCY_RESOLVER", []),
+            ("COMPONENT_TEMPLATE_LOADER", []),
             ("NEXT_JS_OPTIONS", []),
         ],
         ids=[
@@ -55,6 +57,7 @@ class TestValueTypeErrors:
             "str_key_given_list",
             "str_key_given_list_resolver",
             "str_key_given_list_deps_resolver",
+            "str_key_given_list_template_loader",
             "dict_key_given_list",
         ],
     )
@@ -187,6 +190,15 @@ class TestSilencing:
             messages = check_next_framework_value_types()
             silenced = {m.id: m.is_silenced() for m in messages}
         assert silenced == {"next.E076": False, "next.W072": True}
+
+    def test_non_dict_setting_is_reported_by_one_check_only(self) -> None:
+        """No second area repeats "NEXT_FRAMEWORK is not a dict" under its own id."""
+        register_all()
+        with override_settings(NEXT_FRAMEWORK=["not a dict"]):  # type: ignore[arg-type]
+            messages = run_checks(tags=[NEXT])
+        assert [
+            m.id for m in messages if m.msg.startswith("NEXT_FRAMEWORK must be")
+        ] == ["next.E077"]
 
     def test_silencing_a_mistyped_key_leaves_the_whole_setting_reported(self) -> None:
         """A project deaf to next.E076 still hears that NEXT_FRAMEWORK is ignored."""

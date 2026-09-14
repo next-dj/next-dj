@@ -9,7 +9,7 @@
       {% component "nav_link" url_name="next:page_demo" label="Demo" variant="bar" %}
     {% /slot %}
     {% #slot "content" %}
-      {% block template %}{% endblock template %}
+      {% template %}
     {% /slot %}
   {% /component %}
   {% collect_scripts %}

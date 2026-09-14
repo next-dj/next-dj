@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
+from next.introspect import defining_file
 from next.pages.registry import PageContextRegistry
-from next.utils import defining_file
 from tests.support import counting_provider
 
 

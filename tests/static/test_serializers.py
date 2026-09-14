@@ -53,6 +53,15 @@ class TestPydanticJsContextSerializer:
         with pytest.raises(TypeError, match="not JSON serializable"):
             serializer.dumps({"thing": object()})
 
+    def test_the_encoder_class_is_built_once(self) -> None:
+        """A render resolves the serializer afresh, so the class cannot be per call."""
+        pytest.importorskip("pydantic")
+
+        first = PydanticJsContextSerializer()
+        second = PydanticJsContextSerializer()
+
+        assert first._encoder is second._encoder
+
     def test_raises_when_pydantic_missing(self, monkeypatch) -> None:
         monkeypatch.setattr("next.static.serializers.pydantic", None)
         with pytest.raises(ImportError, match="pydantic"):

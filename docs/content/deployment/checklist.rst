@@ -38,10 +38,10 @@ Wizard drafts
 
 Review these when the project ships a ``FormWizard``.
 
-- The default ``SessionFormWizardBackend`` shares drafts wherever the session engine does, so confirm the session store is durable and shared across workers.
-- When using ``CacheFormWizardBackend``, point it at a cache shared across workers, not local memory, and set a short ``TIMEOUT`` for drafts, especially when a step collects personal data.
-- Use a signed or encrypted backend for sensitive flows.
-- Validate cross-step invariants in ``done`` so a stale draft value fails with a friendly message, not an integrity error.
+- The session or cache store behind the wizard backend is durable and shared across every worker.
+- Drafts that hold personal data sit in a signed or encrypted store and expire on their own.
+- ``CacheFormWizardBackend`` reads that expiry from its ``TIMEOUT`` option, which falls back to ``SESSION_COOKIE_AGE`` when the option is absent.
+- The default ``SessionFormWizardBackend`` keeps drafts in the session, so ``SESSION_COOKIE_AGE`` and the session engine decide how long they survive.
 
 See :doc:`/content/topics/forms/wizard-backend` for the backend trade-offs.
 
@@ -54,6 +54,25 @@ Static files
 - Configure caching headers on the static origin.
 
 See :doc:`static-files` for the production specific guidance.
+
+Partial rendering
+-----------------
+
+Review these when the project serves partial responses.
+
+- Run ``collectstatic`` before the first worker of the new release accepts traffic, so the version a response stamps names assets the browser can already fetch.
+- Plan for the window in a rolling deploy where a client that loaded its page from the old release asks the new one for a zone.
+- Pin the ``VERSION`` option of the ``PARTIAL_BACKENDS`` entry to an explicit per-release string when no hashing staticfiles storage is configured.
+
+Every partial response carries the asset version in its ``X-Next-Version`` header.
+A safe-method zone request that asserts a different version answers HTTP 409 with an empty body, and the runtime turns that one answer into a single full visit of the page that owns the zone.
+A client spanning two versions therefore pays one full page load and then runs on the new assets, rather than patching new HTML into a page whose scripts and styles come from the release before.
+
+The default ``VERSION`` value is the sentinel ``"manifest"``, which hashes the staticfiles manifest and so needs a storage that hashes its files into one.
+Without such a storage the sentinel resolves to a stable string that never changes, the guard never fires, and ``manage.py check`` reports ``next.W069``.
+Configure a manifest storage, or pin ``VERSION`` to a string the release process sets.
+
+See :doc:`/content/topics/partial-rendering/reference` for the header and the status codes.
 
 Database
 --------
@@ -90,6 +109,15 @@ Run the framework system checks as part of CI and as part of the deployment scri
    uv run python manage.py check
 
 A clean exit is required for the deployment to proceed.
+
+Access control tests
+--------------------
+
+Keep at least one negative test per guarded action in the suite, an anonymous POST that redirects to ``LOGIN_URL`` and an unauthorised POST that answers ``403``.
+A guard dropped in a refactor breaks no test that posts as the owner, so the denial assertion is the only thing that fails when the protection disappears.
+Run the suite with CSRF enforcement on at least one client as well.
+
+See :ref:`howto-test-actions` for the three guard layers and the status each one produces.
 
 Smoke tests
 -----------

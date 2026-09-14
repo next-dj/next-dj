@@ -16,12 +16,8 @@ if TYPE_CHECKING:
 class ViteManifestBackend(StaticFilesBackend):
     """Dev/prod-aware backend for Vite-bundled co-located Vue assets.
 
-    With DEV_ORIGIN set the backend resolves `.vue` assets to the Vite
-    dev server so HMR works through `@vitejs/plugin-vue`. Without
-    DEV_ORIGIN the Vite manifest is read to find hashed built output
-    and URL resolution is delegated to Django staticfiles. Rendering
-    is handled by `render_module_tag` because the `vue` kind registers
-    against the module renderer in `apps.py`.
+    With DEV_ORIGIN set, `.vue` assets resolve to the Vite dev server for HMR through
+    `@vitejs/plugin-vue`, otherwise the manifest gives the hashed built output.
     """
 
     def __init__(self, config: Mapping[str, Any] | None = None) -> None:

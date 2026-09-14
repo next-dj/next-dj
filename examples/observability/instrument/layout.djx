@@ -12,7 +12,7 @@
       {% component "nav_link" url="/stats/" label="Stats" variant="bar" %}
     {% /slot %}
     {% #slot "content" %}
-      {% block template %}{% endblock template %}
+      {% template %}
     {% /slot %}
   {% /component %}
   {% collect_scripts %}

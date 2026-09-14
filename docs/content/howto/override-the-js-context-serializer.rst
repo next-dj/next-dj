@@ -35,6 +35,7 @@ Context functions can now return Pydantic models directly.
    :caption: notes/pages/page.py
 
    from pydantic import BaseModel
+
    from next import context
 
    class NoteOut(BaseModel):
@@ -60,13 +61,14 @@ What the setting accepts
 The value is a dotted path string, not a class object.
 The settings merge keeps only a string or ``None`` under this key, so a class object assigned directly is dropped and the default JSON serializer stays in place with no error at import time.
 
-The class is resolved lazily rather than at startup, once per request-scoped collector the first time a page registers a ``serialize=True`` value.
-A bad value therefore surfaces at render time instead of at boot, a path that cannot be imported raising ``ImportError`` and a class whose instance has no ``dumps(value) -> str`` method raising ``TypeError``.
+The class is resolved at render time rather than at startup, and under the default ``AUTO`` injection policy every rendered page resolves it, whether or not the page publishes a ``serialize=True`` value.
+A bad value therefore breaks every page, not only the pages that expose context.
+A path that cannot be imported raises ``ImportError``, and a class whose instance has no ``dumps(value) -> str`` method raises ``TypeError``.
 
 Run ``uv run python manage.py check`` before deploying.
 ``next.W042`` reports a non-string value, an unimportable path, a name that is not a class, a class that cannot be instantiated with no arguments, and a class that does not implement the protocol.
 
-Per key override
+Per-key override
 ~~~~~~~~~~~~~~~~
 
 Pass ``serializer=`` on a single ``@context`` so only that key uses a different encoder.

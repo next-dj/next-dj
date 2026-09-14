@@ -23,9 +23,8 @@ def _minutes_for(window: str) -> int:
 def live_zone() -> str:
     """Name the zone the filter form re-aggregates without leaving the page.
 
-    Page-local, not inherited, so only this index carries the
-    `live-totals` zone the filter form targets. The nested stats sub-pages
-    keep an empty value and fall back to a full submit.
+    Page-local, not inherited, so only this index carries the zone the filter targets
+    while nested stats sub-pages keep an empty value and fall back to a full submit.
     """
     return LIVE_TOTALS_ZONE
 
@@ -34,12 +33,8 @@ def live_zone() -> str:
 def window(request: HttpRequest | None = None) -> str:
     """Return the active aggregation window, propagated to nested pages.
 
-    The `HttpRequest | None` annotation matches the union form
-    `HttpRequestProvider` accepts, so DI fills the parameter on every
-    real render while direct unit-test calls keep working with the
-    default `None`. A partial apply posts the window, so the POST value
-    is honoured first and the morphed zone re-aggregates under it without
-    a context override the provider chain would ignore.
+    The `HttpRequest | None` annotation matches the union `HttpRequestProvider` accepts,
+    so DI fills it on a render while unit calls keep the `None` default.
     """
     if request is None:
         return DEFAULT_WINDOW
@@ -55,15 +50,8 @@ def window(request: HttpRequest | None = None) -> str:
 def live_stats(window: str = DEFAULT_WINDOW) -> dict[str, Any]:
     """Build the windowed snapshot exposed under `window.Next.context.live_stats`.
 
-    The override on this decorator wraps the payload in
-    `{"v": 1, "data": ...}`. Sibling serialised keys stay flat through
-    the global `JS_CONTEXT_SERIALIZER`, so the difference is visible
-    end to end in the rendered HTML.
-
-    Counts are read through `metrics.read_window` so each ``?window=``
-    setting actually narrows the aggregation. Cumulative tables on
-    `/stats/pages/` and `/stats/components/` continue to use the
-    process-lifetime totals from `metrics.read_kind`.
+    The decorator override wraps the payload in `{"v": 1, "data": ...}` while sibling
+    keys stay flat through the global `JS_CONTEXT_SERIALIZER`.
     """
     minutes = _minutes_for(window)
     pages = metrics.read_window("pages.rendered", minutes)

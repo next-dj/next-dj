@@ -45,11 +45,8 @@ def cached_search(
 ) -> dict[str, Any]:
     """Return a paginated search payload, reading from the cache when possible.
 
-    The function materialises the page slice into a list so the
-    cached payload does not retain a lazy queryset that could be
-    re-evaluated later under different conditions. The returned
-    payload uses a stable shape so templates can iterate
-    `payload['products']` and read pagination flags directly.
+    The page slice is materialised into a list so the cached payload keeps no lazy
+    queryset that a later evaluation could resolve differently.
     """
     key = _cache_key(filters, page, per_page, category.pk if category else None)
     cached = cache.get(key)

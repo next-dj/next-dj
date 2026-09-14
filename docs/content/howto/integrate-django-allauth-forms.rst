@@ -14,7 +14,7 @@ Solution
 Register each allauth form through an action whose ``form_class`` is a factory returning ``(FormClass, init_kwargs)``, and let the handler return the allauth flow response as is.
 For the next-forms style, a thin subclass with ``on_valid`` works too, with one mandatory line for request-aware forms.
 No bridge code is involved.
-Verified with django-allauth 65.x on Django 5.2 and 6.0.
+Verified with django-allauth 65.x on Django 5.2 through 6.1.
 
 Walkthrough
 -----------

@@ -3,12 +3,13 @@ from django.http import HttpRequest
 from django.test import RequestFactory
 
 from next.deps import Depends
-from next.deps.resolver import (
-    DependencyResolver,
+from next.deps.introspect import (
     cached_accepts_var_keyword,
     cached_signature,
     cached_type_hints,
 )
+from next.deps.linear import LinearDependencyResolver
+from next.deps.resolver import DependencyResolver
 from next.pages.context import Context
 from next.urls import DUrl
 from tests.support import build_mock_http_request
@@ -91,6 +92,14 @@ def _themed_resolver() -> DependencyResolver:
     return planned
 
 
+def _linear_resolver() -> LinearDependencyResolver:
+    """Fresh plan-free resolver with its providers and the `theme` dependency loaded."""
+    walked = LinearDependencyResolver()
+    walked.dependency("theme")(lambda: "dark")
+    walked._sync_providers()
+    return walked
+
+
 def _resolve_four_markers(planned: DependencyResolver) -> dict[str, object]:
     return planned.resolve_dependencies(_handler_four_markers, **_FOUR_MARKERS_KWARGS)
 
@@ -98,9 +107,7 @@ def _resolve_four_markers(planned: DependencyResolver) -> dict[str, object]:
 class TestBenchDependencyResolver:
     """Resolve cost per signature shape.
 
-    The paired CI comparison matches runs by test id, so an id that already
-    carries a baseline keeps measuring the shape that baseline measured and a
-    new shape takes a new id rather than reusing one.
+    CI compares baselines by test id, so renaming one starts a fresh baseline.
     """
 
     @pytest.mark.benchmark(group="deps.resolver")
@@ -127,9 +134,8 @@ class TestBenchDependencyResolver:
     def test_resolve_claimed_request_and_default(self, benchmark) -> None:
         """Plan replay over an ``HttpRequest`` annotation and one default kwarg.
 
-        The compile narrows the request parameter to the one provider that can
-        claim it, which still asks ``can_handle`` because only the context says
-        whether a request is in flight.
+        The compile narrows the request parameter to one provider, which still asks
+        ``can_handle`` because only the context knows whether a request is in flight.
         """
         resolver = _default_resolver()
         request = build_mock_http_request()
@@ -167,6 +173,25 @@ class TestBenchDependencyResolver:
         )
 
     @pytest.mark.benchmark(group="deps.resolver")
+    def test_linear_resolve_simple(self, benchmark) -> None:
+        """Two unclaimed parameters walked by the plan-free reference resolver."""
+        walked = _linear_resolver()
+        request = build_mock_http_request()
+        benchmark(walked.resolve_dependencies, _handler_simple, request=request)
+
+    @pytest.mark.benchmark(group="deps.resolver")
+    def test_linear_resolve_four_markers(self, benchmark) -> None:
+        """The four-marker handler walked by the plan-free reference resolver.
+
+        Paired with ``test_resolve_four_markers``, which is the same work under
+        the compiled plan, so the price of the safety net stays a measurement.
+        """
+        walked = _linear_resolver()
+        benchmark(
+            walked.resolve_dependencies, _handler_four_markers, **_FOUR_MARKERS_KWARGS
+        )
+
+    @pytest.mark.benchmark(group="deps.resolver")
     def test_resolve_with_template_context_20_keys(self, benchmark) -> None:
         """Component path, ``Context`` marker plus a name match over 20 keys."""
         resolver = _default_resolver()
@@ -192,10 +217,8 @@ class TestBenchDependencyResolver:
 class TestBenchInjectionPlan:
     """Cold compile against warm replay of the same four-marker handler.
 
-    Both run under the same pedantic harness with a fresh resolver per round, so
-    the gap between the two is the price of ``compile_plan`` for one callable.
-    The signature and type-hint memos are process-wide and warm after the first
-    round, which leaves the static-verdict walk as the cold cost.
+    Signature and type-hint memos are process-wide and warm after the first
+    round, so only the initial static-verdict walk pays the cold-compile price.
     """
 
     @pytest.mark.benchmark(group="deps.plan")

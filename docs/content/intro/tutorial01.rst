@@ -74,6 +74,7 @@ Create the page module.
    :caption: notes/pages/page.py
 
    from notes.models import Note
+
    from next import context
 
    @context("notes")
@@ -139,7 +140,7 @@ Inspect through system checks
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 next.dj contributes Django system checks for the page configuration.
-They confirm each ``page.py`` has a render function or a paired template, that parameter directories carry a ``page.py``, and that the request context processor is installed.
+They confirm each ``page.py`` has a render function or a paired template, that a parameter directory carries a page file or a child page, and that the request context processor is installed.
 See :doc:`/content/ref/system-checks` for the full catalog.
 Run them and confirm no warnings remain.
 
@@ -177,9 +178,11 @@ Template renders without the notes loop.
    Make sure ``notes/pages/template.djx`` sits next to ``notes/pages/page.py``.
    The framework pairs a ``page.py`` with the ``template.djx`` in the same directory.
 
-ImportError for ``Note``.
-   The ``notes`` app must be installed and migrated.
-   Re-run ``uv run python manage.py migrate``.
+ModuleNotFoundError for ``notes``.
+   Confirm ``notes`` is listed in ``INSTALLED_APPS``.
+
+OperationalError: no such table.
+   Run ``uv run python manage.py migrate`` after adding the app.
 
 Next steps
 ----------

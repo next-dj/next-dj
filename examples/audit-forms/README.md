@@ -105,9 +105,9 @@ class AccessRequestWizard(next.forms.FormWizard):
 
 `check_permissions` is a DI-resolved classmethod the framework runs on **every step POST, before the step form binds**. It declares only what it reads — here the `request` and its POST data. Return `None` or `True` to allow, `False` or `raise PermissionDenied` to deny with a 403, or return an `HttpResponse` to short-circuit verbatim. A denied step writes no draft, so the wizard storage stays untouched.
 
-The gate is the retention-policy acknowledgement. Every step form inherits it from `AcknowledgedStep` in [`access/policy.py`](access/policy.py), a `BooleanField(required=False, initial=True)` that the step template renders as `{{ form.policy_acknowledged }}` inside the `data-policy-notice` block. A normal submission therefore carries the field and passes, while a replayed or forged action URL that never rendered the form omits it and is denied. Making it a real field rather than raw markup is what keeps the tick honest: the server renders `checked` from the submitted data, so a blur-validation morph replays the box the visitor left rather than putting a hardcoded tick back. The field is a control field, not user data, so `_RESERVED_FORM_KEYS` in `access/backends.py` strips it from the captured payload and `done` drops it before the model create. It is also not owned by any step section, so `step_section` filters it out of the fields it renders per step. That denial is exactly the kind of event an audit example should capture.
+The gate is the retention-policy acknowledgement. Every step form inherits it from `AcknowledgedStep` in [`access/policy.py`](access/policy.py), a `BooleanField(required=False, initial=True)` that the step template renders as `{{ form.policy_acknowledged }}` inside the `data-policy-notice` block. A normal submission therefore carries the field and passes, while a replayed action URL that never rendered the form omits it and is denied. Making it a real field rather than raw markup is what keeps the tick honest: every zone morph, an invalid step submit and a blur probe alike, re-renders the bound form inside the `access-wizard` zone, so the box comes back exactly as the visitor left it instead of a hardcoded tick. The field verdict also rides in the envelope's `form` meta, so the client has the errors without parsing the markup. The field is a control field, not user data, so `_RESERVED_FORM_KEYS` in `access/backends.py` strips it from the captured payload and `done` drops it before the model create. It is also not owned by any step section, so `step_section` filters it out of the fields it renders per step. That denial is exactly the kind of event an audit example should capture.
 
-One kind of POST passes ahead of the gate. A blur-validation probe (`validate="blur"` on the `{% form %}` tag, section 10) asks only whether one named field is well formed and binds no step data, so the hook returns early when `partial_intent(request).validate_fields` is set. Denying it would break inline validation on the very first field, long before the user has scrolled to the acknowledgement.
+One kind of POST passes ahead of the gate. A blur-validation probe (`validate="blur"` on the `{% form %}` tag, section 10) asks only whether one named field is well formed and saves no step data, so the hook returns early when `partial_intent(request).validate_fields` is set. Denying it would break inline validation on the very first field, long before the user has scrolled to the acknowledgement.
 
 The framework fires `next.forms.signals.form_access_denied` **only** on a dynamic-hook denial, never on the static `ActionGuard` fast-path. The sender is `FormActionDispatch` and the kwargs are `action_name`, `uid`, `request`, `layer` (`"view"` for `check_permissions`, `"object"` for `has_object_permission`), and `reason` (`"denied"` when the hook returned `False`, `"raised"` on `PermissionDenied`, `"response"` on an `HttpResponse` short-circuit). The receiver in [`access/receivers.py`](access/receivers.py) records one signal-sourced `AuditEntry` per denial with `kind="access_denied"`, storing `layer` and `reason` in the dedicated `access_layer` / `access_reason` columns:
 
@@ -126,6 +126,21 @@ def _on_form_access_denied(action_name, layer, reason, **kwargs):
 
 Because the denied step writes no draft and no `dispatched` row, this `access_denied` row is the only trace that records _why_ the request was refused — the backend channel still leaves a `request_started` row (with no `reason`) before `super().dispatch` reaches the denying hook, which is the whole point of the signal channel. Filter the admin log to the denial with `/admin/audit/?kind=access_denied`.
 
+### 3b. A deliberately shared field, and the check it silences
+
+The acknowledgement lives on all three steps on purpose, and the framework warns about exactly that shape. `next.W059` fires when two static `Meta.steps` declare the same field name, because the merged mapping `get_all_cleaned_data()` returns keeps only the value from the last step that declared it — the earlier steps' answers are gone.
+
+Nothing in this example reads the acknowledgement out of that merged mapping, so the collapse costs nothing. `check_permissions` reads the tick per step straight from the POST being dispatched (`AcknowledgedStep.is_acknowledged(request)`, which asks the field's own `CheckboxInput` so the gate cannot disagree with the bound form), and that is the per-step read `get_cleaned_data_for_step()` exists to give, one step earlier in the request. `done` drops the key before `AccessRequest.objects.create`, and `step_section` filters it out of the fields each section renders, so the merged value is never user data anyone consumes. A real per-step answer — a value each step must keep — would call for `wizard.get_cleaned_data_for_step("identity")` instead.
+
+Because the warning describes the shape correctly and the shape is intended, it is silenced by id in settings rather than worked around:
+
+```python
+# config/settings.py
+SILENCED_SYSTEM_CHECKS = ["next.W059"]
+```
+
+`manage.py check` then reports the message as silenced instead of a warning. Silence a check only when you can name why its advice does not apply, as the comment above that setting does — the id is the narrowest lever Django offers, and it stays scoped to this one message.
+
 ### 4. Three ordinary forms, one per step
 
 Each step is a bare `django.forms.ModelForm` (or `Form`) — the wizard owns dispatching, so step forms never register as standalone actions and need none of the `next.forms` base classes (a step that does subclass `next.forms` and ends up registered trips the `next.W057` check):
@@ -138,11 +153,11 @@ The wizard binds the current step's form to the POST, validates only that step's
 
 ### 5. Three composite components, two patterns
 
-The example ships three composite components that demonstrate two different ways the framework lets a component contribute logic:
+The example ships three composite components, each pairing one `.djx` with a `component.py` that contributes only context:
 
 - **`progress_bar/` — synthesised state from wizard truth.** Lives at `views/request/[step]/_blocks/progress_bar/`. Its `@component.context` functions take the `wizard` instance (pushed into the template context by the `{% form %}` tag) and read `current_step()`, `step_names()`, and `completed_steps()`. A step is `current` when it is the active step, `saved` when it has stored data, otherwise `pending`. No page-level step context is needed — all step knowledge lives in the wizard.
 
-- **`step_section/` — Python `render()` gating on wizard state.** Lives next to `progress_bar`. Has only a `component.py` and no `.djx`. The `render()` function takes `form` and `wizard` via DI, then assembles HTML through inline `django.template.Template` instances. It owns the section chrome: red border on validation errors, "✓ saved" pill plus a compact value summary when a step is past, slate placeholder for steps not yet visited. The page template calls `{% component "step_section" %}` once and the component renders every step.
+- **`step_section/` — one context callable driving a loop in the template.** Lives next to `progress_bar`. Its `sections` context takes `form` and `wizard` via DI and returns one dict per step: the state (`active`, `errors`, `saved`, `pending`), the border classes, the badge props, the bound fields to render, and the stored values to list. The `.djx` walks that list and owns every tag, so the shared `badge` component draws the pill and `|truncatechars` shortens a long saved value. Field labels are read off the step form classes rather than restated, and the page template calls `{% component "step_section" %}` once for all three steps.
 
 - **`audit_row/` — `@component.context` deriving display data.** Lives at `views/_blocks/audit_row/` (one scope above the admin and per-request pages so both can use it). Takes an `AuditEntry` from the parent loop and exposes `kind_class`, `source_class`, `summary`, `payload_keys`, `request_link`, and `data_attrs`. The template stays markup-only.
 

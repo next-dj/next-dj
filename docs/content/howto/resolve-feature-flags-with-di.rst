@@ -31,8 +31,9 @@ The provider claims any parameter whose annotation origin is ``DFlag`` and reads
 
    import inspect
    from typing import get_args, get_origin
-   from next.deps import DDependencyBase, RegisteredParameterProvider
-   from next.deps.context import ResolutionContext
+
+   from next.deps import DDependencyBase, RegisteredParameterProvider, ResolutionContext
+
    from .cache import get_cached_flag
 
    class DFlag[T](DDependencyBase[T]):
@@ -46,6 +47,9 @@ The provider claims any parameter whose annotation origin is ``DFlag`` and reads
        def can_handle(self, param: inspect.Parameter, _context: ResolutionContext) -> bool:
            return get_origin(param.annotation) is DFlag
 
+       def static_can_handle(self, param: inspect.Parameter) -> bool | None:
+           return get_origin(param.annotation) is DFlag
+
        def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:
            (model_cls,) = get_args(param.annotation)
            name = context.url_kwargs.get("name") or context.context_data.get("flag_name")
@@ -55,6 +59,7 @@ The provider claims any parameter whose annotation origin is ``DFlag`` and reads
            return get_cached_flag(str(name)) or model_cls(name=str(name), enabled=False)
 
 ``can_handle`` returns ``True`` only for ``DFlag[...]`` subscripts.
+``static_can_handle`` settles the parameter from the annotation alone, so the plan claims it at compile time and no other provider is consulted for it per request.
 ``resolve`` checks two sources.
 A page captures the name in the URL through ``context.url_kwargs``.
 A component receives it as a template prop through ``context.context_data``.
@@ -71,6 +76,7 @@ A read-through helper stores both hits and a missing sentinel, so a repeated loo
    :caption: flags/cache.py
 
    from django.core.cache import cache
+
    from .models import Flag
 
    FLAG_PREFIX = "flags:flag:"
@@ -110,6 +116,7 @@ The next ``get_cached_flag`` call refetches from the database.
    :caption: flags/receivers.py
 
    from django.db.models.signals import post_delete, post_save
+
    from .cache import invalidate_flag
    from .models import Flag
 
@@ -143,7 +150,10 @@ A top-level import in ``apps.py`` would run while Django is still loading app co
 
        def ready(self) -> None:
            """Import providers and connect receivers once the app registry is populated."""
-           from flags import providers, receivers  # noqa: PLC0415
+           from flags import (  # imported for its registration side effect
+               providers,
+               receivers,
+           )
 
            _ = providers
            receivers.connect()

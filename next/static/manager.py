@@ -1,42 +1,28 @@
-"""Coordinate static backends, asset discovery, and placeholder injection.
+"""Coordinate static backends, asset discovery, and the page-root cache.
 
-The static manager loads backends lazily on first use, owns the shared asset discovery
-instance, caches page-tree roots, and replaces every registered placeholder token with
-the rendered tags once rendering completes. It also injects the `next.min.js` wiring
-unless the injection policy is `DISABLED`.
-
-The module-level `default_manager` is a lazy handle around a single static manager
-instance, and `get_static_manager` hands out the instance it wraps. The settings-change
-hook in `next.conf` resets the wrapper when `NEXT_FRAMEWORK` changes.
+Backends load lazily, page-tree roots are held until a reload moves them, and
+`default_manager` resets on a `NEXT_FRAMEWORK` change.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast, override
 
-from django.conf import settings
 from django.contrib.staticfiles.storage import staticfiles_storage
+from django.core.signals import setting_changed
 from django.utils.functional import LazyObject, empty
 
-from next.backends import backend_entries, load_backends
+from next.backends import BackendListManager, backend_entries, load_backends
 from next.conf import import_class_cached, next_framework_settings
 from next.conf.signals import settings_reloaded
 from next.pages.watch import get_pages_directories_for_watch
 
-from .assets import default_kinds
-from .backends import StaticBackend
-from .collector import HEAD_CLOSE, StaticCollector, default_placeholders
+from .backends import MANIFEST_SETTINGS, StaticBackend
+from .collector import StaticCollector
 from .discovery import AssetDiscovery, PathResolver
-from .scripts import (
-    CSRF_PAYLOAD_KEY,
-    DEV_PAYLOAD_KEY,
-    NEXT_JS_STATIC_PATH,
-    RESERVED_PAYLOAD_KEYS,
-    NextScriptBuilder,
-    ScriptInjectionPolicy,
-    csrf_payload_for,
-)
-from .signals import backend_loaded, collector_finalized, html_injected
+from .inject import PlaceholderInjector
+from .scripts import NEXT_JS_STATIC_PATH, NextScriptBuilder
+from .signals import backend_loaded
 
 
 if TYPE_CHECKING:
@@ -47,12 +33,8 @@ if TYPE_CHECKING:
 
     from next.components import ComponentInfo
 
-    from .assets import StaticAsset
-    from .collector import DedupStrategy, JsContextPolicy, PlaceholderSlot
-    from .scripts import NextScriptBuilder as NextScriptBuilderType
+    from .collector import DedupStrategy, JsContextPolicy
 
-
-_RUNTIME_SLOT_NAME = "scripts"
 
 _DEFAULT_BACKEND_PATH = "next.static.StaticFilesBackend"
 
@@ -60,41 +42,37 @@ _DEFAULT_BACKEND_PATH = "next.static.StaticFilesBackend"
 def _rewrites_asset_urls(backend: StaticBackend) -> bool:
     """Report whether the backend replaces the identity `asset_url` hook.
 
-    The hook is consulted per rendered asset, so the answer is settled once per
-    backend load and a pipeline nothing rewrites pays no call into a method that
-    hands its argument back. The question is put to the instance rather than the
-    class, so a backend that composes its rewrite in `__init__` counts as well,
-    and only a bound method carrying the base function reads as the identity.
+    Settled once per backend load so a pipeline nothing rewrites pays no call.
+    Checked on the instance, so a backend composing its rewrite in `__init__` counts.
     """
     return getattr(backend.asset_url, "__func__", None) is not StaticBackend.asset_url
 
 
-class StaticManager:
-    """Coordinate static backends, asset discovery, and placeholder injection.
+class StaticManager(BackendListManager[StaticBackend]):
+    """Coordinate static backends, asset discovery, and the injector they feed.
 
-    Backends are loaded lazily from
-    `NEXT_FRAMEWORK['STATIC_BACKENDS']` on first access. URL
-    resolution is handled by the built-in staticfiles backend by
-    default, which delegates to Django staticfiles.
+    Backends load lazily from `NEXT_FRAMEWORK['STATIC_BACKENDS']` on first access, and
+    the default one delegates URL resolution to Django staticfiles.
     """
 
     def __init__(self) -> None:
         """Initialise empty backend and discovery caches, loaded lazily."""
-        self._backends: list[StaticBackend] = []
         # The reload always seeds at least one backend, so the flag only
         # gates the lazy first load and the settings-reload invalidation.
-        self._loaded: bool = False
+        super().__init__()
         self._discovery: AssetDiscovery | None = None
         self._cached_page_roots: tuple[Path, ...] | None = None
-        self._script_builder: NextScriptBuilderType | None = None
+        self._script_builder: NextScriptBuilder | None = None
         self._dedup_factory: Callable[[], DedupStrategy] | None = None
         self._js_policy_factory: Callable[[], JsContextPolicy] | None = None
         self._rewrites_urls: bool = False
+        self._injector = PlaceholderInjector(self)
 
-    def __len__(self) -> int:
-        """Return the number of configured backends, loading them if needed."""
+    @property
+    def backends(self) -> tuple[StaticBackend, ...]:
+        """Return the configured backends in consultation order."""
         self._ensure_backends()
-        return len(self._backends)
+        return tuple(self._backends)
 
     @property
     def default_backend(self) -> StaticBackend:
@@ -131,80 +109,24 @@ class StaticManager:
         page_path: Path | None = None,
         request: HttpRequest | None = None,
     ) -> str:
-        """Replace every registered placeholder token with rendered tags.
-
-        Each slot in `default_placeholders` contributes its bucket of
-        collected assets. Asset rendering dispatches through the
-        backend method named by `KindRegistry.renderer(asset.kind)`,
-        so adding new kinds with new renderer methods does not require
-        any changes here. The `scripts` slot also receives the next-dj
-        runtime wiring when the injection policy is `AUTO`.
-
-        A missing placeholder is left unchanged because `str.replace`
-        returns the original string when there is nothing to replace.
-        An empty collector yields empty tag sections. The preload hint
-        is injected before `</head>` under the same policy.
-
-        The optional `request` argument is forwarded to `backend.asset_url`,
-        to the backend tag renderers, and to the `collector_finalized` and
-        `html_injected` signals. Every URL passes through `asset_url` first,
-        the runtime bundle and its preload hint included, so a backend that
-        rewrites URLs per request reaches all of them. The default backend
-        ignores the request.
-        """
-        collector_finalized.send(sender=collector, page_path=page_path, request=request)
-        html_before = html
-        replaced: tuple[str, ...] | None = None
-        if html_injected.receivers:
-            replaced = tuple(
-                slot.name for slot in default_placeholders if slot.token in html
-            )
-        backend = self.default_backend
-        builder = self._next_script_builder()
-        # Settled once for the render, so the script tag and the preload hint
-        # cannot disagree and a backend doing real work in the hook pays for one.
-        runtime_url = (
-            self._runtime_url(builder, backend, request)
-            if builder.policy is ScriptInjectionPolicy.AUTO
-            else None
+        """Replace every registered placeholder token with rendered tags."""
+        return self._injector.inject(
+            html, collector, page_path=page_path, request=request
         )
-        for slot in default_placeholders:
-            rendered = self._render_slot(
-                slot,
-                collector,
-                backend,
-                builder,
-                request=request,
-                runtime_url=runtime_url,
-            )
-            html = html.replace(slot.token, rendered)
-        if runtime_url is not None:
-            html = self._inject_preload_hint(html, builder, runtime_url)
-        if replaced is not None:
-            html_injected.send(
-                sender=self,
-                html_before=html_before,
-                html_after=html,
-                collector=collector,
-                placeholders_replaced=replaced,
-                injected_bytes=len(html) - len(html_before),
-                request=request,
-            )
-        return html
 
     def asset_url(self, url: str, *, request: HttpRequest | None = None) -> str:
         """Return an already-resolved asset URL as the pipeline renders it.
 
-        Full page renders reach the backend hook through tag rendering, while a
-        partial envelope ships bare URLs to the client, so both ask here and a
-        backend that leaves the hook alone pays no call.
+        A full page render and a partial envelope both ask here,
+        so an unrewriting backend pays no call.
         """
         self._ensure_backends()
         if not self._rewrites_urls:
             return url
         return self.default_backend.asset_url(url, request=request)
 
-    def _next_script_builder(self) -> NextScriptBuilderType:
+    def script_builder(self) -> NextScriptBuilder:
+        """Return the builder holding the runtime URL and the tag templates."""
         if self._script_builder is None:
             url = str(staticfiles_storage.url(NEXT_JS_STATIC_PATH))
             options = next_framework_settings.NEXT_JS_OPTIONS
@@ -213,116 +135,11 @@ class StaticManager:
             self._script_builder = NextScriptBuilder.from_options(url, options)
         return self._script_builder
 
-    def _render_slot(
-        self,
-        slot: PlaceholderSlot,
-        collector: StaticCollector,
-        backend: StaticBackend,
-        builder: NextScriptBuilderType,
-        *,
-        request: HttpRequest | None,
-        runtime_url: str | None,
-    ) -> str:
-        user_tags = self._render_tags(
-            collector.assets_in_slot(slot.name), backend, request=request
-        )
-        if slot.name == _RUNTIME_SLOT_NAME and runtime_url is not None:
-            return self._wrap_with_runtime(
-                user_tags, collector, builder, runtime_url, request=request
-            )
-        return user_tags
-
-    def _reserved_payload(self, request: HttpRequest | None) -> dict[str, Any]:
-        """Return the framework-owned init-payload entries for this render."""
-        payload: dict[str, Any] = {}
-        csrf = csrf_payload_for(request)
-        if csrf is not None:
-            payload[CSRF_PAYLOAD_KEY] = csrf
-        if settings.DEBUG:
-            payload[DEV_PAYLOAD_KEY] = True
-        return payload
-
-    def _runtime_url(
-        self,
-        builder: NextScriptBuilderType,
-        backend: StaticBackend,
-        request: HttpRequest | None,
-    ) -> str:
-        """Return the runtime bundle URL as the backend resolves it for this render."""
-        if not self._rewrites_urls:
-            return builder.url
-        return backend.asset_url(builder.url, request=request)
-
-    def _wrap_with_runtime(
-        self,
-        user_tags: str,
-        collector: StaticCollector,
-        builder: NextScriptBuilderType,
-        runtime_url: str,
-        *,
-        request: HttpRequest | None,
-    ) -> str:
-        js_context: dict[str, Any] = collector.js_context()
-        encoded = collector.js_context_encoded()
-        serializers = collector.js_context_serializers()
-        collided = RESERVED_PAYLOAD_KEYS.intersection(js_context)
-        if collided:
-            # Fresh mappings leave the collector untouched, and a colliding
-            # key drops its fragment and serializer along with its value.
-            js_context = {k: v for k, v in js_context.items() if k not in collided}
-            encoded = {k: v for k, v in encoded.items() if k not in collided}
-            serializers = {k: v for k, v in serializers.items() if k not in collided}
-        reserved = self._reserved_payload(request)
-        if reserved:
-            js_context = {**js_context, **reserved}
-        init_payload = builder.init_script(
-            js_context, key_serializers=serializers, encoded=encoded
-        )
-        next_scripts = f"{builder.script_tag(runtime_url)}\n{init_payload}\n"
-        return next_scripts + user_tags if user_tags else next_scripts
-
-    def _inject_preload_hint(
-        self, html: str, builder: NextScriptBuilderType, runtime_url: str
-    ) -> str:
-        replacement = f"{builder.preload_link(runtime_url)}\n{HEAD_CLOSE}"
-        return html.replace(HEAD_CLOSE, replacement, 1)
-
-    def _render_tags(
-        self,
-        assets: list[StaticAsset],
-        backend: StaticBackend,
-        *,
-        request: HttpRequest | None,
-    ) -> str:
-        return "\n".join(self._render_one(asset, backend, request) for asset in assets)
-
-    def _render_one(
-        self, asset: StaticAsset, backend: StaticBackend, request: HttpRequest | None
-    ) -> str:
-        if asset.inline is not None:
-            tag = default_kinds.inline_tag(asset.kind)
-            if tag is None:
-                return asset.inline
-            return f"<{tag}>{asset.inline}</{tag}>"
-        renderer_name = default_kinds.renderer(asset.kind)
-        renderer = getattr(backend, renderer_name)
-        url = asset.url
-        if self._rewrites_urls:
-            url = backend.asset_url(url, request=request)
-        return cast("str", renderer(url, request=request))
-
-    def _ensure_backends(self) -> None:
-        if not self._loaded:
-            self.reload()
-
+    @override
     def reload(self) -> None:
         """Rebuild the backend list from merged framework settings.
 
-        An entry that fails to load costs only itself, the remaining
-        entries still build. A list that ends up empty is seeded with the
-        staticfiles backend so rendering always has one. A settings change
-        answers with `reset_default_manager` instead, which drops the
-        wrapped manager rather than reloading it in place.
+        A failing entry costs only itself, an empty list falls back to staticfiles.
         """
         self._discovery = None
         self._cached_page_roots = None
@@ -340,13 +157,18 @@ class StaticManager:
             default=_DEFAULT_BACKEND_PATH,
             signal=backend_loaded,
         )
-        self._loaded = True
+        self._mark_loaded()
         self._resolve_collector_strategies()
 
     def _resolve_collector_strategies(self) -> None:
-        """Read the pipeline-level facts the first backend settles for a render."""
-        self._rewrites_urls = _rewrites_asset_urls(self._backends[0])
-        options = dict(self._backends[0].config.get("OPTIONS") or {})
+        """Read the pipeline-level facts the first backend settles for a render.
+
+        One render holds one collector, so only the first `STATIC_BACKENDS` entry
+        settles the dedup strategy and JS-context policy for the whole pipeline.
+        """
+        backend = self._backends[0]
+        self._rewrites_urls = _rewrites_asset_urls(backend)
+        options = dict(backend.config.get("OPTIONS") or {})
         dedup_path = options.get("DEDUP_STRATEGY")
         policy_path = options.get("JS_CONTEXT_POLICY")
         self._dedup_factory = (
@@ -369,6 +191,17 @@ class StaticManager:
         )
         return StaticCollector(dedup=dedup, js_context_policy=policy)
 
+    def forget_backend_urls(self) -> None:
+        """Tell every loaded backend the storage behind its URLs was rebuilt.
+
+        Driven from the backend list, so a third-party backend memoising resolved URLs
+        is invalidated on the same terms as the bundled one. The script builder is
+        dropped too, since it holds a URL read through that storage.
+        """
+        self._script_builder = None
+        for backend in self._backends:
+            backend.forget_urls()
+
     def page_roots(self) -> tuple[Path, ...]:
         """Return absolute page-tree roots from configured page backends.
 
@@ -387,9 +220,7 @@ class StaticManager:
 class DefaultStaticManager(LazyObject):
     """Lazy handle that defers the construction of a static manager.
 
-    The wrapped manager is built on first access and `get_static_manager`
-    returns it. The settings-change hook in `next.conf` resets the wrapper
-    when `NEXT_FRAMEWORK` changes.
+    The `next.conf` settings hook resets the wrapper on a `NEXT_FRAMEWORK` change.
     """
 
     def _setup(self) -> None:
@@ -402,12 +233,11 @@ default_manager: DefaultStaticManager = DefaultStaticManager()
 def get_static_manager() -> StaticManager:
     """Return the live `StaticManager` behind the lazy default handle.
 
-    A caller that patches a method and puts the original back needs the
-    instance itself, so that a settings reload swapping the handle midway
-    cannot send the restore to a different manager.
+    A caller that patches a method and restores it needs the instance itself, so a
+    settings reload swapping the handle midway cannot misdirect the restore.
     """
-    # Reading an attribute runs the lazy setup without rebuilding a live manager.
-    _ = default_manager.create_collector
+    if default_manager._wrapped is empty:
+        default_manager._setup()
     return default_manager._wrapped
 
 
@@ -416,9 +246,8 @@ def collect_component_assets(
 ) -> None:
     """Discover a composite component's co-located assets into the collector.
 
-    Simple components never own co-located assets and a missing collector
-    means there is no sink, so both cases short-circuit before dispatching
-    through the lazy default manager.
+    A simple component owns no co-located assets and a missing collector is no sink, so
+    both short-circuit before the lazy default manager is touched.
     """
     if collector is None or info.is_simple:
         return
@@ -428,9 +257,8 @@ def collect_component_assets(
 def reset_default_manager() -> None:
     """Drop the wrapped static manager so the next access rebuilds it.
 
-    Hooked into the `settings_reloaded` signal from `next.conf` so that
-    test code changing `NEXT_FRAMEWORK` via `override_settings` sees a
-    fresh manager on the next access.
+    Hooked into the `settings_reloaded` signal from `next.conf`, so test code changing
+    `NEXT_FRAMEWORK` sees a fresh manager on the next access.
     """
     default_manager._wrapped = empty  # type: ignore[assignment]
 
@@ -445,9 +273,32 @@ def forget_manager_page_roots(**kwargs) -> None:
         default_manager.forget_page_roots()
 
 
+def forget_manager_backend_urls(**kwargs) -> None:
+    """Tell the default manager the staticfiles storage was rebuilt.
+
+    A manager nothing has built yet holds no backend and no memo, so the lazy
+    handle is left alone rather than woken to be invalidated.
+    """
+    if default_manager._wrapped is not empty:
+        default_manager.forget_backend_urls()
+
+
 def _on_settings_reloaded(**kwargs) -> None:
     """Reset the default static manager when framework settings reload."""
     reset_default_manager()
 
 
+def _on_setting_changed(*, setting: str, **kwargs) -> None:
+    """Drop the derived state a Django setting moved out from under.
+
+    `settings_reloaded` covers only the `NEXT_FRAMEWORK` half, while `APP_DIRS` trees
+    move with `INSTALLED_APPS` and a memoised URL answers for a rebuilt storage.
+    """
+    if setting == "INSTALLED_APPS":
+        forget_manager_page_roots()
+    elif setting in MANIFEST_SETTINGS:
+        forget_manager_backend_urls()
+
+
 settings_reloaded.connect(_on_settings_reloaded)
+setting_changed.connect(_on_setting_changed)

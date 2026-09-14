@@ -39,11 +39,13 @@ Built-in kinds
 The static subsystem does not privilege CSS or JS in core code.
 The three built-in kinds register through the same public API that a project uses for a new kind.
 
+.. _topics-static-asset-kinds-registry:
+
 The registry
 ------------
 
 The kind registry is ``next.static.default_kinds``, an instance of ``KindRegistry``.
-A kind registration is keyed by the ``kind`` identifier and carries four pieces of metadata.
+A kind registration carries five fields, the ``kind`` identifier that keys it and four pieces of dispatch metadata.
 
 ``kind``.
    The registry key, a non-empty Python identifier such as ``css`` or ``jsx``.
@@ -51,6 +53,12 @@ A kind registration is keyed by the ``kind`` identifier and carries four pieces 
 ``extension``.
    The file suffix, starting with a dot, such as ``.jsx``.
    Discovery looks for files matching ``{stem}{extension}``.
+
+.. warning::
+
+   One extension belongs to one kind.
+   Registering a second kind against an extension the registry already holds is accepted, and every co-located file with that extension is then discovered once per kind and rendered twice.
+   Give a new kind a new extension.
 
 ``slot``.
    The name of the placeholder slot that buckets the asset at render time.
@@ -73,6 +81,7 @@ Register kinds in ``AppConfig.ready`` so the kind exists before the first reques
    :caption: notes/apps.py
 
    from django.apps import AppConfig
+
    from next.static import default_kinds
 
    class NotesConfig(AppConfig):
@@ -87,7 +96,7 @@ Register kinds in ``AppConfig.ready`` so the kind exists before the first reques
            )
 
 The ``jsx`` kind now lands in the ``scripts`` slot and renders through ``render_module_tag``.
-The ``register`` call also accepts an optional ``inline_tag`` keyword, the HTML wrapper element such as ``"style"`` or ``"script"`` that wraps an inline body, defaulting to verbatim.
+The ``register`` call also accepts an optional ``inline_tag`` keyword, see :ref:`topics-static-asset-kinds-registry`.
 A repeated call with identical parameters is idempotent.
 A repeated call with different parameters raises ``ValueError``.
 
@@ -128,7 +137,7 @@ The renderer choice also decides whether the kind loads on a partial render, see
 Renderers and partial rendering
 -------------------------------
 
-A full page render inserts an asset through its backend renderer method, which returns the HTML tag.
+A full-page render inserts an asset through its backend renderer method, which returns the HTML tag.
 A partial render has no server-rendered tag to insert, so the patch envelope carries an asset manifest and the client runtime inserts the element itself.
 The runtime needs to know which element to build, and the registered renderer is what tells it.
 
@@ -155,7 +164,7 @@ The verb travels in the ``load`` field of the manifest entry, see :doc:`/content
 A kind is loadable on a partial render when it registers one of those three renderers, whatever the kind is named.
 The ``jsx`` kind registered above with ``render_module_tag`` therefore loads on a partial render exactly as ``module`` does.
 
-An inline body additionally needs the ``inline_tag`` that the renderer's verb builds, ``style`` for the ``link`` verb and ``script`` for the ``script`` verb, and a body without it reaches the browser on a full page render only.
+An inline body additionally needs the ``inline_tag`` that the renderer's verb builds, ``style`` for the ``link`` verb and ``script`` for the ``script`` verb, and a body without it reaches the browser on a full-page render only.
 The wire format of the ``load`` field and the client fallback live in the partial rendering reference.
 
 Placeholder slots
@@ -163,7 +172,18 @@ Placeholder slots
 
 A slot is the location where the static manager injects rendered tags.
 The slot registry is ``next.static.default_placeholders``.
-The framework registers two slots, ``styles`` and ``scripts``, each with an HTML comment token.
+The framework registers two slots, each with an HTML comment token.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Slot
+     - Token
+   * - ``styles``
+     - ``<!-- next:styles -->``
+   * - ``scripts``
+     - ``<!-- next:scripts -->``
 
 The placeholder registry
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -192,6 +212,9 @@ Register a new slot when a kind should inject somewhere other than the standard 
                renderer="render_link_tag",
            )
 
+Register the slot before the kind that targets it.
+A kind whose ``slot`` names no registered slot collects into a bucket the manager never reads, so its assets vanish with no error and no warning.
+
 The layout must contain the slot token, or a template tag that emits it, for the manager to find a place to inject.
 A module-level list named after the slot, such as ``preload = [...]`` in ``page.py``, registers external URLs into it, see :ref:`topics-static-module-lists`.
 From a template, ``{% use_script "<url>" kind="font" %}`` registers the same URL, because the ``kind`` argument reaches every registered kind, see :doc:`template-tags`.
@@ -204,7 +227,7 @@ Discovery picks it up from a co-located ``.mjs`` file, a ``scripts`` module-leve
 Customise the rendered output through the ``module_tag`` key in the backend ``OPTIONS`` mapping, see :doc:`backends`.
 
 The ``module`` kind carries no ``inline_tag``, so it renders an inline body verbatim, as do custom kinds registered without an ``inline_tag``.
-An inline body of such a kind carries no insertion verb, so it arrives on a full page render only, while the URL form of the same kind still loads through a patch envelope.
+An inline body of such a kind carries no insertion verb, so it arrives on a full-page render only, while the URL form of the same kind still loads through a patch envelope.
 The two renders agree on that split, because the client drops an inline entry that carries no verb instead of guessing one from the kind name.
 
 System checks
@@ -212,6 +235,7 @@ System checks
 
 The static system checks ``next.W030``, ``next.W031``, and ``next.E036`` through ``next.E038`` validate the backend configuration.
 The ``next.W042`` check validates the ``JS_CONTEXT_SERIALIZER`` setting.
+
 The ``next.W074`` check walks the registered kinds and warns about each one whose renderer carries no client insertion verb.
 The ``next.W076`` check walks the same kinds and warns about each one whose ``inline_tag`` is not the element its renderer's verb builds, so its URL form travels in a patch envelope while its inline bodies do not.
 Both checks read the registry of the running process, so a kind that was never registered is outside their reach.

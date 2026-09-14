@@ -1,5 +1,8 @@
+import json
+
 import pytest
 from django import forms
+from django.core.validators import MinLengthValidator, RegexValidator
 from django.http import HttpResponse, HttpResponseRedirect
 from django.middleware.csrf import rotate_token
 from django.test import RequestFactory
@@ -7,22 +10,26 @@ from django.urls import set_script_prefix
 
 from next.forms.dispatch.responses import ActionOutcome, ActionOutcomeKind
 from next.forms.manager import form_action_manager
-from next.partial import Patches, shape_partial, shaping as shaping_module
-from next.partial.headers import VARY_HEADERS
-from next.partial.shaping import (
-    _CSRF_ROTATED_FLAG,
-    ActionRef,
-    _csrf_rotated,
+from next.partial import Patches, shape_partial
+from next.partial.envelope import Envelope
+from next.partial.headers import RESPONSE_ACTION, RESPONSE_FORM, VARY_HEADERS
+from next.partial.manager import partial_backend_manager
+from next.partial.shaping import ActionRef
+from next.partial.shaping.csrf import _CSRF_ROTATED_FLAG, _csrf_rotated, _stamp_csrf
+from next.partial.shaping.scrub import (
     _error_count,
     _file_field_names,
     _form_meta,
     _meta_errors,
+    _scrub_errors,
+    _validate_targets,
+)
+from next.partial.shaping.targets import (
+    _form_zone,
     _origin_target,
     _resolve_step_target,
-    _scrub_errors,
     _should_push_steps,
-    _stamp_csrf,
-    _validate_targets,
+    _zone_overrides,
 )
 from tests.support import partial_request
 
@@ -114,7 +121,7 @@ class TestPushStepsGate:
         assert _should_push_steps(_PlainWizard()) is False
 
     def test_backend_default_enables_the_push(self) -> None:
-        backend = shaping_module.partial_backend_manager.get()
+        backend = partial_backend_manager.get()
         original = backend._options
         backend._options = {"PUSH_WIZARD_STEPS": True}
         try:
@@ -153,6 +160,23 @@ class TestFormsetScrubbing:
         formset = _bound_formset()
         _scrub_errors(formset, frozenset({"form-0-email"}))
         assert _error_count(formset) == 1
+
+    def test_error_count_sums_every_message_of_a_member_field(self) -> None:
+        class _Coded(forms.Form):
+            code = forms.CharField(
+                validators=[
+                    RegexValidator(r"^[0-9]+$", "digits only"),
+                    MinLengthValidator(4, "too short"),
+                ]
+            )
+
+        factory = forms.formset_factory(_Coded, extra=1)
+        formset = factory(
+            {"form-TOTAL_FORMS": "1", "form-INITIAL_FORMS": "0", "form-0-code": "ab"}
+        )
+        formset.is_valid()
+        _scrub_errors(formset, frozenset({"form-0-code"}))
+        assert _error_count(formset) == 2
 
 
 class TestPlainFormScrubbing:
@@ -209,9 +233,8 @@ class TestCsrfRotation:
 class TestCsrfRotationFlagCanary:
     """Django still sets the private rotation marker `_csrf_rotated` reads.
 
-    The flag is a private Django META key. If a Django bump renames it the
-    rotated token would silently stop being stamped, so this asserts the
-    marker the live middleware sets is the one the constant names.
+    A Django rename of this private key would silently break rotation, so
+    this pins the name to what the live middleware actually sets.
     """
 
     def test_rotate_token_sets_the_named_meta_flag(self) -> None:
@@ -235,11 +258,23 @@ class TestResultRichResponseFallThrough:
         assert response.content == b"<p>plain</p>"
 
 
+class TestInvalidOutcomeWithoutAForm:
+    """A backend of its own may report an invalid submission with no Django form."""
+
+    def test_no_form_meta_travels_and_the_envelope_still_says_invalid(self) -> None:
+        outcome = ActionOutcome(kind=ActionOutcomeKind.INVALID, action_name="x")
+        backend = form_action_manager.default_backend
+        response = shape_partial(backend, partial_request(origin=None), outcome)
+        assert response[RESPONSE_FORM] == "invalid"
+        assert RESPONSE_ACTION not in response
+        assert Envelope.from_dict(json.loads(response.content)).form is None
+
+
 class TestFormZoneWithoutAResolvedPage:
     """`_form_zone` returns None when the origin resolves to no page."""
 
     def test_none_page_path_yields_no_zone(self) -> None:
-        zone = shaping_module._form_zone(partial_request(origin=None), None)
+        zone = _form_zone(partial_request(origin=None), None)
         assert zone is None
 
 
@@ -258,14 +293,19 @@ class TestOriginTarget:
         assert url_kwargs == {"id": 42}
 
 
-class TestFormOverridesWithoutAForm:
-    """`_form_overrides` yields an empty mapping when the outcome has no form."""
+class TestZoneOverrides:
+    """`_zone_overrides` hands the form tag the namespace it accepts."""
 
     def test_no_form_yields_no_overrides(self) -> None:
-        outcome = ActionOutcome(
-            kind=ActionOutcomeKind.INVALID, action_name="step_form", form=None
-        )
-        assert shaping_module._form_overrides(outcome) == {}
+        assert _zone_overrides(None, None, "step_form") == {}
+
+    def test_the_action_key_carries_a_namespace_not_the_bare_form(self) -> None:
+        form = forms.Form()
+        overrides = _zone_overrides(form, None, "step_form")
+        assert overrides["form"] is form
+        assert overrides["step_form"].form is form
+        assert overrides["step_form"].wizard is None
+        assert "wizard" not in overrides
 
 
 class TestResolveStepTarget:

@@ -16,6 +16,7 @@ from next.forms.checks import (
     check_component_widget_components,
     check_component_widget_field_types,
 )
+from next.forms.errors import UnregisteredComponentError
 from next.forms.manager import form_action_manager
 from next.forms.widgets import (
     COMPONENT_LOOKUP_CACHE_ATTR,
@@ -161,12 +162,12 @@ class TestComponentWidgetRender:
         html = widget.render("slug", "v", attrs={})
         assert "name=slug" in html
 
-    def test_unregistered_component_raises_runtime_error(
+    def test_unregistered_component_raises_lookup_error(
         self, echo_component: Path
     ) -> None:
         widget = ComponentWidget("does_not_exist")
         widget._template_path = echo_component
-        with pytest.raises(RuntimeError, match="is not registered") as excinfo:
+        with pytest.raises(LookupError, match="is not registered") as excinfo:
             widget.render("slug", "v", attrs=None)
         message = str(excinfo.value)
         assert f"Searched from {echo_component}" in message
@@ -178,7 +179,7 @@ class TestComponentWidgetRender:
     ) -> None:
         widget = ComponentWidget("eco")
         widget._template_path = echo_component
-        with pytest.raises(RuntimeError, match="Closest matches") as excinfo:
+        with pytest.raises(LookupError, match="Closest matches") as excinfo:
             widget.render("slug", "v", attrs=None)
         assert "'echo'" in str(excinfo.value)
 
@@ -213,7 +214,7 @@ class TestComponentWidgetRequestCache:
         widget = ComponentWidget("does_not_exist")
         widget._template_path = echo_component
         widget._request = HttpRequest()
-        with pytest.raises(RuntimeError, match="is not registered"):
+        with pytest.raises(UnregisteredComponentError, match="is not registered"):
             widget.render("slug", "v", attrs={})
         cache = getattr(widget._request, COMPONENT_LOOKUP_CACHE_ATTR)
         assert cache == {}
@@ -405,8 +406,8 @@ class TestComponentWidgetAssetCollection:
     def test_simple_component_collects_nothing(self, echo_component: Path) -> None:
         collector = StaticCollector()
         self._render_with_collector("echo", echo_component, collector)
-        assert collector.assets_in_slot("styles") == []
-        assert collector.assets_in_slot("scripts") == []
+        assert collector.assets_in_slot("styles") == ()
+        assert collector.assets_in_slot("scripts") == ()
 
     def test_no_collector_does_not_collect(self, echo_box_component: Path) -> None:
         # No _static_collector bound: render is a no-op for asset discovery.

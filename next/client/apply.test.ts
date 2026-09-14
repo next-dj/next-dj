@@ -23,8 +23,7 @@ function envelope(ops: unknown[], extra: Record<string, unknown> = {}): unknown 
   return { version: "v1", ops, assets: [], form: null, ...extra };
 }
 
-// Both boundary channels at once, so a case asserting one of them also asserts
-// the silence of the other.
+// Both boundary channels at once, so asserting one also asserts the other's silence.
 function spyConsole() {
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
   const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
@@ -643,10 +642,19 @@ describe("Applier verbs", () => {
       dispatch: () => undefined,
       mergeContext: () => undefined,
       document,
-      history: { push: (h) => calls.push(h), replace: (h) => calls.push(h) },
+      history: () => ({
+        push: (h: string) => calls.push(h),
+        replace: (h: string) => calls.push(h),
+      }),
     });
     applier.apply(envelope([{ op: "url" }]));
     expect(calls).toEqual([]);
+  });
+
+  it("url is a no-op for an applier built with no history seam", () => {
+    const { applier, dispatched } = makeApplier();
+    applier.apply(envelope([{ op: "url", href: "/elsewhere/" }]));
+    expect(dispatched.filter((d) => d.event === "partial:error")).toEqual([]);
   });
 
   it("skips an event op without a name", () => {
@@ -806,8 +814,7 @@ describe("Applier script neutralisation", () => {
 });
 
 describe("Applier dev timing", () => {
-  // The user timing runs for real, the spies only record the names the runtime
-  // writes. Only console.debug is silenced.
+  // The user timing runs for real, the spies only record the names the runtime writes.
   function spyTiming() {
     return {
       mark: vi.spyOn(performance, "mark"),
@@ -841,8 +848,7 @@ describe("Applier dev timing", () => {
       "next:apply:cart:start:1",
     );
     expect(timing.clear).toHaveBeenCalledWith("next:apply:cart:start:1");
-    // A dev tab lives for hours, so neither half of the span stays in the entry
-    // buffer once the panel has recorded it.
+    // A dev tab lives for hours, so neither half of the span stays in the buffer.
     expect(timing.clearSpans).toHaveBeenCalledWith("next:apply:cart");
     expect(timing.debug).toHaveBeenCalledWith(
       expect.stringMatching(/^\[next] zone "cart" morph in \d+\.\d ms$/),
@@ -1056,8 +1062,7 @@ describe("Applier dev timing", () => {
 
   it("reports the span the op took, not the clock reading it started at", () => {
     const timing = spyTiming();
-    // The op moves the mocked clock itself, so the reported number can only come
-    // from the difference between the two readings.
+    // The op moves the mocked clock, so the reported number can only be the difference.
     let clock = 100;
     vi.spyOn(performance, "now").mockImplementation(() => clock);
     const { applier } = makeApplier(true);
@@ -1799,8 +1804,8 @@ describe("Applier layer, toast, and url verbs", () => {
       dispatch: () => undefined,
       mergeContext: () => undefined,
       document,
-      layers,
-      history,
+      layers: () => layers,
+      history: () => history,
     });
     return { applier, calls };
   }
@@ -1897,7 +1902,7 @@ describe("Applier layer, toast, and url verbs", () => {
       dispatch: () => undefined,
       mergeContext: () => undefined,
       document,
-      layers,
+      layers: () => layers,
     });
     applier.apply(envelope([{ op: "inner", target: { form: "u1" }, html: "patched" }]));
     expect(document.getElementById("modal-form")!.innerHTML).toBe("patched");
@@ -1924,7 +1929,7 @@ describe("Applier page-scoped zone resolve", () => {
       dispatch: () => undefined,
       mergeContext: () => undefined,
       document,
-      layers,
+      layers: () => layers,
     });
     return { applier, pages };
   }
@@ -1966,7 +1971,7 @@ describe("Applier visit verb", () => {
       dispatch: (event, detail) => dispatched.push({ event, detail }),
       mergeContext: () => undefined,
       document,
-      navigate: (url) => visited.push(url),
+      navigate: () => (url: string) => visited.push(url),
     });
     return { applier, visited, dispatched };
   }
@@ -2047,7 +2052,7 @@ describe("Applier keeps overlapping applies apart across the CSS gate", () => {
       dispatch: () => undefined,
       mergeContext: () => undefined,
       document,
-      assets: bridge,
+      assets: () => bridge,
       dirtySince: (snapshot) => (field) =>
         snapshot === 1 ? field === inputA : field === inputB,
     });
@@ -2074,8 +2079,7 @@ describe("Applier keeps overlapping applies apart across the CSS gate", () => {
       1,
       "a",
     );
-    // Apply B runs to completion in the same tick: no CSS, straight-through
-    // gate. It carries key b and snapshot 2.
+    // Apply B runs to completion in the same tick, no CSS to defer behind.
     applier.apply(
       envelope([
         {
@@ -2088,16 +2092,13 @@ describe("Applier keeps overlapping applies apart across the CSS gate", () => {
       "b",
     );
 
-    // B already ran against its own form: marker on form b, its dirty input b
-    // kept its typed value, and only form b mounted.
+    // B already ran against its own form, so every mark landed on form b.
     expect(forms[1]!.getAttribute("data-from")).toBe("B");
     expect(inputB.value).toBe("typed-b");
     expect(forms[0]!.hasAttribute("data-from")).toBe(false);
     expect(mounted).toEqual(["b"]);
 
-    // Resume A. With the per-apply state bound, A lands on form a (its key), A's
-    // marker is on form a not b, A's predicate protects input a, and the mount
-    // pass fires on form a.
+    // Resume A. With the per-apply state bound, A lands on form a, its own key.
     flush();
     expect(forms[0]!.getAttribute("data-from")).toBe("A");
     expect(forms[1]!.getAttribute("data-from")).toBe("B");

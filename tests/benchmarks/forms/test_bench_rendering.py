@@ -32,14 +32,10 @@ _PAGE_GET_ACTION = "bench_page_get_action"
 
 def _build_layered_page(tmp_path: Path, template_body: str) -> Path:
     """Create page.py and template.djx behind two nested layout.djx wrappers."""
-    (tmp_path / "layout.djx").write_text(
-        "<html><body>{% block template %}{% endblock template %}</body></html>"
-    )
+    (tmp_path / "layout.djx").write_text("<html><body>{% template %}</body></html>")
     inner = tmp_path / "inner"
     inner.mkdir()
-    (inner / "layout.djx").write_text(
-        "<section>{% block template %}{% endblock template %}</section>"
-    )
+    (inner / "layout.djx").write_text("<section>{% template %}</section>")
     leaf = inner / "pageA"
     leaf.mkdir()
     page_file = leaf / "page.py"

@@ -13,10 +13,9 @@ from django.urls import Resolver404, URLResolver, include, path
 from next.forms import ActionRegistration, RegistryFormActionBackend
 from next.forms.manager import FormActionManager
 from next.pages import page
-from next.testing import override_next_settings
+from next.testing import capture_signals, override_next_settings
 from next.urls import (
     FileRouterBackend,
-    RouterBackend,
     RouterFactory,
     RouterManager,
     TrieURLResolver,
@@ -29,7 +28,13 @@ from next.urls.manager import (
     _LazyUrlPatterns,
     _on_settings_reloaded,
 )
-from tests.support import named_temp_py
+from next.urls.signals import router_reloaded
+from tests.support import (
+    EntryRouter,
+    file_router,
+    file_router_config_entry,
+    named_temp_py,
+)
 
 
 lazy_urlpatterns = urlpatterns[0].urlconf_name
@@ -143,28 +148,12 @@ class TestRouterManager:
         self, manager
     ) -> None:
         """After reload, iteration returns patterns from created routers."""
-        with (
-            patch.object(manager, "reload"),
-            patch.object(manager, "_get_next_pages_config") as mock_get_config,
-            patch("next.urls.RouterFactory.create_backend") as mock_create,
-        ):
-            mock_get_config.return_value = [
-                {
-                    "BACKEND": "next.urls.FileRouterBackend",
-                    "PAGES_DIR": "pages",
-                    "APP_DIRS": True,
-                    "OPTIONS": {},
-                }
-            ]
+        with patch.object(manager, "reload"):
             mock_router = Mock()
             mock_router.generate_urls.return_value = ["url1"]
-            mock_create.return_value = mock_router
-
             manager._backends = [mock_router]
 
-            url_patterns = list(manager)
-
-            assert url_patterns == ["url1"]
+            assert list(manager) == ["url1"]
 
     def test_reload_clears_cache(self, manager) -> None:
         """Reload replaces cache and builds routers from default framework config."""
@@ -183,7 +172,7 @@ class TestRouterManager:
         """Every construction reads `backends` and the build still ends at two."""
         seen_mid_build = []
 
-        def create_backend(config):
+        def build(klass, config):
             seen_mid_build.append(manager.backends)
             return Mock()
 
@@ -191,9 +180,9 @@ class TestRouterManager:
             patch.object(
                 manager,
                 "_get_next_pages_config",
-                return_value=[{"first": True}, {"second": True}],
+                return_value=[file_router_config_entry(), file_router_config_entry()],
             ),
-            patch("next.urls.RouterFactory.create_backend", side_effect=create_backend),
+            patch("next.backends.instantiate_backend", side_effect=build),
         ):
             manager.reload()
 
@@ -226,7 +215,7 @@ class TestRouterManager:
 
         reader = threading.Thread(target=lambda: seen.append(tuple(manager)))
 
-        def create_backend(config):
+        def build(klass, config):
             reader.start()
             reader_waiting.wait(timeout=5)
             backend = Mock()
@@ -236,9 +225,11 @@ class TestRouterManager:
         manager._lock = WatchedLock(manager._lock)
         with (
             patch.object(
-                manager, "_get_next_pages_config", return_value=[{"first": True}]
+                manager,
+                "_get_next_pages_config",
+                return_value=[file_router_config_entry()],
             ),
-            patch("next.urls.RouterFactory.create_backend", side_effect=create_backend),
+            patch("next.backends.instantiate_backend", side_effect=build),
         ):
             manager.reload()
         reader.join(timeout=5)
@@ -251,8 +242,7 @@ class TestRouterManager:
         """An error the reload does not catch still clears the in-build flag."""
         with (
             patch(
-                "next.urls.RouterFactory.create_backend",
-                side_effect=RuntimeError("boom"),
+                "next.backends.instantiate_backend", side_effect=RuntimeError("boom")
             ),
             pytest.raises(RuntimeError, match="boom"),
         ):
@@ -264,8 +254,8 @@ class TestRouterManager:
     def test_reload_with_exception(self, manager) -> None:
         """Backend creation failure leaves routers empty but cache is still set."""
         with patch(
-            "next.urls.RouterFactory.create_backend",
-            side_effect=ValueError("Test error"),
+            "next.backends.instantiate_backend",
+            side_effect=ImproperlyConfigured("Test error"),
         ):
             manager.reload()
             assert len(manager._backends) == 0
@@ -273,31 +263,24 @@ class TestRouterManager:
             assert len(manager._config_cache) == 1
             assert manager._config_cache[0]["BACKEND"] == "next.urls.FileRouterBackend"
 
-    @pytest.mark.parametrize(
-        "exc_type",
-        [ValueError, TypeError, KeyError, ImportError],
-        ids=["value_error", "type_error", "key_error", "import_error"],
-    )
-    def test_reload_swallows_expected_config_errors(
-        self, manager, caplog, exc_type
-    ) -> None:
-        """Each config-error type from backend creation is logged and swallowed."""
+    def test_reload_swallows_a_misconfigured_entry(self, manager, caplog) -> None:
+        """The one type a bad entry raises is logged and swallowed by the loader."""
         with (
             patch(
-                "next.urls.RouterFactory.create_backend", side_effect=exc_type("boom")
+                "next.backends.instantiate_backend",
+                side_effect=ImproperlyConfigured("boom"),
             ),
-            caplog.at_level(logging.ERROR, logger="next.urls.manager"),
+            caplog.at_level(logging.ERROR, logger="next.backends"),
         ):
             manager.reload()
         assert manager._backends == []
-        assert "error creating router from config" in caplog.text
+        assert "error creating RouterBackend from config" in caplog.text
 
     def test_reload_propagates_unexpected_errors(self, manager) -> None:
         """Exceptions outside the config-error set escape reload."""
         with (
             patch(
-                "next.urls.RouterFactory.create_backend",
-                side_effect=RuntimeError("boom"),
+                "next.backends.instantiate_backend", side_effect=RuntimeError("boom")
             ),
             pytest.raises(RuntimeError, match="boom"),
         ):
@@ -309,6 +292,23 @@ class TestRouterManager:
         manager.reload()
         manager.reload()
         assert manager.version == before + 2
+
+    def test_a_quiet_reload_keeps_the_url_caches_and_the_signal(self, manager) -> None:
+        """A manager nobody serves from flushes no resolver cache and tells nobody."""
+        with (
+            patch("next.urls.manager.clear_url_caches") as flush,
+            capture_signals(router_reloaded) as recorder,
+        ):
+            manager.reload(notify=False)
+
+        assert flush.call_args_list == []
+        assert list(recorder) == []
+
+    def test_a_quiet_reload_still_rebuilds_the_backends(self, manager) -> None:
+        """Silence costs no work, so the manager is loaded once it returns."""
+        manager.reload(notify=False)
+
+        assert manager._loaded is True
 
     def test_get_next_pages_config_uses_cache(self, manager) -> None:
         """Returns cached list when present."""
@@ -360,7 +360,7 @@ class TestGlobalInstances:
 
     def test_generate_urls_for_app_returns_empty_list(self) -> None:
         """Empty per app URLs yield empty generate_urls."""
-        router = FileRouterBackend()
+        router = file_router()
 
         with patch.object(router, "_generate_urls_for_app", return_value=[]):
             urls = router.generate_urls()
@@ -368,14 +368,14 @@ class TestGlobalInstances:
 
     def test_generate_root_urls_returns_empty_when_no_pages_path(self) -> None:
         """No root pages paths means no root URL patterns."""
-        router = FileRouterBackend()
+        router = file_router()
         with patch.object(router, "_get_root_pages_paths", return_value=[]):
             urls = router._generate_root_urls()
             assert urls == []
 
     def test_generate_urls_with_empty_patterns_from_apps(self) -> None:
         """Apps with empty per app patterns still run the app loop."""
-        router = FileRouterBackend()
+        router = file_router()
 
         with (
             patch.object(router, "_get_installed_apps", return_value=["app1", "app2"]),
@@ -384,25 +384,13 @@ class TestGlobalInstances:
             urls = router.generate_urls()
             assert urls == []
 
-    @pytest.mark.parametrize(
-        ("test_case", "file_content"),
-        [
-            (
-                "without_args_parameter",
-                "def render(request, **kwargs):\n    return 'success'",
-            ),
-            (
-                "args_parameter_not_in_kwargs",
-                "def render(request, **kwargs):\n    return 'success'",
-            ),
-        ],
-        ids=["without_args_parameter", "args_not_in_kwargs"],
-    )
-    def test_view_wrapper_scenarios(self, tmp_path, test_case, file_content) -> None:
+    def test_view_wrapper_scenarios(self, tmp_path) -> None:
         """View callback behavior when `render()` returns a string body."""
-        router = FileRouterBackend()
+        router = file_router()
         render_module_path = tmp_path / "page.py"
-        render_module_path.write_text(file_content)
+        render_module_path.write_text(
+            "def render(request, **kwargs):\n    return 'success'"
+        )
 
         pattern = page.create_url_pattern(
             "test/[[args]]", render_module_path, router._url_parser
@@ -416,7 +404,7 @@ class TestGlobalInstances:
 
     def test_view_wrapper_render_returning_non_str_raises(self, tmp_path) -> None:
         """`render()` returning a dict (or any non-str non-HttpResponse) raises TypeError."""
-        router = FileRouterBackend()
+        router = file_router()
         render_module_path = tmp_path / "page.py"
         render_module_path.write_text(
             "def render(request, **kwargs):\n    return kwargs"
@@ -433,7 +421,7 @@ class TestGlobalInstances:
 
     def test_generate_root_urls_returns_empty_when_base_dir_none(self) -> None:
         """BASE_DIR None yields no root URLs."""
-        router = FileRouterBackend()
+        router = file_router()
         mock_s = Mock()
         mock_s.BASE_DIR = None
         with patch("next.utils.settings", mock_s):
@@ -441,21 +429,17 @@ class TestGlobalInstances:
             assert urls == []
 
     def test_create_backend_real_execution(self) -> None:
-        """Registered custom backend instantiates without pages_dir."""
+        """A third-party backend is built from its entry without file-router fields."""
+        backend = RouterFactory.create_backend(
+            {"BACKEND": "tests.support.routers.EntryRouter"}
+        )
 
-        class CustomBackend(RouterBackend):
-            def generate_urls(self):
-                return []
-
-        RouterFactory.register_backend("custom", CustomBackend)
-
-        backend = RouterFactory.create_backend({"BACKEND": "custom"})
-        assert isinstance(backend, CustomBackend)
+        assert isinstance(backend, EntryRouter)
         assert not hasattr(backend, "pages_dir")
 
     def test_generate_urls_comprehensive_coverage(self) -> None:
         """generate_urls walks apps and collects patterns from existing pages paths."""
-        router = FileRouterBackend()
+        router = file_router()
 
         with (
             patch.object(
@@ -479,7 +463,7 @@ class TestGlobalInstances:
 
     def test_generate_root_urls_with_patterns(self) -> None:
         """Root patterns come from _generate_patterns_from_directory."""
-        router = FileRouterBackend()
+        router = file_router()
 
         with (
             patch.object(
@@ -496,7 +480,7 @@ class TestGlobalInstances:
 
     def test_scan_pages_directory_real_filesystem(self, tmp_path) -> None:
         """Nested page.py files produce URL path segments on disk."""
-        router = FileRouterBackend()
+        router = file_router()
 
         pages_dir = tmp_path / "testapp" / "pages"
         pages_dir.mkdir(parents=True, exist_ok=True)
@@ -525,7 +509,7 @@ class TestGlobalInstances:
 
     def test_create_url_pattern_with_template_attribute(self) -> None:
         """Template only module gets a named pattern and callback."""
-        router = FileRouterBackend()
+        router = file_router()
 
         with named_temp_py('template = "Hello {{ name }}!"') as temp_file:
             pattern = page.create_url_pattern("test", temp_file, router._url_parser)
@@ -536,7 +520,7 @@ class TestGlobalInstances:
 
     def test_create_url_pattern_template_view_function_without_args(self) -> None:
         """Template view renders the module's `template` attribute with kwargs."""
-        router = FileRouterBackend()
+        router = file_router()
 
         with named_temp_py('template = "Hello {{ name }}!"') as temp_file:
             pattern = page.create_url_pattern("test", temp_file, router._url_parser)
@@ -551,7 +535,7 @@ class TestGlobalInstances:
         self,
     ) -> None:
         """Args passed as keyword flow through to the rendered template."""
-        router = FileRouterBackend()
+        router = file_router()
 
         with named_temp_py('template = "Hello {{ name }}!"') as temp_file:
             pattern = page.create_url_pattern("test", temp_file, router._url_parser)
@@ -566,7 +550,7 @@ class TestGlobalInstances:
 
     def test_create_url_pattern_template_view_function_args_not_in_kwargs(self) -> None:
         """[[args]] in path without an `args` call-kwarg still renders the template."""
-        router = FileRouterBackend()
+        router = file_router()
 
         with named_temp_py('template = "Hello {{ name }}!"') as temp_file:
             pattern = page.create_url_pattern(
@@ -581,7 +565,7 @@ class TestGlobalInstances:
 
     def test_create_url_pattern_no_template_no_render(self) -> None:
         """Neither template nor render returns no pattern."""
-        router = FileRouterBackend()
+        router = file_router()
 
         with named_temp_py('some_variable = "test"') as temp_file:
             pattern = page.create_url_pattern("test", temp_file, router._url_parser)
@@ -589,7 +573,7 @@ class TestGlobalInstances:
 
     def test_create_url_pattern_spec_from_file_location_returns_none(self) -> None:
         """Missing import spec yields no pattern."""
-        router = FileRouterBackend()
+        router = file_router()
 
         with patch("importlib.util.spec_from_file_location", return_value=None):
             pattern = page.create_url_pattern(
@@ -599,7 +583,7 @@ class TestGlobalInstances:
 
     def test_create_url_pattern_spec_loader_is_none(self) -> None:
         """Spec with no loader returns no pattern."""
-        router = FileRouterBackend()
+        router = file_router()
 
         mock_spec = Mock()
         mock_spec.loader = None
@@ -832,10 +816,16 @@ class TestRouterManagerNextPagesConfig:
     def test_non_list_default_page_backends_returns_empty_cached(self) -> None:
         """When ``PAGE_BACKENDS`` is not a list, config is empty and cached."""
         mock_nf = SimpleNamespace(PAGE_BACKENDS="not-a-list")
-        with patch("next.urls.manager.next_framework_settings", mock_nf):
+        with patch("next.backends.next_framework_settings", mock_nf):
             mgr = RouterManager()
             assert mgr._get_next_pages_config() == []
             assert mgr._get_next_pages_config() == []
+
+    def test_an_entry_that_is_not_a_dict_is_no_entry(self) -> None:
+        """A malformed entry never reaches the factory that would choke on it."""
+        mock_nf = SimpleNamespace(PAGE_BACKENDS=["not-a-dict", {"BACKEND": "x"}])
+        with patch("next.backends.next_framework_settings", mock_nf):
+            assert RouterManager()._get_next_pages_config() == [{"BACKEND": "x"}]
 
 
 class TestLazyResolverSlot:

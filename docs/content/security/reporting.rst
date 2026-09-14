@@ -26,7 +26,7 @@ What to include
 A complete report contains the following.
 
 - Dependency versions that match your environment (for example a lock file or the output of ``pip freeze``) so maintainers can reproduce the stack.
-- The affected subsystem (pages, components, forms, static, deps, server, conf).
+- The affected subsystem (pages, components, forms, urls, partial, static, deps, server, conf).
 - A reproducible test case or at minimum a step by step description.
 - The observed impact, including any account or data exposure.
 - Suggested mitigations if you have any.
@@ -40,20 +40,10 @@ The maintainers acknowledge receipt within a few business days and follow up wit
 A fix is prepared and released once the assessment confirms the issue.
 A coordinated public disclosure happens after the fix is available.
 
-Reporter credit
----------------
-
-The fix announcement credits the reporter unless the reporter prefers to remain anonymous.
-
 Out of scope
 ------------
 
-The following items are out of scope for the security advisory program.
-
-- Vulnerabilities in projects built on top of next.dj that are caused by user code.
-- Issues that require a malicious local administrator account.
-- Self denial of service through an extremely large form payload.
-- Discoveries that depend on a fork or modified copy of the framework.
+Third-party applications built with next.dj are out of scope unless the flaw is in next.dj itself.
 
 See also
 --------

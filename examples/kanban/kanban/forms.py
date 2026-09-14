@@ -10,43 +10,47 @@ from django.http import (
 )
 
 from kanban.models import Board, Card, Column
-from kanban.providers import DBoard
+from kanban.providers import CARD_PARAM, DBoard, DCard
 from next.forms import ComponentWidget, Form, ModelForm
+from next.urls import page_reverse, with_query
+
+
+BOARD_PAGE = "board/[int:id]"
+BOARD_SETTINGS_PAGE = "board/[int:id]/settings"
+
+
+def _is_full(column: Column) -> bool:
+    """Return whether the column already holds as many cards as its limit allows."""
+    return column.wip_limit is not None and column.cards.count() >= column.wip_limit
 
 
 class MoveCardForm(Form):
-    """Move a card to a target column at a chosen position."""
+    """Move a card to a target column at a chosen position.
 
-    card_id = django_forms.IntegerField(widget=django_forms.HiddenInput)
-    target_column_id = django_forms.IntegerField(widget=django_forms.HiddenInput)
+    `CardProvider` resolves the moved card from the POST, and the target column is
+    narrowed to that card's own board, so a column on another board never validates.
+    """
+
+    target_column = django_forms.ModelChoiceField(
+        queryset=Column.objects.none(), widget=django_forms.HiddenInput
+    )
     target_position = django_forms.IntegerField(
         min_value=0, widget=django_forms.HiddenInput
     )
 
-    def clean(self) -> dict[str, object]:
-        """Reject moves that cross a board boundary."""
-        cleaned = super().clean() or {}
-        card_id = cleaned.get("card_id")
-        target_column_id = cleaned.get("target_column_id")
-        if card_id is None or target_column_id is None:
-            return cleaned
-        try:
-            card = Card.objects.select_related("column__board").get(pk=card_id)
-            column = Column.objects.select_related("board").get(pk=target_column_id)
-        except (Card.DoesNotExist, Column.DoesNotExist) as exc:
-            msg = "Unknown card or target column."
-            raise django_forms.ValidationError(msg) from exc
-        if card.column.board_id != column.board_id:
-            msg = "Cards cannot move across boards."
-            raise django_forms.ValidationError(msg)
-        cleaned["_card"] = card
-        cleaned["_target_column"] = column
-        return cleaned
+    def __init__(self, *args, **kwargs) -> None:
+        """Narrow the target column to the board the submitted card sits on."""
+        super().__init__(*args, **kwargs)
+        card_pk = self.data.get(CARD_PARAM)
+        if card_pk:
+            owning_board = Card.objects.filter(pk=card_pk).values("column__board_id")
+            self.fields["target_column"].queryset = Column.objects.filter(
+                board_id__in=owning_board
+            )
 
-    def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
+    def on_valid(self, request: HttpRequest, card: DCard[Card]) -> HttpResponseRedirect:
         """Detach the card and re-insert it at the requested position."""
-        card = self.cleaned_data["_card"]
-        target_column = self.cleaned_data["_target_column"]
+        target_column = self.cleaned_data["target_column"]
         target_position = self.cleaned_data["target_position"]
         with transaction.atomic():
             source_column = card.column
@@ -70,13 +74,19 @@ class MoveCardForm(Form):
                 elif sibling.position != index:
                     sibling.position = index
                     sibling.save(update_fields=["position"])
-        return HttpResponseRedirect(f"/board/{target_column.board_id}/?moved={card.pk}")
+        return HttpResponseRedirect(
+            with_query(
+                page_reverse(BOARD_PAGE, id=target_column.board_id), moved=card.pk
+            )
+        )
 
 
 class CreateCardForm(Form):
     """Create a card at the tail of a column subject to its WIP limit."""
 
-    column_id = django_forms.IntegerField(widget=django_forms.HiddenInput)
+    column = django_forms.ModelChoiceField(
+        queryset=Column.objects.all(), widget=django_forms.HiddenInput
+    )
     title = django_forms.CharField(max_length=200, widget=ComponentWidget("input"))
     body = django_forms.CharField(
         required=False, widget=ComponentWidget("textarea", rows=4)
@@ -89,27 +99,19 @@ class CreateCardForm(Form):
         lives in on_valid under select_for_update.
         """
         cleaned = super().clean() or {}
-        column_id = cleaned.get("column_id")
-        if column_id is None:
-            return cleaned
-        try:
-            column = Column.objects.get(pk=column_id)
-        except Column.DoesNotExist as exc:
-            msg = "Unknown column."
-            raise django_forms.ValidationError(msg) from exc
-        if column.wip_limit is not None and column.cards.count() >= column.wip_limit:
+        column = cleaned.get("column")
+        if column is not None and _is_full(column):
             msg = "Column has reached its WIP limit."
             raise django_forms.ValidationError(msg)
-        cleaned["_column"] = column
         return cleaned
 
     def on_valid(self, request: HttpRequest) -> HttpResponse:
         """Append a card at the tail of the target column under a row lock."""
-        column = self.cleaned_data["_column"]
+        column = self.cleaned_data["column"]
         with transaction.atomic():
             locked = Column.objects.select_for_update().get(pk=column.pk)
             count = locked.cards.count()
-            if locked.wip_limit is not None and count >= locked.wip_limit:
+            if _is_full(locked):
                 return HttpResponseBadRequest("Column has reached its WIP limit.")
             card = Card.objects.create(
                 column=locked,
@@ -119,15 +121,15 @@ class CreateCardForm(Form):
             )
         # The redirect names the new row the same way move_card names the moved
         # one, so a fetch that follows it learns the id from the final URL.
-        return HttpResponseRedirect(f"/board/{column.board_id}/?created={card.pk}")
+        return HttpResponseRedirect(
+            with_query(page_reverse(BOARD_PAGE, id=column.board_id), created=card.pk)
+        )
 
 
 class CreateColumnForm(Form):
     """Append a new column to a board at the next free position."""
 
-    # This form creates a new column under a board rather than editing an
-    # existing instance, so it carries the parent board_id as a hidden field
-    # instead of resolving one row through instance_from_url.
+    # A new column has no instance to resolve, so the parent board_id is a hidden field.
     board_id = django_forms.IntegerField(widget=django_forms.HiddenInput)
     title = django_forms.CharField(max_length=120, widget=ComponentWidget("input"))
     wip_limit = django_forms.IntegerField(
@@ -144,7 +146,7 @@ class CreateColumnForm(Form):
             position=next_position,
             wip_limit=self.cleaned_data.get("wip_limit"),
         )
-        return HttpResponseRedirect(f"/board/{board.pk}/settings/")
+        return HttpResponseRedirect(page_reverse(BOARD_SETTINGS_PAGE, id=board.pk))
 
 
 class RenameBoardForm(ModelForm):
@@ -158,7 +160,9 @@ class RenameBoardForm(ModelForm):
     def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
         """Update the board title and return to settings."""
         self.save()
-        return HttpResponseRedirect(f"/board/{self.instance.pk}/settings/")
+        return HttpResponseRedirect(
+            page_reverse(BOARD_SETTINGS_PAGE, id=self.instance.pk)
+        )
 
 
 class ArchiveBoardForm(ModelForm):
@@ -173,5 +177,7 @@ class ArchiveBoardForm(ModelForm):
         """Toggle the archived flag and redirect."""
         self.save()
         if self.instance.archived:
-            return HttpResponseRedirect("/")
-        return HttpResponseRedirect(f"/board/{self.instance.pk}/settings/")
+            return HttpResponseRedirect(page_reverse())
+        return HttpResponseRedirect(
+            page_reverse(BOARD_SETTINGS_PAGE, id=self.instance.pk)
+        )

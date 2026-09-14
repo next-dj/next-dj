@@ -44,10 +44,10 @@ A compound name such as ``dispatch_build.py`` is not used, so a split turns the 
 The single exception is ``next/templatetags/next_static.py``, whose name Django dictates.
 
 The recurring per-area module names are fixed, so a reader finds the same concern under the same name in every area.
-``registry.py`` holds the ordered registrations, ``manager.py`` the façade over the backends, ``backends.py`` the settings-driven contract, ``markers.py`` the frozen dataclasses, ``providers.py`` the dependency providers, ``signals.py`` the area signals, and ``checks.py`` the system checks.
+``registry.py`` holds the ordered registrations, ``manager.py`` the façade over the backends, ``backends.py`` the settings-driven contract, ``markers.py`` the frozen dataclasses, ``providers.py`` the dependency providers, ``signals.py`` the area signals, ``checks.py`` the system checks, ``dispatch.py`` the action pipeline, and ``errors.py`` the area's public exceptions.
 
 Machinery shared across areas lives in a flat module at the root of ``next/`` rather than in a package, and never in a package whose name starts with an underscore.
-``backends.py``, ``ports.py``, ``signals.py``, and ``utils.py`` are the four such modules.
+``backends.py``, ``errors.py``, ``ports.py``, ``signals.py``, and ``utils.py`` are the five such modules.
 ``next/ports.py`` holds the narrow Protocol ports that let one area call another without importing it, each one reached through a slot that ``AppConfig.ready()`` binds once at startup.
 
 Annotations

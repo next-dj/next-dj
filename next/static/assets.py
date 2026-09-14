@@ -1,14 +1,7 @@
 """Value objects and kind registry for static assets.
 
-This module holds the leaf building blocks of the static subsystem. It defines a frozen
-value object for a single asset reference and a mutable registry that maps asset kinds
-to file extensions, placeholder slots, and renderer method names. The module has no
-internal dependencies and is safe to import before the Django app registry is ready.
-
-The registry ships empty. Built-in kinds such as `css` and `js` are registered by the
-framework bootstrap layer through the same public `register` call that user code uses to
-teach the framework about new file types like `jsx` or `wasm`. Core code never
-special-cases any particular kind.
+Has no internal dependencies, so it imports before the app registry is ready, and ships
+empty so built-in kinds register through the same public API user code uses.
 """
 
 from __future__ import annotations
@@ -37,9 +30,7 @@ _LOAD_INLINE_TAGS: Final[dict[str, str]] = {"link": "style", "script": "script"}
 class StaticNamespace:
     """Namespace constants used when building staticfiles URL paths.
 
-    The `NEXT` constant is the top-level directory under which the
-    framework publishes co-located assets inside the Django staticfiles
-    tree. Public URLs have the form `/static/next/<logical_name>.<ext>`.
+    Public URLs have the form `/static/next/<logical_name>.<ext>`.
     """
 
     NEXT: Final = "next"
@@ -49,11 +40,8 @@ class StaticNamespace:
 class StaticAsset:
     """Immutable record describing one asset reference.
 
-    The collector populates instances of this class during page render.
-    A URL form carries a non-empty `url` and an optional `source_path`
-    pointing at the co-located file on disk. A block form carries a
-    pre-rendered `inline` body and leaves `url` empty. The `kind` field
-    must match a kind registered in the active `KindRegistry`.
+    A URL form carries a non-empty `url` and an optional `source_path`, while a block
+    form carries a pre-rendered `inline` body and leaves `url` empty.
     """
 
     url: str
@@ -65,10 +53,7 @@ class StaticAsset:
 class KindRegistry:
     """Mutable registry mapping asset kinds to extension, slot, and renderer.
 
-    A registration binds the file suffix discovery looks for, the
-    placeholder slot the rendered tags land in, and the backend method
-    that renders a URL of the kind. The registry ships empty so built-in
-    kinds go through the same public `register` call user code uses.
+    Ships empty, so built-in kinds use the same public `register` call user code does.
     """
 
     def __init__(self) -> None:
@@ -95,14 +80,8 @@ class KindRegistry:
     ) -> None:
         """Register an asset kind and its dispatch metadata.
 
-        The `kind` argument must be a non-empty Python identifier. The `extension`
-        argument must begin with a dot. The `slot` and `renderer` arguments must be
-        non-empty strings. Any other input raises `ValueError`. The optional
-        `inline_tag` names the HTML element that wraps a co-located inline body for this
-        kind, for example `"style"` or `"script"`. When omitted, inline bodies of this
-        kind render verbatim. A repeated call with identical parameters is idempotent. A
-        repeated call with different parameters raises `ValueError` so silent
-        re-registrations cannot mask bugs.
+        `inline_tag` names the element wrapping a co-located inline body, and a repeated
+        call with different parameters raises rather than masking a bug.
         """
         if not kind or not kind.isidentifier():
             msg = f"Invalid kind {kind!r}: must be a non-empty identifier"
@@ -168,12 +147,8 @@ class KindRegistry:
     def load(self, kind: str, *, inline: bool = False) -> str | None:
         """Return the client insertion verb for the kind, or None when it has none.
 
-        A kind that is not registered, or one whose renderer is a custom
-        backend method, has no verb the runtime can act on, so the wire
-        omits the field rather than guessing. With `inline` the verb also
-        requires the kind's `inline_tag` to be the element the runtime
-        builds, so a body rendered verbatim on a full page render is never
-        wrapped and executed by a patch instead.
+        An unregistered kind or custom renderer has no verb, so the wire omits the
+        field. With `inline`, the verb also needs the kind's `inline_tag` to match.
         """
         renderer = self._renderers.get(kind)
         if renderer is None:
@@ -189,8 +164,7 @@ class KindRegistry:
     def inline_tag(self, kind: str) -> str | None:
         """Return the inline wrapper element for the kind or None.
 
-        A `None` result means the kind has no wrapper registered, so its
-        inline bodies render verbatim.
+        Without a wrapper registered the kind's inline bodies render verbatim.
         """
         return self._inline_tags.get(kind)
 

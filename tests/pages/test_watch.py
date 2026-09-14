@@ -6,18 +6,17 @@ from unittest.mock import Mock, patch
 import pytest
 from django.test import override_settings
 
-from next.checks.common import get_page_roots
-from next.pages.registry import (
-    get_layout_djx_paths_for_watch,
-    get_template_djx_paths_for_watch,
-)
+from next.caches import DEFAULT_CACHE_SIZE
+from next.discovery import get_page_roots
 from next.pages.watch import (
+    get_layout_djx_paths_for_watch,
     get_pages_directories_for_watch,
+    get_template_djx_paths_for_watch,
     iter_page_backends_for_watch,
     iter_pages_roots_with_components_folder_names,
 )
 from next.urls import RouterFactory, router_manager
-from next.utils import _RESOLVED_TREES_MAX_SIZE, resolved_tree
+from next.utils import resolved_tree
 from tests.support import (
     MalformedRootsRouter,
     OddComponentsNameRouter,
@@ -66,7 +65,7 @@ class TestGetLayoutDjxPathsForWatch:
         (tmp_path / "a" / "layout.djx").write_text("<div>a</div>")
         (tmp_path / "a" / "b").mkdir()
         (tmp_path / "a" / "b" / "layout.djx").write_text("<div>b</div>")
-        with patch("next.pages.registry.get_pages_directories_for_watch") as mock_watch:
+        with patch("next.pages.watch.get_pages_directories_for_watch") as mock_watch:
             mock_watch.return_value = [tmp_path]
             result = get_layout_djx_paths_for_watch()
         assert len(result) == 2
@@ -76,7 +75,7 @@ class TestGetLayoutDjxPathsForWatch:
 
     def test_returns_empty_when_no_layout_djx(self, tmp_path) -> None:
         """Returns empty set when no layout.djx under pages dirs."""
-        with patch("next.pages.registry.get_pages_directories_for_watch") as mock_watch:
+        with patch("next.pages.watch.get_pages_directories_for_watch") as mock_watch:
             mock_watch.return_value = [tmp_path]
             result = get_layout_djx_paths_for_watch()
         assert result == set()
@@ -84,7 +83,7 @@ class TestGetLayoutDjxPathsForWatch:
     def test_swallows_oserror_on_rglob_layout(self, tmp_path) -> None:
         """When rglob raises OSError (e.g. permission), log and return partial result."""
         with (
-            patch("next.pages.registry.get_pages_directories_for_watch") as mock_watch,
+            patch("next.pages.watch.get_pages_directories_for_watch") as mock_watch,
             patch.object(Path, "rglob", side_effect=OSError(13, "Permission denied")),
         ):
             mock_watch.return_value = [tmp_path]
@@ -101,7 +100,7 @@ class TestGetTemplateDjxPathsForWatch:
         (tmp_path / "x" / "template.djx").write_text("x")
         (tmp_path / "x" / "y").mkdir()
         (tmp_path / "x" / "y" / "template.djx").write_text("y")
-        with patch("next.pages.registry.get_pages_directories_for_watch") as mock_watch:
+        with patch("next.pages.watch.get_pages_directories_for_watch") as mock_watch:
             mock_watch.return_value = [tmp_path]
             result = get_template_djx_paths_for_watch()
         assert len(result) == 2
@@ -111,7 +110,7 @@ class TestGetTemplateDjxPathsForWatch:
 
     def test_returns_empty_when_no_template_djx(self, tmp_path) -> None:
         """Returns empty set when no template.djx under pages dirs."""
-        with patch("next.pages.registry.get_pages_directories_for_watch") as mock_watch:
+        with patch("next.pages.watch.get_pages_directories_for_watch") as mock_watch:
             mock_watch.return_value = [tmp_path]
             result = get_template_djx_paths_for_watch()
         assert result == set()
@@ -119,7 +118,7 @@ class TestGetTemplateDjxPathsForWatch:
     def test_swallows_oserror_on_rglob_template(self, tmp_path) -> None:
         """When rglob raises OSError (e.g. permission), log and return partial result."""
         with (
-            patch("next.pages.registry.get_pages_directories_for_watch") as mock_watch,
+            patch("next.pages.watch.get_pages_directories_for_watch") as mock_watch,
             patch.object(Path, "rglob", side_effect=OSError(13, "Permission denied")),
         ):
             mock_watch.return_value = [tmp_path]
@@ -335,8 +334,11 @@ class TestRouterFailuresNeverReachTheWatcher:
         # A wrong shape is no failing source, so it is reported as the wrong
         # type rather than as a raise, and carries no traceback.
         assert _watch_tracebacks(caplog) == []
-        assert "of the wrong type" in caplog.records[0].getMessage()
-        assert caplog.records[0].getMessage().endswith(_RECONFIGURE_PROMISE)
+        watched_records = [r for r in caplog.records if r.name == "next.pages.watch"]
+        assert (
+            "reported page roots of the wrong type" in watched_records[0].getMessage()
+        )
+        assert watched_records[0].getMessage().endswith(_RECONFIGURE_PROMISE)
 
     def test_a_malformed_components_folder_name_costs_only_its_pairs(
         self, tmp_path, caplog
@@ -363,6 +365,10 @@ class TestRouterFailuresNeverReachTheWatcher:
         assert pairs == []
         assert watched == [root.resolve()]
         assert len(reports) == 1
+        assert (
+            "reported components folder name of the wrong type"
+            in reports[0].getMessage()
+        )
 
     def test_the_same_failure_is_logged_once(self, tmp_path, caplog) -> None:
         """These helpers run per reloader tick, so a repeat must stay quiet."""
@@ -536,7 +542,7 @@ class TestTheRoutersOutliveOneTick:
             info = resolved_tree.cache_info()
 
         assert watched == [first_root.resolve(), second_root.resolve()]
-        assert info.maxsize == _RESOLVED_TREES_MAX_SIZE
+        assert info.maxsize == DEFAULT_CACHE_SIZE
         assert info.currsize == 2
 
     def test_a_repeated_tree_costs_one_resolution(self, tmp_path) -> None:

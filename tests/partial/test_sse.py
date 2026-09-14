@@ -90,7 +90,9 @@ class TestPolitenessHeaders:
         _consume(response)
 
 
-_NO_SSE_BACKEND = [{"BACKEND": "next.partial.PartialProtocolBackend", "OPTIONS": {}}]
+_NO_SSE_BACKEND = [
+    {"BACKEND": "next.partial.JsonPartialProtocolBackend", "OPTIONS": {}}
+]
 
 
 class TestRetryOption:
@@ -105,11 +107,14 @@ class TestRetryOption:
         with _partial_backend_config(_NO_SSE_BACKEND):
             assert _retry_ms() == 3000
 
-    def test_retry_falls_back_on_non_int_value(self) -> None:
+    @pytest.mark.parametrize("value", ["fast", True], ids=["non_numeric", "bool"])
+    def test_retry_falls_back_on_a_value_that_is_no_interval(
+        self, value: object
+    ) -> None:
         backend = [
             {
-                "BACKEND": "next.partial.PartialProtocolBackend",
-                "OPTIONS": {"SSE": {"RETRY_MS": "fast"}},
+                "BACKEND": "next.partial.JsonPartialProtocolBackend",
+                "OPTIONS": {"SSE": {"RETRY_MS": value}},
             }
         ]
         with _partial_backend_config(backend):
@@ -120,7 +125,7 @@ def _custom_heartbeat_backend(seconds: object) -> list[dict]:
     """Return a backend config carrying a custom SSE heartbeat value."""
     return [
         {
-            "BACKEND": "next.partial.PartialProtocolBackend",
+            "BACKEND": "next.partial.JsonPartialProtocolBackend",
             "OPTIONS": {"SSE": {"HEARTBEAT_SECONDS": seconds}},
         }
     ]
@@ -393,3 +398,36 @@ class TestAsyncDisconnectCleanup:
             sse_stream_closed.disconnect(closed)
         assert source.finalized is True
         assert closed.events[0]["envelopes_sent"] == 0
+
+
+class _PlainAsyncSource:
+    """Async source whose iterator is a plain object, not a generator."""
+
+    def __init__(self, count: int) -> None:
+        self.left = count
+
+    def __aiter__(self) -> "_PlainAsyncSource":
+        return self
+
+    async def __anext__(self) -> Patches:
+        if self.left == 0:
+            raise StopAsyncIteration
+        self.left -= 1
+        return _patches()
+
+
+class TestAsyncSourceWithoutAclose:
+    """An async iterator that is no generator has nothing to close."""
+
+    def test_the_stream_ends_and_announces_the_close(
+        self, async_request_obj: object
+    ) -> None:
+        closed = _Recorder()
+        sse_stream_closed.connect(closed, weak=False)
+        try:
+            response = PatchEventStream(async_request_obj, _PlainAsyncSource(2))
+            frames = asyncio.run(_aconsume(response))
+        finally:
+            sse_stream_closed.disconnect(closed)
+        assert len(frames) == 3
+        assert closed.events[0]["envelopes_sent"] == 2

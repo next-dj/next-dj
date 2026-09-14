@@ -13,8 +13,8 @@ from next.checks import (
     check_next_framework_unknown_top_level_keys,
     check_next_pages_configuration,
 )
-from next.conf import NextFrameworkSettings, next_framework_settings, perform_import
-from next.urls import RouterBackend, RouterFactory
+from next.conf import NextFrameworkSettings, next_framework_settings
+from next.conf.merge import merge_user_settings
 
 
 class TestLazyFixtureWiring:
@@ -110,7 +110,7 @@ class TestNextFrameworkSettingsDjangoIntegration:
 
 
 class TestNextFrameworkSettingsFlatMerge:
-    """Unit tests for NextFrameworkSettings._build_flat_merged."""
+    """Unit tests for the merge behind `NextFrameworkSettings`."""
 
     @pytest.mark.parametrize(
         ("user", "expected_routers_len"),
@@ -124,7 +124,7 @@ class TestNextFrameworkSettingsFlatMerge:
         expected_routers_len: int,
     ) -> None:
         """PAGE_BACKENDS length follows the merged user value."""
-        merged = fresh_next_framework_settings._build_flat_merged(user)
+        merged = merge_user_settings(fresh_next_framework_settings.DEFAULTS, user)
         assert len(merged["PAGE_BACKENDS"]) == expected_routers_len
 
     def test_build_flat_merge_empty_component_backends(
@@ -132,7 +132,7 @@ class TestNextFrameworkSettingsFlatMerge:
     ) -> None:
         """Explicit empty COMPONENT_BACKENDS is preserved."""
         user = {"COMPONENT_BACKENDS": []}
-        merged = fresh_next_framework_settings._build_flat_merged(user)
+        merged = merge_user_settings(fresh_next_framework_settings.DEFAULTS, user)
         assert merged["COMPONENT_BACKENDS"] == []
 
 
@@ -143,15 +143,6 @@ class TestFlatNextFrameworkBehavior:
         """Top level keys must not be assigned on the settings object."""
         with pytest.raises(AttributeError, match="cannot be assigned"):
             next_framework_settings.URL_NAME_TEMPLATE = "x"  # type: ignore[misc]
-
-    def test_perform_import_raises_import_error(self) -> None:
-        """Invalid dotted path raises ImportError with context."""
-        with pytest.raises(ImportError, match="no_such_module_zzz"):
-            perform_import("no_such_module_zzz.ClassName", "TEST_SETTING")
-
-    def test_perform_import_returns_non_string_unchanged(self) -> None:
-        """Non string values are returned as is for future IMPORT_STRINGS use."""
-        assert perform_import(42, "X") == 42
 
     def test_setattr_allows_internal_attributes(self) -> None:
         """Attributes outside DEFAULTS keys may be set for tests or hooks."""
@@ -246,6 +237,82 @@ class TestDependencyResolverSetting:
         with override_settings(
             NEXT_FRAMEWORK={"DEPENDENCY_RESOLVER": "next.deps.DependencyResolver"}
         ):
+            errors = check_next_framework_unknown_top_level_keys()
+        assert errors == []
+
+
+class TestComponentTemplateLoaderSetting:
+    """COMPONENT_TEMPLATE_LOADER default, string merge, and check acceptance."""
+
+    def test_default_is_the_cached_loader_path(self) -> None:
+        """The setting defaults to the caching component template loader."""
+        assert (
+            NextFrameworkSettings.DEFAULTS["COMPONENT_TEMPLATE_LOADER"]
+            == "next.components.CachedComponentTemplateLoader"
+        )
+        next_framework_settings.reload()
+        assert (
+            next_framework_settings.COMPONENT_TEMPLATE_LOADER
+            == "next.components.CachedComponentTemplateLoader"
+        )
+
+    def test_string_override_reaches_merged_settings(self) -> None:
+        """A dotted-path string lands in next_framework_settings unchanged."""
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "COMPONENT_TEMPLATE_LOADER": "next.components.ComponentTemplateLoader"
+            }
+        ):
+            assert (
+                next_framework_settings.COMPONENT_TEMPLATE_LOADER
+                == "next.components.ComponentTemplateLoader"
+            )
+
+    @pytest.mark.parametrize(
+        "raw",
+        [123, None, ["next.components.ComponentTemplateLoader"]],
+        ids=["int", "none", "list"],
+    )
+    def test_non_string_override_keeps_default(self, raw: object) -> None:
+        """A non-string value is ignored by the merge and the default stays."""
+        with override_settings(NEXT_FRAMEWORK={"COMPONENT_TEMPLATE_LOADER": raw}):  # type: ignore[dict-item]
+            assert (
+                next_framework_settings.COMPONENT_TEMPLATE_LOADER
+                == "next.components.CachedComponentTemplateLoader"
+            )
+
+    def test_key_passes_unknown_key_check(self) -> None:
+        """System checks accept COMPONENT_TEMPLATE_LOADER as a known key."""
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "COMPONENT_TEMPLATE_LOADER": "next.components.ComponentTemplateLoader"
+            }
+        ):
+            errors = check_next_framework_unknown_top_level_keys()
+        assert errors == []
+
+
+class TestStaticDiscoveryCacheSetting:
+    """STATIC_DISCOVERY_CACHE default, typed read, and bool coercion."""
+
+    def test_default_is_true(self) -> None:
+        """Asset plans are cached unless a project turns the key off."""
+        assert NextFrameworkSettings.DEFAULTS["STATIC_DISCOVERY_CACHE"] is True
+        next_framework_settings.reload()
+        assert next_framework_settings.STATIC_DISCOVERY_CACHE is True
+
+    def test_is_a_bool_key(self) -> None:
+        """The key is coerced and checked like every other bool flag."""
+        assert "STATIC_DISCOVERY_CACHE" in NextFrameworkSettings.BOOL_KEYS
+
+    def test_typed_read_of_override(self) -> None:
+        """Turning the key off reaches the merged settings as a real bool."""
+        with override_settings(NEXT_FRAMEWORK={"STATIC_DISCOVERY_CACHE": False}):
+            assert next_framework_settings.STATIC_DISCOVERY_CACHE is False
+
+    def test_key_passes_unknown_key_check(self) -> None:
+        """System checks accept STATIC_DISCOVERY_CACHE as a known key."""
+        with override_settings(NEXT_FRAMEWORK={"STATIC_DISCOVERY_CACHE": False}):
             errors = check_next_framework_unknown_top_level_keys()
         assert errors == []
 
@@ -347,22 +414,15 @@ class TestNextFrameworkChecksUnknownKeys:
 
     def test_non_file_router_entry_only_backend_key(self) -> None:
         """Non-file router entries must not carry extra configuration keys."""
-        backend_path = "conf_test_checks.MinimalRouter"
+        backend_path = "tests.support.routers.EntryRouter"
 
-        class MinimalRouter(RouterBackend):
-            def generate_urls(self) -> list:
-                return []
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "PAGE_BACKENDS": [{"BACKEND": backend_path, "PAGES_DIR": "pages"}]
+            }
+        ):
+            errors = check_next_pages_configuration()
 
-        RouterFactory.register_backend(backend_path, MinimalRouter)
-        try:
-            with override_settings(
-                NEXT_FRAMEWORK={
-                    "PAGE_BACKENDS": [{"BACKEND": backend_path, "PAGES_DIR": "pages"}]
-                }
-            ):
-                errors = check_next_pages_configuration()
-        finally:
-            RouterFactory._backends.pop(backend_path, None)
         assert any(e.id == "next.E035" for e in errors)
 
 
@@ -386,15 +446,15 @@ class TestStrictLoadingSetting:
         [1, 0, "", "False", [], None],
         ids=["one", "zero", "empty_str", "false_str", "empty_list", "none"],
     )
-    @pytest.mark.parametrize("key", ["STRICT_LOADING", "STRICT_CONTEXT"])
+    @pytest.mark.parametrize("key", sorted(NextFrameworkSettings.BOOL_KEYS))
     def test_coercion_matches_existing_bool_keys(
         self,
         fresh_next_framework_settings: NextFrameworkSettings,
         key: str,
         raw: object,
     ) -> None:
-        """The merge coerces STRICT_LOADING with bool() like every bool key."""
-        merged = fresh_next_framework_settings._build_flat_merged({key: raw})
+        """Every bool key coerces its override with `bool()`."""
+        merged = merge_user_settings(fresh_next_framework_settings.DEFAULTS, {key: raw})
         assert merged[key] is bool(raw)
 
 
@@ -403,7 +463,7 @@ class TestPartialBackendsDefault:
 
     def test_default_lists_protocol_backend(self) -> None:
         entry = NextFrameworkSettings.DEFAULTS["PARTIAL_BACKENDS"][0]
-        assert entry["BACKEND"] == "next.partial.PartialProtocolBackend"
+        assert entry["BACKEND"] == "next.partial.JsonPartialProtocolBackend"
 
     def test_default_options(self) -> None:
         options = NextFrameworkSettings.DEFAULTS["PARTIAL_BACKENDS"][0]["OPTIONS"]
@@ -417,7 +477,7 @@ class TestPartialBackendsDefault:
 
     def test_accessible_via_settings(self) -> None:
         assert next_framework_settings.PARTIAL_BACKENDS[0]["BACKEND"] == (
-            "next.partial.PartialProtocolBackend"
+            "next.partial.JsonPartialProtocolBackend"
         )
 
     def test_is_known_top_level_key(self) -> None:
@@ -505,13 +565,12 @@ class TestMergedSettingsAreImmutable:
             next_framework_settings.NEXT_JS_OPTIONS["a"]["b"] = 2
 
     def test_merged_wizard_backend_is_frozen(self) -> None:
-        """FORM_WIZARD_BACKEND merges defaults with the user dict and freezes."""
+        """FORM_WIZARD_BACKEND replaces the default entry and freezes."""
         with override_settings(
             NEXT_FRAMEWORK={"FORM_WIZARD_BACKEND": {"OPTIONS": {"ttl": 1}}}
         ):
             merged = next_framework_settings.FORM_WIZARD_BACKEND
-            assert merged["BACKEND"] == "next.forms.SessionFormWizardBackend"
-            assert merged["OPTIONS"] == {"ttl": 1}
+            assert merged == {"OPTIONS": {"ttl": 1}}
             with pytest.raises(TypeError, match="immutable"):
                 merged["OPTIONS"]["ttl"] = 2
 

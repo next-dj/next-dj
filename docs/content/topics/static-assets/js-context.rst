@@ -89,6 +89,8 @@ The override applies only to that key.
 .. code-block:: python
    :caption: notes/pages/page.py
 
+   from notes.serialization import load_featured_note
+
    from next import context
    from next.static import PydanticJsContextSerializer
 
@@ -96,6 +98,7 @@ The override applies only to that key.
    def featured() -> object:
        return load_featured_note()
 
+``load_featured_note`` is a project helper that returns the pydantic model the serializer encodes.
 The collector routes the ``featured`` key through the supplied serializer and every other key through the project default.
 
 The ``serializer=`` parameter takes an already-instantiated object.
@@ -116,6 +119,7 @@ A serializer is any class with a ``dumps`` method.
    :caption: notes/serializers.py
 
    import json
+
    from django.core.serializers.json import DjangoJSONEncoder
 
    class CompactSerializer:
@@ -172,17 +176,25 @@ Configure the policy through the first static backend ``OPTIONS``.
 The configured policy fires anywhere the same key reaches the collector twice, including page-to-component, component-to-component, page-to-layout, and any contributor that calls ``StaticCollector.add_js_context`` directly.
 Two ``@context`` decorators on the same page that register the same key resolve last-wins, because the second registration replaces the first in the page registry before ``JS_CONTEXT_POLICY`` ever sees the key.
 Pick distinct keys when both registrations live in the same module.
-The framework owns the ``$``-prefixed keys of the init payload, ``$csrf`` and ``$dev``, and claims them once the policy has already run.
+
+Reserved payload keys
+~~~~~~~~~~~~~~~~~~~~~
+
+The framework owns two ``$``-prefixed keys of the init payload, ``$csrf`` and ``$dev``, and claims them after the conflict policy has run.
 A project key of either name is dropped from the collected context on every automatically injected payload, whichever way the project registered it, together with the pre-encoded fragment and the per-key serializer that key recorded.
 The framework then writes its own value where it has one, ``$csrf`` on a payload whose request can mint a CSRF token and ``$dev`` on a payload built while ``DEBUG`` is on.
 The runtime reads ``$csrf`` at bootstrap and seeds the header it stamps on every unsafe request, so a programmatic ``Next.partial.fetch`` carries a token without a form field.
 A render with no value to write leaves the key out of the payload altogether, so a production page carries no ``$dev`` key at all and the registered value reaches ``window.Next.context`` in no environment.
-The ``next.W075`` system check reports such a key at ``manage.py check`` and names the ``page.py`` or ``component.py`` that declares it, so the declaring module keeps its value by renaming the key.
-The check walks the keyed registrations only.
-A keyless ``serialize=True`` provider spreads the keys of the dict it returns at render time, so a collision hidden inside such a dict is invisible to ``manage.py check`` and surfaces on the client as a value that never arrives.
 
 A partial render honours the same ownership.
 ``Patches.context()`` refuses ``$csrf`` and ``$dev`` with ``ReservedContextKeyError``, and the js-context delta of a zone render drops them before it becomes a ``context`` patch, so no patch updates either key.
+
+Reporting a collision
+~~~~~~~~~~~~~~~~~~~~~
+
+The ``next.W075`` system check reports a ``$csrf`` or ``$dev`` registration at ``manage.py check`` and names the ``page.py`` or ``component.py`` that declares it, so the declaring module keeps its value by renaming the key.
+The check walks the keyed registrations only.
+A keyless ``serialize=True`` provider spreads the keys of the dict it returns at render time, so a collision hidden inside such a dict is invisible to ``manage.py check`` and surfaces on the client as a value that never arrives.
 
 Writing a policy
 ----------------
@@ -218,8 +230,9 @@ Register the key server-side with ``serialize=True``.
 .. code-block:: python
    :caption: notes/pages/page.py
 
-   from next import context
    from notes.models import Note
+
+   from next import context
 
    @context("note_count", serialize=True)
    def note_count() -> int:
@@ -254,6 +267,7 @@ Its payload is an object with two fields, where ``context`` is the whole merged 
 The initial seed lists every seeded key in ``changed``.
 A partial zone render ships a js-context delta in its patch envelope, see :doc:`/content/topics/partial-rendering/how-it-works`.
 The runtime merges the delta into ``window.Next.context`` and fires ``context-updated`` again with only the delta keys in ``changed``.
+
 The ``"ready"`` event fires once the first context is loaded, and its listener receives the context object itself.
 A ``ready`` listener registered after that point receives an immediate replay with the current context.
 The partial runtime fires further ``partial:*`` events on the same bus, see :doc:`/content/topics/partial-rendering/reference`.
@@ -311,15 +325,8 @@ An absent or empty ``NEXT_JS_OPTIONS`` uses the ``AUTO`` policy and the default 
      - Pages where you control placement of the script tags in a layout template.
 
 The runtime rides the ``scripts`` slot, so a layout without ``{% collect_scripts %}`` gets no ``next.min.js`` and no ``window.Next`` even under ``AUTO``, while the preload hint is still injected and points at a script the page never loads.
-The preload hint needs a ``</head>`` in the document, and a fragment rendered without one carries none.
-
-.. note::
-
-   Under ``MANUAL`` the static manager skips both the preload hint and the ``Next._init`` wrap, exactly like ``DISABLED``.
-   To inject ``window.Next`` yourself, resolve the runtime URL with ``staticfiles_storage.url(NEXT_JS_STATIC_PATH)`` from ``next.static.scripts``, then bind one ``builder = NextScriptBuilder.from_options(url, NEXT_JS_OPTIONS)``.
-   Emit ``builder.preload_link()`` and ``builder.script_tag()`` from a custom template tag or middleware, then read the collector from the template context under the ``_static_collector`` key and pass ``builder.init_script(collector.js_context(), key_serializers=collector.js_context_serializers(), encoded=collector.js_context_encoded())`` so per-key serializers and the fragments the collector already validated are reused.
-   A payload built this way carries no framework ``$csrf`` or ``$dev`` entry, because the static manager both claims and writes those keys only under ``AUTO``.
-   The manual payload is exactly the mapping the caller passes, so the caller owns what any ``$``-prefixed key of it means.
+The preload hint needs a ``</head>``, and a fragment rendered without one carries none.
+The hint is inserted before the first ``</head>`` in the document.
 
 Set the policy through the ``NEXT_JS_OPTIONS`` dict.
 
@@ -334,7 +341,7 @@ Accepted string values for ``policy`` are ``"auto"``, ``"disabled"``, and ``"man
 The key also accepts a ``ScriptInjectionPolicy`` member directly, so a settings module may import the enum from ``next.static`` instead of spelling the string.
 
 Any other value raises ``ValueError`` from the script builder.
-No system check validates ``NEXT_JS_OPTIONS``, and the builder is created on the first injection, so a typo surfaces as a render-time error on every page rather than at ``manage.py check``.
+``next.E076`` reports a ``NEXT_JS_OPTIONS`` that is not a dict, but no check reads the keys inside it, and the builder is created on the first injection, so a bad ``policy`` surfaces as a render-time error on every page rather than at ``manage.py check``.
 Verify the value by loading one page after the change.
 
 .. warning::
@@ -342,6 +349,48 @@ Verify the value by loading one page after the change.
    When ``policy`` is ``"disabled"``, ``window.Next`` is not defined.
    Any co-located JavaScript or inline script that reads ``window.Next.context`` will fail at runtime.
    Review every ``component.js`` and inline script before switching away from ``AUTO``.
+
+Manual injection
+~~~~~~~~~~~~~~~~
+
+Under ``MANUAL`` the static manager skips both the preload hint and the ``Next._init`` wrap, exactly like ``DISABLED``, and the script builder stays available for a template tag of your own.
+Resolve the runtime URL with ``staticfiles_storage.url(NEXT_JS_STATIC_PATH)`` from ``next.static.scripts``, then build one ``NextScriptBuilder`` from the same options the framework reads.
+
+Emit ``builder.preload_link()`` and ``builder.script_tag()`` from a custom template tag or middleware.
+Read the collector from the template context under the ``_static_collector`` key.
+Pass its ``js_context()``, ``js_context_serializers()``, and ``js_context_encoded()`` to ``builder.init_script`` so per-key serializers and the already-validated fragments are reused.
+
+.. code-block:: python
+   :caption: notes/templatetags/notes_runtime.py
+
+   from django.contrib.staticfiles.storage import staticfiles_storage
+   from django.template import Library
+   from django.utils.safestring import mark_safe
+
+   from next.conf import next_framework_settings
+   from next.static.scripts import NEXT_JS_STATIC_PATH, NextScriptBuilder
+
+   register = Library()
+
+
+   @register.simple_tag(takes_context=True)
+   def next_runtime(context):
+       url = staticfiles_storage.url(NEXT_JS_STATIC_PATH)
+       builder = NextScriptBuilder.from_options(
+           url, next_framework_settings.NEXT_JS_OPTIONS
+       )
+       collector = context["_static_collector"]
+       return mark_safe(
+           builder.preload_link()
+           + builder.script_tag()
+           + builder.init_script(
+               collector.js_context(),
+               key_serializers=collector.js_context_serializers(),
+               encoded=collector.js_context_encoded(),
+           )
+       )
+
+A payload built this way carries no framework ``$csrf`` or ``$dev`` entry, because the static manager both claims and writes those keys only under ``AUTO``.
 
 Runtime script templates
 ------------------------

@@ -5,7 +5,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any, overload
 
-from next.utils import defining_file
+from next.introspect import defining_file
 
 from .backends import (
     ActionGuard,
@@ -80,12 +80,9 @@ def action(
 ) -> Callable[..., Any]:
     """Register a callable as a named form action.
 
-    Used bare or with no name the action is registered under the function's
-    own name. `form_class` accepts a factory callable or a Form class that
-    does not register its own endpoint. `scope` overrides the file-based
-    scope with 'page' or 'shared'. `login_required` and `permission_required`
-    guard the endpoint before origin resolution, `get_initial`, and form
-    binding, so no application code runs for a denied request.
+    `login_required` and `permission_required` guard the endpoint before origin
+    resolution, `get_initial`, and form binding, so no application code runs for a
+    denied request.
     """
     if isinstance(name, type):
         _record_class_misuse(name)

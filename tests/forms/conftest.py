@@ -20,8 +20,7 @@ def client_no_csrf():
 def _isolate_form_registries():
     """Snapshot and restore the form registry around each test.
 
-    Tests that add new actions see a clean slate relative to the import-time baseline.
-    The baseline is always restored for the next test.
+    Tests that add actions see a clean slate relative to the import-time baseline.
     """
     with isolated_form_registries():
         yield

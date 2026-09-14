@@ -7,9 +7,10 @@ from typing import TYPE_CHECKING
 from django.template import Context as DjangoTemplateContext
 
 from next.pages.manager import page
+from next.seeding import seed_collector
 from next.static.collector import default_placeholders
-from next.static.manager import default_manager
 
+from .errors import UnknownZoneError
 from .registry import zones_of
 from .signals import zone_rendered
 from .zone import render_zone_body
@@ -26,35 +27,12 @@ if TYPE_CHECKING:
     from .registry import ZoneInfo
 
 
-class UnknownZoneError(LookupError):
-    """Raised when a partial request names a zone the page does not declare.
-
-    The unified view turns this into a 400 before any zone renders, so a
-    typo or a stale client never trips a partial render. The message names
-    the declared zones so a builder-path typo points at what is available.
-    """
-
-    def __init__(self, zone_name: str, declared: tuple[str, ...] = ()) -> None:
-        """Store the unknown zone name and the declared zone names available."""
-        self.zone_name = zone_name
-        self.declared = declared
-        if declared:
-            names = ", ".join(repr(name) for name in declared)
-            message = f'Unknown zone "{zone_name}". Declared zones: {names}.'
-        else:
-            message = f'Unknown zone "{zone_name}".'
-        super().__init__(message)
-
-
 @dataclass(frozen=True, slots=True)
 class ZoneRenderResult:
     """Rendered zones plus the assets their bodies collected.
 
-    `html` maps each rendered zone name to its wrapped marker element and
-    `bodies` maps it to the bare inner body. A morph or replace addresses the
-    wrapped element, an append or prepend grafts the bare body into the live
-    zone. `collector` carries the co-located assets the bodies registered
-    so the caller can ship a manifest outward, past the no-op inject.
+    A morph or replace addresses the wrapped element in `html`, while an append or
+    prepend grafts the bare body in `bodies` into the live zone.
     """
 
     html: dict[str, str]
@@ -91,10 +69,8 @@ def render_zone(
 ) -> ZoneRenderResult:
     """Render the named zones of a page with the full page context.
 
-    The batch travels into the context build widened by the zones nested in the
-    requested bodies, so a `@context(zone=)` bound outside it never runs. An unknown
-    zone name is skipped so one stale name never poisons a batch, while a batch of only
-    unknown names raises and a single-zone request keeps its 400.
+    Widens the batch by the zones nested in the bodies, so a `@context(zone=)` on a
+    nested zone still runs. An unknown name is skipped, an all-unknown batch raises.
     """
     start = time.perf_counter()
     kwargs = url_kwargs or {}
@@ -112,7 +88,7 @@ def render_zone(
     if overrides:
         context_data.update(overrides)
 
-    collector = _seed_collector(page_path, context_data)
+    collector = seed_collector(page_path, context_data)
     django_context = DjangoTemplateContext(context_data)
 
     html: dict[str, str] = {}
@@ -135,10 +111,8 @@ def _renderable_zone_names(
 ) -> tuple[str, ...]:
     """Return the declared names of a batch, deduplicated in request order.
 
-    A name the page does not declare is dropped so one stale name never
-    poisons the batch. A non-empty batch left with no declared name raises,
-    naming the first unknown, so a single-zone request keeps its 400. An
-    empty batch stays the no-op it always was.
+    An undeclared name is dropped, so one stale name never poisons the batch, while a
+    batch left with nothing declared raises on the first unknown.
     """
     rendered = tuple(name for name in dict.fromkeys(zone_names) if name in zones)
     if zone_names and not rendered:
@@ -160,35 +134,11 @@ def _context_zone_names(
     return frozenset(widened)
 
 
-def _seed_collector(
-    page_path: "Path", context_data: dict[str, object]
-) -> "StaticCollector":
-    """Seed a fresh collector and bind it to the context like the page path.
-
-    The collector is hydrated with the JS context that
-    `build_render_context` left behind, page asset discovery runs, and
-    the collector is bound under `_static_collector` so component widgets
-    and co-located assets of the zone bodies register against it.
-    """
-    collector: StaticCollector = default_manager.create_collector()
-    js_context = context_data.pop("_next_js_context", {})
-    js_serializers = context_data.pop("_next_js_context_serializers", {})
-    if isinstance(js_context, dict):
-        serializers = js_serializers if isinstance(js_serializers, dict) else {}
-        for js_key, js_value in js_context.items():
-            collector.add_js_context(
-                js_key, js_value, serializer=serializers.get(js_key)
-            )
-    default_manager.discover_page_assets(page_path, collector)
-    context_data["_static_collector"] = collector
-    return collector
-
-
 def _emit_rendered(
     page_path: "Path", zone_names: tuple[str, ...], request: "HttpRequest", start: float
 ) -> None:
-    """Announce each rendered zone when the signal has receivers."""
-    if not zone_rendered.receivers:
+    """Announce each rendered zone, timing the render only for a listener."""
+    if not zone_rendered.has_listeners(ZoneRenderResult):
         return
     duration_ms = (time.perf_counter() - start) * 1000
     for name in zone_names:
@@ -201,4 +151,4 @@ def _emit_rendered(
         )
 
 
-__all__ = ["UnknownZoneError", "ZoneRenderResult", "render_zone"]
+__all__ = ["ZoneRenderResult", "render_zone"]

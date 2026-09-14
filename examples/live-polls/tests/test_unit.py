@@ -174,12 +174,8 @@ def _no_options(_vite_root: Path, _tmp_path: Path) -> dict[str, str]:
 class TestRefusalWithoutBuildOrDevServer:
     """Three failure modes raise `RuntimeError` with actionable messages.
 
-    Vue single-file components cannot be parsed by the browser as
-    plain modules. The kanban example falls back to staticfiles when
-    no manifest exists because raw `.jsx` is at least loadable as
-    plain JavaScript. A raw `.vue` file is unrenderable, so the
-    backend raises an actionable error rather than misleading the
-    user with a 200 that the browser cannot execute.
+    A raw `.vue` file is unrenderable, unlike the raw `.jsx` the kanban example falls
+    back to, so an actionable error beats a 200 the browser cannot execute.
     """
 
     @pytest.mark.parametrize(
@@ -416,10 +412,7 @@ class TestBrokerChangeLoop:
     def test_timeout_spins_until_a_real_change_arrives(self, poll: Poll) -> None:
         """A timeout with no new revision loops until a publish lands.
 
-        The loop continues on every timeout that carries no new
-        revision, so a quiet stream yields nothing. A consumer thread
-        spins on the loop until the test publishes, then the loop reads
-        the snapshot once and yields a single `Change`.
+        A consumer thread spins until the test publishes, then yields a single `Change`.
         """
         local = PollBroker()
         captured: list[object] = []
@@ -438,10 +431,8 @@ class TestBrokerChangeLoop:
     ) -> None:
         """A revision bump whose cache entry is missing loops without yielding.
 
-        The branch guards against a cache eviction that lands between
-        `notify_all` and the subscriber's `read_snapshot`. The consumer
-        thread spins past the bumped-but-evicted revision and yields only
-        once a real snapshot is cached and published.
+        The branch guards a cache eviction landing between `notify_all` and the
+        subscriber read, so the consumer spins past the evicted revision.
         """
         local = PollBroker()
         captured: list[object] = []

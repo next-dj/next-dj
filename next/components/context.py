@@ -1,9 +1,6 @@
 """Context registration for `component.py` modules.
 
-`ComponentContextManager` is the public handle used by decorator
-`@component.context` inside a `component.py` file. It records the file
-declaring each callable so the right context functions run when the
-matching component template is rendered.
+The file declaring each callable is recorded, so only its component's context runs.
 """
 
 from __future__ import annotations
@@ -13,18 +10,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, overload
 
-from next.checks.common import get_components_manager
+from next.caches import BoundedCache
 from next.deps import RESERVED_KEYS
-from next.utils import (
+from next.introspect import (
     MisattributedContext,
     MisattributionLog,
     callable_name,
     defining_file,
 )
+from next.utils import resolved_tree
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Sequence
+    from collections.abc import Callable, Sequence
 
     from next.static.serializers import JsContextSerializer
 
@@ -51,7 +49,11 @@ class ComponentContextRegistry:
         self._registry: dict[Path, dict[str | None, ContextFunction]] = {}
         self._misattributions = MisattributionLog()
         self._version = 0
-        self._lookup_cache: dict[Path, tuple[ContextFunction, ...]] = {}
+        # Bounded because a render may spell a component path no earlier render
+        # spelled, and a project holds far fewer components than the bound reaches.
+        self._lookup_cache: BoundedCache[Path, tuple[ContextFunction, ...]] = (
+            BoundedCache()
+        )
         self._lookup_version = 0
 
     @property
@@ -72,8 +74,8 @@ class ComponentContextRegistry:
     ) -> None:
         """Record a `@component.context` declared outside the running file.
 
-        The registration binds to `declared_in`, which no render of
-        `registered_from` reads, so the pair feeds the `next.E075` diagnostic.
+        The registration binds to `declared_in`, which no render of `registered_from`
+        reads, so the pair feeds the `next.E075` diagnostic.
         """
         self._misattributions.record(registered_from, declared_in, func)
 
@@ -94,7 +96,7 @@ class ComponentContextRegistry:
         serializer: JsContextSerializer | None = None,
     ) -> None:
         """Register `func` under `key` for `component_path`, rejecting reserved keys."""
-        path = component_path.resolve()
+        path = resolved_tree(component_path)
 
         if isinstance(key, str) and key in RESERVED_KEYS:
             msg = (
@@ -129,16 +131,14 @@ class ComponentContextRegistry:
 
     def unregister(self, component_path: Path) -> None:
         """Drop every context function registered for `component_path`."""
-        if self._registry.pop(component_path.resolve(), None) is not None:
+        if self._registry.pop(resolved_tree(component_path), None) is not None:
             self._bump()
 
     def get_functions(self, component_path: Path) -> Sequence[ContextFunction]:
         """Return a tuple of registered context functions for `component_path`.
 
-        Results are memoised under the path as passed and thrown away when
-        the registry version moves, so a render pays neither the resolve nor
-        the tuple build twice. The empty result is memoised too, because most
-        components register no context function at all.
+        Memoised under the path as passed, including the empty result, and dropped only
+        when the registry version moves, so a symlinked spelling costs its own entry.
         """
         if self._lookup_version != self._version:
             self._lookup_cache.clear()
@@ -146,7 +146,8 @@ class ComponentContextRegistry:
         cached = self._lookup_cache.get(component_path)
         if cached is not None:
             return cached
-        functions = tuple(self._registry.get(component_path.resolve(), {}).values())
+        resolved = resolved_tree(component_path)
+        functions = tuple(self._registry.get(resolved, {}).values())
         self._lookup_cache[component_path] = functions
         return functions
 
@@ -193,11 +194,8 @@ class ComponentContextManager:
     ) -> Callable[..., Any]:
         """Mark a function so it fills template variables for this component module.
 
-        Pass `serialize=True` to include the return value in
-        `Next.context` so JavaScript code on the page can read it via
-        `window.Next.context`. Pass `serializer=` to route this key
-        through a custom `JsContextSerializer` instead of the global
-        `JS_CONTEXT_SERIALIZER` setting.
+        `serialize=True` publishes the return value on `window.Next.context`, and
+        `serializer=` overrides the global `JS_CONTEXT_SERIALIZER` for this key.
         """
         # Captured here rather than inside the decorator so both spellings see
         # the component.py that ran `@component.context`, not this module.
@@ -224,28 +222,10 @@ component = ComponentContextManager()
 context = component.context
 
 
-def iter_serialized_component_context_keys() -> Iterator[tuple[Path, str]]:
-    """Yield the `component.py` path and key of every keyed `serialize=True` context.
-
-    A keyless `serialize=True` callable spreads the keys of the dict it
-    returns at render time, so those keys exist only at runtime and never
-    travel through here. Reading the keys imports every `component.py`, since
-    the decorator state is the truth, so a check calling this pays that import
-    even under `LAZY_COMPONENT_MODULES`.
-    """
-    manager = get_components_manager()
-    for backend in manager.backends:
-        for module_path in backend.import_component_modules():
-            for entry in component.get_functions(module_path):
-                if entry.serialize and entry.key is not None:
-                    yield module_path, entry.key
-
-
 __all__ = [
     "ComponentContextManager",
     "ComponentContextRegistry",
     "ContextFunction",
     "component",
     "context",
-    "iter_serialized_component_context_keys",
 ]

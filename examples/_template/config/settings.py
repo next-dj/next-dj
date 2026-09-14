@@ -69,10 +69,8 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 
-# The shared next.dj examples UI kit lives one level up under
-# examples/_shared/. Pull its static files and root component tree
-# into this project so templates can render shadcn-style components
-# (button, card, badge, …) via `{% component "button" %}`.
+# The shared UI kit under examples/_shared/ supplies the static files and root component
+# tree that shadcn-style components such as `{% component "button" %}` render from.
 SHARED_DIR = BASE_DIR.parent / "_shared"
 STATICFILES_DIRS = [BASE_DIR / "static", SHARED_DIR / "static"]
 

@@ -12,7 +12,8 @@ from django.http import (
     HttpResponseRedirect,
 )
 
-from next.deps import REQUEST_DEP_CACHE_ATTR, resolver
+from next.deps import REQUEST_DEP_CACHE_ATTR
+from next.deps.resolver import current_resolver
 from next.forms.origin import resolve_origin
 from next.forms.signals import (
     action_dispatched,
@@ -57,8 +58,7 @@ logger = logging.getLogger(__name__)
 class FormActionDispatch:
     """Shared POST pipeline and response shaping for backends.
 
-    The class is also the sender of every dispatch-time signal, so it stays
-    the one stable identity receivers filter on.
+    The class sends every dispatch-time signal, the one identity receivers filter on.
     """
 
     # The documented address a custom backend that drives the pipeline by
@@ -156,7 +156,7 @@ class FormActionDispatch:
         action_name: str,
         state: "_DispatchState",
     ) -> HttpResponse:
-        resolved = resolver.resolve_dependencies(
+        resolved = current_resolver().resolve_dependencies(
             handler,
             request=request,
             _cache=state.dep_cache,
@@ -223,7 +223,7 @@ class FormActionDispatch:
 
         if params.handler is None:
             next_form = cast("NextBaseForm", form)
-            resolved = resolver.resolve_dependencies(
+            resolved = current_resolver().resolve_dependencies(
                 next_form.on_valid,
                 request=request,
                 _cache=state.dep_cache,
@@ -233,7 +233,7 @@ class FormActionDispatch:
             start = time.perf_counter()
             raw = next_form.on_valid(**resolved)
         else:
-            resolved = resolver.resolve_dependencies(
+            resolved = current_resolver().resolve_dependencies(
                 params.handler,
                 request=request,
                 form=form,
@@ -332,8 +332,8 @@ class _DispatchState:
         duration_ms: float,
         response: HttpResponse,
     ) -> None:
-        """Send `action_dispatched` when any receiver is connected."""
-        if action_dispatched.receivers:
+        """Send `action_dispatched` when a receiver listens for this sender."""
+        if action_dispatched.has_listeners(FormActionDispatch):
             action_dispatched.send(
                 sender=FormActionDispatch,
                 action_name=action_name,
@@ -349,8 +349,8 @@ class _DispatchState:
     def emit_form_validation_failed(
         self, request: "HttpRequest", action_name: str, form: "django_forms.Form"
     ) -> None:
-        """Send `form_validation_failed` when any receiver is connected."""
-        if form_validation_failed.receivers:
+        """Send `form_validation_failed` when a receiver listens for this sender."""
+        if form_validation_failed.has_listeners(FormActionDispatch):
             error_count = sum(len(errors) for errors in form.errors.values())
             form_validation_failed.send(
                 sender=FormActionDispatch,
@@ -368,8 +368,8 @@ class _DispatchState:
         step_name: str,
         cleaned: dict[str, Any],
     ) -> None:
-        """Send `wizard_step_submitted` when any receiver is connected."""
-        if wizard_step_submitted.receivers:
+        """Send `wizard_step_submitted` when a receiver listens for this sender."""
+        if wizard_step_submitted.has_listeners(wizard_class):
             wizard_step_submitted.send(
                 sender=wizard_class,
                 step=step_name,
@@ -384,8 +384,8 @@ class _DispatchState:
         wizard_class: "type[FormWizard]",
         merged: dict[str, Any],
     ) -> None:
-        """Send `wizard_completed` when any receiver is connected."""
-        if wizard_completed.receivers:
+        """Send `wizard_completed` when a receiver listens for this sender."""
+        if wizard_completed.has_listeners(wizard_class):
             wizard_completed.send(
                 sender=wizard_class, cleaned_data=merged, uid=self.uid, request=request
             )

@@ -21,6 +21,9 @@ This section covers how each surface protects against common attacks and how to 
 :doc:`di-and-untrusted-input`
    Treating URL, query, and form values as untrusted.
 
+:doc:`file-uploads`
+   Limits, validation, and serving rules for user-supplied files.
+
 :doc:`reporting`
    How to disclose a vulnerability privately.
 
@@ -33,4 +36,5 @@ This section covers how each surface protects against common attacks and how to 
    static-assets
    csp-and-nonce
    di-and-untrusted-input
+   file-uploads
    reporting

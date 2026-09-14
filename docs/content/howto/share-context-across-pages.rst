@@ -21,8 +21,9 @@ Add the context function to the segment's ``page.py``.
 .. code-block:: python
    :caption: notes/pages/page.py
 
-   from next import context
    from notes.models import Note
+
+   from next import context
 
    @context("note_count", inherit_context=True)
    def note_count() -> int:
@@ -36,7 +37,7 @@ Use the value from the layout and from any descendant page.
    <header>
      There are {{ note_count }} notes.
    </header>
-   {% block template %}{% endblock template %}
+   {% template %}
 
 The value is injected into the shared context dict for that request, so both the layout wrappers and every descendant page template can read it.
 

@@ -12,13 +12,14 @@ from django.template import Template
 from django.test import override_settings
 
 import next.pages.loaders as loaders_module
-from next.checks import _load_python_module
 from next.pages import Page, context, page
 from next.pages.loaders import (
     LayoutTemplateLoader,
     PageModuleImportError,
     TemplateLoader,
+    _load_python_module,
     _load_python_module_memo,
+    build_registered_loaders,
 )
 from next.pages.registry import PageContextRegistry
 from next.static import default_manager as static_default_manager
@@ -35,7 +36,7 @@ class TestPage:
 
     def test_init(self, page_instance) -> None:
         """A fresh ``Page`` starts with empty registries and its own layout loader."""
-        assert page_instance._template_registry == {}
+        assert not page_instance._templates.composed
         assert isinstance(page_instance._context_manager, PageContextRegistry)
         assert isinstance(page_instance._layout_loader, LayoutTemplateLoader)
 
@@ -46,8 +47,8 @@ class TestPage:
 
         page_instance.register_template(file_path, template_str)
 
-        assert file_path in page_instance._template_registry
-        assert page_instance._template_registry[file_path] == template_str
+        assert file_path in page_instance._templates.composed
+        assert page_instance._templates.composed[file_path] == template_str
 
     def test_clear_template_caches_recomposes_a_rewritten_page(
         self, page_instance, tmp_path
@@ -70,18 +71,18 @@ class TestPage:
         """One call drops every composed layer and the mtimes behind them."""
         file_path = Path("/test/path/page.py")
         page_instance.register_template(file_path, "<p>x</p>")
-        page_instance._compiled_registry[file_path] = Template("<p>x</p>")
-        page_instance._template_source_mtimes[file_path] = {}
-        page_instance._skeleton_registry[file_path] = "<p>x</p>"
-        page_instance._skeleton_source_mtimes[file_path] = {}
+        page_instance._templates.compiled[file_path] = Template("<p>x</p>")
+        page_instance._templates.composed_sources[file_path] = {}
+        page_instance._templates.skeleton[file_path] = "<p>x</p>"
+        page_instance._templates.skeleton_sources[file_path] = {}
 
         page_instance.clear_template_caches()
 
-        assert page_instance._template_registry == {}
-        assert page_instance._compiled_registry == {}
-        assert page_instance._template_source_mtimes == {}
-        assert page_instance._skeleton_registry == {}
-        assert page_instance._skeleton_source_mtimes == {}
+        assert not page_instance._templates.composed
+        assert not page_instance._templates.compiled
+        assert not page_instance._templates.composed_sources
+        assert not page_instance._templates.skeleton
+        assert not page_instance._templates.skeleton_sources
 
     @pytest.mark.parametrize(
         ("decorator_type", "expected_key"),
@@ -260,9 +261,7 @@ class TestPage:
         layout_dir = tmp_path / "layout_dir"
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
-        layout_file.write_text(
-            "<html>{% block template %}{% endblock template %}</html>"
-        )
+        layout_file.write_text("<html>{% template %}</html>")
 
         page_file = layout_dir / "page.py"
         page_file.write_text("")
@@ -292,9 +291,7 @@ class TestPage:
         layout_dir = tmp_path / "layout_dir"
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
-        layout_file.write_text(
-            "<html>{% block template %}{% endblock template %}</html>"
-        )
+        layout_file.write_text("<html>{% template %}</html>")
 
         page_file = layout_dir / "page.py"
         page_file.write_text("")
@@ -374,15 +371,15 @@ class TestPageHasTemplateAndLazyRender:
         page_file = tmp_path / "page.py"
         page_file.write_text("y = 2")
         (tmp_path / "template.djx").write_text("<h1>{{ title }}</h1>")
-        assert page_file not in page_instance._template_registry
+        assert page_file not in page_instance._templates.composed
         result = page_instance.render(page_file, title="Lazy")
-        assert page_file in page_instance._template_registry
+        assert page_file in page_instance._templates.composed
         assert "Lazy" in result
 
     def test_render_with_no_body_source_returns_empty_block(
         self, page_instance, tmp_path
     ) -> None:
-        """Page.render returns an empty `{% block template %}` slot when no source exists."""
+        """Page.render returns an empty placeholder when no body source exists."""
         page_file = tmp_path / "page.py"
         page_file.write_text("y = 1")
         result = page_instance.render(page_file)
@@ -455,22 +452,22 @@ class TestGlobalPageInstance:
     def clear_global_state(self):
         """Give each test a clean global page state, then restore the baseline.
 
-        The global `page` singleton holds the context providers every page
-        registered at URL-conf build time. A bare clear would strip those
-        from whatever worker runs this class under xdist, so a later page
-        render on the same worker would find no providers. Snapshotting and
-        restoring keeps the suite order-independent.
+        The global `page` singleton holds providers registered at URL-conf build time,
+        so a bare clear would leave a later render on the same xdist worker with none.
         """
-        template_snapshot = dict(page._template_registry)
+        template_snapshot = {
+            path: page._templates.composed[path] for path in page._templates.composed
+        }
         context_snapshot = {
             path: dict(entries)
             for path, entries in page._context_manager._context_registry.items()
         }
-        page._template_registry.clear()
+        page._templates.composed.clear()
         page._context_manager._context_registry.clear()
         yield
-        page._template_registry.clear()
-        page._template_registry.update(template_snapshot)
+        page._templates.composed.clear()
+        for path, source in template_snapshot.items():
+            page._templates.composed[path] = source
         page._context_manager._context_registry.clear()
         page._context_manager._context_registry.update(context_snapshot)
 
@@ -478,8 +475,8 @@ class TestGlobalPageInstance:
         """The exported ``page`` is a ``Page`` carrying the same registries."""
         assert page is not None
         assert isinstance(page, Page)
-        assert page._template_registry == {}
-        assert page._context_manager._context_registry == {}
+        assert not page._templates.composed
+        assert not page._context_manager._context_registry
 
     def test_context_alias(self) -> None:
         """The exported ``context`` is the singleton's own bound decorator."""
@@ -490,8 +487,8 @@ class TestGlobalPageInstance:
         template_str = "Global template: {{ message }}"
         page.register_template(global_file_path, template_str)
 
-        assert global_file_path in page._template_registry
-        assert page._template_registry[global_file_path] == template_str
+        assert global_file_path in page._templates.composed
+        assert page._templates.composed[global_file_path] == template_str
 
     def test_global_page_context_registration(self) -> None:
         """A context function registered on the singleton lands in its registry."""
@@ -600,9 +597,7 @@ class TestLayoutIntegration:
     ) -> None:
         """A pattern built before any render still renders through the ancestor layout."""
         layout_file = tmp_path / "layout.djx"
-        layout_content = (
-            "<html><body>{% block template %}{% endblock template %}</body></html>"
-        )
+        layout_content = "<html><body>{% template %}</body></html>"
         layout_file.write_text(layout_content)
 
         sub_dir = tmp_path / "sub"
@@ -620,15 +615,11 @@ class TestLayoutIntegration:
 
     def test_render_with_layout_inheritance(self, page_instance, tmp_path) -> None:
         """`Page.render` nests a sibling layout inside its ancestor layout."""
-        (tmp_path / "layout.djx").write_text(
-            "<html><body>{% block template %}{% endblock template %}</body></html>"
-        )
+        (tmp_path / "layout.djx").write_text("<html><body>{% template %}</body></html>")
 
         sub_dir = tmp_path / "sub"
         sub_dir.mkdir()
-        (sub_dir / "layout.djx").write_text(
-            "<main>{% block template %}{% endblock template %}</main>"
-        )
+        (sub_dir / "layout.djx").write_text("<main>{% template %}</main>")
         (sub_dir / "template.djx").write_text("<h1>{{ title }}</h1>")
 
         page_file = sub_dir / "page.py"
@@ -637,16 +628,14 @@ class TestLayoutIntegration:
         assert result.startswith("<html><body><main>")
         assert "<h1>Test</h1>" in result
         assert result.endswith("</main></body></html>")
-        assert "{% block template %}" not in result
+        assert "{% template %}" not in result
 
     def test_render_composes_template_djx_under_ancestor_layout(
         self, page_instance, tmp_path
     ) -> None:
         """Page.render wraps the sibling template.djx body through ancestor layouts."""
         layout_file = tmp_path / "layout.djx"
-        layout_file.write_text(
-            "<html><body>{% block template %}{% endblock template %}</body></html>"
-        )
+        layout_file.write_text("<html><body>{% template %}</body></html>")
 
         sub_dir = tmp_path / "sub"
         sub_dir.mkdir()
@@ -659,7 +648,7 @@ class TestLayoutIntegration:
         assert "<html><body>" in result
         assert "<h1>Hi</h1>" in result
         assert "</body></html>" in result
-        assert page_file in page_instance._template_registry
+        assert page_file in page_instance._templates.composed
 
     def test_render_with_layout_template_detection(
         self, page_instance, tmp_path
@@ -717,19 +706,17 @@ class TestUnifiedViewBodyResolution:
 
     @pytest.fixture(autouse=True)
     def _isolate(self):
-        page._template_registry.clear()
-        page._template_source_mtimes.clear()
+        page._templates.composed.clear()
+        page._templates.composed_sources.clear()
         yield
-        page._template_registry.clear()
-        page._template_source_mtimes.clear()
+        page._templates.composed.clear()
+        page._templates.composed_sources.clear()
 
     def test_template_attribute_with_ancestor_layout_composes(
         self, page_instance, tmp_path
     ) -> None:
         """`template = "..."` flows through an ancestor `layout.djx`."""
-        (tmp_path / "layout.djx").write_text(
-            "<html><body>{% block template %}{% endblock template %}</body></html>"
-        )
+        (tmp_path / "layout.djx").write_text("<html><body>{% template %}</body></html>")
         page_dir = tmp_path / "sub"
         page_dir.mkdir()
         page_file = page_dir / "page.py"
@@ -746,9 +733,7 @@ class TestUnifiedViewBodyResolution:
         self, page_instance, tmp_path
     ) -> None:
         """`render()` returning a string flows through the ancestor layout."""
-        (tmp_path / "layout.djx").write_text(
-            "<html><body>{% block template %}{% endblock template %}</body></html>"
-        )
+        (tmp_path / "layout.djx").write_text("<html><body>{% template %}</body></html>")
         page_dir = tmp_path / "sub"
         page_dir.mkdir()
         page_file = page_dir / "page.py"
@@ -766,9 +751,7 @@ class TestUnifiedViewBodyResolution:
         self, page_instance, tmp_path
     ) -> None:
         """`render()` returning HttpResponse is returned verbatim, no layout."""
-        (tmp_path / "layout.djx").write_text(
-            "<html><body>{% block template %}{% endblock template %}</body></html>"
-        )
+        (tmp_path / "layout.djx").write_text("<html><body>{% template %}</body></html>")
         page_dir = tmp_path / "sub"
         page_dir.mkdir()
         page_file = page_dir / "page.py"
@@ -788,9 +771,7 @@ class TestUnifiedViewBodyResolution:
         self, page_instance, tmp_path
     ) -> None:
         """`HttpResponseRedirect` (an HttpResponse subclass) is returned verbatim."""
-        (tmp_path / "layout.djx").write_text(
-            "<html>{% block template %}{% endblock template %}</html>"
-        )
+        (tmp_path / "layout.djx").write_text("<html>{% template %}</html>")
         page_dir = tmp_path / "sub"
         page_dir.mkdir()
         page_file = page_dir / "page.py"
@@ -809,9 +790,7 @@ class TestUnifiedViewBodyResolution:
         self, page_instance, tmp_path
     ) -> None:
         """`JsonResponse` (an HttpResponse subclass) is returned verbatim."""
-        (tmp_path / "layout.djx").write_text(
-            "<html>{% block template %}{% endblock template %}</html>"
-        )
+        (tmp_path / "layout.djx").write_text("<html>{% template %}</html>")
         page_dir = tmp_path / "sub"
         page_dir.mkdir()
         page_file = page_dir / "page.py"
@@ -888,9 +867,7 @@ class TestUnifiedViewBodyResolution:
         self, page_instance, tmp_path
     ) -> None:
         """A page with no body source still renders the ancestor layout's shell."""
-        (tmp_path / "layout.djx").write_text(
-            "<html><body>{% block template %}{% endblock template %}</body></html>"
-        )
+        (tmp_path / "layout.djx").write_text("<html><body>{% template %}</body></html>")
         page_dir = tmp_path / "sub"
         page_dir.mkdir()
         page_file = page_dir / "page.py"
@@ -1014,9 +991,7 @@ class TestBrokenPageImportView:
         self, page_instance, tmp_path, url_parser, broken_source
     ) -> None:
         """With both flags off the broken page answers 404, never a sibling body."""
-        (tmp_path / "layout.djx").write_text(
-            "<html><body>{% block template %}{% endblock template %}</body></html>"
-        )
+        (tmp_path / "layout.djx").write_text("<html><body>{% template %}</body></html>")
         _page_file, pattern = self._broken_pattern(
             page_instance, tmp_path, url_parser, broken_source
         )
@@ -1147,6 +1122,23 @@ class TestAuthorizationOutcomeBrokenPage:
             page_instance.authorization_outcome(page_file, build_page_request())
 
 
+class TestAuthorizationOutcomeVirtualPage:
+    """`authorization_outcome` on a page whose body comes from `template.djx` alone."""
+
+    def test_a_page_without_a_module_resolves_its_static_body(
+        self, page_instance, tmp_path
+    ) -> None:
+        """A `template.djx`-only page has no module to carry a guard or a render."""
+        (tmp_path / "template.djx").write_text("<p>virtual</p>")
+
+        response, dynamic = page_instance.authorization_outcome(
+            tmp_path / "page.py", build_page_request()
+        )
+
+        assert response is None
+        assert dynamic is False
+
+
 class TestLoadStaticBodyEdgeCases:
     """`Page._load_static_body` edge cases."""
 
@@ -1164,9 +1156,7 @@ class TestLoadStaticBodyEdgeCases:
         self, page_instance, tmp_path
     ) -> None:
         """`has_template` short-circuits to True when an ancestor layout applies."""
-        (tmp_path / "layout.djx").write_text(
-            "<main>{% block template %}{% endblock template %}</main>"
-        )
+        (tmp_path / "layout.djx").write_text("<main>{% template %}</main>")
         sub = tmp_path / "sub"
         sub.mkdir()
         page_file = sub / "page.py"
@@ -1184,26 +1174,19 @@ class TestLayoutComposeBody:
         loader = LayoutTemplateLoader()
         assert loader.compose_body("<p>hi</p>", page_file) == "<p>hi</p>"
 
-    def test_ancestor_layout_wraps_body_in_block(self, tmp_path) -> None:
-        """Without a sibling layout the body is wrapped in a `{% block template %}`."""
-        (tmp_path / "layout.djx").write_text(
-            "<main>{% block template %}{% endblock template %}</main>"
-        )
+    def test_ancestor_layout_wraps_body_in_placeholder(self, tmp_path) -> None:
+        """Without a sibling layout the body becomes a paired placeholder fallback."""
+        (tmp_path / "layout.djx").write_text("<main>{% template %}</main>")
         sub = tmp_path / "sub"
         sub.mkdir()
         page_file = sub / "page.py"
         loader = LayoutTemplateLoader()
         result = loader.compose_body("<p>body</p>", page_file)
-        assert (
-            result
-            == "<main>{% block template %}<p>body</p>{% endblock template %}</main>"
-        )
+        assert result == "<main>{% #template %}<p>body</p>{% /template %}</main>"
 
     def test_sibling_layout_substitutes_body_directly(self, tmp_path) -> None:
         """With a sibling layout the body replaces the placeholder verbatim."""
-        (tmp_path / "layout.djx").write_text(
-            "<section>{% block template %}{% endblock template %}</section>"
-        )
+        (tmp_path / "layout.djx").write_text("<section>{% template %}</section>")
         page_file = tmp_path / "page.py"
         loader = LayoutTemplateLoader()
         result = loader.compose_body("<p>body</p>", page_file)
@@ -1232,23 +1215,20 @@ class TestCustomTemplateLoaderIntegration:
 
     @pytest.fixture(autouse=True)
     def _install_md_loader(self):
-        # the cache is a single-slot holder mutated in place, never rebound,
-        # so a stale value on this worker cannot break the production reads
-        loaders_module._REGISTERED_LOADERS_CACHE["value"] = [_MdLoader()]
-        page._template_registry.clear()
-        page._template_source_mtimes.clear()
-        yield
-        loaders_module._REGISTERED_LOADERS_CACHE["value"] = None
-        page._template_registry.clear()
-        page._template_source_mtimes.clear()
+        with override_settings(
+            NEXT_FRAMEWORK={"TEMPLATE_LOADERS": ["tests.pages.test_manager._MdLoader"]}
+        ):
+            build_registered_loaders.cache_clear()
+            page.clear_template_caches()
+            yield
+        build_registered_loaders.cache_clear()
+        page.clear_template_caches()
 
     def test_custom_loader_body_is_rendered_through_layout(
         self, page_instance, tmp_path
     ) -> None:
         """A custom loader for `template.md` feeds `_load_static_body`."""
-        (tmp_path / "layout.djx").write_text(
-            "<html>{% block template %}{% endblock template %}</html>"
-        )
+        (tmp_path / "layout.djx").write_text("<html>{% template %}</html>")
         page_dir = tmp_path / "post"
         page_dir.mkdir()
         (page_dir / "template.md").write_text("hello")
@@ -1286,5 +1266,5 @@ class TestCustomTemplateLoaderIntegration:
         md.write_text("body")
         page_file = tmp_path / "page.py"
         page_file.write_text("")
-        paths = page_instance._get_template_source_paths(page_file)
+        paths = page_instance._templates.source_paths(page_file)
         assert md in paths

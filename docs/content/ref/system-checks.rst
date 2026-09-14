@@ -20,6 +20,7 @@ The list continues with ``next.static.checks``, ``next.partial.checks``, and ``n
 Each of these modules registers checks.
 
 Every next.dj check carries the ``next`` tag.
+That tag is the importable string constant ``next.checks.NEXT``, so a project check joins the framework ones by decorating itself with ``@register(NEXT)`` rather than by repeating the literal.
 Run ``uv run python manage.py check --tag next`` to execute only the framework checks and skip the built-in Django and third-party ones.
 Checks that also concern templates or URL patterns keep their :doc:`Django tags <django:ref/checks>` (``templates``, ``urls``) alongside ``next``, so filtering by those tags still reaches them.
 A tagged run reports what a full run reports.
@@ -30,11 +31,29 @@ The cached state covers the router and components managers, the composed-pages m
 Most of these caches also clear on ``settings_reloaded``, which a ``NEXT_FRAMEWORK`` change through ``override_settings`` triggers.
 Tests and scripts that invoke checks directly and mutate the page or component tree in place call ``reset_check_caches`` explicitly, since the caches otherwise freeze the scanned state for the lifetime of the process.
 
+Silencing a check
+~~~~~~~~~~~~~~~~~
+
+Django's ``SILENCED_SYSTEM_CHECKS`` setting takes a list of check ids and drops those messages from every run, framework ids included.
+An id is the exact string the message carries, ``next.W059`` rather than a tag or a module path, so one entry silences one condition and leaves every other framework check in place.
+The :doc:`Django settings reference <django:ref/settings>` documents the setting itself, and :doc:`django:ref/checks` covers the rest of the check framework.
+
+Silencing answers a deliberate shape the check cannot recognise as intended, and it is the wrong answer to a defect the check names correctly.
+The :repo:`audit-forms <tree/main/examples/audit-forms>` example earns ``next.W059``, which reports that two static wizard steps declare the same field name and that ``get_all_cleaned_data()`` keeps only the last value.
+That wizard repeats one acknowledgement field across its three steps on purpose and reads the answer per step rather than out of the merged mapping, so the collapse the warning describes costs the project nothing and the id sits in ``SILENCED_SYSTEM_CHECKS`` beside a comment naming the reason.
+
+A silenced check stays visible in the run.
+``manage.py check`` counts the messages it dropped and closes with that number, so the setting hides the text of a message and never the fact that the project runs against the advice of a check.
+
+.. warning::
+
+   Silencing ``next.E077`` hides the one condition that means the whole ``NEXT_FRAMEWORK`` setting is ignored, so every value the project set in it is lost and the process runs on the framework defaults.
+
 Shared helpers
 ~~~~~~~~~~~~~~
 
 ``next.checks.common`` holds helpers reused across subsystem check modules.
-It is imported indirectly by those modules rather than by ``register_all``.
+It is imported indirectly by those modules rather than by ``register_all``, and the router manager and the page-tree walk it passes on live in ``next.discovery``, outside this package, because production code reads them too.
 
 .. automodule:: next.checks.common
    :members:
@@ -117,12 +136,10 @@ Errors
    * - Code
      - Condition
      - Emitted by
-   * - ``next.E001``
-     - ``NEXT_FRAMEWORK`` is not a dict, or ``PAGE_BACKENDS`` is not a list.
-     - ``next.urls.checks``
    * - ``next.E002``
-     - A ``PAGE_BACKENDS`` or ``COMPONENT_BACKENDS`` entry is not a dict.
-     - ``next.urls.checks``, ``next.components.checks``
+     - A ``PAGE_BACKENDS`` entry is not a dict.
+       The ``COMPONENT_BACKENDS`` counterpart is ``next.E079``.
+     - ``next.urls.checks``
    * - ``next.E003``
      - A page backend entry does not specify ``BACKEND``.
      - ``next.urls.checks``
@@ -137,9 +154,9 @@ Errors
      - ``next.urls.checks``
    * - ``next.E007``
      - The router manager fails to initialize.
-     - ``next.checks.common``
+     - ``next.discovery``
    * - ``next.E008``
-     - A ``[param]`` directory uses invalid parameter syntax.
+     - A ``[param]`` directory uses invalid parameter syntax, names a converter Django has no registration for, or names a parameter that is no Python identifier.
      - ``next.pages.checks``
    * - ``next.E009``
      - A ``[[args]]`` directory uses invalid or incomplete args syntax.
@@ -151,7 +168,7 @@ Errors
      - An error was raised while checking page functions.
      - ``next.pages.checks``
    * - ``next.E012``
-     - A ``page.py`` has no body source: no ``render`` function, no ``template`` attribute, no loader match, and no sibling ``layout.djx``.
+     - A ``page.py`` has no body source, meaning no ``render`` function, no ``template`` attribute, no loader match, and no sibling ``layout.djx``.
      - ``next.pages.checks``
    * - ``next.E013``
      - A page ``render`` attribute is not callable.
@@ -198,8 +215,9 @@ Errors
      - A file router entry is missing ``OPTIONS``.
      - ``next.urls.checks``
    * - ``next.E027``
-     - A ``COMPONENTS_DIR`` or ``PAGES_DIR`` value is not a string.
-     - ``next.components.checks``, ``next.urls.checks``
+     - A ``PAGES_DIR`` value is not a string.
+       The ``COMPONENTS_DIR`` counterpart is ``next.E080``.
+     - ``next.urls.checks``
    * - ``next.E028``
      - A route repeats one or more bracket parameter names, all listed in the error.
      - ``next.urls.checks``
@@ -330,19 +348,35 @@ Errors
    * - ``next.E076``
      - A ``NEXT_FRAMEWORK`` value has a type the settings merge silently drops in favour of the framework default.
        The check covers ``PAGE_BACKENDS``, ``COMPONENT_BACKENDS``, ``STATIC_BACKENDS``, and ``TEMPLATE_LOADERS`` as lists.
-       It also covers ``URL_NAME_TEMPLATE``, ``URL_RESOLVER``, and ``DEPENDENCY_RESOLVER`` as strings and ``NEXT_JS_OPTIONS`` as a dict.
-       ``PARTIAL_BACKENDS``, ``FORM_ACTION_BACKENDS``, and ``FORM_ANCHOR_FILES`` carry their own per-key checks, ``next.E067``, ``next.E044``, and ``next.E052``, so this probe leaves them out.
+       It also covers ``COMPONENT_TEMPLATE_LOADER``, ``DEPENDENCY_RESOLVER``, ``URL_NAME_TEMPLATE``, and ``URL_RESOLVER`` as strings and ``NEXT_JS_OPTIONS`` as a dict.
+       ``PARTIAL_BACKENDS``, ``FORM_ACTION_BACKENDS``, ``FORM_ANCHOR_FILES``, ``FORM_WIZARD_BACKEND``, and ``JS_CONTEXT_SERIALIZER`` carry their own per-key checks, ``next.E067``, ``next.E044``, ``next.E052``, ``next.E051``, and ``next.W042``, so this probe leaves them out.
      - ``next.conf.checks``
    * - ``next.E077``
      - ``NEXT_FRAMEWORK`` is not a dict, so the settings layer ignores it entirely and the project runs on the framework defaults.
        It carries its own code rather than sharing ``next.E076``, so silencing the noise from one mistyped key never silences this one.
        The per-key probes are skipped, because there is nothing to index into.
+       No other area repeats the condition under a code of its own, so one mistyped setting costs one error.
      - ``next.conf.checks``
    * - ``next.E078``
      - A ``@context(zone=)`` names a zone the composed page template does not declare, so no zone request ever matches the callable and its value is missing from every zone render.
      - ``next.partial.checks``
+   * - ``next.E079``
+     - A ``COMPONENT_BACKENDS`` entry is not a dict.
+       It carries its own code rather than sharing ``next.E002`` with ``PAGE_BACKENDS``, so silencing one settings key never silences the other.
+     - ``next.components.checks``
+   * - ``next.E080``
+     - A ``COMPONENTS_DIR`` value is not a string.
+       It carries its own code rather than sharing ``next.E027`` with ``PAGES_DIR``, for the same reason.
+     - ``next.components.checks``
+   * - ``next.E081``
+     - ``NEXT_FRAMEWORK['PAGE_BACKENDS']`` is not a list, so no page backend entry can be read.
+     - ``next.urls.checks``
+   * - ``next.E082``
+     - A route names a bracket parameter Django refuses as a route name, so the route reaches neither the URLconf nor the conflict map.
+       The directory-level counterpart is ``next.E008``, which reads the same normalisation rule.
+     - ``next.urls.checks``
 
-A code emitted by ``next.checks.common`` is produced by a shared helper that the listed subsystem check modules call.
+A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.
 
 Warnings
 ~~~~~~~~
@@ -355,7 +389,8 @@ Warnings
      - Condition
      - Emitted by
    * - ``next.W001``
-     - A ``layout.djx`` is missing the required ``{% block template %}``.
+     - A ``layout.djx`` carries no ``{% template %}`` placeholder, so composition drops the layout and the pages under it render without its markup.
+       The paired ``{% #template %}`` form, whose body is a fallback, counts as the placeholder too.
      - ``next.pages.checks``
    * - ``next.W002``
      - A directory named by ``PAGES_DIR`` sits beside the working directory, holds pages, and no configured router routes it, so nothing under it is served.
@@ -427,7 +462,7 @@ Warnings
        Partial rendering uses a single protocol backend, so only the first entry runs and the rest are ignored.
      - ``next.partial.checks``
    * - ``next.W072``
-     - A ``NEXT_FRAMEWORK`` bool key, ``STRICT_CONTEXT``, ``STRICT_LOADING``, ``LAZY_COMPONENT_MODULES``, or ``FORM_AUTODISCOVER``, holds a non-bool value.
+     - A ``NEXT_FRAMEWORK`` bool key, ``STRICT_CONTEXT``, ``STRICT_LOADING``, ``LAZY_COMPONENT_MODULES``, ``FORM_AUTODISCOVER``, or ``STATIC_DISCOVERY_CACHE``, holds a non-bool value.
        The ``bool()`` coercion turns a falsy-looking string such as ``'False'`` into ``True``, so the written value can mean the opposite of the intent.
      - ``next.conf.checks``
    * - ``next.W074``
@@ -447,6 +482,11 @@ Warnings
      - ``next.static.checks``
    * - ``next.W077``
      - A ``@context`` parameter names the key of another ``@context`` bound to a zone the reader does not share, so a request outside that zone skips the provider and the reader runs with ``None``.
+     - ``next.pages.checks``
+   * - ``next.W078``
+     - A ``layout.djx`` carries more than one ``{% template %}`` placeholder.
+       Composition fills the first one and every other renders its own fallback instead of the page.
+       It carries its own code rather than sharing ``next.W001``, so silencing one layout mistake never silences the other.
      - ``next.pages.checks``
 
 .. note::

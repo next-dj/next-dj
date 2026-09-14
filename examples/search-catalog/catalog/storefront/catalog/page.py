@@ -10,11 +10,8 @@ from next import context
 def filter_zones() -> str:
     """Name every zone the live filter re-renders on the all-products listing.
 
-    Page-local, never inherited, so the value stops at this listing. The
-    filter panel renders inside the shared `catalog/` layout and reads this
-    key to decide whether it may target zones at all. The product detail
-    page leaves it unset, so the same panel falls back to a plain GET
-    instead of asking for zones that page never declares.
+    Page-local and never inherited, so the filter panel in the shared layout targets
+    zones here and falls back to a plain GET on the product detail page.
     """
     return zone_target(LISTING_ZONES)
 

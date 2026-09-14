@@ -84,9 +84,11 @@ Create ``tests/test_notes_e2e.py``.
        assert response.status_code == 200
        assert "Second" in response.content.decode()
 
-``NextClient`` extends Django's test client with two shortcuts for form actions.
+``NextClient`` extends Django's test client with three shortcuts, two for form actions and one for zone requests.
 ``post_action`` resolves an action name to its URL and POSTs in one call, and its ``origin`` keyword fills the hidden ``_next_form_origin`` field the ``{% form %}`` tag emits in the browser.
 ``get_action_url`` returns that URL without dispatching.
+``get_zones`` sends a GET as a partial request for the named zones, which :doc:`tutorial06` puts to work.
+
 The router itself is built lazily through Django's URL resolver, exactly as in production.
 Use the same ``client.get`` and ``client.post`` calls you already know.
 

@@ -1,12 +1,16 @@
+import logging
 import os
+from collections.abc import Generator
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from django.core.exceptions import ImproperlyConfigured
 from django.template import Context, Template
 from django.test import RequestFactory, override_settings
 
+from next.caches import DEFAULT_CACHE_SIZE
 from next.components import (
     CachedComponentTemplateLoader,
     ComponentInfo,
@@ -15,10 +19,10 @@ from next.components import (
     ComponentsManager,
     ComponentTemplateLoader,
     CompositeComponentRenderer,
-    DummyBackend,
     FileComponentsBackend,
     ModuleLoader,
     SimpleComponentRenderer,
+    component_watch_roots,
     components_manager,
     get_component,
     get_component_paths_for_watch,
@@ -26,20 +30,30 @@ from next.components import (
     register_components_folder_from_router_walk,
     render_component,
 )
-from next.components.manager import _on_settings_reloaded
-from next.components.registry import _VISIBILITY_CACHE_MAX_SIZE
+from next.components.manager import (
+    _configured_template_loader_class,
+    _on_settings_reloaded,
+)
 from next.components.renderers import (
-    _COMPILED_TEMPLATE_CACHE_MAX_SIZE,
     TemplateSource,
     _CompiledTemplate,
     _inject_component_context,
     _merge_csrf_context,
 )
+from next.components.signals import component_backend_loaded
 from next.conf import next_framework_settings
+from next.testing import capture_signals
 from tests.support import (
+    BOOM_COMPONENTS_BACKEND,
+    DUMMY_COMPONENTS_BACKEND,
+    MALFORMED_WATCH_COMPONENTS_BACKEND,
+    RAISING_WATCH_COMPONENTS_BACKEND,
+    DummyComponentsBackend,
     RaisingRootsRouter,
     RootPagesRouter,
-    next_framework_settings_component_backends_list as _next_framework_settings_component_backends_list,
+    failing_watch_components_entry,
+    next_framework_settings_stand_in as _stand_in,
+    watching_components_entry,
 )
 
 
@@ -62,13 +76,28 @@ def _render_body(loader: ComponentTemplateLoader, info: ComponentInfo) -> str:
     return template.render(Context({}))
 
 
+SHIPPED_LOADER_PATHS = [
+    "next.components.CachedComponentTemplateLoader",
+    "next.components.ComponentTemplateLoader",
+]
+
+
+@pytest.fixture(params=SHIPPED_LOADER_PATHS, ids=["cached", "plain"])
+def shipped_template_loader(request) -> Generator[ComponentTemplateLoader, None, None]:
+    """Run the enclosing suite once per shipped component template loader.
+
+    The override reloads the framework settings, which drops the shared render
+    pipeline, so the next access rebuilds it around the named class.
+    """
+    with override_settings(NEXT_FRAMEWORK={"COMPONENT_TEMPLATE_LOADER": request.param}):
+        yield components_manager.template_loader
+
+
 class CountingCachedLoader(CachedComponentTemplateLoader):
     """Cached loader that records how often it read a source."""
 
     def __init__(
-        self,
-        module_loader: ModuleLoader,
-        maxsize: int = _COMPILED_TEMPLATE_CACHE_MAX_SIZE,
+        self, module_loader: ModuleLoader, maxsize: int = DEFAULT_CACHE_SIZE
     ) -> None:
         """Start with an empty compiled cache and a zeroed read counter."""
         super().__init__(module_loader, maxsize)
@@ -129,7 +158,7 @@ class TestComponentsManager:
 
     def test_get_component_empty_when_no_config(self) -> None:
         """When ``BACKENDS`` is empty, get_component returns None."""
-        mock_ns = _next_framework_settings_component_backends_list([])
+        mock_ns = _stand_in(COMPONENT_BACKENDS=[])
         with patch("next.backends.next_framework_settings", mock_ns):
             manager = ComponentsManager()
             manager.reload()
@@ -137,7 +166,7 @@ class TestComponentsManager:
 
     def test_collect_visible_components_merges_backends(self) -> None:
         """collect_visible_components merges from all backends, first wins."""
-        mock_ns = _next_framework_settings_component_backends_list([])
+        mock_ns = _stand_in(COMPONENT_BACKENDS=[])
         with patch("next.backends.next_framework_settings", mock_ns):
             manager = ComponentsManager()
             manager.reload()
@@ -145,8 +174,10 @@ class TestComponentsManager:
 
     def test_reload_swallows_backend_creation_error(self) -> None:
         """An unimportable ``BACKEND`` is logged and costs only its own entry."""
-        mock_ns = _next_framework_settings_component_backends_list(
-            [{"BACKEND": "next.components.NonexistentBackend", "OPTIONS": {}}]
+        mock_ns = _stand_in(
+            COMPONENT_BACKENDS=[
+                {"BACKEND": "next.components.NonexistentBackend", "OPTIONS": {}}
+            ]
         )
         with patch("next.backends.next_framework_settings", mock_ns):
             manager = ComponentsManager()
@@ -156,7 +187,7 @@ class TestComponentsManager:
     def test_template_loader_built_with_default_module_loader(self) -> None:
         """Render pipeline uses ``ComponentTemplateLoader`` wrapping ``ModuleLoader``."""
         mgr = ComponentsManager()
-        mock_ns = _next_framework_settings_component_backends_list([])
+        mock_ns = _stand_in(COMPONENT_BACKENDS=[])
         with patch("next.backends.next_framework_settings", mock_ns):
             mgr.reload()
         assert isinstance(mgr.template_loader, ComponentTemplateLoader)
@@ -169,7 +200,7 @@ class TestBackendsLoadedOnce:
     def test_empty_settings_do_not_reload_on_every_access(self) -> None:
         """An empty list is a load result, not a reason to reread settings."""
         manager = ComponentsManager()
-        mock_ns = _next_framework_settings_component_backends_list([])
+        mock_ns = _stand_in(COMPONENT_BACKENDS=[])
         with (
             patch("next.backends.next_framework_settings", mock_ns),
             patch(
@@ -184,8 +215,8 @@ class TestBackendsLoadedOnce:
     def test_unusable_settings_do_not_reload_on_every_access(self) -> None:
         """A list nobody can load stays loaded rather than retrying per call."""
         manager = ComponentsManager()
-        mock_ns = _next_framework_settings_component_backends_list(
-            [{"BACKEND": "next.components.NoSuchBackend"}]
+        mock_ns = _stand_in(
+            COMPONENT_BACKENDS=[{"BACKEND": "next.components.NoSuchBackend"}]
         )
         with (
             patch("next.backends.next_framework_settings", mock_ns),
@@ -200,9 +231,7 @@ class TestBackendsLoadedOnce:
     def test_a_caller_emptying_the_list_does_not_trigger_a_reload(self) -> None:
         """The flag, not the list, answers whether settings were read."""
         manager = ComponentsManager()
-        mock_ns = _next_framework_settings_component_backends_list(
-            [{"BACKEND": "next.components.DummyBackend"}]
-        )
+        mock_ns = _stand_in(COMPONENT_BACKENDS=[{"BACKEND": DUMMY_COMPONENTS_BACKEND}])
         with patch("next.backends.next_framework_settings", mock_ns):
             manager._ensure_backends()
             manager._backends.clear()
@@ -212,9 +241,7 @@ class TestBackendsLoadedOnce:
     def test_reload_reads_settings_again(self) -> None:
         """The explicit reload is still eager, which test helpers rely on."""
         manager = ComponentsManager()
-        mock_ns = _next_framework_settings_component_backends_list(
-            [{"BACKEND": "next.components.DummyBackend"}]
-        )
+        mock_ns = _stand_in(COMPONENT_BACKENDS=[{"BACKEND": DUMMY_COMPONENTS_BACKEND}])
         with patch("next.backends.next_framework_settings", mock_ns):
             manager._ensure_backends()
             first = manager._backends[0]
@@ -228,8 +255,8 @@ class TestEntryWithoutBackendKey:
     def test_manager_falls_back_to_the_file_backend(self) -> None:
         """An entry naming no ``BACKEND`` loads the filesystem source."""
         manager = ComponentsManager()
-        mock_ns = _next_framework_settings_component_backends_list(
-            [{"DIRS": [], "COMPONENTS_DIR": "_components"}]
+        mock_ns = _stand_in(
+            COMPONENT_BACKENDS=[{"DIRS": [], "COMPONENTS_DIR": "_components"}]
         )
         with patch("next.backends.next_framework_settings", mock_ns):
             manager._ensure_backends()
@@ -259,9 +286,7 @@ class TestBackendConstructionErrorsEscape:
     def test_runtime_error_from_backend_init_propagates(self) -> None:
         """A user backend raising from ``__init__`` reaches the caller."""
         manager = ComponentsManager()
-        mock_ns = _next_framework_settings_component_backends_list(
-            [{"BACKEND": "next.components.BoomBackend"}]
-        )
+        mock_ns = _stand_in(COMPONENT_BACKENDS=[{"BACKEND": BOOM_COMPONENTS_BACKEND}])
         with (
             patch("next.backends.next_framework_settings", mock_ns),
             pytest.raises(RuntimeError, match="boom"),
@@ -275,9 +300,7 @@ class TestSettingsReloadedIsLazy:
     def test_receiver_does_not_build_backends(self) -> None:
         """A reload costs no backend construction on its own."""
         manager = ComponentsManager()
-        mock_ns = _next_framework_settings_component_backends_list(
-            [{"BACKEND": "next.components.DummyBackend"}]
-        )
+        mock_ns = _stand_in(COMPONENT_BACKENDS=[{"BACKEND": DUMMY_COMPONENTS_BACKEND}])
         with patch("next.backends.next_framework_settings", mock_ns):
             manager._ensure_backends()
             assert len(manager._backends) == 1
@@ -288,12 +311,12 @@ class TestSettingsReloadedIsLazy:
             assert manager._loaded is False
 
             manager._ensure_backends()
-        assert isinstance(manager._backends[0], DummyBackend)
+        assert isinstance(manager._backends[0], DummyComponentsBackend)
 
     def test_receiver_drops_the_render_pipeline_and_walk_folders(self) -> None:
         """Cached pipeline and router-walk bookkeeping go with the backends."""
         manager = ComponentsManager()
-        mock_ns = _next_framework_settings_component_backends_list([])
+        mock_ns = _stand_in(COMPONENT_BACKENDS=[])
         with patch("next.backends.next_framework_settings", mock_ns):
             manager._ensure_backends()
             assert manager.template_loader is not None
@@ -305,15 +328,15 @@ class TestSettingsReloadedIsLazy:
     def test_reload_rebuilds_from_the_current_settings(self) -> None:
         """The public entry point swaps the backends for the configured ones."""
         manager = ComponentsManager()
-        dummy = _next_framework_settings_component_backends_list(
-            [{"BACKEND": "next.components.DummyBackend"}]
-        )
+        dummy = _stand_in(COMPONENT_BACKENDS=[{"BACKEND": DUMMY_COMPONENTS_BACKEND}])
         with patch("next.backends.next_framework_settings", dummy):
             manager._ensure_backends()
-        assert isinstance(manager.backends[0], DummyBackend)
+        assert isinstance(manager.backends[0], DummyComponentsBackend)
 
-        file_entry = _next_framework_settings_component_backends_list(
-            [{"BACKEND": "next.components.FileComponentsBackend", "DIRS": []}]
+        file_entry = _stand_in(
+            COMPONENT_BACKENDS=[
+                {"BACKEND": "next.components.FileComponentsBackend", "DIRS": []}
+            ]
         )
         with patch("next.backends.next_framework_settings", file_entry):
             manager.reload()
@@ -325,7 +348,7 @@ class TestSettingsReloadedIsLazy:
     ) -> None:
         """Rebuilding forgets which folders were claimed against the old backends."""
         manager = ComponentsManager()
-        mock_ns = _next_framework_settings_component_backends_list([])
+        mock_ns = _stand_in(COMPONENT_BACKENDS=[])
         with patch("next.backends.next_framework_settings", mock_ns):
             manager._ensure_backends()
             loader = manager.template_loader
@@ -333,6 +356,19 @@ class TestSettingsReloadedIsLazy:
             manager.reload()
             assert manager._walk_registered_folders == set()
             assert manager.template_loader is not loader
+
+    def test_a_quiet_reload_announces_no_backend(self) -> None:
+        """A manager nobody renders from keeps its backends to itself."""
+        manager = ComponentsManager()
+        dummy = _stand_in(COMPONENT_BACKENDS=[{"BACKEND": DUMMY_COMPONENTS_BACKEND}])
+        with (
+            patch("next.backends.next_framework_settings", dummy),
+            capture_signals(component_backend_loaded) as recorder,
+        ):
+            manager.reload(notify=False)
+
+        assert list(recorder) == []
+        assert isinstance(manager.backends[0], DummyComponentsBackend)
 
     def test_receiver_invalidates_the_module_level_manager(self) -> None:
         """The wired receiver drops the shared manager state without a rebuild."""
@@ -398,7 +434,7 @@ class TestRegisterComponentsFolderFromRouterWalk:
         (folder / "b.djx").write_text("b")
         file_backend = FileComponentsBackend(dict(min_component_config))
         manager = ComponentsManager()
-        manager._backends = [DummyBackend({}), file_backend]
+        manager._backends = [DummyComponentsBackend({}), file_backend]
         manager._loaded = True
 
         manager.register_router_walk_folder(folder, tmp_path, "")
@@ -428,7 +464,7 @@ class TestRegisterComponentsFolderFromRouterWalk:
         folder = tmp_path / "_components"
         folder.mkdir()
         manager = ComponentsManager()
-        manager._backends = [DummyBackend({})]
+        manager._backends = [DummyComponentsBackend({})]
         manager._loaded = True
 
         manager.register_router_walk_folder(folder, tmp_path, "")
@@ -515,8 +551,9 @@ class TestGetComponent:
             mock_mgr.get_component.assert_called_once_with("x", Path("/t"))
 
 
+@pytest.mark.usefixtures("shipped_template_loader")
 class TestLoadComponentTemplate:
-    """Tests for load_component_template()."""
+    """Tests for load_component_template(), run over both shipped loaders."""
 
     def test_load_simple_djx(self, tmp_path: Path) -> None:
         """Load template from .djx file."""
@@ -545,8 +582,9 @@ class TestLoadComponentTemplate:
         assert load_component_template(info) is None
 
 
+@pytest.mark.usefixtures("shipped_template_loader")
 class TestRenderComponent:
-    """Tests for render_component()."""
+    """Tests for render_component(), run over both shipped loaders."""
 
     def test_render_simple_component(self, tmp_path: Path) -> None:
         """Simple component renders with context."""
@@ -898,7 +936,7 @@ class TestCachedComponentTemplateLoader:
         assert renderer.render(info, {}, None) == "<h3>one</h3>"
         path.unlink()
         assert renderer.render(info, {}, None) == ""
-        assert loader._compiled == {}
+        assert not loader._compiled
 
     @pytest.mark.usefixtures("watched_template_edits")
     def test_unreadable_source_drops_a_stale_entry(self, tmp_path: Path) -> None:
@@ -911,14 +949,14 @@ class TestCachedComponentTemplateLoader:
         path.write_bytes(b"\xff\xfe broken")
         _bump_mtime(path)
         assert loader.load_template(info) is None
-        assert loader._compiled == {}
+        assert not loader._compiled
 
     def test_component_without_files_caches_nothing(self, tmp_path: Path) -> None:
         """No source file means no mtime to key on, so nothing is stored."""
         info = ComponentInfo("ghost", tmp_path, "", None, None, True)
         loader = CachedComponentTemplateLoader(ModuleLoader())
         assert loader.load_template(info) is None
-        assert loader._compiled == {}
+        assert not loader._compiled
 
     def test_a_source_that_does_not_stat_is_compiled_but_not_cached(
         self, tmp_path: Path
@@ -927,7 +965,7 @@ class TestCachedComponentTemplateLoader:
         info = ComponentInfo("x", tmp_path, "", None, None, True)
         loader = SyntheticSourceLoader(ModuleLoader())
         assert _render_body(loader, info) == "<i>synthetic</i>"
-        assert loader._compiled == {}
+        assert not loader._compiled
 
     def test_a_full_cache_evicts_the_least_recently_used_entry(
         self, tmp_path: Path
@@ -956,14 +994,9 @@ class TestCachedComponentTemplateLoader:
         loader = CachedComponentTemplateLoader(ModuleLoader())
         assert _render_body(loader, info) == "<i>one</i>"
         loader.clear()
-        assert loader._compiled == {}
+        assert not loader._compiled
         path.write_text("<i>two</i>")
         assert _render_body(loader, info) == "<i>two</i>"
-
-    def test_the_default_bound_matches_the_other_component_caches(self) -> None:
-        """One bound covers every path-keyed component cache in the process."""
-        loader = CachedComponentTemplateLoader(ModuleLoader())
-        assert loader._maxsize == _VISIBILITY_CACHE_MAX_SIZE
 
     @pytest.mark.usefixtures("watched_template_edits")
     def test_a_save_during_the_read_does_not_hide_the_edit(
@@ -989,26 +1022,20 @@ class TestCachedComponentTemplateLoader:
         loader = EvictingFreshnessLoader(ModuleLoader())
         assert _render_body(loader, info) == "<i>one</i>"
         assert _render_body(loader, info) == "<i>one</i>"
-        assert loader._compiled == {}
+        assert not loader._compiled
 
-    def test_marking_a_dropped_key_leaves_the_cache_alone(self) -> None:
-        """The reorder a concurrent eviction has already outrun does nothing."""
+    def test_a_hit_makes_the_compiled_entry_the_freshest(self, tmp_path: Path) -> None:
+        """Use order is what the bound gives up an entry by, so a hit refreshes one."""
         loader = CachedComponentTemplateLoader(ModuleLoader())
-        loader._mark_used((Path("/gone/card.djx"), None))
-        assert loader._compiled == {}
-
-    def test_use_order_is_tracked_only_once_the_cache_is_full(
-        self, tmp_path: Path
-    ) -> None:
-        """A cache with room to spare skips the reorder every hit would pay."""
-        path = tmp_path / "card.djx"
-        path.write_text("<i>one</i>")
-        info = ComponentInfo("card", tmp_path, "", path, None, True)
-        loader = CachedComponentTemplateLoader(ModuleLoader())
-        assert _render_body(loader, info) == "<i>one</i>"
-        with patch.object(loader, "_mark_used") as reorder:
-            assert _render_body(loader, info) == "<i>one</i>"
-        assert reorder.call_count == 0
+        infos = []
+        for name in ("one", "two"):
+            path = tmp_path / f"{name}.djx"
+            path.write_text(f"<i>{name}</i>")
+            info = ComponentInfo(name, tmp_path, "", path, None, True)
+            infos.append(info)
+            assert _render_body(loader, info) == f"<i>{name}</i>"
+        assert _render_body(loader, infos[0]) == "<i>one</i>"
+        assert list(loader._compiled)[-1] == _key(infos[0])
 
 
 class TestTemplatesSettingInvalidation:
@@ -1095,6 +1122,221 @@ class TestRenderPipelineCaching:
         assert render_component(info, {}) == "<h3>two</h3>"
 
 
+class TestConfiguredTemplateLoader:
+    """`COMPONENT_TEMPLATE_LOADER` names the class the render pipeline builds."""
+
+    def test_the_default_pipeline_uses_the_cached_loader(self) -> None:
+        """A project that sets nothing keeps the compiled-template cache."""
+        next_framework_settings.reload()
+        assert type(components_manager.template_loader) is CachedComponentTemplateLoader
+
+    def test_the_setting_selects_the_plain_loader(self) -> None:
+        """Naming the plain loader hands the pipeline a class that holds nothing."""
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "COMPONENT_TEMPLATE_LOADER": "next.components.ComponentTemplateLoader"
+            }
+        ):
+            assert type(components_manager.template_loader) is ComponentTemplateLoader
+
+    @staticmethod
+    def _compiles_on_a_warm_render(loader_path: str, info: ComponentInfo) -> int:
+        """Render `info` twice under the named loader, counting the second compile."""
+        with override_settings(
+            NEXT_FRAMEWORK={"COMPONENT_TEMPLATE_LOADER": loader_path}
+        ):
+            render_component(info, {})
+            with patch(
+                "next.components.renderers.Template", side_effect=Template
+            ) as compiles:
+                render_component(info, {})
+        return compiles.call_count
+
+    def test_the_named_class_reaches_every_render_strategy(
+        self, tmp_path: Path
+    ) -> None:
+        """Both strategies share the loader, so both answer a warm render its way."""
+        (tmp_path / "card.djx").write_text("<h3>simple</h3>")
+        simple = ComponentInfo(
+            "card", tmp_path, "", tmp_path / "card.djx", None, is_simple=True
+        )
+        folder = tmp_path / "widget"
+        folder.mkdir()
+        (folder / "component.djx").write_text("<div>composite</div>")
+        (folder / "component.py").write_text("extra = 1\n")
+        composite = ComponentInfo(
+            "widget",
+            tmp_path,
+            "",
+            folder / "component.djx",
+            folder / "component.py",
+            is_simple=False,
+        )
+        cached, plain = SHIPPED_LOADER_PATHS
+
+        counts = {
+            (loader_path, info.name): self._compiles_on_a_warm_render(loader_path, info)
+            for loader_path in (cached, plain)
+            for info in (simple, composite)
+        }
+
+        assert counts[(cached, "card")] == 0
+        assert counts[(cached, "widget")] == 0
+        assert counts[(plain, "card")] == 1
+        assert counts[(plain, "widget")] == 1
+
+    def test_a_class_outside_the_family_raises(self) -> None:
+        """A dotted path naming something else fails loudly rather than silently."""
+        with (
+            override_settings(
+                NEXT_FRAMEWORK={
+                    "COMPONENT_TEMPLATE_LOADER": "next.components.ComponentRenderer"
+                }
+            ),
+            pytest.raises(ImproperlyConfigured, match=r"is not a .* subclass"),
+        ):
+            _ = components_manager.template_loader
+
+    def test_an_unimportable_path_raises(self) -> None:
+        """A dotted path that does not import names the setting in the message."""
+        with (
+            override_settings(
+                NEXT_FRAMEWORK={"COMPONENT_TEMPLATE_LOADER": "next.components.Nope"}
+            ),
+            pytest.raises(ImproperlyConfigured, match="COMPONENT_TEMPLATE_LOADER"),
+        ):
+            _ = components_manager.template_loader
+
+    def test_the_setting_is_read_once_per_pipeline_build(self, tmp_path: Path) -> None:
+        """A warm render never reaches back into the settings for the class."""
+        (tmp_path / "card.djx").write_text("<h3>{{ title }}</h3>")
+        info = ComponentInfo(
+            "card", tmp_path, "", tmp_path / "card.djx", None, is_simple=True
+        )
+        next_framework_settings.reload()
+        assert render_component(info, {"title": "one"}) == "<h3>one</h3>"
+        with patch(
+            "next.components.manager._configured_template_loader_class",
+            side_effect=_configured_template_loader_class,
+        ) as resolves:
+            render_component(info, {"title": "two"})
+            components_manager.template_loader.load(info)
+        assert resolves.call_count == 0
+
+
+class TestBothShippedLoadersAgree:
+    """Turning the compiled-template cache off changes speed, not output."""
+
+    @staticmethod
+    def _render_under(loader_path: str, info: ComponentInfo, context: dict) -> str:
+        """Render `info` through the pipeline the named loader class builds."""
+        with override_settings(
+            NEXT_FRAMEWORK={"COMPONENT_TEMPLATE_LOADER": loader_path}
+        ):
+            return render_component(info, context)
+
+    @staticmethod
+    def _load_under(loader_path: str, info: ComponentInfo) -> str | None:
+        """Read the raw template text through the named loader class."""
+        with override_settings(
+            NEXT_FRAMEWORK={"COMPONENT_TEMPLATE_LOADER": loader_path}
+        ):
+            return load_component_template(info)
+
+    def test_a_simple_component_renders_identically(self, tmp_path: Path) -> None:
+        """The two loaders produce byte-identical HTML for a `.djx` body."""
+        (tmp_path / "card.djx").write_text("<h3>{{ title }}</h3>")
+        info = ComponentInfo(
+            "card", tmp_path, "", tmp_path / "card.djx", None, is_simple=True
+        )
+        cached, plain = SHIPPED_LOADER_PATHS
+
+        assert self._render_under(cached, info, {"title": "Hi"}) == self._render_under(
+            plain, info, {"title": "Hi"}
+        )
+
+    def test_a_composite_component_renders_identically(self, tmp_path: Path) -> None:
+        """A component with a module body agrees across the two loaders too."""
+        folder = tmp_path / "widget"
+        folder.mkdir()
+        (folder / "component.djx").write_text("<div>{{ label }}|{{ extra }}</div>")
+        (folder / "component.py").write_text("extra = 1\n")
+        info = ComponentInfo(
+            "widget",
+            tmp_path,
+            "",
+            folder / "component.djx",
+            folder / "component.py",
+            is_simple=False,
+        )
+        cached, plain = SHIPPED_LOADER_PATHS
+
+        assert self._render_under(cached, info, {"label": "a"}) == self._render_under(
+            plain, info, {"label": "a"}
+        )
+
+    def test_a_module_string_body_loads_identically(self, tmp_path: Path) -> None:
+        """A `component` module string reads the same through either loader."""
+        folder = tmp_path / "mod"
+        folder.mkdir()
+        (folder / "component.py").write_text('component = "<i>{{ x }}</i>"\n')
+        info = ComponentInfo(
+            "mod", tmp_path, "", None, folder / "component.py", is_simple=False
+        )
+        cached, plain = SHIPPED_LOADER_PATHS
+
+        assert self._load_under(cached, info) == self._load_under(plain, info)
+
+    def test_an_unreadable_component_answers_the_same_way(self, tmp_path: Path) -> None:
+        """A component with nothing on disk renders empty under either loader."""
+        info = ComponentInfo(
+            "gone", tmp_path, "", tmp_path / "gone.djx", None, is_simple=True
+        )
+        cached, plain = SHIPPED_LOADER_PATHS
+
+        assert self._render_under(cached, info, {}) == ""
+        assert self._render_under(plain, info, {}) == ""
+
+    @pytest.mark.usefixtures("watched_template_edits")
+    def test_an_edit_reaches_the_next_render_under_either_loader(
+        self, tmp_path: Path
+    ) -> None:
+        """Neither loader serves a body the file no longer holds."""
+        path = tmp_path / "card.djx"
+        info = ComponentInfo("card", tmp_path, "", path, None, is_simple=True)
+        cached, plain = SHIPPED_LOADER_PATHS
+        for loader_path in (cached, plain):
+            path.write_text("<h3>one</h3>")
+            _bump_mtime(path)
+            assert self._render_under(loader_path, info, {}) == "<h3>one</h3>"
+            path.write_text("<h3>two</h3>")
+            _bump_mtime(path)
+            assert self._render_under(loader_path, info, {}) == "<h3>two</h3>"
+
+    def test_only_the_cached_loader_reuses_a_compiled_template(
+        self, tmp_path: Path
+    ) -> None:
+        """The switch is real, so the plain loader parses on every render."""
+        (tmp_path / "card.djx").write_text("<h3>{{ title }}</h3>")
+        info = ComponentInfo(
+            "card", tmp_path, "", tmp_path / "card.djx", None, is_simple=True
+        )
+        counts = {}
+        for loader_path in SHIPPED_LOADER_PATHS:
+            with override_settings(
+                NEXT_FRAMEWORK={"COMPONENT_TEMPLATE_LOADER": loader_path}
+            ):
+                render_component(info, {"title": "one"})
+                with patch(
+                    "next.components.renderers.Template", side_effect=Template
+                ) as compiles:
+                    render_component(info, {"title": "two"})
+                counts[loader_path] = compiles.call_count
+        cached, plain = SHIPPED_LOADER_PATHS
+        assert counts[cached] == 0
+        assert counts[plain] == 1
+
+
 class TestInjectComponentContext:
     """_inject_component_context early exits."""
 
@@ -1176,6 +1418,38 @@ class TestGetComponentPathsForWatch:
             paths = get_component_paths_for_watch()
         next_framework_settings.reload()
         assert (comp_dir / "component.py").resolve() in paths
+
+    def test_watches_a_py_only_composite_without_a_component(
+        self, tmp_path: Path
+    ) -> None:
+        """A module that names no ``component`` yet is still watched for edits."""
+        pages_root = tmp_path / "pages"
+        comp_dir = pages_root / "_components" / "halfbuilt"
+        comp_dir.mkdir(parents=True)
+        (comp_dir / "component.py").write_text("value = 1\n")
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "PAGE_BACKENDS": [
+                    {
+                        "BACKEND": "next.urls.FileRouterBackend",
+                        "PAGES_DIR": "pages",
+                        "APP_DIRS": False,
+                        "DIRS": [str(pages_root)],
+                        "OPTIONS": {},
+                    }
+                ],
+                "COMPONENT_BACKENDS": [
+                    {
+                        "BACKEND": "next.components.FileComponentsBackend",
+                        "DIRS": [],
+                        "COMPONENTS_DIR": "_components",
+                    }
+                ],
+            }
+        ):
+            paths = get_component_paths_for_watch()
+        next_framework_settings.reload()
+        assert paths == {(comp_dir / "component.py").resolve()}
 
     def test_skips_non_dict_page_config(self) -> None:
         """Non-dict ``PAGE_BACKENDS`` entries are ignored."""
@@ -1320,14 +1594,14 @@ class TestGetComponentPathsForWatch:
             assert get_component_paths_for_watch() == set()
         next_framework_settings.reload()
 
-    def test_skips_non_file_component_backend(self) -> None:
-        """Non-``FileComponentsBackend`` entries do not contribute paths."""
+    def test_skips_a_backend_that_watches_no_tree(self) -> None:
+        """A backend naming no watch root contributes no paths."""
         with override_settings(
             NEXT_FRAMEWORK={
                 "PAGE_BACKENDS": [],
                 "COMPONENT_BACKENDS": [
                     {
-                        "BACKEND": "next.components.DummyBackend",
+                        "BACKEND": DUMMY_COMPONENTS_BACKEND,
                         "DIRS": [],
                         "COMPONENTS_DIR": "_components",
                     }
@@ -1335,6 +1609,70 @@ class TestGetComponentPathsForWatch:
             }
         ):
             assert get_component_paths_for_watch() == set()
+        next_framework_settings.reload()
+
+    def test_scans_a_tree_a_backend_watches_outside_dirs(self, tmp_path: Path) -> None:
+        """The scan reads the backend contract, not the `DIRS` key of its entry."""
+        root = tmp_path / "elsewhere"
+        root.mkdir()
+        (root / "solo.djx").write_text("x")
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "PAGE_BACKENDS": [],
+                "COMPONENT_BACKENDS": [watching_components_entry(root)],
+            }
+        ):
+            paths = get_component_paths_for_watch()
+        next_framework_settings.reload()
+        assert (root / "solo.djx").resolve() in paths
+
+    def test_a_backend_that_cannot_report_its_roots_contributes_none(
+        self, caplog
+    ) -> None:
+        """A raising backend costs its own trees, not the scan around it."""
+        entry = failing_watch_components_entry(RAISING_WATCH_COMPONENTS_BACKEND)
+        with (
+            override_settings(
+                NEXT_FRAMEWORK={"PAGE_BACKENDS": [], "COMPONENT_BACKENDS": [entry]}
+            ),
+            caplog.at_level(logging.ERROR, logger="next.components.watch"),
+        ):
+            assert component_watch_roots() == []
+            logged_once = caplog.text.count("failed to report its watched trees")
+            assert component_watch_roots() == []
+            assert (
+                caplog.text.count("failed to report its watched trees")
+                == logged_once
+                == 1
+            )
+        next_framework_settings.reload()
+
+    def test_a_reconfigure_re_arms_the_watch_root_diagnostic(self, caplog) -> None:
+        """The report of one failure returns once the framework is reconfigured."""
+        entry = failing_watch_components_entry(RAISING_WATCH_COMPONENTS_BACKEND)
+        with (
+            override_settings(
+                NEXT_FRAMEWORK={"PAGE_BACKENDS": [], "COMPONENT_BACKENDS": [entry]}
+            ),
+            caplog.at_level(logging.ERROR, logger="next.components.watch"),
+        ):
+            assert component_watch_roots() == []
+            next_framework_settings.reload()
+            assert component_watch_roots() == []
+            assert caplog.text.count("failed to report its watched trees") == 2
+        next_framework_settings.reload()
+
+    def test_a_backend_reporting_no_path_contributes_none(self, caplog) -> None:
+        """A root of the wrong type never reaches a caller that stats it."""
+        entry = failing_watch_components_entry(MALFORMED_WATCH_COMPONENTS_BACKEND)
+        with (
+            override_settings(
+                NEXT_FRAMEWORK={"PAGE_BACKENDS": [], "COMPONENT_BACKENDS": [entry]}
+            ),
+            caplog.at_level(logging.ERROR, logger="next.components.watch"),
+        ):
+            assert component_watch_roots() == []
+            assert "reported watched trees of the wrong type" in caplog.text
         next_framework_settings.reload()
 
     def test_oserror_scanning_extra_root(self, tmp_path: Path) -> None:

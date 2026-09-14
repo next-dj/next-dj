@@ -1,4 +1,5 @@
 from django import forms as django_forms
+from django.http import HttpRequest
 
 
 POLICY_FIELD = "policy_acknowledged"
@@ -7,9 +8,7 @@ POLICY_FIELD = "policy_acknowledged"
 class AcknowledgedStep(django_forms.Form):
     """Base step that carries the retention acknowledgement on every wizard step.
 
-    The acknowledgement is a real form field rather than raw markup so a
-    re-render reflects what the visitor actually submitted. Raw markup with a
-    hardcoded `checked` would let any partial morph put the tick back.
+    The acknowledgement is a real field, so a bound blur morph replays the tick sent.
     """
 
     policy_acknowledged = django_forms.BooleanField(
@@ -17,3 +16,15 @@ class AcknowledgedStep(django_forms.Form):
         initial=True,
         widget=django_forms.CheckboxInput(attrs={"class": "mt-0.5"}),
     )
+
+    @classmethod
+    def is_acknowledged(cls, request: HttpRequest) -> bool:
+        """Read the tick off a POST the way binding the field would read it.
+
+        `CheckboxInput` accepts `on`, `true` and `1` alike, so asking the widget keeps
+        the gate and the bound form from disagreeing over an unusual client.
+        """
+        widget = cls.base_fields[POLICY_FIELD].widget
+        return bool(
+            widget.value_from_datadict(request.POST, request.FILES, POLICY_FIELD)
+        )

@@ -7,4 +7,4 @@ class AccessConfig(AppConfig):
 
     def ready(self) -> None:
         """Import receiver and backend modules so signals wire up at startup."""
-        from access import backends, receivers  # noqa: F401, PLC0415
+        from access import backends, receivers

@@ -59,8 +59,7 @@ CACHES = {
         "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
         "LOCATION": "audit-forms",
     },
-    # A dedicated alias for wizard drafts so step data has its own store and
-    # lifetime, separate from the application cache.
+    # A dedicated alias for wizard drafts so step data has its own store and lifetime.
     "wizards": {
         "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
         "LOCATION": "audit-forms-wizards",
@@ -78,6 +77,12 @@ SHARED_DIR = BASE_DIR.parent / "_shared"
 STATICFILES_DIRS = [SHARED_DIR / "static"]
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# next.W059 flags a field name two static wizard steps share, because the merged
+# get_all_cleaned_data() keeps only the last step's value. The acknowledgement is a
+# control field here, read per step from the submitted POST in check_permissions and
+# dropped before the model create, so nothing reads the merged value.
+SILENCED_SYSTEM_CHECKS = ["next.W059"]
 
 NEXT_FRAMEWORK = {
     "PAGE_BACKENDS": [

@@ -1,6 +1,5 @@
 // Envelope parsing, the built-in verbs, the custom-op registry, and script
-// neutralisation before insertion. The applier is a thin executor, the server
-// authors every address and verb.
+// neutralisation before insertion. The server authors every address and verb.
 
 import { fireRemoved, morph } from "./morph";
 import {
@@ -44,10 +43,15 @@ export interface InnerPatch {
   html?: string;
 }
 
+/** How a merge row is matched against the container, the server's vocabulary. */
+export type DedupeMode = "key" | "id";
+
 export interface MergePatch {
   op: "append" | "prepend";
   target?: Target;
   html?: string;
+  // Absent from an older server's envelope, which keyed by data-next-key then id.
+  dedupe?: DedupeMode;
 }
 
 export interface RemovePatch {
@@ -145,8 +149,7 @@ const BUILTIN_OPS = new Set<string>([
   "context",
 ] satisfies BuiltinPatch["op"][]);
 
-// A type predicate, not an op check, so #applyBuiltin sees a BuiltinPatch and
-// keeps the per-op narrowing.
+// A predicate, not a boolean check, so #applyBuiltin keeps the per-op narrowing.
 function isBuiltin(patch: Patch): patch is BuiltinPatch {
   return BUILTIN_OPS.has(patch.op);
 }
@@ -176,10 +179,9 @@ function isAssetLoad(value: unknown): value is AssetLoad {
 /**
  * The insertion verb of a wire asset.
  *
- * A url-form entry of a built-in kind keeps its implied verb so an older
- * server's envelope still loads. An inline body takes no such fallback, since
- * guessing the verb from the kind name would execute a body the full render
- * prints verbatim.
+ * A url-form entry of a built-in kind keeps its implied verb so an older server's
+ * envelope still loads. An inline body takes no such fallback, since guessing the verb
+ * from the kind name would execute a body the full render prints verbatim.
  */
 export function assetLoad(
   kind: unknown,
@@ -252,7 +254,7 @@ export interface AssetBridge {
   acceptVersion(envelopeVersion: string): void;
 }
 
-/** A mount callback run over every inserted subtree, the DOMContentLoaded replacement. */
+/** A mount callback run over every inserted subtree, the DOMContentLoaded stand-in. */
 export type MountCallback = (root: ParentNode) => void;
 
 export interface MountRegistry {
@@ -267,9 +269,8 @@ export type ZoneFetch = (request: {
   headers?: Record<string, string>;
 }) => void;
 
-// The mutable state of a single apply, threaded through the ops so two
-// overlapping applies (the second starting while the first defers behind
-// loadCss) keep their state apart.
+// The mutable state of one apply, threaded through the ops so two overlapping applies
+// (the second starting while the first defers behind loadCss) stay apart.
 interface ApplyState {
   isDirty: (field: Element) => boolean;
   requestKey: string | undefined;
@@ -284,19 +285,21 @@ export interface ApplyDeps {
   document?: Document;
   // The dev flag, injectable and getter-friendly so the owner can flip it.
   dev?: DevFlag;
-  // Builds the morph dirty predicate from a request snapshot. Absent, no field is dirty.
+  // The morph dirty predicate from a request snapshot. Absent, no field is dirty.
   dirtySince?: (snapshot: number) => (field: Element) => boolean;
   // Whether an element was ever touched, carrying <details> open state past a patch.
   isTouched?: (el: Element) => boolean;
+  // The four seams below are read through a call, not captured: the owner rebuilds
+  // them under a live applier, and a captured instance would be the outgoing one.
   // The layer stack. Absent, zone resolve falls back to the document.
-  layers?: LayerBridge;
+  layers?: () => LayerBridge;
   // The history seam for the url verb. Absent, the verb is a no-op.
-  history?: HistoryAdapter;
+  history?: () => HistoryAdapter;
   // The navigation seam for the visit verb. Absent, the verb is a no-op.
-  navigate?: Navigate;
+  navigate?: () => Navigate;
   // The asset loader and version safeguard. Absent, ops run with no asset handling.
-  assets?: AssetBridge;
-  // The mount registry, run over every inserted subtree. Absent, only next:mounted fires.
+  assets?: () => AssetBridge;
+  // The mount registry, run over inserted subtrees. Absent, only next:mounted fires.
   mount?: MountRegistry;
   // The zone re-GET used by the refresh verb. Absent, it is a no-op.
   refresh?: ZoneFetch;
@@ -327,9 +330,7 @@ function parseFormMeta(value: unknown): FormMeta | null {
   return { uid, valid, errors: parseFormErrors(value.errors) };
 }
 
-// A wire asset is well-formed when it names a kind, carries a url or inline
-// body, and spells no load outside the three verbs. Blind to the kind, since
-// the server registers custom kinds.
+// Well-formedness is blind to the kind, since the server may register custom kinds.
 function isWellFormedAsset(
   value: unknown,
 ): value is { kind: string; load: AssetLoad | undefined; inline?: unknown } {
@@ -392,8 +393,7 @@ export function parseEnvelope(raw: unknown, dev = false): Envelope {
   if (version === undefined) {
     throw new TypeError("partial envelope is missing version");
   }
-  // Keep only ops naming a verb, so a malformed element is dropped rather than
-  // left to throw mid-apply over a half-mutated DOM.
+  // Ops without a verb are dropped, so none throws mid-apply over a half-mutated DOM.
   const ops = Array.isArray(wire.ops) ? wire.ops.filter(isPatch) : [];
   const assets = Array.isArray(wire.assets) ? wire.assets.filter(isAsset) : [];
   if (dev) reportDropped(wire);
@@ -420,10 +420,10 @@ export class Applier {
   readonly #document: Document;
   readonly #dirtySince: (snapshot: number) => (field: Element) => boolean;
   readonly #isTouched: (el: Element) => boolean;
-  readonly #layers: LayerBridge | undefined;
-  readonly #history: HistoryAdapter | undefined;
-  readonly #navigate: Navigate | undefined;
-  readonly #assets: AssetBridge | undefined;
+  readonly #layers: () => LayerBridge | undefined;
+  readonly #history: () => HistoryAdapter | undefined;
+  readonly #navigate: () => Navigate | undefined;
+  readonly #assets: () => AssetBridge | undefined;
   readonly #mount: MountRegistry | undefined;
   readonly #refresh: ZoneFetch | undefined;
   readonly #here: () => string;
@@ -441,10 +441,10 @@ export class Applier {
     this.#dev = devReader(deps.dev);
     this.#dirtySince = deps.dirtySince ?? (() => () => false);
     this.#isTouched = deps.isTouched ?? (() => false);
-    this.#layers = deps.layers;
-    this.#history = deps.history;
-    this.#navigate = deps.navigate;
-    this.#assets = deps.assets;
+    this.#layers = deps.layers ?? (() => undefined);
+    this.#history = deps.history ?? (() => undefined);
+    this.#navigate = deps.navigate ?? (() => undefined);
+    this.#assets = deps.assets ?? (() => undefined);
     this.#mount = deps.mount;
     this.#refresh = deps.refresh;
     this.#here = deps.here ?? (() => currentUrl(this.#document));
@@ -469,15 +469,14 @@ export class Applier {
   /**
    * Parse and apply a wire envelope, returning the parsed form.
    *
-   * The pipeline runs in a fixed order — version, before-apply, CSS delta, ops,
-   * JS delta, mount, then applied. CSS gates the ops, so with an asset bridge
-   * the body after the gate runs in a continuation.
+   * The phases run in a fixed order of version, before-apply, CSS delta, ops, JS delta,
+   * mount, then applied. CSS gates the ops, so the rest runs in a continuation.
    */
   apply(raw: unknown, snapshot?: number, key?: string, page?: string): Envelope {
     const envelope = parseEnvelope(raw, this.#dev());
     // A version mismatch is a full visit instead of an apply, guarded against a
     // reload loop inside the bridge. true means the bridge took over.
-    if (this.#assets?.versionMismatch(envelope.version, this.#here())) {
+    if (this.#assets()?.versionMismatch(envelope.version, this.#here())) {
       return envelope;
     }
     const beforeApply = this.#emit("partial:before-apply", { envelope }, true);
@@ -491,8 +490,9 @@ export class Applier {
       touched: [],
     };
     const runOps = (): void => this.#runOps(envelope, state);
-    if (this.#assets !== undefined) {
-      this.#assets.loadCss(envelope.assets, runOps);
+    const assets = this.#assets();
+    if (assets !== undefined) {
+      assets.loadCss(envelope.assets, runOps);
     } else {
       runOps();
     }
@@ -500,8 +500,7 @@ export class Applier {
   }
 
   #runOps(envelope: Envelope, state: ApplyState): void {
-    // ok flips on any contained failure or unknown verb, so partial:applied
-    // carries an honest degraded signal.
+    // ok flips on any contained failure, so partial:applied carries an honest signal.
     let ok = true;
     for (const op of envelope.ops) {
       // A failing op is contained, the rest apply and it surfaces as partial:error.
@@ -514,8 +513,8 @@ export class Applier {
     }
     if (envelope.csrf) this.#rotateCsrf(envelope.csrf);
     // JS after the ops: the target DOM is in place, each URL runs once.
-    this.#assets?.loadJs(envelope.assets);
-    this.#assets?.acceptVersion(envelope.version);
+    this.#assets()?.loadJs(envelope.assets);
+    this.#assets()?.acceptVersion(envelope.version);
     this.#runMount(state);
     this.#emit("partial:applied", { envelope, ok }, false);
   }
@@ -529,14 +528,12 @@ export class Applier {
     }
   }
 
-  // Dev times every op for the Performance panel. Production stops at the first
-  // line, one branch on the hot path.
+  // Dev times every op, production stops at the first line, one branch on the hot path.
   #timedOp(patch: Patch, state: ApplyState): boolean {
     if (!this.#dev()) return this.#applyOp(patch, state);
     const zone = zoneOf(patch);
     const label = zone ?? patch.op;
-    // The serial keeps this mark distinct from a nested apply under the same
-    // label, whose finally would otherwise clear it.
+    // The serial keeps the mark distinct, so a nested apply's finally cannot clear it.
     this.#timings += 1;
     const startMark = `next:apply:${label}:start:${this.#timings}`;
     openMeasure(startMark);
@@ -554,8 +551,7 @@ export class Applier {
     }
   }
 
-  // Returns false for an unknown verb the envelope is degraded by. A thrown op
-  // is caught by the caller.
+  // Returns false for an unknown verb, a thrown op is caught by the caller.
   #applyOp(patch: Patch, state: ApplyState): boolean {
     // Built-ins first, so the switch narrows each verb and the remaining patch
     // narrows to CustomPatch for the handler with no cast.
@@ -589,8 +585,7 @@ export class Applier {
     );
   }
 
-  // The built-in verbs dispatch through this switch rather than the registry,
-  // keeping their static variants.
+  // A switch, not the registry, so each built-in verb keeps its static variant.
   #applyBuiltin(patch: BuiltinPatch, state: ApplyState): void {
     switch (patch.op) {
       case "morph":
@@ -633,6 +628,13 @@ export class Applier {
       case "context":
         this.#contextOp(patch);
         return;
+      // A verb missing here would be a silent no-op reported as ok, so the never
+      // binding turns it into a build error, and this throw is that error at runtime.
+      /* v8 ignore next 3 */
+      default: {
+        const unhandled: never = patch;
+        throw new TypeError(`unhandled built-in op ${JSON.stringify(unhandled)}`);
+      }
     }
   }
 
@@ -649,41 +651,39 @@ export class Applier {
   // builder enforces, so the malformed op stays a no-op.
   #layerOpen(patch: LayerOpenPatch): void {
     if (patch.href !== undefined && patch.zone === undefined) return;
-    this.#layers?.open(null, patch.href, patch.zone);
+    this.#layers()?.open(null, patch.href, patch.zone);
   }
 
   #layerClose(patch: LayerClosePatch): void {
     // A validation error addresses no layer, so the modal survives by
     // construction: only an explicit close patch reaches the stack.
-    this.#layers?.close({
+    this.#layers()?.close({
       result: patch.result,
       dismiss: patch.dismiss === true,
       ...(patch.reason !== undefined ? { reason: patch.reason } : {}),
     });
   }
 
-  // toast is sugar over the stack's built-in container, set as textContent
-  // there, never parsed as HTML.
+  // toast is sugar over the stack's container, textContent there, never parsed as HTML.
   #toast(patch: ToastPatch): void {
     if (patch.text !== undefined)
-      this.#layers?.toast(patch.text, patch.variant ?? "info");
+      this.#layers()?.toast(patch.text, patch.variant ?? "info");
   }
 
   // History from a server-validated href: push or replace, never authored.
   #url(patch: UrlPatch): void {
     if (patch.href === undefined) return;
-    if (patch.action === "replace") this.#history?.replace(patch.href);
-    else this.#history?.push(patch.href);
+    if (patch.action === "replace") this.#history()?.replace(patch.href);
+    else this.#history()?.push(patch.href);
   }
 
   // A redirect is a hard navigation, not a history push. The same seam carries
   // an external redirect, the client does not branch on the external flag.
   #visit(patch: VisitPatch): void {
-    if (patch.href !== undefined) this.#navigate?.(patch.href);
+    if (patch.href !== undefined) this.#navigate()?.(patch.href);
   }
 
-  // Merge server-serialised provider values into the client context, which
-  // fires context-updated so islands react.
+  // Merging into the client context fires context-updated, so islands react.
   #contextOp(patch: ContextPatch): void {
     if (isRecord(patch.data)) this.#mergeContext(patch.data);
   }
@@ -709,8 +709,7 @@ export class Applier {
     this.#mark(result, patch.target, state);
   }
 
-  // Carve out the target node from a full-document reply, still script-
-  // neutralised before the engine sees it.
+  // Carve the target node out of a full-document reply, still script-neutralised.
   #extract(
     html: string,
     target: Element,
@@ -750,11 +749,14 @@ export class Applier {
     this.#mark(node, patch.target, state);
   }
 
-  // append and prepend dedupe by data-next-key, then id, replacing a matching
+  // append and prepend dedupe rows under the patch's mode, replacing a matching
   // node in place so a re-fetched list cannot double its rows.
   #merge(patch: MergePatch, state: ApplyState): void {
     const node = this.#resolve(patch.target, state);
     if (node === null) return;
+    // Any spelling but "id" keys the default way, so a malformed wire value degrades to
+    // the documented default rather than losing every match.
+    const mode: DedupeMode = patch.dedupe === "id" ? "id" : "key";
     const fragment = this.#fragment(patch.html ?? "", patch.target);
     const incoming = Array.from(fragment.children);
     // New rows collect into a fragment so prepend inserts them all in their
@@ -766,16 +768,15 @@ export class Applier {
     // One pass over the live children, not a scan per row, so n rows and m cost
     // n + m. The index waits for the first keyed row, a keyless batch matches nothing.
     let index: Map<string, Element> | undefined;
-    // Whether an island unmount hook has run, the only point where page code can
-    // touch the container and stale the index snapshot.
+    // Whether an unmount hook ran, the only point where page code can stale the index.
     let fired = false;
     for (const child of incoming) {
-      const key = keyOf(child);
+      const key = keyOf(child, mode);
       if (key === null) {
         fresh.append(child);
         continue;
       }
-      index ??= keyIndex(node);
+      index ??= keyIndex(node, mode);
       const existing = index.get(key);
       // The index is a snapshot, and replaceWith on a detached node is a no-op
       // that would swallow this row. A hit that left the container reads as a miss.
@@ -786,8 +787,7 @@ export class Applier {
       }
       fireRemoved(existing);
       fired = true;
-      // The hook may detach the very row it fired on, so the match is re-checked
-      // rather than replaced into nothing.
+      // The hook may detach the row it fired on, so the match is re-checked.
       if (existing.parentNode !== node) {
         fresh.append(child);
         missed.push([key, child]);
@@ -798,18 +798,16 @@ export class Applier {
       // carrying the same key replaces what just landed, not the detached node.
       index.set(key, child);
     }
-    if (fired && missed.length > 0) this.#reconcile(node, missed);
+    if (fired && missed.length > 0) this.#reconcile(node, missed, mode);
     if (patch.op === "append") node.append(fresh);
     else node.prepend(fresh);
     this.#mark(node, patch.target, state);
     for (const child of incoming) state.touched.push(child);
   }
 
-  // Match the missed rows against the container a hook has since rewritten. One
-  // rebuild per merge, taken only when a hook ran and left rows unmatched, so an
-  // adversarial hook cannot make the merge unbounded.
-  #reconcile(node: Element, missed: [string, Element][]): void {
-    const live = keyIndex(node);
+  // One rebuild per merge, only when a hook left rows unmatched, so it stays bounded.
+  #reconcile(node: Element, missed: [string, Element][], mode: DedupeMode): void {
+    const live = keyIndex(node, mode);
     for (const [key, child] of missed) {
       const existing = live.get(key);
       if (existing === undefined) continue;
@@ -836,10 +834,9 @@ export class Applier {
     const zone = patch.zone ?? patch.target?.zone;
     if (zone === undefined) return;
     const node = this.#resolve({ zone }, state);
+    const layers = this.#layers();
     const url =
-      node !== null && this.#layers !== undefined
-        ? this.#layers.urlFor(node)
-        : this.#here();
+      node !== null && layers !== undefined ? layers.urlFor(node) : this.#here();
     this.#refresh?.({ url, zone, headers: { [HEADER_ZONE]: zone } });
   }
 
@@ -883,8 +880,9 @@ export class Applier {
   // Resolve against the live document. A zone goes to the layer stack with the
   // envelope's page, so a base-page poll cannot morph a same-named modal zone.
   #resolve(target: Target | undefined, state: ApplyState): Element | null {
-    if (target?.zone !== undefined && this.#layers !== undefined) {
-      return this.#layers.resolveZone(target.zone, this.#document, state.page);
+    const layers = this.#layers();
+    if (target?.zone !== undefined && layers !== undefined) {
+      return layers.resolveZone(target.zone, this.#document, state.page);
     }
     return this.#resolveIn(this.#document, target, state);
   }
@@ -932,8 +930,9 @@ export class Applier {
   // In the live document a modal form wins over a same-uid form under it.
   // The parsed extract document holds no layers, so it keeps the plain lookup.
   #formQuery(root: Document, selector: string): Element | null {
-    if (root === this.#document && this.#layers !== undefined) {
-      return this.#layers.resolveSelector(selector, root);
+    const layers = this.#layers();
+    if (root === this.#document && layers !== undefined) {
+      return layers.resolveSelector(selector, root);
     }
     return root.querySelector(selector);
   }
@@ -968,25 +967,29 @@ function matchByTag(parsed: Document, target: Element): Element | null {
   return parsed.body.querySelector(tag);
 }
 
-// The dedup key of a list row: data-next-key first, then id. Absent both, the
-// row has no identity and is always inserted, never matched.
-function keyOf(el: Element): string | null {
-  return el.getAttribute(ATTR_KEY) ?? (el.id !== "" ? el.id : null);
+// The dedup key of a list row. "key" reads data-next-key then falls back to id, "id"
+// reads only id, so a row with a key but no id has no identity and always inserts.
+// The id comes off the attribute, as morph reads it: the property is subject to DOM
+// clobbering, where an <input name="id"> shadows form.id with the field itself.
+function keyOf(el: Element, mode: DedupeMode): string | null {
+  const raw = el.getAttribute("id") ?? "";
+  const id = raw === "" ? null : raw;
+  if (mode === "id") return id;
+  return el.getAttribute(ATTR_KEY) ?? id;
 }
 
-// Index the keyed children of a merge container, first holder of a key wins.
-// Keyless children stay out, a row with no identity never matches.
-function keyIndex(container: Element): Map<string, Element> {
+// Index the keyed children of a merge container under the keying rule the incoming rows
+// use, first holder of a key wins. A keyless child never matches.
+function keyIndex(container: Element, mode: DedupeMode): Map<string, Element> {
   const index = new Map<string, Element>();
   for (const child of container.children) {
-    const key = keyOf(child);
+    const key = keyOf(child, mode);
     if (key !== null && !index.has(key)) index.set(key, child);
   }
   return index;
 }
 
-// Open the diagnostic span of one op. Contained so a stubbed or exhausted user
-// timing cannot fail the op it was about to measure.
+// Contained so a stubbed or exhausted user timing cannot fail the op it measures.
 function openMeasure(startMark: string): void {
   try {
     performance.mark(startMark);

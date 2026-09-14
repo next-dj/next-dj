@@ -1,4 +1,5 @@
 from typing import ClassVar
+from unittest.mock import patch
 
 import pytest
 from django import forms as django_forms
@@ -38,6 +39,12 @@ def _reset_collision_cache():
     yield
     registration_diagnostics.action_collisions.clear()
     registration_diagnostics.shared_name_collisions.clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_page_discovery():
+    with patch("next.forms.checks.discover_page_registrations"):
+        yield
 
 
 def _distinct_handler(tag: str):

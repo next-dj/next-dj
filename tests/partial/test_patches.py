@@ -118,11 +118,9 @@ class TestPatchesBuilder:
             "html": "<div></div>",
         }
 
-    def test_morph_extract_marks_payload(self) -> None:
+    def test_morph_form_extract_marks_payload(self) -> None:
         envelope = (
-            Patches.versioned("v1")
-            .morph({"form": "ab12"}, "<html></html>", extract=True)
-            .envelope()
+            Patches.versioned("v1").morph_form("ab12", "<html></html>").envelope()
         )
         assert envelope.ops[0].as_dict()["extract"] is True
 
@@ -145,15 +143,15 @@ class TestPatchesBuilder:
         assert facade.ops[0].as_dict() == direct.ops[0].as_dict()
 
     def test_morph_rejects_an_unknown_selector(self) -> None:
-        with pytest.raises(TypeError, match="unexpected selector"):
+        with pytest.raises(TypeError, match="unexpected keyword argument"):
             Patches.versioned("v1").morph(widget="ab12")
 
     def test_morph_rejects_conflicting_selectors(self) -> None:
-        with pytest.raises(TypeError, match="conflicting selector"):
+        with pytest.raises(TypeError, match=r"\['form'\]"):
             Patches.versioned("v1").morph(zone="list", form="ab12")
 
     def test_morph_rejects_a_none_valued_selector(self) -> None:
-        with pytest.raises(TypeError, match="unexpected selector"):
+        with pytest.raises(TypeError, match="needs a target mapping"):
             Patches.versioned("v1").morph(zone=None)
 
     def test_replace(self) -> None:
@@ -230,6 +228,15 @@ class TestPatchesBuilder:
     def test_versioned_carries_no_request_id_by_default(self) -> None:
         assert Patches.versioned("v1").envelope().request_id is None
 
+    def test_the_constructor_pins_a_version_like_versioned(self) -> None:
+        request = partial_request()
+        pinned = Patches(request, version="9f3c", echo_of="r1").envelope()
+        assert pinned.version == "9f3c"
+        assert pinned.request_id == "r1"
+
+    def test_a_request_free_builder_needs_no_versioned_sugar(self) -> None:
+        assert Patches(None, version="9f3c").envelope().version == "9f3c"
+
 
 class TestPatchResponse:
     """`PatchResponse` is an HttpResponse carrying serialized bytes."""
@@ -286,7 +293,6 @@ def custom_op():
     """Register a custom patch verb for the test and drop it afterwards."""
     register_patch_op("confetti")
     yield "confetti"
-    patch_op_registry._ops.discard("confetti")
     patch_op_registry._custom.discard("confetti")
 
 
@@ -369,22 +375,22 @@ class TestZoneDeltaReservedKeys:
 
     def test_reserved_key_is_dropped_from_the_delta(self) -> None:
         result = self._result({"$csrf": {"token": "forged"}, "unread": 3})
-        envelope = Patches.versioned("v1")._absorb_zone_result(result).envelope()
+        envelope = Patches.versioned("v1").absorb_zone_result(result).envelope()
         assert envelope.ops[0].as_dict() == {"op": "context", "data": {"unread": 3}}
 
     def test_dev_key_is_dropped_too(self) -> None:
         result = self._result({"$dev": False, "unread": 3})
-        envelope = Patches.versioned("v1")._absorb_zone_result(result).envelope()
+        envelope = Patches.versioned("v1").absorb_zone_result(result).envelope()
         assert envelope.ops[0].as_dict()["data"] == {"unread": 3}
 
     def test_only_reserved_keys_emit_no_context_op(self) -> None:
         result = self._result({"$csrf": {"token": "forged"}, "$dev": True})
-        envelope = Patches.versioned("v1")._absorb_zone_result(result).envelope()
+        envelope = Patches.versioned("v1").absorb_zone_result(result).envelope()
         assert envelope.ops == ()
 
     def test_plain_delta_still_rides_out(self) -> None:
         result = self._result({"unread": 3})
-        envelope = Patches.versioned("v1")._absorb_zone_result(result).envelope()
+        envelope = Patches.versioned("v1").absorb_zone_result(result).envelope()
         assert envelope.ops[0].as_dict() == {"op": "context", "data": {"unread": 3}}
 
 

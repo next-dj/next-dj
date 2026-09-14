@@ -36,8 +36,7 @@ See the poll section of :doc:`zones`.
 One active backend
 ------------------
 
-``PARTIAL_BACKENDS`` activates its first entry and ignores the rest.
-Multi-backend selection is not supported, and a list with more than one entry earns the ``next.W071`` warning at ``manage.py check``.
+``PARTIAL_BACKENDS`` activates its first entry and ignores the rest, so multi-backend selection is outside the model, see :doc:`reference`.
 A different wire format is a subclass of ``PartialProtocolBackend`` installed as the single entry, see :doc:`extending`.
 
 Scripts in patch HTML never run
@@ -45,8 +44,8 @@ Scripts in patch HTML never run
 
 A zone's co-located assets ship on a standalone render, inline bodies and URLs alike, through the envelope's asset manifest.
 A URL loads when its kind registers one of the three bundled renderers, and an inline body loads when the kind also wraps it in the element that renderer's verb builds.
-A kind registered with a custom renderer reaches the browser only on a full render, which the ``next.W074`` check reports.
-A kind whose ``inline_tag`` names another element keeps its URL form on a patch and leaves its inline bodies to the full render, which the ``next.W076`` check reports.
+A kind registered with a custom renderer reaches the browser only on a full render.
+A kind whose ``inline_tag`` names another element keeps its URL form on a patch and leaves its inline bodies to the full render, and :doc:`reference` names the checks that report both.
 The full render and the patch therefore agree on which element holds a body, because an inline entry that carries no verb is dropped rather than wrapped in an element the full render would not build.
 What never runs is a ``<script>`` inside the patch HTML itself, which the applier strips before the markup reaches the document.
 Every asset executes once per page lifetime, so behaviour binds through the mount idioms rather than a load-time scan.

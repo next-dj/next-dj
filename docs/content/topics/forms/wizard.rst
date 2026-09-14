@@ -3,11 +3,9 @@
 Form wizards
 ============
 
-A multi-step form across several requests usually means hand-rolling step routing, stashing partial data in the session, and re-wiring all of it to support the browser back button or a branch that skips a step.
+A multi-step form across several requests usually means hand-rolling step routing, stashing partial data in the session, and re-wiring all of it for the browser back button.
 A ``next.forms.FormWizard`` carries that load.
-It routes a sequence of ordinary forms across requests and finalises once on the last step.
-Each step is a plain ``django.forms.Form`` or ``django.forms.ModelForm``.
-The wizard handles step routing and back-navigation, supports conditional branching through ``get_steps``, persists per-step drafts through the configured wizard backend, and calls ``done`` with the merged cleaned data after the final step.
+Each step is a plain ``django.forms.Form`` or ``django.forms.ModelForm``, and the wizard finalises once on the last step.
 
 .. contents::
    :local:
@@ -32,8 +30,17 @@ See :ref:`topics-forms-actions-guards` for the semantics and the inheritance rul
 
 A wizard also accepts the dynamic ``check_permissions`` classmethod for a per-request decision.
 It is enforced per step POST, before the step form binds, so a denied step writes no storage.
-A wizard has no object-level hook.
+The wizard class itself carries no object-level hook, though a step form built on a ``next.forms`` base does, see `How step forms differ from standalone forms`_.
 See :ref:`topics-forms-actions-dynamic-guards` for the hook contract.
+
+.. code-block:: python
+   :caption: a per-request gate on the wizard class
+
+   @classmethod
+   def check_permissions(cls, request: HttpRequest) -> PermissionOutcome:
+       return request.POST.get("policy_acknowledged") == "on"
+
+The hook resolves its parameters through the injector, so a per-request gate reads the request or any registered dependency, and a denial leaves the step draft untouched.
 
 Declaring steps
 ---------------
@@ -84,7 +91,8 @@ Every step form subclasses ``django.forms`` directly.
 A step is not a standalone action, so a plain Django form has nothing to register and nothing to suppress.
 The wizard never runs ``get_initial`` or ``on_valid`` on a step, so a plain Django form is the canonical base, see `How step forms differ from standalone forms`_.
 A ``next.forms`` base can still serve as a step, but then it must set ``Meta.abstract = True``.
-Without the flag ``__init_subclass__`` registers the step as its own form action whose default ``on_valid`` saves a partial row, and the ``next.W057`` system check warns about the double role.
+Without the flag ``__init_subclass__`` registers the step as its own form action, and the ``next.W057`` system check warns about the double role.
+The registered step stays a live POST endpoint beside the wizard whatever its base, and a ``ModelForm`` step adds to that a default ``on_valid`` that saves a partial row.
 See :ref:`Preventing registration <topics-forms-actions-abstract>` for the ``Meta.abstract`` semantics.
 
 ``Meta.steps`` is required.
@@ -124,6 +132,7 @@ Return any ``HttpResponse``, most often a redirect away from the wizard.
 A field declared by two steps is statically flagged by the ``next.W059`` check, since the merge silently keeps the last value.
 ``Meta.success_message`` works on a wizard too.
 The message is flashed once, after ``done`` succeeds, interpolated over the merged step data, with ``get_success_message`` as the dynamic override.
+``Meta.success_url`` has no effect on a wizard, because ``done`` returns the response itself and no default ``on_valid`` runs to read the key.
 See :ref:`topics-forms-actions-success` for the message contract.
 
 Keep ``done`` idempotent.
@@ -139,7 +148,7 @@ A flow that must serialise concurrent tabs needs a custom backend that locks or 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The dispatcher resolves ``done`` through the same injector as an action handler or ``on_valid``.
-The classic signature ``done(self, request: HttpRequest, cleaned_data)`` reads ``request`` through its ``HttpRequest`` annotation, the same way a context callable does, so an unannotated ``request`` resolves to ``None``.
+The classic signature ``done(self, request: HttpRequest, cleaned_data)`` reads ``request`` through its ``HttpRequest`` annotation, the same way a context function does, so an unannotated ``request`` resolves to ``None``.
 Only ``cleaned_data`` is reserved by parameter name.
 ``cleaned_data`` is reserved the way ``form`` is on a handler, so it always carries the merged step data and wins over a provider or a URL kwarg of the same name.
 Beyond the reserved names, ``done`` declares markers and named dependencies like any injected callable, and URL kwargs resolve by parameter name.
@@ -244,17 +253,27 @@ The zero-argument methods are auto-called by Django templates, so a template wri
    * - ``completed_steps()``
      - The names of steps that already have a saved draft.
      - Zero-argument.
+   * - ``first_incomplete_step()``
+     - The first step without a saved draft, or ``None`` when every step is stored.
+     - Zero-argument.
    * - ``get_all_cleaned_data()``
      - The merged cleaned data of every saved step.
      - Zero-argument.
    * - ``get_cleaned_data_for_step(step)``
      - The saved cleaned data for ``step``, or ``None`` when the step has not been submitted.
      - Takes an argument, so call it from a ``@page.context`` or ``@component.context`` function and publish the result.
+   * - ``next_step(step)``
+     - The step after ``step``, or after the current step when the argument is omitted, and ``None`` on the last step.
+     - Takes an argument, so call it from a ``@page.context`` or ``@component.context`` function and publish the result.
    * - ``goto(step)``
      - The page URL for ``step``, derived from the current page path by swapping the step segment.
      - Takes an argument, so call it from a ``@page.context`` or ``@component.context`` function and publish the result.
+       When the current step name does not appear in the path, the last non-empty segment is rewritten instead.
 
 A progress bar reads the step status in Python and iterates the precomputed list in the template.
+
+The ``{% component %}`` call must sit inside the ``{% form %}`` block, because the tag is what publishes ``wizard`` into the template context.
+Called from outside the block, the ``wizard`` parameter of ``@component.context`` resolves to ``None`` and every wizard read raises ``AttributeError``.
 
 .. code-block:: python
    :caption: access/views/request/[step]/_blocks/progress_bar/component.py
@@ -295,6 +314,17 @@ A progress bar reads the step status in Python and iterates the precomputed list
      {% endfor %}
    </nav>
 
+The page template calls the component from inside the block, beside the step form shown earlier.
+
+.. code-block:: jinja
+   :caption: access/views/request/[step]/template.djx
+
+   {% form "access_request_wizard" %}
+     {% component "progress_bar" %}
+     {{ form.as_p }}
+     <button type="submit">Continue</button>
+   {% endform %}
+
 Routing and back-navigation
 ---------------------------
 
@@ -312,6 +342,9 @@ An invalid step re-renders the current step with its errors, and the draft alrea
 Back-navigation works through the same URL.
 Visiting an earlier step prefills its form from the saved draft, so the user sees the values they entered before.
 The current step is always resolved from the URL kwarg, which keeps the browser back button and bookmarked step URLs working.
+
+A step value the route captures but ``get_steps`` does not list resolves to the first step rather than to a 404, so a stale bookmark or a step dropped by a conditional list lands the visitor at the start.
+The captured value is compared as a string, so an ``[int:step]`` segment matches a numeric step name.
 
 The ``form`` variable has two sources
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

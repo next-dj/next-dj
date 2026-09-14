@@ -42,7 +42,7 @@ The function emits the ``watch_specs_ready`` signal on every call so subscribers
 Roots
 ~~~~~
 
-``get_framework_filesystem_roots_for_linking`` returns the sorted unique roots derived from page trees and component ``DIRS``.
+``get_framework_filesystem_roots_for_linking`` returns the sorted unique roots of the configured page trees together with every tree the components backends report through ``watch_roots``, which for the shipped file backend are its ``DIRS`` entries.
 Each root is resolved to an absolute path.
 Tooling that needs to symlink or scan those directories reads them from here instead of recomputing paths.
 
@@ -55,6 +55,10 @@ Signals
 ``watch_specs_ready`` fires after the reloader resolves the full watch-spec list.
 The sender is the ``iter_all_autoreload_watch_specs`` function.
 The single payload argument is ``specs``, the deduplicated ``(path, glob)`` list passed to the watcher.
+
+.. automodule:: next.server.signals
+   :members:
+   :no-index:
 
 See :doc:`signals` for the signal index.
 

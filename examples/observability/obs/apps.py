@@ -17,4 +17,4 @@ class ObsConfig(AppConfig):
             "jsx", extension=".jsx", slot="scripts", renderer="render_babel_script_tag"
         )
         register_patch_op(METRIC_PULSE_OP)
-        from obs import receivers  # noqa: F401, PLC0415
+        from obs import receivers

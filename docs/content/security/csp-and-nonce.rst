@@ -17,8 +17,9 @@ The runtime remembers the nonce of the script that bootstrapped it.
 On load it reads ``document.currentScript.nonce`` and copies that value onto every element it injects for a co-located asset delta, script, module, ``<link rel="stylesheet">``, and inline ``<style>`` alike.
 A dynamically inserted element carries the page nonce, so a policy that allows nonced scripts and styles allows the assets the runtime loads.
 
-The bootstrap script tag already carries the nonce your CSP middleware stamps on it, so there is nothing extra to configure on the runtime side.
-The asset elements inherit it.
+The framework does not write a nonce onto the bootstrap tag or onto the inline ``Next._init`` script.
+Both come from ``NextScriptBuilder``, whose templates are formatted once per process and cannot carry a per-request value.
+Under a nonce policy switch ``NEXT_JS_OPTIONS`` to the ``MANUAL`` policy and emit the three fragments from a template tag that reads the nonce off the request, as described under :ref:`Runtime script options <topics-static-js-runtime-script-options>`, or admit the two script fragments by hash.
 
 The nonce is the only attribute the runtime carries over from the page.
 An element it builds for a patch-inserted asset takes a fixed attribute set, so an ``integrity`` or ``crossorigin`` attribute a backend writes into its tag templates reaches the browser on a full render alone, see :doc:`/content/topics/partial-rendering/limitations`.
@@ -61,7 +62,7 @@ A nonce-based policy with ``'strict-dynamic'`` looks like this, with ``{nonce}``
 
    Content-Security-Policy: script-src 'nonce-{nonce}' 'strict-dynamic'; object-src 'none'; base-uri 'none'
 
-The bootstrap script tag carries ``nonce="{nonce}"``, the runtime copies that nonce onto every asset element it injects, and ``'strict-dynamic'`` lets the bootstrap load the scripts among them.
+Under the ``MANUAL`` policy the bootstrap script tag you emit carries ``nonce="{nonce}"``, the runtime copies that nonce onto every asset element it injects, and ``'strict-dynamic'`` lets the bootstrap load the scripts among them.
 No patch can introduce an inline script, so no patch needs a nonce of its own.
 
 See also

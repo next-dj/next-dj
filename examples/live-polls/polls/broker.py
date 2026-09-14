@@ -83,10 +83,7 @@ class PollBroker:
     def publish(self, snapshot: Snapshot, request_id: str | None = None) -> None:
         """Store `snapshot`, record the request id, bump the revision, wake all.
 
-        The request id of the mutation rides with the change so the
-        stream page can stamp it as the envelope echo. A caller without
-        a request id (a backfill or a test) publishes `None` and no
-        subscriber suppresses the change.
+        The request id rides with the change so the stream page can echo it.
         """
         store_snapshot(snapshot)
         condition = self._conditions[snapshot.poll_id]
@@ -98,14 +95,8 @@ class PollBroker:
     def changes(self, poll_id: int) -> Iterator[Change]:
         """Yield a `Change` for every poll mutation while the client stays open.
 
-        Each subscriber tracks its own `last_revision` so every wake reads the same
-        snapshot exactly once and no event is lost when several tabs subscribe at once.
-        A wake timeout loops without yielding, the sync source under WSGI sending no
-        keepalive, which is the documented limitation the framework stream notes.
-
-        On client disconnect the generator receives `GeneratorExit` and stops looping.
-        No per-subscriber bookkeeping needs unwinding because the per-poll condition and
-        revision counter are shared state.
+        Each subscriber tracks its own `last_revision`, so concurrent tabs each read a
+        snapshot once, and a timed-out wait loops without yielding.
         """
         condition = self._conditions[poll_id]
         last_revision = self._revisions[poll_id]
@@ -126,10 +117,8 @@ class PollBroker:
     ) -> int:
         """Block until the revision differs from `baseline` or the wake fires.
 
-        Return the current revision. The caller compares against
-        `baseline` to tell wake-up from timeout. Binding `baseline`
-        as a default argument on the predicate keeps the lambda free
-        of late-binding traps when this helper is called from a loop.
+        Binds `baseline` as a default argument on the predicate to keep the lambda
+        free of late-binding traps when this helper runs from a loop.
         """
         with condition:
             condition.wait_for(

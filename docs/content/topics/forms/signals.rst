@@ -53,7 +53,9 @@ Exactly one of ``handler``, ``form_class``, or ``wizard_class`` identifies the r
    :caption: notes/receivers.py
 
    import logging
+
    from django.dispatch import receiver
+
    from next.forms.signals import action_registered
 
    logger = logging.getLogger("notes.actions")
@@ -109,6 +111,7 @@ A receiver that needs request data reads it from ``request`` directly or from ``
    :caption: notes/receivers.py
 
    from django.dispatch import receiver
+
    from next.forms.signals import action_dispatched
 
    SLOW_MS = 250.0
@@ -153,6 +156,7 @@ The dispatcher only builds the payload and sends the signal when at least one re
    :caption: notes/receivers.py
 
    from django.dispatch import receiver
+
    from next.forms.signals import form_validation_failed
 
    @receiver(form_validation_failed)
@@ -165,6 +169,9 @@ The dispatcher only builds the payload and sends the signal when at least one re
        )
 
 The signal fires once per failed submission, so log volume scales with the failure rate rather than the request rate.
+
+A failing ``FormWizard`` step sends the same signal, with ``action_name`` set to the wizard's action name and ``error_count`` and ``field_names`` read off the step form that failed.
+The payload names no step, so a receiver that needs to know which one failed pairs this signal with ``wizard_step_submitted``.
 
 .. _topics-forms-signals-wizard-step-submitted:
 
@@ -182,8 +189,10 @@ The payload carries ``step``, ``cleaned_data``, ``uid``, and ``request``.
    :caption: access/receivers.py
 
    import logging
-   from django.dispatch import receiver
+
    from access.wizards import AccessRequestWizard
+   from django.dispatch import receiver
+
    from next.forms.signals import wizard_step_submitted
 
    logger = logging.getLogger("access.wizard")
@@ -210,6 +219,7 @@ The payload carries ``cleaned_data``, ``uid``, and ``request``.
    :caption: access/receivers.py
 
    from django.dispatch import receiver
+
    from next.forms.signals import wizard_completed
 
    @receiver(wizard_completed)
@@ -238,7 +248,9 @@ The dispatcher builds the payload and sends the signal only when at least one re
    :caption: notes/receivers.py
 
    import logging
+
    from django.dispatch import receiver
+
    from next.forms.signals import form_access_denied
 
    logger = logging.getLogger("notes.access")

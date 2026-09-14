@@ -15,8 +15,7 @@ def greeting() -> str:
 class ZonedRenameForm(Form):
     """Form that lives inside a zone so its invalid submit morphs the zone.
 
-    Meta.success_message flashes a contrib message, so a partial success
-    funnel drains it into a toast patch.
+    Meta.success_message flashes a contrib message the success funnel drains to a toast.
     """
 
     title = forms.CharField(max_length=100)

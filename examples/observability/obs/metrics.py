@@ -24,9 +24,7 @@ _MINUTE_FORMAT = "%Y%m%d%H%M"
 def _floor_minute(moment: datetime) -> str:
     """Return the minute-floor of `moment` as a colon-free stamp.
 
-    The output stays free of colons so the bucket key can be split
-    back into its parts with `rpartition(":")` even when the user-
-    supplied `key` itself contains colons.
+    Colon-free output lets `rpartition(":")` split the key even when `key` has colons.
     """
     return moment.replace(second=0, microsecond=0).strftime(_MINUTE_FORMAT)
 
@@ -42,9 +40,8 @@ def _bucket_key(kind: str, key: str, minute_iso: str) -> str:
 def _track(full_key: str) -> None:
     """Record `full_key` in the index used by `read_all` and `flush`.
 
-    The index key itself never expires, otherwise a long idle stretch
-    would let the default cache timeout drop the index even though the
-    individual entries are still alive.
+    The index key never expires, otherwise a long idle stretch would let the default
+    cache timeout drop the index while its entries are still alive.
     """
     index = cache.get(INDEX_KEY) or set()
     if full_key not in index:
@@ -56,9 +53,7 @@ def _track(full_key: str) -> None:
 def _atomic_bump(full: str, by: int, *, ttl: int | None = None) -> int:
     """Add `by` to the counter at `full`, seeding atomically when missing.
 
-    The `ttl` value of ``None`` means the counter never expires, which
-    is the desired behaviour for cumulative counters. Bucket counters
-    pass an explicit `BUCKET_TTL_SECONDS`.
+    A `ttl` of `None` never expires, the right behaviour for a cumulative counter.
     """
     if cache.add(full, by, timeout=ttl):
         _track(full)
@@ -103,11 +98,8 @@ def read_kind(kind: str) -> dict[str, int]:
 def read_window(kind: str, minutes: int) -> dict[str, int]:
     """Return per-key totals across every bucket in the last `minutes` minutes.
 
-    The function is read-only with one exception: bucket entries whose
-    cache value already expired are dropped from the index in passing.
-    The window itself is a query parameter and never mutates state, so
-    a `read_window(kind, 5)` call cannot evict the bucket that the next
-    `read_window(kind, 60)` call needs to see.
+    The only write is dropping already-expired bucket entries from the index, so a
+    narrow window cannot evict the buckets a wider one still needs.
     """
     cutoff = _now() - timedelta(minutes=minutes)
     index = cache.get(INDEX_KEY) or set()
@@ -160,10 +152,7 @@ def top_by_window(
 def flush() -> list[tuple[str, str, int]]:
     """Drain every counter, clear the index, and return the snapshot.
 
-    Both cumulative and bucket entries are drained. The returned list
-    contains only cumulative `(kind, key, value)` triples, sorted by
-    kind and key for stable output. The cache is left empty so the
-    next `incr` starts from zero.
+    Bucket entries drain too, but only cumulative triples come back, sorted by kind.
     """
     index = cache.get(INDEX_KEY) or set()
     rows: list[tuple[str, str, int]] = []

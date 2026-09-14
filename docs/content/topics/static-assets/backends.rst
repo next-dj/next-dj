@@ -56,8 +56,15 @@ A backend adds the renderer methods that its registered kinds reference, see :do
        """Return the public URL of an already-resolved asset for this render."""
 
 Every URL the pipeline renders passes through it, including the ``next.min.js`` runtime bundle and its preload hint, which the framework builds rather than a renderer method.
-A partial patch envelope carries bare URLs for the assets a zone body introduces, and those pass through the hook as well, so a zone morph reaches the client with the URLs a full page render would have written.
+A partial patch envelope carries bare URLs for the assets a zone body introduces, and those pass through the hook as well, so a zone morph reaches the client with the URLs a full-page render would have written.
 Override ``asset_url`` when the URL must change, override the renderer methods when the markup must change.
+
+Invalidating a memo
+~~~~~~~~~~~~~~~~~~~
+
+``forget_urls`` is concrete on the base class and clears the memo the base fills.
+The manager calls it on every configured backend whenever ``STATIC_ROOT``, ``STATIC_URL``, or ``STORAGES`` changes, because those settings rebuild the storage the URLs were resolved against.
+A backend that remembers what it resolved somewhere other than the base memo, such as a parsed build manifest, overrides this hook and drops its own state there.
 
 The default backend
 -------------------
@@ -67,8 +74,8 @@ Assets live in the ``next/`` staticfiles namespace, so manifest storage, S3 stor
 
 .. note::
 
-   ``StaticFilesBackend`` caches resolved URLs per ``(logical_name, suffix)`` pair for the lifetime of the backend instance.
-   Tests that use ``override_settings`` to swap storage backends should be aware that the cache is reset when the framework rebuilds the backend.
+   ``StaticFilesBackend`` caches resolved URLs per ``(logical_name, suffix)`` pair.
+   A ``STATIC_ROOT``, ``STATIC_URL``, or ``STORAGES`` change drops that cache through ``forget_urls`` without rebuilding the backend, so a test that swaps storage through ``override_settings`` sees fresh URLs on the next render.
 
 The backend ships three renderer methods.
 
@@ -189,24 +196,15 @@ A backend that raises ``ImproperlyConfigured`` from its own ``__init__`` is skip
 Any other exception a constructor raises is a bug in that backend and reaches the caller.
 When no entry survives, the manager seeds the built-in staticfiles backend so rendering always has one, and that seed announces itself through the same signal.
 
-Request aware output
+``StaticManager.default_backend`` is the first entry, and it is the only one the render path uses.
+A later entry is built and receives ``backend_loaded`` and ``forget_urls``, and renders nothing.
+
+Request-aware output
 --------------------
 
 ``asset_url`` and every renderer method accept a ``request`` keyword.
-A custom backend can vary its output per request, for example to pick a CDN host based on the tenant.
-
-.. code-block:: python
-   :caption: notes/backends.py
-
-   from next.static import StaticFilesBackend
-
-   class TenantPrefixBackend(StaticFilesBackend):
-       def asset_url(self, url, *, request=None) -> str:
-           prefix = getattr(getattr(request, "tenant", None), "cdn", "")
-           return f"{prefix}{url}"
-
-The manager passes the current request to ``asset_url`` and to every renderer call.
-See the `multi-tenant example <https://github.com/next-dj/next-dj/tree/main/examples/multi-tenant>`__ for a worked tenant prefix backend.
+The manager passes the current request to ``asset_url`` and to every renderer call, so a custom backend can vary its output per request, for example to pick a CDN host based on the tenant.
+See :ref:`Tenant URL prefix <howto-static-backend-tenant-prefix>` for a worked backend, and the `multi-tenant example <https://github.com/next-dj/next-dj/tree/main/examples/multi-tenant>`__ for the same pattern in a running project.
 
 Signals
 -------
@@ -241,7 +239,7 @@ Subclass ``StaticFilesBackend`` and override ``render_link_tag`` and ``render_sc
 Per-tenant CDN
 ~~~~~~~~~~~~~~
 
-Use a request aware ``asset_url`` that reads the tenant from the request and chooses a CDN host.
+Use a request-aware ``asset_url`` that reads the tenant from the request and chooses a CDN host.
 
 See also
 --------

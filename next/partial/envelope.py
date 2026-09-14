@@ -40,14 +40,22 @@ class Patch:
         data.update(self.extras)
         return data
 
+    @classmethod
+    def from_dict(cls, data: "Mapping[str, Any]") -> "Patch":
+        """Rebuild a patch from its wire mapping, reading extras as what is left."""
+        return cls(
+            op=data[keys.OP],
+            target=data.get(keys.TARGET),
+            html=data.get(keys.HTML),
+            extras={k: v for k, v in data.items() if k not in keys.RESERVED_PATCH_KEYS},
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class Asset:
     """One co-located asset of a rendered target by kind, URL, and inline body.
 
-    The `load` field is the client insertion verb resolved from the kind
-    registry. It stays None for a kind the runtime cannot insert, and the
-    wire then omits the field entirely.
+    `load` is the insertion verb from the kind registry, omitted when the kind has none.
     """
 
     kind: str
@@ -63,6 +71,16 @@ class Asset:
         if self.load is not None:
             data[keys.LOAD] = self.load
         return data
+
+    @classmethod
+    def from_dict(cls, data: "Mapping[str, str]") -> "Asset":
+        """Rebuild an asset from its wire mapping."""
+        return cls(
+            kind=data[keys.KIND],
+            url=data[keys.URL],
+            inline=data.get(keys.INLINE),
+            load=data.get(keys.LOAD),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,14 +99,17 @@ class FormMeta:
             keys.ERRORS: {name: list(msgs) for name, msgs in self.errors.items()},
         }
 
+    @classmethod
+    def from_dict(cls, data: "Mapping[str, Any]") -> "FormMeta":
+        """Rebuild the form meta from its wire mapping."""
+        return cls(uid=data[keys.UID], valid=data[keys.VALID], errors=data[keys.ERRORS])
+
 
 @dataclass(frozen=True, slots=True)
 class Envelope:
     """A patch envelope carrying ordered ops and protocol meta.
 
-    Every field but `version` is optional, an absent value is empty on
-    the wire. The `csrf` and `request_id` meta are stamped only when set
-    so the wire shape stays stable whether or not they travel.
+    `csrf` and `request_id` stamp only when set, so the wire shape stays stable.
     """
 
     version: str
@@ -111,6 +132,22 @@ class Envelope:
         if self.request_id is not None:
             data[keys.REQUEST_ID] = self.request_id
         return data
+
+    @classmethod
+    def from_dict(cls, data: "Mapping[str, Any]") -> "Envelope":
+        """Rebuild an envelope from its wire mapping, the inverse of `as_dict`.
+
+        Kept beside the writer so the serializer and the test client read one format.
+        """
+        form = data.get(keys.FORM)
+        return cls(
+            version=data[keys.VERSION],
+            ops=tuple(Patch.from_dict(op) for op in data.get(keys.OPS, ())),
+            assets=tuple(Asset.from_dict(a) for a in data.get(keys.ASSETS, ())),
+            form=None if form is None else FormMeta.from_dict(form),
+            csrf=data.get(keys.CSRF),
+            request_id=data.get(keys.REQUEST_ID),
+        )
 
 
 __all__ = ["Asset", "Envelope", "FormMeta", "Patch"]

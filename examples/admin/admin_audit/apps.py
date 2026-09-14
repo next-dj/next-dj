@@ -7,4 +7,4 @@ class AdminAuditConfig(AppConfig):
 
     def ready(self) -> None:
         """Import the receivers module so signal wiring fires at startup."""
-        from admin_audit import signals  # noqa: F401, PLC0415
+        from admin_audit import signals

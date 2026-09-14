@@ -1,5 +1,4 @@
 from django import forms
-from django.contrib.messages import get_messages
 from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponseRedirect
 from flags.models import Flag
@@ -7,6 +6,7 @@ from flags.providers import WRITE_GATE_FLAG, FlagService
 
 from next import Depends, context
 from next.forms import Form
+from next.urls import page_reverse_lazy
 
 
 class BulkToggleForm(Form):
@@ -15,7 +15,7 @@ class BulkToggleForm(Form):
     )
 
     class Meta:
-        success_url = "/admin/"
+        success_url = page_reverse_lazy("admin")
         success_message = "Flag toggles saved."
 
     @classmethod
@@ -45,9 +45,3 @@ class BulkToggleForm(Form):
 @context("flags")
 def flags() -> list[Flag]:
     return list(Flag.objects.all())
-
-
-@context("flash_messages")
-def flash_messages(request: HttpRequest) -> list[str]:
-    """Drain the pending Meta.success_message flashes for the admin banner."""
-    return [str(m) for m in get_messages(request)]

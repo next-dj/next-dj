@@ -1,13 +1,13 @@
 """Template tags for rendering next.forms form blocks."""
 
-from typing import TYPE_CHECKING, cast, override
+from typing import TYPE_CHECKING, Final, cast, override
 
 from django import template
 from django.core.exceptions import ImproperlyConfigured
 from django.middleware.csrf import get_token
 from django.utils.html import format_html
 
-from next.forms.backends import FormActionNotFoundError
+from next.forms.errors import FormActionNotFoundError
 from next.forms.manager import (
     _build_form_namespace_from_meta,
     form_action_manager,
@@ -20,11 +20,16 @@ from next.forms.uid import (
     validated_origin_path,
 )
 from next.forms.widgets import bind_component_widgets
+from next.seeding import COLLECTOR_KEY
 
 
 _MIN_FORM_TAG_BITS = 2
 _RESERVED_FORM_ATTRS = frozenset({"action", "method"})
 _RESERVED_FORM_ATTR_PREFIX = "data-next-"
+
+# Wire attributes other areas ask about, named here because the tag writes them.
+FORM_ZONE_ATTR: Final = "data-next-target"
+FORM_KEY_ATTR: Final = "data-next-key"
 
 # Python params of the tag that compile to client `data-next-*` attributes on
 # the form, so the markup never carries a raw selector or swap mode.
@@ -32,8 +37,8 @@ _PARTIAL_FORM_PARAMS: dict[str, str] = {
     "validate": "data-next-validate",
     "trigger": "data-next-trigger",
     "debounce": "data-next-debounce",
-    "zone": "data-next-target",
-    "key": "data-next-key",
+    "zone": FORM_ZONE_ATTR,
+    "key": FORM_KEY_ATTR,
 }
 
 
@@ -52,9 +57,8 @@ register = template.Library()
 def do_form(parser: template.base.Parser, token: template.base.Token) -> "FormNode":
     """Block tag accepting an action name plus optional HTML attributes.
 
-    The `validate`, `trigger`, `debounce`, `zone`, and `key` params compile
-    to client `data-next-*` attributes on the form, every other key="value"
-    pair stays a plain HTML attribute.
+    The `validate`, `trigger`, `debounce`, `zone`, and `key` params compile to
+    `data-next-*` attributes, while any other pair stays plain HTML.
     """
     bits = token.split_contents()
     if len(bits) < _MIN_FORM_TAG_BITS:
@@ -62,13 +66,11 @@ def do_form(parser: template.base.Parser, token: template.base.Token) -> "FormNo
         raise template.TemplateSyntaxError(msg)
     action_expr = parser.compile_filter(bits[1])
     attrs: list[tuple[str, FilterExpression]] = []
-    partial_attrs: list[tuple[str, FilterExpression]] = []
+    partial_attrs: dict[str, FilterExpression] = {}
     for bit in bits[2:]:
         name, eq, value = bit.partition("=")
         if eq and name in _PARTIAL_FORM_PARAMS:
-            partial_attrs.append(
-                (_PARTIAL_FORM_PARAMS[name], parser.compile_filter(value))
-            )
+            partial_attrs[_PARTIAL_FORM_PARAMS[name]] = parser.compile_filter(value)
             continue
         attrs.append(_parse_form_attr(parser, bits[0], bit))
     nodelist = parser.parse(("endform",))
@@ -77,7 +79,7 @@ def do_form(parser: template.base.Parser, token: template.base.Token) -> "FormNo
         action_expr=action_expr,
         nodelist=nodelist,
         attrs=tuple(attrs),
-        partial_attrs=tuple(partial_attrs),
+        partial_attrs=partial_attrs,
     )
 
 
@@ -147,13 +149,17 @@ class FormNode(template.Node):
         action_expr: "FilterExpression",
         nodelist: template.NodeList,
         attrs: "tuple[tuple[str, FilterExpression], ...]" = (),
-        partial_attrs: "tuple[tuple[str, FilterExpression], ...]" = (),
+        partial_attrs: "dict[str, FilterExpression] | None" = None,
     ) -> None:
         """Initialize with the action, nodelist, HTML attrs, and partial attrs."""
         self.action_expr = action_expr
         self.nodelist = nodelist
         self.attrs = attrs
-        self.partial_attrs = partial_attrs
+        self.partial_attrs = partial_attrs or {}
+
+    def has_partial_attr(self, attr: str) -> bool:
+        """Return True when the tag compiled the given `data-next-*` attribute."""
+        return attr in self.partial_attrs
 
     def _get_request(self, context: template.Context) -> "HttpRequest":
         """Extract request from context or raise ImproperlyConfigured."""
@@ -193,12 +199,8 @@ class FormNode(template.Node):
     def _origin_path(context: template.Context, request: "HttpRequest") -> str | None:
         """Return the page URL the form belongs to, query string included.
 
-        On the validation-error re-render the request targets the action
-        endpoint, so the posted origin of the original page wins over the
-        current URL. On a wizard advance the shaping layer merges the
-        next step URL under FORM_ORIGIN_OVERRIDE_KEY into the zone render
-        context, which wins over the submitted step origin so blur-validate
-        probes on the new step render from the correct page.
+        `FORM_ORIGIN_OVERRIDE_KEY` wins over both the posted origin and the current
+        URL, for a validation-error re-render and a wizard step advance alike.
         """
         override = context.get(FORM_ORIGIN_OVERRIDE_KEY)
         if override is not None:
@@ -222,7 +224,7 @@ class FormNode(template.Node):
             bits.append(format_html('data-next-action="{}"', uid))
         bits.extend(
             format_html('{}="{}"', name, str(expr.resolve(context)))
-            for name, expr in self.partial_attrs
+            for name, expr in self.partial_attrs.items()
         )
         if (
             form_instance is not None
@@ -278,7 +280,7 @@ class FormNode(template.Node):
                 form_instance,
                 template_path=context.get("current_template_path"),
                 request=request,
-                collector=context.get("_static_collector"),
+                collector=context.get(COLLECTOR_KEY),
                 with_errors=form_instance.is_bound,
             )
 

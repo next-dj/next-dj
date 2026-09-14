@@ -29,12 +29,10 @@ See :doc:`actions` for the registration rules.
 .. code-block:: python
    :caption: obs/forms.py — auto-registered as ``window_filter_form`` (shared)
 
-   from django import forms as django_forms
+   import next.forms
 
-   from next.forms import Form
-
-   class WindowFilterForm(Form):
-       window = django_forms.ChoiceField(choices=WINDOW_CHOICES)
+   class WindowFilterForm(next.forms.Form):
+       window = next.forms.ChoiceField(choices=WINDOW_CHOICES)
 
 A form declared in ``forms.py`` takes ``shared`` scope and is reachable from any template by its derived name.
 See :doc:`actions` for the full scope rules.
@@ -61,8 +59,10 @@ A filter form, for example, redirects with the picked value on the query string.
 
    from django.http import HttpRequest, HttpResponseRedirect
 
-   class WindowFilterForm(Form):
-       window = django_forms.ChoiceField(choices=WINDOW_CHOICES)
+   import next.forms
+
+   class WindowFilterForm(next.forms.Form):
+       window = next.forms.ChoiceField(choices=WINDOW_CHOICES)
 
        def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
            chosen = self.cleaned_data["window"]
@@ -71,16 +71,17 @@ A filter form, for example, redirects with the picked value on the query string.
 The method reads ``self.cleaned_data`` directly.
 There is no model to save, so the page owns every write.
 
+The bulk form below declares ``enabled_names`` with an empty choice list, so a ``MultipleChoiceField`` rejects every submitted value until `Dynamic choices`_ fills the list in ``__init__``.
+
 .. code-block:: python
    :caption: flags/panels/admin/page.py — bulk update across many rows
 
-   from django import forms
    from django.http import HttpRequest, HttpResponseRedirect
 
-   from next.forms import Form
+   import next.forms
 
-   class BulkToggleForm(Form):
-       enabled_names = forms.MultipleChoiceField(required=False)
+   class BulkToggleForm(next.forms.Form):
+       enabled_names = next.forms.MultipleChoiceField(required=False)
 
        def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
            enabled_names = set(self.cleaned_data["enabled_names"])
@@ -91,6 +92,46 @@ There is no model to save, so the page owns every write.
                    flag.save(update_fields=["enabled", "updated_at"])
            return HttpResponseRedirect("/admin/")
 
+Round-tripping the filter
+-------------------------
+
+A filter form owns both halves of a round trip.
+The redirect above puts the picked value on the query string, and the page reads it back on the next GET through ``DQuery[str]``.
+
+.. code-block:: python
+   :caption: obs/stats/page.py — read the window currently in force
+
+   from next import context
+   from next.urls import DQuery
+
+   @context("current_window")
+   def current_window(window: DQuery[str] = "7d") -> str:
+       return window
+
+A ``get_initial`` classmethod pre-selects the same value on the form itself.
+Without it the control resets to the first choice on every render and shows a filter the page is not applying.
+
+.. code-block:: python
+   :caption: obs/forms.py — pre-select the current window
+
+   import next.forms
+   from next.urls import DQuery
+
+   class WindowFilterForm(next.forms.Form):
+       window = next.forms.ChoiceField(choices=WINDOW_CHOICES)
+
+       @classmethod
+       def get_initial(cls, window: DQuery[str] = "7d") -> dict:
+           return {"window": window}
+
+The ``{% form %}`` tag writes the rendering URL with its query string into ``_next_form_origin``, so a handler that ends in ``redirect_to_origin`` returns the visitor to the filtered view rather than the bare page.
+
+Success feedback on a plain form
+--------------------------------
+
+``Meta.success_url`` names the redirect target and ``Meta.success_message`` queues a Django message, so a form that only needs a destination and a confirmation writes no ``on_valid`` at all.
+See :ref:`topics-forms-actions-success` for the message interpolation contract and the redirect precedence.
+
 Dynamic choices
 ---------------
 
@@ -100,12 +141,10 @@ Call ``super().__init__`` first, then rewrite the field's ``choices`` or ``query
 .. code-block:: python
    :caption: flags/panels/admin/page.py — choices from current flag names
 
-   from django import forms
+   import next.forms
 
-   from next.forms import Form
-
-   class BulkToggleForm(Form):
-       enabled_names = forms.MultipleChoiceField(required=False)
+   class BulkToggleForm(next.forms.Form):
+       enabled_names = next.forms.MultipleChoiceField(required=False)
 
        def __init__(self, *args, **kwargs):
            super().__init__(*args, **kwargs)
@@ -118,13 +157,11 @@ The same pattern narrows a ``ModelChoiceField`` queryset to the submitted parent
 .. code-block:: python
    :caption: polls/forms.py — narrow the queryset on binding
 
-   from django import forms as django_forms
+   import next.forms
 
-   from next.forms import Form
-
-   class VoteForm(Form):
-       poll = django_forms.ModelChoiceField(queryset=Poll.objects.all())
-       choice = django_forms.ModelChoiceField(queryset=Choice.objects.none())
+   class VoteForm(next.forms.Form):
+       poll = next.forms.ModelChoiceField(queryset=Poll.objects.all())
+       choice = next.forms.ModelChoiceField(queryset=Choice.objects.none())
 
        def __init__(self, *args, **kwargs):
            super().__init__(*args, **kwargs)

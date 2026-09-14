@@ -6,20 +6,26 @@ from unittest.mock import patch
 
 import pytest
 from django.core.exceptions import ImproperlyConfigured
+from django.utils.functional import empty
 
 from next.deps import Depends
+from next.deps.linear import LinearDependencyResolver
 from next.deps.resolver import (
     DependencyResolver,
     _configured_resolver_class,
+    _holder,
     apply_resolver_setting,
+    current_resolver,
     resolver,
 )
 from next.testing import override_next_settings, resolve_call
 
 
 DEFAULT_PATH = "next.deps.DependencyResolver"
+LINEAR_PATH = "next.deps.linear.LinearDependencyResolver"
 WIDE_SKIP_PATH = "tests.deps.test_setting.WideSkipResolver"
 SLOTTED_PATH = "tests.deps.test_setting.SlottedResolver"
+BUILT_PATH = "tests.deps.test_setting.BuiltResolver"
 
 NOT_A_CLASS = object()
 
@@ -34,9 +40,18 @@ class WideSkipResolver(DependencyResolver):
 
 
 class SlottedResolver(DependencyResolver):
-    """Resolver subclass whose own slots give it an incompatible object layout."""
+    """Resolver subclass declaring slots of its own."""
 
     __slots__ = ("extra",)
+
+
+class BuiltResolver(DependencyResolver):
+    """Resolver subclass that sets up a field of its own while it is built."""
+
+    def __init__(self, *providers) -> None:
+        """Note that the constructor ran, on top of the base initialisation."""
+        super().__init__(*providers)
+        self.badge = "built"
 
 
 def widget(size: int = 3, label: str = "plain") -> dict[str, object]:
@@ -59,16 +74,13 @@ def apply_with(dotted: str) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _restored_resolver_class() -> Generator[None, None, None]:
-    """Put the resolver class and its memos back, so no swap outlives a test."""
-    original = type(resolver)
+def _restored_resolver() -> Generator[None, None, None]:
+    """Put the object the holder stood for back, so no swap outlives a test."""
+    original = current_resolver()
     try:
         yield
     finally:
-        resolver.__class__ = original
-        resolver._providers_version += 1
-        resolver._plan_cache.clear()
-        resolver._leaf_dependencies.clear()
+        _holder._wrapped = original
 
 
 class TestConfiguredResolverClass:
@@ -100,18 +112,28 @@ class TestConfiguredResolverClass:
         """A refused class never reaches the singleton."""
         with pytest.raises(ImproperlyConfigured):
             apply_with("next.deps.ProviderRegistry")
-        assert type(resolver) is DependencyResolver
+        assert type(current_resolver()) is DependencyResolver
 
 
 class TestApplyResolverSetting:
-    """`apply_resolver_setting` retypes the singleton and drops its memos."""
+    """`apply_resolver_setting` rebuilds the singleton behind the shared holder."""
 
-    def test_swap_keeps_the_object_and_changes_its_class(self) -> None:
-        """The singleton keeps its identity while its class moves."""
-        before = resolver
+    def test_a_swap_rebuilds_the_object_behind_the_holder(self) -> None:
+        """A holder imported before the swap reads the resolver in force after it."""
+        before = current_resolver()
         apply_with(WIDE_SKIP_PATH)
-        assert resolver is before
-        assert type(resolver) is WideSkipResolver
+        assert current_resolver() is not before
+        assert resolver.__class__ is WideSkipResolver
+
+    def test_an_untouched_holder_builds_the_core_resolver_on_first_read(self) -> None:
+        """Nothing has to apply the setting for a holder to stand for a resolver."""
+        _holder._wrapped = empty
+        assert type(current_resolver()) is DependencyResolver
+
+    def test_a_swap_runs_the_constructor_of_the_class_it_adopts(self) -> None:
+        """A subclass setting up a field of its own is built, not taken on."""
+        apply_with(BUILT_PATH)
+        assert current_resolver().badge == "built"
 
     def test_swap_changes_what_the_recompiled_plan_carries(self) -> None:
         """A subclass widening `skips` drops the parameter from the next plan."""
@@ -119,48 +141,49 @@ class TestApplyResolverSetting:
         apply_with(WIDE_SKIP_PATH)
         assert resolve_call(widget) == {"size": 3}
 
-    def test_swap_empties_the_plan_and_leaf_memos(self) -> None:
-        """Both caches the previous class filled are dropped by the swap."""
-        resolver.register_dependency("greeting", greeting)
+    def test_a_swap_leaves_no_memo_of_the_class_it_replaced(self) -> None:
+        """Every memo the previous class filled goes with the object that took it."""
+        previous = current_resolver()
+        previous.register_dependency("greeting", greeting)
         try:
             assert resolve_call(welcome) == {"greeting": "hi"}
-            assert resolver._plan_cache
-            assert resolver._leaf_dependencies
+            assert previous._plan_cache
+            assert previous._leaf_dependencies
             apply_with(WIDE_SKIP_PATH)
-            assert dict(resolver._plan_cache) == {}
-            assert resolver._leaf_dependencies == {}
+            assert not resolver._plan_cache
+            assert not resolver._leaf_dependencies
         finally:
-            resolver.unregister_dependency("greeting")
+            previous.unregister_dependency("greeting")
 
-    def test_swap_moves_the_providers_version(self) -> None:
-        """A plan held outside the cache is stamped stale by the swap."""
-        before = resolver._providers_version
+    def test_reapplying_the_same_class_rebuilds_nothing(self) -> None:
+        """A second apply of the class already in place keeps the object and its memos."""
         apply_with(WIDE_SKIP_PATH)
-        assert resolver._providers_version > before
-
-    def test_reapplying_the_same_class_invalidates_nothing(self) -> None:
-        """A second apply of the class already in place leaves the memos intact."""
-        apply_with(WIDE_SKIP_PATH)
+        built = current_resolver()
         resolve_call(widget)
-        version = resolver._providers_version
-        cached = dict(resolver._plan_cache)
-        assert cached
+        held = list(resolver._plan_cache)
+        assert held
         apply_with(WIDE_SKIP_PATH)
-        assert resolver._providers_version == version
-        assert dict(resolver._plan_cache) == cached
+        assert current_resolver() is built
+        assert list(resolver._plan_cache) == held
 
     def test_returning_to_the_default_restores_the_core_class(self) -> None:
         """The default path takes a swapped singleton back to the core resolver."""
         apply_with(WIDE_SKIP_PATH)
         apply_with(DEFAULT_PATH)
-        assert type(resolver) is DependencyResolver
+        assert type(current_resolver()) is DependencyResolver
         assert resolve_call(widget) == {"size": 3, "label": "plain"}
 
-    def test_incompatible_layout_raises_improperly_configured(self) -> None:
-        """A subclass declaring slots cannot be taken on in place."""
-        with pytest.raises(ImproperlyConfigured, match="object layout"):
-            apply_with(SLOTTED_PATH)
-        assert type(resolver) is DependencyResolver
+    def test_the_linear_resolver_ships_as_a_selectable_alternative(self) -> None:
+        """The reference resolver is reachable through the setting like any other."""
+        apply_with(LINEAR_PATH)
+        assert type(current_resolver()) is LinearDependencyResolver
+        assert resolve_call(widget) == {"size": 3, "label": "plain"}
+        assert not resolver._plan_cache
+
+    def test_a_subclass_with_slots_is_built_like_any_other(self) -> None:
+        """Slots of its own are no obstacle once the object is built rather than retyped."""
+        apply_with(SLOTTED_PATH)
+        assert type(current_resolver()) is SlottedResolver
 
 
 class TestSettingsReloadWiring:
@@ -169,7 +192,7 @@ class TestSettingsReloadWiring:
     def test_override_swaps_the_class_and_restores_it_on_exit(self) -> None:
         """`override_next_settings` swaps the class for the block only."""
         with override_next_settings(DEPENDENCY_RESOLVER=WIDE_SKIP_PATH):
-            assert type(resolver) is WideSkipResolver
+            assert type(current_resolver()) is WideSkipResolver
             assert resolve_call(widget) == {"size": 3}
-        assert type(resolver) is DependencyResolver
+        assert type(current_resolver()) is DependencyResolver
         assert resolve_call(widget) == {"size": 3, "label": "plain"}

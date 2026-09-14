@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 from django.http import HttpResponse, HttpResponseBadRequest
 
-from next.deps import resolver
+from next.deps.resolver import current_resolver
 from next.ports import partial_shaper_slot
 
 from .permissions import _enforce_object_permissions, _enforce_view_permissions
@@ -34,21 +34,27 @@ def _maybe_validate_only(
     form: "django_forms.Form",
     action_name: str,
     state: "_DispatchState",
+    *,
+    wizard: "FormWizard | None" = None,
 ) -> "HttpResponse | None":
     """Return a validate-only response when the request asks for one.
 
-    The branch only fires once both authorization layers have passed and
-    the form is already bound, so a guarded action's validator is never an
-    anonymous oracle. The handler never runs, success signals never fire,
-    and wizard storage stays untouched. A request without validate fields
-    falls through to the normal submit path.
+    Fires only once both authorization layers pass and the form is bound, so a guarded
+    action's validator is never an anonymous oracle, and the handler, success signals,
+    and wizard storage stay untouched until the real submit.
     """
     shaper = partial_shaper_slot.get()
     intent = shaper.intent(request)
     if not intent.validate_fields:
         return None
     return shaper.shape_validate(
-        backend, request, form, intent, action_name=action_name, uid=state.uid or ""
+        backend,
+        request,
+        form,
+        intent,
+        action_name=action_name,
+        uid=state.uid or "",
+        wizard=wizard,
     )
 
 
@@ -82,7 +88,9 @@ def _bind_wizard_step(
     denial = _enforce_object_permissions(form, request, action_name, state)
     if denial is not None:
         return denial
-    validated = _maybe_validate_only(backend, request, form, action_name, state)
+    validated = _maybe_validate_only(
+        backend, request, form, action_name, state, wizard=wizard
+    )
     if validated is not None:
         return validated
     return wizard, step_name, form
@@ -122,12 +130,12 @@ def _dispatch_wizard(
 
     next_step = wizard.next_step(step_name)
     if next_step is None:
-        # A direct POST to the last step must not finalise while an
-        # earlier step has no stored data, so reroute to the first gap.
+        # A direct POST to the last step must not finalise while an earlier step has no
+        # stored data, so reroute to the first gap.
         next_step = wizard.first_incomplete_step()
     if next_step is None:
         merged = wizard.get_all_cleaned_data()
-        resolved = resolver.resolve_dependencies(
+        resolved = current_resolver().resolve_dependencies(
             wizard.done,
             request=request,
             cleaned_data=merged,

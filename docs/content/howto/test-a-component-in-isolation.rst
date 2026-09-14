@@ -60,6 +60,18 @@ The ``props`` mapping stands in for a ``{% component %}`` call site, so it fills
 
 The helper raises ``LookupError`` when no visible component matches the name from the ``at`` path.
 
+The ``at`` path is resolved against the process working directory, so a relative string only holds while the suite runs from the project root.
+A suite that may run from elsewhere builds the anchor from the test file.
+
+.. code-block:: python
+   :caption: tests/test_info_card.py
+
+   from pathlib import Path
+
+   TEMPLATE = Path(__file__).resolve().parents[1] / "notes" / "pages" / "template.djx"
+
+A component that comes from a ``COMPONENT_BACKENDS`` ``DIRS`` root is visible from any anchor, so only components that live inside a page tree depend on the value.
+
 .. warning::
 
    The keys of the ``props`` mapping reach the render-time guard as the props of this call site, the way ``{% component "info_card" title="Quick start" %}`` would pass them.
@@ -120,6 +132,7 @@ When a component callable reads the request, build one with :class:`~django.test
    :caption: tests/test_user_badge.py
 
    from django.test import RequestFactory
+
    from next.testing import render_component_by_name
 
    def test_user_badge_shows_username(db, django_user_model) -> None:

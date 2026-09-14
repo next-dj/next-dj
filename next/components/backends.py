@@ -2,8 +2,6 @@
 
 `ComponentsBackend` is the ABC for alternative component sources.
 `FileComponentsBackend` is the default filesystem-based backend.
-`DummyBackend` and `BoomBackend` are tiny doubles kept here so
-dotted-path resolution in tests works through `import_class_cached`.
 """
 
 from __future__ import annotations
@@ -52,9 +50,8 @@ class ComponentsBackend(ABC):
     def import_component_modules(self) -> tuple[Path, ...]:
         """Execute the module of every known component and return their paths.
 
-        Separate from `discover`, which only populates the registry, because
-        `LAZY_COMPONENT_MODULES` leaves those modules unexecuted until a
-        render needs one and a caller reading decorator state cannot wait.
+        Separate from `discover`, since `LAZY_COMPONENT_MODULES` leaves modules
+        unexecuted until a render needs one, and decorator state cannot wait that long.
         """
         return ()
 
@@ -63,9 +60,7 @@ class ComponentsBackend(ABC):
     ) -> bool:
         """Register `folder` under `scope_relative` below `pages_root`, or answer False.
 
-        The page-tree walk offers each components folder to the backends in
-        configuration order and stops at the first that answers True, so one
-        folder belongs to exactly one backend.
+        The walk stops at the first backend answering True, so a folder has one owner.
         """
         del folder, pages_root, scope_relative
         return False
@@ -73,18 +68,24 @@ class ComponentsBackend(ABC):
     def iter_components(self) -> Iterable[ComponentInfo]:
         """Return every component this backend has registered, for diagnostics.
 
-        The system checks enumerate components through this to report
-        duplicate names and wrong-decorator modules, which the render
-        contract alone cannot answer.
+        The checks report duplicate names and wrong-decorator modules through this.
         """
         return ()
 
     def global_component_roots(self) -> Iterable[Path]:
         """Return the scope roots whose root-scope components resolve everywhere.
 
-        A shared root makes its root-scope components visible
-        from every template, a page tree does not, and the
-        cross-root name check reads this to tell the two apart.
+        A shared root makes its root-scope components visible from every template, a
+        page tree does not, and the cross-root name check reads this to tell the two
+        apart.
+        """
+        return ()
+
+    def watch_roots(self) -> Iterable[Path]:
+        """Return the trees the development watcher and link tooling observe.
+
+        A backend that computes its roots from somewhere other than its config
+        entry names them here, which is the only way they reach autoreload.
         """
         return ()
 
@@ -98,6 +99,7 @@ class FileComponentsBackend(ComponentsBackend):
         `COMPONENTS_DIR` is not read here. It names the folder the URL router skips
         inside a page tree, and `FileRouterBackend` reads it straight from the settings.
         """
+        self._config = config
         self._extra_component_roots = component_extra_roots_from_config(config)
 
         self._registry = ComponentRegistry()
@@ -144,9 +146,8 @@ class FileComponentsBackend(ComponentsBackend):
     def import_component_modules(self) -> tuple[Path, ...]:
         """Import every discovered `component.py` and return their paths.
 
-        The import is deliberately unconditional, which is why a caller that
-        walks decorator state pays under `LAZY_COMPONENT_MODULES` the import
-        that the lazy mode otherwise avoids.
+        The import is unconditional, so a caller that walks decorator state pays under
+        `LAZY_COMPONENT_MODULES` the import the lazy mode otherwise avoids.
         """
         self._ensure_loaded()
         self._import_registered_modules()
@@ -181,6 +182,15 @@ class FileComponentsBackend(ComponentsBackend):
         return self._registry.global_roots()
 
     @override
+    def watch_roots(self) -> tuple[Path, ...]:
+        """Return the `DIRS` roots, read again rather than taken from discovery.
+
+        A root named by `DIRS` that the disk did not hold at construction carries no
+        component yet, and a watch built from that snapshot would never notice one.
+        """
+        return tuple(component_extra_roots_from_config(self._config))
+
+    @override
     def get_component(self, name: str, template_path: Path) -> ComponentInfo | None:
         """Return the named component visible from `template_path`."""
         self._ensure_loaded()
@@ -199,46 +209,4 @@ class FileComponentsBackend(ComponentsBackend):
         return self._visibility_resolver.resolve_visible(template_path)
 
 
-class DummyBackend(ComponentsBackend):
-    """Test double that keeps its settings `config` entry on `self`."""
-
-    def __init__(self, config: dict[str, Any]) -> None:
-        """Keep `config` on `self` for assertions about wiring."""
-        self.config = config
-
-    @override
-    def get_component(self, _name: str, _template_path: Path) -> ComponentInfo | None:
-        """Return `None` to skip name resolution through this backend."""
-        return None
-
-    @override
-    def collect_visible_components(
-        self, _template_path: Path
-    ) -> Mapping[str, ComponentInfo]:
-        """Return an empty mapping because this test double never registers."""
-        return {}
-
-
-class BoomBackend(ComponentsBackend):
-    """Test double that raises from `__init__` for load error-path tests."""
-
-    def __init__(self, config: dict[str, Any]) -> None:
-        """Raise the kind of error the loader never swallows."""
-        del config
-        msg = "boom"
-        raise RuntimeError(msg)
-
-    @override
-    def get_component(self, _name: str, _template_path: Path) -> ComponentInfo | None:
-        """Unreachable because construction always raises."""
-        raise NotImplementedError
-
-    @override
-    def collect_visible_components(
-        self, _template_path: Path
-    ) -> Mapping[str, ComponentInfo]:
-        """Unreachable because construction always raises."""
-        raise NotImplementedError
-
-
-__all__ = ["BoomBackend", "ComponentsBackend", "DummyBackend", "FileComponentsBackend"]
+__all__ = ["ComponentsBackend", "FileComponentsBackend"]

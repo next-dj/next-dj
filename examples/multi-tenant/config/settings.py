@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 from next.conf import extend_default_backend
@@ -70,6 +71,9 @@ USE_TZ = True
 STATIC_URL = "static/"
 
 SHARED_DIR = BASE_DIR.parent / "_shared"
+# The shared kit ships Python helpers next to its components, so the directory joins the
+# import path the way `pytest.ini` already adds it for the test run.
+sys.path.insert(0, str(SHARED_DIR))
 STATICFILES_DIRS = [SHARED_DIR / "static"]
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

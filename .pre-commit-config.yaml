@@ -20,6 +20,11 @@ repos:
         entry: uv run python docs/prose_lint.py
         language: system
         files: ^docs/content/.*\.rst$
+      - id: snippet-lint
+        name: documentation code snippets
+        entry: uv run python docs/snippet_lint.py
+        language: system
+        files: ^docs/content/.*\.rst$
       - id: prettier
         name: prettier
         entry: npm run format:check

@@ -22,8 +22,28 @@ Stable.
    Form classes self-register, so reach for ``@action`` only for form-less handlers.
 
 Advanced.
-   ``FormActionBackend``, ``RegistryFormActionBackend``, ``ActionOutcome``, ``ActionOutcomeKind``, ``ActionRegistration``, ``ActionGuard``, ``ComponentWidget``, ``FormWizardBackend``, ``SessionFormWizardBackend``, ``CacheFormWizardBackend``, the frozen specs (``FieldSpec``, ``FormsetSpec``, ``FormSpec``, ``FormSectionSpec``, ``FormsetRowSpec``, ``FieldKind``), the spec helpers (``field_spec``, ``form_spec``, ``formset_spec``), the formset helper ``cleanup_extra_initial``, the origin helpers (``OriginMatch``, ``resolve_origin``, ``resolve_url_to_match``, ``resolve_url_to_page``), the ``PermissionOutcome`` type alias for the dynamic permission hooks, and the ``signals`` and ``checks`` submodules.
    Use these when writing a custom backend or a form renderer.
+
+   .. list-table::
+      :header-rows: 1
+      :widths: 30 70
+
+      * - Area
+        - Names
+      * - Backends
+        - ``FormActionBackend``, ``RegistryFormActionBackend``, ``RegistryBackendSnapshot``, ``ActionRegistration``, ``ActionGuard``
+      * - Outcomes
+        - ``ActionOutcome``, ``ActionOutcomeKind``
+      * - Specs
+        - ``FieldSpec``, ``FormsetSpec``, ``FormSpec``, ``FormSectionSpec``, ``FormsetRowSpec``, ``FieldKind``, and the helpers ``field_spec``, ``form_spec``, ``formset_spec``
+      * - Origin helpers
+        - ``OriginMatch``, ``resolve_origin``, ``resolve_url_to_match``, ``resolve_url_to_page``
+      * - Wizard storage
+        - ``FormWizardBackend``, ``SessionFormWizardBackend``, ``CacheFormWizardBackend``
+      * - Rendering and formsets
+        - ``ComponentWidget``, ``cleanup_extra_initial``
+      * - Permissions and signals
+        - ``PermissionOutcome`` for the dynamic permission hooks, and the ``signals`` submodule
 
 Framework machinery.
    The wiring lives on the owning submodules and is not re-exported at the package level.
@@ -35,6 +55,8 @@ Framework machinery.
    ``bind_component_widgets`` lives in ``next.forms.widgets``.
    ``render_form_page_with_errors`` lives in ``next.forms.rendering``.
    ``RegistrationDiagnostics`` and the ``registration_diagnostics`` instance live in ``next.forms.diagnostics``.
+   The forms system checks live in ``next.forms.checks``, which the framework application config imports at startup and which the package does not re-export.
+   ``FormActionNotFoundError``, ``UnstorableWizardValueError``, and ``UnregisteredComponentError`` live in ``next.forms.errors`` and are re-exported at the package level.
    The UID helpers ``FORM_ACTION_REVERSE_NAME``, ``URL_NAME_FORM_ACTION``, ``ORIGIN_FIELD_NAME``, ``FORM_ORIGIN_OVERRIDE_KEY``, ``reverse_form_action``, ``current_origin_path``, and ``validated_origin_path`` live in ``next.forms.uid``.
    The test isolation helper ``reset_form_registration_state`` belongs to ``next.testing``, documented under :doc:`/content/ref/testing`.
 
@@ -63,13 +85,23 @@ Exceptions
 ~~~~~~~~~~
 
 ``FormActionNotFoundError`` is raised when no registered action matches a requested name.
-``FormActionManager.get_action_url``, the ``{% form %}`` and ``{% action_url %}`` tags, and the testing helpers ``resolve_action_url`` and ``build_form_for`` all raise it.
+``FormActionManager.get_action_url`` and ``FormActionManager.require_action_meta``, the ``{% form %}`` and ``{% action_url %}`` tags, and the testing helpers ``resolve_action_url`` and ``build_form_for`` all raise it.
+``get_action_url`` composes the same refusal whether one backend is configured or several, so the shape of the failure never follows the length of the settings list.
 It subclasses ``LookupError`` and carries the failing ``name``, the ``page_path`` that was searched, the close-match ``suggestions`` tuple, and the ``registry_empty`` flag.
 Every raising surface renders the suggestions into the message as ``Closest matches: 'x', 'y'``, computed by close-match comparison against the registered names.
 The comparison and the message run on first render, so probing for an action by catching the exception costs no close-match work.
 When ``registry_empty`` is true the message also explains that no actions are registered at all and points at autodiscovery.
 
 .. autoexception:: next.forms.FormActionNotFoundError
+   :members:
+
+``UnstorableWizardValueError`` is raised by the session wizard backend for a cleaned value its JSON codec cannot store, and names the backend keys that serve such a value instead.
+``UnregisteredComponentError`` is a ``LookupError`` raised while a ``ComponentWidget`` renders a component name nothing registered, with the closest visible component names rendered into the message on first read.
+
+.. autoexception:: next.forms.UnstorableWizardValueError
+   :members:
+
+.. autoexception:: next.forms.UnregisteredComponentError
    :members:
 
 Form base classes
@@ -241,7 +273,7 @@ Action URL helpers
 It lives in ``next.forms.uid`` and is not re-exported at the package level.
 ``ORIGIN_FIELD_NAME`` is the wire name of the hidden origin field every rendered form carries, ``"_next_form_origin"``.
 ``current_origin_path`` names the URL a rendering request should return to, its query string included.
-``validated_origin_path`` accepts a posted origin value only as a same-site path, and refuses a value carrying a tab or a newline because a browser drops those code points before resolving a URL.
+``validated_origin_path`` accepts a posted origin value only as a same-site path, and refuses it when the stripped value still carries a tab or a newline, because a browser drops those code points before resolving a URL.
 ``redirect_to_origin`` builds the success redirect back to the page named by the posted origin field, falling back to ``fallback`` when the field is absent or off-site.
 It is re-exported from ``next.forms``.
 ``FORM_ORIGIN_OVERRIDE_KEY`` names the render-context key whose value overrides the origin of a rendered form, which the partial shaping layer sets to the next step URL on a wizard advance.

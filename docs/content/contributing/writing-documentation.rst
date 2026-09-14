@@ -148,7 +148,7 @@ A typical change goes through three steps.
 
 1. Branch from ``main``.
 2. Add or update pages under ``docs/content/``.
-3. Build with ``make docs``, which runs ``uv run sphinx-build -aETW --keep-going -b html docs docs/_build``.
+3. Build with ``make docs``, which runs ``make docs-lint`` first and then ``uv run --group docs sphinx-build -aETW --keep-going -b html docs docs/_build``.
 
 A green build is a hard precondition for merge.
 Local builds reveal anchor and cross reference issues quickly.
@@ -172,6 +172,9 @@ The project uses ``doc8`` for RST style.
 
 The linter catches trailing whitespace and inconsistent indentation.
 It does not police line length, because semantic newlines put one sentence on one line however long that sentence runs.
+
+``docs/snippet_lint.py`` checks every code block instead of the surrounding prose.
+It parses Python blocks with :mod:`ast`, flags a ``NEXT_FRAMEWORK`` key that ``next/conf/defaults.py`` does not define, and catches an unbalanced template tag, and :doc:`quality-gates` states where it runs.
 
 Translation notes
 -----------------
@@ -237,6 +240,15 @@ The table below lists the public package, its primary narrative page, and its re
    * - ``next.templatetags``
      - :doc:`/content/topics/static-assets/template-tags`, :doc:`/content/topics/forms/templates`
      - :doc:`/content/ref/template-tags`
+   * - ``next.ports``
+     - :doc:`/content/topics/extending`
+     - :doc:`/content/ref/ports`
+   * - ``next.errors``
+     - :doc:`/content/faq/troubleshooting`
+     - :doc:`/content/ref/errors`
+   * - ``next.backends``
+     - :doc:`/content/topics/extending`
+     - :doc:`/content/ref/backends`
 
 When you edit the signal aggregator in ``next/signals.py``, update :doc:`/content/topics/signals` and :doc:`/content/ref/signals` so every re-exported name and payload matches the module.
 

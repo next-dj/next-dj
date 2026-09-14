@@ -90,8 +90,8 @@ describe("layer flow through the partial surface", () => {
     partial._reset();
   });
 
-  function headerOf(call: Call, name: string): string | undefined {
-    return (call.init.headers as Record<string, string>)[name];
+  function headerOf(call: Call, name: string): string | null {
+    return new Headers(call.init.headers).get(name);
   }
 
   it("opens a dialog with the zone container before the request and lands the first morph in it", async () => {

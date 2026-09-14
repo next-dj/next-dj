@@ -15,6 +15,6 @@
   </header>
 
   <div class="rounded-md border border-border bg-card p-4 shadow-sm">
-    {% block template %}{% endblock template %}
+    {% template %}
   </div>
 </div>

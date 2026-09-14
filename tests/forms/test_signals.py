@@ -20,6 +20,7 @@ from next.forms.signals import (
 )
 from next.forms.wizard import FormWizard
 from next.testing import SignalRecorder, capture_signals
+from tests.support import SignalSender
 
 
 _FAKE_FILE = "/fake/myapp/forms.py"
@@ -117,7 +118,7 @@ class TestActionRegisteredSignal:
         self, capture_action_registered: SignalRecorder
     ) -> None:
         """The sender argument is preserved in the captured event."""
-        sentinel = object()
+        sentinel = SignalSender()
         action_registered.send(sender=sentinel, action_name="test_action")
         assert capture_action_registered.events[0].sender is sentinel
 
@@ -168,7 +169,7 @@ class TestActionDispatchedSignal:
         self, capture_action_dispatched: SignalRecorder
     ) -> None:
         """The sender argument is preserved in the captured event."""
-        sentinel = object()
+        sentinel = SignalSender()
         action_dispatched.send(sender=sentinel)
         assert capture_action_dispatched.events[0].sender is sentinel
 
@@ -219,7 +220,7 @@ class TestFormValidationFailedSignal:
         self, capture_form_validation_failed: SignalRecorder
     ) -> None:
         """The sender argument is preserved in the captured event."""
-        sentinel = object()
+        sentinel = SignalSender()
         form_validation_failed.send(sender=sentinel)
         assert capture_form_validation_failed.events[0].sender is sentinel
 

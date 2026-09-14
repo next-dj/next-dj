@@ -34,7 +34,7 @@ def resolve_model_admin(
 def resolve_object_or_404(
     request: HttpRequest, app_label: str, model_name: str, pk: int
 ) -> tuple[type[Model], ModelAdmin, Model]:
-    """Like `resolve_model_admin` but also fetches the object — 404 if missing."""
+    """Like `resolve_model_admin` but also fetch the object, 404 when it is missing."""
     model, model_admin = resolve_model_admin(app_label, model_name)
     obj = model_admin.get_object(request, pk)
     if obj is None:

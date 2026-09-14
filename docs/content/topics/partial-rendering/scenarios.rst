@@ -6,8 +6,7 @@ Partial rendering by scenario
 This page is a tutorial, not a reference.
 Each scenario starts from a task, shows the markup and the handler that satisfy it, and ends with the wire traffic so the behaviour is observable.
 Every scenario degrades to a full page cycle without the runtime.
-The wire always carries the ``assets`` and ``form`` keys, serialised as ``[]`` and ``null`` when empty.
-The JSON examples on this page omit them when they are empty.
+The JSON examples on this page omit the empty ``assets`` and ``form`` keys, see :doc:`reference`.
 
 .. contents::
    :local:
@@ -47,10 +46,10 @@ The zone is an optional optimisation, not required markup.
 The ``zone="rename-board"`` argument on the tag compiles to ``data-next-target`` on the ``<form>``.
 The runtime then sends the zone name with the submission and the server re-renders only that zone with the bound form.
 
-Submitting an empty title posts to the form endpoint with the partial switch set.
+Submitting an empty title in the unzoned form posts to the form endpoint with the partial switch set.
 
 .. code-block:: http
-   :caption: request
+   :caption: request without a zone
 
    POST /_next/form/3f9ac21d75e04b88/ HTTP/1.1
    X-Next-Request: 1
@@ -61,7 +60,7 @@ Submitting an empty title posts to the form endpoint with the partial switch set
 The response is a 200 carrying the invalid-form headers and a patch envelope.
 
 .. code-block:: json
-   :caption: response body
+   :caption: response body without a zone
 
    {
      "version": "9f3c2e1b",
@@ -73,6 +72,7 @@ The response is a 200 carrying the invalid-form headers and a patch envelope.
               "errors": {"title": ["This field is required."]}}
    }
 
+With the ``zone=`` form above the submission also carries ``X-Next-Zone: rename-board``, and the envelope morphs that zone instead of extracting the form out of a whole page, the shape :doc:`zones` shows.
 Without the runtime the same submission returns the full page with its errors.
 
 Inline validation on blur
@@ -107,7 +107,7 @@ A blur on the email field with an invalid value posts the validate request.
 
    full_name=Ada&email=ada%40&team=&_next_form_origin=/request/identity/
 
-The response is always 200 to an authorised caller.
+The response is always 200 to an authorized caller.
 
 .. code-block:: json
    :caption: response body
@@ -130,7 +130,7 @@ A file field is excluded from a validate request so a multipart upload is not re
 The morph keeps the caret and any value typed in a neighbouring field during the round trip.
 
 The guard runs before validation, so an anonymous caller on a protected action gets a denial, not an envelope.
-A uniqueness validator never becomes an enumeration oracle for an unauthorised request.
+A uniqueness validator never becomes an enumeration oracle for an unauthorized request.
 
 Without the runtime nothing happens on blur and validation runs on submit.
 
@@ -173,7 +173,7 @@ The catalogue page wraps its results in a zone.
      {% component "pagination" %}
    {% endzone %}
 
-Here ``page_obj`` is a Django :class:`~django.core.paginator.Page`, published by the paginated context callable of :ref:`topics-pages-pagination`.
+Here ``page_obj`` is a Django :class:`~django.core.paginator.Page`, published by the paginated context function of :ref:`topics-pages-pagination`.
 The template reads the standard ``Page`` API, iterating the page for its rows and reaching through ``paginator`` for the total.
 The page module needs nothing new.
 The provider already reads ``request.GET``, so the zone GET reuses the same query parsing the full page uses.
@@ -295,7 +295,6 @@ The stream page is a neighbour of the vote page and uses the page render escape 
    from polls.providers import DPoll
 
    from next.partial import Patches, PatchEventStream
-
 
    def patch_source(request: HttpRequest, poll_id: int) -> Iterator[Patches]:
        """Yield one refresh envelope for every poll change."""
@@ -430,7 +429,8 @@ The dialog carries the ``data-next-dialog`` attribute so project CSS can target 
 A valid non-last step advances without a 302.
 The dispatcher builds the next wizard and the unbound form of the next step, and morphs the wizard zone to the next step.
 
-Wizard steps inside a layer are not pushed to history by default.
+A wizard advance pushes no history entry by default, in a layer or on a full page.
+``PUSH_WIZARD_STEPS`` flips the global default and a wizard's ``Meta.push_steps`` overrides it per wizard, see :doc:`reference`.
 The per-uid mutation lock makes a double-click on Submit request impossible by construction, it lets exactly one fetch through.
 A session that expires mid-wizard returns a non-envelope response, and the runtime performs a full navigation to the login page.
 
@@ -512,7 +512,6 @@ Bind the provider to the zone with ``zone=`` and guard the expensive data with `
 
    from next import context
    from next.partial import zone_requested
-
 
    @context("entries", zone="audit-table")
    def entries(request: HttpRequest) -> list[AuditEntry] | None:

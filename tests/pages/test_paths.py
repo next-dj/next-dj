@@ -1,7 +1,20 @@
 from pathlib import Path
 
+import pytest
+
+from next.caches import BoundedCache
+from next.pages import paths as paths_mod
 from next.pages.paths import clear_page_path_info, forget_page_path_info, page_path_info
 from next.utils import MAX_ANCESTOR_WALK_DEPTH
+from tests.support import assert_bounded_by_insert_age
+
+
+@pytest.fixture(autouse=True)
+def _fresh_page_path_memo():
+    """Clear the page-path memo, whose tmp_path keys never expire on their own."""
+    clear_page_path_info()
+    yield
+    clear_page_path_info()
 
 
 class TestPagePathInfo:
@@ -110,3 +123,20 @@ class TestPagePathInfoMemo:
         forget_page_path_info(page_file)
 
         assert page_path_info(page_file).template_path == str(tmp_path / "template.djx")
+
+
+class TestPagePathInfoBound:
+    """The memo drops its oldest insert once it is full."""
+
+    def test_the_memo_holds_the_pages_read_last(self, tmp_path, monkeypatch) -> None:
+        """A full memo drops its oldest insert and a warm read reorders nothing."""
+
+        def install(bound: int) -> tuple[BoundedCache, ...]:
+            monkeypatch.setattr(paths_mod, "_PAGE_PATH_INFO_CACHE", BoundedCache(bound))
+            return (paths_mod._PAGE_PATH_INFO_CACHE,)
+
+        assert_bounded_by_insert_age(
+            install,
+            page_path_info,
+            [tmp_path / name / "page.py" for name in ("a", "b", "c")],
+        )

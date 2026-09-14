@@ -71,21 +71,19 @@ Modules
    ``import_component_modules`` is the separate capability of executing those components' Python modules, which is why ``LAZY_COMPONENT_MODULES`` can populate the registry without running a single ``component.py``.
    It returns the paths it imported, and a backend whose components carry no module returns an empty tuple.
    ``register_walked_folder`` is the ownership hook the page-tree walk calls, and ``iter_components`` with ``global_component_roots`` is the enumeration the system checks read.
-   Each of the three has a default that declines, so a backend that resolves names on demand implements only the two abstract render methods.
+   ``watch_roots`` names the trees the development watcher observes, and a backend that computes its roots outside its configuration entry reaches autoreload no other way.
+   Each of the six has a default that declines, so a backend that resolves names on demand implements only the two abstract render methods.
 
 ``next.components.manager``.
    ``ComponentsManager`` orchestrates the backends, shares one render pipeline between them, and builds the list with the shared ``load_backends`` helper.
    A ``settings_reloaded`` drops the cached backends, and the next access rebuilds them.
    A Django ``TEMPLATES`` change drops the render pipeline the same way, because a compiled component template carries the engine that built it.
-   ``next.components.watch`` resolves the same entries with ``resolve_backend_class`` and never instantiates them, because its scan is read-only.
+   ``next.components.watch`` reads the loaded backends through the manager and asks each for ``watch_roots``, then walks those trees with a scanner of its own, so neither the component registries nor the router registry move.
 
 ``next.components.checks``.
    The components system checks, including ``next.E020`` and ``next.E034``.
-   They read the per-run manager ``next.checks.common.get_components_manager`` builds, which registers the ``_components`` folders under the page trees itself instead of waiting for the router walk to reach them, so every check sees the same components whatever asked for the manager first.
+   They read the per-run manager ``next.components.sources.get_components_manager`` builds, which registers the ``_components`` folders under the page trees itself instead of waiting for the router walk to reach them, so every check sees the same components whatever asked for the manager first.
    The checks enumerate through ``ComponentsBackend.iter_components``, so a custom backend joins the reports by implementing that hook and stays out of them by leaving it alone.
-
-``next.components.watch``.
-   Watch specs exposed to the autoreloader.
 
 Resolution order
 ----------------
@@ -98,13 +96,14 @@ A page-tree root and a ``DIRS`` root both score zero, so the tie breaks on origi
 
 The full sort key is ``(-score, dirs_origin, component.name, registration_position)``, where ``dirs_origin`` is ``0`` for a page-tree component and ``1`` for a ``DIRS`` component.
 At equal score a page-tree component sorts before a ``DIRS`` one, so a project-local component shadows a shared ``DIRS`` entry.
-A remaining same-origin tie breaks first by component name, then by registration order, so within one origin the component discovered first shadows a later same-named one.
+A remaining same-origin tie is decided by registration order alone, so within one origin the component discovered first shadows a later same-named one.
+The component name in the sort key only groups candidates of different names next to each other.
 Registration order operates inside a single ``FileComponentsBackend``.
 ``DIRS`` roots are scanned at app ready, before the URL router walk registers page-tree folders, but the origin dimension of the sort key makes the page-tree component win regardless of that order.
 Across backends, the order of entries in ``COMPONENT_BACKENDS`` decides which backend is consulted first.
 
 Two components sharing a name under one ``(scope_root, scope_relative)`` pair are reported by ``next.E020``, because nothing in the sort key above tells them apart.
-``next.E034`` reports one name at the root scope of two roots the same template resolves against with neither taking precedence: two ``DIRS`` roots, which are visible everywhere, or one page tree nested inside another.
+``next.E034`` reports one name at the root scope of two roots the same template resolves against with neither taking precedence, for example two ``DIRS`` roots, which are visible everywhere, or one page tree nested inside another.
 A page tree and a ``DIRS`` root sharing a name are decided by the origin dimension of the sort key, so that pair is silent.
 
 Filter expression props
@@ -135,8 +134,8 @@ Signals
 
 The pipeline fires four signals.
 
-- ``component_registered`` once per component on startup or reload.
-- ``components_registered`` once per bulk discovery cycle with the full list.
+- ``component_registered`` fires only on a one-at-a-time ``ComponentRegistry.register`` call, which folder discovery never takes.
+- ``components_registered`` fires once per bulk ``register_many`` call, carrying that call's batch in ``infos``.
 - ``component_backend_loaded`` once per backend instance, sent by the backend class with ``config`` and ``instance``.
 - ``component_rendered`` after each render, carrying the ``ComponentInfo`` and its ``template_path``.
 

@@ -15,4 +15,4 @@ class KanbanConfig(AppConfig):
         )
         default_stems.register("template", "page")
 
-        from kanban import providers, signals  # noqa: F401, PLC0415
+        from kanban import providers, signals

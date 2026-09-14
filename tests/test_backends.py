@@ -4,16 +4,27 @@ import pytest
 from django.core.exceptions import ImproperlyConfigured
 from django.dispatch import Signal
 from django.test import override_settings
+from django.urls.resolvers import URLResolver
 
 from next.backends import (
+    BackendListManager,
     SingleBackendManager,
     backend_entries,
     load_backends,
     resolve_backend_class,
+    resolve_setting_class,
 )
 from next.conf import next_framework_settings
 from next.conf.frozen import FrozenDict, FrozenList
+from next.errors import (
+    BackendImportError,
+    BackendNotSubclassError,
+    SettingImportError,
+    SettingNotSubclassError,
+)
+from next.urls.resolver import TrieURLResolver
 from tests.support.backends import (
+    ABSTRACT,
     ALPHA,
     BETA,
     CONCRETE,
@@ -230,6 +241,18 @@ class TestAbstractFamilyRoot:
         assert type(backend) is ConcreteFakeBackend
         assert backend.run() == "ok"
 
+    def test_resolve_refuses_the_abstract_root_itself(self) -> None:
+        with pytest.raises(ImproperlyConfigured, match="is abstract"):
+            resolve_backend_class({"BACKEND": ABSTRACT}, base=AbstractFakeBackend)
+
+    def test_load_skips_an_entry_naming_the_abstract_root(self, caplog) -> None:
+        with caplog.at_level(logging.ERROR, logger="next.backends"):
+            assert (
+                load_backends([{"BACKEND": ABSTRACT}], base=AbstractFakeBackend) == []
+            )
+
+        assert "is abstract" in caplog.text
+
     def test_load_names_the_abstract_root_in_its_log(self, caplog) -> None:
         with caplog.at_level(logging.ERROR, logger="next.backends"):
             assert load_backends([{"BACKEND": MISSING}], base=AbstractFakeBackend) == []
@@ -439,3 +462,117 @@ class TestFrozenMergedValuesAreReadUnchanged:
             assert isinstance(config, FrozenDict)
             with pytest.raises(TypeError, match="immutable"):
                 config["OPTIONS"]["flag"] = False
+
+
+class _CountingListManager(BackendListManager[FakeBackend]):
+    """Family manager over one list-valued key, counting its loads."""
+
+    def __init__(self, *, retry_when_empty: bool = False) -> None:
+        super().__init__()
+        self.loads = 0
+        self._retry_when_empty = retry_when_empty
+
+    def reload(self) -> None:
+        """Read the configured entries and record the load."""
+        self.loads += 1
+        self._backends = load_backends(backend_entries(_LIST_SETTING), base=FakeBackend)
+        self._mark_loaded(retry_when_empty=self._retry_when_empty)
+
+
+class TestBackendListManager:
+    """The shared lazy list loads once and rereads only where a family asks it to."""
+
+    def test_the_first_access_reads_the_settings(self) -> None:
+        manager = _CountingListManager()
+        with override_settings(NEXT_FRAMEWORK={_LIST_SETTING: [{"BACKEND": ALPHA}]}):
+            manager._ensure_backends()
+            manager._ensure_backends()
+
+        assert manager.loads == 1
+        assert [type(b) for b in manager._backends] == [AlphaBackend]
+
+    def test_an_explicit_list_skips_the_settings_read(self) -> None:
+        manager = _CountingListManager()
+        manager._backends = [AlphaBackend({})]
+        manager._loaded = True
+
+        manager._ensure_backends()
+
+        assert manager.loads == 0
+
+    def test_an_empty_load_is_a_result_by_default(self) -> None:
+        manager = _CountingListManager()
+        with override_settings(NEXT_FRAMEWORK={_LIST_SETTING: []}):
+            manager._ensure_backends()
+            manager._ensure_backends()
+
+        assert manager.loads == 1
+
+    def test_an_empty_load_is_reread_where_the_family_calls_it_broken(self) -> None:
+        manager = _CountingListManager(retry_when_empty=True)
+        with override_settings(NEXT_FRAMEWORK={_LIST_SETTING: []}):
+            manager._ensure_backends()
+            manager._ensure_backends()
+
+        assert manager.loads == 2
+
+    def test_a_loaded_list_is_kept_even_where_an_empty_one_is_broken(self) -> None:
+        manager = _CountingListManager(retry_when_empty=True)
+        with override_settings(NEXT_FRAMEWORK={_LIST_SETTING: [{"BACKEND": ALPHA}]}):
+            manager._ensure_backends()
+            manager._ensure_backends()
+
+        assert manager.loads == 1
+
+
+def _resolve_url_resolver_setting() -> type[URLResolver]:
+    """Read one dotted-path settings key through the shared resolver."""
+    return resolve_setting_class(
+        "URL_RESOLVER",
+        base=URLResolver,
+        shipped=TrieURLResolver,
+        base_path="django.urls.resolvers.URLResolver",
+    )
+
+
+class TestBackendErrorAttributes:
+    """Which attributes an error carries follows from its class, not its caller."""
+
+    def test_an_entry_that_does_not_import_carries_only_its_key(self) -> None:
+        with (
+            override_settings(NEXT_FRAMEWORK={_DICT_SETTING: {"BACKEND": MISSING}}),
+            pytest.raises(BackendImportError) as caught,
+        ):
+            _manager().get()
+
+        assert caught.value.setting == _DICT_SETTING
+        assert not hasattr(caught.value, "dotted")
+
+    def test_a_dotted_path_setting_that_does_not_import_carries_the_path(self) -> None:
+        with (
+            override_settings(NEXT_FRAMEWORK={"URL_RESOLVER": MISSING}),
+            pytest.raises(SettingImportError) as caught,
+        ):
+            _resolve_url_resolver_setting()
+
+        assert caught.value.setting == "URL_RESOLVER"
+        assert caught.value.dotted == MISSING
+
+    def test_an_entry_outside_the_family_names_no_settings_key(self) -> None:
+        with pytest.raises(BackendNotSubclassError) as caught:
+            resolve_backend_class({"BACKEND": FOREIGN}, base=FakeBackend)
+
+        assert caught.value.dotted == FOREIGN
+        assert caught.value.base_name == "FakeBackend"
+        assert not hasattr(caught.value, "setting")
+
+    def test_a_dotted_path_setting_outside_the_family_names_its_key(self) -> None:
+        with (
+            override_settings(NEXT_FRAMEWORK={"URL_RESOLVER": FOREIGN}),
+            pytest.raises(SettingNotSubclassError) as caught,
+        ):
+            _resolve_url_resolver_setting()
+
+        assert caught.value.setting == "URL_RESOLVER"
+        assert caught.value.dotted == FOREIGN
+        assert caught.value.base_name == "django.urls.resolvers.URLResolver"

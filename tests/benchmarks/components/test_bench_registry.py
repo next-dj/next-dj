@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from next.components.context import ComponentContextManager
+from next.components.context import ComponentContextManager, ComponentContextRegistry
 from next.components.registry import ComponentRegistry, ComponentVisibilityResolver
 from tests.benchmarks.factories import build_component_info_list
 
@@ -56,6 +56,27 @@ class TestBenchComponentContext:
                 manager.context(f"k_{i}")(ctx)
 
         benchmark(run)
+
+    @pytest.mark.benchmark(group="components.registry")
+    def test_context_lookup_warm(self, tmp_path: Path, benchmark) -> None:
+        """Per-render cost of the memo that answers a component render."""
+
+        def ctx() -> dict[str, int]:
+            return {"count": 1}
+
+        registry = ComponentContextRegistry()
+        module_path = tmp_path / "card" / "component.py"
+        registry.register(module_path, "count", ctx)
+        registry.get_functions(module_path)
+        benchmark(registry.get_functions, module_path)
+
+    @pytest.mark.benchmark(group="components.registry")
+    def test_context_lookup_empty_warm(self, tmp_path: Path, benchmark) -> None:
+        """The same cost for a component that registers nothing, the common case."""
+        registry = ComponentContextRegistry()
+        module_path = tmp_path / "card" / "component.py"
+        registry.get_functions(module_path)
+        benchmark(registry.get_functions, module_path)
 
 
 class TestBenchComponentVisibility:

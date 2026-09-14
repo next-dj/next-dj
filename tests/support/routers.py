@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from next.urls import PageRoot, RouterBackend
+
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 
 class RootPagesRouter(RouterBackend):
@@ -21,6 +26,18 @@ class RootPagesRouter(RouterBackend):
         return [PageRoot(path=tree, label="Root") for tree in self._root_trees]
 
 
+class EntryRouter(RouterBackend):
+    """Third-party backend built from the ``PAGE_BACKENDS`` entry that names it."""
+
+    def __init__(self, config: Mapping[str, Any]) -> None:
+        """Keep the entry, the way a backend reading its own keys would."""
+        self.config = dict(config)
+
+    def generate_urls(self) -> list:
+        """Contribute no patterns."""
+        return []
+
+
 class RaisingRootsRouter(RouterBackend):
     """Backend whose tree listing raises, the way a database-backed one can."""
 
@@ -37,8 +54,7 @@ class RaisingRootsRouter(RouterBackend):
 class MalformedRootsRouter(RouterBackend):
     """Backend whose tree listing answers the wrong shape rather than raising.
 
-    A plugin with a type slip hands back bare paths instead of `PageRoot`
-    entries, which no reader may dereference.
+    A plugin with a type slip hands back bare paths instead of `PageRoot` entries.
     """
 
     def __init__(self, trees: list[Path]) -> None:

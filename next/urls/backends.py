@@ -5,12 +5,13 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, override
+from typing import TYPE_CHECKING, Any, override
 
 from django.apps import apps
-from django.core.exceptions import AppRegistryNotReady
+from django.core.exceptions import AppRegistryNotReady, ImproperlyConfigured
 
-from next.conf import import_class_cached, next_framework_settings
+from next.backends import instantiate_backend, resolve_backend_class
+from next.conf import next_framework_settings
 from next.pages import page
 from next.utils import PageRoot, classify_dirs_entries, resolve_base_dir, resolved_tree
 
@@ -31,6 +32,11 @@ logger = logging.getLogger(__name__)
 # framework ships a `next/pages` package that otherwise reads as a page tree.
 _NON_PAGE_APP_ROOTS = ("django", "next")
 
+# The keys a file router entry carries beside BACKEND, read here and validated by
+# the checks. They have no defaults, because a partial entry is a settings mistake
+# the checks name rather than a shorthand.
+FILE_ROUTER_CONFIG_KEYS = ("PAGES_DIR", "APP_DIRS", "OPTIONS", "DIRS")
+
 
 def _is_framework_app(app_name: str) -> bool:
     """Whether the dotted app name belongs to Django or to next itself."""
@@ -43,8 +49,7 @@ def _is_framework_app(app_name: str) -> bool:
 def _installed_app_directories() -> dict[str, Path]:
     """Map each installed app's dotted name to its directory.
 
-    Read live on every call, because `INSTALLED_APPS` changes without the
-    settings reload that rebuilds a backend.
+    Read live on every call, because `INSTALLED_APPS` changes without a settings reload.
     """
     try:
         configs = apps.get_app_configs()
@@ -61,7 +66,10 @@ def _installed_app_directories() -> dict[str, Path]:
 
 
 class RouterBackend(ABC):
-    """Pluggable source of `URLPattern` and `URLResolver` entries."""
+    """Pluggable source of `URLPattern` and `URLResolver` entries.
+
+    A backend takes its own `PAGE_BACKENDS` entry as its single constructor argument.
+    """
 
     @abstractmethod
     def generate_urls(self) -> list[URLPattern | URLResolver]:
@@ -92,8 +100,10 @@ class RouterBackend(ABC):
         return frozenset()
 
 
-def _narrow_file_router_options(options: dict[str, Any]) -> dict[str, Any]:
+def _narrow_file_router_options(options: object) -> dict[str, Any]:
     """Keep only keys consumed by `next.pages` (e.g. `context_processors`)."""
+    if not isinstance(options, dict):
+        return {}
     cp = options.get("context_processors")
     if not isinstance(cp, list):
         cp = []
@@ -106,49 +116,43 @@ def _narrow_file_router_options(options: dict[str, Any]) -> dict[str, Any]:
 class FileRouterBackend(RouterBackend):
     """Discover `page.py` (and virtual pages) under app and optional root trees."""
 
-    DEFAULT_COMPONENTS_FOLDER_NAME: ClassVar[str] = "_components"
+    def __init__(self, config: Mapping[str, Any]) -> None:
+        """Read the pages dir, the extra roots, and the narrowed OPTIONS off the entry.
 
-    def __init__(
-        self,
-        pages_dir: str | None = None,
-        *,
-        app_dirs: bool | None = None,
-        extra_root_paths: list[Path] | None = None,
-        skip_dir_names: frozenset[str] | None = None,
-        components_folder_name: str | None = None,
-        options: dict[str, Any] | None = None,
-    ) -> None:
-        """Configure pages dir, extra roots, skip-dir names, and narrowed OPTIONS."""
-        self.pages_dir = pages_dir if pages_dir is not None else "pages"
-        self.app_dirs = app_dirs if app_dirs is not None else True
-        raw_opts = dict(options) if options else {}
-        base_dir = resolve_base_dir()
+        A subclass renaming the component folder overrides
+        `_resolve_components_folder_name`, which is read here and nowhere else.
+        """
+        self._require_config_keys(config)
+        self.pages_dir = str(config["PAGES_DIR"])
+        self.app_dirs = bool(config["APP_DIRS"])
+        self.options = _narrow_file_router_options(config["OPTIONS"])
 
-        comp_name = (
-            self.DEFAULT_COMPONENTS_FOLDER_NAME
-            if components_folder_name is None
-            else components_folder_name
-        )
-        if extra_root_paths is None or skip_dir_names is None:
-            dirs_list = list(extra_root_paths or [])
-            # Already resolved, because the classification probes what it keeps.
-            roots, segment_names = classify_dirs_entries(dirs_list, base_dir)
-            skip = frozenset({comp_name, *segment_names})
-        else:
-            # `page_roots` promises resolved absolute trees, and a subclass
-            # passing both keywords bypasses the classification that resolves.
-            roots = [resolved_tree(root) for root in extra_root_paths]
-            skip = skip_dir_names
+        components_dir = self._resolve_components_folder_name()
+        # Already resolved, because the classification probes what it keeps.
+        roots, segment_names = classify_dirs_entries(config["DIRS"], resolve_base_dir())
         self._extra_root_paths = roots
-        self._skip_dir_names = skip
-        self._components_folder_name = comp_name
+        self._skip_dir_names = frozenset({components_dir, *segment_names})
+        self._components_folder_name = components_dir
 
-        self.options = _narrow_file_router_options(raw_opts)
         self._patterns_cache: dict[str, list[URLPattern | URLResolver]] = {}
         self._app_pages_path_cache: dict[str, tuple[Path, Path | None]] = {}
         self._root_patterns_cache: list[URLPattern | URLResolver] | None = None
         self._root_pages_paths_cache: list[Path] | None = None
         self._url_parser = default_url_parser
+
+    @classmethod
+    def _require_config_keys(cls, config: Mapping[str, Any]) -> None:
+        """Refuse an entry that leaves out one of the keys a file router reads."""
+        for required in FILE_ROUTER_CONFIG_KEYS:
+            if required not in config:
+                rest = ", ".join(
+                    key for key in FILE_ROUTER_CONFIG_KEYS if key != required
+                )
+                msg = (
+                    f"A {cls.__name__} entry needs {required!r} alongside "
+                    f"{rest}, got {config!r}."
+                )
+                raise ImproperlyConfigured(msg)
 
     @override
     def components_folder_name(self) -> str | None:
@@ -167,13 +171,14 @@ class FileRouterBackend(RouterBackend):
         Taken from the first `COMPONENT_BACKENDS` entry.
         """
         cbs = next_framework_settings.COMPONENT_BACKENDS
-        _components_key = "COMPONENTS_DIR"
-        if not isinstance(cbs, list) or not cbs:
-            raise KeyError(_components_key)
-        cb0 = cbs[0]
-        if not isinstance(cb0, dict) or _components_key not in cb0:
-            raise KeyError(_components_key)
-        return str(cb0[_components_key])
+        cb0 = cbs[0] if isinstance(cbs, list) and cbs else None
+        if not isinstance(cb0, dict) or "COMPONENTS_DIR" not in cb0:
+            msg = (
+                "A file router takes the folder it skips from COMPONENTS_DIR on "
+                f"the first NEXT_FRAMEWORK['COMPONENT_BACKENDS'] entry, got {cbs!r}."
+            )
+            raise ImproperlyConfigured(msg)
+        return str(cb0["COMPONENTS_DIR"])
 
     @override
     def __repr__(self) -> str:
@@ -181,36 +186,6 @@ class FileRouterBackend(RouterBackend):
         return (
             f"<{self.__class__.__name__} pages_dir='{self.pages_dir}' "
             f"app_dirs={self.app_dirs}>"
-        )
-
-    @override
-    def __eq__(self, other: object) -> bool:
-        """Return True when the other backend has the same pages configuration."""
-        if not isinstance(other, FileRouterBackend):
-            return False
-        return (
-            self.pages_dir == other.pages_dir
-            and self.app_dirs == other.app_dirs
-            and self.options == other.options
-            and self._extra_root_paths == other._extra_root_paths
-            and self._skip_dir_names == other._skip_dir_names
-            and self._components_folder_name == other._components_folder_name
-        )
-
-    @override
-    def __hash__(self) -> int:
-        """Hash from pages config including extra roots and skip names."""
-        cp = self.options.get("context_processors")
-        cp_t = tuple(cp) if isinstance(cp, list) else ()
-        return hash(
-            (
-                self.pages_dir,
-                self.app_dirs,
-                tuple(self._extra_root_paths),
-                tuple(sorted(self._skip_dir_names)),
-                self._components_folder_name,
-                cp_t,
-            )
         )
 
     @override
@@ -224,8 +199,7 @@ class FileRouterBackend(RouterBackend):
     def page_roots(self) -> list[PageRoot]:
         """Report the app trees and root trees this router serves from.
 
-        The app reads share one registry snapshot, because a page-root listing
-        sits on the static finder and reloader paths.
+        The app reads share one snapshot, because the finder and the reloader ask often.
         """
         roots: list[PageRoot] = []
         if self.app_dirs:
@@ -245,8 +219,7 @@ class FileRouterBackend(RouterBackend):
     def _generate_app_urls(self) -> list[URLPattern | URLResolver]:
         """Return patterns from each installed app's `pages_dir` tree.
 
-        One registry snapshot serves the whole pass, because reading it per
-        app name rebuilds the map per app.
+        One snapshot serves the pass, because reading it per app name rebuilds the map.
         """
         directories = _installed_app_directories()
         urls: list[URLPattern | URLResolver] = []
@@ -272,8 +245,7 @@ class FileRouterBackend(RouterBackend):
     ) -> Generator[str, None, None]:
         """Yield the dotted name of every installed app that can hold pages.
 
-        The registry snapshot comes from the caller that opened the pass, so
-        nothing below it reads the registry again.
+        The snapshot comes from the caller, so nothing below opens the registry again.
         """
         for app_name in directories:
             if not _is_framework_app(app_name):
@@ -284,10 +256,8 @@ class FileRouterBackend(RouterBackend):
     ) -> Path | None:
         """Return `<app>/pages_dir` when that directory exists.
 
-        The answer is memoised per app directory, so an app that moves is
-        looked at again while a static lookup pays no probe per call. The memo
-        lives as long as this router, which the watch layer rebuilds per read
-        while the process watches the disk.
+        Memoised per app directory, so a static lookup pays no probe per call. The memo
+        dies with this router, which the watch layer rebuilds per read.
         """
         app_path = directories.get(app_name)
         if app_path is None:
@@ -305,9 +275,8 @@ class FileRouterBackend(RouterBackend):
     def _get_root_pages_paths(self) -> list[Path]:
         """Return paths from `DIRS` plus optional `BASE_DIR` / `pages_dir`.
 
-        Memoised per instance, because the roots this router serves belong to
-        the configuration it was built for and every reader asks per call. A
-        copy goes back, so a caller appending to the answer moves no root.
+        Memoised per instance, because the roots belong to this router's configuration
+        and every reader asks per call. A copy goes back, so appending moves no root.
         """
         if self._root_pages_paths_cache is None:
             result = [p for p in self._extra_root_paths if p.exists()]
@@ -360,77 +329,21 @@ class FileRouterBackend(RouterBackend):
 
 
 class RouterFactory:
-    """Build `RouterBackend` instances from `PAGE_BACKENDS`-style dicts."""
+    """Build one `RouterBackend` from one `PAGE_BACKENDS` entry.
 
-    _backends: ClassVar[dict[str, type[RouterBackend]]] = {
-        "next.urls.FileRouterBackend": FileRouterBackend
-    }
+    `RouterManager` loads the whole list through `next.backends`. This is the
+    single-entry build the router access port hands the development watcher.
+    """
 
     @classmethod
-    def register_backend(cls, name: str, backend_class: type[RouterBackend]) -> None:
-        """Map a dotted backend path to a class for `create_backend`.
+    def create_backend(cls, config: Mapping[str, Any]) -> RouterBackend:
+        """Return the router named by `config['BACKEND']`, built from the entry.
 
-        Validates at registration so a bad class fails loudly here instead of
-        silently on the first `create_backend` during a router reload.
+        Every router of the family takes the entry, so nothing here knows one of them.
         """
-        candidate: object = backend_class
-        if not isinstance(candidate, type) or not issubclass(candidate, RouterBackend):
-            msg = f"Backend {name!r} is not a RouterBackend subclass"
-            raise TypeError(msg)
-        cls._backends[name] = candidate
-
-    @classmethod
-    def is_registered(cls, name: str) -> bool:
-        """Report whether `name` maps to a registered backend class.
-
-        Contract-only seam for system checks so adjacent
-        areas never read the class registry directly.
-        """
-        return name in cls._backends
-
-    @classmethod
-    def create_backend(cls, config: dict[str, Any]) -> RouterBackend:
-        """Instantiate the backend class named by `config["BACKEND"]`."""
-        backend_name = config["BACKEND"]
-        backend_class: Any
-
-        if backend_name in cls._backends:
-            backend_class = cls._backends[backend_name]
-        else:
-            try:
-                backend_class = import_class_cached(backend_name)
-            except ImportError as e:
-                msg = f"Unsupported backend: {backend_name}"
-                raise ValueError(msg) from e
-
-        if not isinstance(backend_class, type) or not issubclass(
-            backend_class, RouterBackend
-        ):
-            msg = f"Backend {backend_name!r} is not a RouterBackend subclass"
-            raise TypeError(msg)
-
-        if issubclass(backend_class, FileRouterBackend):
-            for req in ("PAGES_DIR", "APP_DIRS", "OPTIONS", "DIRS"):
-                if req not in config:
-                    raise KeyError(req)
-            base_dir = resolve_base_dir()
-            raw_opts = config.get("OPTIONS")
-            if not isinstance(raw_opts, dict):
-                raw_opts = {}
-            dirs_list = list(config.get("DIRS") or [])
-            path_roots, segment_names = classify_dirs_entries(dirs_list, base_dir)
-            components_dir = FileRouterBackend._resolve_components_folder_name()
-            skip_names = frozenset({components_dir, *segment_names})
-            narrow_opts = _narrow_file_router_options(raw_opts)
-            return backend_class(
-                pages_dir=config.get("PAGES_DIR", "pages"),
-                app_dirs=bool(config.get("APP_DIRS", True)),
-                extra_root_paths=path_roots,
-                skip_dir_names=skip_names,
-                components_folder_name=components_dir,
-                options=narrow_opts,
-            )
-        return backend_class()
+        return instantiate_backend(
+            resolve_backend_class(config, base=RouterBackend), config
+        )
 
 
 __all__ = ["FileRouterBackend", "RouterBackend", "RouterFactory"]

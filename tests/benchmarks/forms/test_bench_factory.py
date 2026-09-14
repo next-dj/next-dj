@@ -27,11 +27,8 @@ class TestBenchFormActionBackendLoad:
     def test_build_backend_cold(self, benchmark) -> None:
         """The framework import cache is cleared on every round.
 
-        `clear_import_cache()` only invalidates the per-framework dict
-        cache. The underlying module already lives in `sys.modules`, so
-        this measures the cache-miss code path, not a full module
-        reimport. The bench restores the warm cache on teardown so other
-        benches in the same session are not penalised.
+        The module already lives in `sys.modules`, so this measures the cache-miss path,
+        and teardown restores the warm cache for the rest of the session.
         """
 
         def setup() -> None:

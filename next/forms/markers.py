@@ -9,8 +9,7 @@ from next.deps import DDependencyBase, RegisteredParameterProvider, ResolutionCo
 from next.deps.markers import unwrap_annotated
 
 
-# A bound form is a form or a formset, so a plain annotation naming either one
-# is a shape the context can carry.
+# A bound form is a form or a formset, so the context can carry an annotation of either.
 _FORM_BASES: tuple[type, ...] = (BaseForm, BaseFormSet)
 
 
@@ -55,9 +54,8 @@ class FormProvider(RegisteredParameterProvider):
     def static_can_handle(self, param: inspect.Parameter) -> bool | None:
         """Rule out every annotation no form can inhabit. The rest waits for context.
 
-        Even the `form` name stays open because the context may carry no form.
-        The plainest parameters leave here, which keeps the costliest provider out
-        of the candidate list of a signature that has nothing to do with forms.
+        Keeps the costliest provider out of the candidate list of a signature that has
+        nothing to do with forms, even the bare `form` name since context may lack one.
         """
         if param.name == "form":
             return None

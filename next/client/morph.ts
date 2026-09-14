@@ -3,6 +3,7 @@
 // scroll survive a patch. Matching runs on id-sets, then a child walk reuses.
 
 import { defaultMove } from "./adapters";
+import { ATTR_KEY } from "./protocol";
 
 /** Whether a morph replaces the target itself or only its children. */
 export type MorphMode = "node" | "children";
@@ -44,10 +45,10 @@ interface Ctx {
 // Read the id through getAttribute: the `id` property is subject to DOM
 // clobbering, an `<input name="id">` shadows form.id.
 function readId(el: Element, dev: boolean): string | null {
-  const key = el.getAttribute("data-next-key");
+  const key = el.getAttribute(ATTR_KEY);
   if (key !== null) {
     if (dev && el.getAttribute("id") !== null) {
-      console.warn("[next.morph] data-next-key and id on one node", el);
+      console.warn(`[next.morph] ${ATTR_KEY} and id on one node`, el);
     }
     return key;
   }
@@ -64,7 +65,7 @@ function collectIds(
   dev: boolean,
 ): void {
   consume(root, root, into, universe, dev);
-  const tagged = root.querySelectorAll("[id],[data-next-key]");
+  const tagged = root.querySelectorAll(`[id],[${ATTR_KEY}]`);
   for (const el of Array.from(tagged)) {
     consume(el, root, into, universe, dev);
   }
@@ -93,8 +94,7 @@ function consume(
   }
 }
 
-// Persistent ids are present in both trees. An id on one side owns no match, so
-// it must not vote.
+// Persistent ids live in both trees, an id on one side owns no match and cannot vote.
 function intersects(a: Set<string> | undefined, persistent: Set<string>): boolean {
   if (a === undefined) return false;
   for (const id of a) {
@@ -287,8 +287,7 @@ function syncAttributes(ctx: Ctx, oldEl: Element, newEl: Element): void {
   }
 }
 
-// Morph a single pair: keep, atomicity, attributes, live properties, recursion.
-// The pair is reused, never the new node grafted in.
+// Morph one pair in place, the old node reused and never the new one grafted in.
 function morphNode(
   ctx: Ctx,
   oldEl: Element,
@@ -313,10 +312,8 @@ function morphNode(
   ctx.afterNode(oldEl, newEl);
 }
 
-// Walk new children left to right against an insertion pointer into old children:
-// hard match, soft match, or create. A match at the pointer morphs in place, a
-// match found further on is moved before the pointer, and trailing old children
-// are discarded when the new ones run out.
+// New children walk left to right against an insertion pointer into the old ones. A
+// match at the pointer morphs in place, a match further on moves before it.
 function morphChildren(
   ctx: Ctx,
   oldParent: Element,
@@ -329,8 +326,7 @@ function morphChildren(
     const next = newChild.nextSibling;
     const match = findMatch(ctx, pointer, newChild, persistent);
     if (match === null) {
-      // No match: insert a fresh node before the pointer, the only path new
-      // content takes into the document.
+      // Unmatched, the only path new content takes into the document.
       if (ctx.beforeNode(null, newChild) !== false) {
         oldParent.insertBefore(newChild, pointer);
       }
@@ -437,7 +433,7 @@ function firstElement(fragment: DocumentFragment): Element | null {
   return null;
 }
 
-/** Bring target up to html and return the resulting root, a new node when the root tag changed. */
+/** Bring target up to html and return the root, a new node if the root tag changed. */
 export function morph(
   target: Element,
   html: string | Element | DocumentFragment,
@@ -456,8 +452,7 @@ export function morph(
       : content;
   if (newRoot === null) return target;
 
-  // One id-map across both trees plus a raw universe per side. Persistent ids are
-  // present on both sides, the only ones that vote.
+  // One id-map across both trees, plus a raw universe per side.
   const ids = new Map<Element, Set<string>>();
   const oldUniverse = new Set<string>();
   const newUniverse = new Set<string>();

@@ -43,6 +43,7 @@ Terms used throughout the next.dj documentation.
 
    context function
       A Python callable decorated with ``@context("key")`` that publishes a value to the template scope.
+      Also written ``@context`` callable.
 
    DI marker
       A typed annotation or default-value object that asks the resolver for a specific source of data.
@@ -97,7 +98,7 @@ Terms used throughout the next.dj documentation.
       Wraps every descendant page.
 
    JS context policy
-      Algorithm class that resolves duplicate serialised keys for ``window.Next.context``, distinct from the :term:`JS context serializer` that encodes the values.
+      Algorithm class that resolves duplicate serialised keys for ``window.Next.context``.
       Selected through ``JS_CONTEXT_POLICY`` inside static backend ``OPTIONS``, see :doc:`/content/topics/static-assets/js-context`.
 
    NextScriptBuilder
@@ -109,7 +110,7 @@ Terms used throughout the next.dj documentation.
 
    manager
       The singleton orchestrator for one subsystem.
-      Examples include ``page``, ``components_manager``, ``router_manager``, ``form_action_manager``.
+      Examples include ``page``, ``components_manager``, ``router_manager``, and ``next.forms.manager.form_action_manager``.
 
    morph
       The default patch verb.
@@ -175,16 +176,17 @@ Terms used throughout the next.dj documentation.
       Subscribers react without subclassing.
 
    JS context serializer
-      Implementations of ``next.static.JsContextSerializer`` that encode values for ``window.Next.context``, distinct from the :term:`JS context policy` that resolves duplicate keys.
-      Distinct from frozen form specs in ``next.forms.serializers``.
+      Implementations of ``next.static.JsContextSerializer`` that encode values for ``window.Next.context``.
+      Not the frozen form specs in ``next.forms.serializers``.
 
    slot
-      A named area inside a component template filled with caller content through the block form of ``{% component %}``.
+      A named area inside a component template filled with caller content through the block form ``{% #component "name" %}`` … ``{% /component %}``, see :doc:`/content/topics/components`.
 
    stem
       The filename without the extension.
       The recognised stem is ``component`` for a component file, ``layout`` for a layout file, and ``template`` for a page template file.
-      There is no ``page`` stem.
+      No ``page`` stem is registered by default.
+      A project adds one under the ``template`` role, see :doc:`/content/topics/static-assets/custom-stems`.
 
    template loader
       A ``TemplateLoader`` subclass registered through ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`` that supplies template text for a ``page.py`` path.

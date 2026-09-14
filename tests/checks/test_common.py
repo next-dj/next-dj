@@ -1,68 +1,29 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
-from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from django.core.checks import run_checks
 from django.core.checks.registry import registry
 from django.test import override_settings
 
-from next.checks import NEXT, register_all
-from next.checks.common import (
-    PageRootsError,
-    RegistrationSubject,
-    get_components_manager,
-    get_page_roots,
-    get_pages_directories,
-    get_router_manager,
-    iter_page_tree_component_folders,
-    iter_scanned_page_pairs,
-    page_tree_skip_names,
-    read_page_roots,
-    registration_file_errors,
-    reset_components_manager_cache,
-    reset_router_manager_cache,
-)
-from next.conf.signals import settings_reloaded
-from next.urls import (
-    FileRouterBackend,
-    PageRoot,
-    RouterBackend,
-    RouterFactory,
-    checks as urls_checks,
-)
+from next.checks import _LAZY_SOURCES_BY_MODULE, NEXT, register_all
+from next.checks.common import RegistrationSubject, registration_file_errors
+from next.deps import resolver
+from next.deps.introspect import introspect_key
+from next.deps.resolver import forget_dep_caches
+from next.pages.loaders import _page_roots, forget_page_roots
+from next.pages.watch import _page_backends_for_watch, _state, forget_watch_state
+from next.static.manager import forget_manager_page_roots, get_static_manager
+from next.urls import PageRoot, RouterBackend, checks as urls_checks
 from next.urls.checks import check_reverse_name_collisions, check_url_patterns
-from next.urls.dispatcher import scan_pages_tree
-from next.utils import walk_page_tree
-from tests.support import (
-    MalformedRootsRouter,
-    OddSkipNamesRouter,
-    RaisingComponentsRouter,
-    RaisingRootsRouter,
-    RaisingSkipNamesRouter,
-    SkippingRouter,
-    file_router_config_entry,
-    patch_checks_router_manager_with_routers,
-)
+from tests.support import patch_checks_router_manager_with_routers
 
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-
-
-@pytest.fixture(autouse=True)
-def _clean_manager_caches() -> Iterator[None]:
-    reset_router_manager_cache()
-    reset_components_manager_cache()
-    urls_checks.reset_collected_patterns_cache()
-    yield
-    reset_router_manager_cache()
-    reset_components_manager_cache()
-    urls_checks.reset_collected_patterns_cache()
+    from pathlib import Path
 
 
 def _labelled_root(index: int, tree: Path) -> PageRoot:
@@ -90,639 +51,6 @@ class _RootTreeRouter(RouterBackend):
         return [
             _labelled_root(index, tree) for index, tree in enumerate(self._root_trees)
         ]
-
-
-class _CustomFolderRouter(FileRouterBackend):
-    """File router subclass that registers components from another folder."""
-
-    def components_folder_name(self) -> str | None:
-        return "_widgets"
-
-
-@dataclass
-class _UnhashableRouter(RouterBackend):
-    """Third-party router written as a plain dataclass, so `__hash__` is `None`."""
-
-    tree: Path
-
-    def generate_urls(self) -> list:
-        return []
-
-    def page_roots(self) -> list[PageRoot]:
-        return [PageRoot(path=self.tree, label="Root")]
-
-
-class _TwoLabelRouter(RouterBackend):
-    """Router reporting one tree twice, as an app tree and as a configured root."""
-
-    def __init__(self, tree: Path) -> None:
-        self._tree = tree
-
-    def generate_urls(self) -> list:
-        return []
-
-    def page_roots(self) -> list[PageRoot]:
-        return [
-            PageRoot(path=self._tree, label="App 'shop'"),
-            PageRoot(path=self._tree, label="Root"),
-        ]
-
-
-@contextmanager
-def _walk_spy() -> Iterator[MagicMock]:
-    """Count the tree walks a check seam runs, keeping the real walk."""
-    with patch("next.checks.common.walk_page_tree", wraps=walk_page_tree) as spy:
-        yield spy
-
-
-def _walked_trees(spy: MagicMock) -> list[Path]:
-    """Return the root of every walk the spy recorded, in order."""
-    return [call.args[0] for call in spy.call_args_list]
-
-
-class TestRouterManagerCache:
-    """`get_router_manager` reuses one manager per check run."""
-
-    def test_built_once_across_repeated_calls(self) -> None:
-        with patch("next.urls.RouterManager") as mock_cls:
-            first = get_router_manager()
-            second = get_router_manager()
-            third = get_router_manager()
-        assert first is second is third
-        assert mock_cls.call_count == 1
-        assert mock_cls.return_value.reload.call_count == 1
-
-    def test_explicit_reset_forces_rebuild(self) -> None:
-        with patch("next.urls.RouterManager") as mock_cls:
-            get_router_manager()
-            reset_router_manager_cache()
-            get_router_manager()
-        assert mock_cls.call_count == 2
-        assert mock_cls.return_value.reload.call_count == 2
-
-    def test_settings_reloaded_signal_resets_cache(self) -> None:
-        with patch("next.urls.RouterManager") as mock_cls:
-            get_router_manager()
-            settings_reloaded.send(sender=None)
-            get_router_manager()
-        assert mock_cls.call_count == 2
-
-    def test_init_error_result_is_cached(self) -> None:
-        with patch("next.urls.RouterManager", side_effect=ImportError("boom")):
-            manager, errors = get_router_manager()
-            second_manager, second_errors = get_router_manager()
-        assert manager is None
-        assert second_manager is None
-        assert errors is second_errors
-        assert errors[0].id == "next.E007"
-
-
-class TestComponentsManagerCache:
-    """`get_components_manager` reuses one manager per check run."""
-
-    def test_built_once_across_repeated_calls(self) -> None:
-        with patch("next.components.manager.ComponentsManager") as mock_cls:
-            first = get_components_manager()
-            second = get_components_manager()
-            third = get_components_manager()
-        assert first is second is third
-        assert mock_cls.call_count == 1
-        assert mock_cls.return_value.reload.call_count == 1
-
-    def test_explicit_reset_forces_rebuild(self) -> None:
-        with patch("next.components.manager.ComponentsManager") as mock_cls:
-            get_components_manager()
-            reset_components_manager_cache()
-            get_components_manager()
-        assert mock_cls.call_count == 2
-        assert mock_cls.return_value.reload.call_count == 2
-
-    def test_settings_reloaded_signal_resets_cache(self) -> None:
-        with patch("next.components.manager.ComponentsManager") as mock_cls:
-            get_components_manager()
-            settings_reloaded.send(sender=None)
-            get_components_manager()
-        assert mock_cls.call_count == 2
-
-
-class TestScannedPairsCache:
-    """`iter_scanned_page_pairs` materialises one scan per router per run."""
-
-    def test_two_consumptions_scan_once(self, tmp_path: Path) -> None:
-        _write_page(tmp_path, "blog")
-        router = _RootTreeRouter([tmp_path])
-
-        with _walk_spy() as spy:
-            first = list(iter_scanned_page_pairs(router))
-            second = list(iter_scanned_page_pairs(router))
-
-        assert first == second
-        assert spy.call_count == 1
-
-    def test_cached_pairs_match_direct_scan(self, tmp_path: Path) -> None:
-        _write_page(tmp_path, "blog")
-        _write_page(tmp_path, "docs/guide")
-        router = _RootTreeRouter([tmp_path])
-
-        cached = list(iter_scanned_page_pairs(router))
-        direct = list(scan_pages_tree(tmp_path))
-
-        assert cached == direct
-
-    def test_distinct_routers_cache_independently(self, tmp_path: Path) -> None:
-        tree_a = tmp_path / "a"
-        tree_b = tmp_path / "b"
-        _write_page(tree_a, "one")
-        _write_page(tree_b, "two")
-        router_a = _RootTreeRouter([tree_a])
-        router_b = _RootTreeRouter([tree_b])
-
-        with _walk_spy() as spy:
-            pairs_a = list(iter_scanned_page_pairs(router_a))
-            list(iter_scanned_page_pairs(router_a))
-            pairs_b = list(iter_scanned_page_pairs(router_b))
-            list(iter_scanned_page_pairs(router_b))
-
-        assert _walked_trees(spy) == [tree_a, tree_b]
-        assert pairs_a != pairs_b
-
-    def test_explicit_reset_rescans(self, tmp_path: Path) -> None:
-        _write_page(tmp_path, "blog")
-        router = _RootTreeRouter([tmp_path])
-
-        with _walk_spy() as spy:
-            list(iter_scanned_page_pairs(router))
-            reset_router_manager_cache()
-            list(iter_scanned_page_pairs(router))
-
-        assert spy.call_count == 2
-
-    def test_settings_reloaded_signal_rescans(self, tmp_path: Path) -> None:
-        _write_page(tmp_path, "blog")
-        router = _RootTreeRouter([tmp_path])
-
-        with _walk_spy() as spy:
-            list(iter_scanned_page_pairs(router))
-            settings_reloaded.send(sender=None)
-            list(iter_scanned_page_pairs(router))
-
-        assert spy.call_count == 2
-
-    def test_new_pages_visible_only_after_reset(self, tmp_path: Path) -> None:
-        _write_page(tmp_path, "blog")
-        router = _RootTreeRouter([tmp_path])
-
-        before = list(iter_scanned_page_pairs(router))
-        _write_page(tmp_path, "about")
-        frozen = list(iter_scanned_page_pairs(router))
-        reset_router_manager_cache()
-        after = list(iter_scanned_page_pairs(router))
-
-        assert frozen == before
-        assert len(after) == len(before) + 1
-
-
-class TestEveryPagesRootIsScanned:
-    """`iter_scanned_page_pairs` walks every configured pages root."""
-
-    def test_pairs_come_from_all_roots(self, tmp_path: Path) -> None:
-        tree_a = tmp_path / "a"
-        tree_b = tmp_path / "b"
-        page_a = _write_page(tree_a, "blog")
-        page_b = _write_page(tree_b, "docs")
-        router = _RootTreeRouter([tree_a, tree_b])
-
-        with _walk_spy() as spy:
-            pairs = list(iter_scanned_page_pairs(router))
-
-        assert _walked_trees(spy) == [tree_a, tree_b]
-        assert [page_file for _url, page_file in pairs] == [page_a, page_b]
-
-    def test_directories_are_reported_without_duplicates(self, tmp_path: Path) -> None:
-        # A repeat sits between two distinct roots, so a first-root-only walk
-        # and a walk that keeps duplicates both fail this.
-        tree_a = tmp_path / "a"
-        tree_b = tmp_path / "b"
-        _write_page(tree_a, "blog")
-        _write_page(tree_b, "docs")
-        router = _RootTreeRouter([tree_a, tree_b, tree_a])
-
-        assert get_pages_directories(router) == [tree_a, tree_b]
-
-    def test_symlinked_spelling_of_one_tree_collapses(self, tmp_path: Path) -> None:
-        real = tmp_path / "real"
-        _write_page(real, "blog")
-        linked = tmp_path / "linked"
-        linked.symlink_to(real, target_is_directory=True)
-        router = _RootTreeRouter([real, linked])
-
-        directories = get_pages_directories(router)
-
-        assert directories == [real]
-        assert list(iter_scanned_page_pairs(router)) == list(scan_pages_tree(real))
-
-    def test_one_tree_under_two_labels_is_scanned_once(self, tmp_path: Path) -> None:
-        # An app tree also listed in DIRS is routed twice for real, so the roots
-        # keep both entries while the scan behind the page checks walks it once.
-        _write_page(tmp_path, "blog")
-        router = _TwoLabelRouter(tmp_path)
-
-        assert [root.label for root in get_page_roots(router)] == ["App 'shop'", "Root"]
-        assert get_pages_directories(router) == [tmp_path]
-
-    def test_reported_spelling_survives_the_collapse(self, tmp_path: Path) -> None:
-        # The page registries key on the path the module was loaded by, so the
-        # router's own spelling has to come back out, not the resolved one.
-        real = tmp_path / "real"
-        _write_page(real, "blog")
-        linked = tmp_path / "linked"
-        linked.symlink_to(real, target_is_directory=True)
-        router = _RootTreeRouter([linked, real])
-
-        assert get_pages_directories(router) == [linked]
-
-
-class TestPageRootsAreTheRoutersOwn:
-    """`get_page_roots` reports the trees a router routes and invents none."""
-
-    def test_a_router_that_routes_nothing_reports_no_tree(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
-        # A `pages` beside the process is no page root. `next.W002` names it.
-        _write_page(tmp_path / "pages", "hello")
-        monkeypatch.chdir(tmp_path)
-
-        assert get_page_roots(_RootTreeRouter(root_trees=[])) == []
-
-    def test_the_reported_tree_is_the_only_tree(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
-        _write_page(tmp_path / "pages", "hello")
-        configured = tmp_path / "shell"
-        configured.mkdir()
-        monkeypatch.chdir(tmp_path)
-        router = _RootTreeRouter([configured])
-
-        assert get_page_roots(router) == [PageRoot(path=configured, label="Root")]
-
-
-class TestPageTreeSkipNames:
-    """The skip set is the router's own, both halves read off its contract."""
-
-    def test_a_backend_refusing_nothing_and_naming_no_folder_skips_nothing(
-        self,
-    ) -> None:
-        assert page_tree_skip_names(_RootTreeRouter([])) == frozenset()
-
-    def test_the_names_the_backend_refuses_are_the_skip_set(self) -> None:
-        router = SkippingRouter([], frozenset({"api", "_drafts"}))
-
-        assert page_tree_skip_names(router) == frozenset({"api", "_drafts"})
-
-    def test_the_components_folder_of_the_backend_joins_the_skip_set(self) -> None:
-        router = SkippingRouter([], frozenset({"api"}))
-
-        with patch.object(SkippingRouter, "components_folder_name", return_value="wid"):
-            assert page_tree_skip_names(router) == frozenset({"api", "wid"})
-
-    def test_the_dirs_of_another_backend_entry_name_no_skip_name_here(
-        self, tmp_path: Path
-    ) -> None:
-        # A `blog` that one entry refuses is a route of the next entry's tree,
-        # so the skip set of a router may never gather what another declared.
-        tree = tmp_path / "site"
-        _write_page(tree, "blog")
-        entries = [
-            file_router_config_entry(dirs=["blog"]),
-            file_router_config_entry(pages_dir=tree),
-        ]
-
-        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": entries}):
-            router = RouterFactory.create_backend(entries[1])
-            routes = [url for url, _page in iter_scanned_page_pairs(router)]
-
-            assert "blog" not in page_tree_skip_names(router)
-
-        assert routes == ["blog"]
-
-    def test_a_raising_components_folder_name_costs_only_that_name(self) -> None:
-        router = SkippingRouter([], frozenset({"api"}))
-
-        with patch.object(
-            SkippingRouter,
-            "components_folder_name",
-            side_effect=RuntimeError("components folder unavailable"),
-        ):
-            assert page_tree_skip_names(router) == frozenset({"api"})
-
-    def test_a_malformed_components_folder_name_costs_only_that_name(self) -> None:
-        router = SkippingRouter([], frozenset({"api"}))
-
-        with patch.object(
-            SkippingRouter, "components_folder_name", return_value=Path("widgets")
-        ):
-            assert page_tree_skip_names(router) == frozenset({"api"})
-
-    def test_a_raising_skip_set_refuses_no_directory(self, tmp_path: Path) -> None:
-        _write_page(tmp_path, "blog")
-        router = RaisingSkipNamesRouter([tmp_path])
-
-        assert page_tree_skip_names(router) == frozenset()
-        assert [url for url, _page in iter_scanned_page_pairs(router)] == ["blog"]
-
-    def test_a_skip_set_answered_as_a_string_costs_no_skip_name(self) -> None:
-        # Iterating the string would refuse the directories `a`, `p` and `i`,
-        # which is no name the backend ever declared.
-        assert page_tree_skip_names(OddSkipNamesRouter([])) == frozenset()
-
-    def test_a_skip_set_holding_more_than_names_keeps_the_names(self) -> None:
-        router = SkippingRouter([], frozenset({"api"}))
-
-        with patch.object(
-            SkippingRouter, "skip_dir_names", return_value=["api", 7, None]
-        ):
-            assert page_tree_skip_names(router) == frozenset({"api"})
-
-    def test_a_raising_router_is_asked_for_its_contract_once_per_run(
-        self, tmp_path: Path
-    ) -> None:
-        # Three checks ask the same questions, and a failing router would
-        # otherwise write one traceback per asking check.
-        router = RaisingComponentsRouter([tmp_path])
-        with patch.object(
-            RaisingComponentsRouter,
-            "components_folder_name",
-            side_effect=RuntimeError("components folder unavailable"),
-        ) as asked:
-            page_tree_skip_names(router)
-            page_tree_skip_names(router)
-            list(iter_page_tree_component_folders(router))
-
-        assert asked.call_count == 1
-
-
-class TestPageTreeComponentFolders:
-    """The folders a check discovers are the ones the router walk registers."""
-
-    def _write_component(self, folder: Path) -> Path:
-        folder.mkdir(parents=True, exist_ok=True)
-        (folder / "component.djx").write_text("<p>c</p>\n")
-        return folder
-
-    def test_folders_carry_their_tree_root_and_route_trail(
-        self, tmp_path: Path
-    ) -> None:
-        tree = tmp_path / "shell"
-        _write_page(tree, "blog")
-        top = self._write_component(tree / "_components")
-        nested = self._write_component(tree / "blog" / "_components")
-        router = FileRouterBackend(app_dirs=False, extra_root_paths=[tree])
-
-        found = sorted(iter_page_tree_component_folders(router))
-
-        assert found == sorted([(top, tree, ""), (nested, tree, "blog")])
-
-    def test_a_folder_under_a_skipped_directory_is_not_reached(
-        self, tmp_path: Path
-    ) -> None:
-        # The walk never enters `_drafts`, so the router never registers what
-        # sits under it and neither may the check.
-        tree = tmp_path / "shell"
-        _write_page(tree, "blog")
-        self._write_component(tree / "_drafts" / "_components")
-        entry = file_router_config_entry(pages_dir=tree, dirs=["_drafts"])
-
-        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}):
-            router = RouterFactory.create_backend(entry)
-            assert list(iter_page_tree_component_folders(router)) == []
-
-    def test_a_backend_naming_no_components_folder_reports_none(
-        self, tmp_path: Path
-    ) -> None:
-        tree = tmp_path / "shell"
-        _write_page(tree, "blog")
-        self._write_component(tree / "_components")
-
-        assert list(iter_page_tree_component_folders(_RootTreeRouter([tree]))) == []
-
-    def test_the_folder_name_the_backend_names_is_the_one_found(
-        self, tmp_path: Path
-    ) -> None:
-        tree = tmp_path / "shell"
-        _write_page(tree, "blog")
-        widgets = self._write_component(tree / "widgets")
-        router = FileRouterBackend(
-            app_dirs=False,
-            extra_root_paths=[tree],
-            skip_dir_names=frozenset({"widgets"}),
-            components_folder_name="widgets",
-        )
-
-        with override_settings(
-            NEXT_FRAMEWORK={
-                "PAGE_BACKENDS": [
-                    file_router_config_entry(pages_dir=tree, dirs=["widgets"])
-                ]
-            }
-        ):
-            assert list(iter_page_tree_component_folders(router)) == [
-                (widgets, tree, "")
-            ]
-
-    def test_pages_and_folders_come_from_one_walk(self, tmp_path: Path) -> None:
-        tree = tmp_path / "shell"
-        _write_page(tree, "blog")
-        self._write_component(tree / "_components")
-        router = FileRouterBackend(app_dirs=False, extra_root_paths=[tree])
-
-        with _walk_spy() as spy:
-            pairs = list(iter_scanned_page_pairs(router))
-            folders = list(iter_page_tree_component_folders(router))
-
-        assert spy.call_count == 1
-        assert len(pairs) == 1
-        assert len(folders) == 1
-
-    def test_a_raising_components_folder_name_reports_no_folder(
-        self, tmp_path: Path
-    ) -> None:
-        tree = tmp_path / "shell"
-        _write_page(tree, "blog")
-        self._write_component(tree / "_components")
-
-        assert (
-            list(iter_page_tree_component_folders(RaisingComponentsRouter([tree])))
-            == []
-        )
-
-
-class TestFileRouterWalkParity:
-    """The check walk finds exactly the pages the file router's own walk finds."""
-
-    def _build_tree(self, root: Path) -> None:
-        _write_page(root, "blog")
-        _write_page(root, "blog/[slug]")
-        _write_page(root, "_components/card")
-        _write_page(root, "_drafts/wip")
-        _write_page(root, "deep/nested/leaf")
-        (root / "virtual").mkdir(parents=True, exist_ok=True)
-        (root / "virtual" / "template.djx").write_text("<p>ok</p>\n")
-
-    @pytest.mark.parametrize(
-        "dirs",
-        [[], ["_drafts"], ["_drafts", "deep"], ["does_not_exist/nested"]],
-        ids=["no-dirs", "one-skip-name", "two-skip-names", "path-shaped-skip-name"],
-    )
-    def test_the_two_walks_agree_pair_for_pair(self, tmp_path: Path, dirs) -> None:
-        tree = tmp_path / "shell"
-        self._build_tree(tree)
-        entry = file_router_config_entry(pages_dir=tree, dirs=dirs)
-
-        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}):
-            router = RouterFactory.create_backend(entry)
-            checked = list(iter_scanned_page_pairs(router))
-            routed = [
-                pair
-                for pages_dir in get_pages_directories(router)
-                for pair in router._scan_pages_directory(
-                    pages_dir, register_components=False
-                )
-            ]
-
-        assert checked == routed
-        assert checked
-
-    @pytest.mark.parametrize(
-        "dirs", [[], ["_drafts"]], ids=["no-dirs", "one-skip-name"]
-    )
-    def test_the_derived_skip_set_is_the_routers_own(
-        self, tmp_path: Path, dirs
-    ) -> None:
-        # The names the checks refuse are the names the file router refuses,
-        # so the two walks cannot diverge.
-        tree = tmp_path / "shell"
-        tree.mkdir(parents=True)
-        entry = file_router_config_entry(pages_dir=tree, dirs=dirs)
-
-        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}):
-            router = RouterFactory.create_backend(entry)
-
-            assert page_tree_skip_names(router) == router._skip_dir_names
-
-    def test_a_custom_components_dir_moves_both_walks(self, tmp_path: Path) -> None:
-        tree = tmp_path / "shell"
-        self._build_tree(tree)
-        entry = file_router_config_entry(pages_dir=tree)
-        components = [
-            {
-                "BACKEND": "next.components.FileComponentsBackend",
-                "DIRS": [],
-                "COMPONENTS_DIR": "_widgets",
-            }
-        ]
-
-        with override_settings(
-            NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry], "COMPONENT_BACKENDS": components}
-        ):
-            router = RouterFactory.create_backend(entry)
-            routes = [url for url, _page in iter_scanned_page_pairs(router)]
-
-            assert page_tree_skip_names(router) == router._skip_dir_names
-
-        assert "_components/card" in routes
-
-
-class TestPerRouterCachesKeyOnIdentity:
-    """Config equality never makes one router read another one's cached scan."""
-
-    def test_a_config_equal_subclass_keeps_its_own_folder_name(
-        self, tmp_path: Path
-    ) -> None:
-        # `FileRouterBackend.__eq__` compares configuration, so a subclass with
-        # the same settings is `==` to the base while naming another folder.
-        plain = FileRouterBackend(app_dirs=False, extra_root_paths=[tmp_path])
-        custom = _CustomFolderRouter(app_dirs=False, extra_root_paths=[tmp_path])
-        assert plain == custom
-
-        assert page_tree_skip_names(plain) == frozenset({"_components"})
-        assert page_tree_skip_names(custom) == frozenset({"_components", "_widgets"})
-
-    def test_a_config_equal_subclass_keeps_its_own_scan(self, tmp_path: Path) -> None:
-        tree = tmp_path / "shell"
-        _write_page(tree, "blog")
-        (tree / "_widgets").mkdir()
-        (tree / "_widgets" / "card").mkdir()
-        (tree / "_widgets" / "card" / "page.py").write_text('template = "x"\n')
-        plain = FileRouterBackend(app_dirs=False, extra_root_paths=[tree])
-        custom = _CustomFolderRouter(app_dirs=False, extra_root_paths=[tree])
-
-        plain_routes = {url for url, _page in iter_scanned_page_pairs(plain)}
-        custom_routes = {url for url, _page in iter_scanned_page_pairs(custom)}
-
-        assert "_widgets/card" in plain_routes
-        assert "_widgets/card" not in custom_routes
-
-    def test_an_unhashable_router_is_read_rather_than_cached(
-        self, tmp_path: Path
-    ) -> None:
-        # A dataclass router carries `__hash__ = None`, which no cache lookup
-        # may turn into a traceback out of a check run.
-        _write_page(tmp_path, "blog")
-        router = _UnhashableRouter(tree=tmp_path)
-
-        assert page_tree_skip_names(router) == frozenset()
-        assert [url for url, _page in iter_scanned_page_pairs(router)] == ["blog"]
-
-
-class TestFailingPageRootsRead:
-    """User code that raises or answers the wrong shape costs only its trees."""
-
-    def test_get_page_roots_swallows_and_reports_none(self) -> None:
-        assert get_page_roots(RaisingRootsRouter()) == []
-
-    def test_bare_paths_instead_of_page_roots_are_refused(self, tmp_path: Path) -> None:
-        # Every reader dereferences `root.path`, so a bare path may not reach one.
-        with pytest.raises(PageRootsError) as caught:
-            read_page_roots(MalformedRootsRouter([tmp_path]))
-
-        assert "MalformedRootsRouter" in str(caught.value)
-        assert "PosixPath" in str(caught.value) or "WindowsPath" in str(caught.value)
-        assert caught.value.__cause__ is None
-
-    def test_a_page_root_holding_something_other_than_a_path_is_refused(self) -> None:
-        router = _RootTreeRouter(["pages"])
-
-        with pytest.raises(PageRootsError, match=r"str instead of pathlib\.Path"):
-            read_page_roots(router)
-
-    def test_the_scanning_seams_survive_a_malformed_router(
-        self, tmp_path: Path
-    ) -> None:
-        router = MalformedRootsRouter([tmp_path])
-
-        assert get_page_roots(router) == []
-        assert get_pages_directories(router) == []
-        assert list(iter_scanned_page_pairs(router)) == []
-
-    def test_read_page_roots_folds_the_failure_into_one_error(self) -> None:
-        # Folded rather than propagated raw, so both callers catch it narrowly
-        # and the cause still reaches the report.
-        with pytest.raises(PageRootsError) as caught:
-            read_page_roots(RaisingRootsRouter())
-
-        assert "RaisingRootsRouter" in str(caught.value)
-        assert isinstance(caught.value.__cause__, RuntimeError)
-        assert str(caught.value.__cause__) == "database is down"
-
-    def test_a_healthy_router_raises_nothing(self, tmp_path: Path) -> None:
-        _write_page(tmp_path, "blog")
-
-        roots = read_page_roots(_RootTreeRouter([tmp_path]))
-
-        assert [root.path for root in roots] == [tmp_path]
-
-    def test_the_scan_seam_survives_a_failing_router(self) -> None:
-        assert list(iter_scanned_page_pairs(RaisingRootsRouter())) == []
 
 
 class TestCollectAllPatternsDedup:
@@ -762,6 +90,13 @@ class TestCollectAllPatternsDedup:
 
 class TestRegisterAll:
     """`register_all` keeps the registered check set stable without server checks."""
+
+    def test_it_imports_exactly_the_modules_the_map_names(self) -> None:
+        with patch("next.checks.importlib.import_module") as spy:
+            register_all()
+
+        imported = [call.args[0] for call in spy.call_args_list]
+        assert imported == list(_LAZY_SOURCES_BY_MODULE)
 
     def test_register_all_registers_same_check_set(self) -> None:
         before = {
@@ -870,3 +205,63 @@ class TestRegistrationFileErrors:
             True,
             True,
         ]
+
+
+@pytest.fixture()
+def live_caches() -> Iterator[None]:
+    """Empty the process-wide memos a check run must leave alone."""
+    _forget_live_caches()
+    yield
+    _forget_live_caches()
+
+
+def _forget_live_caches() -> None:
+    forget_dep_caches()
+    forget_page_roots()
+    forget_watch_state()
+    forget_manager_page_roots()
+
+
+def _injected_view(request) -> None:
+    """Plain callable the resolver compiles a plan for."""
+
+
+class TestACheckRunLeavesTheLiveCachesWarm:
+    """The managers a check run builds are its own, so no live memo is evicted."""
+
+    def test_the_compiled_plan_cache_survives(self, live_caches) -> None:
+        """The DI plans stay compiled, so the first request after a check is warm."""
+        register_all()
+        resolver.resolve_dependencies(_injected_view)
+        key = introspect_key(_injected_view)
+        entry = resolver._plan_cache[key]
+
+        run_checks(tags=[NEXT])
+
+        assert resolver._plan_cache[key] is entry
+
+    def test_the_page_root_memos_survive(self, live_caches) -> None:
+        """Both page-root memos stay filled, so no walk asks the routers again."""
+        register_all()
+        roots = _page_roots()
+        static_roots = get_static_manager().page_roots()
+        # An empty tuple is interned, so identity would pass a dropped memo too.
+        assert roots
+        assert static_roots
+
+        run_checks(tags=[NEXT])
+
+        assert _page_roots() is roots
+        assert get_static_manager()._cached_page_roots is static_roots
+
+    def test_the_watch_state_survives(self, live_caches) -> None:
+        """The routers the watcher holds outlive a check run."""
+        register_all()
+        with override_settings(DEBUG=False):
+            _page_backends_for_watch()
+            memo = _state.memo
+            assert memo is not None
+
+            run_checks(tags=[NEXT])
+
+            assert _state.memo is memo

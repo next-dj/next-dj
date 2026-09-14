@@ -33,8 +33,8 @@ from next.forms.base import (
 )
 from next.forms.diagnostics import registration_diagnostics
 from next.forms.manager import form_action_manager
+from next.introspect import defining_file
 from next.pages.loaders import _load_python_module
-from next.utils import defining_file
 from tests.support import importable_dir
 
 
@@ -330,8 +330,7 @@ def _exec_module_from_file(module_name: str, module_file: Path) -> ModuleType:
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    # The entry must exist before the body runs, otherwise classes declared
-    # there cannot resolve their own module.
+    # The entry must exist before the body runs, or its classes lose their module.
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
@@ -503,8 +502,7 @@ class TestDefinitionFileOf:
             pass
 
         Shadowed.__module__ = impostor.__name__
-        # The impostor binds a different class under that name, which is the
-        # collision the attribution has to notice.
+        # The impostor binds a different class under that name, the collision to notice.
         assert impostor.Shadowed is not Shadowed
         assert _definition_file_of(Shadowed) == __file__
 
@@ -869,13 +867,7 @@ class TestComputeScope:
 
 
 class TestPermissionHookAnnotationSafety:
-    """The DI-inspected hook modules keep real, non-string annotations.
-
-    A `from __future__ import annotations` in base.py or wizard.py would
-    stringify every subclass annotation and break the resolver reading a
-    user's `check_permissions(cls, board: Board)`. The hook return
-    annotations stay the real `PermissionOutcome` alias, never the string.
-    """
+    """The DI-inspected hook modules keep real, non-string annotations."""
 
     @pytest.mark.parametrize(
         "hook",

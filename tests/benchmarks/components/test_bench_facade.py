@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from next.components.manager import components_manager
 from next.components.signals import component_rendered
 from tests.benchmarks.factories import build_component_info, noop_signal_receiver
 
@@ -27,7 +28,12 @@ class TestBenchComponentRenderedSignal:
     def test_send_no_receiver(self, tmp_path: Path, benchmark) -> None:
         """``component_rendered.send`` with zero receivers."""
         info = build_component_info(tmp_path)
-        benchmark(_send_component_rendered, component_rendered, object(), info)
+        benchmark(
+            _send_component_rendered,
+            component_rendered,
+            components_manager.__class__,
+            info,
+        )
 
     @pytest.mark.benchmark(group="components.signals")
     def test_send_with_one_receiver(self, tmp_path: Path, benchmark) -> None:
@@ -35,6 +41,11 @@ class TestBenchComponentRenderedSignal:
         info = build_component_info(tmp_path)
         component_rendered.connect(noop_signal_receiver)
         try:
-            benchmark(_send_component_rendered, component_rendered, object(), info)
+            benchmark(
+                _send_component_rendered,
+                component_rendered,
+                components_manager.__class__,
+                info,
+            )
         finally:
             component_rendered.disconnect(noop_signal_receiver)

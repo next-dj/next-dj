@@ -41,14 +41,11 @@ BUILTIN_OPS: frozenset[str] = frozenset(
 class PatchOpRegistry:
     """Registry of patch verbs known to the builder.
 
-    The built-in verbs seed the registry so the core eats its own dog
-    food. A project registers a custom verb to clear the `next.E066`
-    check and earn the generic `op()` channel on the builder.
+    Registering a verb clears the `next.E066` check and unlocks the `op()` channel.
     """
 
     def __init__(self) -> None:
-        """Seed the registry with the built-in verbs."""
-        self._ops: set[str] = set(BUILTIN_OPS)
+        """Start with no custom verb on record, the built-ins seed the reads."""
         self._custom: set[str] = set()
 
     def register(self, name: str) -> None:
@@ -57,14 +54,12 @@ class PatchOpRegistry:
         The name is recorded whatever it is, so a registration shadowing a
         built-in verb stays visible to the check that reports it.
         """
-        self._ops.add(name)
         self._custom.add(name)
-        if patch_op_registered.receivers:
-            patch_op_registered.send(sender=type(self), name=name)
+        patch_op_registered.send(sender=type(self), name=name)
 
     def __contains__(self, name: object) -> bool:
-        """Return True when the verb is known to the registry."""
-        return name in self._ops
+        """Return True when the verb is built in or registered by a project."""
+        return name in BUILTIN_OPS or name in self._custom
 
     def custom_names(self) -> frozenset[str]:
         """Return every verb name a project registered itself."""
@@ -83,10 +78,8 @@ def register_patch_op(name: str) -> None:
 class ZoneInfo:
     """One compiled zone of a composed page template.
 
-    The render paths consume `options` whole, and the scalar read
-    surface delegates to it so no mode can drift between the two.
-    `nested` names the zones declared inside the body, computed once with
-    the map so a standalone render never walks the nodes again.
+    Scalar properties delegate to `options` so no mode can drift between the two reads.
+    `nested` is computed once so a standalone render never re-walks the nodes.
     """
 
     name: str
@@ -141,23 +134,22 @@ def zones_of(template: "Template") -> "Mapping[str, ZoneInfo]":
     """Return the named zones of a compiled template, memoised per object.
 
     The cache keys on the compiled template object, so a recompiled page gets a fresh
-    entry while the stale object is collected. The first read of a template announces
-    its zones through `zone_registered`.
+    entry and the first read announces its zones through `zone_registered`.
     """
     cached = _zone_cache.get(template)
     if cached is not None:
         return cached
     zones = _zones_from_template(template)
     _zone_cache[template] = zones
-    if zone_registered.receivers:
-        for info in zones.values():
-            zone_registered.send(
-                sender=type(template),
-                template=template,
-                zone_name=info.name,
-                lazy=info.options.lazy,
-                poll=info.options.poll,
-            )
+    sender = type(template)
+    for info in zones.values():
+        zone_registered.send(
+            sender=sender,
+            template=template,
+            zone_name=info.name,
+            lazy=info.options.lazy,
+            poll=info.options.poll,
+        )
     return zones
 
 

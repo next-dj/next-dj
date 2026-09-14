@@ -1,23 +1,18 @@
 """Resolve callable parameters from request, URL kwargs, forms, and context.
 
-The public surface covers the annotation base class `DDependencyBase`, the `Depends`
-marker, the `DependencyResolver` and its singleton, the `UnknownDependencyError`
-exception, the `RegisteredParameterProvider` ABC, the `ParameterProvider` protocol, the
-`ProviderRegistry` and its singleton, and the `RESERVED_KEYS` set. Deeper helpers live
-under `next.deps.cache`, `next.deps.markers`, and `next.deps.providers`, whose
-`CompilingParameterProvider` spells the optional compile hook, while `next.deps.plan`
-spells the compiled contract, cached per callable and replayed on every resolve.
+The resolver backend is pluggable via `NEXT_FRAMEWORK["DEPENDENCY_RESOLVER"]`.
 """
 
 from __future__ import annotations
 
 from . import signals
-from .cache import REQUEST_DEP_CACHE_ATTR, DependencyCycleError, get_request_dep_cache
+from .cache import REQUEST_DEP_CACHE_ATTR, get_request_dep_cache
 from .context import RESERVED_KEYS, ResolutionContext
+from .errors import DependencyCycleError, UnknownDependencyError
 from .markers import DDependencyBase, Depends
 from .providers import ParameterProvider, RegisteredParameterProvider
 from .registry import ProviderRegistry, provider_registry
-from .resolver import DependencyResolver, UnknownDependencyError, resolver
+from .resolver import DependencyResolver, resolver
 
 
 __all__ = [

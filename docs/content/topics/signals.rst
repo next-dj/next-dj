@@ -18,12 +18,13 @@ Every signal lives in the subpackage that emits it.
 The aggregator ``next.signals`` re-exports every name so handlers can pull from a single import.
 
 .. code-block:: python
-   :caption: import patterns
+   :caption: through the aggregator
 
-   # Aggregator
    from next.signals import action_dispatched, page_rendered
 
-   # Subpackage import
+.. code-block:: python
+   :caption: through the subpackage modules
+
    from next.forms.signals import action_dispatched
    from next.pages.signals import page_rendered
 
@@ -48,7 +49,7 @@ Every signal the framework emits is listed below with the subsystem that emits i
      - After a template source is registered on a page.
    * - ``context_registered``
      - Pages
-     - After a context callable is attached to a page module.
+     - After a context function is attached to a page module.
    * - ``page_rendered``
      - Pages
      - After the page renders to HTML and the static assets are injected.
@@ -136,8 +137,7 @@ Receiver patterns
 
 Connect once at startup.
 
-Django's app registry is not fully initialised at module import time, so the receiver import lives inside ``ready``.
-This is the one approved exception to the module-level import rule.
+Django's app registry is not fully initialised at module import time, so the receiver import lives inside ``ready`` rather than at module level.
 
 .. code-block:: python
    :caption: notes/apps.py
@@ -148,7 +148,7 @@ This is the one approved exception to the module-level import rule.
        name = "notes"
 
        def ready(self) -> None:
-           from notes import receivers  # noqa: F401, PLC0415
+           from notes import receivers  # noqa: F401
 
 Use ``django.dispatch.receiver`` to connect a callable to a signal.
 
@@ -156,7 +156,9 @@ Use ``django.dispatch.receiver`` to connect a callable to a signal.
    :caption: notes/receivers.py
 
    import logging
+
    from django.dispatch import receiver
+
    from next.signals import action_dispatched
 
    logger = logging.getLogger(__name__)
@@ -177,6 +179,7 @@ The same ``dispatch_uid`` passed to ``connect`` can be supplied to ``disconnect`
    :caption: notes/receivers.py
 
    import logging
+
    from next.signals import action_dispatched
 
    logger = logging.getLogger(__name__)

@@ -35,6 +35,7 @@ See Django's :doc:`WSGI deployment guide <django:howto/deployment/wsgi/index>`.
    :caption: config/wsgi.py
 
    import os
+
    from django.core.wsgi import get_wsgi_application
 
    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
@@ -63,6 +64,7 @@ See Django's :doc:`ASGI deployment guide <django:howto/deployment/asgi/index>`.
    :caption: config/asgi.py
 
    import os
+
    from django.core.asgi import get_asgi_application
 
    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")

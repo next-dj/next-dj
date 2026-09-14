@@ -187,8 +187,22 @@ describe("trigger delegation", () => {
     expect(requests).toHaveLength(1);
     expect(requests[0]!.method).toBe("POST");
     expect(requests[0]!.headers?.["X-Next-Validate"]).toBe("email");
-    expect(requests[0]!.zone).toBe("validate:u");
+    expect(requests[0]!.queue).toBe("validate:u");
+    expect(requests[0]!.zone).toBeUndefined();
     expect(requests[0]!.abortable).toBe(true);
+  });
+
+  it("sends the form's declared zone on a validate post, not the queue key", () => {
+    document.body.innerHTML =
+      '<form action="/_next/form/u/" data-next-validate="blur" data-next-action="u"' +
+      ' data-next-target="wizard">' +
+      '<input name="email" value="a@b.c">' +
+      "</form>";
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    document.querySelector("input")!.dispatchEvent(new FocusEvent("blur"));
+    expect(requests[0]!.zone).toBe("wizard");
+    expect(requests[0]!.queue).toBe("validate:u");
   });
 
   it("aborts the in-flight validation when the form submits", () => {
@@ -202,6 +216,45 @@ describe("trigger delegation", () => {
     document.querySelector("input")!.dispatchEvent(new FocusEvent("blur"));
     form.dispatchEvent(new Event("submit", { bubbles: true }));
     expect(aborted).toEqual(["validate:u"]);
+  });
+
+  it("cancels a debounced validation that has not fired when the form submits", () => {
+    const clock = manualClock();
+    document.body.innerHTML =
+      '<form action="/_next/form/u/" data-next-validate="blur" data-next-action="u"' +
+      ' data-next-debounce="300">' +
+      '<input name="email" value="a@b.c">' +
+      "</form>";
+    const { triggers, requests, aborted } = makeTriggers({ clock });
+    detach = triggers.install(document);
+    document.querySelector("input")!.dispatchEvent(new FocusEvent("blur"));
+    document
+      .querySelector("form")!
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    // The blur timer would land here, after the mutation it must not outlive.
+    clock.run();
+    expect(aborted).toEqual(["validate:u"]);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.uid).toBe("u");
+  });
+
+  it("supersedes a pending validation when another field blurs", () => {
+    const clock = manualClock();
+    document.body.innerHTML =
+      '<form action="/_next/form/u/" data-next-validate="blur" data-next-action="u"' +
+      ' data-next-debounce="300">' +
+      '<input name="email" value="a@b.c">' +
+      '<input name="name" value="ann">' +
+      "</form>";
+    const { triggers, requests } = makeTriggers({ clock });
+    detach = triggers.install(document);
+    document
+      .querySelector('input[name="email"]')!
+      .dispatchEvent(new FocusEvent("blur"));
+    document.querySelector('input[name="name"]')!.dispatchEvent(new FocusEvent("blur"));
+    clock.run();
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.headers?.["X-Next-Validate"]).toBe("name");
   });
 
   it("intercepts a next-action submit as a partial post carrying the zone", () => {
@@ -236,6 +289,34 @@ describe("trigger delegation", () => {
       .querySelector("form")!
       .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     expect(requests[0]!.key).toBe("row-7");
+  });
+
+  it("stamps the layer host as the origin of a submit fired inside a layer", () => {
+    document.body.innerHTML =
+      '<div id="modal">' +
+      '<form action="/_next/form/u/" data-next-action="u" data-next-target="wizard">' +
+      "</form>" +
+      "</div>";
+    const modal = document.querySelector("#modal")!;
+    const { triggers, requests } = makeTriggers({
+      layerHost: (el) => (modal.contains(el) ? "/requests/" : undefined),
+    });
+    detach = triggers.install(document);
+    document
+      .querySelector("form")!
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    expect(requests[0]!.headers?.["X-Next-Origin"]).toBe("/requests/");
+  });
+
+  it("sends no origin header on a submit outside every layer", () => {
+    document.body.innerHTML =
+      '<form action="/_next/form/u/" data-next-action="u"></form>';
+    const { triggers, requests } = makeTriggers({ layerHost: () => undefined });
+    detach = triggers.install(document);
+    document
+      .querySelector("form")!
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    expect(requests[0]!.headers).toBeUndefined();
   });
 
   it("omits the key for a form without one", () => {
@@ -327,6 +408,55 @@ describe("trigger delegation", () => {
     expect(pushState).not.toHaveBeenCalled();
     replaceState.mockRestore();
     pushState.mockRestore();
+  });
+
+  it("replaces the query of an action that already carries one", () => {
+    document.body.innerHTML =
+      '<form action="/search/?tab=all" data-next-target="r">' +
+      '<input name="q" value="x" data-next-trigger="input">' +
+      "</form>";
+    const replaced: string[] = [];
+    const { triggers, requests } = makeTriggers({
+      history: { push: () => undefined, replace: (href) => replaced.push(href) },
+    });
+    detach = triggers.install(document);
+    document
+      .querySelector("input")!
+      .dispatchEvent(new Event("input", { bubbles: true }));
+    expect(requests[0]!.url).toBe("/search/?q=x");
+    expect(replaced).toEqual(["/search/?q=x"]);
+  });
+
+  it("drops the query of an action when the filter form is empty", () => {
+    document.body.innerHTML =
+      '<form action="/search/?tab=all" data-next-target="r">' +
+      '<input data-next-trigger="input">' +
+      "</form>";
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    document
+      .querySelector("input")!
+      .dispatchEvent(new Event("input", { bubbles: true }));
+    expect(requests[0]!.url).toBe("/search/");
+  });
+
+  it("syncs the bar through the injected history seam, not window.history", () => {
+    document.body.innerHTML =
+      '<form action="/c/" data-next-target="r">' +
+      '<input name="q" value="x" data-next-trigger="input">' +
+      "</form>";
+    const replaceState = vi.spyOn(window.history, "replaceState");
+    const calls: string[] = [];
+    const { triggers } = makeTriggers({
+      history: { push: () => undefined, replace: (href) => calls.push(href) },
+    });
+    detach = triggers.install(document);
+    document
+      .querySelector("input")!
+      .dispatchEvent(new Event("input", { bubbles: true }));
+    expect(calls).toEqual(["/c/?q=x"]);
+    expect(replaceState).not.toHaveBeenCalled();
+    replaceState.mockRestore();
   });
 
   it("falls back to the current path when a filter form has no action", () => {
@@ -477,7 +607,7 @@ describe("trigger delegation", () => {
     expect(requests).toHaveLength(0);
   });
 
-  it("keys the validate zone empty when the form carries no action uid", () => {
+  it("keys the validate queue empty when the form carries no action uid", () => {
     document.body.innerHTML =
       '<form action="/f/" data-next-validate="blur">' +
       '<input name="email" value="a@b.c">' +
@@ -485,7 +615,7 @@ describe("trigger delegation", () => {
     const { triggers, requests } = makeTriggers();
     detach = triggers.install(document);
     document.querySelector("input")!.dispatchEvent(new FocusEvent("blur"));
-    expect(requests[0]!.zone).toBe("validate:");
+    expect(requests[0]!.queue).toBe("validate:");
   });
 
   it("falls back to the current path when a validate form has no action", () => {
@@ -589,6 +719,28 @@ describe("trigger delegation", () => {
     triggers._reset();
     observer.reveal();
     expect(requests).toHaveLength(0);
+  });
+
+  it("forgets a one-shot teardown as it fires, so a long scroll keeps none", () => {
+    let stopped = 0;
+    let reveal = (): void => undefined;
+    const observer: IntersectionAdapter = {
+      observe: (_el, onReveal) => {
+        reveal = onReveal;
+        return () => {
+          stopped += 1;
+        };
+      },
+    };
+    document.body.innerHTML =
+      '<div data-next-zone="late" data-next-lazy="revealed"></div>';
+    const { triggers, requests } = makeTriggers({ observer });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    reveal();
+    triggers._reset();
+    expect(requests).toHaveLength(1);
+    expect(stopped).toBe(0);
   });
 });
 
@@ -694,8 +846,7 @@ describe("zone polling", () => {
     const visibility = manualVisibility();
     document.body.innerHTML = '<div data-next-zone="t" data-next-poll="5000"></div>';
     const { triggers, requests } = makeTriggers({ clock, visibility });
-    // No install, so the hidden flip delivers no visibilitychange and the armed
-    // timer fires into the in-tick safety net.
+    // No install, so hiding delivers no visibilitychange and the safety net fires.
     triggers.scan(document.body);
     visibility.setHidden(true);
     clock.tick();
@@ -763,8 +914,7 @@ describe("zone polling", () => {
     visibility.setHidden(true);
     clock.setNow(1000);
     visibility.setHidden(false);
-    // The countdown resumes with the remaining time, so rapid switching cannot
-    // postpone a due tick.
+    // The countdown resumes with the time left, so switching cannot postpone a tick.
     expect(requests).toHaveLength(1);
     expect(clock.pending()).toBe(1);
     expect(clock.intervals).toEqual([5000, 5000, 4000]);
@@ -779,8 +929,7 @@ describe("zone polling", () => {
     const { triggers, requests } = makeTriggers({ clock, visibility });
     detach = triggers.install(document);
     triggers.scan(document.body);
-    // A visible event with no intervening hidden clears the live handle before
-    // re-arming, so a second one forks no chain.
+    // A repeated visible event clears the handle before re-arming, so no chain forks.
     visibility.setHidden(false);
     visibility.setHidden(false);
     expect(clock.pending()).toBe(1);

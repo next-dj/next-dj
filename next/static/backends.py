@@ -1,18 +1,7 @@
 """Pluggable backend contract and Django-staticfiles default implementation.
 
-A static backend turns co-located asset paths into public URLs and renders them through
-one of its named renderer methods. The default backend delegates URL resolution to
-Django staticfiles, so manifest hashing, S3 storage, and CDN configuration from Django
-settings apply automatically.
-
-The abstract `StaticBackend` only mandates `register_file`. Renderer methods are
-concrete on the default backend and selected per asset by `KindRegistry.renderer(kind)`.
-Custom backends extend the surface by adding more named methods such as
-`render_babel_script_tag` and registering kinds that point to them.
-
-Instances are built from `NEXT_FRAMEWORK['STATIC_BACKENDS']`
-entries by the static manager, which emits the `backend_loaded`
-signal for each one so user code may react to backend construction.
+The default backend resolves URLs through Django staticfiles,
+so manifest, S3, and CDN settings apply automatically.
 """
 
 from __future__ import annotations
@@ -21,6 +10,8 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, ClassVar, override
 
 from django.contrib.staticfiles.storage import staticfiles_storage
+
+from next.caches import BoundedCache
 
 from .assets import StaticNamespace
 
@@ -32,24 +23,24 @@ if TYPE_CHECKING:
     from django.http import HttpRequest
 
 
+# Changing one of these rebuilds `staticfiles_storage`, so every URL resolved
+# through the manifest it held answers for a manifest that is gone.
+MANIFEST_SETTINGS = frozenset({"STATIC_ROOT", "STATIC_URL", "STORAGES"})
+
+
 class StaticBackend(ABC):
     """Pluggable strategy for resolving asset files to URLs and rendering tags.
 
-    The constructor accepts the full backend entry from `STATIC_BACKENDS`, which has the
-    shape `{"BACKEND": "...", "OPTIONS": {...}}`. The base class stores the mapping on
-    the `config` property. Subclasses are free to read any keys they expose to users.
-
-    The only abstract requirement is `register_file`. The concrete `asset_url`
-    hook rewrites a resolved URL per request and covers every asset the pipeline
-    renders. Renderer methods are added by subclasses and selected per asset
-    through `KindRegistry.renderer(kind)`. The default backend below ships
-    `render_link_tag` and `render_script_tag` for the built-in `css` and `js`
-    kinds. Custom backends register additional kinds and expose matching methods.
+    The base class memoises what each backend resolves, so `forget_urls` exists for
+    the framework to tell it when the storage behind those URLs is rebuilt.
     """
 
     def __init__(self, config: Mapping[str, Any] | None = None) -> None:
-        """Store the raw config mapping for subclasses to read."""
+        """Store the raw config mapping and prime the URL memo it may fill."""
         self._config: Mapping[str, Any] = config or {}
+        # Bounded against a backend asked for logical names without end rather than
+        # as a policy, so the stalest insert goes and a warm tag reorders nothing.
+        self._url_cache: BoundedCache[tuple[str, str], str] = BoundedCache()
 
     @property
     def config(self) -> Mapping[str, Any]:
@@ -59,42 +50,33 @@ class StaticBackend(ABC):
     def asset_url(self, url: str, *, request: HttpRequest | None = None) -> str:
         """Return the public URL of an already-resolved asset for this render.
 
-        The default answer is the URL as `register_file` resolved it. A backend
-        whose URLs vary per request, such as a per-tenant prefix, overrides this
-        one hook so the rewrite reaches every rendered asset and the `next.min.js`
-        runtime alike, which no renderer method can do because the runtime tag
-        and its preload hint are built by the framework.
+        Overriding this one hook lets a per-request scheme, such as a per-tenant
+        prefix, reach even the framework-built `next.min.js` runtime tag.
         """
         del request
         return url
+
+    def forget_urls(self) -> None:
+        """Drop every memoised URL, so the next lookup resolves it again.
+
+        A backend that remembers resolved URLs outside the base memo overrides this
+        hook, so a storage rebuild reaches it regardless of the memo's shape.
+        """
+        self._url_cache.clear()
 
     @abstractmethod
     def register_file(self, source_path: Path, logical_name: str, kind: str) -> str:
         """Register a co-located asset file and return its public URL.
 
-        The `source_path` argument is the absolute path to the source file on
-        disk. The `logical_name` argument is the path without an extension,
-        for example `"about"` or `"components/card"`. The `kind` argument
-        must be a kind registered in the default kind registry. The method
-        raises `RuntimeError` when the asset cannot be resolved to a URL.
-        Discovery asks on every render rather than remembering the answer, so a
-        backend is free to resolve the same file to a different URL per request.
+        Discovery asks on every render rather than caching the answer, so a backend
+        may resolve the same file to a different URL per request.
         """
 
 
 class StaticFilesBackend(StaticBackend):
     """Resolve co-located asset URLs through Django staticfiles.
 
-    Assets live in the `next/` staticfiles namespace so manifest
-    storage, S3 storage, and CDN settings apply automatically.
-
-    Two option keys are recognised in the backend entry. The
-    `css_tag` key sets a format string for `<link>` tags. It must
-    contain the `{url}` placeholder. Extra attributes such as
-    `crossorigin` or `integrity` can be baked directly into the
-    template. The `js_tag` key sets a format string for `<script>`
-    tags. The same placeholder rules apply. Attributes such as `defer`
-    or `async` are added by writing them into the template.
+    `css_tag`, `js_tag`, and `module_tag` hold format strings needing `{url}`.
     """
 
     _DEFAULT_CSS_TAG: ClassVar[str] = '<link rel="stylesheet" href="{url}">'
@@ -102,13 +84,12 @@ class StaticFilesBackend(StaticBackend):
     _DEFAULT_MODULE_TAG: ClassVar[str] = '<script type="module" src="{url}"></script>'
 
     def __init__(self, config: Mapping[str, Any] | None = None) -> None:
-        """Read tag templates from the OPTIONS mapping and prime caches."""
+        """Read the tag templates from the OPTIONS mapping."""
         super().__init__(config)
         opts = dict(self._config.get("OPTIONS") or {})
         self._css_tag = str(opts.get("css_tag") or self._DEFAULT_CSS_TAG)
         self._js_tag = str(opts.get("js_tag") or self._DEFAULT_JS_TAG)
         self._module_tag = str(opts.get("module_tag") or self._DEFAULT_MODULE_TAG)
-        self._url_cache: dict[tuple[str, str], str] = {}
 
     def _logical_static_path(self, logical_name: str, suffix: str) -> str:
         return f"{StaticNamespace.NEXT}/{logical_name}{suffix}"
@@ -117,14 +98,8 @@ class StaticFilesBackend(StaticBackend):
     def register_file(self, source_path: Path, logical_name: str, kind: str) -> str:
         """Return the staticfiles URL for `next/<logical_name><suffix>`.
 
-        The suffix is taken from `source_path.suffix`, so a single kind
-        can serve multiple file extensions if a custom backend wishes to.
-        The answer is memoised per `(logical_name, suffix)` for the life of
-        this backend, which `StaticManager.reload()` ends, because staticfiles
-        itself reads its manifest once per process. Missing entries in that
-        manifest are reported as `RuntimeError` with a hint about running
-        `collectstatic`. The `kind` argument is part of the contract and
-        ignored here, the suffix alone names the file.
+        Memoised per `(logical_name, suffix)`, because staticfiles reads its manifest
+        once per process, and `forget_urls` drops it when that manifest moves.
         """
         del kind
         suffix = source_path.suffix

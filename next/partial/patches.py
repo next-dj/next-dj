@@ -2,13 +2,14 @@
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.utils.http import url_has_allowed_host_and_scheme
 
 from next.forms.origin import resolve_origin, resolve_url_to_page
 from next.pages import page
+from next.seeding import JS_CONTEXT_KEY
 from next.static.assets import default_kinds
 from next.static.manager import default_manager
 from next.static.scripts import RESERVED_PAYLOAD_KEYS
@@ -51,11 +52,6 @@ if TYPE_CHECKING:
 
 _SEE_OTHER = 303
 
-# Each morph() route owns its selector keywords, so a stray key is refused.
-_ZONE_MORPH_KEYS: frozenset[str] = frozenset({"zone", "overrides"})
-_FOREIGN_ZONE_MORPH_KEYS: frozenset[str] = frozenset({"zone", "page", "url_kwargs"})
-_FORM_MORPH_KEYS: frozenset[str] = frozenset({"form"})
-
 # Framework-owned bus events, refused to event() so an app cannot forge one.
 _RESERVED_EVENT_NAMES: frozenset[str] = frozenset({"ready", "context-updated"})
 _RESERVED_EVENT_PREFIXES: tuple[str, ...] = ("partial:", "next:")
@@ -72,22 +68,32 @@ def _is_reserved_event(name: str) -> bool:
 class Patches:
     """Request-bound builder of a patch envelope.
 
-    Built from a request, the builder takes its asset version from the
-    active protocol backend and resolves the origin page lazily, so a
-    `morph(zone=...)` renders against the page that owns the request.
-    The `versioned` classmethod builds an assembler for paths that
-    already hold the version and render their own HTML.
+    The origin page resolves lazily, so a `morph(zone=...)` renders against the page
+    that owns the request, and `versioned` serves paths that already hold the version.
     """
 
-    def __init__(self, request: HttpRequest, *, echo_of: str | None = None) -> None:
-        """Start an empty builder bound to the request.
+    def __init__(
+        self,
+        request: HttpRequest | None,
+        *,
+        version: str | None = None,
+        echo_of: str | None = None,
+    ) -> None:
+        """Start an empty builder bound to the request, or to no request at all.
 
-        Pass `echo_of` with the originating mutation's request id so the envelope
-        carries it as `request_id`, letting an SSE subscriber suppress its own echo.
-        Only the stream path passes it, the HTTP response path leaves it unset since the
-        answer already reaches the initiator.
+        `version` pins the asset version literally instead of resolving it. `echo_of`
+        carries the originating request id so an SSE subscriber can suppress its echo.
         """
-        self._init_state(request, asset_version(), echo_of)
+        self._request = request
+        self._version = asset_version() if version is None else version
+        self._ops: list[Patch] = []
+        self._assets: list[Asset] = []
+        self._form: FormMeta | None = None
+        self._csrf: Mapping[str, Any] | None = None
+        self._request_id: str | None = echo_of
+        self._origin: OriginMatch | None = None
+        self._origin_resolved = False
+        self._render_context: dict[str, object] | None = None
 
     @classmethod
     def versioned(
@@ -99,102 +105,80 @@ class Patches:
     ) -> "Patches":
         """Start an empty builder stamped with a literal version.
 
-        The builder stays a low-level envelope assembler, used by paths that already
-        hold the version and render their own HTML. Such a path passes `request` when
-        it has one, so an asset URL the backend scopes per request is scoped here too.
+        Used by paths that already hold the version and render their own HTML. Pass
+        `request` when available so asset URLs stay scoped per request.
         """
-        builder = cls.__new__(cls)
-        builder._init_state(request, version, echo_of)
-        return builder
-
-    def _init_state(
-        self, request: HttpRequest | None, version: str, echo_of: str | None
-    ) -> None:
-        """Set the builder state shared by both construction forms."""
-        self._request = request
-        self._version = version
-        self._ops: list[Patch] = []
-        self._assets: list[Asset] = []
-        self._form: FormMeta | None = None
-        self._csrf: Mapping[str, Any] | None = None
-        self._request_id: str | None = echo_of
-        self._origin: OriginMatch | None = None
-        self._origin_resolved = False
-        self._render_context: dict[str, object] | None = None
+        return cls(request, version=version, echo_of=echo_of)
 
     @property
     def version(self) -> str:
         """Return the asset version stamped on the envelope."""
         return self._version
 
+    @overload
+    def morph(self, target: "Mapping[str, Any]", html: str = "") -> "Patches": ...
+
+    @overload
+    def morph(
+        self, *, zone: str, overrides: "Mapping[str, Any] | None" = None
+    ) -> "Patches": ...
+
+    @overload
+    def morph(
+        self,
+        *,
+        zone: str,
+        page: "Path | str",
+        url_kwargs: "Mapping[str, Any] | None" = None,
+    ) -> "Patches": ...
+
+    @overload
+    def morph(self, *, form: str, html: str) -> "Patches": ...
+
     def morph(
         self,
         target: "Mapping[str, Any] | None" = None,
         html: str | None = None,
         *,
-        extract: bool = False,
-        **select,
+        zone: str | None = None,
+        overrides: "Mapping[str, Any] | None" = None,
+        page: "Path | str | None" = None,
+        url_kwargs: "Mapping[str, Any] | None" = None,
+        form: str | None = None,
     ) -> "Patches":
         """Morph a target into HTML, the default verb.
 
-        A thin facade over the typed per-verb morph methods that keeps the
-        single-verb mental model. The facade routes the selector keyword to
-        the method that owns its contract, so two selectors in one call or
-        an unknown selector raises rather than being silently dropped.
+        A thin facade over the typed per-verb morph methods. A keyword belonging to
+        another route raises here rather than being silently dropped.
         """
-        if not select:
-            return self._append_morph(dict(target or {}), html or "", extract=extract)
-        return self._dispatch_morph(html, select)
-
-    def _dispatch_morph(
-        self, html: str | None, select: "Mapping[str, object]"
-    ) -> "Patches":
-        """Route a keyword-selected morph to its typed per-verb method."""
-        zone = select.get("zone")
-        form = select.get("form")
-        if isinstance(zone, str) and isinstance(form, str):
-            msg = "morph() got conflicting selector keywords ['zone', 'form']."
-            raise TypeError(msg)
-        if isinstance(zone, str):
-            return self._dispatch_zone_morph(zone, select)
-        if isinstance(form, str):
-            self._reject_extra_morph_keys(select, _FORM_MORPH_KEYS)
-            return self.morph_form(form, html or "")
-        msg = f"morph() got unexpected selector keywords {sorted(select)}."
-        raise TypeError(msg)
-
-    def _dispatch_zone_morph(
-        self, zone: str, select: "Mapping[str, object]"
-    ) -> "Patches":
-        """Route a zone-selected morph to its local or foreign per-verb method.
-
-        A `url_kwargs` without a `page` names a foreign page's
-        URL with no page to render, so it is refused rather
-        than dropped into a local zone render that ignores it.
-        """
-        if "page" in select:
-            self._reject_extra_morph_keys(select, _FOREIGN_ZONE_MORPH_KEYS)
-            return self.morph_foreign_zone(
-                zone,
-                cast("Path | str", select["page"]),
-                url_kwargs=cast("Mapping[str, Any] | None", select.get("url_kwargs")),
+        if zone is not None and page is not None:
+            self._refuse(target=target, html=html, form=form, overrides=overrides)
+            return self.morph_foreign_zone(zone, page, url_kwargs=url_kwargs)
+        if zone is not None:
+            self._refuse(target=target, html=html, form=form, url_kwargs=url_kwargs)
+            return self.morph_zone(zone, overrides=overrides)
+        if form is not None:
+            self._refuse(
+                target=target, overrides=overrides, page=page, url_kwargs=url_kwargs
             )
-        self._reject_extra_morph_keys(select, _ZONE_MORPH_KEYS)
-        overrides = cast("Mapping[str, Any] | None", select.get("overrides"))
-        return self.morph_zone(zone, overrides=overrides)
+            return self.morph_form(form, html or "")
+        self._refuse(overrides=overrides, page=page, url_kwargs=url_kwargs)
+        if not target:
+            msg = "morph() needs a target mapping, or a zone or form selector."
+            raise TypeError(msg)
+        return self._append_morph(target, html or "", extract=False)
 
     @staticmethod
-    def _reject_extra_morph_keys(
-        select: "Mapping[str, object]", allowed: frozenset[str]
-    ) -> None:
-        """Raise when the selector mapping carries keys the route does not own."""
-        extra = sorted(select.keys() - allowed)
-        if extra:
-            msg = (
-                f"morph() got unexpected keyword(s) {extra}, "
-                f"this route accepts {sorted(allowed)}."
-            )
-            raise TypeError(msg)
+    def _refuse(**unused: object) -> None:
+        """Raise when a morph route is passed a keyword another route owns.
+
+        The empty case is every morph's hot path, so it returns before naming anything.
+        """
+        if not any(unused.values()):
+            return
+        named = sorted(name for name, value in unused.items() if value)
+        msg = f"morph() got {named}, which the selected route does not accept."
+        raise TypeError(msg)
 
     def _append_morph(
         self, target: "Mapping[str, Any]", html: str, *, extract: bool
@@ -223,13 +207,8 @@ class Patches:
     ) -> "Patches":
         """Render a zone of a foreign page out of band, re-running its guards.
 
-        The page is named by its page path or by a URL of it, which is resolved through
-        the URLconf to the page that serves it. The foreign page's body resolution runs
-        first, so a redirect or a denial short-circuits before any zone renders and
-        raises instead of morphing an empty body. A `render()` string body has no zone
-        to render standalone, so it is refused the same way the OOB view branch refuses
-        it. With the page authorized, the named zone renders standalone with the foreign
-        page's URL kwargs and morphs in place addressed by zone name.
+        The foreign page's body resolution runs first, so a redirect or denial raises
+        instead of morphing an empty body. A `render()` body is refused the same way.
         """
         request = self._require_request()
         foreign_path = self._foreign_page_path(page)
@@ -327,11 +306,8 @@ class Patches:
     def context(self, **names) -> "Patches":
         """Merge named serialize provider values into the client context.
 
-        Only the names of registered `serialize=True` providers on the origin page are
-        accepted. A framework-owned init-payload key raises `ReservedContextKeyError`
-        whether or not the origin page registered it, so the refusal does not depend on
-        the collision the check warns about. The values are serialized through
-        `resolve_serializer()` so the wire carries plain data.
+        A reserved init-payload key raises `ReservedContextKeyError` whether or not the
+        origin page registered it, so the refusal never depends on the collision check.
         """
         reserved = RESERVED_PAYLOAD_KEYS & names.keys()
         if reserved:
@@ -360,9 +336,8 @@ class Patches:
     ) -> "Patches":
         """Open a server-initiated layer, optionally seeding a zone or href.
 
-        A seeded href needs a zone to load into and must be same-site, so a
-        href without a zone raises `LayerHrefWithoutZoneError` and a
-        cross-site value raises `CrossSiteHrefError`.
+        A seeded href needs a zone to load into and must be same-site, else
+        `LayerHrefWithoutZoneError` or `CrossSiteHrefError`.
         """
         if href is not None and zone is None:
             raise LayerHrefWithoutZoneError(href)
@@ -379,9 +354,8 @@ class Patches:
     ) -> "Patches":
         """Close the top layer with an accept result or a dismissal.
 
-        A dismissal sets the boolean `dismiss` flag the client reads and
-        carries the reason string under `reason`, matching the wire shape
-        the runtime expects rather than overloading `dismiss` with the text.
+        A dismissal sets the boolean `dismiss` flag and carries the reason text under
+        `reason`, rather than overloading `dismiss` with the string.
         """
         extras: dict[str, Any] = {}
         if result is not None:
@@ -400,8 +374,7 @@ class Patches:
     def event(self, name: str, detail: "Mapping[str, Any] | None" = None) -> "Patches":
         """Dispatch a CustomEvent on document and the `Next.on` bus.
 
-        A framework-owned event name raises `ReservedEventNameError` so an
-        app cannot forge a runtime lifecycle event.
+        A framework-owned name raises, so an app cannot forge a lifecycle event.
         """
         if _is_reserved_event(name):
             raise ReservedEventNameError(name)
@@ -427,14 +400,8 @@ class Patches:
     def redirect(self, href: str, *, external: bool = False) -> "Patches":
         """Drive a full client navigation to a server-authored href.
 
-        An internal href must be same-site, a cross-site value raises
-        `CrossSiteHrefError`. An external href is sent with a
-        full-navigation marker so a server-authored redirect like OAuth or
-        a payment gateway is not rejected by the same-host validator.
-
-        The `external=True` escape hatch bypasses same-host validation, so
-        the href must be server authored. Never pass user-supplied input
-        through it, or the page becomes an open redirect.
+        An internal href must be same-site. `external=True` bypasses that for a
+        server-authored destination, never user input, or it opens a redirect.
         """
         if external:
             self._ops.append(Patch(op="visit", extras={"href": href, "external": True}))
@@ -460,12 +427,8 @@ class Patches:
     def add_asset(self, kind: str, url: str, *, inline: str | None = None) -> "Patches":
         """Record a co-located asset in the envelope manifest.
 
-        The insertion verb comes from the kind registry, so an unregistered
-        kind still travels and only loses the field the runtime would use.
-        An inline body keeps the verb only when the runtime builds the same
-        element the full page render wraps it in. A URL passes through the
-        backend hook a full page render also asks, so one `asset_url` override
-        covers the manifest of an envelope as well.
+        The verb comes from the kind registry, so an unregistered kind still travels
+        without it, and a URL passes the same `asset_url` hook a full render asks.
         """
         # An inline body carries no URL, so it never reaches the backend hook.
         resolved = default_manager.asset_url(url, request=self._request) if url else url
@@ -503,10 +466,7 @@ class Patches:
     def response(self, fallback: str | None = None) -> "PatchResponse | HttpResponse":
         """Assemble the response for the current request.
 
-        With the partial switch on the request the envelope travels as a
-        `PatchResponse`. Without the switch, mutation falls back to the
-        full cycle: a 303 to the request origin when no `fallback` is
-        given, or a redirect to `fallback` when it is.
+        Without the partial switch, falls back to a 303 to the origin or to `fallback`.
         """
         request = self._request
         if request is not None and is_partial_request(request):
@@ -521,9 +481,7 @@ class Patches:
     def _fallback_target(self, fallback: str | None) -> str:
         """Return the validated no-runtime redirect target.
 
-        A bound request validates the fallback against its host like every
-        other href sink. A request-free builder has no host to validate
-        against, so the server-authored fallback passes through.
+        A request-free builder has no host, so `fallback` passes through unchecked.
         """
         if fallback is None:
             return self._origin_path()
@@ -571,9 +529,8 @@ class Patches:
     def _origin_render_context(self) -> dict[str, object]:
         """Return the origin page render context, built once per builder.
 
-        A handler that pairs `context()` with `morph(zone=...)` resolves the
-        origin context through both paths, so the build is memoised and a
-        fresh copy is handed out because consumers mutate the mapping.
+        Memoised because `context()` and `morph(zone=...)` both resolve it, and a fresh
+        copy is handed out since consumers mutate the mapping.
         """
         if self._render_context is None:
             # Pinned so mypy does not read the url kwarg splat as the zone batch.
@@ -600,7 +557,7 @@ class Patches:
 
     def _serializable_names(self) -> frozenset[str]:
         """Return the serialize=True provider names of the origin page."""
-        js_context = self._origin_render_context().get("_next_js_context", {})
+        js_context = self._origin_render_context().get(JS_CONTEXT_KEY, {})
         return frozenset(js_context) if isinstance(js_context, dict) else frozenset()
 
     def _collect_zone_assets(self, result: "ZoneRenderResult") -> "Patches":
@@ -615,15 +572,11 @@ class Patches:
             self.add_asset(kind, url)
         return self
 
-    def _absorb_zone_result(self, result: "ZoneRenderResult") -> "Patches":
+    def absorb_zone_result(self, result: "ZoneRenderResult") -> "Patches":
         """Record a zone render's assets and js-context delta on the envelope.
 
-        The framework render paths, zone GET and wizard advance, forward
-        both so a zone body that first introduces a co-located asset or a
-        serialize provider still ships it to the client. A reserved
-        init-payload key is dropped rather than raised, since the delta is a
-        by-product of the render and not a handler naming the key, and the
-        collision is already reported at startup by the reserved-key check.
+        A reserved init-payload key is dropped rather than raised, since the delta is a
+        render by-product rather than a handler naming the key.
         """
         self._collect_zone_assets(result)
         delta = {
@@ -663,10 +616,7 @@ class Patches:
 class PatchResponse(HttpResponse):
     """HTTP response that carries a serialized patch envelope.
 
-    The response is an `HttpResponse` subclass so it passes the handler
-    normalisation contract that requires rich return types to subclass
-    `HttpResponse`. The body bytes and content type come from the active
-    protocol backend, the partial Vary headers are set on construction.
+    Subclasses `HttpResponse` to satisfy the handler's rich-return-type contract.
     """
 
     def __init__(

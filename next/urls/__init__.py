@@ -1,14 +1,17 @@
 """URL routing, router backends, and URL parameter injection providers.
 
-`_LazyUrlPatterns` and the tree-walk helpers stay out of `__all__` on
-purpose. They are wiring internals, and a caller that needs one imports
-it from the module that defines it.
+`_LazyUrlPatterns` and the tree-walk helpers are internals, kept out of `__all__`.
 """
 
 from next.utils import PageRoot
 
 from . import checks, signals
 from .backends import FileRouterBackend, RouterBackend, RouterFactory
+from .errors import (
+    DuplicateURLParameterError,
+    InvalidURLParameterError,
+    URLParameterError,
+)
 from .manager import RouterManager, app_name, router_manager, urlpatterns
 from .markers import (
     DQuery,
@@ -19,7 +22,7 @@ from .markers import (
     UrlKwargsProvider,
     get_multi_values,
 )
-from .parser import DuplicateURLParameterError, URLPatternParser
+from .parser import URLPatternParser
 from .resolver import TrieURLResolver
 from .reverse import page_reverse, page_reverse_lazy, with_query
 
@@ -30,12 +33,14 @@ __all__ = [
     "DuplicateURLParameterError",
     "FileRouterBackend",
     "HttpRequestProvider",
+    "InvalidURLParameterError",
     "PageRoot",
     "QueryParamProvider",
     "RouterBackend",
     "RouterFactory",
     "RouterManager",
     "TrieURLResolver",
+    "URLParameterError",
     "URLPatternParser",
     "UrlByAnnotationProvider",
     "UrlKwargsProvider",

@@ -7,4 +7,4 @@ class BlogConfig(AppConfig):
 
     def ready(self) -> None:
         """Connect the `template_loaded` receiver so we can trace loader wins."""
-        from blog import receivers  # noqa: F401, PLC0415
+        from blog import receivers

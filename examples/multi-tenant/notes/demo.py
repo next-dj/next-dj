@@ -14,7 +14,8 @@ DEMO_TENANTS = [
                     "This workspace is **scoped** to the Acme tenant. "
                     "Notes here are invisible to Globex.\n\n"
                     "- Try `?tenant=globex` to switch.\n"
-                    "- Send `X-Tenant: globex` from `curl` for the production path.\n"
+                    "- Send `X-Tenant: globex` from `curl` to stand in for the "
+                    "proxy that owns that header in production.\n"
                 ),
             },
             {
@@ -41,8 +42,7 @@ DEMO_TENANTS = [
 def seed_demo() -> None:
     """Create the demo tenants and notes for the browser and curl walkthroughs.
 
-    One Acme note ships locked so the editor has a row that exercises the
-    object-level guard.
+    One Acme note ships locked so the editor has a row that exercises the object guard.
     """
     for tenant_data in DEMO_TENANTS:
         tenant, _ = Tenant.objects.get_or_create(
