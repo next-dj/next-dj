@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 __all__ = ["VERSION", "Depends", "action", "component", "context", "page"]
 
 __title__ = "Next Django Framework"
-__version__ = "0.8.0"
+__version__ = "0.9.0"
 __author__ = "paqstd-dev"
 
 VERSION = __version__
