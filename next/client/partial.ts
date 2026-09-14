@@ -272,8 +272,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       if (adapters.document !== undefined) dirty.install(adapters.document);
       if (adapters.history !== undefined) history = adapters.history;
       if (adapters.navigate !== undefined) navigate = adapters.navigate;
-      // The outgoing registry may still watch the old document's parse, so it is
-      // torn down before the replacement takes over.
+      // The outgoing registry may still watch the old document's parse.
       assets._reset();
       assets = createAssets(assetsDeps(adapters));
       detachLayers();

@@ -116,10 +116,8 @@ def _renderable_zone_names(
 ) -> tuple[str, ...]:
     """Return the declared names of a batch, deduplicated in request order.
 
-    A name the page does not declare is dropped so one stale name never
-    poisons the batch. A non-empty batch left with no declared name raises,
-    naming the first unknown, so a single-zone request keeps its 400. An
-    empty batch stays the no-op it always was.
+    An undeclared name is dropped, so one stale name never poisons the batch, while a
+    batch left with nothing declared raises on the first unknown.
     """
     rendered = tuple(name for name in dict.fromkeys(zone_names) if name in zones)
     if zone_names and not rendered:

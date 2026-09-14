@@ -338,9 +338,9 @@ The context manager prepends the provider to the resolver list on entry and remo
 .. code-block:: python
 
    from django.test import TestCase
+   from myapp.providers import TenantProvider
 
    from next.testing.patching import override_provider
-   from myapp.providers import TenantProvider
 
    class TenantProviderTests(TestCase):
        def test_resolves_tenant(self):

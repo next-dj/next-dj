@@ -1,9 +1,6 @@
 """`Page` manager and its process-wide singleton.
 
-`Page` orchestrates template loading, context collection, layout
-composition, rendering, and URL-pattern wiring. `page` is the
-application-wide singleton. `context` is a convenience alias for
-`page.context` used by the `@context` decorator in user code.
+`context` is the alias for `page.context` that user code spells as `@context`.
 """
 
 from __future__ import annotations
@@ -81,16 +78,11 @@ class _RoutedPageView(Protocol):
 class _BodyResolution:
     """Per-request outcome of `Page._resolve_page_body`.
 
-    `body` is a string that will be composed through the layout chain
-    and rendered. `http_response` is a Django response that is returned
-    verbatim. The framework uses the verbatim path as the `render()`
-    escape hatch for redirects, streaming responses, JSON, and anything
-    else. The type is `HttpResponseBase` so `StreamingHttpResponse` and
-    `FileResponse` flow through unchanged alongside `HttpResponse`.
+    `http_response` is returned verbatim, which is the `render()` escape hatch, and it
+    is typed `HttpResponseBase` so streaming and file responses flow through.
 
-    `dynamic` marks a body produced by a `render()` function returning a
-    string. Such a body never reaches the composed-template cache, so a
-    zone in it has no compiled source to render standalone.
+    `dynamic` marks a body a `render()` returned as a string, which never reaches the
+    composed-template cache and so has no compiled source for a standalone zone.
     """
 
     body: str | None = None
@@ -173,12 +165,8 @@ class Page:
     ) -> Callable[..., Any]:
         """Register a keyed or dict-merge `@context` for the file declaring `func`.
 
-        Pass `serialize=True` to include the return value in
-        `Next.context` so JavaScript code on the page can read it via
-        `window.Next.context`. Pass `serializer=` to route this key
-        through a custom `JsContextSerializer` instead of the global
-        `JS_CONTEXT_SERIALIZER` setting. Pass `zone=` to bind the
-        callable to one zone, so a GET for another zone never runs it.
+        `serialize=True` publishes the value on `window.Next.context`, `serializer=`
+        overrides `JS_CONTEXT_SERIALIZER`, and `zone=` binds the callable to one zone.
         """
         # Captured here rather than inside the decorator so both spellings see
         # the page.py that ran `@context`, not this module.
@@ -218,12 +206,8 @@ class Page:
     ) -> dict[str, object]:
         """Build the full render context dict used by `render`.
 
-        The returned dict includes `_next_js_context` holding the subset
-        of values marked `serialize=True`. `render` pops that key and
-        seeds the `StaticCollector` with it before creating the Django
-        template context. A `_requested_zones` batch narrows the page
-        callables to that batch and stays out of the returned dict, so it
-        never reaches a template or the JS context.
+        `_next_js_context` carries the `serialize=True` subset, which `render` pops for
+        the `StaticCollector`. A `_requested_zones` batch stays out of the dict.
         """
         info = page_path_info(file_path)
         context_data: dict[str, object] = {
@@ -290,12 +274,8 @@ class Page:
     ) -> _BodyResolution:
         """Resolve the page body per-request.
 
-        The resolution order is `render()`, then the `template` module
-        attribute, then the registered `TemplateLoader` chain, then an
-        empty body. `render()` may short-circuit by returning any
-        `HttpResponseBase` subclass such as a redirect, a streaming
-        response, a file response, or a JSON response. In that case
-        the layout and static pipelines are bypassed entirely.
+        The order is `render()`, the `template` attribute, the loader chain, then empty.
+        An `HttpResponseBase` from `render()` bypasses the layout and static pipelines.
         """
         if module is not None:
             render_func = getattr(module, "render", None)
@@ -457,12 +437,8 @@ class Page:
     ) -> str:
         """Render the page with Django `Template` and the static collector.
 
-        The static body source is the `template` attribute or any
-        registered file-based `TemplateLoader`. The result is composed
-        through the ancestor layout chain and cached compiled through
-        `composed_template_for`. Direct callers of `Page.render` do not
-        invoke `render()`. The unified view handles that path so
-        dynamic bodies skip the registry cache.
+        The body comes from the `template` attribute or a file-based loader and is
+        composed through the layout chain, so a direct caller never invokes `render()`.
         """
         start = time.perf_counter()
         template = self.composed_template_for(file_path)
@@ -473,11 +449,8 @@ class Page:
     ) -> tuple[HttpResponseBase | None, bool]:
         """Resolve a page body once, reporting its short-circuit and its kind.
 
-        `render()` runs under the same dependency injection as the unified
-        view, so guards, denials, and redirects fire as they would on the
-        page's own request. An out-of-band zone morph reads the response and
-        the dynamic flag from this one resolution, so the foreign page's
-        `render()` runs exactly once.
+        `render()` runs under the same injection as the unified view, so guards and
+        redirects fire as on the page's own request, and a zone morph resolves once.
         """
         module = _load_python_module_memo(file_path)
         error = last_load_error(file_path)
@@ -553,8 +526,7 @@ class Page:
         def view(request: HttpRequest, **kwargs) -> HttpResponseBase:
             active_module = module
             if broken_at_build:
-                # The memo re-reads by mtime and drops the recorded error
-                # once the file imports cleanly again.
+                # The memo re-reads by mtime and drops the error once the file imports.
                 active_module = _load_python_module_memo(file_path)
                 error = last_load_error(file_path)
                 if error is not None:

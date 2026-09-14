@@ -153,9 +153,8 @@ def _with_theme(
     return planned
 
 
-# One request and one form shared by the kwargs and the expected mapping of a
-# case, because neither type defines equality and the plan must hand back the
-# very object it was given.
+# One request and one form shared by the kwargs and the expected mapping, because
+# neither type defines equality and the plan hands back the very object it was given.
 _REQUEST = RequestFactory().get("/?page=3&ident=9")
 _FORM = AForm()
 

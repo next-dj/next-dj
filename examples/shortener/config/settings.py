@@ -78,10 +78,7 @@ NEXT_FRAMEWORK = {
         {
             "BACKEND": "next.urls.FileRouterBackend",
             "APP_DIRS": True,
-            # `host/` is the project-level page root: it owns the shared
-            # HTML envelope (layout.djx) and may host project-shared
-            # components under `_widgets/`. Listed alongside `APP_DIRS=True`
-            # so per-app routes under `shortener/routes/` still apply.
+            # The project-level page root `host/` owns the shared `layout.djx` envelope.
             "DIRS": [str(BASE_DIR / "host")],
             "PAGES_DIR": "routes",
             "OPTIONS": {"context_processors": []},

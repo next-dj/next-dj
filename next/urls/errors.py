@@ -64,9 +64,8 @@ class DuplicateURLParameterError(URLParameterError):
 class InvalidURLParameterError(URLParameterError):
     """Raised when a bracket segment names something Django refuses as a route.
 
-    Django compiles a route the moment the pattern is built, so a name that is
-    no Python identifier would otherwise surface as an `ImproperlyConfigured`
-    traceback far from the directory that named it.
+    Django compiles a route as the pattern is built, so a bad name would otherwise
+    surface as an `ImproperlyConfigured` far from the directory that named it.
     """
 
     @override

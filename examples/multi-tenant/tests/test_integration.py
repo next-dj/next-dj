@@ -72,6 +72,41 @@ class TestTenantContract:
         assert "Welcome to Acme" in body
 
 
+class TestRefusalsDoNotReflectInput:
+    """Every refusal answers with a fixed body, never with the submitted slug."""
+
+    @override_settings(DEBUG=False)
+    def test_unknown_header_slug_is_not_echoed(self, next_client: NextClient) -> None:
+        response = next_client.get("/notes/", HTTP_X_TENANT="<script>alert(1)</script>")
+        assert response.status_code == 404
+        assert response.content == b"Unknown tenant."
+
+    @override_settings(DEBUG=True)
+    def test_unknown_query_slug_is_not_echoed(self, next_client: NextClient) -> None:
+        response = next_client.get("/notes/?tenant=%3Cscript%3E")
+        assert response.status_code == 404
+        assert response.content == b"Unknown tenant."
+
+    @override_settings(DEBUG=True)
+    def test_unknown_cookie_slug_is_not_echoed(self, next_client: NextClient) -> None:
+        next_client.cookies["next_tenant"] = "ghost"
+        response = next_client.get("/notes/")
+        assert response.status_code == 404
+        assert response.content == b"Unknown tenant."
+
+
+class TestTenantPrefixIsNotABypass:
+    """The `/_t/` early return reaches static files only, never a page."""
+
+    @override_settings(DEBUG=False)
+    def test_prefix_does_not_expose_a_page(
+        self, next_client: NextClient, demo_data
+    ) -> None:
+        response = next_client.get("/_t/acme/notes/")
+        assert response.status_code == 404
+        assert b"Welcome to Acme" not in response.content
+
+
 class TestTenantTheme:
     """The tenant_theme context processor surfaces the primary color."""
 

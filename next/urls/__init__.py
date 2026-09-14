@@ -1,8 +1,6 @@
 """URL routing, router backends, and URL parameter injection providers.
 
-`_LazyUrlPatterns` and the tree-walk helpers stay out of `__all__` on
-purpose. They are wiring internals, and a caller that needs one imports
-it from the module that defines it.
+`_LazyUrlPatterns` and the tree-walk helpers are internals, kept out of `__all__`.
 """
 
 from next.utils import PageRoot

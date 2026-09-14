@@ -35,13 +35,9 @@ class WindowFilterForm(Form):
     def on_valid(self, request: HttpRequest) -> HttpResponse:
         """Re-aggregate the totals under the picked window and pulse the change.
 
-        An apply from the live page morphs the `live-totals` zone with the
-        re-aggregated cards and the `stats-window` label beside it, so the
-        heading never names a window the cards no longer show, and emits the
-        custom `metric-pulse` verb so the co-located handler flashes the
-        refreshed numbers. Only that page asks for the zone, so a caller that
-        never named it takes the redirect instead, which covers a stats
-        sub-page rendering the filter zoneless and a browser with no runtime.
+        An apply morphs the `live-totals` zone and the `stats-window` label so the
+        heading never names a stale window, and emits `metric-pulse` for the co-located
+        handler. A caller without the zone redirects instead.
         """
         # Pick the literal out of WINDOW_CHOICES so the redirect target is
         # built from trusted constants, with request data used only to compare.

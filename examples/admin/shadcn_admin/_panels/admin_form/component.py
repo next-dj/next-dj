@@ -13,7 +13,7 @@ def form_state(
     spec: AdminFormSpec = Depends("admin_spec"),
     pk: int | None = None,
 ) -> dict[str, Any]:
-    """Build add/change context — binds the form to POST so re-render shows errors."""
+    """Build add/change context, binding the form to POST so re-render shows errors."""
     form_cls = spec.model_admin.get_form(
         spec.request, spec.instance, change=spec.is_change
     )

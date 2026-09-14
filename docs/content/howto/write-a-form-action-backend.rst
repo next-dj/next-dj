@@ -22,8 +22,9 @@ Write the backend.
    :caption: notes/backends.py
 
    from django.http import HttpRequest, HttpResponse
-   from next.forms import RegistryFormActionBackend
    from notes.models import AuditEntry
+
+   from next.forms import RegistryFormActionBackend
 
    class AuditedFormActionBackend(RegistryFormActionBackend):
        """Registry backend that writes an audit row per dispatch."""
@@ -66,6 +67,7 @@ Return an ``HttpResponse`` before calling ``super().dispatch`` to short circuit.
    :caption: notes/backends.py
 
    from django.http import HttpResponse
+
    from next.forms import RegistryFormActionBackend
 
    class RateLimitedBackend(RegistryFormActionBackend):
@@ -87,6 +89,7 @@ The factory passes the whole config entry to the constructor, so declare ``__ini
    :caption: notes/backends.py
 
    from typing import Any
+
    from next.forms import RegistryFormActionBackend
 
    class RateLimitedBackend(RegistryFormActionBackend):
@@ -119,6 +122,7 @@ Override ``shape_response`` to change the envelope without touching the HTML, fo
    :caption: notes/backends.py
 
    from django.http import HttpRequest, HttpResponse
+
    from next.forms import ActionOutcome, ActionOutcomeKind, RegistryFormActionBackend
 
    class UnprocessableBackend(RegistryFormActionBackend):

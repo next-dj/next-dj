@@ -9,8 +9,7 @@ from next.deps import DDependencyBase, RegisteredParameterProvider, ResolutionCo
 from next.deps.markers import unwrap_annotated
 
 
-# A bound form is a form or a formset, so a plain annotation naming either one
-# is a shape the context can carry.
+# A bound form is a form or a formset, so the context can carry an annotation of either.
 _FORM_BASES: tuple[type, ...] = (BaseForm, BaseFormSet)
 
 

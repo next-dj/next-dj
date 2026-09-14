@@ -43,8 +43,7 @@ _COMPONENT_NAME_INDEX = 1
 _SLOT_ARG_COUNT = 2
 _COMPONENT_MIN_BITS = 2
 
-# Distinct ``current_template_path`` strings the process memoises, the same
-# bound the other path-keyed component caches use.
+# Distinct ``current_template_path`` strings memoised, matching the other path caches.
 _PATH_MEMO_MAX_ENTRIES = 2048
 
 _END_BLOCK_COMPONENT = ("/component",)
@@ -100,11 +99,8 @@ def _parse_props(
 ) -> dict[str, FilterExpression]:
     """Parse ``key=expr`` pairs from tag bits starting at *start*.
 
-    Each ``expr`` is compiled into a Django :class:`FilterExpression`
-    so the value resolves against the template context at render time.
-    Quoted strings, numbers, dotted attribute lookups, and filter
-    chains all work through the same mechanism. Bits without ``=``
-    are skipped to keep the tag tolerant of stray tokens.
+    Each ``expr`` compiles to a :class:`FilterExpression`, so it resolves against the
+    context at render time, and a bit without ``=`` is skipped rather than refused.
     """
     props: dict[str, FilterExpression] = {}
     for part in bits[start:]:
@@ -212,12 +208,8 @@ class ComponentNode(Node):
     def _resolved_props(self, context: template.Context) -> dict[str, Any]:
         """Resolve every prop expression against the active template context.
 
-        Django's ``FilterExpression`` marks bare string literals as safe so
-        ``{% tag "x" %}`` style arguments would render unescaped if interpolated
-        through ``{{ x }}``. Component props are user-facing text by default,
-        so we strip the safe marker from plain string literals. Callers who
-        want raw HTML can opt in explicitly with ``prop=value|safe`` or with
-        a variable that already holds a ``SafeString``.
+        ``FilterExpression`` marks a bare string literal safe, so the marker is stripped
+        from plain literals and raw HTML needs an explicit ``|safe``.
         """
         resolved: dict[str, Any] = {}
         for key, expr in self.props.items():
@@ -254,8 +246,7 @@ class ComponentNode(Node):
     def _on_missing_path(self) -> str:
         """Report a render whose context carries no `current_template_path`.
 
-        The context names no template, so there is no visibility scope to
-        draw a did-you-mean hint from.
+        The context names no template, so there is no scope for a did-you-mean hint.
         """
         if not fail_loudly():
             logger.warning(

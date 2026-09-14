@@ -57,8 +57,7 @@ logger = logging.getLogger(__name__)
 class FormActionDispatch:
     """Shared POST pipeline and response shaping for backends.
 
-    The class is also the sender of every dispatch-time signal, so it stays
-    the one stable identity receivers filter on.
+    The class sends every dispatch-time signal, the one identity receivers filter on.
     """
 
     # The documented address a custom backend that drives the pipeline by

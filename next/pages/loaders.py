@@ -1,17 +1,8 @@
 """Template-text loaders and the layout composition engine.
 
-`TemplateLoader` is the abstract contract. The page manager consults
-`module.template` directly and then iterates the loader chain built
-from `NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`. The default chain contains
-only `DjxTemplateLoader`. `PythonTemplateLoader` is available for
-projects that register it explicitly. Registering it changes nothing
-at render time and only affects how the `next.W043` conflict check
-reports the body source. The manager does not call it by default.
-
-`DjxTemplateLoader` reads a sibling `template.djx`.
-`LayoutTemplateLoader` composes outer `layout.djx` wrappers up the
-directory chain. It is not registered through `TEMPLATE_LOADERS`.
-Layouts have their own dedicated path.
+The manager consults `module.template` before the `TEMPLATE_LOADERS` chain, which holds
+only `DjxTemplateLoader`. Registering `PythonTemplateLoader` only moves what `next.W043`
+reports about the body source, and `LayoutTemplateLoader` stays off the chain.
 """
 
 from __future__ import annotations
@@ -153,12 +144,8 @@ _MODULE_MEMO_MAX_SIZE = 2048
 def _load_python_module_memo(file_path: Path) -> types.ModuleType | None:
     """Return `_load_python_module(file_path)` memoised by mtime.
 
-    Different call sites (`PythonTemplateLoader.can_load`, `load_template`,
-    and `Page._create_regular_page_pattern`) previously executed the
-    module up to three times per URL dispatch. The memo keys by nanosecond
-    mtime so that autoreload and template-stale detection still pick up an
-    edit a coarser timestamp would round away, and it is bounded because
-    every entry holds a whole executed module alive.
+    The memo keys by nanosecond mtime, so an edit a coarser stamp would round away is
+    still seen, and it is bounded because every entry holds a whole module alive.
     """
     mtime = stat_mtime_ns(file_path)
     if mtime is None:
@@ -247,12 +234,8 @@ def read_module_string_lists(
 ) -> dict[str, list[str]] | None:
     """Return the named module-level string lists a page-tree module declares.
 
-    Answers `None` when the file does not execute as a module, which tells an
-    absent or broken module apart from one that declares none of the names.
-    Anything but a list or tuple of non-empty strings reads as an empty list,
-    so a caller never has to type-check what a user module bound to the name.
-    Read through the mtime memo, so an edit is picked up while a re-read of the
-    same file executes no module body a second time.
+    `None` tells an absent or broken module apart from one that declares none of the
+    names, and anything but a list of non-empty strings reads as empty.
     """
     module = _load_python_module_memo(file_path)
     if module is None:
@@ -281,9 +264,7 @@ class TemplateLoader(ABC):
     def source_path(self, file_path: Path) -> Path | None:
         """Return the filesystem path this loader reads for `file_path`.
 
-        The page manager uses the result to snapshot file mtimes for stale-cache
-        detection. The default returns `None` for non-file-based loaders. Subclasses
-        override when they back a sibling file.
+        The page manager snapshots the mtime of the result for stale-cache detection.
         """
         del file_path
         return None

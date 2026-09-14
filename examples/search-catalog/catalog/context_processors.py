@@ -13,11 +13,8 @@ if TYPE_CHECKING:
 def active_filters(request: HttpRequest) -> dict[str, Any]:
     """Expose active-filter chips with a precomputed drop URL each.
 
-    Each chip carries `label`, `key`, `value`, and `drop_url`. The `drop_url`
-    is the query string that the chip's anchor clicks to, reproducing the
-    current URL with that single (key, value) pair removed. Templates render
-    the strip with `<a href="?{{ chip.drop_url }}">{{ chip.label }}</a>`
-    and never look up the URL by hand.
+    The `drop_url` reproduces the current query string with that one pair removed, so a
+    template renders `<a href="?{{ chip.drop_url }}">` without building the URL itself.
     """
     f = parse_filters(request)
     items: list[tuple[str, str]] = [

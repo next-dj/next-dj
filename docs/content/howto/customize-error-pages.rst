@@ -126,9 +126,10 @@ The exception propagates out of the page to Django's URL resolver, which then in
    :caption: notes/pages/notes/[int:note_id]/page.py
 
    from django.http import Http404
+   from notes.models import Note
+
    from next import context
    from next.urls import DUrl
-   from notes.models import Note
 
    @context("note")
    def note(note_id: DUrl[int]) -> Note:

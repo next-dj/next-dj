@@ -77,8 +77,7 @@ export interface TriggerDeps {
   observer?: IntersectionAdapter;
   // The tab-visibility seam the SSE bridge shares, a hidden tab holds no poll timers.
   visibility?: VisibilityAdapter;
-  // The owning page of an element, answered by the layer stack. Absent, lazy and
-  // poll GETs read the address bar.
+  // The owning page of an element. Absent, lazy and poll GETs read the address bar.
   pageUrl?: (el: Element) => string;
   // The host page of the layer an element sits in, answered by the layer stack. Absent,
   // a submit inside a layer stamps no origin, the same as one outside.
@@ -118,13 +117,11 @@ export function createTriggers(deps: TriggerDeps): Triggers {
   const dev = devReader(deps.dev);
   // Per-element debounce handles, keyed by the element.
   const timers = new WeakMap<Element, number>();
-  // Lazy zones already activated, so a parent morph re-inserting the same element
-  // fires no second GET.
+  // Lazy zones already activated, so a re-inserted element fires no second GET.
   const activated = new WeakSet<Element>();
   // Observer teardowns, dropped on reset so vitest files do not leak observers.
   const observed: (() => void)[] = [];
-  // Poller groups keyed by interval, plus each element's group so a re-scan arms
-  // no second timer and _reset can stop every chain.
+  // Poll groups by interval, with each element's group so a re-scan arms no new timer.
   const groups = new Map<number, PollGroup>();
   const membership = new Map<Element, number>();
   let detach: (() => void) | null = null;
@@ -153,8 +150,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     return Number.isFinite(ms) && ms > 0 ? ms : 0;
   }
 
-  // Debounce by element: a fresh event clears the pending timer, so only the
-  // last of a burst runs. ms 0 runs immediately.
+  // A fresh event clears the element's pending timer, so only the last of a burst runs.
   function debounced(el: Element, ms: number, run: () => void): void {
     const pending = timers.get(el);
     if (pending !== undefined) clock.clearTimeout(pending);
@@ -165,8 +161,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     timers.set(el, clock.setTimeout(run, ms));
   }
 
-  // A filter form auto-submits its query as a zone GET and syncs the address bar
-  // with replaceState, an address sync not a visit.
+  // A filter form auto-submits as a zone GET, replaceState syncs the bar, not a visit.
   function submitFilter(form: HTMLFormElement, zone: string): void {
     // URLSearchParams takes string pairs, so file fields are walked out.
     const pairs: [string, string][] = [];
@@ -182,8 +177,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     zoneGet(url, zone);
   }
 
-  // The one shape of a zone GET. The wire stamps X-Next-Zone from request.zone, so
-  // the triggers pass intent, never headers.
+  // The wire stamps X-Next-Zone from request.zone, triggers pass intent, not headers.
   function zoneGet(url: string, zone: string): void {
     deps.fetch({ url, zone });
   }
@@ -193,8 +187,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     for (const [url, zones] of batches) zoneGet(url, zones.join(","));
   }
 
-  // A pagination link or sentinel GETs the next page with a merge intent, the
-  // server authors the append patch.
+  // A pagination link or sentinel GETs the next page with a merge intent.
   function paginate(el: Element, zone: string): void {
     const href = el.getAttribute("href");
     if (href === null || href === "") return;
@@ -257,8 +250,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     if (!(form instanceof HTMLFormElement)) return;
     const uid = form.getAttribute(ATTR_ACTION);
     if (uid === null) return;
-    // A submit cancels its own in-flight validation, so a late answer never morphs
-    // the form the server is about to re-render.
+    // A submit cancels its in-flight validation, so no late answer morphs the form.
     deps.abort(validateQueue(uid));
     // Intercept as a partial mutation under the uid lock. Without the runtime the
     // form posts natively, so this is the enhancement, never the only path.
@@ -268,8 +260,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     const submitter = (event as SubmitEvent).submitter;
     const name = submitter?.getAttribute("name") ?? "";
     if (name !== "") body.append(name, submitter?.getAttribute("value") ?? "");
-    // The declared zone travels as the morph target. Without one the server falls
-    // back to the form by uid.
+    // The declared zone travels as the morph target, without one the server uses uid.
     const zone = targetZone(form);
     // The form's own key, so the response morphs this instance.
     const key = form.getAttribute(ATTR_KEY);
@@ -345,8 +336,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     return ms >= MIN_POLL_MS && ms <= MAX_POLL_MS ? ms : null;
   }
 
-  // Chained setTimeout, not setInterval, so tests drive ticks one by one. A hidden
-  // tab registers the group sleeping.
+  // Chained setTimeout, not setInterval, so tests drive ticks one by one.
   function joinPoll(el: Element, interval: number): void {
     membership.set(el, interval);
     const group = groups.get(interval);
@@ -377,8 +367,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     const group = groups.get(interval);
     if (group === undefined) return;
     if (visibility.hidden()) {
-      // Safety net for an undelivered hidden visibilitychange: sleep, the visible
-      // flip wakes the group.
+      // Safety net for a missed visibilitychange, the visible flip wakes the group.
       group.handle = null;
       return;
     }
@@ -407,9 +396,8 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     group.handle = clock.setTimeout(() => pollTick(interval), interval);
   }
 
-  // On hidden, silence every live timer but keep the groups sleeping. On visible,
-  // each group measures elapsed against its own lastFire: due ticks run at once,
-  // the rest resume with the remaining time.
+  // On hidden, live timers are silenced and the groups sleep. On visible, elapsed
+  // against lastFire runs due ticks at once and resumes the rest with the time left.
   function onVisibility(): void {
     if (visibility.hidden()) {
       for (const group of groups.values()) {
@@ -443,8 +431,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
       activated.add(el);
       addZone(batches, pageUrl(el), zone);
     }
-    // The wire queues per path and zone batch, so a re-fired batch supersedes its
-    // own page's predecessor and never another page's.
+    // The wire queues per path and zone batch, so a re-fired batch supersedes its own.
     flushBatches(batches);
   }
 
@@ -514,8 +501,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     target.addEventListener("blur", onBlur, true);
     target.addEventListener("submit", onSubmit, true);
     target.addEventListener("click", onClick, true);
-    // The visibility subscription pauses and resumes the poll timers, the same
-    // choreography as the SSE bridge.
+    // The visibility subscription pauses and resumes the poll timers.
     const stopVisibility = visibility.onChange(onVisibility);
     detach = () => {
       target.removeEventListener("input", onInput);

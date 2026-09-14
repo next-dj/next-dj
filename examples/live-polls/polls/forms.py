@@ -11,8 +11,7 @@ from polls.models import Choice, Poll
 class VoteForm(Form):
     """Cast a single vote on a choice that belongs to a known poll.
 
-    ``__init__`` narrows the ``choice`` queryset to the submitted poll so a
-    forged choice PK fails field validation.
+    Narrowing `choice` to the submitted poll makes a forged choice PK fail validation.
     """
 
     poll = django_forms.ModelChoiceField(

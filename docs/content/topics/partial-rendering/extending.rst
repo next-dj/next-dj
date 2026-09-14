@@ -94,7 +94,6 @@ A value is pushed by the name of a registered ``serialize=True`` provider on the
    from next import action, context
    from next.partial import Patches
 
-
    @context("cart_count", serialize=True)
    def cart_count(request: HttpRequest) -> int:
        """Expose the cart size to the client context."""
@@ -158,7 +157,6 @@ It is the seam for a server-authored signal that no morph expresses, a notificat
    from next import action
    from next.forms.markers import DForm
    from next.partial import Patches
-
 
    @action("place_order", form_class=OrderForm)
    def place_order(request: HttpRequest, form: DForm[OrderForm]) -> HttpResponse:

@@ -1,9 +1,6 @@
 """Context registration for `component.py` modules.
 
-`ComponentContextManager` is the public handle used by decorator
-`@component.context` inside a `component.py` file. It records the file
-declaring each callable so the right context functions run when the
-matching component template is rendered.
+The file declaring each callable is recorded, so only its component's context runs.
 """
 
 from __future__ import annotations
@@ -206,11 +203,8 @@ class ComponentContextManager:
     ) -> Callable[..., Any]:
         """Mark a function so it fills template variables for this component module.
 
-        Pass `serialize=True` to include the return value in
-        `Next.context` so JavaScript code on the page can read it via
-        `window.Next.context`. Pass `serializer=` to route this key
-        through a custom `JsContextSerializer` instead of the global
-        `JS_CONTEXT_SERIALIZER` setting.
+        `serialize=True` publishes the return value on `window.Next.context`, and
+        `serializer=` overrides the global `JS_CONTEXT_SERIALIZER` for this key.
         """
         # Captured here rather than inside the decorator so both spellings see
         # the component.py that ran `@component.context`, not this module.

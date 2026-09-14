@@ -110,6 +110,41 @@ class TestTenantMiddleware:
 
     @pytest.mark.django_db()
     @override_settings(DEBUG=False)
+    def test_unknown_slug_body_never_repeats_the_slug(self) -> None:
+        """Echoing the slug would enumerate tenants and inject HTML into the body."""
+        middleware = TenantMiddleware(Mock())
+        forged = "<script>alert(1)</script>"
+        response = middleware(self._request(meta={"HTTP_X_TENANT": forged}))
+        assert response.status_code == 404
+        assert response.content == b"Unknown tenant."
+
+    @override_settings(DEBUG=False)
+    def test_missing_tenant_body_is_fixed_in_production(self) -> None:
+        middleware = TenantMiddleware(Mock())
+        response = middleware(self._request())
+        assert response.content == b"Missing X-Tenant header."
+
+    @override_settings(DEBUG=True)
+    def test_missing_tenant_body_names_the_affordance_only_in_debug(self) -> None:
+        middleware = TenantMiddleware(Mock())
+        response = middleware(self._request())
+        assert response.content.startswith(b"Missing X-Tenant header.")
+        assert b"?tenant=<slug>" in response.content
+
+    @pytest.mark.django_db()
+    @override_settings(DEBUG=True)
+    def test_debug_redirect_cannot_leave_the_site(self, payer_tenant: Tenant) -> None:
+        """A `//host/...` path would otherwise redirect off-site protocol-relatively."""
+        request = self._request(
+            path="//evil.example.com/", get=QueryDict(f"tenant={payer_tenant.slug}")
+        )
+        middleware = TenantMiddleware(Mock())
+        response = middleware(request)
+        assert response.status_code == 302
+        assert response.url == "/evil.example.com/"
+
+    @pytest.mark.django_db()
+    @override_settings(DEBUG=False)
     def test_header_attaches_tenant_and_calls_next(self, payer_tenant: Tenant) -> None:
         captured, _next = _capturing_next()
         middleware = TenantMiddleware(_next)

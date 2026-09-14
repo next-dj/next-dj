@@ -139,9 +139,7 @@ def _collect_component_paths_from_backend_dirs() -> set[Path]:
 def get_component_paths_for_watch() -> set[Path]:
     """Return filesystem paths that matter for the dev component reloader.
 
-    The scan registers nothing. It asks the loaded backends which trees they
-    watch and walks those with a scanner of its own, so neither the component
-    registries nor the router registry move.
+    A scanner of its own keeps both the component and the router registries still.
     """
     page_paths = _collect_component_paths_under_page_trees()
     extra_paths = _collect_component_paths_from_backend_dirs()

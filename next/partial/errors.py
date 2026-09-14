@@ -97,9 +97,8 @@ class ReservedEventNameError(ValueError):
 class ForeignPageNotAuthorizedError(PermissionError):
     """Raised when an OOB morph names a foreign page that denies the request.
 
-    The zone of a foreign page renders only after that page's own body
-    resolution authorizes the request, so the denial is surfaced rather
-    than swallowed into an empty morph.
+    The zone of a foreign page renders only after that page's own body resolution
+    authorizes the request, so the denial is surfaced rather than swallowed.
     """
 
     def __init__(self, page_path: "Path", status_code: int) -> None:
@@ -136,9 +135,8 @@ class DynamicForeignPageError(ValueError):
 class UnknownContextNameError(LookupError):
     """Raised when `context()` names a value that is not a serialize provider.
 
-    Only the names of registered `serialize=True` context providers may
-    travel in a context patch, so an arbitrary mapping is rejected at the
-    builder rather than serialized blind.
+    Only the names of registered `serialize=True` providers may travel in a context
+    patch, so an arbitrary mapping is refused rather than serialized blind.
     """
 
     def __init__(self, name: str, available: tuple[str, ...] = ()) -> None:
@@ -159,10 +157,8 @@ class UnknownContextNameError(LookupError):
 class ReservedContextKeyError(ValueError):
     """Raised when `context()` names a key the init payload owns.
 
-    A full render keeps a reserved key for the framework, so a context
-    patch that names one would leave the client store disagreeing with the
-    page it patches. The explicit naming is a caller bug refused at the
-    builder rather than merged on the client.
+    A full render keeps a reserved key for the framework, so a context patch naming one
+    would leave the client store disagreeing with the page it patches.
     """
 
     def __init__(self, reserved: frozenset[str]) -> None:
@@ -195,11 +191,8 @@ class UnknownDedupeError(ValueError):
 class CrossSiteHrefError(ValueError):
     """Raised when a builder href sink names a cross-site URL.
 
-    The `push_url`, `layer_open(href=)`, and internal `redirect` sinks
-    author an in-app navigation, so a cross-site href is a caller bug
-    refused at the builder rather than masked as a fallback to the origin
-    path. A server-authored external destination travels through
-    `redirect(external=True)` instead.
+    These sinks author an in-app navigation, so a cross-site href is refused at the
+    builder, and `redirect(external=True)` carries a deliberate external destination.
     """
 
     def __init__(self, href: str) -> None:

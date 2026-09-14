@@ -64,9 +64,8 @@ def _consume_one_change(
 def primed_broker(poll: Poll) -> PollBroker:
     """Stand-alone broker with `poll`'s snapshot cached for change tests.
 
-    Tests use a local instance so revision counters do not leak across cases. The cache
-    is process-wide, so seeding through `store_snapshot` is enough for a `changes`
-    consumer to read the snapshot on its first wake.
+    A local instance keeps revision counters from leaking across cases, and the cache is
+    process-wide so `store_snapshot` alone primes the first wake.
     """
     store_snapshot(build_snapshot(poll))
     return PollBroker()
@@ -392,9 +391,8 @@ class TestBroadcastReceiver:
     ) -> None:
         """A vote ends with a fresh snapshot in cache, written by the receiver alone.
 
-        The vote handler no longer writes to the cache so the cached
-        payload after a successful POST proves the receiver path
-        executed and called `broker.publish`.
+        The vote handler never writes to the cache, so a cached payload after the POST
+        proves the receiver ran and called `broker.publish`.
         """
         choice = poll.choices.get(text="Tabs")
         next_client.post_action("vote_form", {"poll": poll.pk, "choice": choice.pk})
@@ -461,10 +459,7 @@ class TestStreamEndpoint:
     ) -> None:
         """The first byte frame is the retry hint, proving the page wires the stream.
 
-        Reading the leading frame off the actual streaming response is the only way to
-        verify the HTTP path end to end without blocking on the broker condition. The
-        frame is consumed in a `try/finally` so the response closes even if the
-        assertion fails before the read.
+        Reading just the leading frame keeps the test from blocking on the broker.
         """
         response = next_client.get(f"/polls/{poll.pk}/stream/")
         try:

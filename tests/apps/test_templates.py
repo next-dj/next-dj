@@ -20,8 +20,7 @@ _WIDENED_TAG_PATTERN = r"((?s:{%.*?%})|{{.*?}}|{#.*?#})"
 
 _MULTILINE_BLOCK_TAG = '{% component\n    "card"\n%}'
 
-# A comment and a variable broken over a line break, which Django lexes as plain
-# template text. Widening the block-tag branch alone must keep it that way.
+# Django lexes neither across lines, and widening the block-tag branch keeps it so.
 _UNLEXED_SOURCE = "A {# note\nstill note #} B\nC {{ x\n}} D"
 
 

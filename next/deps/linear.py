@@ -40,9 +40,8 @@ class LinearDependencyResolver(DependencyResolver):
     def _fill_targets(self, func: Callable[..., Any]) -> tuple[_FillTarget, ...]:
         """Return the parameters of `func` to fill, resolved the way a compile does.
 
-        Hints that do not resolve leave the raw annotations in place, the way a
-        provisional plan does, so a name only a later import defines is picked up on
-        the next resolve rather than frozen out for good.
+        Unresolved hints leave the raw annotations in place, so a name only a later
+        import defines is picked up on the next resolve rather than frozen out.
         """
         try:
             signature = cached_signature(func)
@@ -73,8 +72,7 @@ class LinearDependencyResolver(DependencyResolver):
     ) -> dict[str, Any]:
         """Return keyword arguments for `func` by asking every provider in turn.
 
-        A missing dependency takes the name of the callable filled here, which
-        matches the attribution the plan replay makes.
+        A missing dependency names the callable filled here, matching the plan replay.
         """
         self._sync_providers()
         providers = self._providers
@@ -101,8 +99,7 @@ class LinearDependencyResolver(DependencyResolver):
     ) -> bool:
         """Return whether a provider fills `param` of `func` in `context`.
 
-        The walk sees the parameter of the signature rather than the one handed in,
-        so a name outside the signature is never claimed.
+        The walk sees the signature's own parameter, so a foreign name is never claimed.
         """
         self._sync_providers()
         target = next(

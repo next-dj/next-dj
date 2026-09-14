@@ -53,9 +53,7 @@ def _dedupe_watch_specs(specs: Iterable[tuple[Path, str]]) -> list[tuple[Path, s
 def _iter_default_autoreload_watch_specs() -> list[tuple[Path, str]]:
     """Return the default watch specs for pages and filesystem components.
 
-    `.djx` is intentionally omitted. Template edits do not restart the
-    process, but Python entrypoints (`page.py`, `component.py`) trigger
-    reload when their mtimes change.
+    `.djx` is omitted because a template edit needs no process restart.
     """
     specs: list[tuple[Path, str]] = [
         (p, "**/page.py") for p in get_pages_directories_for_watch()

@@ -121,8 +121,7 @@ def _origin_rerender_response(
     """Re-render the origin page after a valid submission's handler returned None.
 
     The success response carries no invalid-submission headers and never re-enters
-    `backend.shape_response`, so envelopes keyed off `ActionOutcomeKind.INVALID` stay
-    untouched. An unresolvable origin yields 400.
+    `backend.shape_response`, so `ActionOutcomeKind.INVALID` envelopes stay untouched.
     """
     origin_match = resolve_origin(request)
     if origin_match is None or origin_match.page_path is None:

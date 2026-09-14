@@ -32,9 +32,7 @@ except ImportError:  # pragma: no cover - pydantic is installed in CI
 class JsContextSerializer(Protocol):
     """Encode values destined for `window.Next.context`.
 
-    Implementations turn Python values into JSON text. The contract is
-    deliberately narrow so that custom types can travel to the client
-    without bolt-on Django encoder extensions.
+    The contract stays narrow, so a custom type needs no Django encoder extension.
     """
 
     def dumps(self, value: object) -> str:
@@ -45,8 +43,7 @@ class JsContextSerializer(Protocol):
 class JsonJsContextSerializer:
     """Serialise values with Django's `DjangoJSONEncoder`.
 
-    This is the process-wide default, and its output uses compact separators
-    so the inline init payload stays small.
+    It is the process-wide default, and compact separators keep the init payload small.
     """
 
     def dumps(self, value: object) -> str:

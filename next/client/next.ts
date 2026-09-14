@@ -127,8 +127,7 @@ class Next {
   static #dispatch(event: string, payload: Record<string, unknown>): void {
     const bucket = Next.#listeners.get(event);
     if (bucket === undefined) return;
-    // Snapshot against mid-fan-out mutation, isolate each call so one throwing
-    // listener does not abort delivery to the rest.
+    // Snapshot against mid-fan-out mutation, a throwing listener cannot stop the rest.
     for (const listener of [...bucket]) {
       try {
         listener(payload);

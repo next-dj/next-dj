@@ -30,7 +30,6 @@ The page view authorizes the subscriber, the same as any other page.
 
    from next.partial import Patches, PatchEventStream
 
-
    def patch_source(request: HttpRequest, poll_id: int) -> Iterator[Patches]:
        """Yield one refresh envelope for every poll change."""
        for change in broker.changes(poll_id):

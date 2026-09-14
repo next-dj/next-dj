@@ -73,8 +73,7 @@ def record_path_calls(
 ) -> list[Path]:
     """Collect the paths `method` is called on for the rest of the test.
 
-    The real method still runs, so a recorded call reports a syscall the
-    render performed rather than replacing it.
+    The real method still runs, so a recorded call reports a syscall the render made.
     """
     calls: list[Path] = []
     original = getattr(Path, method)

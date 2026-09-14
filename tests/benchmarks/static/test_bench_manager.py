@@ -53,8 +53,7 @@ def _context_pair(count: int) -> tuple[dict[str, Any], dict[str, str]]:
 def _warmed_manager(
     html: str, collector: StaticCollector, request: HttpRequest | None
 ) -> StaticManager:
-    # The first inject loads the backends and caches the script builder, so the
-    # measured calls never pay that one-off setup.
+    # The first inject loads the backends and caches the script builder.
     manager = StaticManager()
     manager.inject(html, collector, request=request)
     return manager

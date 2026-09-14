@@ -71,16 +71,13 @@ class TestFullRenderPipeline:
         manager.discover_page_assets(page_path, collector)
         out = manager.inject(HTML_SHELL, collector, page_path=page_path)
 
-        # Styles: template.css (via index.css) + module list styles
         assert "/static/next/index.css" in out
         assert "https://cdn/y.css" in out
-        # Scripts: next.min.js first, then module scripts
         assert "next/next.min.js" in out
         assert "https://cdn/x.js" in out
         idx_next = out.index("next/next.min.js")
         idx_user = out.index("https://cdn/x.js")
         assert idx_next < idx_user
-        # Preload hint
         assert 'rel="preload"' in out
 
 

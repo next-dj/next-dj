@@ -79,6 +79,7 @@ Register kinds in ``AppConfig.ready`` so the kind exists before the first reques
    :caption: notes/apps.py
 
    from django.apps import AppConfig
+
    from next.static import default_kinds
 
    class NotesConfig(AppConfig):

@@ -57,9 +57,7 @@ class TestSuccessFunnelEnvelope:
 class TestCsrfMetaRidesEveryShape:
     """A rotated token stamps the CSRF meta on every shaped outcome.
 
-    The validate path already carried it. These cover the success funnel
-    and the invalid shape, so a login mid-submit refreshes the document
-    tokens whatever shape the outcome takes.
+    Beyond the validate path, these cover the success funnel and the invalid shape.
     """
 
     def test_rotation_on_success_stamps_csrf(self, next_client: NextClient) -> None:

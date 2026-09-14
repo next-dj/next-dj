@@ -1,9 +1,7 @@
 """Merged view of `settings.NEXT_FRAMEWORK` with framework defaults.
 
-The class reads the user mapping lazily and merges it with `DEFAULTS` on first access,
-caching until `reload()` drops the cache and emits `settings_reloaded`. The Django
-`setting_changed` receiver lives here because it reloads the singleton this module
-owns, and the merge policy lives in `merge`.
+The merge runs on first access and caches until `reload()` emits `settings_reloaded`.
+The `setting_changed` receiver reloads the singleton this module owns.
 """
 
 from __future__ import annotations

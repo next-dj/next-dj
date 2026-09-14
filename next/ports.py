@@ -72,10 +72,8 @@ class PartialIntentView(Protocol):
 class PartialShaper(Protocol):
     """Shapes page and form responses for partial requests.
 
-    The caller decides through `intent` whether a request is partial and
-    only then enters a shape method, so a full render never pays for one.
-    That intent travels on as an argument, so a shape method never re-reads
-    the request to learn what was asked.
+    The caller decides through `intent` whether a request is partial, and that
+    intent travels on as an argument so no shape method re-reads the request.
     """
 
     def intent(self, request: HttpRequest) -> PartialIntentView:

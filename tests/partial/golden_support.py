@@ -60,11 +60,8 @@ def _meta_text(meta: dict[str, object]) -> bytes:
 def _atomic_write_bytes(path: Path, data: bytes) -> None:
     """Write bytes through a pid-unique temp and an atomic replace.
 
-    The golden fixtures are shared files, and the writer tests are
-    parametrised across xdist workers that rewrite the same case in
-    parallel. A pid-suffixed temp keeps the workers from clobbering one
-    another, and the replace lets a concurrent reader see a whole file
-    rather than a truncated mid-write one.
+    Parallel xdist workers rewrite the same shared fixture, so a pid-suffixed temp keeps
+    them off each other and the replace never shows a reader a half file.
     """
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     tmp.write_bytes(data)
@@ -74,11 +71,8 @@ def _atomic_write_bytes(path: Path, data: bytes) -> None:
 def write_case(case: GoldenCase) -> tuple[Path, Path]:
     """Regenerate the committed envelope bytes and metadata sidecar for one case.
 
-    This is the explicit update step, not part of the verification path.
-    The `<name>.envelope.json` file is the exact byte body the protocol
-    backend emits, so vitest reads the same bytes the server sends. The
-    `<name>.meta.json` sidecar carries the content type and the response
-    headers vitest needs to classify the response.
+    This is the explicit update step, not verification. The envelope file holds the
+    exact bytes the backend emits and the sidecar the headers vitest needs.
     """
     body, meta = serialize_case(case)
     GOLDEN_DIR.mkdir(parents=True, exist_ok=True)

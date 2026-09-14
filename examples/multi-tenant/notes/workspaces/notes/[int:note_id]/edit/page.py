@@ -14,7 +14,11 @@ from next.forms import ComponentWidget, ModelForm, PermissionOutcome
 
 
 def get_owned_note(tenant: object, note_id: int) -> Note:
-    """Return the note for `tenant` or raise 404 to keep tenants isolated."""
+    """Return the note for `tenant` or raise 404 to keep tenants isolated.
+
+    A `None` tenant narrows the lookup to `tenant__isnull=True`, which the non-nullable
+    foreign key never matches, so a tenantless request 404s instead of reading unscoped.
+    """
     return get_object_or_404(Note, pk=note_id, tenant=tenant)
 
 

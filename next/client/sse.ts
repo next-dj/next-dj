@@ -147,9 +147,8 @@ export function createSse(deps: SseDeps): Sse {
     }
   }
 
-  // A fatal error (CLOSED, a 4xx) evicts the dead connection and fires
-  // partial:error once. A transient error is left to the native reconnect, its
-  // own back-off, so no toast spins on every retry.
+  // A fatal error evicts the connection and fires partial:error once, a transient one
+  // is left to the native reconnect so no toast spins on every retry.
   function onError(connection: Connection, fatal: boolean): void {
     if (!fatal) return;
     connection.control.close();
@@ -189,8 +188,7 @@ export function createSse(deps: SseDeps): Sse {
     }
   }
 
-  // A background tab pauses every stream but keeps the bound registry, so resume
-  // knows which zones to revalidate.
+  // Pausing keeps the bound registry, so resume knows which zones to revalidate.
   function pause(): void {
     paused = true;
     pausedAt = now();

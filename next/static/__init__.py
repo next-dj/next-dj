@@ -1,23 +1,13 @@
 """Discover and inject co-located static assets for pages and components.
 
-Each `.djx` file may have matching `.css` and `.js` files (or any other registered kind)
-in the same directory. Pages and components may also declare URL list variables in their
-Python modules, named after a registered placeholder slot. During rendering, a shared
-`StaticCollector` gathers every referenced asset. After rendering,
-`StaticManager.inject` replaces every registered placeholder token with the rendered
-tags. Public URLs are resolved through Django staticfiles.
+Each `.djx` may have sibling files of any registered kind, and a module may declare URL
+lists named after a placeholder slot. A shared `StaticCollector` gathers them during
+render and `StaticManager.inject` swaps each placeholder token for the rendered tags.
 
-The `Next` JavaScript runtime is automatically injected on every page by default.
-`StaticManager.inject` prepends `next.min.js` as the first script and follows it with an
-inline init script that passes the serialized JS context to `Next._init`. Context values
-opt into JavaScript exposure by using `serialize=True` on their `@context` decorator. A
-preload hint is injected immediately before `</head>` so the browser downloads the file
-during HTML parsing. Users may switch to `ScriptInjectionPolicy.DISABLED` or
-`ScriptInjectionPolicy.MANUAL` to opt out.
+The `Next` runtime is injected by default as the first script plus an inline init
+script, and `ScriptInjectionPolicy.DISABLED` or `MANUAL` opts out.
 
-The subsystem is fully type-agnostic. Built-in kinds such as `css` and `js` are
-registered through the same public API exposed to user code, so adding a new kind like
-`jsx` is a one-call extension.
+Built-in kinds register through the same public API user code uses.
 """
 
 from __future__ import annotations

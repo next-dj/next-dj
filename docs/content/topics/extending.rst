@@ -155,6 +155,7 @@ Call ``default_stems.register(...)`` from ``AppConfig.ready`` so the new stem is
    :caption: notes/apps.py
 
    from django.apps import AppConfig
+
    from next.static.discovery import default_stems
 
    class NotesConfig(AppConfig):
@@ -189,7 +190,9 @@ Register the spec from ``AppConfig.ready`` so it is in place before the watcher 
    :caption: notes/apps.py
 
    from pathlib import Path
+
    from django.apps import AppConfig
+
    from next.server import register_autoreload_watch_spec
 
    class NotesConfig(AppConfig):

@@ -11,8 +11,8 @@ r"""                  __           __
 A next-gen framework based on Django without the tears.
 """
 
-# Every annotation here is a builtin, so the module skips
-# `from __future__ import annotations` and the import it would add to `import next`.
+# Every annotation here is a builtin, so the module skips `from __future__ import
+# annotations` and the import it would add to `import next`.
 import importlib
 from typing import TYPE_CHECKING
 
@@ -21,7 +21,10 @@ if TYPE_CHECKING:
     from next.components import component
     from next.deps import Depends
     from next.forms import action
-    from next.pages import context, page
+
+    # `context` is both a submodule and a callable inside `next.pages`, so the
+    # import points at the defining module to keep the name unambiguous.
+    from next.pages.manager import context, page
 
 
 __all__ = ["VERSION", "Depends", "action", "component", "context", "page"]
@@ -45,8 +48,7 @@ _LAZY_ATTRIBUTES: dict[str, str] = {
 def _resolve(name: str) -> object:
     """Resolve a curated top-level name from its owning subpackage on demand.
 
-    Importing any subpackage pulls in Django, so the facade stays lazy to keep
-    `import next` free of Django imports.
+    Importing any subpackage pulls in Django, so the facade keeps `import next` lazy.
     """
     module_name = _LAZY_ATTRIBUTES.get(name)
     if module_name is None:

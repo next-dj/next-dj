@@ -87,11 +87,7 @@ NEXT_FRAMEWORK = {
     "PAGE_BACKENDS": [
         {
             "BACKEND": "next.urls.FileRouterBackend",
-            # `chrome/` is the project-level page root. It only holds
-            # `layout.djx` — the outermost HTML envelope (DOCTYPE,
-            # `<body>`, `{% collect_scripts %}`) that wraps every page.
-            # Per-app routes live under each app's `surfaces/` tree,
-            # picked up by `APP_DIRS=True` + `PAGES_DIR="surfaces"`.
+            # The project-level page root `chrome/` holds only the outer `layout.djx`.
             "APP_DIRS": True,
             "DIRS": [str(BASE_DIR / "chrome")],
             "PAGES_DIR": "surfaces",

@@ -139,9 +139,7 @@ class TestStatsTreeRendersEachSubpage:
 class TestLiveStatsSerializerOverride:
     """The override on `live_stats` wraps the payload in a versioned envelope.
 
-    Sibling serialised keys (`render_rates`, `totals_chart`) are emitted
-    by component-level callables and demonstrate the per-key
-    granularity the framework guarantees.
+    Sibling keys `render_rates` and `totals_chart` stay flat, proving per-key control.
     """
 
     def test_live_stats_carries_envelope(self, next_client) -> None:
@@ -209,9 +207,8 @@ class TestWindowFilters:
 class TestJsxAssetPipeline:
     """`.jsx` files are emitted as `<script type="text/babel">` tags.
 
-    The overview page mounts the React sparkline through the custom `BabelJsxBackend`.
-    The Chart.js widget on `/stats/` continues to travel through the regular `.js` path
-    so both kinds coexist on the same dashboard.
+    The overview page mounts the React sparkline through `BabelJsxBackend` while the
+    Chart.js widget on `/stats/` travels the regular `.js` path.
     """
 
     def test_overview_emits_babel_script_tag(self, next_client) -> None:

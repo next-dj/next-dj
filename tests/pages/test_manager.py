@@ -451,11 +451,8 @@ class TestGlobalPageInstance:
     def clear_global_state(self):
         """Give each test a clean global page state, then restore the baseline.
 
-        The global `page` singleton holds the context providers every page
-        registered at URL-conf build time. A bare clear would strip those
-        from whatever worker runs this class under xdist, so a later page
-        render on the same worker would find no providers. Snapshotting and
-        restoring keeps the suite order-independent.
+        The global `page` singleton holds providers registered at URL-conf build time,
+        so a bare clear would leave a later render on the same xdist worker with none.
         """
         template_snapshot = dict(page._template_registry)
         context_snapshot = {

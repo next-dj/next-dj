@@ -1,9 +1,7 @@
 """The manager over every component source and the context keys it declares.
 
-The live registry holds only what a request already made the router walk, so
-the system checks and the JS-context key walk read a second manager built
-here. Like `next.pages.scan` it stays under the coverage gate, because a
-`checks` module is not the only caller.
+The live registry holds only what a request made the router walk, so the checks and the
+JS-context key walk read a second manager built here, outside any `checks` module.
 """
 
 from __future__ import annotations
@@ -46,8 +44,7 @@ def get_components_manager() -> ComponentsManager:
 def _register_page_tree_component_folders(manager: ComponentsManager) -> None:
     """Register every components folder the configured page trees carry.
 
-    The folders and the registration are the router's own, so a reader sees
-    the store a render would resolve against.
+    The router's own folders and registration make a reader see what a render sees.
     """
     router_manager, _errors = get_router_manager()
     if router_manager is None:

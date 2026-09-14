@@ -110,6 +110,15 @@ Run the framework system checks as part of CI and as part of the deployment scri
 
 A clean exit is required for the deployment to proceed.
 
+Access control tests
+--------------------
+
+Keep at least one negative test per guarded action in the suite, an anonymous POST that redirects to ``LOGIN_URL`` and an unauthorised POST that answers ``403``.
+A guard dropped in a refactor breaks no test that posts as the owner, so the denial assertion is the only thing that fails when the protection disappears.
+Run the suite with CSRF enforcement on at least one client as well.
+
+See :ref:`howto-test-actions` for the three guard layers and the status each one produces.
+
 Smoke tests
 -----------
 

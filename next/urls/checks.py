@@ -449,8 +449,7 @@ def _collect_url_patterns(
 ) -> list[_CollectedPattern]:
     """Collect one `_CollectedPattern` per route from one pages root.
 
-    Conversion and skip set match the router, so the check sees exactly
-    the routes the router registers.
+    Conversion and skip set match the router, so the check sees its exact routes.
     """
     patterns: list[_CollectedPattern] = []
 

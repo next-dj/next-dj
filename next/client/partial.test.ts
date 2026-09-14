@@ -532,8 +532,7 @@ describe("createPartial surface", () => {
       }),
     );
     await Promise.resolve();
-    // Drop the refresh op's own fetch, so the next call proves the resume
-    // revalidation fired, not the stream event.
+    // Drop the refresh op's own fetch, so the next call can only be the revalidation.
     calls.length = 0;
     visibility.setHidden(true);
     clock = 5000;

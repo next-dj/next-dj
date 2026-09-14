@@ -21,8 +21,7 @@ function mockDialog() {
   return { adapter, dismissed };
 }
 
-// Every stack registers here so the afterEach resets them all, no leaked
-// dialogs or listeners into the next test.
+// Every stack registers here so the afterEach resets them all, leaking no dialogs.
 const madeStacks: LayerStack[] = [];
 
 function createTrackedLayers(deps: LayerDeps): LayerStack {

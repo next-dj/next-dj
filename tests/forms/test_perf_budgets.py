@@ -93,9 +93,8 @@ def _post_step(client, action: str, step: str, data: dict):
 class TestWizardStorageRoundTripBudgets:
     """Deterministic storage budgets for the wizard dispatch hot paths.
 
-    A failing assertion here means a change added a storage round-trip
-    to a wizard POST. Update the budget only for a feature that
-    legitimately needs the extra operation.
+    A failing assertion means a change added a storage round-trip to a wizard POST, so
+    raise a budget only for a feature that needs the extra operation.
     """
 
     def test_mid_step_submit_budget(self, client_no_csrf, counting_backend) -> None:

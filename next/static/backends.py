@@ -1,9 +1,7 @@
 """Pluggable backend contract and Django-staticfiles default implementation.
 
-A static backend turns co-located asset paths into public URLs and renders them through
-one of its named renderer methods. The default backend delegates URL resolution to
-Django staticfiles, so manifest hashing, S3 storage, and CDN configuration from Django
-settings apply automatically.
+The default backend resolves URLs through Django staticfiles, so manifest hashing, S3
+storage, and CDN configuration from Django settings apply automatically.
 
 The abstract `StaticBackend` only mandates `register_file`. Renderer methods are
 concrete on the default backend and selected per asset by `KindRegistry.renderer(kind)`.
@@ -36,9 +34,8 @@ if TYPE_CHECKING:
     from django.http import HttpRequest
 
 
-# Bounded against a backend asked for logical names without end rather than as an
-# eviction policy, because a project serves far fewer assets than it allows. So the
-# stalest insert goes and a warm tag reorders nothing.
+# Bounded against a backend asked for logical names without end, not as an eviction
+# policy, so the stalest insert goes and a warm tag reorders nothing.
 _URL_CACHE_MAX_SIZE = 2048
 
 # Changing one of these rebuilds `staticfiles_storage`, so every URL resolved
@@ -117,13 +114,8 @@ class StaticFilesBackend(StaticBackend):
     Assets live in the `next/` staticfiles namespace so manifest
     storage, S3 storage, and CDN settings apply automatically.
 
-    Two option keys are recognised in the backend entry. The
-    `css_tag` key sets a format string for `<link>` tags. It must
-    contain the `{url}` placeholder. Extra attributes such as
-    `crossorigin` or `integrity` can be baked directly into the
-    template. The `js_tag` key sets a format string for `<script>`
-    tags. The same placeholder rules apply. Attributes such as `defer`
-    or `async` are added by writing them into the template.
+    The `css_tag` and `js_tag` options hold format strings for the `<link>` and
+    `<script>` tags, each needing `{url}` and free to carry extra attributes.
     """
 
     _DEFAULT_CSS_TAG: ClassVar[str] = '<link rel="stylesheet" href="{url}">'

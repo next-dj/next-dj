@@ -170,7 +170,6 @@ Add a ``component.py`` next to the template.
 
    from next import component
 
-
    @component.context("preview")
    def preview(note: Note) -> str:
        words = note.body.split()

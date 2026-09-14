@@ -126,6 +126,21 @@ def _on_form_access_denied(action_name, layer, reason, **kwargs):
 
 Because the denied step writes no draft and no `dispatched` row, this `access_denied` row is the only trace that records _why_ the request was refused — the backend channel still leaves a `request_started` row (with no `reason`) before `super().dispatch` reaches the denying hook, which is the whole point of the signal channel. Filter the admin log to the denial with `/admin/audit/?kind=access_denied`.
 
+### 3b. A deliberately shared field, and the check it silences
+
+The acknowledgement lives on all three steps on purpose, and the framework warns about exactly that shape. `next.W059` fires when two static `Meta.steps` declare the same field name, because the merged mapping `get_all_cleaned_data()` returns keeps only the value from the last step that declared it — the earlier steps' answers are gone.
+
+Nothing in this example reads the acknowledgement out of that merged mapping, so the collapse costs nothing. `check_permissions` reads the tick per step straight from the POST being dispatched (`request.POST.get(POLICY_FIELD)`), which is the per-step read `get_cleaned_data_for_step()` exists to give, one step earlier in the request. `done` drops the key before `AccessRequest.objects.create`, and `step_section` filters it out of the fields each section renders, so the merged value is never user data anyone consumes. A real per-step answer — a value each step must keep — would call for `wizard.get_cleaned_data_for_step("identity")` instead.
+
+Because the warning describes the shape correctly and the shape is intended, it is silenced by id in settings rather than worked around:
+
+```python
+# config/settings.py
+SILENCED_SYSTEM_CHECKS = ["next.W059"]
+```
+
+`manage.py check` then reports the message as silenced instead of a warning. Silence a check only when you can name why its advice does not apply, as the comment above that setting does — the id is the narrowest lever Django offers, and it stays scoped to this one message.
+
 ### 4. Three ordinary forms, one per step
 
 Each step is a bare `django.forms.ModelForm` (or `Form`) — the wizard owns dispatching, so step forms never register as standalone actions and need none of the `next.forms` base classes (a step that does subclass `next.forms` and ends up registered trips the `next.W057` check):

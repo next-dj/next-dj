@@ -57,9 +57,8 @@ class FormActionManager:
     def reload(self) -> None:
         """Rebuild the backends from the current `NEXT_FRAMEWORK` settings.
 
-        The actions registered against the old backends go with them, so a
-        caller that swaps `FORM_ACTION_BACKENDS` under a live manager lets
-        the forms register again afterwards.
+        The actions registered on the old backends go with them, so a caller that swaps
+        `FORM_ACTION_BACKENDS` live must let the forms register again.
         """
         configs = backend_entries("FORM_ACTION_BACKENDS")
         self.version += 1

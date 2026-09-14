@@ -208,8 +208,7 @@ def _reserved_key_warning(origin: str, source_path: Path, key: str) -> CheckMess
 def check_reserved_js_context_keys(*args, **kwargs) -> list[CheckMessage]:
     """Warn about a page or component context key the init payload reserves.
 
-    Pages and components feed the same init payload, so both registries are
-    walked against the reserved namespace.
+    Pages and components feed the same init payload, so both registries are walked.
     """
     sources = (
         ("Page", iter_serialized_page_context_keys()),

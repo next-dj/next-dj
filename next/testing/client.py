@@ -125,10 +125,8 @@ def envelope_of(response: HttpResponse) -> PartialEnvelope:
 class NextClient(Client):
     """Django test client with next-dj form-action shortcuts.
 
-    `post_action` resolves an action name to its URL and POSTs data in
-    a single call. `get_action_url` returns the URL without dispatching
-    so tests can assert on structure before hitting the view. `get_zones`
-    GETs a URL as a partial zone request.
+    `post_action` POSTs to a resolved action name, `get_action_url` resolves without
+    dispatching, and `get_zones` GETs a URL as a partial zone request.
     """
 
     def post_action(
@@ -144,10 +142,8 @@ class NextClient(Client):
     ) -> HttpResponse:
         """Resolve `action_name` and POST `data` to the resulting URL.
 
-        `origin` fills the `_next_form_origin` hidden field the form tag emits, unless
-        `data` already carries one. `partial` turns the POST into a patch request by
-        stamping `X-Next-Request`, `zones` names the zone the form lives in, and
-        `version` sets the client asset version.
+        `origin` fills the `_next_form_origin` hidden field unless `data` carries one,
+        and `partial` stamps `X-Next-Request` with `zones` and `version`.
         """
         url = resolve_action_url(action_name)
         payload: dict[str, Any] = dict(data or {})

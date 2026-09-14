@@ -1,8 +1,7 @@
 """Import helper backed by a module-level dotted-path cache.
 
-`import_class_cached` memoises dotted-path lookups across reloads of the framework
-settings, so a backend named by a settings key is imported once per process. The
-cache is cleared by `NextFrameworkSettings.reload`.
+`import_class_cached` memoises lookups so a backend named by a settings key imports once
+per process, and `NextFrameworkSettings.reload` clears the cache.
 """
 
 from __future__ import annotations

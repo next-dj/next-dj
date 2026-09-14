@@ -29,11 +29,8 @@ PLUGIN_NOT_LOADED = (
 def ignore_browser_suite(config: pytest.Config) -> bool | None:
     """Report whether the browser suite has to be skipped, and say why out loud.
 
-    The suite skips rather than errors, because a bare `pytest` in an example
-    directory has to keep running the integration tests next door. What changes is
-    that the run names the reason instead of reporting an empty directory, and a
-    machine with no browser stack at all is told apart from one that has the stack
-    and forgot the plugin flag.
+    Skipping rather than erroring lets a bare `pytest` still run the integration tests
+    next door, and the warning names the reason instead of leaving an empty directory.
     """
     if config.pluginmanager.has_plugin(BROWSER_PLUGIN):
         return None

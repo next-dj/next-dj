@@ -36,11 +36,17 @@ if not settings.configured:
     )
     django.setup()
 
+# `import next` pulls in no Django, so the version stamp costs nothing here
+import next
 
 # project information
 project = "next.dj"
 copyright = "2025-2026, paqstd-dev"
 author = "paqstd-dev"
+
+# the stamp on every page reads the installed package, so no document names its own
+version = next.__version__
+release = version
 
 # general configuration
 extensions = [
@@ -162,6 +168,13 @@ html_theme_options = {
         {"title": "Issues", "url": "https://github.com/next-dj/next-dj/issues", "external": True},
         {"title": "Discussions", "url": "https://github.com/orgs/next-dj/discussions", "external": True},
     ],
+}
+
+# Shibuya renders the version through its header switcher, which reads `current_version`
+# and `versions` from the HTML context rather than from html_theme_options.
+html_context = {
+    "current_version": release,
+    "versions": [(release, "https://pypi.org/project/next.dj/")],
 }
 
 # html static files

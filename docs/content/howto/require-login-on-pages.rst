@@ -89,6 +89,7 @@ A ``@context`` callable asks for the request by annotation and reads ``request.u
    :caption: notes/pages/page.py
 
    from django.http import HttpRequest
+
    from next import context
 
    @context("greeting")
@@ -110,6 +111,7 @@ A branded 403 page needs a ``403.html`` template or a ``handler403`` in the root
 
    from django.core.exceptions import PermissionDenied
    from django.http import HttpRequest
+
    from next import context
 
    @context("notes")
@@ -130,8 +132,9 @@ Use ``Meta.login_required`` and ``Meta.permission_required`` on the form class, 
 .. code-block:: python
    :caption: notes/pages/admin-notes/page.py
 
-   import next.forms
    from notes.models import Note
+
+   import next.forms
 
    class AdminNoteForm(next.forms.ModelForm):
        class Meta:

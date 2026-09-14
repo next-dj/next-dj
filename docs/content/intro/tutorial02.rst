@@ -81,7 +81,6 @@ Pass ``inherit_context=True`` so every descendant page can read the value too.
 
    from next import context
 
-
    @context("site_name", inherit_context=True)
    def site_name() -> str:
        return "Notes"
@@ -114,7 +113,6 @@ The typed ``[int:id]`` directory form rejects non-numeric URLs at routing time b
 
    from next import context
    from next.urls import DUrl
-
 
    @context("note")
    def fetch_note(note_id: DUrl["id", int]) -> Note:

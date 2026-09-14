@@ -21,8 +21,9 @@ Define the row form and the formset.
 .. code-block:: python
    :caption: notes/forms.py
 
-   from next.forms import ModelForm, formset_factory
    from notes.models import Note
+
+   from next.forms import ModelForm, formset_factory
 
    class NoteRowForm(ModelForm):
        class Meta:
@@ -45,10 +46,10 @@ Register the action.
 
    from django.forms.formsets import BaseFormSet
    from django.http import HttpRequest, HttpResponseRedirect
+   from notes.forms import NoteFormSet
 
    from next import action
    from next.forms import redirect_to_origin
-   from notes.forms import NoteFormSet
 
    def build_bulk_formset() -> tuple[type[BaseFormSet], dict]:
        return NoteFormSet, {"prefix": "notes"}
@@ -102,9 +103,10 @@ Use ``cleanup_extra_initial`` to clear initial values from blank extra rows befo
 
    from types import SimpleNamespace
 
+   from notes.forms import NoteFormSet
+
    from next import context
    from next.forms import cleanup_extra_initial
-   from notes.forms import NoteFormSet
 
    @context("bulk_create")
    def bulk_create_form() -> SimpleNamespace:

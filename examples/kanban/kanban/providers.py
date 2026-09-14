@@ -43,9 +43,8 @@ def _fetch_board(model_cls: type[Model], context: ResolutionContext) -> object:
 class BoardProvider(RegisteredParameterProvider):
     """Resolve ``DBoard[Model]`` parameters from URL or POST.
 
-    Checks ``url_kwargs["id"]`` first, then falls back to a POST
-    ``board_id`` field so form actions can receive a board through DI
-    without re-fetching it inside the handler.
+    `url_kwargs["id"]` comes first, then a POST `board_id` field, so form actions
+    receive a board through DI without re-fetching it in the handler.
     """
 
     def can_handle(self, param: inspect.Parameter, _context: ResolutionContext) -> bool:

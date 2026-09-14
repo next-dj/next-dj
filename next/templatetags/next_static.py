@@ -89,9 +89,8 @@ def _register_asset(context: template.Context, url: str, kind: str) -> None:
 class _InlineAssetNode(Node):
     """Render an inline asset body and push it onto the active collector.
 
-    The body renders with the current context so it can interpolate page
-    variables, and the node emits nothing in place because the collector owns
-    final placement inside the matching slot.
+    The body renders with the current context, and nothing is emitted in place because
+    the collector owns final placement inside the matching slot.
     """
 
     def __init__(self, kind: str, nodelist: NodeList) -> None:

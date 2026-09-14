@@ -75,9 +75,7 @@ def _vanilla_page(root: Path, source: str, count: int) -> CompiledTemplate:
 class TestBenchColdComponentTag:
     """The tag rendering a page whose component caches were just dropped.
 
-    The compiled component template and the page-path memo both go, which is
-    what the first render after a reload meets, and what the warm rows below
-    never pay.
+    The compiled component template and the page-path memo both go, as after a reload.
     """
 
     @pytest.mark.benchmark(group="templatetags.component")

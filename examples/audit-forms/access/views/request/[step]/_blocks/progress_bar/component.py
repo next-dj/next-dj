@@ -15,9 +15,7 @@ def _label(step: str) -> str:
 def steps(wizard: FormWizard) -> list[dict[str, Any]]:
     """Describe each step with its label, index, and status from the wizard.
 
-    Status is sourced from wizard storage truth, not URL position: a step
-    is ``"current"`` when it is the active step, ``"saved"`` when it has
-    stored data, otherwise ``"pending"``.
+    Status comes from wizard storage rather than from the position in the URL.
     """
     current = wizard.current_step()
     completed = set(wizard.completed_steps())

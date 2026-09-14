@@ -59,9 +59,8 @@ def _coerce_url_value(value: object, hint: object) -> object:
 class URLPatternParser:
     """Map bracket segments in a file-based path to Django path converters.
 
-    The `url_path` string is the logical URL trail built from directory names. An empty
-    string means the tree root. It is not a `pathlib.Path`. The on-disk file is the
-    second value from the page-tree scanner.
+    An empty `url_path` means the tree root, it is a logical trail of directory names
+    and no `pathlib.Path`, and the on-disk file comes from the page-tree scanner.
     """
 
     parameter_error: ClassVar[type[URLParameterError]] = URLParameterError

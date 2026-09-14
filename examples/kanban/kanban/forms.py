@@ -125,9 +125,7 @@ class CreateCardForm(Form):
 class CreateColumnForm(Form):
     """Append a new column to a board at the next free position."""
 
-    # This form creates a new column under a board rather than editing an
-    # existing instance, so it carries the parent board_id as a hidden field
-    # instead of resolving one row through instance_from_url.
+    # A new column has no instance to resolve, so the parent board_id is a hidden field.
     board_id = django_forms.IntegerField(widget=django_forms.HiddenInput)
     title = django_forms.CharField(max_length=120, widget=ComponentWidget("input"))
     wip_limit = django_forms.IntegerField(

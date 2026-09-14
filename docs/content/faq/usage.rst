@@ -91,7 +91,6 @@ Mount the API above ``include("next.urls")`` in ``config/urls.py`` and the API p
 
    from django.urls import include, path
 
-
    urlpatterns = [
        path("api/", include("api.urls")),
        path("", include("next.urls")),
@@ -142,7 +141,6 @@ Reconstruct the query string from the validated fields instead.
 
    from next.forms import CharField, Form
 
-
    class SearchForm(Form):
        q = CharField(required=False)
 
@@ -169,7 +167,6 @@ Return any ``HttpResponseBase`` subclass.
    from notes.models import Note
 
    from next.forms import ModelForm
-
 
    class NoteForm(ModelForm):
        class Meta:

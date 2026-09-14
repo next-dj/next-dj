@@ -54,9 +54,11 @@ An override that can fail slowly is still worth a cache of its own, because noth
    :caption: wiki/backends.py
 
    from collections.abc import Callable
+
    from django.apps import apps as django_apps
    from django.db.utils import DatabaseError
    from django.urls import URLPattern, URLResolver, path
+
    from next.conf import next_framework_settings
    from next.urls import FileRouterBackend
 
@@ -189,7 +191,9 @@ Connect a receiver to ``post_save`` and ``post_delete`` and call ``router_manage
 
    from django.db.models.signals import post_delete, post_save
    from django.dispatch import receiver
+
    from next.urls import router_manager
+
    from .models import Article
 
    @receiver(post_save, sender=Article)

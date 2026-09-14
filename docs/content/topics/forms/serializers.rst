@@ -52,7 +52,7 @@ The module provides three constructor helpers.
 .. code-block:: python
    :caption: building specs
 
-   from next.forms import field_spec, formset_spec, form_spec
+   from next.forms import field_spec, form_spec, formset_spec
 
    spec_one_field = field_spec(form["title"])
    spec_one_formset = formset_spec(my_formset)

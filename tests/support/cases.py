@@ -187,9 +187,8 @@ class ParityCase:
 class ContextMarkerCase:
     """One `Context` marker source, resolved against one template context.
 
-    `source` is what the marker was built with, a name, a callable, a constant,
-    or None for the parameter name, and `expected` the value both the plain
-    resolve and the compiled filler have to answer.
+    `source` is what the marker was built with, a name, a callable, a constant, or None
+    for the parameter name, and `expected` is what both paths have to answer.
     """
 
     id: str

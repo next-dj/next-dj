@@ -80,11 +80,9 @@ _COMPOSED_PAGES_MEMO: "dict[str, _ComposedMemo]" = {"value": None}
 def _iter_composed_pages() -> "Iterator[tuple[Path, Template]]":
     """Yield each page path with its compiled composed template.
 
-    Pages whose body is produced dynamically by `render()` have no
-    static composed template and are skipped. A page that fails to
-    compile is skipped here and reported by
-    `check_composed_templates_compile`. The result is memoised per
-    router-manager instance so all zone checks share one walk.
+    A dynamic `render()` body has no composed template, and a page that fails to compile
+    is reported by `check_composed_templates_compile` instead. The list is memoised per
+    router manager, so every zone check shares one walk of the tree.
     """
     router_manager, _errors = get_router_manager()
     if router_manager is None:
@@ -110,10 +108,8 @@ def _collect_composed_pages(
 def reset_composed_pages_memo(**kwargs) -> None:
     """Drop the memoised composed-page list for the next check run.
 
-    Identity against the router manager already invalidates the memo when the
-    manager is rebuilt. Call this explicitly after editing a `.djx` in place
-    under a live manager, since `settings_reloaded` only fires when
-    `NEXT_FRAMEWORK` itself changes.
+    Manager identity already invalidates the memo, so this is for a `.djx` edited in
+    place under a live manager, which `settings_reloaded` never reports.
     """
     _COMPOSED_PAGES_MEMO["value"] = None
 
@@ -162,9 +158,8 @@ def _significant(nodelist: NodeList) -> list[Node]:
 def check_composed_templates_compile(*args, **kwargs) -> list[CheckMessage]:
     """Error when a composed page template fails to compile (`next.E072`).
 
-    The zone checks skip a page whose composed template does not
-    compile, so without this check the syntax error would surface only
-    as a 500 on the first request to the page.
+    The zone checks skip a page whose composed template does not compile, so without
+    this check the syntax error would surface only as a 500 on the first request.
     """
     messages: list[CheckMessage] = []
     router_manager, _errors = get_router_manager()
@@ -428,9 +423,8 @@ def _zone_bound_contexts(
 ) -> "Iterator[tuple[str, str]]":
     """Yield the label and bound zone name of every zone-bound `@context` of a page.
 
-    The registry keys on the file declaring the callable, which for a
-    `page.py` is the path the page scan walked, so the composed-page path
-    looks the bindings up directly.
+    The registry keys on the file declaring the callable, which for a `page.py` is the
+    path the page scan walked, so the composed-page path looks the bindings up directly.
     """
     for binding in bindings:
         if binding.zones is None:
@@ -526,11 +520,8 @@ def check_custom_patch_ops_well_formed(*args, **kwargs) -> list[CheckMessage]:
 def check_form_backend_partial_aware(*args, **kwargs) -> list[CheckMessage]:
     """Warn when partial rendering is on but a form backend is not aware (`next.W068`).
 
-    The base `FormActionBackend.shape_response` routes partial requests
-    to the patch shaping path. A custom backend that overrides
-    `shape_response` without that branch would silently drop the patch
-    envelope and serve a full page to the runtime. The check stays silent
-    on the default backend, which inherits the partial-aware method.
+    A backend that overrides `shape_response` without the partial branch drops the patch
+    envelope and serves a full page, so only an override is warned about.
     """
     if not _partial_backends_active():
         return []

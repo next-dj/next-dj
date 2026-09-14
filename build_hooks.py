@@ -1,10 +1,3 @@
-"""Hatchling build hook that compiles `next.min.js` before packaging.
-
-The hook runs `npm ci` and `npm run build:next` during wheel and sdist
-builds so the published artifact always contains a fresh bundle. Local
-development still uses the Makefile targets.
-"""
-
 from __future__ import annotations
 
 import os

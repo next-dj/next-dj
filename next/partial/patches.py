@@ -72,20 +72,15 @@ def _is_reserved_event(name: str) -> bool:
 class Patches:
     """Request-bound builder of a patch envelope.
 
-    Built from a request, the builder takes its asset version from the
-    active protocol backend and resolves the origin page lazily, so a
-    `morph(zone=...)` renders against the page that owns the request.
-    The `versioned` classmethod builds an assembler for paths that
-    already hold the version and render their own HTML.
+    The origin page resolves lazily, so a `morph(zone=...)` renders against the page
+    that owns the request, and `versioned` serves paths that already hold the version.
     """
 
     def __init__(self, request: HttpRequest, *, echo_of: str | None = None) -> None:
         """Start an empty builder bound to the request.
 
-        Pass `echo_of` with the originating mutation's request id so the envelope
-        carries it as `request_id`, letting an SSE subscriber suppress its own echo.
-        Only the stream path passes it, the HTTP response path leaves it unset since the
-        answer already reaches the initiator.
+        `echo_of` carries the originating request id as `request_id`, so an SSE
+        subscriber suppresses its own echo, and only the stream path passes it.
         """
         self._init_state(request, asset_version(), echo_of)
 
@@ -400,8 +395,7 @@ class Patches:
     def event(self, name: str, detail: "Mapping[str, Any] | None" = None) -> "Patches":
         """Dispatch a CustomEvent on document and the `Next.on` bus.
 
-        A framework-owned event name raises `ReservedEventNameError` so an
-        app cannot forge a runtime lifecycle event.
+        A framework-owned name raises, so an app cannot forge a lifecycle event.
         """
         if _is_reserved_event(name):
             raise ReservedEventNameError(name)
@@ -460,12 +454,8 @@ class Patches:
     def add_asset(self, kind: str, url: str, *, inline: str | None = None) -> "Patches":
         """Record a co-located asset in the envelope manifest.
 
-        The insertion verb comes from the kind registry, so an unregistered
-        kind still travels and only loses the field the runtime would use.
-        An inline body keeps the verb only when the runtime builds the same
-        element the full page render wraps it in. A URL passes through the
-        backend hook a full page render also asks, so one `asset_url` override
-        covers the manifest of an envelope as well.
+        The verb comes from the kind registry, so an unregistered kind still travels
+        without it, and a URL passes the same `asset_url` hook a full render asks.
         """
         # An inline body carries no URL, so it never reaches the backend hook.
         resolved = default_manager.asset_url(url, request=self._request) if url else url

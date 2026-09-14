@@ -37,11 +37,8 @@ def zone_response(
 ) -> HttpResponse:
     """Build the partial response for a zone GET, or a 400/409 short-circuit.
 
-    A zone named on a dynamic body has no compiled source to render, so
-    the response is a 400 before any render. A version mismatch on a safe
-    method is a 409 with an empty body. An unknown zone is a 400 raised
-    before any render. Otherwise the named zones render in one batch and
-    travel back as one patch envelope.
+    A zone named on a dynamic body has no compiled source to render, so it is a 400
+    before any render, and a version mismatch on a safe method is a 409.
     """
     backend = partial_backend_manager.get()
     version = asset_version()
@@ -75,13 +72,9 @@ def _build_envelope(
 ) -> Envelope:
     """Assemble one envelope patching every rendered zone with its assets.
 
-    Without a merge intent each zone morphs in place. With an `append` or
-    `prepend` merge intent each zone is patched with the matching merge
-    verb instead, so a paginating request grows the zone with deduplicated
-    children rather than replacing its body. The zones come from the render
-    result rather than the intent, so a skipped unknown name emits no patch
-    and a duplicated name is patched once. The verb is server-authored from
-    the parsed intent, the client never names it.
+    An `append` or `prepend` merge intent patches each zone with the matching verb, so a
+    paginating request grows the zone rather than replacing its body. The verb is
+    server-authored from the parsed intent, never named by the client.
     """
     patches = Patches.versioned(version, request=request)
     for name in result.html:

@@ -31,7 +31,9 @@ The provider claims any parameter whose annotation origin is ``DFlag`` and reads
 
    import inspect
    from typing import get_args, get_origin
+
    from next.deps import DDependencyBase, RegisteredParameterProvider, ResolutionContext
+
    from .cache import get_cached_flag
 
    class DFlag[T](DDependencyBase[T]):
@@ -74,6 +76,7 @@ A read-through helper stores both hits and a missing sentinel, so a repeated loo
    :caption: flags/cache.py
 
    from django.core.cache import cache
+
    from .models import Flag
 
    FLAG_PREFIX = "flags:flag:"
@@ -113,6 +116,7 @@ The next ``get_cached_flag`` call refetches from the database.
    :caption: flags/receivers.py
 
    from django.db.models.signals import post_delete, post_save
+
    from .cache import invalidate_flag
    from .models import Flag
 
@@ -146,7 +150,10 @@ A top-level import in ``apps.py`` would run while Django is still loading app co
 
        def ready(self) -> None:
            """Import providers and connect receivers once the app registry is populated."""
-           from flags import providers, receivers  # imported for its registration side effect
+           from flags import (  # imported for its registration side effect
+               providers,
+               receivers,
+           )
 
            _ = providers
            receivers.connect()

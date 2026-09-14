@@ -9,7 +9,8 @@ Module summary
 ``next.partial`` exposes the server side of partial rendering.
 The surface covers the ``Patches`` builder that authors a patch envelope, the response and stream classes that carry it, and the zone-render and origin helpers.
 It also covers the custom-verb registration hook and the protocol backend that serializes the wire format.
-The wire protocol, the ``data-next-*`` attributes, and the client runtime live in the topic section, see :doc:`/content/topics/partial-rendering/reference`.
+The wire protocol and the ``data-next-*`` attributes live in the topic section, see :doc:`/content/topics/partial-rendering/reference`.
+The browser half of the same protocol has its own page, see :doc:`client`.
 
 API tiers
 ---------
@@ -143,6 +144,12 @@ A custom backend that overrides ``shape_response`` routes partial requests throu
 
 .. autofunction:: next.partial.shape_partial
 
+``PartialShaperImpl`` in ``next.partial.shaper`` is the object that binds these shaping entry points to the ``PartialShaper`` port, so ``next.pages`` and ``next.forms`` reach partial rendering without importing it.
+``NextFrameworkConfig.ready`` composes it into ``next.ports.partial_shaper_slot``, the one place the binding happens, and unlike the settings-driven backends it answers to no ``NEXT_FRAMEWORK`` key.
+A project that shapes partial responses differently subclasses it, overrides one of ``intent``, ``zone_response``, ``shape_response``, and ``shape_validate``, then calls ``partial_shaper_slot.set`` from the ``ready`` of an application listed after ``next`` in ``INSTALLED_APPS``.
+The slot holds one implementation and the last binding wins, so the replacement serves every later request.
+See :doc:`ports` for the protocol the subclass satisfies.
+
 SSE stream
 ~~~~~~~~~~
 
@@ -228,6 +235,7 @@ See also
 .. seealso::
 
    :doc:`/content/topics/partial-rendering/index` for the topic subtree.
-   :doc:`/content/topics/partial-rendering/reference` for the wire protocol and client runtime.
+   :doc:`/content/topics/partial-rendering/reference` for the wire protocol and the attribute tables.
+   :doc:`client` for the ``window.Next`` runtime that applies every envelope.
    :doc:`/content/topics/partial-rendering/extending` for custom verbs and server-pushed context.
    :doc:`settings` for ``PARTIAL_BACKENDS``.

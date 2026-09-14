@@ -12,10 +12,7 @@ if TYPE_CHECKING:
 class PageModuleImportError(Exception):
     """A `page.py` body raised while importing.
 
-    Covers any exception raised by the module body. ImportError,
-    SyntaxError, and AttributeError are common examples, not a closed
-    list. The original exception travels as `__cause__` and the
-    offending path as `file_path`.
+    The original exception travels as `__cause__` and the offending path as `file_path`.
     """
 
     def __init__(self, file_path: Path) -> None:

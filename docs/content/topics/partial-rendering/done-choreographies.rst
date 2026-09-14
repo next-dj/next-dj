@@ -52,7 +52,6 @@ The builder takes ``page=`` and ``url_kwargs=`` alongside ``zone=``, and the req
    from next.forms import FormWizard
    from next.partial import Patches, resolve_partial_origin
 
-
    class AccessRequestWizard(FormWizard):
        def done(
            self, request: HttpRequest, cleaned_data: dict[str, Any]

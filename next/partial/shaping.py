@@ -93,12 +93,7 @@ def shape_validate(
 
     The form is already bound and both authorization layers have passed, so running
     `is_valid()` here never leaks a guarded validator to an anonymous caller. The
-    handler stays unrun, success signals stay silent, and wizard storage stays
-    untouched. Errors are filtered to the fields the request named, never-submitted
-    fields keep no premature required error, the cross-field non-field errors are always
-    dropped, and file fields are excluded from the requested set. The response is always
-    200 with the surviving errors in meta, morphing the form's own zone when it declares
-    one and the form by uid otherwise.
+    handler stays unrun and the response is 200 with the errors of the named fields.
     """
     rotated = _csrf_rotated(request)
     form.is_valid()

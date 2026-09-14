@@ -54,11 +54,8 @@ def asset_version() -> str:
 def _resolve_asset_version() -> str:
     """Resolve the asset version from the backend options and the manifest.
 
-    An explicit `VERSION` option wins so a deployment may pin the version to a release
-    tag. The `"manifest"` sentinel resolves to a stable hash of the staticfiles manifest
-    when the active staticfiles storage hashes its files, so the deploy-mismatch guard
-    works out of the box. Without a manifest storage the sentinel falls back to a stable
-    default and the guard never fires.
+    An explicit `VERSION` option pins a release tag, and the `"manifest"` sentinel
+    hashes the staticfiles manifest, falling back to a stable default without one.
     """
     options = partial_backend_manager.get().options
     configured = options.get(_VERSION_OPTION, _MANIFEST_VERSION)
@@ -70,14 +67,8 @@ def _resolve_asset_version() -> str:
 def _manifest_version() -> str:
     """Return a stable version hash from the staticfiles manifest.
 
-    The active staticfiles storage is read through the same proxy the
-    static backend uses, so the `STORAGES["staticfiles"]` backend resolves.
-    A manifest storage exposes a precomputed `manifest_hash` and the
-    `hashed_files` mapping it loaded.
-    The precomputed hash wins when present, otherwise the mapping is
-    hashed so a storage with no recorded hash still yields a stable
-    version. A non-manifest storage or one that fails to resolve has no
-    version source, so the stable default keeps the sync guard silent.
+    The precomputed `manifest_hash` wins, otherwise the `hashed_files` mapping is
+    hashed, and a storage exposing neither falls back to the stable default.
     """
     try:
         is_manifest = isinstance(staticfiles_storage, ManifestFilesMixin)

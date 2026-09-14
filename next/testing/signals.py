@@ -117,8 +117,7 @@ class SignalRecorder:
 def capture_signals(*signals: Signal) -> SignalRecorder:
     """Return a started `SignalRecorder` for use as a context manager.
 
-    Equivalent to `SignalRecorder(*signals).start()` but reads like a
-    verb at the call site: `with capture_signals(sig) as rec: ...`.
+    Equivalent to `SignalRecorder(*signals).start()`, spelled as a verb.
     """
     return SignalRecorder(*signals).start()
 
@@ -126,8 +125,7 @@ def capture_signals(*signals: Signal) -> SignalRecorder:
 def capture_framework_signals() -> SignalRecorder:
     """Return a recorder connected to every signal in `next.signals.__all__`.
 
-    Handy when a test wants to verify that nothing unexpected fires
-    without wiring each signal by hand.
+    Handy when a test verifies that nothing unexpected fires.
     """
     tracked = tuple(
         getattr(framework_signals, name) for name in framework_signals.__all__

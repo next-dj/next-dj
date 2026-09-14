@@ -2,6 +2,10 @@
 
 A workspace for two independent tenants (Acme and Globex) that share the same Django project, the same page tree, and the same static pipeline. Each request is scoped to one tenant, the page tree resolves notes through that tenant, the static pipeline rewrites every asset URL with a per-tenant prefix, and the chrome reads its accent color from a request-derived CSS variable.
 
+> **Trust boundary.** The `X-Tenant` header is attacker-controlled. Anybody can send `X-Tenant: globex` with `curl`, so this shape isolates tenants only behind a reverse proxy that owns the header. That proxy must be the single route to the application, the application must bind to an address the public network cannot reach, the proxy must derive the slug from something it owns — a host mapping, a client certificate, its own session — rather than from anything the client sent, and it must set the header on every request it forwards so an inbound copy is overwritten instead of passed along. A proxy that fills the header in only when it is absent keeps the client's forged value, and that single misconfiguration removes the isolation entirely. Run this example with nothing in front of it and every visitor picks their own tenant.
+>
+> Two shapes need no proxy at all: read the tenant out of the signed-in user's membership rows, or out of `request.get_host()`, which `ALLOWED_HOSTS` narrows to the names the project publishes. [`docs/content/howto/scope-requests-per-tenant.rst`](../../docs/content/howto/scope-requests-per-tenant.rst) puts all three side by side in trust order. This example reads the header because that is the shape which shows a custom `RegisteredParameterProvider` and a request-aware static backend with the fewest moving parts, not because it is the shape to reach for first.
+
 ## What you will see
 
 | URL | Description |
@@ -31,19 +35,19 @@ uv run python manage.py runserver     # http://127.0.0.1:8000/
 uv run pytest
 ```
 
-`seed_demo` writes two tenants and three demo notes from [`notes/demo.py`](notes/demo.py). The Acme `Status update` note is seeded locked, so the editor's object-level guard has something to refuse. Migrations carry schema only, so a database without that command has no tenant and every request answers `400`.
+`seed_demo` writes two tenants and three demo notes from [`notes/demo.py`](notes/demo.py). The Acme `Status update` note is seeded locked, so the editor's object-level guard has something to refuse. Migrations carry schema only, so a database without that command has no tenant row at all: a request that carries no tenant answers `400` and one that names a slug answers `404`.
 
 There are two ways to drive the app:
 
 - **Browser (DEBUG only).** Open `http://127.0.0.1:8000/notes/?tenant=acme`. The middleware sets a `next_tenant` cookie and redirects to a clean URL. Subsequent navigation reuses the cookie. Switch tenants with `?tenant=globex`. The query parameter and cookie path are guarded by `settings.DEBUG=True` and exist only to make the demo viewable without a header-injecting browser extension. A cookie naming a tenant that no longer exists answers `404` and deletes the cookie, so a renamed slug does not wedge the browser on an unreachable workspace.
-- **API / production.** Send the `X-Tenant` header explicitly:
+- **Header.** Send `X-Tenant` explicitly, which is what the reverse proxy of a deployment does on every request it forwards:
 
   ```bash
   curl -H 'X-Tenant: acme' http://127.0.0.1:8000/notes/
   curl -H 'X-Tenant: globex' http://127.0.0.1:8000/notes/
   ```
 
-  The query and cookie fallbacks are disabled outside `DEBUG`. A request without the header returns `400 Missing X-Tenant header.`.
+  Choosing the tenant by hand like this is precisely the forgery the trust boundary above describes, and against a bare development server it works — which is why the boundary is stated rather than implied. The query and cookie fallbacks are disabled outside `DEBUG`. A request with no tenant at all returns `400 Missing X-Tenant header.`, and in `DEBUG` the body appends a one-line pointer at the query affordance. A slug that matches no row returns `404 Unknown tenant.`. Neither body repeats what the client sent: a body quoting the submitted slug is an oracle for enumerating tenant names, and in an HTML response it is a reflected-XSS sink.
 
 Tailwind loads via the Play CDN in the shared [`page_head`](../_shared/_components/page_head/component.djx) component. No Node, no build step. [`root_pages/layout.djx`](root_pages/layout.djx) calls it in block form and fills its `extra` slot with the `.accent-bar` / `.accent-text` / `.accent-border` rules, which read `var(--tenant-accent)` with the shared primary colour as the fallback. The variable itself is set once as an inline `style` on `<body>` from `tenant_theme_css`, so a page rendered without a tenant still has a usable palette.
 
@@ -53,7 +57,7 @@ Tailwind loads via the Play CDN in the shared [`page_head`](../_shared/_componen
 
 The chain has three links:
 
-1. [`notes/middleware.py`](notes/middleware.py) parses `X-Tenant` and looks up the matching `Tenant` row. Missing slug → `400`. Unknown slug → `404`. Match → `request.tenant = tenant`. Paths under `/_t/` return early without resolving anything, because the per-tenant asset URLs of section 2 already carry the slug in the path and a browser never puts the header on an asset request.
+1. [`notes/middleware.py`](notes/middleware.py) parses `X-Tenant` and looks up the matching `Tenant` row. Missing slug → `400`. Unknown slug → `404`. Match → `request.tenant = tenant`. Both refusals answer with a fixed body built from a module constant, never from the submitted slug, and the middleware docstring carries the proxy obligations the header shape rests on. Paths under `/_t/` return early without resolving anything, because the per-tenant asset URLs of section 2 already carry the slug in the path and a browser never puts the header on an asset request. That early return is safe only because nothing tenant-owned lives under the prefix: [`config/urls.py`](config/urls.py) discards the slug and serves the same shared file whichever tenant a URL names, so the prefix is a cache key rather than an isolation boundary, and no page route can be reached through it.
 2. [`notes/providers.py`](notes/providers.py) defines `DTenant` (a `DDependencyBase` marker) and `TenantProvider`, a `RegisteredParameterProvider`. The provider matches when `param.annotation is DTenant` and `request.tenant` is set. `static_can_handle` answers `False` for any other annotation, so the plan compiler keeps the provider out of unrelated parameters, and `None` for `DTenant`, whose tenant check stays in `can_handle`. `apps.py` imports the module on startup so the auto-registry picks it up.
 3. Pages and form actions request the tenant by name and type:
 
@@ -63,7 +67,7 @@ The chain has three links:
        return list(Note.objects.filter(tenant=active_tenant))
    ```
 
-   The framework injects the `Tenant` instance directly. Page modules never start with `from __future__ import annotations` and import `DTenant` at runtime. The resolver does evaluate string hints through `get_type_hints`, but a single name it cannot evaluate — a marker or a model imported only under `if TYPE_CHECKING` — drops the whole callable back to its raw annotations, where `get_origin` sees a string and the parameter silently falls through to another provider.
+   The framework injects the `Tenant` instance directly. Every query in the example that reaches a tenant-owned row carries that filter: the two note listings, the `Note.objects.create` of the create form, and the `get_object_or_404(Note, pk=note_id, tenant=tenant)` behind both the editor's `note` context and its `get_initial`. Middleware that attaches a tenant repairs nothing if one queryset forgets to use it. Page modules never start with `from __future__ import annotations` and import `DTenant` at runtime. The resolver does evaluate string hints through `get_type_hints`, but a single name it cannot evaluate — a marker or a model imported only under `if TYPE_CHECKING` — drops the whole callable back to its raw annotations, where `get_origin` sees a string and the parameter silently falls through to another provider.
 
 ### 2. Per-tenant static URL prefix
 

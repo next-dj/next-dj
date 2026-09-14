@@ -16,8 +16,7 @@ import type { SessionStore } from "./assets";
 
 const SAFE_METHODS = new Set(["GET", "HEAD"]);
 
-// Kept apart from the version guard's own flag in assets.ts. The two loops have
-// different causes and one must not clear the other.
+// Kept apart from the version guard's flag in assets.ts, one must not clear the other.
 const NAVIGATED_FLAG = "next:partial:navigated";
 
 /** Fetch stand-in so vitest can drive requests deterministically. */
@@ -161,15 +160,13 @@ export class Wire {
 
   /**
    * Abort the in-flight request on a queue without starting a new one, so a form submit
-   * can cancel its own inline validation. The bumped seq also makes any answer already
-   * on the wire discard itself.
+   * can cancel its own inline validation and the bumped seq drops a late answer.
    */
   abort(key: string): void {
     const entry = this.#queues.get(key);
     if (entry === undefined) return;
     entry.controller.abort();
-    // Bump the seq so a response that resolves before the abort is observed is
-    // still dropped as stale.
+    // Bump the seq so a response resolving before the abort lands is still dropped.
     this.#queues.set(key, {
       controller: new AbortController(),
       seq: entry.seq + 1,
@@ -181,8 +178,7 @@ export class Wire {
     const method = (request.method ?? "GET").toUpperCase();
     const safe = SAFE_METHODS.has(method);
     const uid = request.uid;
-    // An abortable POST (inline validation) is queue-managed like a safe GET
-    // and never takes the mutation lock.
+    // An abortable POST (inline validation) queues like a safe GET, taking no lock.
     const locked = !safe && !request.abortable && uid !== undefined;
     if (locked) {
       // A second submit drops while busy, so a double click yields one fetch.
@@ -299,10 +295,8 @@ export class Wire {
       this.#deliver(hook(response, body), response, snapshot, request.key, page);
       return;
     }
-    // A non-envelope content-type or a redirect is a full navigation to the
-    // final URL. A non-redirect non-envelope on a mutation points at the action
-    // endpoint, not a page, so navigating there would 405: surface it as an
-    // error and leave the page in place instead.
+    // A non-envelope reply or a redirect is a full navigation to the final URL. On a
+    // mutation the URL is the action endpoint, so navigating there would 405.
     if (baseType !== CONTENT_TYPE || response.redirected) {
       if (response.redirected || SAFE_METHODS.has(method)) {
         this.#fallbackNavigate(response.url || request.url);
@@ -379,8 +373,7 @@ export class Wire {
     if (!SAFE_METHODS.has(method)) {
       const csrf = this.#csrf();
       if (csrf !== undefined) headers[csrf.header] = csrf.token;
-      // A true mutation (not an abortable validate POST) carries a ring id so
-      // the SSE bridge suppresses its own echo.
+      // A true mutation carries a ring id so the SSE bridge suppresses its own echo.
       if (request.abortable !== true && headers[HEADER_REQUEST_ID] === undefined) {
         const id = newRequestId();
         headers[HEADER_REQUEST_ID] = id;

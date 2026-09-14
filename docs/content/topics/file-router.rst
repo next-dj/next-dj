@@ -110,9 +110,10 @@ Both that refusal and ``DuplicateURLParameterError`` name the offending ``page.p
 .. code-block:: python
    :caption: routes/posts/[int:post_id]/page.py
 
+   from notes.models import Note
+
    from next import context
    from next.urls import DUrl
-   from notes.models import Note
 
    @context("note")
    def fetch_note(post_id: DUrl[int]) -> Note:

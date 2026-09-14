@@ -106,6 +106,11 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
 :doc:`ports`
    ``next.ports`` for the narrow protocols one subsystem calls another through.
 
+.. rubric:: Client runtime
+
+:doc:`client`
+   The ``window.Next`` runtime, its events, and the ``data-next-*`` attribute contract, the one reference page that documents no Python module.
+
 .. rubric:: Configuration
 
 :doc:`settings`
@@ -142,6 +147,7 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
    errors
    backends
    ports
+   client
    settings
    system-checks
    template-tags

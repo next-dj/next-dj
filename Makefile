@@ -211,8 +211,9 @@ dev-setup: # setup development environment
 	make build-js
 	make pre-commit-install
 
-docs-lint: # check semantic newlines in the documentation prose
+docs-lint: # check the documentation prose and its code snippets
 	uv run python docs/prose_lint.py docs/content
+	uv run python docs/snippet_lint.py docs/content
 
 docs: docs-lint # build documentation
 	uv run --group docs sphinx-build -aETW --keep-going -b html docs docs/_build

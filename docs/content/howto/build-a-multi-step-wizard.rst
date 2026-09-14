@@ -29,11 +29,11 @@ The wizard lists them in order.
 
    from typing import Any
 
+   from access.models import AccessRequest
    from django import forms
    from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 
    import next.forms
-   from access.models import AccessRequest
 
    class IdentityStep(forms.ModelForm):
        class Meta:
@@ -119,6 +119,7 @@ The dispatcher resolves it against the URLconf, the ``[step]`` segment yields th
    :caption: tests/test_wizard.py
 
    from access.models import AccessRequest
+
    from next.testing.client import NextClient
 
    def post_step(client, step, data):

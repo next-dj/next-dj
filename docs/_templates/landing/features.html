@@ -25,7 +25,7 @@
           <span class="ndj-feature-kicker">File router</span>
           <h3 class="ndj-feature-title">Pages are files</h3>
           <p>
-            Add a directory with a <code>page.py</code> under <code>routes/</code>
+            Add a directory with a <code>page.py</code> under <code>pages/</code>
             and it answers a URL. Bracketed segments capture typed parameters.
           </p>
           <ul class="ndj-feature-bullets">
@@ -35,7 +35,7 @@
           </ul>
         </div>
         <div class="ndj-mock">
-          {{ mockbar("routes/posts/[int:post_id]/page.py") }}
+          {{ mockbar("pages/posts/[int:post_id]/page.py") }}
           <pre class="ndj-mock-body ndj-code"><span class="c-kw">from</span> notes.models <span class="c-kw">import</span> Note
 <span class="c-kw">from</span> next.pages <span class="c-kw">import</span> context
 <span class="c-kw">from</span> next.urls <span class="c-kw">import</span> DUrl
@@ -61,7 +61,7 @@
           </ul>
         </div>
         <div class="ndj-mock">
-          {{ mockbar("routes/template.djx") }}
+          {{ mockbar("pages/template.djx") }}
           <pre class="ndj-mock-body ndj-code"><span class="c-tag">{% raw %}{% #component{% endraw %}</span> <span class="c-str">"card"</span> title=<span class="c-str">"Welcome"</span> <span class="c-tag">%}</span>
   <span class="c-tag">{% raw %}{% #slot{% endraw %}</span> <span class="c-str">"content"</span> <span class="c-tag">%}</span>
     &lt;p&gt;Latest update.&lt;/p&gt;
@@ -116,7 +116,7 @@
           </ul>
         </div>
         <div class="ndj-mock">
-          {{ mockbar("wiki/routes/search/template.djx") }}
+          {{ mockbar("wiki/pages/search/template.djx") }}
           <pre class="ndj-mock-body ndj-code">{% raw %}&lt;form method=<span class="c-str">"get"</span>
       <span class="c-deco">data-next-target</span>=<span class="c-str">"search-results"</span>
       <span class="c-deco">data-next-trigger</span>=<span class="c-str">"input"</span> <span class="c-deco">data-next-debounce</span>=<span class="c-str">"300"</span>&gt;
@@ -148,7 +148,7 @@
         </div>
         <div class="ndj-mock">
           {{ mockbar("notes/") }}
-          <pre class="ndj-mock-body ndj-code"><span class="c-fn">routes/</span>
+          <pre class="ndj-mock-body ndj-code"><span class="c-fn">pages/</span>
   page.py
   template.djx
   template.css        <span class="c-com"># collected with the page</span>
@@ -175,7 +175,7 @@
           </ul>
         </div>
         <div class="ndj-mock">
-          {{ mockbar("routes/notes/[int:note_id]/page.py") }}
+          {{ mockbar("pages/notes/[int:note_id]/page.py") }}
           <pre class="ndj-mock-body ndj-code"><span class="c-kw">from</span> django.http <span class="c-kw">import</span> HttpRequest
 <span class="c-kw">from</span> next.deps <span class="c-kw">import</span> Depends
 <span class="c-kw">from</span> next.pages <span class="c-kw">import</span> context

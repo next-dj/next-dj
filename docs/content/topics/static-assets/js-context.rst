@@ -89,10 +89,10 @@ The override applies only to that key.
 .. code-block:: python
    :caption: notes/pages/page.py
 
+   from notes.serialization import load_featured_note
+
    from next import context
    from next.static import PydanticJsContextSerializer
-
-   from notes.serialization import load_featured_note
 
    @context("featured", serialize=True, serializer=PydanticJsContextSerializer())
    def featured() -> object:
@@ -119,6 +119,7 @@ A serializer is any class with a ``dumps`` method.
    :caption: notes/serializers.py
 
    import json
+
    from django.core.serializers.json import DjangoJSONEncoder
 
    class CompactSerializer:
@@ -229,8 +230,9 @@ Register the key server-side with ``serialize=True``.
 .. code-block:: python
    :caption: notes/pages/page.py
 
-   from next import context
    from notes.models import Note
+
+   from next import context
 
    @context("note_count", serialize=True)
    def note_count() -> int:

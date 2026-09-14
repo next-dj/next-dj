@@ -177,9 +177,7 @@ class TestResultRichResponseFallsThrough:
 class TestSuccessFunnelMorphsAndDrainsMessages:
     """A None result morphs the form zone and drains messages to toasts.
 
-    The zoned rename form flashes a success message and an info note on a
-    valid submit. The success funnel morphs the zone in place and drains
-    both pending messages into toast patches.
+    The zoned rename form flashes a success message and an info note on a valid submit.
     """
 
     def test_zone_morph_and_message_toasts(self, next_client: NextClient) -> None:

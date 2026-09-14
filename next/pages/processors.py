@@ -49,8 +49,7 @@ _CONTEXT_PROCESSORS_CACHE: dict[str, list[Callable[[Any], dict[str, Any]]] | Non
 def _get_context_processors() -> list[Callable[[Any], dict[str, Any]]]:
     """Return the merged context processors from Next routers and Django.
 
-    The merge and its imports depend on settings alone, so the result is
-    memoised until either source setting changes.
+    The merge depends on settings alone, so it is memoised until one of them changes.
     """
     cached = _CONTEXT_PROCESSORS_CACHE["value"]
     if cached is None:

@@ -77,8 +77,7 @@ _PAGE_CONTEXT_SUBJECT = RegistrationSubject(
 @register(Tags.templates, NEXT)
 def check_request_in_context(*args, **kwargs) -> list[CheckMessage]:
     """Ensure `request` is in the template context (required for `{% form %}`)."""
-    # Through the registry, so the check holds for an `INSTALLED_APPS` entry
-    # written as the framework's `AppConfig` path.
+    # Through the registry, so an `AppConfig` path in `INSTALLED_APPS` counts too.
     if not apps.is_installed("next"):
         return []
 
@@ -176,9 +175,8 @@ def _working_directory_page_trees() -> list[Path]:
 def _touches_a_routed_tree(directory: Path, routed: set[Path]) -> bool:
     """Whether a routed page tree is this directory, or sits above or below it.
 
-    A routed tree nested inside the candidate makes the candidate part of a
-    served layout, which is the shape of an application package that happens
-    to carry the configured `PAGES_DIR` name.
+    A routed tree nested inside the candidate makes it part of a served layout, the
+    shape of an app package that happens to carry the `PAGES_DIR` name.
     """
     return any(
         root.is_relative_to(directory) or directory.is_relative_to(root)
@@ -235,8 +233,7 @@ def _check_directory_syntax(
         dir_name_str = item.name
         relative_path = item.relative_to(pages_path)
 
-        # The wildcard form is read first, because every `[[args]]` name also
-        # opens with `[` and closes with `]`.
+        # The wildcard form is read first, because `[[args]]` also opens with `[`.
         if dir_name_str.startswith("[[") and dir_name_str.endswith("]]"):
             reason = _args_syntax_error(dir_name_str)
             if reason is not None:
@@ -667,9 +664,7 @@ def _check_context_function(
     """Emit an error when keyless context callables are not annotated dict-like.
 
     The check is static, because executing user code at ``manage.py check`` time is
-    expensive and can hit databases that have not been migrated yet. Callables without a
-    return annotation are accepted. The runtime emits a clear ``TypeError`` on first
-    render if the result is not a mapping.
+    expensive and can hit databases that have yet to be migrated.
     """
     try:
         annotation = inspect.signature(func).return_annotation
@@ -921,8 +916,7 @@ def _context_parameters(func: Callable[..., Any]) -> list[inspect.Parameter]:
 def _url_parameter_names(url_path: str) -> list[str]:
     """Return the URL kwarg names the route captures, as the router parses them.
 
-    A route the parser refuses captures nothing here, because `next.E011`
-    reports the conflicting segments on its own.
+    A route the parser refuses captures nothing, because `next.E011` reports it.
     """
     parser = _url_parser()
     try:

@@ -34,7 +34,6 @@ Create ``notes/forms.py``.
 
    from next.forms import BooleanField, Form, ModelForm
 
-
    class CreateNoteForm(ModelForm):
        class Meta:
            model = Note
@@ -65,7 +64,6 @@ The ``inherit_context=True`` flag on the three layout-scope callables stays from
    from notes.models import Note
 
    from next import context
-
 
    @context("site_name", inherit_context=True)
    def site_name() -> str:
@@ -148,7 +146,6 @@ It receives the same DI-resolved parameters as any other callable, including URL
 
    from next import action, context
    from next.urls import DUrl
-
 
    @context("note")
    def fetch_note(note_id: DUrl["id", int]) -> Note:
@@ -244,14 +241,11 @@ The detail ``page.py`` only needs to add its own context.
 .. code-block:: python
    :caption: notes/pages/notes/[id]/page.py
 
-   from django.http import HttpResponseRedirect
    from django.shortcuts import get_object_or_404
-   from django.urls import reverse
    from notes.models import Note
 
    from next import context
    from next.urls import DUrl
-
 
    @context("note")
    def fetch_note(note_id: DUrl["id", int]) -> Note:
@@ -271,7 +265,6 @@ The complete file now looks like this.
 
    from next.forms import BooleanField, Form, ModelForm
    from next.urls import DUrl
-
 
    class CreateNoteForm(ModelForm):
        class Meta:
@@ -308,7 +301,6 @@ Mount them above the file router and send a successful login back to the index.
    :caption: config/urls.py
 
    from django.urls import include, path
-
 
    urlpatterns = [
        path("accounts/", include("django.contrib.auth.urls")),

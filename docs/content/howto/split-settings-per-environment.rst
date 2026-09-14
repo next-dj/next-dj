@@ -108,6 +108,7 @@ Override for production
    :caption: config/settings/prod.py
 
    import os
+
    from config.settings.base import *  # noqa: F403
 
    DEBUG = False

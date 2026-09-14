@@ -88,8 +88,9 @@ The shipped multi-tenant example implements this pattern, and the snippet below 
 .. code-block:: python
    :caption: notes/backends.py
 
-   from next.static import StaticFilesBackend
    from notes.access import get_active_tenant
+
+   from next.static import StaticFilesBackend
 
    PREFIX_FORMAT = "/_t/{slug}"
 

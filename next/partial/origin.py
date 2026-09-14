@@ -42,13 +42,8 @@ class PartialOrigin:
 def resolve_partial_origin(request: "HttpRequest") -> "PartialOrigin | None":
     """Resolve the host page of a partial request for an out-of-band morph.
 
-    The `X-Next-Origin` header the runtime stamps with the host page URL
-    wins, so a master rendered inside a layer morphs the zone of the page
-    that owns the layer rather than the master's own step page. When the
-    header is absent or does not resolve to a page the posted form origin
-    is the fallback, which keeps the resolver usable from a master that
-    posts straight from its host page. The header is validated same-site
-    before it is trusted, so an off-site origin cannot redirect the morph.
+    The same-site `X-Next-Origin` header wins, so a master inside a layer morphs the
+    zone of the page owning the layer, and the posted form origin is the fallback.
     """
     intent = partial_intent(request)
     header = validated_origin_path(intent.origin)

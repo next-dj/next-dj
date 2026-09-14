@@ -26,8 +26,7 @@ _MIN_FORM_TAG_BITS = 2
 _RESERVED_FORM_ATTRS = frozenset({"action", "method"})
 _RESERVED_FORM_ATTR_PREFIX = "data-next-"
 
-# Wire attributes other areas ask a compiled form about, named once here
-# because the tag is what writes them.
+# Wire attributes other areas ask about, named here because the tag writes them.
 FORM_ZONE_ATTR: Final = "data-next-target"
 FORM_KEY_ATTR: Final = "data-next-key"
 
@@ -57,9 +56,8 @@ register = template.Library()
 def do_form(parser: template.base.Parser, token: template.base.Token) -> "FormNode":
     """Block tag accepting an action name plus optional HTML attributes.
 
-    The `validate`, `trigger`, `debounce`, `zone`, and `key` params compile
-    to client `data-next-*` attributes on the form, every other key="value"
-    pair stays a plain HTML attribute.
+    The `validate`, `trigger`, `debounce`, `zone`, and `key` params compile to
+    `data-next-*` attributes, while any other pair stays plain HTML.
     """
     bits = token.split_contents()
     if len(bits) < _MIN_FORM_TAG_BITS:

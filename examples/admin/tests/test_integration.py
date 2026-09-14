@@ -377,9 +377,8 @@ class TestChangelistChrome:
     def test_action_labels_come_from_a_version_stable_admin_api(self, admin_client):
         """`get_actions` answers a tuple on Django 5.2 and an `Action` from 6.0.
 
-        `get_action_choices` reads the same registry on both without the
-        deprecated tuple unpacking, so a changelist render must raise no
-        deprecation warning at all.
+        `get_action_choices` reads the same registry on both without the deprecated
+        tuple unpacking, so the changelist render must raise no deprecation warning.
         """
         with warnings.catch_warnings():
             warnings.simplefilter("error", DeprecationWarning)
@@ -712,9 +711,8 @@ _INLINE_ACTIONS = ("admin:inline_change", "admin:inline_add")
 def chapter_unique_constraint(monkeypatch):
     """Restate the chapter pair rule as the `UniqueConstraint` Django documents.
 
-    `unique_together` and `Meta.constraints` are checked by two different
-    `_post_clean` calls, so the modern spelling needs its own proof that the
-    parent key is back in scope.
+    `unique_together` and `Meta.constraints` run through two different `_post_clean`
+    checks, so the modern spelling needs its own proof that the parent key is in scope.
     """
     monkeypatch.setattr(Chapter._meta, "unique_together", ())
     monkeypatch.setattr(
@@ -1079,10 +1077,8 @@ class TestLayerDismiss:
     def test_only_a_change_view_renders_the_discard_form(self, admin_client, chapter):
         """Discard dismisses an open editor, so the add view never offers it.
 
-        Whether the editor sits in a layer is a client-side fact, so the
-        button is hidden by the co-located CSS rather than by the server.
-        The browser suite asserts that visibility, this one asserts which
-        pages carry the form at all.
+        Whether the editor sits in a layer is a client-side fact, so the co-located CSS
+        hides the button. This test asserts only which pages carry the form.
         """
         discard_url = admin_client.get_action_url("admin:discard")
         change = admin_client.get(

@@ -119,10 +119,8 @@ def _page_backends_for_watch() -> list[RouterBackend]:
     read. An incomplete one is built again, because an entry can fail for a
     reason the next read no longer has, such as an app that had yet to load.
 
-    A process watching the disk holds nothing at all, so every read builds the
-    routers again. A router answers about the trees it probed while it was
-    built, and that is what makes a page tree created, moved, or removed under
-    the development server reach the very next read.
+    A process watching the disk memoises nothing, so a page tree created, moved, or
+    removed under the development server reaches the very next read.
     """
     if template_edits_watched():
         return _build_page_backends_for_watch()[0]
@@ -143,10 +141,8 @@ def _page_backends_for_watch() -> list[RouterBackend]:
 def iter_page_backends_for_watch() -> Iterator[RouterBackend]:
     """Return one router per `PAGE_BACKENDS` entry, skipping the ones that fail.
 
-    A backend that cannot be built costs its own trees and nothing else, so the
-    watcher keeps observing every tree the other entries report. Every router
-    is built before the iterator is handed back, so abandoning it half way
-    leaves nothing half built behind.
+    A backend that cannot be built costs its own trees alone, so the watcher still sees
+    every tree the other entries report, and every router is built eagerly.
     """
     return iter(_page_backends_for_watch())
 

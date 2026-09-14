@@ -21,9 +21,7 @@ _DEFAULT_BACKEND = "next.partial.JsonPartialProtocolBackend"
 def _backend_options(options: dict[str, object]) -> Iterator[None]:
     """Run the body against a protocol backend configured with `options`.
 
-    Entering and leaving `override_settings` reloads the framework
-    settings, which resets the shared manager on both edges, so the body
-    sees exactly the entry declared here.
+    Both edges of `override_settings` reset the shared manager through a reload.
     """
     config = {"BACKEND": _DEFAULT_BACKEND, "OPTIONS": options}
     with override_settings(NEXT_FRAMEWORK={"PARTIAL_BACKENDS": [config]}):

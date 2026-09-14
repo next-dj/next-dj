@@ -506,7 +506,6 @@ class TestFormDispatchRenderInvalidPageBranches:
         post = QueryDict(mutable=True)
         request = mock_http_request(method="POST", POST=post, FILES=None)
 
-        # Construct meta manually without form_class or handler.
         meta = {
             "handler": None,
             "form_class": None,
@@ -602,8 +601,7 @@ class TestDispatchOnValid:
         meta = backend.get_meta("none_form")
         assert meta is not None
 
-        # None → ensure_http_response(None, request, action_name, backend)
-        # → origin re-render → no resolvable origin → 400
+        # A None result re-renders the origin, which resolves to nothing, so 400.
         response = FormActionDispatch.dispatch(backend, request, "none_form", meta)
         assert response.status_code == 400
 

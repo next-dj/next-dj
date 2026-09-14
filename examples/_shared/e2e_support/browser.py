@@ -207,9 +207,7 @@ def _serve_from_cache(route: Route) -> None:
     if not path.exists():
         fetched = route.fetch()
         if not fetched.ok:
-            # An error page cached under a script name would be replayed as a valid
-            # bundle by every later run on this machine, so nothing is stored and the
-            # test sees the real status instead.
+            # Caching a failed fetch would replay the error page as a bundle forever.
             route.fulfill(response=fetched)
             return
         CDN_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -235,9 +233,8 @@ def _test_failed(request: pytest.FixtureRequest) -> bool:
 def pytest_runtest_call(item: pytest.Item) -> Generator[None, object, object]:
     """Fail the call phase, not the teardown, on the noise the probe collected.
 
-    pytest-playwright keeps the retain-on-failure trace, video and screenshot only
-    when `rep_call` failed, so a probe failing in teardown would delete its own
-    evidence.
+    pytest-playwright keeps the retain-on-failure trace, video and screenshot only when
+    `rep_call` failed, so a failure raised in teardown deletes its own evidence.
     """
     outcome = yield
     probe = item.stash.get(PROBE_KEY, None)

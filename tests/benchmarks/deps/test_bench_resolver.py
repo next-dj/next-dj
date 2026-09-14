@@ -136,9 +136,8 @@ class TestBenchDependencyResolver:
     def test_resolve_claimed_request_and_default(self, benchmark) -> None:
         """Plan replay over an ``HttpRequest`` annotation and one default kwarg.
 
-        The compile narrows the request parameter to the one provider that can
-        claim it, which still asks ``can_handle`` because only the context says
-        whether a request is in flight.
+        The compile narrows the request parameter to one provider, which still asks
+        ``can_handle`` because only the context knows whether a request is in flight.
         """
         resolver = _default_resolver()
         request = build_mock_http_request()

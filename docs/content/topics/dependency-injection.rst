@@ -90,6 +90,7 @@ The URL path provider coerces the captured segment to the requested type.
    :caption: notes/pages/notes/[int:note_id]/page.py
 
    from notes.models import Note
+
    from next import context
    from next.urls import DUrl
 
@@ -166,6 +167,7 @@ The query provider reads from ``request.GET``.
    :caption: notes/pages/search/page.py
 
    from notes.models import Note
+
    from next import context
    from next.urls import DQuery
 
@@ -335,8 +337,9 @@ The base classes are ``RegisteredParameterProvider`` and ``DDependencyBase``.
    :caption: notes/providers.py
 
    from typing import get_args, get_origin
+
    from django.http import Http404
-   from notes.models import Note
+
    from next.deps import DDependencyBase, RegisteredParameterProvider
 
    class DNote[T](DDependencyBase[T]):
@@ -372,6 +375,7 @@ Use the new marker.
 
    from notes.models import Note
    from notes.providers import DNote
+
    from next import context
 
    @context("note")
@@ -431,6 +435,7 @@ The function returns ``None`` outside a form dispatch, so callers handle the mis
    :caption: reading the cache
 
    from django.http import HttpRequest
+
    from next.deps import get_request_dep_cache
 
    def render(request: HttpRequest) -> str:

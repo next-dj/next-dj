@@ -16,10 +16,8 @@ PREFIX_FORMAT = "/_t/{slug}"
 class TenantPrefixStaticBackend(StaticFilesBackend):
     """Prepend a per-tenant URL prefix to every asset URL the pipeline renders.
 
-    The tenant comes from `request.tenant`, attached upstream by `TenantMiddleware`.
-    Rewriting in `asset_url` rather than in the renderer methods covers the co-located
-    assets, the runtime bundle and its preload hint from one place, and with no tenant
-    in scope the URL is left untouched.
+    The tenant comes from `request.tenant`, attached upstream by `TenantMiddleware`, and
+    rewriting in `asset_url` covers every asset kind from one place.
     """
 
     def asset_url(self, url: str, *, request: HttpRequest | None = None) -> str:

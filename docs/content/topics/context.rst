@@ -78,8 +78,9 @@ The decorator takes a single key and the function returns the value.
 .. code-block:: python
    :caption: notes/pages/page.py
 
-   from next import context
    from notes.models import Note
+
+   from next import context
 
    @context("notes")
    def recent_notes() -> list[Note]:
@@ -95,8 +96,9 @@ Decorating a function with bare ``@context`` and returning a dict merges every k
 .. code-block:: python
    :caption: notes/pages/posts/[int:post_id]/page.py
 
-   from next import context
    from notes.models import Post
+
+   from next import context
 
    @context
    def post_context(post: Post) -> dict[str, object]:
@@ -134,8 +136,9 @@ A zone GET that asks for any other zone skips the callable before its dependenci
 .. code-block:: python
    :caption: admin/audit/page.py
 
-   from next import context
    from audit.models import AuditEntry
+
+   from next import context
 
    @context("entries", zone="audit-table")
    def entries() -> list[AuditEntry]:
@@ -159,8 +162,9 @@ A helper that lives in a shared module therefore needs a thin wrapper in the pag
 .. code-block:: python
    :caption: notes/pages/dashboard/page.py
 
-   from next import context
    from notes.cache import pending_clicks
+
+   from next import context
 
    @context("pending_clicks")
    def dashboard_pending_clicks() -> dict[str, int]:
@@ -200,10 +204,11 @@ The factory takes its own dependency-injected arguments, so it can ask for the r
 .. code-block:: python
    :caption: notes/pages/notes/[int:note_id]/page.py
 
+   from notes.models import Note
+
    from next import context
    from next.pages import Context
    from next.urls import DUrl
-   from notes.models import Note
 
    def load_note(note_id: DUrl[int]) -> Note:
        return Note.objects.get(pk=note_id)
@@ -275,8 +280,9 @@ Leave the parameter untyped and return early when it is already a model instance
 .. code-block:: python
    :caption: notes/pages/notes/[category]/page.py
 
-   from next import context
    from notes.models import Category
+
+   from next import context
 
    @context("category", inherit_context=True)
    def category(category: object) -> Category:
@@ -349,9 +355,10 @@ Publish the page title from each page.
 .. code-block:: python
    :caption: notes/pages/notes/[int:note_id]/page.py
 
+   from notes.models import Note
+
    from next import context
    from next.urls import DUrl
-   from notes.models import Note
 
    @context("page_title")
    def page_title(note_id: DUrl[int]) -> str:

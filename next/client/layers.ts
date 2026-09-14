@@ -20,7 +20,7 @@ const BUSY_ATTR = "data-next-busy";
 export interface LayerCloseEvent {
   // The accept result, absent on a dismiss.
   result?: unknown;
-  // The dismiss reason ("escape", "backdrop", "dialog", or server text), absent on accept.
+  // The dismiss reason ("escape", "backdrop", "dialog", server text), absent on accept.
   reason?: string;
   dismiss?: boolean;
 }
@@ -28,7 +28,7 @@ export interface LayerCloseEvent {
 /** Ends the dialog from the runtime side without re-firing dismiss. */
 export type DialogControl = () => void;
 
-/** The native dialog modality behind a seam, open traps focus and wires the dismiss gestures. */
+/** The native dialog modality behind a seam, open traps focus and wires dismiss. */
 export interface DialogAdapter {
   open(dialog: HTMLDialogElement, onDismiss: (reason: string) => void): DialogControl;
 }
@@ -383,8 +383,7 @@ export function createLayers(deps: LayerDeps): LayerStack {
         toastHost.remove();
         toastHost = null;
       }
-      // Also drop the delegated click and popstate listeners install bound, so a
-      // reset leaves nothing on the document or window.
+      // Drop the click and popstate listeners install bound, so a reset leaves none.
       if (detach !== null) {
         detach();
         detach = null;

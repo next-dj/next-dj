@@ -1,10 +1,7 @@
 """Per-`page.py` context-callable registry and layout watch helpers.
 
-`PageContextRegistry` stores the list of context functions bound to
-each `page.py` path, and merges their return values (with keyed and
-dict-merge semantics) at render time. The watch helpers list
-`template.djx` and `layout.djx` files under page roots for the
-autoreloader and for the static finder.
+Context callables are keyed by the `page.py` that declared them, and the watch helpers
+list `template.djx` and `layout.djx` for the autoreloader and the static finder.
 """
 
 from __future__ import annotations
@@ -33,12 +30,8 @@ if TYPE_CHECKING:
 class PageContextEntry(NamedTuple):
     """One context callable registered for a `page.py` file.
 
-    The optional `serializer` overrides the global JS context
-    serializer for the value this callable produces, but only when
-    `serialize` is true. The optional `zones` binds the callable to the
-    named zones, so a GET for a foreign zone never calls it. Backed by
-    `NamedTuple` so the hot `register_context` path allocates a plain
-    tuple rather than a frozen dataclass instance.
+    `zones` binds the callable to the named zones, so a GET for a foreign zone never
+    calls it, and a `NamedTuple` keeps `register_context` allocating a plain tuple.
     """
 
     func: Callable[..., Any]
@@ -186,8 +179,7 @@ class PageContextRegistry:
     ) -> None:
         """Bind `func` to `file_path` with keyed or dict-merge semantics.
 
-        A `zone` name scopes the callable to that zone, so a GET for any
-        other zone skips it entirely.
+        A `zone` name scopes the callable, so a GET for any other zone skips it.
         """
         if zone is not None and inherit_context:
             msg = (
@@ -227,14 +219,8 @@ class PageContextRegistry:
     ) -> ContextResult:
         """Merge inherited ancestor page.py context with this file's context callables.
 
-        Inherited context comes from ``@context(..., inherit_context=True)``
-        callables in ancestor ``page.py`` files, not from layout files. The
-        returned `ContextResult` separates the full template context from the
-        JavaScript-serializable subset. The js_context uses first-registration
-        semantics so that page-level values always take priority over
-        inherited ones. A `_requested_zones` batch narrows this file's
-        callables to the zone-less ones plus those bound to a named zone in
-        the batch, a full render passes no batch and runs every callable.
+        Inherited context comes from `inherit_context=True` callables in ancestor
+        `page.py` files, not layouts, and first registration wins for the js_context.
         """
         context_data: dict[str, Any] = {}
         js_context: dict[str, Any] = {}
@@ -327,8 +313,7 @@ class PageContextRegistry:
     def _entries_in_merge_order(self, file_path: Path) -> _OrderedEntries:
         """Return this file's callables in the order the merge consumes them.
 
-        Keyless callables come first so a dict merge never overwrites a keyed
-        value, and keyed ones follow in string order.
+        Keyless callables come first, so a dict merge never overwrites a keyed value.
         """
         self._sync_memos()
         entries = self._merge_order.get(file_path)

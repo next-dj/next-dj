@@ -1,7 +1,6 @@
 """Walk of the routed page tree and the serialized context keys it declares.
 
-Both the pages checks and the static reserved-key check read it, and unlike a
-`checks` module it stays under the coverage gate.
+Both the pages checks and the static reserved-key check read it.
 """
 
 from __future__ import annotations

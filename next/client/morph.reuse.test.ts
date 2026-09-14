@@ -6,8 +6,7 @@ function mount(html: string): Element {
   return document.body.firstElementChild!;
 }
 
-// A move adapter that records moves and falls back to insertBefore, since native
-// moveBefore is absent from jsdom.
+// Records moves and falls back to insertBefore, since jsdom has no moveBefore.
 function recordingMove() {
   const moved: Element[] = [];
   return {
@@ -137,8 +136,7 @@ describe("middle insertion into a keyless list shifts the tail onto the wrong ro
     // A keyless soft match only checks the pointer, never a forward scan, so old
     // rows are reused in document order and a fresh node fills the final slot.
     expect(moved).toHaveLength(0);
-    // The tail slides to the B position, the dirty pin carries the typed value
-    // onto a row the server now names "b".
+    // The tail slides to the B position, the dirty pin carrying the typed value along.
     expect(tail.isConnected).toBe(true);
     expect(after.indexOf(tail)).toBe(2);
     expect(tail.querySelector<HTMLInputElement>("input")!.name).toBe("b");

@@ -137,8 +137,7 @@ def reloader_tick_scenario(request):
 def intent_only_shaper():
     """Bind a shaper that refuses to shape, restore the real one after.
 
-    The slot is process-global, so the previously bound implementation is
-    captured and put back rather than dropped.
+    The slot is process-global, so the previous implementation is put back, not dropped.
     """
     bound = partial_shaper_slot.get()
     shaper = IntentOnlyShaper()

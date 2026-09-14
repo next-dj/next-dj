@@ -366,8 +366,7 @@ describe("assets registry and delta", () => {
       [{ kind: "js", url: "http://x/odd.css", load: "link" }],
       () => undefined,
     );
-    // A url of its own, so only the verb guard (not the dedup key) can keep it
-    // out of the head.
+    // A url of its own, so only the verb guard can keep it out of the head.
     assets.loadJs([{ kind: "js", url: "http://x/other.css", load: "link" }]);
     expect(loaded).toEqual(["http://x/odd.css"]);
     expect(document.head.querySelectorAll("script")).toHaveLength(0);
@@ -401,8 +400,7 @@ describe("assets registry and delta", () => {
     document.head.innerHTML = "<script>mount()</script>";
     const { assets } = makeAssets();
     assets.seed();
-    // The seeded body ran as a classic script, so the module form of the same
-    // source still has to be inserted.
+    // The seeded body ran as a classic script, so the module form still inserts.
     assets.loadJs([inlineModule("mount()")]);
     const scripts =
       document.head.querySelectorAll<HTMLScriptElement>("script:not([src])");
@@ -538,8 +536,7 @@ describe("url dedup keys", () => {
       '<script type="module" src="http://cdn.example.com/build/app.mjs"></script>';
     const { assets } = makeAssets();
     assets.seed();
-    // Keyed against the location, the relative url would resolve elsewhere and
-    // the module would evaluate twice.
+    // Keyed against the location, or the relative url would evaluate twice.
     assets.loadJs([{ kind: "module", url: "app.mjs", load: "module" }]);
     expect(document.head.querySelectorAll("script[src]")).toHaveLength(1);
   });
@@ -675,8 +672,7 @@ describe("seeding across the parse window", () => {
     const { assets } = makeAssets();
     assets.seed();
     parseTag('<script src="/static/d.js"></script>');
-    // A deferred script runs once readyState has flipped but before the event,
-    // so the pending catch-up gates the rescan.
+    // readyState flipped but the event has not fired, so the catch-up gates the rescan.
     readyState("interactive");
     assets.loadJs([{ kind: "js", url: "/static/d.js" }]);
     expect(document.querySelectorAll('script[src="/static/d.js"]')).toHaveLength(1);

@@ -19,8 +19,7 @@ _SSE_EVENT_NAME = "next-patches"
 class PartialProtocolBackend(ABC):
     """Pluggable strategy for the wire format of patch envelopes.
 
-    The constructor takes the full `PARTIAL_BACKENDS` entry and exposes its OPTIONS on
-    `options`, leaving the wire format to the subclass.
+    The constructor takes the whole `PARTIAL_BACKENDS` entry and exposes its OPTIONS.
     """
 
     content_type: str
@@ -49,8 +48,7 @@ class PartialProtocolBackend(ABC):
 class JsonPartialProtocolBackend(PartialProtocolBackend):
     """Serialize envelopes as compact JSON under the next.dj patch MIME type.
 
-    The response body and the SSE data line carry the same JSON envelope, so a client
-    reading one wire format reads the other unchanged.
+    The response body and the SSE data line carry the same JSON envelope.
     """
 
     content_type = CONTENT_TYPE

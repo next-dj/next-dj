@@ -61,9 +61,7 @@ class ComponentsBackend(ABC):
     ) -> bool:
         """Register `folder` under `scope_relative` below `pages_root`, or answer False.
 
-        The page-tree walk offers each components folder to the backends in
-        configuration order and stops at the first that answers True, so one
-        folder belongs to exactly one backend.
+        The walk stops at the first backend answering True, so a folder has one owner.
         """
         del folder, pages_root, scope_relative
         return False
@@ -71,9 +69,7 @@ class ComponentsBackend(ABC):
     def iter_components(self) -> Iterable[ComponentInfo]:
         """Return every component this backend has registered, for diagnostics.
 
-        The system checks enumerate components through this to report
-        duplicate names and wrong-decorator modules, which the render
-        contract alone cannot answer.
+        The checks report duplicate names and wrong-decorator modules through this.
         """
         return ()
 
@@ -151,9 +147,8 @@ class FileComponentsBackend(ComponentsBackend):
     def import_component_modules(self) -> tuple[Path, ...]:
         """Import every discovered `component.py` and return their paths.
 
-        The import is deliberately unconditional, which is why a caller that
-        walks decorator state pays under `LAZY_COMPONENT_MODULES` the import
-        that the lazy mode otherwise avoids.
+        The import is unconditional, so a caller that walks decorator state pays under
+        `LAZY_COMPONENT_MODULES` the import the lazy mode otherwise avoids.
         """
         self._ensure_loaded()
         self._import_registered_modules()

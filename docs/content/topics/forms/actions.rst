@@ -196,6 +196,7 @@ A bare ``@action`` or an empty ``@action()`` registers the function under its ow
    :caption: page.py
 
    from django.http import HttpRequest
+
    from next import action
    from next.forms import redirect_to_origin
    from next.urls import DUrl
@@ -232,6 +233,7 @@ Keep ``@action`` outermost when other decorators apply to the same handler.
 
    from django.db import transaction
    from django.http import HttpRequest
+
    from next import action
    from next.forms import redirect_to_origin
    from next.urls import DUrl
@@ -301,6 +303,7 @@ A ``(FormClass, init_kwargs)`` tuple.
    :caption: page.py — a factory returning the tuple form
 
    from django.shortcuts import get_object_or_404, redirect
+
    from next import action
    from next.urls import DUrl
 
@@ -419,8 +422,9 @@ Unlike the static guard, the dynamic hooks intentionally run application code.
 .. code-block:: python
    :caption: page.py — view-level gate with no parameters
 
-   import next.forms
    from notes.models import Note
+
+   import next.forms
 
    class TenantNoteForm(next.forms.ModelForm):
        class Meta:
@@ -561,6 +565,7 @@ Call ``messages.success`` in the handler body instead.
 
    from django.contrib import messages
    from django.http import HttpRequest
+
    from next import action
    from next.forms import redirect_to_origin
    from next.urls import DUrl

@@ -208,9 +208,7 @@ class TestNextScriptBuilderFromOptions:
 class TestInitScriptGoldenParity:
     """Fragment-assembled init payload stays byte-identical to the whole-dict dump.
 
-    Each case builds a collector the way the static manager does, then asserts
-    the new `encoded`-driven `init_script` output equals the legacy payload for
-    the compact serializers the framework ships.
+    Each case builds its collector the way the static manager does, for each serializer.
     """
 
     def _assert_parity(

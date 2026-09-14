@@ -80,9 +80,7 @@ class FormWizardBackend(ABC):
     ) -> None:
         """Persist cleaned data for a single step.
 
-        Implementations must persist `data` so a later `load` returns an
-        equivalent mapping for the step. The wizard write-through cache
-        assumes saved data round-trips verbatim.
+        The write-through cache assumes a later `load` round-trips `data` verbatim.
         """
 
     @abstractmethod

@@ -63,8 +63,7 @@ class ComponentsManager:
 
         ml = ModuleLoader()
 
-        # Read here rather than per render, because the pipeline is built once
-        # and dropped whole whenever settings reload.
+        # Read here, not per render, because a settings reload drops the pipeline whole.
         tl = _configured_template_loader_class()(ml)
         self._template_loader = tl
         simple = SimpleComponentRenderer(tl)
@@ -134,8 +133,7 @@ class ComponentsManager:
     def _claim_router_walk_folder(self, folder: Path) -> bool:
         """Return True the first time a router-walk folder is claimed.
 
-        Owns the dedup set so a repeated walk over the same folder
-        registers its components only once.
+        Owns the dedup set, so a repeated walk registers a folder's components once.
         """
         key = folder.resolve()
         if key in self._walk_registered_folders:

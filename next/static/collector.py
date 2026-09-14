@@ -5,10 +5,7 @@ along in the template context, absorbs every `{% use_style %}`, `{% #use_script 
 co-located `template.css`, and `styles` or `scripts` list entry, then hands the
 accumulated set back to the static manager when the template finishes.
 
-The collector does not hardcode deduplication or merge semantics. Strategy objects plug
-in at construction time, so users can swap URL-based dedup for content-hash dedup or
-replace the default first-wins JS-context merge with a deep-merge policy without
-touching the collector source.
+Dedup and merge semantics plug in as strategies at construction, not hardcoded here.
 
 The collector is also fully type-agnostic. Each asset routes to a slot named in
 `KindRegistry`, and the buckets live in a slot-keyed dictionary on the collector. There
@@ -76,9 +73,8 @@ class UrlDedup:
 class HashContentDedup:
     """Dedupe URL-form assets by sha256 of their disk content.
 
-    This is useful in production builds where identical CSS may be emitted under
-    different hashed filenames by a manifest storage. The strategy falls back to
-    URL-based dedup when the `source_path` is missing.
+    A manifest storage may emit identical CSS under different hashed filenames, and an
+    asset that carries no `source_path` falls back to URL dedup.
     """
 
     def __init__(self) -> None:
@@ -278,9 +274,7 @@ class StaticCollector:
     during injection. The collector has no knowledge of backends or rendering. It
     coordinates insertion order, deduplication, and JS context merging.
 
-    Buckets are keyed by slot name as resolved through `KindRegistry`. The collector
-    does not hardcode any specific slot, so adding new asset kinds to the registry
-    transparently produces new buckets.
+    Buckets are keyed by slot through `KindRegistry`, so a new kind gets a new bucket.
     """
 
     def __init__(
@@ -348,13 +342,8 @@ class StaticCollector:
     ) -> None:
         """Merge the value under the key through the JS-context policy.
 
-        Validates that `value` is serialisable by the active serializer
-        before merging. Surfacing the failure here, at the registration
-        site, gives a much better traceback than catching it at final
-        page inject time. When `serializer` is supplied, the override
-        validates this value and is recorded for the inject phase so
-        the same key uses the same serializer end to end. The override
-        does not leak into other keys.
+        Validating here rather than at inject time puts the registration site in the
+        traceback, and a `serializer` override is recorded for this key alone.
         """
         active = serializer if serializer is not None else self._get_js_serializer()
         try:
@@ -380,8 +369,7 @@ class StaticCollector:
     def js_context_serializers(self) -> dict[str, JsContextSerializer]:
         """Return the per-key serializer overrides recorded so far.
 
-        The returned mapping is empty when every key uses the global
-        serializer. Callers must not mutate it.
+        Empty when every key uses the global serializer, and callers must not mutate it.
         """
         return self._js_context_serializers
 

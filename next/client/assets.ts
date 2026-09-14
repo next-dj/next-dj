@@ -20,8 +20,7 @@ const CSS_TIMEOUT_MS = 3000;
 /**
  * Insert a stylesheet and signal load, timeout, or error through one callback.
  *
- * A seam because jsdom never fires link.onload, so the timeout and error
- * branches are otherwise untestable.
+ * A seam because jsdom never fires link.onload, leaving the branches untestable.
  */
 export type LinkLoader = (
   url: string,
@@ -63,26 +62,21 @@ export interface Assets {
   /** Seed the registry from the assets already present in the document. */
   seed(): void;
   /**
-   * Insert the missing link-verb assets of a manifest and call done once every
-   * new sheet has loaded, errored, or timed out.
+   * Insert missing link-verb assets, done runs once every new sheet loads or fails.
    *
-   * With none missing done runs synchronously, unless the document is still
-   * parsing, where the whole phase waits for the end of the parse.
+   * With none missing done runs synchronously, or at the end of a running parse.
    */
   loadCss(manifest: readonly Asset[], done: () => void): void;
   /**
-   * Run the missing script and module verbs of a manifest after the ops, each
-   * URL and each inline body once per page.
+   * Run the missing script and module verbs after the ops, each source once per page.
    */
   loadJs(manifest: readonly Asset[]): void;
   /** The current asset version known to the client, sent on every request. */
   version(): string;
   /**
-   * Compare the envelope version against the known one, true meaning do not
-   * apply.
+   * Compare the envelope version against the known one, true meaning do not apply.
    *
-   * A mismatch starts a single full visit under the reload-once flag, or fires
-   * partial:error when a reload already happened.
+   * A mismatch starts a full visit under the reload-once flag, or fires partial:error.
    */
   versionMismatch(envelopeVersion: string, url: string): boolean;
   /** Record the version of an applied envelope and clear the reload-once flag. */
@@ -208,8 +202,7 @@ export function createAssets(deps: AssetsDeps): Assets {
     return true;
   }
 
-  // The verb a manifest entry asks for, undefined when the entry is malformed
-  // or its kind carries no client verb.
+  // The verb an entry asks for, undefined when it is malformed or its kind has none.
   function verbOf(asset: Asset): AssetLoad | undefined {
     if (!isAsset(asset)) return undefined;
     return assetLoad(asset.kind, asset.load, asset.inline);
@@ -222,8 +215,7 @@ export function createAssets(deps: AssetsDeps): Assets {
     doc.head.append(el);
   }
 
-  // async is pinned to false so a src element joins the in-order list instead
-  // of running as soon as it is ready.
+  // async is pinned false so a src element joins the in-order list.
   function makeScript(load: "script" | "module"): HTMLScriptElement {
     const el = doc.createElement("script");
     if (load === "module") el.type = "module";
@@ -260,8 +252,7 @@ export function createAssets(deps: AssetsDeps): Assets {
         if (!ok) errored = true;
         pending -= 1;
         if (pending > 0) return;
-        // The ops still run, so a 404 cannot leave a response unapplied.
-        // partial:error reports the styling gap.
+        // The ops already ran, partial:error only reports the styling gap.
         if (errored) {
           deps.dispatch("partial:error", {
             kind: "asset",
@@ -276,8 +267,7 @@ export function createAssets(deps: AssetsDeps): Assets {
     });
   }
 
-  // One pass in manifest order so a module and a classic script insert in the
-  // order the server listed them.
+  // One pass in manifest order, so module and classic scripts keep the server's order.
   function loadJs(manifest: readonly Asset[]): void {
     whenParsed(() => {
       catchUp();
@@ -303,8 +293,7 @@ export function createAssets(deps: AssetsDeps): Assets {
   function versionMismatch(envelopeVersion: string, url: string): boolean {
     if (envelopeVersion === "" || envelopeVersion === knownVersion) return false;
     if (knownVersion === "") {
-      // The first envelope teaches the runtime the live version, nothing to be
-      // out of sync with yet.
+      // The first envelope teaches the live version, nothing to be out of sync yet.
       knownVersion = envelopeVersion;
       return false;
     }

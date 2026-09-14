@@ -59,6 +59,7 @@ A backend that reads an option declares a constructor and pulls ``OPTIONS`` out 
    :caption: reading OPTIONS in a custom backend
 
    from typing import Any
+
    from next.forms import RegistryFormActionBackend
 
    class ThrottledBackend(RegistryFormActionBackend):
@@ -263,8 +264,9 @@ The most common customisation overrides ``dispatch`` to wrap the standard dispat
    :caption: notes/backends.py
 
    from django.http import HttpRequest, HttpResponse
-   from next.forms import RegistryFormActionBackend
    from notes.models import AuditEntry
+
+   from next.forms import RegistryFormActionBackend
 
    class AuditedFormActionBackend(RegistryFormActionBackend):
        """Registry backend that writes an audit row per dispatch."""

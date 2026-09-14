@@ -181,8 +181,8 @@ def _json_object_at(text: str, start: int) -> str:
 def find_anchor(html: str, *, href: str | None = None, text: str | None = None) -> str:
     """Return the first `<a>...</a>` substring that matches the filters.
 
-    `href` matches exactly, `text` as a substring of the stripped inner text. An anchor
-    inside a comment or a script body never matches.
+    `href` matches exactly and `text` matches as a substring of the stripped inner text,
+    while an anchor inside a comment or a script body never matches.
     """
     for anchor in _elements(html, "a"):
         if href is not None and anchor.attrs.get("href") != href:
@@ -245,8 +245,7 @@ def form_fields(fragment: str) -> dict[str, str]:
 def hidden_fields(fragment: str) -> dict[str, str]:
     """Return the hidden `<input>` name to value pairs inside the fragment.
 
-    Same contract as `form_fields`, narrowed to the `type="hidden"` inputs a form
-    expects echoed back on submit.
+    Same contract as `form_fields`, narrowed to the `type="hidden"` inputs.
     """
     return _input_fields(fragment, hidden_only=True)
 

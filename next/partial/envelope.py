@@ -55,9 +55,7 @@ class Patch:
 class Asset:
     """One co-located asset of a rendered target by kind, URL, and inline body.
 
-    The `load` field is the client insertion verb resolved from the kind
-    registry. It stays None for a kind the runtime cannot insert, and the
-    wire then omits the field entirely.
+    `load` is the insertion verb from the kind registry, omitted when the kind has none.
     """
 
     kind: str
@@ -141,8 +139,7 @@ class Envelope:
     def from_dict(cls, data: "Mapping[str, Any]") -> "Envelope":
         """Rebuild an envelope from its wire mapping, the inverse of `as_dict`.
 
-        Kept beside the writer so one reading of the wire format serves the
-        serializer and the test client alike.
+        Kept beside the writer so the serializer and the test client read one format.
         """
         form = data.get(keys.FORM)
         return cls(

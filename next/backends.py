@@ -43,9 +43,8 @@ def resolve_backend_class[T](
     if not (isinstance(klass, type) and issubclass(klass, root)):
         raise BackendNotSubclassError(dotted, root.__name__)
     if inspect.isabstract(klass):
-        # The family roots are the abstract classes a settings entry is most
-        # likely to name by mistake, and instantiating one answers a TypeError
-        # no caller of this family is written to read.
+        # The abstract family roots are what a settings entry most likely names
+        # by mistake, and instantiating one answers a TypeError no caller reads.
         raise AbstractBackendError(dotted)
     return klass
 

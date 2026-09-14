@@ -23,9 +23,7 @@ def _advance_identity(next_client: NextClient, **kwargs) -> HttpResponse:
 class TestWizardAdvanceStepsByEnvelope:
     """A partial step advance morphs the next step's zone, never redirects.
 
-    The first step validates, the master zone of the next step renders the
-    unbound scope form, the `name` field of the prior step is gone and the
-    `scope` field of the next step has arrived.
+    The first step validates and the master zone of the next step renders unbound.
     """
 
     def test_partial_advance_is_an_envelope_not_a_redirect(
@@ -205,9 +203,8 @@ class TestWizardAdvanceShipsZoneAssetsAndContext:
 class TestWizardAdvanceWholePage:
     """A wizard advance with no zone extract-morphs the next step form.
 
-    Without a named zone the advance re-renders the whole next step page
-    and trims the form out by uid, the same shape the invalid path uses,
-    so the envelope is never an empty 204.
+    Without a named zone the advance re-renders the whole next step page and trims the
+    form out by uid, so the envelope is never an empty 204.
     """
 
     @pytest.fixture()

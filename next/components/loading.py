@@ -1,9 +1,6 @@
 """LRU cache and loader for `component.py` modules.
 
-`ModuleCache` keeps a bounded mapping of file paths to loaded modules
-so repeated renders do not re-execute module top level on every
-request. `ModuleLoader` wraps the cache and falls back to reading the
-file when the entry is missing.
+The cache spares repeated renders the cost of re-executing module top level.
 """
 
 from __future__ import annotations

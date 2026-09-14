@@ -1045,8 +1045,7 @@ class TestSettingChangedReload:
                 "STATIC_BACKENDS": [{"BACKEND": "next.static.StaticFilesBackend"}]
             }
         ):
-            # override_settings fires setting_changed, which calls reload.
-            # The first attribute access rebuilds the manager.
+            # override_settings fires setting_changed, so the first access rebuilds.
             assert isinstance(default_manager.default_backend, StaticFilesBackend)
 
     def test_override_settings_drops_the_cached_asset_plans(

@@ -29,6 +29,7 @@ The default is used when the key is absent from the query string.
    :caption: storefront/page.py
 
    from catalog.models import Product
+
    from next import context
    from next.urls import DQuery
 
@@ -128,6 +129,7 @@ When several callables need the same filter set, parse it once into a frozen dat
    :caption: catalog/providers.py
 
    from dataclasses import dataclass
+
    from next.urls import get_multi_values
 
    @dataclass(frozen=True, slots=True)
@@ -183,6 +185,7 @@ Child callables then ask for ``category`` by parameter name and never re-query.
 
    from catalog.models import Category
    from django.http import Http404
+
    from next import context
 
    @context("category", inherit_context=True)
@@ -200,6 +203,7 @@ A descendant page reads the resolved instance back through its parameter name.
    :caption: storefront/catalog/[category]/products/page.py
 
    from catalog.models import Category, Product
+
    from next import context
 
    @context("products")

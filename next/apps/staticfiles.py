@@ -14,11 +14,7 @@ _FINDER_PATH = "next.static.NextStaticFilesFinder"
 def install() -> None:
     """Wire the staticfiles finder and register the framework's built-in asset kinds.
 
-    Adds `NextStaticFilesFinder` to `STATICFILES_FINDERS` once and
-    populates the public `KindRegistry` and `PlaceholderRegistry` with
-    framework-shipped defaults through the same API user code uses.
-    Both steps are idempotent so the function is safe under settings
-    reloads or re-entrant `ready` calls.
+    Both steps are idempotent, so a settings reload or a re-entrant `ready` is safe.
     """
     configured = list(getattr(settings, "STATICFILES_FINDERS", []))
     if _FINDER_PATH not in configured:

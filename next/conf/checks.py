@@ -1,9 +1,7 @@
 """System checks for the configuration layer.
 
-Unknown top-level keys are reported as `next.E035`, values whose type
-the settings merge would silently discard as `next.E076`, a
-`NEXT_FRAMEWORK` that is no dict at all as `next.E077`, and non-bool
-values for bool flags as `next.W072`.
+The ids are `next.E035` for an unknown key, `next.E076` and `next.W072` for a value the
+merge would discard, and `next.E077` for a non-dict `NEXT_FRAMEWORK`.
 """
 
 from __future__ import annotations
@@ -31,8 +29,7 @@ def check_next_framework_unknown_top_level_keys(*args, **kwargs) -> list[CheckMe
     return common.errors_for_unknown_keys(raw, allowed=allowed, prefix="NEXT_FRAMEWORK")
 
 
-# These carry their own raw per-key checks in next.forms and next.partial, so
-# probing them here would report one key twice.
+# next.forms and next.partial carry their own raw per-key checks for these.
 _TYPED_LIST_KEYS: frozenset[str] = NextFrameworkSettings.LIST_KEYS - {
     "FORM_ACTION_BACKENDS",
     "FORM_ANCHOR_FILES",
@@ -54,10 +51,8 @@ _SILENCE_HINT = (
 def check_next_framework_value_types(*args, **kwargs) -> list[CheckMessage]:
     """Report `NEXT_FRAMEWORK` values whose type the merge would silently drop.
 
-    A `NEXT_FRAMEWORK` that is no dict is `next.E077` on its own and skips
-    the per-key probes, which have nothing to index into. It carries its own
-    id because silencing the noise from one mistyped key must not silence
-    "the whole setting is ignored".
+    A non-dict `NEXT_FRAMEWORK` skips the per-key probes and carries its own id, so
+    silencing one mistyped key never silences "the whole setting is ignored".
     """
     raw = getattr(settings, USER_SETTING, None)
     if raw is None:

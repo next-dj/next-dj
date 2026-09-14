@@ -18,12 +18,13 @@ Every signal lives in the subpackage that emits it.
 The aggregator ``next.signals`` re-exports every name so handlers can pull from a single import.
 
 .. code-block:: python
-   :caption: import patterns
+   :caption: through the aggregator
 
-   # Aggregator
    from next.signals import action_dispatched, page_rendered
 
-   # Subpackage import
+.. code-block:: python
+   :caption: through the subpackage modules
+
    from next.forms.signals import action_dispatched
    from next.pages.signals import page_rendered
 
@@ -155,7 +156,9 @@ Use ``django.dispatch.receiver`` to connect a callable to a signal.
    :caption: notes/receivers.py
 
    import logging
+
    from django.dispatch import receiver
+
    from next.signals import action_dispatched
 
    logger = logging.getLogger(__name__)
@@ -176,6 +179,7 @@ The same ``dispatch_uid`` passed to ``connect`` can be supplied to ``disconnect`
    :caption: notes/receivers.py
 
    import logging
+
    from next.signals import action_dispatched
 
    logger = logging.getLogger(__name__)

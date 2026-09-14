@@ -25,8 +25,9 @@ Declaring it is enough to make it reachable by name from any template, and the a
 .. code-block:: python
    :caption: notes/pages/notes/edit/[slug]/page.py — auto-registered as ``note_edit_form``
 
-   import next.forms
    from notes.models import Note
+
+   import next.forms
 
    class NoteEditForm(next.forms.ModelForm):
        class Meta:
@@ -185,8 +186,9 @@ On an edit page the route captures the kwarg named by ``instance_from_url``, so 
 .. code-block:: python
    :caption: notes/forms.py — shared scope, one class for both pages
 
-   import next.forms
    from notes.models import Note
+
+   import next.forms
 
    class NoteEditForm(next.forms.ModelForm):
        class Meta:

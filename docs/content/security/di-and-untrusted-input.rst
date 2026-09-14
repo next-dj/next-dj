@@ -42,6 +42,7 @@ Always validate the string before passing it into ORM lookups or external servic
 
    from django.shortcuts import get_object_or_404
    from notes.models import Note
+
    from next import context
    from next.urls import DUrl
 
@@ -139,9 +140,11 @@ The ``url_kwargs`` dict and ``request.GET`` are both untrusted.
 
    import re
    from typing import get_origin
+
    from django.http import Http404
-   from next.deps import DDependencyBase, RegisteredParameterProvider
    from notes.models import Link
+
+   from next.deps import DDependencyBase, RegisteredParameterProvider
 
    class DLink[T](DDependencyBase[T]):
        __slots__ = ()
@@ -178,6 +181,7 @@ Django ships ``url_has_allowed_host_and_scheme`` in ``django.utils.http`` for th
 
    from django.http import HttpRequest, HttpResponseRedirect
    from django.utils.http import url_has_allowed_host_and_scheme
+
    from next.forms import CharField, Form
    from next.urls import DQuery
 

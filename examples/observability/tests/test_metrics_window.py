@@ -87,8 +87,7 @@ class TestReadWindowKindIsolation:
 class TestReadWindowPruning:
     """Bucket entries are dropped from the index only when the cache evicts them.
 
-    Reading with a narrow window must not evict entries that a later
-    read with a wider window still needs.
+    A narrow read must not evict entries that a later wider read still needs.
     """
 
     def test_narrow_window_read_does_not_evict_older_buckets(self, frozen_now) -> None:

@@ -21,10 +21,8 @@ _loaded_dirs: set[Path] = set()
 def eager_load_pages(base_dir: Path | str) -> list[Path]:
     """Import every `page.py` under `base_dir` and return loaded paths.
 
-    The call is idempotent for the same absolute directory. Non-existent
-    paths raise `FileNotFoundError`. Importer errors bubble up so that
-    broken page modules fail loudly in test setup rather than producing
-    confusing 404 responses later.
+    The call is idempotent per absolute directory, and an importer error bubbles up so a
+    broken page fails in setup rather than as a confusing 404 later.
     """
     directory = Path(base_dir).resolve()
     if not directory.is_dir():

@@ -1507,8 +1507,7 @@ class TestPageModuleImportErrors:
 
     def test_a_record_the_file_outlived_stops_arming_the_probe(self, tmp_path) -> None:
         """A dead record is dropped, so the per-request gate goes quiet again."""
-        # The gate reads a process-wide store, so it answers for this file only
-        # once nothing else is on record.
+        # The gate reads a process-wide store, so it answers for this file alone.
         reset_module_memo()
         page_file = tmp_path / "page.py"
         page_file.write_text("def render( invalid syntax {\n")

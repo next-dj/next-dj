@@ -983,9 +983,7 @@ class TestFormNodePartialAttrs:
 class TestFormTagPartialParams:
     """The validate, trigger, debounce, and zone params compile to data-next-*.
 
-    The server authors the client attribute names so the markup never
-    carries a raw selector or swap mode. Without the params the opening
-    tag stays free of every partial attribute.
+    The server authors the names so the markup carries no raw selector or swap mode.
     """
 
     @staticmethod

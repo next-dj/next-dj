@@ -36,7 +36,6 @@ Keep the fields minimal so the tutorial stays focused on the framework.
 
    from django.db import models
 
-
    class Note(models.Model):
        title = models.CharField(max_length=120)
        body = models.TextField(blank=True)
@@ -77,7 +76,6 @@ Create the page module.
    from notes.models import Note
 
    from next import context
-
 
    @context("notes")
    def recent_notes() -> list[Note]:

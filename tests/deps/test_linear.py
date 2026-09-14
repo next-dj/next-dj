@@ -69,8 +69,7 @@ def _deferred(value: HttpRequest | None = None) -> None:
     return None
 
 
-# Its own callable, because a hint memo is process-wide and the test below makes
-# this one resolve for good.
+# Its own callable, because the hint memo is process-wide and this one resolves once.
 _deferred.__annotations__["value"] = "_LateHttpRequest"
 
 
@@ -334,9 +333,7 @@ def _agree(first: object, second: object) -> bool:
 class TestPathParity:
     """The compiled plan and the linear walk answer the same thing.
 
-    The golden matrix pins both paths against a literal. These rows compare the
-    two against each other, where the shapes are messy enough that no literal
-    would stay readable.
+    These rows compare the two paths where no literal would stay readable.
     """
 
     @pytest.mark.parametrize("case", PARITY_CASES, ids=attrgetter("id"))
@@ -377,8 +374,7 @@ class TestPathParity:
     def test_both_paths_agree_on_provides(self, name: str, context_id: str) -> None:
         planned = _with_theme(DependencyResolver)
         linear = _with_theme(LinearDependencyResolver)
-        # Both implementations match the entry by name alone, so the parameter
-        # handed in carries nothing else.
+        # Both paths match the entry by name, so the parameter carries nothing else.
         param = inspect_parameter(name)
         context = make_resolution_context(**_CONTEXTS[context_id])
         for func in (_markers, _forms, _skipping):

@@ -71,10 +71,7 @@ NEXT_FRAMEWORK = {
         {
             "BACKEND": "next.urls.FileRouterBackend",
             "APP_DIRS": True,
-            # `site/` holds the project-level HTML envelope plus the
-            # `site_footer` project-shared component. The file router
-            # walks this root alongside `blog/screens/`, and components
-            # under `site/_parts/` become root-scope visible everywhere.
+            # The project-level page root `site/` holds the envelope and `site_footer`.
             "DIRS": [str(BASE_DIR / "site")],
             "PAGES_DIR": "screens",
             "OPTIONS": {
@@ -88,10 +85,7 @@ NEXT_FRAMEWORK = {
     "COMPONENT_BACKENDS": [
         {
             "BACKEND": "next.components.FileComponentsBackend",
-            # Two extra component roots: the cross-project shadcn kit AND
-            # the project-level `_parts/` next to the shared layout. The
-            # second entry makes `site_footer` resolve at the empty route
-            # scope across every template in the project.
+            # The second root makes `site_footer` resolve at the empty route scope.
             "DIRS": [
                 str(SHARED_DIR / "_components"),
                 str(BASE_DIR / "site" / "_parts"),

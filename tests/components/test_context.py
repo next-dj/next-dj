@@ -21,8 +21,7 @@ from tests.support import attribution, handler_declared_here, record_path_calls
 from tests.support.components import build_composite_component
 
 
-# The package rebinds the name `context` to the decorator, so the module that
-# holds the bound answers under its import path.
+# The package name `context` is the decorator, so the module comes from `sys.modules`.
 _CONTEXT_MODULE = sys.modules["next.components.context"]
 
 

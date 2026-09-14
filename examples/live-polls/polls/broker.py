@@ -83,10 +83,7 @@ class PollBroker:
     def publish(self, snapshot: Snapshot, request_id: str | None = None) -> None:
         """Store `snapshot`, record the request id, bump the revision, wake all.
 
-        The request id of the mutation rides with the change so the
-        stream page can stamp it as the envelope echo. A caller without
-        a request id (a backfill or a test) publishes `None` and no
-        subscriber suppresses the change.
+        The request id rides with the change so the stream page can echo it.
         """
         store_snapshot(snapshot)
         condition = self._conditions[snapshot.poll_id]
@@ -103,9 +100,7 @@ class PollBroker:
         A wake timeout loops without yielding, the sync source under WSGI sending no
         keepalive, which is the documented limitation the framework stream notes.
 
-        On client disconnect the generator receives `GeneratorExit` and stops looping.
-        No per-subscriber bookkeeping needs unwinding because the per-poll condition and
-        revision counter are shared state.
+        On disconnect the generator receives `GeneratorExit` and stops looping.
         """
         condition = self._conditions[poll_id]
         last_revision = self._revisions[poll_id]

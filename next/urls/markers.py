@@ -1,11 +1,7 @@
 """Dependency injection markers and providers for URL-derived parameters.
 
-`DUrl` is an annotation marker used in `@context` and view-derived
-callables to pull a value from URL kwargs. `DQuery` is the parallel
-marker that reads `request.GET` query-string parameters. The provider
-classes plug into the `next.deps` resolver via
-`RegisteredParameterProvider` and expose `HttpRequest`, `DUrl[...]`
-values, raw URL kwargs by name, and `DQuery[...]` values.
+`DUrl` pulls a value from URL kwargs and `DQuery` from `request.GET`, and the providers
+plug into the `next.deps` resolver through `RegisteredParameterProvider`.
 """
 
 from __future__ import annotations
@@ -102,10 +98,8 @@ def _is_http_request_annotation(annotation: object) -> bool:
 class HttpRequestProvider(RegisteredParameterProvider):
     """Supply `HttpRequest` from `context.request`.
 
-    The provider claims parameters annotated as `HttpRequest`, one of its
-    subclasses, or the optional form of either. The optional form lets
-    handlers keep `request: HttpRequest | None = None` for direct unit-test
-    calls without giving up dependency injection.
+    The optional `request: HttpRequest | None = None` form is claimed too, so a handler
+    keeps it for a direct unit-test call without giving up injection.
     """
 
     priority = 50
@@ -114,11 +108,8 @@ class HttpRequestProvider(RegisteredParameterProvider):
     def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:
         """Return True when the request in context inhabits the annotated class.
 
-        A handler asking for one concrete subclass under a server that serves
-        another gets the parameter default rather than a request whose
-        interface it would go on to call. The bare `HttpRequest` annotation
-        asks for no subclass and takes whatever the context carries, which is
-        what lets a test hand the handler a stand-in.
+        A handler asking for a concrete subclass under a server serving another takes
+        the default, while the bare `HttpRequest` takes whatever the context carries.
         """
         request = context.request
         if request is None:

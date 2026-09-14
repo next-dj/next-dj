@@ -28,8 +28,9 @@ Autodiscovery imports ``notes/forms.py`` on startup, so neither page module impo
 .. code-block:: python
    :caption: notes/forms.py
 
-   import next.forms
    from notes.models import Note
+
+   import next.forms
 
    class NoteEditForm(next.forms.ModelForm):
        class Meta:
@@ -98,8 +99,9 @@ A test asserts the same flow with ``NextClient``.
 .. code-block:: python
    :caption: tests/test_crud.py
 
-   from next.testing.client import NextClient
    from notes.models import Note
+
+   from next.testing.client import NextClient
 
    def test_crud_flow(db) -> None:
        client = NextClient()

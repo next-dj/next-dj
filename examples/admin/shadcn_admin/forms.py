@@ -163,9 +163,8 @@ def _row_form_class(
 ) -> type[django_forms.ModelForm]:
     """Wrap a row form so the model checks still see the link to the parent.
 
-    A keyed row form never renders the parent key, so Django excludes it and
-    skips every uniqueness and constraint check naming it, letting a duplicate
-    reach the database as an `IntegrityError`.
+    A keyed row form never renders the parent key, so Django excludes it and skips every
+    check naming it, letting a duplicate reach the database as an `IntegrityError`.
     """
 
     class InlineRowForm(base):  # type: ignore[misc, valid-type]
@@ -331,11 +330,9 @@ class AdminInlineSpec:
 def _build_form_class(spec: AdminFormSpec) -> type[django_forms.Form]:
     """Wrap `ModelAdmin.get_form` so inline-formset errors surface on the main form.
 
-    `AdminForm.clean()` builds the inline formsets a second time bound to the
-    same POST data, calls `is_valid()` on each, and raises `ValidationError`
-    if any inline row is broken. The dispatcher catches that through
-    `form.is_valid() == False` and re-renders the origin page — `form_state`
-    then rebuilds the formsets and shows the errors next to the bad rows.
+    `AdminForm.clean()` rebuilds the inline formsets bound to the same POST data and
+    raises `ValidationError` if any row is broken, so the dispatcher re-renders the
+    origin page and `form_state` shows the errors next to the bad rows.
     """
     base = spec.model_admin.get_form(spec.request, spec.instance, change=spec.is_change)
 
@@ -559,9 +556,9 @@ def handle_inline_add(
 def handle_discard(request: HttpRequest) -> HttpResponse:
     """Dismiss the editor layer server-side, carrying a discard reason.
 
-    Unlike a `layer_close(result=...)` accept, this closes the layer as a
-    rejection — the client fires `partial:layer-dismissed` and skips any
-    accept side effects. Without a runtime it falls back to the dashboard.
+    Unlike a `layer_close(result=...)` accept, this closes the layer as a rejection, so
+    the client fires `partial:layer-dismissed` and skips accept side effects. Without a
+    client runtime the action falls back to the dashboard instead.
     """
     if not is_partial_request(request):
         return HttpResponseRedirect(utils.dashboard_url())

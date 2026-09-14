@@ -27,9 +27,8 @@ RESERVED_KEYS: Final[frozenset[str]] = frozenset(
 class ResolutionContext:
     """Per-call snapshot of the inputs available during dependency resolution.
 
-    Not frozen, because a frozen `__init__` is measurably slower on every
-    resolve while the mutable `stack` and `cache` it already carries make a
-    frozen guarantee hollow anyway.
+    Not frozen, because a frozen `__init__` is measurably slower on every resolve and
+    the mutable `stack` and `cache` already make the guarantee hollow.
     """
 
     request: HttpRequest | None

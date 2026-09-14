@@ -121,10 +121,8 @@ class TestBenchComponentAssetDiscovery:
 class TestBenchColdAssetPlan:
     """What building an `_AssetPlan` costs, against the replay of a built one.
 
-    A cold round hands the target a discovery that holds no plan and no page
-    root, the shape the first render after a reload meets. The rebuild round
-    keeps the resolver warm and drops only the plan, which is what a touched
-    asset directory leaves behind.
+    A cold round holds no plan and no page root, what a first render after a reload
+    meets. A rebuild round drops only the plan, what a touched asset directory leaves.
     """
 
     @pytest.mark.benchmark(group="static.discovery")

@@ -48,8 +48,7 @@ def inspect_parameter(
 class SignalSender:
     """Stand-in sender whose identity a signal test can assert on.
 
-    A cached signal weak-references its sender and a bare ``object()`` carries no
-    ``__weakref__`` slot, so it cannot play that part.
+    A cached signal weak-references its sender, which a bare ``object()`` cannot be.
     """
 
 

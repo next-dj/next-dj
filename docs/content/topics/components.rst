@@ -345,9 +345,9 @@ Use ``@component.context("key")`` to publish a value under that key for the temp
 .. code-block:: python
    :caption: _components/note_card/component.py
 
-   from next import component
-
    from notes.models import Note
+
+   from next import component
 
    @component.context("preview")
    def preview(note: Note) -> str:

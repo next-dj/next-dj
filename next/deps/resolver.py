@@ -1,9 +1,7 @@
 """Fill a callable's parameters from the context by replaying its compiled plan.
 
-`DependencyResolver` is the orchestrator consumed by page views, form actions,
-and component renderers. Each callable is compiled once into an `InjectionPlan`
-from the providers' static verdicts, and every resolve replays that plan
-instead of scanning the provider list.
+`DependencyResolver` serves page views, form actions, and component renderers, and a
+plan is compiled once per callable rather than scanned per resolve.
 """
 
 from __future__ import annotations
@@ -95,9 +93,7 @@ class _Described:
 def _adopt_provider[P](provider: P) -> P:
     """Return `provider` once the hooks the plan compiler calls hold up.
 
-    Checked as the provider joins a resolver, so one written against an older
-    contract names itself here instead of surfacing as an `AttributeError` out
-    of the compiler on an unrelated callable.
+    Checked as the provider joins, so an outdated contract names itself here.
     """
     if not callable(getattr(provider, "static_can_handle", None)):
         msg = (
@@ -309,9 +305,8 @@ class DependencyResolver:
         with self._lock:
             version = provider_registry.version
             if self._registry_seen == version or self._syncing:
-                # A provider whose construction resolves through this resolver
-                # re-enters here, and the list it is halfway through building
-                # is the wrong one to start over from.
+                # A provider constructed through this resolver re-enters here, and the
+                # half-built list is the wrong one to restart from.
                 return
             self._syncing = True
             try:
@@ -378,8 +373,7 @@ class DependencyResolver:
         try:
             entry = self._plan_cache.get(key)
         except TypeError:
-            # A callable no mapping can key compiles a plan per resolve rather
-            # than losing injection altogether.
+            # An unhashable callable compiles per resolve rather than losing injection.
             return self._compile_plan(func)[0]
         if entry is not None and entry[0] == version:
             touch_bounded(self._plan_cache, key)
@@ -547,9 +541,8 @@ class DependencyResolver:
     ) -> dict[str, Any]:
         """Return keyword arguments for `func` by replaying its compiled plan.
 
-        A missing dependency takes the name of the callable filled here, which
-        is the innermost one of a nested chain and therefore the one whose
-        signature carries the offending `Depends`.
+        A missing dependency names the callable filled here, the innermost of a nested
+        chain and so the one whose signature carries the offending `Depends`.
         """
         # The hit path is inlined because a miss is rare enough to afford the helper.
         key = _introspect_key(func)
@@ -662,9 +655,7 @@ def apply_resolver_setting() -> None:
     """Retype the resolver singleton to the configured resolver class.
 
     Retyped in place rather than replaced, because the framework and its test helpers
-    hold the singleton by reference and a fresh object would strand every holder. The
-    swap runs under the resolver lock, so it never interleaves with a provider rebuild
-    moving the same version counter.
+    hold the singleton by reference and a fresh object would strand every holder.
     """
     cls = _configured_resolver_class()
     with resolver._lock:

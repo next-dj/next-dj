@@ -35,6 +35,7 @@ Context functions can now return Pydantic models directly.
    :caption: notes/pages/page.py
 
    from pydantic import BaseModel
+
    from next import context
 
    class NoteOut(BaseModel):

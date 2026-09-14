@@ -330,8 +330,7 @@ def _exec_module_from_file(module_name: str, module_file: Path) -> ModuleType:
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    # The entry must exist before the body runs, otherwise classes declared
-    # there cannot resolve their own module.
+    # The entry must exist before the body runs, or its classes lose their module.
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
@@ -503,8 +502,7 @@ class TestDefinitionFileOf:
             pass
 
         Shadowed.__module__ = impostor.__name__
-        # The impostor binds a different class under that name, which is the
-        # collision the attribution has to notice.
+        # The impostor binds a different class under that name, the collision to notice.
         assert impostor.Shadowed is not Shadowed
         assert _definition_file_of(Shadowed) == __file__
 

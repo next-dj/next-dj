@@ -22,6 +22,7 @@ Register the kind.
    :caption: notes/apps.py
 
    from django.apps import AppConfig
+
    from next.static import default_kinds
 
    class NotesConfig(AppConfig):
@@ -75,6 +76,7 @@ A repeated ``register`` call with the same parameters is idempotent, but registe
    :caption: notes/apps.py
 
    from django.apps import AppConfig
+
    from next.static import default_kinds
 
    class NotesConfig(AppConfig):

@@ -1,9 +1,3 @@
-"""Check that reStructuredText prose keeps one sentence per line.
-
-Neither ``doc8`` nor ``sphinx-build -W`` sees semantic newlines, so this gate
-covers the drift they let through.
-"""
-
 import re
 import sys
 from collections.abc import Iterator, Sequence

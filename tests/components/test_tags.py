@@ -253,8 +253,7 @@ class TestComponentTag:
     ) -> None:
         """A prop named like a slot never leaks into the slot lookup.
 
-        Slot content lives under a prefixed key only, so a prop sharing the
-        slot name cannot displace the default body.
+        Slot content lives under a prefixed key that a same-named prop cannot displace.
         """
         (tmp_path / "card.djx").write_text(
             "<article>"
@@ -281,24 +280,19 @@ class TestComponentTag:
     @pytest.mark.parametrize(
         ("call_site", "context_extra", "must_contain", "must_not_contain"),
         [
-            # Django marks a bare quoted literal safe, so without the
-            # component-side demotion the ``<slug>`` token renders as a tag.
+            # Django marks a quoted literal safe, so `<slug>` would render as a tag.
             (
                 '{% component "card" body="visit /s/<slug>/ now" %}',
                 {},
                 ("/s/&lt;slug&gt;/",),
                 ("<slug>",),
             ),
-            # Explicit ``|safe`` on the literal opts back in to raw HTML
-            # so callers can still inject pre-built markup when needed.
             (
                 '{% component "card" body="<em>raw</em>"|safe %}',
                 {},
                 ("<em>raw</em>",),
                 ("&lt;em&gt;",),
             ),
-            # A variable whose value is already a ``SafeString`` keeps
-            # its safe marker through the resolver.
             (
                 '{% component "card" body=html_blob %}',
                 {"html_blob": "<b>safe</b>"},
@@ -1517,8 +1511,7 @@ _MULTILINE_PAGE = (
 
 _MULTILINE_HTML = '<article data-title="Card title"><h1>Injected</h1></article>'
 
-# A comment and a variable that both run over a line break. Django lexes neither
-# across lines, so the whole source is template text.
+# Django lexes neither comments nor variables across lines, so this is all text.
 _UNLEXED_SOURCE = "A {# note\nstill note #} B\nC {{ x\n}} D"
 
 

@@ -72,8 +72,7 @@ describe("Next._init", () => {
 });
 
 describe("Next._init dev channel", () => {
-  // _configure is stubbed, not called through: a real call would leave the
-  // shared runtime of this file wired for dev.
+  // _configure is stubbed, a real call would leave this file's runtime wired for dev.
   function spyConfigure() {
     return vi.spyOn(win.Next.partial, "_configure").mockImplementation(() => undefined);
   }

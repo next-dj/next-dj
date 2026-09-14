@@ -65,6 +65,10 @@ A change in behaviour lands with the pull request that makes it, and the pull re
 A release is published to the Python Package Index from a version tag, so the distribution history there records what shipped.
 A project that tracks changes closely follows the repository pull requests and re-reads the manual page for the subsystem it depends on.
 
+The manual is built from the development branch, so it can describe work that no published release carries yet.
+Every page names the version it was built from in the site header.
+A reader who needs the manual for an installed distribution compares that stamp with the installed version and follows the repository pull requests for whatever the two do not share.
+
 Security fixes
 --------------
 

@@ -91,9 +91,9 @@ The most common shape is ``request`` plus captured URL parameters and marker-dri
 .. code-block:: python
    :caption: notes/pages/reports/[int:report_id]/page.py
 
-   from next.urls import DUrl
-
    from notes.models import Report
+
+   from next.urls import DUrl
 
    def render(request, report_id: DUrl[int]) -> str:
        report = Report.objects.get(pk=report_id)
@@ -179,8 +179,9 @@ Unkeyed dict.
    .. code-block:: python
       :caption: unkeyed dict
 
-      from next import context
       from notes.models import Post
+
+      from next import context
 
       @context
       def post_context(post: Post) -> dict[str, object]:
@@ -335,7 +336,6 @@ The router registers no catch-all pattern, so a path that matches no page direct
 
    from django.contrib import admin
    from django.urls import include, path
-
    from notes import views
 
    urlpatterns = [
@@ -416,11 +416,10 @@ Publish its page under the name the template expects, and read the requested pag
    :caption: notes/pages/page.py
 
    from django.core.paginator import Page as PaginatorPage, Paginator
+   from notes.models import Note
 
    from next import context
    from next.urls import DQuery
-
-   from notes.models import Note
 
    PER_PAGE = 20
 
@@ -490,10 +489,9 @@ Reach for ``StreamingHttpResponse`` when the body is produced incrementally, suc
    from collections.abc import Iterator
 
    from django.http import StreamingHttpResponse
+   from notes.models import Note
 
    from next.urls import DUrl
-
-   from notes.models import Note
 
    def event_stream(note_id: int) -> Iterator[bytes]:
        while True:

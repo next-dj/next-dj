@@ -35,7 +35,9 @@ Discovery asks ``register_file`` for the URL of every discovered file on every r
    :caption: count discovered assets per kind
 
    from collections import Counter
+
    from django.dispatch import receiver
+
    from next.static.signals import asset_registered
 
    asset_counts: Counter = Counter()
@@ -56,6 +58,7 @@ A standalone zone render never fires this signal because its assets travel in th
    :caption: inspect collected slots per request
 
    from django.dispatch import receiver
+
    from next.static.signals import collector_finalized
 
    @receiver(collector_finalized)

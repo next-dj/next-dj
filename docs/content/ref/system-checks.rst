@@ -35,8 +35,15 @@ Silencing a check
 ~~~~~~~~~~~~~~~~~
 
 Django's ``SILENCED_SYSTEM_CHECKS`` setting takes a list of check ids and drops those messages from every run, framework ids included.
-Silence a check only when the condition it reports is a deliberate choice, and fix the cause otherwise.
-See :doc:`django:ref/checks` for the setting and the rest of the check framework.
+An id is the exact string the message carries, ``next.W059`` rather than a tag or a module path, so one entry silences one condition and leaves every other framework check in place.
+The :doc:`Django settings reference <django:ref/settings>` documents the setting itself, and :doc:`django:ref/checks` covers the rest of the check framework.
+
+Silencing answers a deliberate shape the check cannot recognise as intended, and it is the wrong answer to a defect the check names correctly.
+The :repo:`audit-forms <tree/main/examples/audit-forms>` example earns ``next.W059``, which reports that two static wizard steps declare the same field name and that ``get_all_cleaned_data()`` keeps only the last value.
+That wizard repeats one acknowledgement field across its three steps on purpose and reads the answer per step rather than out of the merged mapping, so the collapse the warning describes costs the project nothing and the id sits in ``SILENCED_SYSTEM_CHECKS`` beside a comment naming the reason.
+
+A silenced check stays visible in the run.
+``manage.py check`` counts the messages it dropped and closes with that number, so the setting hides the text of a message and never the fact that the project runs against the advice of a check.
 
 .. warning::
 

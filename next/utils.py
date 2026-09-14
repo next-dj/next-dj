@@ -164,9 +164,8 @@ def resolve_base_dir() -> Path | None:
 def template_edits_watched() -> bool:
     """Whether the caches re-read the disk to notice a change under way.
 
-    Autoreload leaves `.djx` alone and restarts for no directory that appears,
-    so under `DEBUG` reading again is the only thing making either visible.
-    Read per call, so an override takes effect.
+    Autoreload ignores `.djx` edits and new directories, so only a re-read notices
+    either, and `DEBUG` is read per call so an override takes effect.
     """
     return bool(settings.DEBUG)
 
@@ -174,8 +173,7 @@ def template_edits_watched() -> bool:
 def _dir_entry_candidate(item: Path, base_dir: Path | None) -> Path | None:
     """Return the path a ``DIRS`` entry could name, before it is resolved.
 
-    A relative entry names one only against ``BASE_DIR``, so without one the
-    entry can only be a URL segment.
+    Only ``BASE_DIR`` can resolve a relative entry, so without one it names a segment.
     """
     if item.is_absolute():
         return item
@@ -218,8 +216,7 @@ def classify_dirs_entries(
 ) -> tuple[list[Path], frozenset[str]]:
     """Split ``DIRS`` into directory roots and URL segment names (file router).
 
-    The shape is settled here rather than by each reader, because every caller
-    hands in what one settings entry carried.
+    Settled here rather than per reader, since every caller hands in one settings entry.
     """
     if isinstance(entries, str | bytes):
         raise InvalidDirsError(entries)

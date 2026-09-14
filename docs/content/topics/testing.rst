@@ -249,6 +249,7 @@ A suite that runs outside pytest, or one that computes its page roots at runtime
    from pathlib import Path
 
    import pytest
+
    from next.testing import eager_load_pages
 
    PROJECT_ROOT = Path(__file__).resolve().parent
@@ -306,6 +307,7 @@ Tests that write ``template.djx`` or ``page.py`` files to ``tmp_path`` register 
    :caption: conftest.py for a tmp_path suite
 
    import pytest
+
    from next.testing.isolation import reset_page_cache, reset_registries
 
    @pytest.fixture(autouse=True)
@@ -444,6 +446,7 @@ Extra keyword arguments are forwarded to the underlying ``page.render`` call as 
    :caption: render with a custom request
 
    from django.test import RequestFactory
+
    from next.testing.rendering import render_page
 
    def test_index_with_request() -> None:
@@ -549,7 +552,7 @@ Both raise ``FormActionNotFoundError`` from ``next.forms`` for an unknown action
    from next.testing.actions import build_form_for, resolve_action_url
 
    def test_form_validates(db) -> None:
-       url = resolve_action_url("create_note")
+       assert resolve_action_url("create_note").startswith("/_next/form/")
        form = build_form_for("create_note", {"title": "Direct", "body": ""})
        assert form.is_valid()
 
@@ -654,8 +657,8 @@ Use ``patch_static_collector(capture=True)`` to inspect which assets a page emit
 .. code-block:: python
    :caption: tests/test_static_capture.py
 
-   from next.testing.patching import patch_static_collector
    from next.testing.client import NextClient
+   from next.testing.patching import patch_static_collector
 
    def test_collects_styles() -> None:
        with patch_static_collector(capture=True) as proxy:
@@ -733,6 +736,7 @@ Pass ``form_class=`` to give the override a form, which is what ``build_form_for
    :caption: temporary form action
 
    from django import forms
+
    from next.testing.client import NextClient
    from next.testing.patching import override_form_action
 

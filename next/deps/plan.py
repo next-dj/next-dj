@@ -1,9 +1,7 @@
 """Compile a per-callable injection plan from the providers' static verdicts.
 
-A marker parameter is owned by one provider no matter the context, so the
-per-request scan of every provider is pure overhead for it. The compiler asks
-each provider once, keeps only the ones the signature cannot rule out, and the
-resolver replays that short-list on every call.
+A marker parameter is owned by one provider no matter the context, so the compiler asks
+each provider once and the resolver replays the short-list.
 """
 
 from __future__ import annotations
@@ -47,10 +45,8 @@ EMPTY_PLAN: InjectionPlan = ()
 def _filler(provider: ParameterProvider, param: inspect.Parameter) -> ParameterFiller:
     """Return the single call that fills `param` for the provider owning it.
 
-    The hook is read off the instance, so a provider that defines none keeps the plain
-    `resolve` path. The bound method is captured here either way, not on every replay.
-    A hook that compiles something uncallable raises here, where the provider is named,
-    rather than on every replay of the plan it went into.
+    The hook is read off the instance, so a provider without one keeps the plain
+    `resolve`. One that compiles something uncallable raises here, where it is named.
     """
     hook: _CompileHook | None = getattr(provider, "compile_resolve", None)
     if callable(hook):

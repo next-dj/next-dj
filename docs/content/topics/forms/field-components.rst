@@ -34,9 +34,10 @@ A ``ModelForm`` declares the same widgets through ``Meta.widgets``, mapping each
 .. code-block:: python
    :caption: a ModelForm with Meta.widgets
 
+   from wiki.models import Article
+
    import next.forms
    from next.forms import ComponentWidget
-   from wiki.models import Article
 
    class ArticleEditForm(next.forms.ModelForm):
        class Meta:

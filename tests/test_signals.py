@@ -95,9 +95,8 @@ class TestCollectorFinalizedStaysUncached:
 class TestCachedSignalSenderContract:
     """Django reads the sender cache before it looks at the receiver list.
 
-    That makes a weak-referenceable sender mandatory on a cached signal, including the
-    `None` default of a bare `has_listeners()` call, which is why every guard in the
-    core passes the same sender the following send uses.
+    Even the `None` default of a bare `has_listeners()` needs a weak-referenceable
+    sender, so every core guard passes the sender its send uses.
     """
 
     def test_has_listeners_without_a_sender_raises_on_a_cached_signal(self) -> None:

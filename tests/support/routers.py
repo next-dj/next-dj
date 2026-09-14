@@ -37,8 +37,7 @@ class RaisingRootsRouter(RouterBackend):
 class MalformedRootsRouter(RouterBackend):
     """Backend whose tree listing answers the wrong shape rather than raising.
 
-    A plugin with a type slip hands back bare paths instead of `PageRoot`
-    entries, which no reader may dereference.
+    A plugin with a type slip hands back bare paths instead of `PageRoot` entries.
     """
 
     def __init__(self, trees: list[Path]) -> None:

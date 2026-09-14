@@ -1,13 +1,10 @@
 """Coordinate static backends, asset discovery, and placeholder injection.
 
-The static manager loads backends lazily on first use, owns the shared asset discovery
-instance, caches page-tree roots, and replaces every registered placeholder token with
-the rendered tags once rendering completes. It also injects the `next.min.js` wiring
-unless the injection policy is `DISABLED`.
+Backends load lazily on first use, page-tree roots are cached, and the `next.min.js`
+wiring is injected unless the injection policy is `DISABLED`.
 
-The module-level `default_manager` is a lazy handle around a single static manager
-instance, and `get_static_manager` hands out the instance it wraps. The settings-change
-hook in `next.conf` resets the wrapper when `NEXT_FRAMEWORK` changes.
+The module-level `default_manager` is a lazy handle around one instance, which the
+settings hook in `next.conf` resets on a `NEXT_FRAMEWORK` change.
 """
 
 from __future__ import annotations
@@ -73,10 +70,8 @@ def _rewrites_asset_urls(backend: StaticBackend) -> bool:
 class StaticManager:
     """Coordinate static backends, asset discovery, and placeholder injection.
 
-    Backends are loaded lazily from
-    `NEXT_FRAMEWORK['STATIC_BACKENDS']` on first access. URL
-    resolution is handled by the built-in staticfiles backend by
-    default, which delegates to Django staticfiles.
+    Backends load lazily from `NEXT_FRAMEWORK['STATIC_BACKENDS']` on first access, and
+    the default one delegates URL resolution to Django staticfiles.
     """
 
     def __init__(self) -> None:
@@ -134,24 +129,14 @@ class StaticManager:
     ) -> str:
         """Replace every registered placeholder token with rendered tags.
 
-        Each slot in `default_placeholders` contributes its bucket of
-        collected assets. Asset rendering dispatches through the
-        backend method named by `KindRegistry.renderer(asset.kind)`,
-        so adding new kinds with new renderer methods does not require
-        any changes here. The `scripts` slot also receives the next-dj
-        runtime wiring when the injection policy is `AUTO`.
+        Each slot contributes its bucket through the backend method
+        `KindRegistry.renderer(asset.kind)` names, so a new kind needs no change here.
 
-        A missing placeholder is left unchanged because `str.replace`
-        returns the original string when there is nothing to replace.
-        An empty collector yields empty tag sections. The preload hint
-        is injected before `</head>` under the same policy.
+        A missing placeholder is left unchanged and an empty collector yields empty
+        sections, while the preload hint goes in before `</head>` under the same policy.
 
-        The optional `request` argument is forwarded to `backend.asset_url`,
-        to the backend tag renderers, and to the `collector_finalized` and
-        `html_injected` signals. Every URL passes through `asset_url` first,
-        the runtime bundle and its preload hint included, so a backend that
-        rewrites URLs per request reaches all of them. The default backend
-        ignores the request.
+        `request` reaches `backend.asset_url`, the tag renderers, and both signals, and
+        every URL passes `asset_url` first so a per-request rewrite reaches all of them.
         """
         collector_finalized.send(sender=collector, page_path=page_path, request=request)
         html_before = html
@@ -319,11 +304,8 @@ class StaticManager:
     def reload(self) -> None:
         """Rebuild the backend list from merged framework settings.
 
-        An entry that fails to load costs only itself, the remaining
-        entries still build. A list that ends up empty is seeded with the
-        staticfiles backend so rendering always has one. A settings change
-        answers with `reset_default_manager` instead, which drops the
-        wrapped manager rather than reloading it in place.
+        A failing entry costs only itself and an empty list is seeded with the
+        staticfiles backend, while a settings change drops the wrapped manager instead.
         """
         self._discovery = None
         self._cached_page_roots = None
@@ -407,9 +389,7 @@ class StaticManager:
 class DefaultStaticManager(LazyObject):
     """Lazy handle that defers the construction of a static manager.
 
-    The wrapped manager is built on first access and `get_static_manager`
-    returns it. The settings-change hook in `next.conf` resets the wrapper
-    when `NEXT_FRAMEWORK` changes.
+    The `next.conf` settings hook resets the wrapper on a `NEXT_FRAMEWORK` change.
     """
 
     def _setup(self) -> None:
@@ -436,9 +416,8 @@ def collect_component_assets(
 ) -> None:
     """Discover a composite component's co-located assets into the collector.
 
-    Simple components never own co-located assets and a missing collector
-    means there is no sink, so both cases short-circuit before dispatching
-    through the lazy default manager.
+    A simple component owns no co-located assets and a missing collector is no sink, so
+    both short-circuit before the lazy default manager is touched.
     """
     if collector is None or info.is_simple:
         return
@@ -448,9 +427,8 @@ def collect_component_assets(
 def reset_default_manager() -> None:
     """Drop the wrapped static manager so the next access rebuilds it.
 
-    Hooked into the `settings_reloaded` signal from `next.conf` so that
-    test code changing `NEXT_FRAMEWORK` via `override_settings` sees a
-    fresh manager on the next access.
+    Hooked into the `settings_reloaded` signal from `next.conf`, so test code changing
+    `NEXT_FRAMEWORK` sees a fresh manager on the next access.
     """
     default_manager._wrapped = empty  # type: ignore[assignment]
 
@@ -483,9 +461,8 @@ def _on_settings_reloaded(**kwargs) -> None:
 def _on_setting_changed(*, setting: str, **kwargs) -> None:
     """Drop the derived state a Django setting moved out from under.
 
-    `settings_reloaded` covers only the `NEXT_FRAMEWORK` half. The trees of a router
-    with `APP_DIRS` move with `INSTALLED_APPS`, and a memoised asset URL answers for a
-    staticfiles storage the manifest settings rebuild.
+    `settings_reloaded` covers only the `NEXT_FRAMEWORK` half, while `APP_DIRS` trees
+    move with `INSTALLED_APPS` and a memoised URL answers for a rebuilt storage.
     """
     if setting == "INSTALLED_APPS":
         forget_manager_page_roots()

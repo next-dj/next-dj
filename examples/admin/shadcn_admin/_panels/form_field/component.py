@@ -29,10 +29,8 @@ TEMPLATE_OWNED = frozenset(
 def widget_attrs(info: FieldSpec) -> SafeString:
     """Flatten the attributes Django computed for the widget.
 
-    A hand-written input carries only what the template spells out, so the
-    constraints the form field derived are lost. Without the `step` a
-    decimal renders as a whole-number input and the browser refuses to
-    submit `12.50`.
+    A hand-written input carries only what the template spells out, so the constraints
+    the form field derived are lost and a decimal renders as a whole-number input.
     """
     attrs = {
         name: value

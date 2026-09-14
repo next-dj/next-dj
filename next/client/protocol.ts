@@ -15,8 +15,7 @@ export const HEADER_REQUEST_ID = "X-Next-Request-Id";
 export const HEADER_ORIGIN = "X-Next-Origin";
 
 /** The data-next-poll bounds, matching _MIN_POLL_MS and _MAX_POLL_MS in
- * next/partial/zone.py. The ceiling is the signed-32-bit setTimeout coercion,
- * above which a timer fires immediately. */
+ * next/partial/zone.py. The signed-32-bit ceiling, above it a timer fires at once. */
 export const MIN_POLL_MS = 1000;
 export const MAX_POLL_MS = 2147483647;
 

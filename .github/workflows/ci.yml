@@ -106,6 +106,8 @@ jobs:
         run: uv run python docs/prose_lint.py docs/content
       - name: Install docs dependencies
         run: uv sync --locked --group docs
+      - name: Check documentation code snippets
+        run: uv run python docs/snippet_lint.py docs/content
       - name: Build documentation (fail on warnings)
         run: uv run sphinx-build -T -W --keep-going -b html docs docs/_build
       - name: Check documentation links

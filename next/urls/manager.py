@@ -1,12 +1,7 @@
 """Router manager, lazy urlpatterns sequence, and settings-reload wiring.
 
-`RouterManager` owns the list of active `RouterBackend` instances and
-rebuilds it from `NEXT_FRAMEWORK["PAGE_BACKENDS"]` whenever framework
-settings change. `_LazyUrlPatterns` is the sequence wrapped by the
-resolver built from `NEXT_FRAMEWORK["URL_RESOLVER"]`, which
-`_LazyResolverSlot` holds back until first read so the first resolve
-triggers router and form-action resolution without walking the page tree
-or reading settings at import time.
+`_LazyResolverSlot` holds the resolver back until first read, so the first resolve wires
+routers and form actions without touching the page tree at import time.
 """
 
 from __future__ import annotations
@@ -57,10 +52,8 @@ class RouterManager:
     def _ensure_loaded(self) -> None:
         """Build the backend list on the first read, whichever accessor asks.
 
-        The in-build escape is keyed on the building thread, so a backend
-        consulting the manager on construction cannot recurse while a
-        reader on another thread waits for the build instead of resolving
-        against the still-empty list.
+        The in-build escape is keyed on the building thread, so a backend consulting the
+        manager on construction cannot recurse while another thread waits for the build.
         """
         if self._loaded or self._building_thread == threading.get_ident():
             return
@@ -115,9 +108,8 @@ class RouterManager:
             self._config_cache = None
 
             built: list[RouterBackend] = []
-            # Recorded for the whole build, so a backend reading the manager
-            # while it is constructed is answered instead of deadlocking on
-            # the lock this thread already holds.
+            # Recorded for the whole build, so a backend reading the manager during
+            # construction is answered instead of deadlocking on this thread's lock.
             self._building_thread = threading.get_ident()
             try:
                 for config in self._get_next_pages_config():

@@ -39,7 +39,6 @@ The framework owns the SSE framing, so the broker stays a plain pub/sub of domai
    from collections.abc import Iterator
    from dataclasses import dataclass
 
-
    @dataclass(frozen=True)
    class Change:
        snapshot: dict[str, object]
@@ -110,7 +109,6 @@ See :doc:`/content/topics/dependency-injection` for how to define custom markers
 
    from next.partial import Patches, PatchEventStream
 
-
    def patch_source(request: HttpRequest, poll_id: int) -> Iterator[Patches]:
        for change in broker.changes(poll_id):
            yield Patches(request, echo_of=change.request_id).refresh(zone="poll-results")
@@ -139,10 +137,10 @@ The signal carries the bound form after validation and the request, so the recei
    from django import forms as django_forms
    from django.dispatch import receiver
    from django.http import HttpRequest
+   from polls.broker import broker, build_snapshot
 
    from next.forms.signals import action_dispatched
    from next.partial.headers import REQUEST_ID
-   from polls.broker import broker, build_snapshot
 
    VOTE_ACTION_NAME = "vote_form"
 

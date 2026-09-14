@@ -66,6 +66,13 @@ SQL injection.
 Mass assignment.
    Whitelist editable fields on ``ModelForm``, see :doc:`di-and-untrusted-input` for the rule.
 
+File uploads.
+   An upload writes attacker-supplied bytes that the server keeps and later hands to another visitor.
+   The dispatch passes ``request.FILES`` into the form and adds no size check, no content sniff, and no filename rewrite of its own, so every limit is Django field validation plus project code.
+   Cap the request, validate the bytes rather than the declared media type, generate the stored name on the server, and serve user media from a separate origin as an attachment.
+   An accepted SVG is the sharpest edge, because the browser runs script inside it.
+   See :doc:`file-uploads`.
+
 Origin spoofing.
    The only page identity a form submission carries is the ``_next_form_origin`` URL path, which the dispatcher resolves through the URLconf with :func:`django.urls.resolve`.
    The client never supplies a filesystem path, so an error re-render can target only pages that are reachable through the routing table anyway.
@@ -157,5 +164,6 @@ See also
    :doc:`csrf-and-forms` for the form pipeline.
    :doc:`static-assets` for the static pipeline.
    :doc:`di-and-untrusted-input` for the dependency surface.
+   :doc:`file-uploads` for user-supplied files and the media origin.
    :doc:`/content/topics/static-assets/js-context` for runtime script options that interact with CSP.
    :doc:`reporting` for vulnerability disclosure.

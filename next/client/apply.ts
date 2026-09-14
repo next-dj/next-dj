@@ -1,6 +1,5 @@
 // Envelope parsing, the built-in verbs, the custom-op registry, and script
-// neutralisation before insertion. The applier is a thin executor, the server
-// authors every address and verb.
+// neutralisation before insertion. The server authors every address and verb.
 
 import { fireRemoved, morph } from "./morph";
 import {
@@ -150,8 +149,7 @@ const BUILTIN_OPS = new Set<string>([
   "context",
 ] satisfies BuiltinPatch["op"][]);
 
-// A type predicate, not an op check, so #applyBuiltin sees a BuiltinPatch and
-// keeps the per-op narrowing.
+// A predicate, not a boolean check, so #applyBuiltin keeps the per-op narrowing.
 function isBuiltin(patch: Patch): patch is BuiltinPatch {
   return BUILTIN_OPS.has(patch.op);
 }
@@ -181,10 +179,9 @@ function isAssetLoad(value: unknown): value is AssetLoad {
 /**
  * The insertion verb of a wire asset.
  *
- * A url-form entry of a built-in kind keeps its implied verb so an older
- * server's envelope still loads. An inline body takes no such fallback, since
- * guessing the verb from the kind name would execute a body the full render
- * prints verbatim.
+ * A url-form entry of a built-in kind keeps its implied verb so an older server's
+ * envelope still loads. An inline body takes no such fallback, since guessing the verb
+ * from the kind name would execute a body the full render prints verbatim.
  */
 export function assetLoad(
   kind: unknown,
@@ -257,7 +254,7 @@ export interface AssetBridge {
   acceptVersion(envelopeVersion: string): void;
 }
 
-/** A mount callback run over every inserted subtree, the DOMContentLoaded replacement. */
+/** A mount callback run over every inserted subtree, the DOMContentLoaded stand-in. */
 export type MountCallback = (root: ParentNode) => void;
 
 export interface MountRegistry {
@@ -272,9 +269,8 @@ export type ZoneFetch = (request: {
   headers?: Record<string, string>;
 }) => void;
 
-// The mutable state of a single apply, threaded through the ops so two
-// overlapping applies (the second starting while the first defers behind
-// loadCss) keep their state apart.
+// The mutable state of one apply, threaded through the ops so two overlapping applies
+// (the second starting while the first defers behind loadCss) stay apart.
 interface ApplyState {
   isDirty: (field: Element) => boolean;
   requestKey: string | undefined;
@@ -289,7 +285,7 @@ export interface ApplyDeps {
   document?: Document;
   // The dev flag, injectable and getter-friendly so the owner can flip it.
   dev?: DevFlag;
-  // Builds the morph dirty predicate from a request snapshot. Absent, no field is dirty.
+  // The morph dirty predicate from a request snapshot. Absent, no field is dirty.
   dirtySince?: (snapshot: number) => (field: Element) => boolean;
   // Whether an element was ever touched, carrying <details> open state past a patch.
   isTouched?: (el: Element) => boolean;
@@ -301,7 +297,7 @@ export interface ApplyDeps {
   navigate?: Navigate;
   // The asset loader and version safeguard. Absent, ops run with no asset handling.
   assets?: AssetBridge;
-  // The mount registry, run over every inserted subtree. Absent, only next:mounted fires.
+  // The mount registry, run over inserted subtrees. Absent, only next:mounted fires.
   mount?: MountRegistry;
   // The zone re-GET used by the refresh verb. Absent, it is a no-op.
   refresh?: ZoneFetch;
@@ -332,9 +328,7 @@ function parseFormMeta(value: unknown): FormMeta | null {
   return { uid, valid, errors: parseFormErrors(value.errors) };
 }
 
-// A wire asset is well-formed when it names a kind, carries a url or inline
-// body, and spells no load outside the three verbs. Blind to the kind, since
-// the server registers custom kinds.
+// Well-formedness is blind to the kind, since the server may register custom kinds.
 function isWellFormedAsset(
   value: unknown,
 ): value is { kind: string; load: AssetLoad | undefined; inline?: unknown } {
@@ -397,8 +391,7 @@ export function parseEnvelope(raw: unknown, dev = false): Envelope {
   if (version === undefined) {
     throw new TypeError("partial envelope is missing version");
   }
-  // Keep only ops naming a verb, so a malformed element is dropped rather than
-  // left to throw mid-apply over a half-mutated DOM.
+  // Ops without a verb are dropped, so none throws mid-apply over a half-mutated DOM.
   const ops = Array.isArray(wire.ops) ? wire.ops.filter(isPatch) : [];
   const assets = Array.isArray(wire.assets) ? wire.assets.filter(isAsset) : [];
   if (dev) reportDropped(wire);
@@ -474,9 +467,8 @@ export class Applier {
   /**
    * Parse and apply a wire envelope, returning the parsed form.
    *
-   * The pipeline runs in a fixed order — version, before-apply, CSS delta, ops,
-   * JS delta, mount, then applied. CSS gates the ops, so with an asset bridge
-   * the body after the gate runs in a continuation.
+   * The phases run in a fixed order of version, before-apply, CSS delta, ops, JS delta,
+   * mount, then applied. CSS gates the ops, so the rest runs in a continuation.
    */
   apply(raw: unknown, snapshot?: number, key?: string, page?: string): Envelope {
     const envelope = parseEnvelope(raw, this.#dev());
@@ -505,8 +497,7 @@ export class Applier {
   }
 
   #runOps(envelope: Envelope, state: ApplyState): void {
-    // ok flips on any contained failure or unknown verb, so partial:applied
-    // carries an honest degraded signal.
+    // ok flips on any contained failure, so partial:applied carries an honest signal.
     let ok = true;
     for (const op of envelope.ops) {
       // A failing op is contained, the rest apply and it surfaces as partial:error.
@@ -534,14 +525,12 @@ export class Applier {
     }
   }
 
-  // Dev times every op for the Performance panel. Production stops at the first
-  // line, one branch on the hot path.
+  // Dev times every op, production stops at the first line, one branch on the hot path.
   #timedOp(patch: Patch, state: ApplyState): boolean {
     if (!this.#dev()) return this.#applyOp(patch, state);
     const zone = zoneOf(patch);
     const label = zone ?? patch.op;
-    // The serial keeps this mark distinct from a nested apply under the same
-    // label, whose finally would otherwise clear it.
+    // The serial keeps the mark distinct, so a nested apply's finally cannot clear it.
     this.#timings += 1;
     const startMark = `next:apply:${label}:start:${this.#timings}`;
     openMeasure(startMark);
@@ -559,8 +548,7 @@ export class Applier {
     }
   }
 
-  // Returns false for an unknown verb the envelope is degraded by. A thrown op
-  // is caught by the caller.
+  // Returns false for an unknown verb, a thrown op is caught by the caller.
   #applyOp(patch: Patch, state: ApplyState): boolean {
     // Built-ins first, so the switch narrows each verb and the remaining patch
     // narrows to CustomPatch for the handler with no cast.
@@ -594,8 +582,7 @@ export class Applier {
     );
   }
 
-  // The built-in verbs dispatch through this switch rather than the registry,
-  // keeping their static variants.
+  // A switch, not the registry, so each built-in verb keeps its static variant.
   #applyBuiltin(patch: BuiltinPatch, state: ApplyState): void {
     switch (patch.op) {
       case "morph":
@@ -667,8 +654,7 @@ export class Applier {
     });
   }
 
-  // toast is sugar over the stack's built-in container, set as textContent
-  // there, never parsed as HTML.
+  // toast is sugar over the stack's container, textContent there, never parsed as HTML.
   #toast(patch: ToastPatch): void {
     if (patch.text !== undefined)
       this.#layers?.toast(patch.text, patch.variant ?? "info");
@@ -687,8 +673,7 @@ export class Applier {
     if (patch.href !== undefined) this.#navigate?.(patch.href);
   }
 
-  // Merge server-serialised provider values into the client context, which
-  // fires context-updated so islands react.
+  // Merging into the client context fires context-updated, so islands react.
   #contextOp(patch: ContextPatch): void {
     if (isRecord(patch.data)) this.#mergeContext(patch.data);
   }
@@ -714,8 +699,7 @@ export class Applier {
     this.#mark(result, patch.target, state);
   }
 
-  // Carve out the target node from a full-document reply, still script-
-  // neutralised before the engine sees it.
+  // Carve the target node out of a full-document reply, still script-neutralised.
   #extract(
     html: string,
     target: Element,
@@ -774,8 +758,7 @@ export class Applier {
     // One pass over the live children, not a scan per row, so n rows and m cost
     // n + m. The index waits for the first keyed row, a keyless batch matches nothing.
     let index: Map<string, Element> | undefined;
-    // Whether an island unmount hook has run, the only point where page code can
-    // touch the container and stale the index snapshot.
+    // Whether an unmount hook ran, the only point where page code can stale the index.
     let fired = false;
     for (const child of incoming) {
       const key = keyOf(child, mode);
@@ -794,8 +777,7 @@ export class Applier {
       }
       fireRemoved(existing);
       fired = true;
-      // The hook may detach the very row it fired on, so the match is re-checked
-      // rather than replaced into nothing.
+      // The hook may detach the row it fired on, so the match is re-checked.
       if (existing.parentNode !== node) {
         fresh.append(child);
         missed.push([key, child]);
@@ -813,9 +795,7 @@ export class Applier {
     for (const child of incoming) state.touched.push(child);
   }
 
-  // Match the missed rows against the container a hook has since rewritten. One
-  // rebuild per merge, taken only when a hook ran and left rows unmatched, so an
-  // adversarial hook cannot make the merge unbounded.
+  // One rebuild per merge, only when a hook left rows unmatched, so it stays bounded.
   #reconcile(node: Element, missed: [string, Element][], mode: DedupeMode): void {
     const live = keyIndex(node, mode);
     for (const [key, child] of missed) {
@@ -994,8 +974,7 @@ function keyIndex(container: Element, mode: DedupeMode): Map<string, Element> {
   return index;
 }
 
-// Open the diagnostic span of one op. Contained so a stubbed or exhausted user
-// timing cannot fail the op it was about to measure.
+// Contained so a stubbed or exhausted user timing cannot fail the op it measures.
 function openMeasure(startMark: string): void {
   try {
     performance.mark(startMark);

@@ -75,7 +75,7 @@ export function defaultConfirm(): ConfirmAdapter {
   return (text) => globalThis.confirm(text);
 }
 
-/** The reload-once store, sessionStorage throws in private mode so access is guarded. */
+/** The reload-once store, guarded since sessionStorage throws in private mode. */
 export function defaultSession(): SessionStore {
   return {
     get(key) {
@@ -102,7 +102,7 @@ export function defaultSession(): SessionStore {
   };
 }
 
-/** The one-shot reveal geometry, jsdom reports no IntersectionObserver intersections. */
+/** The one-shot reveal geometry, jsdom fires no IntersectionObserver callbacks. */
 export function defaultObserver(): IntersectionAdapter {
   return {
     observe(el, onReveal) {
@@ -157,7 +157,7 @@ export function defaultEventSource(): EventSourceAdapter {
   };
 }
 
-/** The visibility seam over document.visibilityState, a background tab pauses the streams. */
+/** Visibility over document.visibilityState, a background tab pauses the streams. */
 export function defaultVisibility(): VisibilityAdapter {
   return {
     hidden: () => document.visibilityState === "hidden",
@@ -168,7 +168,7 @@ export function defaultVisibility(): VisibilityAdapter {
   };
 }
 
-/** The native <dialog> modality, showModal traps focus and wires the dismiss gestures. */
+/** The native <dialog> modality, showModal traps focus and wires dismiss. */
 export function defaultDialog(): DialogAdapter {
   return { open: openNativeDialog };
 }

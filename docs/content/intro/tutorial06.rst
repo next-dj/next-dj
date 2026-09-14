@@ -79,7 +79,6 @@ Update ``notes/pages/page.py`` so the ``notes`` context honours ``q``, and publi
 
    from next import context
 
-
    @context("site_name", inherit_context=True)
    def site_name() -> str:
        return "Notes"
@@ -165,7 +164,6 @@ Update the ``CreateNoteForm`` class in ``notes/forms.py`` and merge the new impo
    from next.forms import ModelForm
    from next.partial import Patches, is_partial_request
 
-
    class CreateNoteForm(ModelForm):
        class Meta:
            model = Note
@@ -230,7 +228,6 @@ Both partial paths are reachable from the test client of :doc:`tutorial05`.
    from notes.models import Note
 
    from next.testing.client import envelope_of
-
 
    def test_zone_get_returns_one_morph(next_client, db) -> None:
        Note.objects.create(title="Groceries", body="milk")

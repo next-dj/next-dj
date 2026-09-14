@@ -27,10 +27,8 @@ logger = logging.getLogger(__name__)
 def _tree_dir_signature(root: Path) -> tuple[float, int]:
     """Return `(max mtime, directory count)` across every subdirectory.
 
-    Walks directories with `os.scandir` and uses each `DirEntry`'s
-    cached stat, avoiding a second `Path.stat()` syscall per node.
-    The entry count guards against two independent renames that happen
-    to preserve the latest mtime.
+    `os.scandir` hands back a cached stat per `DirEntry`, sparing a second syscall, and
+    the count catches two renames that preserve the latest mtime.
     """
     try:
         root_st = root.stat()

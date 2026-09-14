@@ -67,9 +67,10 @@ Use inside an action handler
    :caption: notes/pages/page.py
 
    from django.http import HttpRequest, HttpResponseRedirect
+   from notes.models import Note
+
    from next.forms import ModelForm
    from next.urls import page_reverse
-   from notes.models import Note
 
    class CreateNoteForm(ModelForm):
        class Meta:
@@ -86,9 +87,10 @@ Use inside a component
 .. code-block:: python
    :caption: _components/note_link/component.py
 
+   from notes.models import Note
+
    from next import component
    from next.urls import page_reverse
-   from notes.models import Note
 
    @component.context("href")
    def href(note: Note) -> str:

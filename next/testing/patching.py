@@ -1,8 +1,7 @@
 """Context managers for test-scoped overrides.
 
-Each helper is a plain `@contextlib.contextmanager` so the public
-surface does not depend on pytest or `unittest.mock`. State is restored
-on exit, including when the block raises.
+Each helper is a plain `@contextlib.contextmanager`, so the surface needs neither pytest
+nor `unittest.mock`, and state is restored even when the block raises.
 """
 
 from __future__ import annotations
@@ -33,11 +32,8 @@ if TYPE_CHECKING:
 def override_next_settings(**overrides) -> Iterator[None]:
     """Merge `overrides` into `NEXT_FRAMEWORK` for the duration of the block.
 
-    The merge is shallow: top-level keys supplied as kwargs replace any
-    values present in the current `NEXT_FRAMEWORK`. Relies on Django's
-    `override_settings` underneath, so the `setting_changed` then
-    `settings_reloaded` signal chain fires automatically and framework
-    managers pick up the new values.
+    The merge is shallow, and `override_settings` underneath fires the `setting_changed`
+    then `settings_reloaded` chain so managers pick the values up.
     """
     current = getattr(django_settings, "NEXT_FRAMEWORK", None) or {}
     merged = {**current, **overrides}
@@ -85,10 +81,8 @@ def override_form_action(
 ) -> Iterator[None]:
     """Register `handler` as the named form action for the block.
 
-    The override wins name-based lookup for the block even when an
-    action with the same name already exists. The full registry state
-    is snapshotted on entry and restored on exit, so previously
-    registered actions with the same name survive.
+    The override wins name-based lookup for the block, and the whole registry is
+    snapshotted on entry so that an action it shadows survives the block.
     """
     saved = form_action_manager.snapshot_actions()
     form_action_manager.register_action(

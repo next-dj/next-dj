@@ -206,8 +206,7 @@ describe("append and prepend dedup", () => {
   it("inserts both rows when one batch repeats a key absent from the container", () => {
     document.body.innerHTML = '<ul data-next-zone="rows"><li>keep</li></ul>';
     const { applier } = makeApplier();
-    // The fresh rows sit in the fragment, invisible to the container index, so
-    // neither matches the other and both land.
+    // Fresh rows sit in the fragment, invisible to the container index, so both land.
     applier.apply(
       envelope([
         {
@@ -382,8 +381,7 @@ describe("append and prepend dedup", () => {
     );
     expect(document.querySelector<HTMLInputElement>("#kept")!.value).toBe("typed");
     expect(document.activeElement).toBe(kept);
-    // A keyed match is a replace, not a morph, so the swapped row loses its
-    // value exactly as it did before the index.
+    // A keyed match is a replace, not a morph, so the swapped row loses its value.
     expect(document.querySelector<HTMLInputElement>("#swapped")!.value).toBe("");
   });
 
@@ -420,8 +418,7 @@ describe("append and prepend dedup", () => {
       '<ul data-next-zone="rows"><li data-next-key="1">one</li></ul>';
     const list = document.querySelector("ul")!;
     let added = false;
-    // An island unmount hook that renders a placeholder row lands a key the
-    // index snapshot cannot know about.
+    // An unmount hook rendering a placeholder row lands a key the snapshot cannot know.
     list.addEventListener("next:removed", () => {
       if (added) return;
       added = true;
@@ -636,8 +633,7 @@ describe("append and prepend dedup", () => {
     const texts = Array.from(document.querySelectorAll("li")).map(
       (li) => li.textContent,
     );
-    // B replaces A, the row of its own batch, and the hook's row is left where
-    // the hook put it.
+    // B replaces A, the row of its own batch, the hook's row stays put.
     expect(texts).toEqual(["ghost", "B"]);
   });
 
@@ -711,12 +707,10 @@ describe("append and prepend dedup", () => {
     ).join("");
     const { applier } = makeApplier();
     const spy = vi.spyOn(Element.prototype, "getAttribute");
-    // A spy left on the prototype would poison every later test, so it comes off
-    // even if the apply throws.
+    // A spy left on the prototype would poison every later test.
     try {
       applier.apply(envelope([{ op: "append", target: { zone: "rows" }, html }]));
-      // A scan per row would cost 500 * 100 reads. The loose constant asserts
-      // linearity, not a jsdom call count.
+      // A scan per row would cost 500 * 100 reads, the constant asserts linearity.
       expect(spy.mock.calls.length).toBeLessThan(10 * (500 + 100));
     } finally {
       spy.mockRestore();

@@ -379,8 +379,7 @@ class TestChecks:
 class TestPageTreeComponentsReachTheChecks:
     """Every check reading the per-run store sees a page-tree component.
 
-    No router has walked during these runs, so the store has to find the
-    folders under the page trees itself.
+    No router has walked here, so the store finds the page-tree folders itself.
     """
 
     def _write_project(self, tmp_path: Path) -> Path:

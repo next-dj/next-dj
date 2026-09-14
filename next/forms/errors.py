@@ -119,8 +119,7 @@ class UnstorableWizardValueError(ImproperlyConfigured):
 class UnregisteredComponentError(RuntimeError):
     """Raised when a `ComponentWidget` names a component nothing registered.
 
-    The close matches are drawn here from what the caller found visible, so the
-    error stays out of the component manager.
+    The close matches come from what the caller saw, so the error needs no manager.
     """
 
     def __init__(

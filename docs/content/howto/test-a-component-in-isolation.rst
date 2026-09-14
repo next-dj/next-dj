@@ -132,6 +132,7 @@ When a component callable reads the request, build one with :class:`~django.test
    :caption: tests/test_user_badge.py
 
    from django.test import RequestFactory
+
    from next.testing import render_component_by_name
 
    def test_user_badge_shows_username(db, django_user_model) -> None:

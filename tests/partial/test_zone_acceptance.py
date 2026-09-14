@@ -21,8 +21,7 @@ COUNTED_PAGE = SITE_PAGES / "counted" / "page.py"
 def counted_page():
     """Re-register the counted page and zero its counters before each test.
 
-    Dropping the memo re-executes the module so its providers survive a
-    neighbouring test clearing the registry.
+    Dropping the memo re-executes the module so its providers outlive a neighbour.
     """
     _MODULE_MEMO.pop(COUNTED_PAGE, None)
     _load_python_module_memo(COUNTED_PAGE)

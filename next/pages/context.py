@@ -44,8 +44,7 @@ def _from_context_data(
 class Context:
     """Mark a parameter default so the value is taken from context_data.
 
-    The source decides which of the four forms applies, and `default` answers
-    for the one case a context key can be missing.
+    The source decides which form applies, and `default` covers a missing context key.
     """
 
     source: object | None = None
@@ -113,8 +112,7 @@ class ContextByDefaultProvider(RegisteredParameterProvider):
     def compile_resolve(self, param: inspect.Parameter) -> ParameterFiller | None:
         """Settle the source and the default of the marker, once per plan.
 
-        A reserved key can never reach the marker, so a parameter naming one compiles
-        straight to its default.
+        A reserved key never reaches the marker, so the parameter takes its default.
         """
         marker: Context = param.default
         source = marker.source

@@ -296,7 +296,6 @@ The stream page is a neighbour of the vote page and uses the page render escape 
 
    from next.partial import Patches, PatchEventStream
 
-
    def patch_source(request: HttpRequest, poll_id: int) -> Iterator[Patches]:
        """Yield one refresh envelope for every poll change."""
        for change in broker.changes(poll_id):
@@ -513,7 +512,6 @@ Bind the provider to the zone with ``zone=`` and guard the expensive data with `
 
    from next import context
    from next.partial import zone_requested
-
 
    @context("entries", zone="audit-table")
    def entries(request: HttpRequest) -> list[AuditEntry] | None:

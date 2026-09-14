@@ -90,6 +90,11 @@ You do not need to list it in ``STATICFILES_FINDERS`` yourself.
 The dotted path is ``next.static.NextStaticFilesFinder``.
 Confirm it is active by running ``manage.py findstatic next/components/note_card.css``.
 
+Replacing the finder means adding one rather than swapping one out.
+``next.apps.staticfiles.install`` appends the framework entry whenever it is absent, and its ``setting_changed`` receiver appends it again after an override rewrites the list, so the shipped finder cannot be configured away.
+A project that needs a different mapping subclasses ``NextStaticFilesFinder``, overrides ``find`` or ``list``, and lists the subclass in ``STATICFILES_FINDERS`` ahead of the framework entry.
+Staticfiles consults the finders in list order and the first match answers a lookup, so the subclass decides every path it claims while ``collectstatic`` still collects from both.
+
 Signals
 -------
 

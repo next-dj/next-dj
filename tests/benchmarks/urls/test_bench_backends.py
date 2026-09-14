@@ -63,8 +63,7 @@ def installed_page_apps(tmp_path: Path, settings) -> Iterator[None]:
 def installed_many_apps(tmp_path: Path, settings) -> Iterator[None]:
     """Install 100 apps, two of them with pages, the shape of a large project.
 
-    App resolution is per installed app, so a small `INSTALLED_APPS` hides
-    anything quadratic in the number of apps.
+    App resolution is per installed app, so a small `INSTALLED_APPS` hides quadratics.
     """
     names = _write_apps(tmp_path, count=100, depth=2, fanout=3, with_pages=2)
     with importable_dir(tmp_path):

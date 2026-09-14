@@ -111,8 +111,7 @@ def install() -> None:
 def _on_setting_changed(*, setting: str, **kwargs) -> None:
     """Reinstall the builtins when an override hands the engines a new `TEMPLATES`.
 
-    Django rebuilds the engines from the new value, which carries none of the
-    framework tags until they are installed again.
+    Django rebuilds the engines from the new value, which carries no framework tags.
     """
     if setting == "TEMPLATES":
         install()

@@ -11,9 +11,8 @@ from next import context
 def filter_zones() -> str:
     """Name every zone the live filter re-renders on a category listing.
 
-    The category listing paginates instead of growing on scroll, so the set
-    drops `catalog-more` and keeps the count, the pager, and the chip strip
-    beside the results.
+    The category listing paginates instead of growing on scroll, so the set drops
+    `catalog-more` and keeps the pager beside the results.
     """
     return zone_target(CATEGORY_ZONES)
 
@@ -22,12 +21,9 @@ def filter_zones() -> str:
 def category(category: object) -> Category:
     """Resolve the category slug from the URL into a `Category` instance.
 
-    The result is registered with `inherit_context=True` so child pages
-    receive the same instance through DI without re-querying. The
-    parameter is left untyped because `_collect_inherited_context`
-    runs this callable twice when rendering `[category]/page.py`. The
-    first run receives the URL slug as a string, the second receives
-    the resolved instance from `context_data` and is short-circuited.
+    `inherit_context=True` hands child pages the same instance through DI without a
+    second query. The parameter stays untyped because `_collect_inherited_context` runs
+    the callable twice, first with the URL slug and then with the resolved instance.
     """
     if isinstance(category, Category):
         return category

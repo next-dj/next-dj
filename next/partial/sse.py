@@ -37,22 +37,12 @@ _DEFAULT_HEARTBEAT_SECONDS = 25.0
 class PatchEventStream(StreamingHttpResponse):
     """SSE response that emits patch envelopes as `next-patches` events.
 
-    Each envelope yielded by the source travels as one `next-patches`
-    event serialized by the active protocol backend, the same shape an
-    HTTP partial response carries. A sync source streams envelopes as
-    they arrive with no heartbeat, a blocked `next()` having nothing to
-    interrupt it without a thread. An async source under ASGI interleaves
-    heartbeat comments during quiet periods through `asyncio.wait`. The
-    politeness headers and the leading `retry` hint are set on
-    construction so a buffering proxy or GZipMiddleware does not eat the
-    flush. The `sse_stream_opened` signal fires on construction and
-    `sse_stream_closed` fires when the stream ends.
+    A sync source streams as envelopes arrive with no heartbeat, an async source under
+    ASGI interleaves heartbeat comments through `asyncio.wait`, and the politeness
+    headers plus the leading `retry` keep a proxy from eating the flush.
 
-    The source kind must match the server kind. Django buffers an async
-    iterator fully under WSGI and a sync iterator fully under ASGI before
-    the first byte, which hangs an infinite stream, so the constructor
-    raises `ImproperlyConfigured` when an async source meets a WSGI
-    request or a sync source meets an ASGI request.
+    Django buffers a mismatched iterator fully before the first byte, which hangs an
+    infinite stream, so the constructor raises `ImproperlyConfigured` instead.
     """
 
     def __init__(
@@ -124,11 +114,8 @@ class PatchEventStream(StreamingHttpResponse):
     def _sync_stream(self, source: "Iterable[Patches]") -> "Iterator[bytes]":
         """Yield SSE bytes for a sync source, with no heartbeat.
 
-        A blocked `next()` on a sync source has nothing to interrupt it without a
-        thread, so a quiet sync stream sends no heartbeat. A keepalive is the source's
-        own job under WSGI. The close signal fires once the source is exhausted or the
-        client disconnects, after the source generator is closed so it releases its
-        resources like the async path drives `aclose`.
+        A blocked `next()` has nothing to interrupt it without a thread, so a quiet sync
+        stream sends no heartbeat and a keepalive is the source's own job.
         """
         sent = 0
         yield self._retry_frame()
@@ -144,9 +131,7 @@ class PatchEventStream(StreamingHttpResponse):
     def _close_source(source: "Iterable[Patches]") -> None:
         """Close a generator source so a disconnect leaves nothing suspended.
 
-        A plain iterable owns no `close`, so the call is skipped. A double
-        close on an already-exhausted generator is a no-op, so this stays
-        safe on normal exhaustion too.
+        A plain iterable has no `close`, and closing a spent generator twice is a no-op.
         """
         close = getattr(source, "close", None)
         if callable(close):

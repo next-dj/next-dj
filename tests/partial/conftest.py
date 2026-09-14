@@ -39,10 +39,8 @@ _PARTIAL_MODULES = (
 def _partial_form_registries():
     """Register the partial-suite forms and restore the clean baseline after.
 
-    The snapshot is taken before the partial modules load, so the teardown drops every
-    action and provider they registered. A later forms suite then sees the registry
-    exactly as it was, not the partial fixtures. Re-execution each test is idempotent
-    because registration keys on the file path.
+    The snapshot predates the partial modules, so teardown drops what they registered,
+    and re-execution is idempotent because registration keys on the file path.
     """
     with isolated_form_registries():
         for module_path in _PARTIAL_MODULES:

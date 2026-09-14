@@ -12,9 +12,7 @@ FORM_ACTION_REVERSE_NAME = "next:form_action"
 def reverse_form_action(uid: str) -> str:
     """Return the dispatch URL for a form action uid.
 
-    The route name depends on how the project wired next URLs: included
-    under the `next` namespace it reverses as `next:form_action`, included
-    bare it reverses as `form_action`.
+    The route reverses as `next:form_action` under the namespace, bare as `form_action`.
     """
     try:
         return reverse(FORM_ACTION_REVERSE_NAME, kwargs={"uid": uid})
@@ -36,10 +34,8 @@ _URL_DROPPED_CHARS = frozenset("\t\n\r")
 def current_origin_path(request: HttpRequest) -> str | None:
     """Return the URL of `request` with its query string, or `None` without a path.
 
-    The query rides along so a redirect back to the origin keeps the filters,
-    the search terms, and the page the visitor was looking at. The path stays as
-    Django decoded it rather than re-escaped, so a non-ASCII route still resolves
-    against the URLconf on the way back.
+    The query rides along so a redirect back keeps the filters and the page. The path
+    stays as Django decoded it, so a non-ASCII route still resolves on the way back.
     """
     path = getattr(request, "path", None)
     if not path:
@@ -54,9 +50,8 @@ def current_origin_path(request: HttpRequest) -> str | None:
 def validated_origin_path(raw: object) -> str | None:
     """Return `raw` as a same-site path or `None`.
 
-    A tab or a newline anywhere is refused because a browser drops those code
-    points before it resolves a URL, which would turn a value the check read as
-    same-site into a protocol-relative jump off site.
+    A tab or a newline is refused because a browser drops those before resolving a URL,
+    which would turn a same-site value into a protocol-relative jump off site.
     """
     if not isinstance(raw, str):
         return None

@@ -96,9 +96,8 @@ def _url_suffix(url: str) -> str:
 def _rel_path_str(child: Path, root: Path) -> str | None:
     """Return the forward-slashed path of `child` relative to `root`.
 
-    Both operands must already be resolved absolute paths. Returns an empty string when
-    `child == root`, and `None` when `child` is not nested under `root`. Skips the
-    per-segment work of `Path.relative_to().parts`.
+    Both operands must already be resolved absolute paths, and the string comparison
+    skips the per-segment work `Path.relative_to().parts` does.
     """
     child_str = os.fspath(child)
     root_str = os.fspath(root)
@@ -129,9 +128,8 @@ def _directory_mtimes(
 def _resolved_parent(path: Path) -> Path:
     """Return the resolved directory holding `path`, or its own spelling.
 
-    A relative path resolves through the working directory, which an atomic
-    deploy removes out from under a live worker, and a render is no place to
-    raise over the name of a folder.
+    A relative path resolves through the working directory, which an atomic deploy
+    removes under a live worker, and a render is no place to raise.
     """
     parent = path.parent
     try:
@@ -144,10 +142,8 @@ def _resolved_parent(path: Path) -> Path:
 class BackendProvider(Protocol):
     """Contract consumed by the asset discovery layer.
 
-    The static manager is the canonical implementation. Tests can pass
-    any object exposing `default_backend` and `page_roots` without
-    instantiating the full manager. Implementations must return
-    resolved absolute paths from `page_roots`.
+    The static manager is the canonical implementation, and any stand-in exposing the
+    same two members must return resolved absolute paths from `page_roots`.
     """
 
     @property
@@ -268,11 +264,8 @@ class PathResolver:
 class AssetDiscovery:
     """Detect co-located asset files and module-level asset list variables.
 
-    The `provider` argument supplies the active backend and the page
-    tree roots. The optional `resolver` argument is a path resolver.
-    The default resolver is backed by the provider. The optional
-    `stems` argument is a stem registry. The default is the
-    process-wide `default_stems`.
+    The `provider` supplies the active backend and the page tree roots, while `resolver`
+    defaults to one backed by it and `stems` to `default_stems`.
     """
 
     def __init__(
@@ -297,9 +290,8 @@ class AssetDiscovery:
     def discover_page_assets(self, file_path: Path, collector: StaticCollector) -> None:
         """Collect layout, template, and module-level assets for a page file.
 
-        Assets are added from the outermost layout inward, then from
-        the template directory, then from `styles` and `scripts`
-        module lists declared in `page.py`.
+        Assets are added from the outermost layout inward, then from the template
+        directory, then from the `styles` and `scripts` lists declared in `page.py`.
         """
         if self._cache_plans:
             plan = self._page_plan_cache.get(file_path)

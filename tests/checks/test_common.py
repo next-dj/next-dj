@@ -476,8 +476,7 @@ class TestPageTreeSkipNames:
         assert [url for url, _page in iter_scanned_page_pairs(router)] == ["blog"]
 
     def test_a_skip_set_answered_as_a_string_costs_no_skip_name(self) -> None:
-        # Iterating the string would refuse the directories `a`, `p` and `i`,
-        # which is no name the backend ever declared.
+        # Iterating the string would refuse the directories `a`, `p` and `i`.
         assert page_tree_skip_names(OddSkipNamesRouter([])) == frozenset()
 
     def test_a_skip_set_holding_more_than_names_keeps_the_names(self) -> None:
@@ -530,8 +529,7 @@ class TestPageTreeComponentFolders:
     def test_a_folder_under_a_skipped_directory_is_not_reached(
         self, tmp_path: Path
     ) -> None:
-        # The walk never enters `_drafts`, so the router never registers what
-        # sits under it and neither may the check.
+        # The router never registers what `_drafts` holds, so neither may the check.
         tree = tmp_path / "shell"
         _write_page(tree, "blog")
         self._write_component(tree / "_drafts" / "_components")
@@ -643,8 +641,6 @@ class TestFileRouterWalkParity:
     def test_the_derived_skip_set_is_the_routers_own(
         self, tmp_path: Path, dirs
     ) -> None:
-        # The names the checks refuse are the names the file router refuses,
-        # so the two walks cannot diverge.
         tree = tmp_path / "shell"
         tree.mkdir(parents=True)
         entry = file_router_config_entry(pages_dir=tree, dirs=dirs)
@@ -750,8 +746,7 @@ class TestFailingPageRootsRead:
         assert list(iter_scanned_page_pairs(router)) == []
 
     def test_read_page_roots_folds_the_failure_into_one_error(self) -> None:
-        # Folded rather than propagated raw, so both callers catch it narrowly
-        # and the cause still reaches the report.
+        # Folded rather than raised raw, so both callers catch it narrowly.
         with pytest.raises(PageRootsError) as caught:
             read_page_roots(RaisingRootsRouter())
 

@@ -46,8 +46,7 @@ interface BugCase {
   before: string;
   after: string;
   setup?: (target: Element) => void;
-  // A field carrying user input is dirty by construction, so a case that types
-  // into a field marks it dirty here.
+  // A field carrying user input is dirty by construction, a typing case marks it here.
   dirty?: (target: Element) => (el: Element) => boolean;
   verify: (result: Element, target: Element) => void;
 }

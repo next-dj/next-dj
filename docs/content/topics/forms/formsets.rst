@@ -30,8 +30,9 @@ Pass the formset class as ``form_class``.
 .. code-block:: python
    :caption: notes/forms.py
 
-   from next.forms import ModelForm, formset_factory
    from notes.models import Note
+
+   from next.forms import ModelForm, formset_factory
 
    class NoteRowForm(ModelForm):
        class Meta:
@@ -53,10 +54,10 @@ Reach for ``modelformset_factory`` when the set has to load an existing queryset
 
    from django.forms.formsets import BaseFormSet
    from django.http import HttpRequest, HttpResponseRedirect
+   from notes.forms import NoteFormSet
 
    from next import action
    from next.forms import redirect_to_origin
-   from notes.forms import NoteFormSet
 
    def build_bulk_formset() -> tuple[type[BaseFormSet], dict]:
        return NoteFormSet, {"initial": [{"title": "Draft"}]}
@@ -117,9 +118,11 @@ Build the formset inside a ``@context`` callable named after the action and retu
    :caption: notes/pages/notes/bulk/page.py
 
    from types import SimpleNamespace
+
+   from notes.forms import NoteFormSet
+
    from next import context
    from next.forms import cleanup_extra_initial
-   from notes.forms import NoteFormSet
 
    def build_formset(initial: list[dict]) -> NoteFormSet:
        formset = NoteFormSet(initial=initial)
@@ -141,8 +144,9 @@ Use ``modelformset_factory`` for editing several existing instances.
 .. code-block:: python
    :caption: notes/forms.py
 
-   from next.forms import ModelForm, modelformset_factory
    from notes.models import Note
+
+   from next.forms import ModelForm, modelformset_factory
 
    class NoteForm(ModelForm):
        class Meta:
@@ -159,11 +163,11 @@ Use ``modelformset_factory`` for editing several existing instances.
 
    from django.forms.formsets import BaseFormSet
    from django.http import HttpRequest, HttpResponseRedirect
+   from notes.forms import NoteEditFormSet
+   from notes.models import Note
 
    from next import action, context
    from next.forms import redirect_to_origin
-   from notes.forms import NoteEditFormSet
-   from notes.models import Note
 
    @context("edit_all_notes")
    def edit_formset() -> SimpleNamespace:
@@ -202,8 +206,9 @@ The parent form is ``abstract`` because it dispatches only through the ``update_
 .. code-block:: python
    :caption: notes/forms.py
 
-   from next.forms import ModelForm, inlineformset_factory
    from notes.models import Note, Row
+
+   from next.forms import ModelForm, inlineformset_factory
 
    RowFormSet = inlineformset_factory(Note, Row, fields=("label",), extra=1)
 
@@ -232,10 +237,11 @@ The parent form is ``abstract`` because it dispatches only through the ``update_
 
    from django.http import HttpResponseRedirect
    from django.shortcuts import get_object_or_404
-   from next import action
-   from next.urls import DUrl
    from notes.forms import NoteForm
    from notes.models import Note
+
+   from next import action
+   from next.urls import DUrl
 
    def note_form_factory(note_id: DUrl["id", int]) -> tuple:
        note = get_object_or_404(Note, pk=note_id)

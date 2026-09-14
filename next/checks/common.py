@@ -103,8 +103,7 @@ def _dead_file_errors(
 ) -> list[CheckMessage]:
     """Report registrations sitting on a file the renderer never looks at.
 
-    A name in `already_reported` is left out, because the cross-file report
-    has named that callable and its fix already.
+    A name in `already_reported` is left out, because the cross-file report named it.
     """
     errors: list[CheckMessage] = []
     for file_path in sorted(registrations, key=str):
@@ -321,9 +320,8 @@ def get_pages_directories(router: RouterBackend) -> list[Path]:
 def _read_components_folder_name(router: RouterBackend) -> str | None:
     """Return the components folder `router` names, dropping anything but a name.
 
-    `components_folder_name` is third-party code that can raise or answer the
-    wrong shape, and a check run survives both by skipping no folder rather
-    than by ending in a traceback.
+    `components_folder_name` is third-party code that can raise or answer the wrong
+    shape, and a check run survives both by skipping no folder at all.
     """
     try:
         name: object = router.components_folder_name()
@@ -361,8 +359,7 @@ def _read_skip_dir_names(router: RouterBackend) -> frozenset[str]:
 def _router_contract(router: RouterBackend) -> _RouterContract:
     """Return the per-run reading of `router`'s walk contract, taking it once.
 
-    Several checks ask the same two questions, and a router that raises would
-    otherwise write one traceback per asking check.
+    A router that raises would otherwise write one traceback per asking check.
     """
     key = id(router)
     contract = _ROUTER_CONTRACT_CACHE.get(key)

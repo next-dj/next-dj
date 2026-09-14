@@ -33,11 +33,14 @@ A custom backend can intercept one kind and resolve it elsewhere, then delegate 
    :caption: kanban/backends.py
 
    from __future__ import annotations
+
    import json
    import logging
    from pathlib import Path
    from typing import TYPE_CHECKING, Any
+
    from django.contrib.staticfiles.storage import staticfiles_storage
+
    from next.static import StaticFilesBackend
 
    if TYPE_CHECKING:
@@ -144,6 +147,7 @@ Register the ``page`` stem too so discovery picks up ``page.jsx`` alongside ``pa
    :caption: kanban/apps.py
 
    from django.apps import AppConfig
+
    from next.static import default_kinds
    from next.static.discovery import default_stems
 

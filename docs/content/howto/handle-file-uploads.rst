@@ -34,9 +34,10 @@ Define the form.
 .. code-block:: python
    :caption: notes/forms.py
 
+   from notes.models import Attachment
+
    from next.forms import ModelForm
    from next.urls import page_reverse_lazy
-   from notes.models import Attachment
 
    class AttachmentForm(ModelForm):
        class Meta:
@@ -108,6 +109,23 @@ A production deployment serves the same files through the web server instead.
    if settings.DEBUG:
        urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
+Secure the upload
+-----------------
+
+The walkthrough above is the wiring, not the policy.
+An upload accepts bytes from a visitor, keeps them, and later hands them to another visitor, so it needs limits and validation before it goes to production.
+Four rules cover most of the exposure.
+
+- Guard the action with ``Meta.login_required`` at a minimum, because the dispatch endpoint accepts a POST from any visitor.
+- Cap the request at the web server and cap the field with a validator, because ``DATA_UPLOAD_MAX_MEMORY_SIZE`` bounds only the non-file part of a multipart body.
+- Check the extension against an allow list and read the media type from the leading bytes, because the client writes the ``Content-Type`` of every part it sends.
+- Generate the stored name on the server with a callable ``upload_to`` and never let the uploaded filename reach a path.
+
+Serve the stored files from a hostname that shares no cookies with the application, with ``Content-Disposition: attachment`` and ``X-Content-Type-Options: nosniff`` on every response.
+Refuse SVG unless the project sanitises it, because a browser runs script inside an SVG it renders inline.
+
+:doc:`/content/security/file-uploads` covers each rule with the settings, the validators, and the serving configuration.
+
 Verification
 ------------
 
@@ -124,6 +142,7 @@ Without a resolvable origin the invalid submission is rejected with HTTP 400, se
    :caption: tests/test_upload.py
 
    from django.core.files.uploadedfile import SimpleUploadedFile
+
    from next.testing.client import NextClient
 
    def test_upload(db) -> None:
@@ -148,5 +167,6 @@ See also
 
 .. seealso::
 
+   :doc:`/content/security/file-uploads` for the limits, the validation, and the serving rules.
    :doc:`/content/topics/forms/actions` for handler patterns.
    :doc:`/content/topics/forms/templates` for the form tag.

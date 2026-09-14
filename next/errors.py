@@ -34,8 +34,7 @@ class BackendPathError(ImproperlyConfigured):
 class BackendImportError(ImproperlyConfigured):
     """Raised when the class a settings entry names does not import.
 
-    The dotted path is named when the setting carries one path alone, and left
-    out where the entry is a whole backend mapping.
+    The dotted path is named only where the setting carries one path, not a mapping.
     """
 
     def __init__(self, setting: str, exc: object, dotted: str | None = None) -> None:
@@ -53,8 +52,7 @@ class BackendImportError(ImproperlyConfigured):
 class BackendNotSubclassError(ImproperlyConfigured):
     """Raised when the class a settings entry names is outside its family.
 
-    The setting is named where one dotted path carries the whole choice, so a
-    project reads which key it has to fix.
+    The setting is named where one dotted path carries the whole choice.
     """
 
     def __init__(self, dotted: str, base_name: str, setting: str | None = None) -> None:

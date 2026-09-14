@@ -52,8 +52,7 @@ class TestBenchDispatchHelpers:
 
     @pytest.mark.benchmark(group="forms.dispatch")
     def test_resolve_origin_cold(self, benchmark) -> None:
-        # A fixed urlconf keeps this measuring the resolver itself rather
-        # than the live test site page count.
+        # A fixed urlconf measures the resolver, not the live test site page count.
         request = build_mock_http_request(
             method="POST",
             POST={"_next_form_origin": "/items/42/"},
@@ -127,7 +126,7 @@ class TestBenchDispatchEndToEnd:
         )
         meta = backend.get_meta("bench_action")
         assert meta is not None
-        # name is required but missing → ValidationError → error path.
+        # The required name is missing, so the dispatch takes the error path.
         post = MagicMock()
         post.items.return_value = []
         request = build_mock_http_request(method="POST", POST=post, FILES=None)
@@ -164,9 +163,7 @@ class TestBenchDispatchEndToEnd:
     def test_dispatch_through_subclassed_backend(self, benchmark) -> None:
         """Dispatch through a thin `RegistryFormActionBackend` subclass.
 
-        Pins the wrapper overhead for projects that inherit from the registry backend
-        (audit-trail, metrics, gating). Compare against ``test_dispatch_valid_form`` to
-        spot regressions in the super-call path.
+        Pins the wrapper overhead for projects that inherit from the registry backend.
         """
 
         class _SubclassedBackend(RegistryFormActionBackend):

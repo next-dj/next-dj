@@ -736,8 +736,7 @@ describe("zone polling", () => {
     const visibility = manualVisibility();
     document.body.innerHTML = '<div data-next-zone="t" data-next-poll="5000"></div>';
     const { triggers, requests } = makeTriggers({ clock, visibility });
-    // No install, so the hidden flip delivers no visibilitychange and the armed
-    // timer fires into the in-tick safety net.
+    // No install, so hiding delivers no visibilitychange and the safety net fires.
     triggers.scan(document.body);
     visibility.setHidden(true);
     clock.tick();
@@ -805,8 +804,7 @@ describe("zone polling", () => {
     visibility.setHidden(true);
     clock.setNow(1000);
     visibility.setHidden(false);
-    // The countdown resumes with the remaining time, so rapid switching cannot
-    // postpone a due tick.
+    // The countdown resumes with the time left, so switching cannot postpone a tick.
     expect(requests).toHaveLength(1);
     expect(clock.pending()).toBe(1);
     expect(clock.intervals).toEqual([5000, 5000, 4000]);
@@ -821,8 +819,7 @@ describe("zone polling", () => {
     const { triggers, requests } = makeTriggers({ clock, visibility });
     detach = triggers.install(document);
     triggers.scan(document.body);
-    // A visible event with no intervening hidden clears the live handle before
-    // re-arming, so a second one forks no chain.
+    // A repeated visible event clears the handle before re-arming, so no chain forks.
     visibility.setHidden(false);
     visibility.setHidden(false);
     expect(clock.pending()).toBe(1);

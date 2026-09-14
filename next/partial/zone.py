@@ -110,11 +110,8 @@ def render_zone_standalone(
 class ZonePartial:
     """Standalone renderable for one zone body that owns its template state.
 
-    The body renders inside its own render-context state so a partial
-    request can render the zone alone with the full page context. The
-    object stands in for the page template on the render-context stack,
-    so it answers `get_exception_info` by delegating to the page template
-    and DEBUG tracebacks stay honest.
+    The body renders in its own render-context state so a partial can render the zone
+    alone, and `get_exception_info` delegates to keep DEBUG tracebacks honest.
     """
 
     def __init__(

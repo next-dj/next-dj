@@ -30,8 +30,7 @@ if TYPE_CHECKING:
 
 _COMPONENT_BACKEND_SETTINGS_KEY = "COMPONENT_BACKENDS"
 
-# The scanner renders only this name, so a context bound anywhere else is dead,
-# including one bound to the component.py next door.
+# The scanner renders only this name, so a context bound anywhere else is dead.
 _COMPONENT_CONTEXT_SUBJECT = RegistrationSubject(
     decorator="@component.context",
     anchor_name="component.py",
@@ -41,8 +40,7 @@ _COMPONENT_CONTEXT_SUBJECT = RegistrationSubject(
 
 _FILE_COMPONENT_BACKEND_CONFIG_KEYS = frozenset({"BACKEND", "COMPONENTS_DIR", "DIRS"})
 
-# The curated root re-exports the page decorator, so every spelling below names
-# the same wrong `context` inside a component.py.
+# The curated root re-exports the page decorator, so every spelling below is the same.
 _PAGE_CONTEXT_MODULES = frozenset({"next", "next.pages"})
 _PAGE_CONTEXT_OWNERS = frozenset({"next", "page", "next.page", "next.pages"})
 

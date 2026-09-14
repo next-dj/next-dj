@@ -482,8 +482,7 @@ _PLAIN_STORAGE = "django.contrib.staticfiles.storage.StaticFilesStorage"
 def _partial_version(version: object) -> Iterator[None]:
     """Point the W069 check at a partial backend with the given VERSION option.
 
-    A version of None means the OPTIONS mapping omits the key, so the check
-    sees the implicit manifest sentinel.
+    A version of None omits the key, so the check sees the implicit manifest sentinel.
     """
     options: dict[str, object] = {}
     if version is not None:

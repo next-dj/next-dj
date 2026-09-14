@@ -33,13 +33,15 @@ The framework emits these signals on hot rendering paths, so receivers stay sync
    :caption: obs/receivers.py
 
    from django.dispatch import receiver
-   from next.pages.signals import page_rendered
+
    from next.components.signals import component_rendered
    from next.forms.signals import (
        action_dispatched,
        form_access_denied,
        form_validation_failed,
    )
+   from next.pages.signals import page_rendered
+
    from .metrics import incr
 
    @receiver(page_rendered)
@@ -95,6 +97,7 @@ The ``html_injected`` payload carries ``injected_bytes``, which is useful as a p
    :caption: obs/receivers.py
 
    from django.dispatch import receiver
+
    from next.static.signals import (
        asset_registered,
        backend_loaded,
@@ -133,7 +136,9 @@ The URL subsystem emits ``route_registered`` for each route discovered during a 
    :caption: obs/receivers.py
 
    from django.dispatch import receiver
+
    from next.urls.signals import route_registered, router_reloaded
+
    from .metrics import incr
 
    @receiver(route_registered)
@@ -154,6 +159,7 @@ The signal carries no keyword arguments, so a receiver that holds its own memo d
    :caption: obs/receivers.py
 
    from django.dispatch import receiver
+
    from next.conf.signals import settings_reloaded
 
    from .metrics import reset_backend_labels
