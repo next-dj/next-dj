@@ -131,17 +131,23 @@ class FormActionManager(BackendListManager[FormActionBackend]):
         so the shape of the failure never follows the length of the settings list.
         """
         self._require_backends()
-        caught: list[FormActionNotFoundError] = []
-        for backend in self._backends:
+        backends = self._backends
+        if len(backends) == 1:
+            return backends[0].get_action_url(action_name, page_path=page_path)
+        registry_empty = True
+        for backend in backends:
             try:
                 return backend.get_action_url(action_name, page_path=page_path)
             except FormActionNotFoundError as exc:
-                caught.append(exc)
+                if not exc.registry_empty:
+                    registry_empty = False
         raise FormActionNotFoundError(
             name=action_name,
             page_path=page_path,
-            candidates=tuple(name for exc in caught for name in exc.candidates),
-            registry_empty=all(exc.registry_empty for exc in caught),
+            candidates=lambda: [
+                meta["name"] for backend in backends for meta in backend.iter_actions()
+            ],
+            registry_empty=registry_empty,
         )
 
     def get_action_meta(
