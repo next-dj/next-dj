@@ -3,12 +3,7 @@
 // list never travels from client to server. A version mismatch triggers one full
 // visit under a reload-once flag, so a stale CDN cannot loop the page.
 
-import {
-  defaultClock,
-  defaultLinkLoader,
-  defaultNavigate,
-  defaultSession,
-} from "./adapters";
+import { defaultClock, defaultNavigate, defaultSession } from "./adapters";
 import { assetLoad, isAsset } from "./apply";
 import type { Asset, AssetLoad } from "./apply";
 import type { PartialError } from "./protocol";
@@ -20,7 +15,7 @@ const CSS_TIMEOUT_MS = 3000;
 /**
  * Insert a stylesheet and signal load, timeout, or error through one callback.
  *
- * A seam because jsdom never fires link.onload, leaving the branches untestable.
+ * A seam so a test drives the outcome without a browser resolving the stylesheet.
  */
 export type LinkLoader = (
   url: string,
@@ -88,7 +83,7 @@ export interface Assets {
 export function createAssets(deps: AssetsDeps): Assets {
   const doc = deps.document ?? document;
   const clock = deps.clock ?? defaultClock();
-  const loadLink = deps.loadLink ?? defaultLinkLoader();
+  const loadLink = deps.loadLink ?? nativeLinkLoader(doc);
   const navigate = deps.navigate ?? defaultNavigate();
   const session = deps.session ?? defaultSession();
   const cssTimeout = deps.cssTimeoutMs ?? CSS_TIMEOUT_MS;
@@ -374,4 +369,27 @@ function rememberNonce(doc: Document): string | undefined {
   const current = doc.currentScript;
   const value = current instanceof HTMLElement ? current.nonce : "";
   return value === "" ? undefined : value;
+}
+
+/** The default loader, inserting a <link> and racing its load against the timeout. */
+export function nativeLinkLoader(doc: Document): LinkLoader {
+  return (url, nonce, done, clock, timeoutMs) => {
+    const link = doc.createElement("link");
+    link.rel = "stylesheet";
+    link.href = url;
+    if (nonce !== undefined) link.nonce = nonce;
+    // A sheet that loads after the timeout already reported failure, and a browser
+    // is free to fire load and error both, so the first outcome is the only one.
+    let settled = false;
+    const finish = (ok: boolean): void => {
+      if (settled) return;
+      settled = true;
+      clock.clearTimeout(timer);
+      done(ok);
+    };
+    link.onload = () => finish(true);
+    link.onerror = () => finish(false);
+    const timer = clock.setTimeout(() => finish(false), timeoutMs);
+    doc.head.append(link);
+  };
 }

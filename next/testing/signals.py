@@ -1,9 +1,7 @@
 """Signal capture utility for tests.
 
-`SignalRecorder` is a context manager that connects to one or more
-Django signals, stores every emission as a `SignalEvent`, and
-disconnects on exit. It works with plain Django `TestCase`, the stdlib
-`unittest.TestCase`, and pytest without any framework-specific code.
+`SignalRecorder` is a context manager that connects to one or more Django signals,
+stores every emission as a `SignalEvent`, and disconnects on exit.
 """
 
 from __future__ import annotations

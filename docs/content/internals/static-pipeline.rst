@@ -82,7 +82,7 @@ Each slot matches the ``collector slot`` term in :doc:`/content/misc/glossary`.
 Runtime script injection
 ------------------------
 
-Under the ``AUTO`` script injection policy the static manager wraps the rendered page with the ``next.min.js`` runtime through ``NextScriptBuilder``.
+Under the ``AUTO`` script injection policy the injector wraps the rendered page with the ``next.min.js`` runtime through ``NextScriptBuilder``.
 The builder owns the markup of all three fragments, while the bundle URL comes from ``backend.asset_url``, so a request-aware backend moves the runtime the same way it moves a co-located asset.
 
 .. mermaid::
@@ -120,6 +120,12 @@ Modules
 ``next.static.manager``.
    ``StaticManager`` orchestrates discovery and the per-request collector lifecycle.
 
+``next.seeding``.
+   ``seed_collector`` hydrates one collector from the render context and binds it back under ``COLLECTOR_KEY``, and it sits at the root of the package because the page render reaches this area through a port rather than an import.
+
+``next.static.inject``.
+   ``PlaceholderInjector`` renders what a collector holds into the placeholder tokens of a finished page, and the manager delegates its ``inject`` to one.
+
 ``next.static.scripts``.
    ``NextScriptBuilder`` and ``ScriptInjectionPolicy`` for the ``Next`` runtime script.
 
@@ -138,7 +144,7 @@ Asset kinds
 -----------
 
 Each kind maps an extension to a placeholder slot and a backend renderer method.
-The renderer name is a plain string the manager looks up with ``getattr`` on the active static backend per asset, so a backend supplies a renderer by exposing a method of that name.
+The renderer name is a plain string the injector looks up with ``getattr`` on the active static backend per asset, so a backend supplies a renderer by exposing a method of that name.
 :doc:`/content/topics/static-assets/asset-kinds` lists the bundled kinds and their renderer methods.
 
 Dedup

@@ -19,7 +19,8 @@ VERSION = "X-Next-Version"
 REQUEST_ID = "X-Next-Request-Id"
 ORIGIN = "X-Next-Origin"
 
-RESPONSE_VERSION = "X-Next-Version"
+# The response echoes the version under the same name the request asserts it.
+RESPONSE_VERSION = VERSION
 RESPONSE_FORM = "X-Next-Form"
 RESPONSE_ACTION = "X-Next-Action"
 

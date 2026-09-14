@@ -1,17 +1,14 @@
 """Django signals emitted by the configuration layer.
 
-`settings_reloaded` fires after `NextFrameworkSettings.reload` drops its caches,
-through `dispatch_settings_reloaded`, which runs every receiver before it lets an
-error out. Package-level managers subscribe to it and reset their own state when the
-merged settings change. Nothing here reads the merged settings, so the module the
-reload lives in imports this one and not the other way round.
+Nothing here reads the merged settings, so the module the reload lives in imports
+this one and not the other way round.
 """
 
 import logging
 
 from django.dispatch import Signal
 
-from next.utils import callable_name
+from next.introspect import callable_name
 
 
 logger = logging.getLogger(__name__)

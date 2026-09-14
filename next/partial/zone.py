@@ -8,6 +8,7 @@ from django.template import Library, TemplateSyntaxError
 from django.template.base import Node, NodeList, Template
 from django.template.engine import Engine
 from django.utils.safestring import SafeString
+from django.utils.text import unescape_string_literal
 
 
 if TYPE_CHECKING:
@@ -35,9 +36,20 @@ _MS_PER_SECOND = 1000
 _POLL_DIGITS = re.compile(r"[0-9]+")
 
 
-def _strip_quotes(raw: str) -> str:
-    """Return a quoted tag literal as a bare string."""
-    return raw.strip("'\"").strip()
+def _literal(raw: str, subject: str) -> str:
+    """Return the text of a quoted tag literal, refusing anything unquoted.
+
+    The tag reads literals only, so an unquoted bit is a template variable whose
+    name would silently stand in for the value it never resolves to.
+    """
+    try:
+        return unescape_string_literal(raw).strip()
+    except ValueError as error:
+        msg = (
+            f"{{% zone %}} {subject} must be a quoted literal, got {raw!r}. "
+            "Template variables are not read."
+        )
+        raise TemplateSyntaxError(msg) from error
 
 
 def _wrap_zone(tag: str, name: str, body: str, *, extra: str = "") -> SafeString:
@@ -85,10 +97,7 @@ def render_zone_body(
 ) -> tuple[SafeString, SafeString]:
     """Render one zone body and its addressable wrapper element.
 
-    The first element is the bare inner body, the second wraps it in the
-    marker element carrying the delivery attributes of the zone options.
-    An append or prepend merge grafts the bare body into the live zone, so
-    it needs the body without the wrapper the morph path addresses.
+    Returned separately since append/prepend graft the bare body, morph the wrapper.
     """
     body = partial.render(context)
     wrapped = _wrap_zone(options.tag, name, body, extra=options.delivery_attrs)
@@ -148,9 +157,8 @@ class ZonePartial:
 class ZoneNode(Node):
     """A named zone of a page template, rendered inline or as a placeholder.
 
-    On a full render a non-lazy zone wraps its body in a marker element
-    so the client can address it by name. A lazy zone renders only its
-    placeholder branch, its body arrives later as a patch.
+    A non-lazy zone wraps its body in an addressable marker element. A lazy zone
+    renders only its placeholder branch, its body arrives later as a patch.
     """
 
     child_nodelists = ("nodelist", "placeholder")
@@ -190,7 +198,7 @@ def _parse_options(token: "Token") -> tuple[str, ZoneOptions]:
     if len(bits) < _ZONE_NAME_INDEX + 1:
         msg = '{% zone %} tag requires a quoted zone name, e.g. {% zone "name" %}.'
         raise TemplateSyntaxError(msg)
-    name = _strip_quotes(bits[_ZONE_NAME_INDEX])
+    name = _literal(bits[_ZONE_NAME_INDEX], "name")
     if not name:
         msg = "{% zone %} tag requires a non-empty quoted zone name."
         raise TemplateSyntaxError(msg)
@@ -205,7 +213,7 @@ def _parse_options(token: "Token") -> tuple[str, ZoneOptions]:
                 'as key="value" with no spaces around =.'
             )
             raise TemplateSyntaxError(msg)
-        value = _strip_quotes(raw)
+        value = _literal(raw, f"{key}=")
         if key == _TAG_KWARG:
             tag = value or _DEFAULT_TAG
         elif key == _LAZY_KWARG:
@@ -238,9 +246,7 @@ def _validate_lazy(value: str) -> str:
 def _validate_poll(value: str) -> int:
     """Return the poll interval in ms parsed from a 5s or 1500ms literal.
 
-    A bare number is read as milliseconds and the digits must be plain
-    ASCII. An interval outside the floor-to-ceiling range or a malformed
-    literal fails at compile time, the same honest-fail as lazy.
+    A bare number is milliseconds in ASCII digits, out-of-range values fail to compile.
     """
     if value.endswith("ms"):
         digits, scale = value[:-2], 1
@@ -268,10 +274,7 @@ def _validate_poll(value: str) -> int:
 def do_zone(parser: "Parser", token: "Token") -> ZoneNode:
     """Compile `{% zone "name" tag=... lazy=... poll=... %}` … `{% endzone %}`.
 
-    The body compiles into a standalone `ZonePartial`. An optional
-    `{% placeholder %}` branch holds the markup shown until a lazy body
-    arrives. This hook registers nothing with the zone registry, the
-    registry is derived from the compiled page template on demand.
+    Registers nothing with the zone registry, derived from the compiled page template.
     """
     name, options = _parse_options(token)
     body = parser.parse(_PLACEHOLDER_THEN_END)

@@ -260,30 +260,24 @@ __all__ = [
 
 
 def register_all() -> None:
-    """Import each subpackage's `checks` module to register its hooks."""
-    for module_name in (
-        "next.conf.checks",
-        "next.pages.checks",
-        "next.urls.checks",
-        "next.components.checks",
-        "next.forms.checks",
-        "next.static.checks",
-        "next.partial.checks",
-        "next.apps.checks",
-    ):
+    """Import each subpackage's `checks` module to register its hooks.
+
+    The map already lists every area, so a new entry registers its checks simply
+    by appearing there, not by a second listing here.
+    """
+    for module_name in _LAZY_SOURCES_BY_MODULE:
         importlib.import_module(module_name)
 
 
 def reset_check_caches() -> None:
     """Drop every per-run check cache so the next run rebuilds from disk.
 
-    Tests and scripts that invoke checks directly and mutate the page or
-    component tree in place need this, since the caches otherwise freeze the
-    scanned state for the lifetime of the process. The module memo and context
-    registry are cleared together so a re-executed `page.py` repopulates the
-    registry from its current source instead of keeping a stale `@context`.
+    Tests that mutate the page or component tree in place need this, since the caches
+    otherwise freeze the scanned state for the process lifetime.
     """
-    importlib.import_module("next.checks.common").reset_router_manager_cache()
+    # Reached by name because each of these pulls in an area package that imports
+    # its own `checks` module, and that module imports `NEXT` back from here.
+    importlib.import_module("next.discovery").reset_router_manager_cache()
     sources = importlib.import_module("next.components.sources")
     sources.reset_components_manager_cache()
     importlib.import_module("next.partial.checks").reset_composed_pages_memo()

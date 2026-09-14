@@ -1,17 +1,21 @@
 """`ComponentsManager` and the settings hooks that invalidate its caches.
 
-The manager loads configured backends lazily, shares a render pipeline
-between them, and subscribes to `settings_reloaded` so a fresh config
-drops the cached state without reimporting this module.
+Backends load lazily and share a render pipeline, and a `settings_reloaded`
+subscription drops the cached state without reimporting this module.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, cast, override
 
 from django.core.signals import setting_changed
 
-from next.backends import backend_entries, load_backends, resolve_setting_class
+from next.backends import (
+    BackendListManager,
+    backend_entries,
+    load_backends,
+    resolve_setting_class,
+)
 from next.conf.signals import settings_reloaded
 
 from .backends import _DEFAULT_BACKEND_PATH, ComponentsBackend
@@ -45,14 +49,12 @@ def _configured_template_loader_class() -> type[ComponentTemplateLoader]:
     )
 
 
-class ComponentsManager:
+class ComponentsManager(BackendListManager[ComponentsBackend]):
     """Loads backends from settings and merges name resolution across them."""
 
     def __init__(self) -> None:
         """Prepare an empty backend list and load settings on first access."""
-        self._backends: list[ComponentsBackend] = []
-        # An empty list is a legitimate load result, so only a flag knows.
-        self._loaded: bool = False
+        super().__init__()
         self._walk_registered_folders: set[Path] = set()
         self._template_loader: ComponentTemplateLoader | None = None
         self._component_renderer: ComponentRenderer | None = None
@@ -105,6 +107,7 @@ class ComponentsManager:
         self._walk_registered_folders.clear()
         self._loaded = False
 
+    @override
     def reload(self, *, notify: bool = True) -> None:
         """Rebuild the backends from the current `NEXT_FRAMEWORK` settings.
 
@@ -118,11 +121,7 @@ class ComponentsManager:
             default=_DEFAULT_BACKEND_PATH,
             signal=component_backend_loaded if notify else None,
         )
-        self._loaded = True
-
-    def _ensure_backends(self) -> None:
-        if not self._loaded:
-            self.reload()
+        self._mark_loaded()
 
     @property
     def backends(self) -> tuple[ComponentsBackend, ...]:
@@ -146,9 +145,8 @@ class ComponentsManager:
     ) -> None:
         """Register components for one folder discovered during a page-tree walk.
 
-        The route trail the folder sits on becomes its scope, so the components
-        resolve only for templates under that part of the tree. The folder goes
-        to the first backend whose `register_walked_folder` claims it.
+        The route trail becomes the scope, and the folder goes to the first backend
+        whose `register_walked_folder` claims it.
         """
         # Backends first, because loading them clears the claim set and a claim
         # taken before that would be forgotten as soon as it was made.

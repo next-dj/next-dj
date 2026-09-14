@@ -19,7 +19,7 @@ class TestInstallIdempotent:
 
 
 class TestFinderFollowsAnOverride:
-    """``override_settings(STATICFILES_FINDERS=...)`` drops the finder, so it reinstalls."""
+    """An override of `STATICFILES_FINDERS` drops the finder, so it reinstalls."""
 
     def test_overridden_list_carries_the_finder(self) -> None:
         with override_settings(STATICFILES_FINDERS=[_APP_DIRS_FINDER]):

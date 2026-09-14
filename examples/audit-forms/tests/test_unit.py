@@ -6,7 +6,7 @@ from types import ModuleType
 import pytest
 from access.backends import _safe_form_payload, _step_from_origin
 from access.models import AccessRequest, AuditEntry
-from access.policy import POLICY_FIELD
+from access.policy import POLICY_FIELD, AcknowledgedStep
 from access.receivers import _on_form_access_denied
 from django.contrib.sessions.backends.db import SessionStore
 from django.http import HttpRequest, QueryDict
@@ -262,6 +262,16 @@ class TestWizardPermissionHook:
         )
         assert _step_page.AccessRequestWizard.check_permissions(request) is expected
 
+    @pytest.mark.parametrize(
+        ("posted", "expected"),
+        [("on", True), ("true", True), ("1", True), ("false", False), ("", False)],
+    )
+    def test_the_widget_decides_which_spellings_count(self, posted, expected) -> None:
+        request = HttpRequest()
+        request.method = "POST"
+        request.POST = QueryDict(f"policy_acknowledged={posted}")
+        assert AcknowledgedStep.is_acknowledged(request) is expected
+
 
 @pytest.mark.django_db()
 class TestAccessDeniedReceiver:
@@ -385,10 +395,14 @@ class TestStepFormValidation:
         assert form.cleaned_data == {POLICY_FIELD: False}
 
 
-class TestStepSectionRenderPaths:
-    """`step_section.render` covers the review, saved, and errors branches."""
+class TestStepSectionStates:
+    """`step_section.sections` describes every step from wizard storage alone."""
 
-    def test_review_step_renders_summary(self) -> None:
+    @staticmethod
+    def _by_key(built: list[dict]) -> dict[str, dict]:
+        return {section["key"]: section for section in built}
+
+    def test_review_step_lists_every_stored_value(self) -> None:
         wizard = _wizard(
             "approval",
             {
@@ -404,35 +418,49 @@ class TestStepSectionRenderPaths:
                 },
             },
         )
-        rendered = _step_section.render(wizard.current_form(), wizard)
-        assert 'data-step-section="approval"' in rendered
-        assert "Confirm and submit" in rendered
-        assert "Computing" in rendered
+        built = self._by_key(_step_section.sections(wizard.current_form(), wizard))
+        approval = built["approval"]
+        assert approval["review"] is True
+        assert approval["fields"] == []
+        assert ("Team", "Computing") in [
+            (entry["label"], entry["value"]) for entry in approval["entries"]
+        ]
 
     def test_invalid_active_step_reports_errors_state(self) -> None:
         wizard = _wizard("identity")
         form = _step_page.IdentityStep(data={"full_name": "", "email": "", "team": ""})
         form.is_valid()
-        rendered = _step_section.render(form, wizard)
-        assert 'data-state="errors"' in rendered
-        assert "border-rose-300" in rendered
+        built = self._by_key(_step_section.sections(form, wizard))
+        identity = built["identity"]
+        assert identity["state"] == "errors"
+        assert "border-rose-300" in identity["border"]
+        assert [field.name for field in identity["fields"]] == [
+            "full_name",
+            "email",
+            "team",
+        ]
 
-    def test_long_saved_value_is_truncated(self) -> None:
-        long_reason = "x" * 200
+    def test_saved_step_summarises_its_own_fields_only(self) -> None:
         wizard = _wizard(
             "identity",
-            {
-                "scope": {
-                    "project_slug": "engine",
-                    "reason": long_reason,
-                    "expires_in_days": 7,
-                }
-            },
+            {"scope": {"project_slug": "engine", "reason": "ok", "expires_in_days": 7}},
         )
-        rendered = _step_section.render(wizard.current_form(), wizard)
-        assert 'data-step-section="scope" data-state="saved"' in rendered
-        assert "..." in rendered
-        assert long_reason not in rendered
+        built = self._by_key(_step_section.sections(wizard.current_form(), wizard))
+        assert built["scope"]["state"] == "saved"
+        assert built["scope"]["badge"]["variant"] == "success"
+        assert [entry["value"] for entry in built["scope"]["entries"]] == [
+            "engine",
+            "ok",
+            7,
+        ]
+        assert built["approval"]["state"] == "pending"
+        assert built["approval"]["entries"] == []
+
+    def test_labels_come_from_the_step_form_classes(self) -> None:
+        wizard = _wizard("identity")
+        assert _step_section._field_labels(wizard)["expires_in_days"] == (
+            "Expires in days"
+        )
 
 
 class TestLandingPage:

@@ -3,8 +3,8 @@
 // module is excluded from TS-coverage rather than painted with fake hits.
 
 import type { HistoryAdapter } from "./apply";
-import type { LinkLoader, SessionStore } from "./assets";
-import type { DialogAdapter, DialogControl, PopStateAdapter } from "./layers";
+import type { SessionStore } from "./assets";
+import type { PopStateAdapter } from "./layers";
 import type { Move } from "./morph";
 import type { EventSourceAdapter, VisibilityAdapter } from "./sse";
 import type { ConfirmAdapter, IntersectionAdapter } from "./triggers";
@@ -28,27 +28,6 @@ export function defaultClock(): Clock {
 /** The full-navigation seam, jsdom does not implement location.assign. */
 export function defaultNavigate(): Navigate {
   return (url) => globalThis.location.assign(url);
-}
-
-/** The CSS loader seam, jsdom never fires link.onload so the insertion lives here. */
-export function defaultLinkLoader(): LinkLoader {
-  return (url, nonce, done, clock, timeoutMs) => {
-    const link = document.createElement("link");
-    link.rel = "stylesheet";
-    link.href = url;
-    if (nonce !== undefined) link.nonce = nonce;
-    let settled = false;
-    const finish = (ok: boolean): void => {
-      if (settled) return;
-      settled = true;
-      clock.clearTimeout(timer);
-      done(ok);
-    };
-    link.onload = () => finish(true);
-    link.onerror = () => finish(false);
-    const timer = clock.setTimeout(() => finish(false), timeoutMs);
-    document.head.append(link);
-  };
 }
 
 /** The history seam for the url verb, push and replace map onto the History global. */
@@ -104,18 +83,28 @@ export function defaultSession(): SessionStore {
 
 /** The one-shot reveal geometry, jsdom fires no IntersectionObserver callbacks. */
 export function defaultObserver(): IntersectionAdapter {
+  // One shared observer for every watched element, not one each: an infinite scroll
+  // arms a sentinel per page, and a per-element observer would outlive its target.
+  const callbacks = new WeakMap<Element, () => void>();
+  let shared: IntersectionObserver | undefined;
+  const observer = (): IntersectionObserver =>
+    (shared ??= new IntersectionObserver((entries, self) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const onReveal = callbacks.get(entry.target);
+        callbacks.delete(entry.target);
+        self.unobserve(entry.target);
+        onReveal?.();
+      }
+    }));
   return {
     observe(el, onReveal) {
-      const io = new IntersectionObserver((entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            onReveal();
-            io.disconnect();
-          }
-        }
-      });
-      io.observe(el);
-      return () => io.disconnect();
+      callbacks.set(el, onReveal);
+      observer().observe(el);
+      return () => {
+        callbacks.delete(el);
+        shared?.unobserve(el);
+      };
     },
   };
 }
@@ -165,42 +154,5 @@ export function defaultVisibility(): VisibilityAdapter {
       document.addEventListener("visibilitychange", listener);
       return () => document.removeEventListener("visibilitychange", listener);
     },
-  };
-}
-
-/** The native <dialog> modality, showModal traps focus and wires dismiss. */
-export function defaultDialog(): DialogAdapter {
-  return { open: openNativeDialog };
-}
-
-function openNativeDialog(
-  dialog: HTMLDialogElement,
-  onDismiss: (reason: string) => void,
-): DialogControl {
-  let runtimeClose = false;
-  const onCancel = (event: Event): void => {
-    event.preventDefault();
-    onDismiss("escape");
-  };
-  const onClose = (): void => {
-    // <form method="dialog"> closes with returnValue as the reason.
-    if (!runtimeClose) onDismiss(dialog.returnValue || "dialog");
-  };
-  // A click whose target is the dialog itself landed on the backdrop padding,
-  // children intercept inner clicks, so element identity is the hit-test.
-  const onPointer = (event: Event): void => {
-    if (event.target === dialog) onDismiss("backdrop");
-  };
-  dialog.addEventListener("cancel", onCancel);
-  dialog.addEventListener("close", onClose);
-  dialog.addEventListener("click", onPointer);
-  dialog.showModal();
-  (dialog.querySelector<HTMLElement>("[autofocus]") ?? dialog).focus();
-  return (): void => {
-    runtimeClose = true;
-    dialog.removeEventListener("cancel", onCancel);
-    dialog.removeEventListener("close", onClose);
-    dialog.removeEventListener("click", onPointer);
-    if (dialog.open) dialog.close();
   };
 }

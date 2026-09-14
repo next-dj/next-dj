@@ -73,9 +73,9 @@ class NextStatReloader(StatReloader):
         if prev is None or current == prev:
             self._previous_routes = current
             return
+        # The sets differ, so one side of the difference always holds a route.
         diff = (current - prev) or (prev - current)
-        if diff:
-            self.notify_file_changed(next(iter(diff))[1])
+        self.notify_file_changed(next(iter(diff))[1])
         self._previous_routes = current
 
     def _collect_routes(self) -> set[tuple[str, Path]]:

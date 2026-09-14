@@ -195,7 +195,7 @@ Every success path writes a flash before redirecting:
 - login handler → `messages.success(request, "Welcome, admin.")` (a failed sign-in never reaches the handler, it comes back as an `AuthenticationForm` non-field error)
 - `BookAdmin.mark_as_published` → `self.message_user(request, "N book(s) marked as published.")` (Django's stock `ModelAdmin.message_user` writes through the same framework.)
 
-The [`flash_messages` component](shadcn_admin/_panels/flash_messages/component.py) drains pending messages off the request, maps Django's level tags (`success` / `error` / `warning` / `info`) to the shared `alert` component's variants, and is invoked once from `layout.djx` so both the admin chrome and the auth chrome surface flashes without repeating HTML.
+The [`flash_messages` component](../_shared/_components/flash_messages/component.py) drains pending messages off the request, maps Django's level tags (`success` / `error` / `warning` / `info`) to the shared `alert` component's variants, and is invoked once from `layout.djx` so both the admin chrome and the auth chrome surface flashes without repeating HTML. It lives in the shared kit, so the shortener and feature-flags banners answer to the same level mapping.
 
 ### 10. Delete with `get_deleted_objects`
 

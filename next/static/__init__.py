@@ -1,13 +1,7 @@
 """Discover and inject co-located static assets for pages and components.
 
-Each `.djx` may have sibling files of any registered kind, and a module may declare URL
-lists named after a placeholder slot. A shared `StaticCollector` gathers them during
-render and `StaticManager.inject` swaps each placeholder token for the rendered tags.
-
-The `Next` runtime is injected by default as the first script plus an inline init
-script, and `ScriptInjectionPolicy.DISABLED` or `MANUAL` opts out.
-
-Built-in kinds register through the same public API user code uses.
+The `Next` runtime injects by default as the first script plus an inline init
+script. `ScriptInjectionPolicy.DISABLED` or `MANUAL` opts out.
 """
 
 from __future__ import annotations

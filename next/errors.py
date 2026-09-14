@@ -32,40 +32,53 @@ class BackendPathError(ImproperlyConfigured):
 
 
 class BackendImportError(ImproperlyConfigured):
-    """Raised when the class a settings entry names does not import.
+    """Raised when the backend an entry under one settings key names does not import.
 
-    The dotted path is named only where the setting carries one path, not a mapping.
+    The entry is a mapping carrying no path of its own, so the key is all it names.
     """
 
-    def __init__(self, setting: str, exc: object, dotted: str | None = None) -> None:
-        """Store the setting that named the class and the import failure."""
+    def __init__(self, setting: str, exc: object) -> None:
+        """Store the settings key whose entry named the backend."""
+        self.setting = setting
+        super().__init__(
+            f"NEXT_FRAMEWORK[{setting!r}] names a backend that cannot be "
+            f"imported: {exc}"
+        )
+
+
+class SettingImportError(ImproperlyConfigured):
+    """Raised when the class one dotted-path settings key names does not import."""
+
+    def __init__(self, setting: str, dotted: str, exc: object) -> None:
+        """Store the settings key and the dotted path it carries."""
         self.setting = setting
         self.dotted = dotted
-        subject = (
-            "names a backend that cannot be imported"
-            if dotted is None
-            else f"{dotted!r} could not be imported"
+        super().__init__(
+            f"NEXT_FRAMEWORK[{setting!r}] {dotted!r} could not be imported: {exc}"
         )
-        super().__init__(f"NEXT_FRAMEWORK[{setting!r}] {subject}: {exc}")
 
 
 class BackendNotSubclassError(ImproperlyConfigured):
-    """Raised when the class a settings entry names is outside its family.
+    """Raised when the class a backend entry names is outside its family."""
 
-    The setting is named where one dotted path carries the whole choice.
-    """
-
-    def __init__(self, dotted: str, base_name: str, setting: str | None = None) -> None:
+    def __init__(self, dotted: str, base_name: str) -> None:
         """Store the named class and the family root it stands outside of."""
         self.dotted = dotted
         self.base_name = base_name
+        super().__init__(f"Backend {dotted!r} is not a {base_name} subclass.")
+
+
+class SettingNotSubclassError(ImproperlyConfigured):
+    """Raised when the class one dotted-path key names stands outside its family."""
+
+    def __init__(self, setting: str, dotted: str, base_name: str) -> None:
+        """Store the settings key, the named class and the family root it misses."""
         self.setting = setting
-        subject = (
-            f"Backend {dotted!r}"
-            if setting is None
-            else f"NEXT_FRAMEWORK[{setting!r}] {dotted!r}"
+        self.dotted = dotted
+        self.base_name = base_name
+        super().__init__(
+            f"NEXT_FRAMEWORK[{setting!r}] {dotted!r} is not a {base_name} subclass."
         )
-        super().__init__(f"{subject} is not a {base_name} subclass.")
 
 
 class AbstractBackendError(ImproperlyConfigured):
@@ -85,4 +98,6 @@ __all__ = [
     "BackendNotSubclassError",
     "BackendPathError",
     "InvalidDirsError",
+    "SettingImportError",
+    "SettingNotSubclassError",
 ]

@@ -86,6 +86,7 @@ Exceptions
 
 ``FormActionNotFoundError`` is raised when no registered action matches a requested name.
 ``FormActionManager.get_action_url`` and ``FormActionManager.require_action_meta``, the ``{% form %}`` and ``{% action_url %}`` tags, and the testing helpers ``resolve_action_url`` and ``build_form_for`` all raise it.
+``get_action_url`` composes the same refusal whether one backend is configured or several, so the shape of the failure never follows the length of the settings list.
 It subclasses ``LookupError`` and carries the failing ``name``, the ``page_path`` that was searched, the close-match ``suggestions`` tuple, and the ``registry_empty`` flag.
 Every raising surface renders the suggestions into the message as ``Closest matches: 'x', 'y'``, computed by close-match comparison against the registered names.
 The comparison and the message run on first render, so probing for an action by catching the exception costs no close-match work.
@@ -95,7 +96,7 @@ When ``registry_empty`` is true the message also explains that no actions are re
    :members:
 
 ``UnstorableWizardValueError`` is raised by the session wizard backend for a cleaned value its JSON codec cannot store, and names the backend keys that serve such a value instead.
-``UnregisteredComponentError`` is raised while a ``ComponentWidget`` renders a component name nothing registered, with the closest visible component names rendered into the message.
+``UnregisteredComponentError`` is a ``LookupError`` raised while a ``ComponentWidget`` renders a component name nothing registered, with the closest visible component names rendered into the message on first read.
 
 .. autoexception:: next.forms.UnstorableWizardValueError
    :members:

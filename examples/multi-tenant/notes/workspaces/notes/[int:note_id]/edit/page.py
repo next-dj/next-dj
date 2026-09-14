@@ -2,15 +2,15 @@ from typing import ClassVar
 
 from django.http import HttpRequest, HttpResponseRedirect
 from django.shortcuts import get_object_or_404
-from django.urls import reverse
 from django.utils.safestring import SafeString
+from markup import render_markdown
 from notes.access import get_active_tenant
-from notes.markdown_render import render_markdown
 from notes.models import Note
 from notes.providers import DTenant
 
 from next import context
 from next.forms import ComponentWidget, ModelForm, PermissionOutcome
+from next.urls import page_reverse
 
 
 def get_owned_note(tenant: object, note_id: int) -> Note:
@@ -49,9 +49,7 @@ class NoteEditForm(ModelForm):
         """Persist edits and redirect back to the note editor."""
         self.save()
         return HttpResponseRedirect(
-            reverse(
-                "next:page_notes_int_note_id_edit", kwargs={"note_id": self.instance.pk}
-            )
+            page_reverse("notes/[int:note_id]/edit", note_id=self.instance.pk)
         )
 
 

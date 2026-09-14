@@ -1,0 +1,37 @@
+{% for section in sections %}
+  <section data-step-section="{{ section.key }}" data-state="{{ section.state }}" class="{{ section.border }} rounded-lg p-4 space-y-3">
+    <header class="flex items-center justify-between text-xs uppercase tracking-wide text-slate-500">
+      <span>{{ section.label }}</span>
+      {% component "badge" text=section.badge.text variant=section.badge.variant %}
+    </header>
+
+    {% if section.review %}
+      <div class="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm">
+        <h2 class="text-sm font-semibold text-slate-700">Confirm and submit</h2>
+        <dl class="mt-3 grid grid-cols-2 gap-y-2 text-sm">
+          {% for entry in section.entries %}
+            <dt class="text-slate-500">{{ entry.label }}</dt>
+            <dd class="whitespace-pre-line">{{ entry.value }}</dd>
+          {% endfor %}
+        </dl>
+      </div>
+    {% elif section.fields %}
+      {% for field in section.fields %}
+        <label class="block">
+          <span class="block text-sm font-medium text-slate-700">{{ field.label }}</span>
+          {{ field }}
+          {% if field.errors %}
+            <span class="mt-1 block text-xs text-rose-600">{{ field.errors|first }}</span>
+          {% endif %}
+        </label>
+      {% endfor %}
+    {% elif section.entries %}
+      <dl class="grid grid-cols-3 gap-x-3 gap-y-1 text-xs text-slate-600">
+        {% for entry in section.entries %}
+          <dt class="text-slate-400">{{ entry.label }}</dt>
+          <dd class="col-span-2 truncate">{{ entry.value|truncatechars:60 }}</dd>
+        {% endfor %}
+      </dl>
+    {% endif %}
+  </section>
+{% endfor %}

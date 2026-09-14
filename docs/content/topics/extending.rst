@@ -71,7 +71,7 @@ Every family checks the configured class against the base named above, so a clas
 A custom backend usually subclasses the default so it inherits every default behaviour.
 
 Every base is an abstract base class that declares the methods a subclass must implement.
-``PartialProtocolBackend`` requires ``serialize_envelope``, which returns the HTTP response body for one patch envelope, and ``sse_event``, which returns the same envelope as a server-sent-events frame.
+``PartialProtocolBackend`` requires ``serialize_envelope``, which returns the HTTP response body for one patch envelope, ``sse_event``, which returns the same envelope as a server-sent-events frame, and ``deserialize_envelope``, which reads a response body back into an ``Envelope`` so a reader such as the test client parses the format its writer produced.
 It also expects the ``content_type`` class attribute that names the media type of the body, and it supplies the ``options`` property that reads ``OPTIONS`` out of the settings entry.
 The shipped ``next.partial.JsonPartialProtocolBackend`` implements that contract as compact JSON, and a subclass of it that only changes part of the wire format overrides both public methods rather than reaching through the internal ``_dumps`` helper, which carries no stability promise.
 
@@ -279,9 +279,9 @@ Swap it to change how a request path is matched against those patterns, for exam
 A path that cannot be imported, and a class that is not a ``URLResolver`` subclass, both raise :class:`~django.core.exceptions.ImproperlyConfigured` while the URL configuration is built.
 
 ``DEPENDENCY_RESOLVER`` names a ``next.deps.DependencyResolver`` subclass, and that class performs every injection the framework makes, from page views and ``@context`` callables to form actions and component renderers.
-The framework holds one resolver singleton and adopts the named class by retyping that object in place, so the subclass adds no instance slots and no second base and its ``__init__`` never runs.
+The framework holds one resolver singleton behind a shared holder and adopts the named class by building an instance of it, so the subclass runs its own ``__init__`` and every reference reads the resolver in force.
 Widening the public ``skips`` predicate is the usual reason to subclass, because it decides which parameters a compiled injection plan carries at all.
-See :doc:`dependency-injection` for the resolver contract and :doc:`/content/ref/settings` for the constraints the retype imposes.
+See :doc:`dependency-injection` for the resolver contract and :doc:`/content/ref/settings` for what a swap takes with it.
 
 ``COMPONENT_TEMPLATE_LOADER`` names a ``next.components.ComponentTemplateLoader`` subclass, and the components manager builds one instance of it around the shared module loader.
 The loader decides where a component body comes from and how long a compiled template is reused, so the shipped ``CachedComponentTemplateLoader`` is the subclass to start from when only the caching policy changes.

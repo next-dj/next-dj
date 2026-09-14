@@ -38,7 +38,7 @@ class TestSerializedPageContextKeys:
         with (
             patch_checks_router_manager(pages_directory=tmp_path),
             patch(
-                "next.checks.common.walk_page_tree",
+                "next.discovery.walk_page_tree",
                 return_value=[("first", page_file), ("second", page_file)],
             ),
         ):
@@ -66,7 +66,7 @@ class TestSerializedPageContextKeys:
         with (
             patch_checks_router_manager(pages_directory=tmp_path),
             patch(
-                "next.checks.common.walk_page_tree",
+                "next.discovery.walk_page_tree",
                 return_value=[("real", page_file), ("link", linked)],
             ),
         ):

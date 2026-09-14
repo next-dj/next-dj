@@ -289,14 +289,16 @@ export interface ApplyDeps {
   dirtySince?: (snapshot: number) => (field: Element) => boolean;
   // Whether an element was ever touched, carrying <details> open state past a patch.
   isTouched?: (el: Element) => boolean;
+  // The four seams below are read through a call, not captured: the owner rebuilds
+  // them under a live applier, and a captured instance would be the outgoing one.
   // The layer stack. Absent, zone resolve falls back to the document.
-  layers?: LayerBridge;
+  layers?: () => LayerBridge;
   // The history seam for the url verb. Absent, the verb is a no-op.
-  history?: HistoryAdapter;
+  history?: () => HistoryAdapter;
   // The navigation seam for the visit verb. Absent, the verb is a no-op.
-  navigate?: Navigate;
+  navigate?: () => Navigate;
   // The asset loader and version safeguard. Absent, ops run with no asset handling.
-  assets?: AssetBridge;
+  assets?: () => AssetBridge;
   // The mount registry, run over inserted subtrees. Absent, only next:mounted fires.
   mount?: MountRegistry;
   // The zone re-GET used by the refresh verb. Absent, it is a no-op.
@@ -418,10 +420,10 @@ export class Applier {
   readonly #document: Document;
   readonly #dirtySince: (snapshot: number) => (field: Element) => boolean;
   readonly #isTouched: (el: Element) => boolean;
-  readonly #layers: LayerBridge | undefined;
-  readonly #history: HistoryAdapter | undefined;
-  readonly #navigate: Navigate | undefined;
-  readonly #assets: AssetBridge | undefined;
+  readonly #layers: () => LayerBridge | undefined;
+  readonly #history: () => HistoryAdapter | undefined;
+  readonly #navigate: () => Navigate | undefined;
+  readonly #assets: () => AssetBridge | undefined;
   readonly #mount: MountRegistry | undefined;
   readonly #refresh: ZoneFetch | undefined;
   readonly #here: () => string;
@@ -439,10 +441,10 @@ export class Applier {
     this.#dev = devReader(deps.dev);
     this.#dirtySince = deps.dirtySince ?? (() => () => false);
     this.#isTouched = deps.isTouched ?? (() => false);
-    this.#layers = deps.layers;
-    this.#history = deps.history;
-    this.#navigate = deps.navigate;
-    this.#assets = deps.assets;
+    this.#layers = deps.layers ?? (() => undefined);
+    this.#history = deps.history ?? (() => undefined);
+    this.#navigate = deps.navigate ?? (() => undefined);
+    this.#assets = deps.assets ?? (() => undefined);
     this.#mount = deps.mount;
     this.#refresh = deps.refresh;
     this.#here = deps.here ?? (() => currentUrl(this.#document));
@@ -474,7 +476,7 @@ export class Applier {
     const envelope = parseEnvelope(raw, this.#dev());
     // A version mismatch is a full visit instead of an apply, guarded against a
     // reload loop inside the bridge. true means the bridge took over.
-    if (this.#assets?.versionMismatch(envelope.version, this.#here())) {
+    if (this.#assets()?.versionMismatch(envelope.version, this.#here())) {
       return envelope;
     }
     const beforeApply = this.#emit("partial:before-apply", { envelope }, true);
@@ -488,8 +490,9 @@ export class Applier {
       touched: [],
     };
     const runOps = (): void => this.#runOps(envelope, state);
-    if (this.#assets !== undefined) {
-      this.#assets.loadCss(envelope.assets, runOps);
+    const assets = this.#assets();
+    if (assets !== undefined) {
+      assets.loadCss(envelope.assets, runOps);
     } else {
       runOps();
     }
@@ -510,8 +513,8 @@ export class Applier {
     }
     if (envelope.csrf) this.#rotateCsrf(envelope.csrf);
     // JS after the ops: the target DOM is in place, each URL runs once.
-    this.#assets?.loadJs(envelope.assets);
-    this.#assets?.acceptVersion(envelope.version);
+    this.#assets()?.loadJs(envelope.assets);
+    this.#assets()?.acceptVersion(envelope.version);
     this.#runMount(state);
     this.#emit("partial:applied", { envelope, ok }, false);
   }
@@ -625,6 +628,13 @@ export class Applier {
       case "context":
         this.#contextOp(patch);
         return;
+      // A verb missing here would be a silent no-op reported as ok, so the never
+      // binding turns it into a build error, and this throw is that error at runtime.
+      /* v8 ignore next 3 */
+      default: {
+        const unhandled: never = patch;
+        throw new TypeError(`unhandled built-in op ${JSON.stringify(unhandled)}`);
+      }
     }
   }
 
@@ -641,13 +651,13 @@ export class Applier {
   // builder enforces, so the malformed op stays a no-op.
   #layerOpen(patch: LayerOpenPatch): void {
     if (patch.href !== undefined && patch.zone === undefined) return;
-    this.#layers?.open(null, patch.href, patch.zone);
+    this.#layers()?.open(null, patch.href, patch.zone);
   }
 
   #layerClose(patch: LayerClosePatch): void {
     // A validation error addresses no layer, so the modal survives by
     // construction: only an explicit close patch reaches the stack.
-    this.#layers?.close({
+    this.#layers()?.close({
       result: patch.result,
       dismiss: patch.dismiss === true,
       ...(patch.reason !== undefined ? { reason: patch.reason } : {}),
@@ -657,20 +667,20 @@ export class Applier {
   // toast is sugar over the stack's container, textContent there, never parsed as HTML.
   #toast(patch: ToastPatch): void {
     if (patch.text !== undefined)
-      this.#layers?.toast(patch.text, patch.variant ?? "info");
+      this.#layers()?.toast(patch.text, patch.variant ?? "info");
   }
 
   // History from a server-validated href: push or replace, never authored.
   #url(patch: UrlPatch): void {
     if (patch.href === undefined) return;
-    if (patch.action === "replace") this.#history?.replace(patch.href);
-    else this.#history?.push(patch.href);
+    if (patch.action === "replace") this.#history()?.replace(patch.href);
+    else this.#history()?.push(patch.href);
   }
 
   // A redirect is a hard navigation, not a history push. The same seam carries
   // an external redirect, the client does not branch on the external flag.
   #visit(patch: VisitPatch): void {
-    if (patch.href !== undefined) this.#navigate?.(patch.href);
+    if (patch.href !== undefined) this.#navigate()?.(patch.href);
   }
 
   // Merging into the client context fires context-updated, so islands react.
@@ -824,10 +834,9 @@ export class Applier {
     const zone = patch.zone ?? patch.target?.zone;
     if (zone === undefined) return;
     const node = this.#resolve({ zone }, state);
+    const layers = this.#layers();
     const url =
-      node !== null && this.#layers !== undefined
-        ? this.#layers.urlFor(node)
-        : this.#here();
+      node !== null && layers !== undefined ? layers.urlFor(node) : this.#here();
     this.#refresh?.({ url, zone, headers: { [HEADER_ZONE]: zone } });
   }
 
@@ -871,8 +880,9 @@ export class Applier {
   // Resolve against the live document. A zone goes to the layer stack with the
   // envelope's page, so a base-page poll cannot morph a same-named modal zone.
   #resolve(target: Target | undefined, state: ApplyState): Element | null {
-    if (target?.zone !== undefined && this.#layers !== undefined) {
-      return this.#layers.resolveZone(target.zone, this.#document, state.page);
+    const layers = this.#layers();
+    if (target?.zone !== undefined && layers !== undefined) {
+      return layers.resolveZone(target.zone, this.#document, state.page);
     }
     return this.#resolveIn(this.#document, target, state);
   }
@@ -920,8 +930,9 @@ export class Applier {
   // In the live document a modal form wins over a same-uid form under it.
   // The parsed extract document holds no layers, so it keeps the plain lookup.
   #formQuery(root: Document, selector: string): Element | null {
-    if (root === this.#document && this.#layers !== undefined) {
-      return this.#layers.resolveSelector(selector, root);
+    const layers = this.#layers();
+    if (root === this.#document && layers !== undefined) {
+      return layers.resolveSelector(selector, root);
     }
     return root.querySelector(selector);
   }
@@ -958,9 +969,13 @@ function matchByTag(parsed: Document, target: Element): Element | null {
 
 // The dedup key of a list row. "key" reads data-next-key then falls back to id, "id"
 // reads only id, so a row with a key but no id has no identity and always inserts.
+// The id comes off the attribute, as morph reads it: the property is subject to DOM
+// clobbering, where an <input name="id"> shadows form.id with the field itself.
 function keyOf(el: Element, mode: DedupeMode): string | null {
-  if (mode === "id") return el.id !== "" ? el.id : null;
-  return el.getAttribute(ATTR_KEY) ?? (el.id !== "" ? el.id : null);
+  const raw = el.getAttribute("id") ?? "";
+  const id = raw === "" ? null : raw;
+  if (mode === "id") return id;
+  return el.getAttribute(ATTR_KEY) ?? id;
 }
 
 // Index the keyed children of a merge container under the keying rule the incoming rows

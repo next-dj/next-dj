@@ -1,23 +1,17 @@
 """Django staticfiles finder that exposes next-dj co-located assets.
 
-The finder surfaces every `template.css`, `layout.js`, and `component.css` plus any
-stems registered on the stem registry under the `next/` staticfiles namespace. The usual
-`{% static "next/about.css" %}` call works without the user configuring anything.
-
-The logical-path and source-file mapping comes from the discovery helper below, which
-shares the `PathResolver` of request-time discovery, so both agree on every URL.
-
-Staticfiles asks per referenced asset, so the answer is held until something it was
-read from moves. The freshness token is the one the asset plans use, a generation per
-registry and a directory snapshot taken only where template edits are watched.
+Shares `PathResolver` with request-time discovery so both layers agree on every URL,
+and caches the mapping until the same freshness token discovery uses goes stale.
 """
 
 from __future__ import annotations
 
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, NamedTuple, overload, override
 
+from django.conf import settings
 from django.contrib.staticfiles.finders import BaseFinder
 from django.contrib.staticfiles.utils import matches_patterns
 from django.core.files import File
@@ -25,15 +19,15 @@ from django.core.files.storage import Storage
 
 from next.components import component_watch_roots, get_component_paths_for_watch
 from next.conf.signals import settings_reloaded
-from next.pages.registry import (
+from next.pages.watch import (
     get_layout_djx_paths_for_watch,
+    get_pages_directories_for_watch,
     get_template_djx_paths_for_watch,
 )
-from next.pages.watch import get_pages_directories_for_watch
 from next.utils import stat_mtime_ns, template_edits_watched
 
 from .assets import StaticNamespace, default_kinds
-from .discovery import PathResolver, default_stems
+from .discovery import PathResolver, default_stems, find_role_files
 
 
 if TYPE_CHECKING:
@@ -49,22 +43,17 @@ def _collect_stem_static_files(
     role: str,
     stems: StemRegistry,
 ) -> None:
-    """Add `{stem}.<kind>` files found in the directory to the output map.
+    """Add the `{stem}.<kind>` files of a role directory to the output map.
 
-    Every registered kind is probed for each stem of the given role. Every caller hands
-    in a resolved directory, so a file that is no symlink is already spelled the way
-    request-time discovery spells it, and only a symlinked one is worth resolving.
+    The probe is the one request-time discovery runs, so a logical name means one file.
     """
-    kinds = default_kinds.kinds()
-    for stem in stems.stems(role):
-        for kind in kinds:
-            suffix = default_kinds.extension(kind)
-            candidate = directory / f"{stem}{suffix}"
-            if not candidate.exists():  # pragma: no cover
-                continue
-            static_path = f"{StaticNamespace.NEXT}/{logical_name}{suffix}"
-            source = candidate.resolve() if candidate.is_symlink() else candidate
-            out.setdefault(static_path, source)
+    for found in find_role_files(
+        directory, logical_name=logical_name, role=role, stems=stems
+    ):
+        suffix = default_kinds.extension(found.kind)
+        out.setdefault(
+            f"{StaticNamespace.NEXT}/{found.logical_name}{suffix}", found.source_path
+        )
 
 
 def discover_colocated_static_assets() -> dict[str, Path]:
@@ -128,10 +117,8 @@ class _MappedSourceStorage(Storage):
     @override
     def exists(self, name: str) -> bool:
         """Return True when the logical name has a mapping and the file exists."""
-        try:
-            return self._resolve(name).exists()
-        except FileNotFoundError:
-            return False
+        source = self._mapping.get(name)
+        return source is not None and source.exists()
 
     @override
     def open(self, name: str, mode: str = "rb") -> File:
@@ -143,6 +130,20 @@ class _MappedSourceStorage(Storage):
     def path(self, name: str) -> str:
         """Return the absolute filesystem path behind the logical name."""
         return str(self._resolve(name))
+
+    @override
+    def get_modified_time(self, name: str) -> datetime:
+        """Return the mtime of the source file the way `FileSystemStorage` spells it.
+
+        Without it `collectstatic` deletes and recopies the whole namespace every run.
+        """
+        stamp = self._resolve(name).stat().st_mtime
+        return datetime.fromtimestamp(stamp, tz=UTC if settings.USE_TZ else None)
+
+    @override
+    def size(self, name: str) -> int:
+        """Return the byte size of the source file behind the logical name."""
+        return self._resolve(name).stat().st_size
 
 
 class _ScanRoots(NamedTuple):
@@ -167,13 +168,28 @@ class _Scan(NamedTuple):
     directories: tuple[tuple[Path, int | None], ...]
 
 
-# Bumped by every settings reload, because a reconfiguration moves what the walk finds.
-_SETTINGS_GENERATION: dict[str, int] = {"value": 0}
+class _SettingsGeneration:
+    """The reconfiguration counter every held scan carries.
+
+    A reconfiguration moves what the walk finds and shifts no mtime the scan
+    would notice, so it is counted rather than watched.
+    """
+
+    def __init__(self) -> None:
+        """Start at the generation the first scan is stamped with."""
+        self.value = 0
+
+    def bump(self) -> None:
+        """Mark every held scan stale."""
+        self.value += 1
+
+
+_settings_generation = _SettingsGeneration()
 
 
 def _forget_scans(**kwargs) -> None:
     """Mark every held scan stale, so a reconfigure is walked again."""
-    _SETTINGS_GENERATION["value"] += 1
+    _settings_generation.bump()
 
 
 settings_reloaded.connect(_forget_scans)
@@ -185,7 +201,7 @@ def _registry_generation() -> tuple[int, int, int]:
     The placeholder registry is left out, because the finder names files rather than
     slots and no registration there moves which file a logical name means.
     """
-    return (default_stems.version, default_kinds.version, _SETTINGS_GENERATION["value"])
+    return (default_stems.version, default_kinds.version, _settings_generation.value)
 
 
 def _scan_roots() -> _ScanRoots:
@@ -209,10 +225,8 @@ def _stat_directory(directory: Path) -> os.stat_result | None:
 def _child_directories(directory: Path) -> list[Path]:
     """Return the directories held directly by `directory` that can hold an asset.
 
-    A symlinked one counts, because the component glob reads through it and a watch set
-    narrower than what the scan reads would miss a file landing there. A bytecode cache
-    is left out, because the imports the scan runs write into one and would invalidate
-    its own answer. A dot directory too, because tooling keeps no co-located asset.
+    A symlinked directory counts since the component glob reads through it. A
+    bytecode cache is excluded so the scan's own imports cannot invalidate its answer.
     """
     try:
         with os.scandir(directory) as entries:
@@ -230,16 +244,18 @@ def _child_directories(directory: Path) -> list[Path]:
 def _scan_directories(roots: _ScanRoots) -> tuple[tuple[Path, int | None], ...]:
     """Snapshot the mtime of every directory the trees of `roots` hold.
 
-    A directory that does not stat is recorded as `None`, which no real mtime equals,
-    so a tree that appears later rebuilds the scan that walked past it.
+    A missing directory records as `None`, so one appearing later rebuilds the scan.
+    A directory reached by two configured trees is recorded once.
     """
-    out: list[tuple[Path, int | None]] = []
+    out: dict[Path, int | None] = {}
     seen: set[tuple[int, int]] = set()
     stack = [*roots.pages, *roots.components]
     while stack:
         directory = stack.pop()
+        if directory in out:
+            continue
         info = _stat_directory(directory)
-        out.append((directory, None if info is None else info.st_mtime_ns))
+        out[directory] = None if info is None else info.st_mtime_ns
         if info is None:
             continue
         key = (info.st_dev, info.st_ino)
@@ -247,15 +263,14 @@ def _scan_directories(roots: _ScanRoots) -> tuple[tuple[Path, int | None], ...]:
             continue
         seen.add(key)
         stack.extend(_child_directories(directory))
-    return tuple(out)
+    return tuple(out.items())
 
 
 def _build_scan(roots: _ScanRoots) -> _Scan:
     """Discover every co-located asset and note what the answer was read from.
 
-    The generations and the snapshot are taken before the walk, so anything landing
-    while it runs leaves the scan stale rather than fresh. A process watching no
-    template edit snapshots nothing, because there only a reconfigure moves the answer.
+    Generations and the snapshot are taken before the walk, so anything landing
+    mid-walk leaves the scan stale rather than falsely fresh.
     """
     registries = _registry_generation()
     watched = template_edits_watched()
@@ -269,10 +284,8 @@ def _build_scan(roots: _ScanRoots) -> _Scan:
 def _scan_stale(scan: _Scan, roots: _ScanRoots) -> bool:
     """Whether anything the scan was read from has moved since.
 
-    A registration moves no file and a reconfigured tree no mtime, so the generations
-    and the roots are compared whatever the process watches, and only a process
-    watching template edits pays the stats. A scan taken while nothing was watched
-    snapshotted no directory, so it reads as stale the moment watching starts.
+    Generations and roots are always compared, directory mtimes only when the process
+    watches template edits. A scan taken unwatched reads as stale once watching starts.
     """
     if scan.registries != _registry_generation():
         return True

@@ -1,10 +1,8 @@
-"""Exceptions the URL area raises for a route or a router it cannot build."""
+"""Exceptions the URL area raises for a route it cannot build."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Self, override
-
-from django.core.exceptions import ImproperlyConfigured
 
 
 if TYPE_CHECKING:
@@ -14,25 +12,36 @@ if TYPE_CHECKING:
 class URLParameterError(ValueError):
     """Raised when the parser refuses to turn a bracket segment into a route.
 
-    The parser knows the route but not the file it came from, so one base
-    carries the page file and every refusal reports it the same way.
+    The parser knows the route but not the file, so one base carries the page file.
     """
 
     def __init__(
         self, param_name: str, url_path: str, file_path: Path | None = None
     ) -> None:
-        """Build the message from the refused name, its route, and the page file."""
+        """Store the refused name, its route, and the page file when one is known."""
         self.param_name = param_name
         self.url_path = url_path
         self.file_path = file_path
-        message = self._reason()
-        if file_path is not None:
-            message = f"{message} Page file: {file_path}."
-        super().__init__(message)
+        super().__init__(self._reason())
 
     def with_file(self, file_path: Path) -> Self:
-        """Return the same refusal with `file_path` named in its message."""
-        return type(self)(self.param_name, self.url_path, file_path=file_path)
+        """Return the same refusal with `file_path` named in its message.
+
+        Cloned past the constructor, so a subclass may take a shape of its own.
+        """
+        named = type(self).__new__(type(self))
+        named.args = self.args
+        named.__dict__.update(self.__dict__)
+        named.file_path = file_path
+        return named
+
+    @override
+    def __str__(self) -> str:
+        """Render the reason, naming the page file once one is known."""
+        reason = super().__str__()
+        if self.file_path is None:
+            return reason
+        return f"{reason} Page file: {self.file_path}."
 
     def _reason(self) -> str:
         """Return the sentence explaining why the route cannot be built."""
@@ -45,9 +54,7 @@ class URLParameterError(ValueError):
 class DuplicateURLParameterError(URLParameterError):
     """Raised when bracket segments in one route conflict after normalisation.
 
-    Covers a repeated normalised parameter name (`-` maps to `_`) and a
-    second `[[wildcard]]` segment, both of which Django would otherwise
-    reject only at resolve time or resolve ambiguously.
+    A repeated normalised name and a second `[[wildcard]]` both resolve ambiguously.
     """
 
     @override
@@ -78,21 +85,8 @@ class InvalidURLParameterError(URLParameterError):
         )
 
 
-class RouterConstructionError(ImproperlyConfigured):
-    """Raised when a router class refuses the arguments the factory passes."""
-
-    def __init__(self, backend_name: str, exc: TypeError) -> None:
-        """Store the router that refused and the signature mismatch it reported."""
-        self.backend_name = backend_name
-        super().__init__(
-            f"{backend_name} does not take the arguments RouterFactory "
-            f"builds a router with: {exc}"
-        )
-
-
 __all__ = [
     "DuplicateURLParameterError",
     "InvalidURLParameterError",
-    "RouterConstructionError",
     "URLParameterError",
 ]

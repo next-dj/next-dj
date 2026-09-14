@@ -1,10 +1,7 @@
 """Pluggable builder for the `next.min.js` preload, script, and init tags.
 
-The preload hint goes before `</head>` so the download starts during parsing, a blocking
-script tag loads the runtime, and an inline script feeds the JS context to `Next._init`.
-
-Every template is an instance attribute, so a single tag is overridable without
-subclassing, and an injection policy decides whether the tags are emitted at all.
+Every template is an instance attribute, overridable without subclassing, and an
+injection policy decides whether the tags are emitted at all.
 """
 
 from __future__ import annotations
@@ -55,10 +52,8 @@ _SCRIPT_ESCAPES: Final[dict[int, str]] = {
 def csrf_header_name() -> str:
     """Return the CSRF header name in HTTP wire form from Django settings.
 
-    Django stores `CSRF_HEADER_NAME` in WSGI `request.META` form, for
-    example `HTTP_X_CSRFTOKEN`. The runtime sends the header by its HTTP
-    name, so the META form is unmangled with the same rule Django uses
-    to expose headers. The cookie is never read.
+    Django stores `CSRF_HEADER_NAME` in WSGI `META` form, so it is unmangled to the
+    wire name with the same rule Django uses to expose headers.
     """
     raw = settings.CSRF_HEADER_NAME
     name = HttpHeaders.parse_header_name(raw)
@@ -86,12 +81,8 @@ def csrf_payload_for(request: HttpRequest | None) -> dict[str, str] | None:
 class ScriptInjectionPolicy(enum.Enum):
     """Controls whether `next.min.js` is automatically injected.
 
-    The `AUTO` value is the default. Under `AUTO` the static manager emits the preload
-    hint, the `<script>` tag, and the `Next._init` call into every rendered page. The
-    `DISABLED` value skips injection entirely and is useful when a page does not need
-    `window.Next`, for example a raw API response rendered through the page machinery.
-    The `MANUAL` value skips automatic injection but still builds the fragments on
-    request so users can emit the tags themselves from a template.
+    `AUTO` emits every tag automatically. `DISABLED` skips injection entirely.
+    `MANUAL` still builds the fragments but leaves emitting them to the template.
     """
 
     AUTO = "auto"
@@ -183,10 +174,7 @@ class NextScriptBuilder:
     ) -> NextScriptBuilder:
         """Build a script builder from an options mapping.
 
-        The recognised keys are `preload_template`, `script_tag_template`,
-        `init_template`, and `policy`. The `policy` value may be a
-        `ScriptInjectionPolicy` member or the string value of one of its
-        members. Any other value raises `ValueError`.
+        `policy` accepts a `ScriptInjectionPolicy` member or its string value.
         """
         options = options or {}
         raw_policy = options.get("policy", ScriptInjectionPolicy.AUTO)

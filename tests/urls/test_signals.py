@@ -10,7 +10,7 @@ from next.conf import next_framework_settings
 from next.testing import SignalRecorder, capture_signals
 from next.urls import FileRouterBackend, RouterManager, router_manager
 from next.urls.signals import route_registered, router_reloaded
-from tests.support import SignalSender
+from tests.support import SignalSender, file_router
 
 
 @pytest.fixture()
@@ -85,7 +85,7 @@ class TestRouteRegisteredFromBackend:
         self, capture_route_registered: SignalRecorder
     ) -> None:
         """Each yielded URL pattern produces one `route_registered` event."""
-        router = FileRouterBackend()
+        router = file_router()
         scanned = [
             ("home/", Path("/tmp/pages/home/page.py")),
             ("about/", Path("/tmp/pages/about/page.py")),
@@ -108,7 +108,7 @@ class TestRouteRegisteredFromBackend:
         self, capture_route_registered: SignalRecorder
     ) -> None:
         """When `create_url_pattern` returns falsy, no event is fired."""
-        router = FileRouterBackend()
+        router = file_router()
         with (
             patch.object(
                 router,

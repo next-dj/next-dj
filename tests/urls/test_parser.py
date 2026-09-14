@@ -263,7 +263,10 @@ class TestNamesDjangoRefuses:
     def test_a_hyphen_name_still_builds_a_django_route(self, url_parser) -> None:
         """Normalisation runs before the rule, so a hyphen keeps working."""
         pattern, _params = url_parser.parse_url_pattern("post/[slug:post-slug]")
-        assert path(pattern, _noop_view).pattern.regex.pattern.count("post_slug") == 1
+        match = path(pattern, _noop_view).pattern.match("post/hello-world/")
+        assert match is not None
+        _remainder, _args, kwargs = match
+        assert kwargs == {"post_slug": "hello-world"}
 
 
 class TestCreateUrlPatternFileContext:

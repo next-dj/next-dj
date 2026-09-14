@@ -1,8 +1,7 @@
 """Filesystem-root helpers for build tooling and symlink management.
 
-These helpers are distinct from watch specs. They return a canonical
-list of directories that downstream tooling (dockerfiles, editors,
-symlink builders) needs, without reloader semantics.
+Distinct from watch specs, these return a canonical directory list for downstream
+tooling (dockerfiles, editors, symlink builders), without reloader semantics.
 """
 
 from __future__ import annotations

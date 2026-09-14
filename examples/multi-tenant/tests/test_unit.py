@@ -9,10 +9,10 @@ import pytest
 from django.core.management import call_command
 from django.http import HttpRequest, QueryDict
 from django.test import override_settings
+from markup import render_markdown
 from notes.backends import TenantPrefixStaticBackend
 from notes.context_processors import tenant_theme
 from notes.demo import DEMO_TENANTS, seed_demo
-from notes.markdown_render import render_markdown
 from notes.middleware import TenantMiddleware
 from notes.models import Note, Tenant
 from notes.providers import DTenant, TenantProvider
@@ -141,7 +141,7 @@ class TestTenantMiddleware:
         middleware = TenantMiddleware(Mock())
         response = middleware(request)
         assert response.status_code == 302
-        assert response.url == "/evil.example.com/"
+        assert response.url == "/"
 
     @pytest.mark.django_db()
     @override_settings(DEBUG=False)

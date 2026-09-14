@@ -2,19 +2,24 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
 from django.core.checks import Error
 from django.test import override_settings
 
 from next.checks import reset_check_caches
 from next.testing import override_next_settings
-from next.urls import FileRouterBackend, PageRoot, RouterBackend
+from next.urls import PageRoot, RouterBackend
 from next.urls.checks import (
     _collect_url_patterns,
     check_next_pages_configuration,
     check_reverse_name_collisions,
     check_url_patterns,
 )
-from tests.support import importable_dir, patch_checks_router_manager_with_routers
+from tests.support import (
+    file_router,
+    importable_dir,
+    patch_checks_router_manager_with_routers,
+)
 
 
 def _write_page(tree: Path, route: str) -> Path:
@@ -94,7 +99,7 @@ class TestDoublyMountedTree:
         (app / "__init__.py").parent.mkdir(parents=True)
         (app / "__init__.py").write_text("")
         _write_page(app / "pages", "hello")
-        router = FileRouterBackend(app_dirs=True, extra_root_paths=[app / "pages"])
+        router = file_router(app_dirs=True, dirs=[app / "pages"])
 
         with importable_dir(tmp_path):
             settings.INSTALLED_APPS = [*settings.INSTALLED_APPS, "shop"]
@@ -358,21 +363,33 @@ class TestCheckReverseNameCollisions:
 
 
 class TestCollectUrlPatterns:
-    """`_collect_url_patterns` tolerates parser failures it cannot attribute."""
+    """`_collect_url_patterns` reports each parser refusal under its own code."""
 
-    def test_parser_value_error_skips_route_silently(self, tmp_path) -> None:
-        """Plain ValueError from the parser drops the route without an error."""
+    def test_a_plain_value_error_is_no_refusal_and_reaches_the_caller(
+        self, tmp_path
+    ) -> None:
+        """Only the refusals the parser declares are caught, never every ValueError."""
         _write_page(tmp_path, "broken")
+
+        with (
+            patch(
+                "next.urls.checks.default_url_parser.parse_url_pattern",
+                side_effect=ValueError("unparsable"),
+            ),
+            pytest.raises(ValueError, match="unparsable"),
+        ):
+            _collect_url_patterns(tmp_path, "Root", [])
+
+    def test_a_refused_parameter_name_is_reported_as_e082(self, tmp_path) -> None:
+        """A bracket name Django refuses leaves the map under a code of its own."""
+        _write_page(tmp_path, "[2fa]")
         errors: list[Error] = []
 
-        with patch(
-            "next.urls.checks.default_url_parser.parse_url_pattern",
-            side_effect=ValueError("unparsable"),
-        ):
-            patterns = _collect_url_patterns(tmp_path, "Root", errors)
+        patterns = _collect_url_patterns(tmp_path, "Root", errors)
 
         assert patterns == []
-        assert errors == []
+        assert [error.id for error in errors] == ["next.E082"]
+        assert "no valid Python identifier" in errors[0].msg
 
 
 class TestPagesConfigurationCodes:

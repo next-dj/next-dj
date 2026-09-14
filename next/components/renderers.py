@@ -1,16 +1,13 @@
 """Component renderers and render-time helpers.
 
-`ComponentTemplateLoader` reads the raw source for a component and
-`CachedComponentTemplateLoader` keeps its compilation between renders.
-The Protocol `ComponentRenderStrategy` plus `SimpleComponentRenderer` and
-`CompositeComponentRenderer` are the two renderers `ComponentRenderer` picks.
+`ComponentTemplateLoader` reads raw source and `CachedComponentTemplateLoader` caches
+its compilation, feeding the two strategies `ComponentRenderer` picks between.
 """
 
 from __future__ import annotations
 
 import contextlib
 import threading
-from collections import OrderedDict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, override
 
@@ -19,9 +16,12 @@ from django.middleware.csrf import get_token
 from django.template import Context as DjangoTemplateContext, Template
 from django.utils.functional import SimpleLazyObject
 
-from next.deps import get_request_dep_cache, resolver
+from next.caches import DEFAULT_CACHE_SIZE, LruCache
+from next.deps import get_request_dep_cache
 from next.deps.cache import DependencyCache
-from next.utils import store_bounded, template_edits_watched
+from next.deps.resolver import current_resolver
+from next.seeding import COLLECTOR_KEY
+from next.utils import template_edits_watched
 
 from .context import component
 
@@ -44,8 +44,8 @@ COMPONENT_PROPS_CONTEXT_KEY = "_component_props"
 # Keys the render path owns, so overwriting one breaks the render itself.
 _RESERVED_CONTEXT_KEYS = frozenset(
     {
+        COLLECTOR_KEY,
         COMPONENT_PROPS_CONTEXT_KEY,
-        "_static_collector",
         "children",
         "csrf_token",
         "current_component_module_path",
@@ -120,9 +120,6 @@ class _CompiledTemplate:
 # The template and module files that define one component.
 type _SourceKey = tuple[Path | None, Path | None]
 
-# Components one process keeps compiled, at the bound the path-keyed caches share.
-_COMPILED_TEMPLATE_CACHE_MAX_SIZE = 2048
-
 
 def _stat_ns(path: Path) -> int | None:
     """Return the mtime of `path` in nanoseconds, or `None` when it does not stat."""
@@ -151,21 +148,16 @@ def _source_mtimes(info: ComponentInfo) -> dict[Path, int]:
 class CachedComponentTemplateLoader(ComponentTemplateLoader):
     """Reuse a compiled template until the file it was read from changes.
 
-    A render then pays at most one `stat` instead of a read plus a full parse,
-    and an edited `.djx` still reaches the next render without a restart. A
-    `component` string comes from an already imported module, so its edit
-    arrives with the reload the autoreloader runs for `component.py`.
+    A render then pays at most one `stat` instead of a read plus a full parse, and a
+    `component` string picks up its own edits through the `component.py` autoreload.
     """
 
     def __init__(
-        self,
-        module_loader: ModuleLoader,
-        maxsize: int = _COMPILED_TEMPLATE_CACHE_MAX_SIZE,
+        self, module_loader: ModuleLoader, maxsize: int = DEFAULT_CACHE_SIZE
     ) -> None:
         """Bind this loader to a shared `ModuleLoader` with an empty LRU cache."""
         super().__init__(module_loader)
-        self._maxsize = maxsize
-        self._compiled: OrderedDict[_SourceKey, _CompiledTemplate] = OrderedDict()
+        self._compiled: LruCache[_SourceKey, _CompiledTemplate] = LruCache(maxsize)
         # Taken around the cache mutations alone, never around a read or a parse.
         self._lock = threading.Lock()
 
@@ -179,10 +171,6 @@ class CachedComponentTemplateLoader(ComponentTemplateLoader):
         key = (info.template_path, info.module_path)
         entry = self._compiled.get(key)
         if entry is not None and self._is_fresh(entry):
-            # Use order decides only who is evicted, so a cache with room to
-            # spare skips the bookkeeping every hit would otherwise pay.
-            if len(self._compiled) >= self._maxsize:
-                self._mark_used(key)
             return entry.template
         return self._compile(key, info)
 
@@ -191,12 +179,6 @@ class CachedComponentTemplateLoader(ComponentTemplateLoader):
         """Drop every compiled template."""
         with self._lock:
             self._compiled.clear()
-
-    def _mark_used(self, key: _SourceKey) -> None:
-        """Move `key` to the fresh end, unless a concurrent store already dropped it."""
-        with self._lock:
-            if key in self._compiled:
-                self._compiled.move_to_end(key)
 
     def _is_fresh(self, entry: _CompiledTemplate) -> bool:
         if not template_edits_watched():
@@ -227,11 +209,11 @@ class CachedComponentTemplateLoader(ComponentTemplateLoader):
     def _drop(self, key: _SourceKey) -> None:
         """Forget the entry under `key`, whether or not one is stored."""
         with self._lock:
-            self._compiled.pop(key, None)
+            self._compiled.pop(key)
 
     def _store(self, key: _SourceKey, entry: _CompiledTemplate) -> None:
         with self._lock:
-            store_bounded(self._compiled, key, entry, self._maxsize)
+            self._compiled[key] = entry
 
 
 def _stamp_component_anchor(info: ComponentInfo, context_dict: dict[str, Any]) -> None:
@@ -298,7 +280,7 @@ def _inject_component_context(
     if not ctx_funcs:
         return
 
-    collector: StaticCollector | None = context_data.get("_static_collector")
+    collector: StaticCollector | None = context_data.get(COLLECTOR_KEY)
     guarded = _guarded_keys(context_data)
 
     shared = get_request_dep_cache(request)
@@ -306,7 +288,7 @@ def _inject_component_context(
     stack: list[str] = []
 
     for ctx_func in ctx_funcs:
-        resolved = resolver.resolve_with_template_context(
+        resolved = current_resolver().resolve_with_template_context(
             ctx_func.func,
             request=request,
             template_context=context_data,
@@ -425,7 +407,7 @@ class CompositeComponentRenderer:
 
         # Nothing here writes to the context, and no provider writes to the
         # mapping it reads, so this branch hands it straight through.
-        resolved = resolver.resolve_with_template_context(
+        resolved = current_resolver().resolve_with_template_context(
             render_func,
             request=request,
             template_context=context_data,

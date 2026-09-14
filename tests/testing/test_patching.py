@@ -207,7 +207,7 @@ class TestPatchStaticCollector:
 
     def test_replaces_factory_and_captures_collector(self) -> None:
         manager = get_static_manager()
-        with patch_static_collector(capture=True) as proxy:
+        with patch_static_collector() as proxy:
             assert isinstance(proxy, StaticCollectorProxy)
             collector = manager.create_collector()
             assert proxy.collector is collector
@@ -216,14 +216,14 @@ class TestPatchStaticCollector:
     def test_custom_factory(self) -> None:
         sentinel = StaticCollector()
         manager = get_static_manager()
-        with patch_static_collector(lambda: sentinel, capture=True) as proxy:
+        with patch_static_collector(lambda: sentinel) as proxy:
             out = manager.create_collector()
             assert out is sentinel
             assert proxy.collector is sentinel
 
-    def test_no_proxy_when_capture_false(self) -> None:
+    def test_a_block_that_builds_nothing_leaves_the_proxy_empty(self) -> None:
         with patch_static_collector() as proxy:
-            assert proxy is None
+            assert proxy.collector is None
 
     def test_restores_after_exception(self) -> None:
         manager = get_static_manager()

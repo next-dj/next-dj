@@ -21,9 +21,8 @@ def filter_zones() -> str:
 def category(category: object) -> Category:
     """Resolve the category slug from the URL into a `Category` instance.
 
-    `inherit_context=True` hands child pages the same instance through DI without a
-    second query. The parameter stays untyped because `_collect_inherited_context` runs
-    the callable twice, first with the URL slug and then with the resolved instance.
+    Stays untyped because `_collect_inherited_context` runs this callable twice, once
+    with the URL slug and once with the resolved instance, to hand child pages the same.
     """
     if isinstance(category, Category):
         return category

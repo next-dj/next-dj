@@ -4,7 +4,7 @@ from collections.abc import Callable, Iterable
 from difflib import get_close_matches
 from typing import Any, override
 
-from next.utils import describe_callable
+from next.introspect import describe_callable
 
 
 class DependencyCycleError(Exception):

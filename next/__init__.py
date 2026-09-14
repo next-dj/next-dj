@@ -57,9 +57,11 @@ def _resolve(name: str) -> object:
     return getattr(importlib.import_module(module_name), name)
 
 
-# A visible module `__getattr__` would make any name typecheck, so only the
-# binding hides from type checkers while `_resolve` stays checked.
-if not TYPE_CHECKING:
+# A visible module `__getattr__` would make any name typecheck, so the binding sits
+# in the arm a type checker never reads while `_resolve` itself stays checked.
+if TYPE_CHECKING:
+    pass
+else:
     __getattr__ = _resolve
 
 

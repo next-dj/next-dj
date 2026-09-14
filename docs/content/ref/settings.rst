@@ -276,11 +276,9 @@ A path that fails to import, or one that names anything other than a ``Dependenc
 The key is read through ``next.backends.resolve_setting_class``, documented in :doc:`backends`, the same helper ``URL_RESOLVER`` goes through.
 
 The key is read at startup and again on every settings reload, never per request, so ``override_settings`` swaps the resolver without a restart.
-The framework holds one resolver singleton that the rest of the code binds by reference, so the named class is adopted by retyping that object in place rather than by building a new one.
-Two constraints on the subclass follow from that.
-Its ``__init__`` never runs, because the state it would build already lives on the singleton the base class initialised.
-It adds no instance slots and no second base, because either changes the object layout and the retype then raises :exc:`~django.core.exceptions.ImproperlyConfigured`.
-An empty ``__slots__ = ()`` leaves the layout alone and is fine.
+The framework holds one resolver singleton behind a shared holder, so the named class is adopted by building an instance of it and putting it behind that holder, which every reference reads through.
+The subclass is built like any other object, so its ``__init__`` runs and it is free to declare slots and bases of its own.
+The object the swap replaces takes its state with it, the compiled plans as well as anything registered on it at runtime, so a dependency registered through ``resolver.dependency`` is registered again after a swap.
 
 See :doc:`/content/internals/di-resolver` for the resolution algorithm and :doc:`deps` for the resolver API.
 

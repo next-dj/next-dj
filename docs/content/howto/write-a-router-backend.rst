@@ -140,7 +140,7 @@ Register the backend
 ~~~~~~~~~~~~~~~~~~~~~
 
 List the dotted path of the subclass under ``PAGE_BACKENDS``.
-``RouterFactory`` imports the class and instantiates it with the same ``PAGES_DIR``, ``APP_DIRS``, ``DIRS``, and ``OPTIONS`` keys a plain ``FileRouterBackend`` accepts.
+The framework imports the class and hands the whole entry to its constructor, so a file router subclass reads the same ``PAGES_DIR``, ``APP_DIRS``, ``DIRS``, and ``OPTIONS`` keys a plain ``FileRouterBackend`` reads.
 
 .. code-block:: python
    :caption: config/settings.py
@@ -175,10 +175,9 @@ A backend that subclasses ``RouterBackend`` directly rather than ``FileRouterBac
        ],
    }
 
-``RouterFactory`` calls the class with no arguments, so a backend that is not a file router reads its own configuration.
+Every router of the family takes its own entry as the single constructor argument, so a backend that is not a file router reads whatever keys it declares off that mapping.
 The entry carries ``BACKEND`` and nothing else, and any other key reports ``next.E035``.
-A constructor that requires arguments raises ``RouterConstructionError``, which the manager logs and skips, so the backend contributes no pattern and the process still starts.
-Give the class a no-argument constructor and read its configuration from settings inside it.
+A constructor that refuses the entry raises ``TypeError``, which nothing catches, because a backend that does not take its own entry is a bug rather than a misconfigured site.
 
 Reload when the table changes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

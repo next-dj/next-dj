@@ -37,12 +37,8 @@ _DEFAULT_HEARTBEAT_SECONDS = 25.0
 class PatchEventStream(StreamingHttpResponse):
     """SSE response that emits patch envelopes as `next-patches` events.
 
-    A sync source streams as envelopes arrive with no heartbeat, an async source under
-    ASGI interleaves heartbeat comments through `asyncio.wait`, and the politeness
-    headers plus the leading `retry` keep a proxy from eating the flush.
-
-    Django buffers a mismatched iterator fully before the first byte, which hangs an
-    infinite stream, so the constructor raises `ImproperlyConfigured` instead.
+    Django buffers a mismatched sync/async iterator fully before the first byte,
+    hanging an infinite stream, so the constructor raises `ImproperlyConfigured`.
     """
 
     def __init__(
@@ -71,19 +67,15 @@ class PatchEventStream(StreamingHttpResponse):
         self["Cache-Control"] = _CACHE_CONTROL
         self[_ACCEL_BUFFERING] = "no"
         set_partial_vary(self)
-        sender = type(self)
-        if sse_stream_opened.receivers and sse_stream_opened.has_listeners(sender):
-            sse_stream_opened.send(sender=sender, request=request)
+        sse_stream_opened.send(sender=type(self), request=request)
 
     def _guard_source_kind(
         self, source: "Iterable[Patches] | AsyncIterable[Patches]"
     ) -> None:
         """Refuse a source kind the request's server kind would buffer.
 
-        Django reads an async iterator fully under WSGI and a sync iterator
-        fully under ASGI before the first byte, so a mismatched stream hangs
-        instead of flushing. The mismatch is caught at construction with an
-        actionable message rather than a silent hang.
+        Django reads an async iterator fully under WSGI and a sync one fully under ASGI
+        before the first byte, hanging a mismatched stream instead of flushing it.
         """
         asgi = isinstance(self._request, ASGIRequest)
         if isinstance(source, AsyncIterable):
@@ -142,13 +134,9 @@ class PatchEventStream(StreamingHttpResponse):
     ) -> "AsyncIterator[bytes]":
         """Yield SSE bytes for an async source, interleaving heartbeats.
 
-        A single pull task is held across heartbeats so the source generator is never
-        re-entered while a pull is in flight and no envelope is lost. A pull that
-        outlasts `heartbeat_seconds` yields a comment frame so a buffering proxy keeps
-        the connection. The close signal fires once the source is exhausted or the
-        client disconnects. A disconnect throws into the `await`, so the cleanup cancels
-        the in-flight pull and closes the source generator before announcing the close,
-        leaving no pending task or suspended generator behind.
+        A single pull task is held across heartbeats so the generator is never
+        re-entered while a pull is in flight. A pull past `heartbeat_seconds` yields a
+        comment frame to keep a buffering proxy connected.
         """
         sent = 0
         yield self._retry_frame()
@@ -179,10 +167,8 @@ class PatchEventStream(StreamingHttpResponse):
     ) -> None:
         """Cancel an in-flight pull and close the source generator.
 
-        A client disconnect throws into the stream while a pull is in
-        flight, so the pending task is cancelled and awaited and the source
-        generator's `aclose` is driven, both suppressed, so neither a
-        pending task nor a suspended generator is left behind.
+        A disconnect throws into the stream mid-pull, so the pending task is cancelled
+        and the generator's `aclose` driven, both errors suppressed.
         """
         if task is not None:
             task.cancel()
@@ -205,9 +191,7 @@ class PatchEventStream(StreamingHttpResponse):
     def _announce_closed(self, sent: int) -> None:
         """Fire the close signal with the stream's duration and event count."""
         sender = type(self)
-        if not sse_stream_closed.receivers or not sse_stream_closed.has_listeners(
-            sender
-        ):
+        if not sse_stream_closed.has_listeners(sender):
             return
         duration_ms = (self._clock() - self._opened_at) * 1000
         sse_stream_closed.send(
@@ -218,26 +202,27 @@ class PatchEventStream(StreamingHttpResponse):
         )
 
 
-def _sse_options() -> dict[str, object]:
-    """Return the active backend's SSE options sub-mapping, or an empty one."""
+def _sse_interval(option: str, default: float) -> float:
+    """Return one numeric SSE option of the active backend, or its default.
+
+    A bool is an int to Python but no interval to a client, so `True` falls back
+    instead of travelling as a one-millisecond reconnect.
+    """
     sse = partial_backend_manager.get().options.get(_SSE_OPTION)
-    return sse if isinstance(sse, dict) else {}
+    value = sse.get(option, default) if isinstance(sse, dict) else default
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return default
 
 
 def _retry_ms() -> int:
     """Return the EventSource retry hint from the active backend options."""
-    value = _sse_options().get(_RETRY_OPTION, _DEFAULT_RETRY_MS)
-    if isinstance(value, int):
-        return value
-    return _DEFAULT_RETRY_MS
+    return int(_sse_interval(_RETRY_OPTION, _DEFAULT_RETRY_MS))
 
 
 def _heartbeat_seconds() -> float:
     """Return the heartbeat interval from the active backend options."""
-    value = _sse_options().get(_HEARTBEAT_OPTION, _DEFAULT_HEARTBEAT_SECONDS)
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return float(value)
-    return _DEFAULT_HEARTBEAT_SECONDS
+    return _sse_interval(_HEARTBEAT_OPTION, _DEFAULT_HEARTBEAT_SECONDS)
 
 
 __all__ = ["PatchEventStream"]

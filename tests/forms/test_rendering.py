@@ -477,6 +477,24 @@ class TestFormTagRender:
         assert 'name="_next_form_origin" value="/board/4/settings/"' in html
         assert 'value="/_next/form/abc123/"' not in html
 
+    def test_a_post_carrying_no_origin_falls_back_to_the_url(
+        self, form_engine, csrf_request
+    ) -> None:
+        """A POST straight at the page has no posted origin, so the URL answers."""
+        csrf_request.method = "POST"
+        csrf_request.path = "/board/4/settings/"
+        csrf_request.POST = {}
+        t = form_engine.from_string('{% form "simple_form" %}x{% endform %}')
+        html = t.render(
+            Context(
+                {
+                    "request": csrf_request,
+                    "current_page_module_path": str(PAGE_MODULE_FOR_FORM_TESTS),
+                }
+            )
+        )
+        assert 'name="_next_form_origin" value="/board/4/settings/"' in html
+
     def test_unknown_action_raises_form_action_not_found(
         self, form_engine, csrf_request
     ) -> None:

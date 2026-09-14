@@ -28,9 +28,8 @@ _registered_extra_watch_specs: list[tuple[Path, str]] = []
 def register_autoreload_watch_spec(path: Path, glob: str) -> None:
     """Register one extra directory and glob pair for the file watcher.
 
-    Built-in globs already come from `NEXT_FRAMEWORK`.
-    Call this from your own `AppConfig.ready` if you need
-    more trees watched without changing the `next` package.
+    Call this from your own `AppConfig.ready` for more trees to watch without touching
+    the `next` package, since built-in globs already come from `NEXT_FRAMEWORK`.
     """
     _registered_extra_watch_specs.append((path, glob))
 

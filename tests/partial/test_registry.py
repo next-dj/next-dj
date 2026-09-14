@@ -30,8 +30,8 @@ class TestBuiltinOps:
 
     def test_fresh_registry_knows_builtins(self) -> None:
         registry = PatchOpRegistry()
-        assert "morph" in registry
-        assert frozenset(registry._ops) == BUILTIN_OPS
+        assert all(verb in registry for verb in BUILTIN_OPS)
+        assert registry.custom_names() == frozenset()
 
 
 class TestRegisterPatchOp:
@@ -60,7 +60,7 @@ class TestRegisterPatchOp:
         assert seen[0]["sender"] is PatchOpRegistry
         assert seen[0]["name"] == "confetti"
 
-    def test_register_skips_send_without_receivers(self) -> None:
+    def test_register_records_the_name_with_no_receiver_connected(self) -> None:
         registry = PatchOpRegistry()
         registry.register("quiet")
         assert "quiet" in registry

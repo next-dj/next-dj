@@ -7,4 +7,4 @@ class WikiConfig(AppConfig):
 
     def ready(self) -> None:
         """Wire DI providers and signal receivers when the app loads."""
-        from wiki import providers, receivers  # noqa: F401, PLC0415
+        from wiki import providers, receivers

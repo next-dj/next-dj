@@ -121,7 +121,28 @@ class TestFormActionNotFoundError:
         assert str(revived) == str(exc)
         assert revived.suggestions == ("votes",)
         assert revived.candidates == ()
-        assert str(FormActionNotFoundError(*exc.args)) == str(exc)
+        assert revived.args == (str(exc),)
+        assert revived.name == "vote"
+        assert revived.page_path == "/app/page.py"
+
+    def test_reduce_rebuilds_the_refusal_from_its_state(self) -> None:
+        """The protocol tuple pickle follows rebuilds message, context, and matches."""
+        exc = FormActionNotFoundError(
+            name="vote", page_path="/app/page.py", candidates=("votes",)
+        )
+        klass, args, state = exc.__reduce__()
+        revived = klass(*args)
+        revived.__dict__.update(state)
+        assert str(revived) == str(exc)
+        assert revived.name == "vote"
+        assert revived.suggestions == ("votes",)
+
+    def test_rendering_leaves_the_raised_args_alone(self) -> None:
+        """Composing the message never writes it back into `args`."""
+        exc = FormActionNotFoundError(name="vote")
+        assert exc.args == ()
+        assert "Unknown form action 'vote'." in str(exc)
+        assert exc.args == ()
 
     @pytest.mark.parametrize(
         ("kwargs", "expected"),
@@ -420,6 +441,27 @@ class TestRegistryFormActionBackend:
         )
         assert backend.get_meta("alpha") is not None
 
+    def test_reregistration_over_a_targetless_action_reports_no_collision(self) -> None:
+        """A stored action with nothing to dispatch to is no handler to collide with."""
+        backend = RegistryFormActionBackend()
+
+        def handler() -> None:
+            pass
+
+        backend.register_action(
+            ActionRegistration(name="empty", file_path=_FAKE_FILE, scope="shared")
+        )
+        backend.register_action(
+            ActionRegistration(
+                name="empty", file_path=_FAKE_FILE, scope="shared", handler=handler
+            )
+        )
+        scope_key = scope_key_for(_FAKE_FILE, "shared")
+        assert f"{scope_key}:empty" not in registration_diagnostics.action_collisions
+        meta = backend.get_meta("empty")
+        assert meta is not None
+        assert meta["handler"] is handler
+
     def test_registry_keys_are_scope_name_tuples(self) -> None:
         """Internal registry uses (scope_key, name) tuples as keys."""
         backend = RegistryFormActionBackend()
@@ -645,6 +687,23 @@ class TestUnknownActionSuggestions:
             manager.get_action_url("delete_not")
         assert excinfo.value.suggestions == ("delete_note", "delete_card")
         assert "Closest matches: 'delete_note', 'delete_card'." in str(excinfo.value)
+
+    def test_one_backend_refuses_the_way_several_do(self) -> None:
+        """The refusal never follows the length of the configured backend list."""
+        single = RegistryFormActionBackend()
+        first = RegistryFormActionBackend()
+        _register_action(single, "delete_note")
+        _register_action(first, "delete_note")
+
+        with pytest.raises(FormActionNotFoundError) as one:
+            FormActionManager(backends=[single]).get_action_url("delete_not")
+        with pytest.raises(FormActionNotFoundError) as several:
+            FormActionManager(
+                backends=[first, RegistryFormActionBackend()]
+            ).get_action_url("delete_not")
+
+        assert str(one.value) == str(several.value)
+        assert one.value.candidates == several.value.candidates == ("delete_note",)
 
 
 class TestEmptyRegistryDiagnosis:

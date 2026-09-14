@@ -139,13 +139,13 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       dev: readDev,
       dirtySince: (snapshot) => dirty.isDirtySince(snapshot),
       isTouched: (el) => dirty.isTouched(el),
-      // _configure rebuilds the stack before the applier, so this stays live.
-      layers,
-      history,
-      // The visit verb rides this hard-navigation seam, the url verb rides
-      // history. _configure swaps in the mock, the same as history.
-      navigate,
-      assets,
+      // Every seam _configure rebuilds is read through a call, so the order in which
+      // it rebuilds the stack and the applier cannot decide what this one sees.
+      layers: () => layers,
+      history: () => history,
+      // The visit verb rides this hard-navigation seam, the url verb rides history.
+      navigate: () => navigate,
+      assets: () => assets,
       mount: { run: runMount },
       refresh: (request) => void wire.fetch(request),
       here: () => currentUrl(adapters?.document ?? document),
@@ -179,6 +179,9 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       ...opt("observer", adapters?.observer),
       ...opt("visibility", adapters?.visibility),
       ...opt("confirm", adapters?.confirm),
+      // A filter submit syncs the address bar through the applier's seam, never
+      // through window.history behind the runtime's back.
+      history,
       dev: readDev,
     };
   }

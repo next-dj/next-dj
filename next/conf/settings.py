@@ -42,27 +42,23 @@ class NextFrameworkSettings:
         dispatch_settings_reloaded(type(self))
 
     def _raw_user(self) -> dict[str, Any] | None:
+        """Return the mapping the user set, or None for anything else under the key.
+
+        An empty mapping needs no case of its own, the merge answers the defaults.
+        """
         raw = getattr(settings, USER_SETTING, None)
-        if raw is None or raw == {}:
-            return None
-        if not isinstance(raw, dict):
-            return None
-        return raw
+        return raw if isinstance(raw, dict) else None
 
     def _merged(self) -> dict[str, Any]:
         if self._merged_cache is None:
-            self._merged_cache = self._build_flat_merged(self._raw_user())
+            self._merged_cache = merge_user_settings(self.DEFAULTS, self._raw_user())
         return self._merged_cache
 
-    def _build_flat_merged(self, user: dict[str, Any] | None) -> dict[str, Any]:
-        return merge_user_settings(self.DEFAULTS, user)
-
-    def __getattr__(self, attr: str) -> Any:  # noqa: ANN401
+    def __getattr__(self, attr: str) -> Any:
         """Return merged values for keys declared in `DEFAULTS`.
 
-        `DEFAULTS` is open for third-party keys and every value carries the
-        shape of its own key, so one accessor cannot name a narrower return.
-        `Any` is what lets each read site re-validate the shape it needs.
+        `DEFAULTS` is open for third-party keys, so no narrower return type fits, and
+        `Any` lets each read site re-validate the shape it needs.
         """
         if attr in self._attr_value_cache:
             return self._attr_value_cache[attr]

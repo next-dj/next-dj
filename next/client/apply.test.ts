@@ -642,10 +642,19 @@ describe("Applier verbs", () => {
       dispatch: () => undefined,
       mergeContext: () => undefined,
       document,
-      history: { push: (h) => calls.push(h), replace: (h) => calls.push(h) },
+      history: () => ({
+        push: (h: string) => calls.push(h),
+        replace: (h: string) => calls.push(h),
+      }),
     });
     applier.apply(envelope([{ op: "url" }]));
     expect(calls).toEqual([]);
+  });
+
+  it("url is a no-op for an applier built with no history seam", () => {
+    const { applier, dispatched } = makeApplier();
+    applier.apply(envelope([{ op: "url", href: "/elsewhere/" }]));
+    expect(dispatched.filter((d) => d.event === "partial:error")).toEqual([]);
   });
 
   it("skips an event op without a name", () => {
@@ -1795,8 +1804,8 @@ describe("Applier layer, toast, and url verbs", () => {
       dispatch: () => undefined,
       mergeContext: () => undefined,
       document,
-      layers,
-      history,
+      layers: () => layers,
+      history: () => history,
     });
     return { applier, calls };
   }
@@ -1893,7 +1902,7 @@ describe("Applier layer, toast, and url verbs", () => {
       dispatch: () => undefined,
       mergeContext: () => undefined,
       document,
-      layers,
+      layers: () => layers,
     });
     applier.apply(envelope([{ op: "inner", target: { form: "u1" }, html: "patched" }]));
     expect(document.getElementById("modal-form")!.innerHTML).toBe("patched");
@@ -1920,7 +1929,7 @@ describe("Applier page-scoped zone resolve", () => {
       dispatch: () => undefined,
       mergeContext: () => undefined,
       document,
-      layers,
+      layers: () => layers,
     });
     return { applier, pages };
   }
@@ -1962,7 +1971,7 @@ describe("Applier visit verb", () => {
       dispatch: (event, detail) => dispatched.push({ event, detail }),
       mergeContext: () => undefined,
       document,
-      navigate: (url) => visited.push(url),
+      navigate: () => (url: string) => visited.push(url),
     });
     return { applier, visited, dispatched };
   }
@@ -2043,7 +2052,7 @@ describe("Applier keeps overlapping applies apart across the CSS gate", () => {
       dispatch: () => undefined,
       mergeContext: () => undefined,
       document,
-      assets: bridge,
+      assets: () => bridge,
       dirtySince: (snapshot) => (field) =>
         snapshot === 1 ? field === inputA : field === inputB,
     });

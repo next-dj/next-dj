@@ -38,9 +38,8 @@ def _build_tree(root: Path) -> None:
 def pages_tree(tmp_path: Path) -> Iterator[Path]:
     """Build the tree and point the framework settings at it.
 
-    Under `DEBUG`, because that is when the staticfiles view asks the finder
-    once per referenced asset, and it is the mode where the held answer is
-    checked against the disk rather than taken as given.
+    Runs under `DEBUG`, where the finder re-asks per asset instead of
+    trusting a cached answer.
     """
     root = tmp_path / "pages"
     root.mkdir()

@@ -7,6 +7,7 @@ nor `unittest.mock`, and state is restored even when the block raises.
 from __future__ import annotations
 
 import contextlib
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from django.conf import settings as django_settings
@@ -115,23 +116,21 @@ def override_component_backends(*configs: dict[str, Any]) -> Iterator[None]:
         yield
 
 
+@dataclass(slots=True)
 class StaticCollectorProxy:
     """Handle that exposes the collector most recently built inside a patch."""
 
-    def __init__(self) -> None:
-        """Initialise with no captured collector."""
-        self.collector: StaticCollector | None = None
+    collector: StaticCollector | None = None
 
 
 @contextlib.contextmanager
 def patch_static_collector(
-    factory: Callable[[], StaticCollector] | None = None, *, capture: bool = False
-) -> Iterator[StaticCollectorProxy | None]:
+    factory: Callable[[], StaticCollector] | None = None,
+) -> Iterator[StaticCollectorProxy]:
     """Replace `default_manager.create_collector` for the block.
 
-    When `capture` is True a `StaticCollectorProxy` is yielded. Its
-    `.collector` attribute is set on each call to the patched factory
-    so tests can inspect emitted styles/scripts without parsing HTML.
+    The yielded proxy holds the collector of the latest call to the patched factory,
+    so a test reads the emitted styles and scripts without parsing HTML.
     """
     manager = get_static_manager()
     original = manager.create_collector
@@ -144,7 +143,7 @@ def patch_static_collector(
 
     manager.create_collector = _create  # type: ignore[method-assign]
     try:
-        yield proxy if capture else None
+        yield proxy
     finally:
         manager.create_collector = original  # type: ignore[method-assign]
 

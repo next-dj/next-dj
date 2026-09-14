@@ -4,13 +4,13 @@ from unittest.mock import MagicMock
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 
+from next.caches import LruCache
 from next.components import (
     ComponentInfo,
     ComponentRegistry,
     ComponentScanner,
     ComponentVisibilityResolver,
     component_extra_roots_from_config,
-    registry as registry_mod,
 )
 
 
@@ -83,6 +83,27 @@ class TestComponentScanner:
         w = found[0]
         assert w.name == "widget"
         assert w.template_path == d / "component.py"
+
+    def test_composite_py_only_without_component_has_no_template(
+        self, tmp_path: Path
+    ) -> None:
+        """A component.py exposing no ``component`` leaves the template unresolved."""
+        d = tmp_path / "widget"
+        d.mkdir()
+        (d / "component.py").write_text("value = 1\n")
+        scanner = ComponentScanner()
+        found = scanner.scan_directory(tmp_path, tmp_path, "")
+        assert len(found) == 1
+        assert found[0].template_path is None
+        assert found[0].module_path == d / "component.py"
+
+    def test_a_file_that_is_no_djx_is_skipped(self, tmp_path: Path) -> None:
+        """Only ``.djx`` files become simple components, other files are passed over."""
+        (tmp_path / "notes.txt").write_text("x")
+        (tmp_path / "card.djx").write_text("<div/>")
+        scanner = ComponentScanner()
+        found = scanner.scan_directory(tmp_path, tmp_path, "")
+        assert [c.name for c in found] == ["card"]
 
     def test_subdir_without_component_files_is_ignored(self, tmp_path: Path) -> None:
         """Directories without component.djx or component.py produce no composite."""
@@ -256,7 +277,6 @@ class TestComponentVisibilityResolver:
         self, tmp_path: Path, monkeypatch
     ) -> None:
         """Exceeding the LRU size evicts the oldest entries for both caches."""
-        monkeypatch.setattr(registry_mod, "_VISIBILITY_CACHE_MAX_SIZE", 2)
         reg = ComponentRegistry()
         scope_root = (tmp_path / "scope").resolve()
         scope_root.mkdir()
@@ -272,6 +292,8 @@ class TestComponentVisibilityResolver:
         )
 
         res = ComponentVisibilityResolver(reg)
+        res._result_cache = LruCache(2)
+        res._path_cache = LruCache(2)
         paths = [sub / f"t{i}.djx" for i in range(3)]
         for p in paths:
             p.write_text("x")

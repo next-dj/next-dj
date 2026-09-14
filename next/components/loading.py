@@ -7,10 +7,9 @@ from __future__ import annotations
 
 import importlib.util
 import logging
-from collections import OrderedDict
 from typing import TYPE_CHECKING, cast
 
-from next.utils import store_bounded
+from next.caches import LruCache
 
 
 if TYPE_CHECKING:
@@ -28,19 +27,18 @@ class ModuleCache:
 
     def __init__(self, maxsize: int = 128) -> None:
         """Create an LRU cache with the given capacity."""
-        self._maxsize = maxsize
-        self._order: OrderedDict[Path, ModuleType | None] = OrderedDict()
+        self._order: LruCache[Path, ModuleType | None] = LruCache(maxsize)
 
     def get(self, path: Path) -> ModuleType | object | None:
         """Return the cached module, a cached `None`, or the miss sentinel."""
-        if path not in self._order:
+        try:
+            return self._order[path]
+        except KeyError:
             return _CACHE_MISS
-        self._order.move_to_end(path)
-        return self._order[path]
 
     def set(self, path: Path, module: ModuleType | None) -> None:
         """Store the module (or `None` on failure) under `path`, evicting when full."""
-        store_bounded(self._order, path, module, self._maxsize)
+        self._order[path] = module
 
     def clear(self) -> None:
         """Drop every entry from the cache."""

@@ -2,16 +2,16 @@ import secrets
 from pathlib import Path
 
 from django import forms
-from django.contrib.messages import get_messages
 from django.db import IntegrityError, transaction
 from django.http import HttpRequest, HttpResponse
-from django.template import Context, Template
+from fragments import render_fragment
 from shortener.cache import pending_clicks
 from shortener.models import Link
 
 from next import context
 from next.forms import ComponentWidget, Form
 from next.partial import Patches, is_partial_request
+from next.urls import page_reverse_lazy
 
 
 SLUG_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
@@ -21,7 +21,6 @@ SLUG_MAX_LENGTH = 12
 LATEST_LINKS_ZONE = "latest-links"
 BADGE_ZONE = "links-badge"
 _TEMPLATE_PATH = Path(__file__).resolve().parent / "template.djx"
-_ROW_TEMPLATE = Template('{% component "link_row" link=link %}')
 
 
 class CreateLinkForm(Form):
@@ -34,16 +33,13 @@ class CreateLinkForm(Form):
     )
 
     class Meta:
-        success_url = "/"
+        success_url = page_reverse_lazy()
         success_message = "Short link created for %(url)s."
 
     def on_valid(self, request: HttpRequest) -> HttpResponse:
         """Create a shortened link, then follow the declared success contract.
 
-        A live runtime prepends the new row to the latest-links list with
-        dedupe by slug so a resubmission replaces its row rather than
-        doubling it. Without the runtime the form keeps its declared
-        redirect so the no-JS path lands back on the home page.
+        A live runtime dedupes the new row by slug, replacing rather than doubling it.
         """
         link = _create_link_with_unique_slug(self.cleaned_data["url"])
         if is_partial_request(request):
@@ -78,14 +74,9 @@ def _create_link_with_unique_slug(url: str, length: int = 6) -> Link:
 def _render_row(link: Link, request: HttpRequest) -> str:
     """Render one keyed `link_row` for a prepend patch.
 
-    The page template path travels as `current_template_path` so the component resolver
-    finds `link_row` next to the page, the same way the page render does.
+    The page template is the anchor, so `link_row` resolves next to the page.
     """
-    return _ROW_TEMPLATE.render(
-        Context(
-            {"link": link, "request": request, "current_template_path": _TEMPLATE_PATH}
-        )
-    )
+    return render_fragment("link_row", _TEMPLATE_PATH, request, link=link)
 
 
 @context("recent_links", zone=LATEST_LINKS_ZONE)
@@ -102,9 +93,3 @@ def pending_total_label() -> str:
     """
     total = sum(pending_clicks().values())
     return f"{total} pending clicks"
-
-
-@context("flash_messages")
-def flash_messages(request: HttpRequest) -> list[str]:
-    """Drain the pending Meta.success_message flashes for the page banner."""
-    return [str(m) for m in get_messages(request)]

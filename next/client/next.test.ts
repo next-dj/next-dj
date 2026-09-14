@@ -128,8 +128,8 @@ describe("Next._init csrf seed", () => {
     return `{"version":"v1","ops":[],"assets":[],"form":null${meta}}`;
   }
 
-  function header(index: number): string | undefined {
-    return (calls[index]!.headers as Record<string, string>)["X-CSRFToken"];
+  function header(index: number): string | null {
+    return new Headers(calls[index]!.headers).get("X-CSRFToken");
   }
 
   beforeEach(() => {
@@ -165,7 +165,7 @@ describe("Next._init csrf seed", () => {
   it("sends no CSRF header when the payload carries no $csrf", async () => {
     win.Next._init({ page: "home" });
     await win.Next.partial.fetch({ url: "/mutate/", method: "POST" });
-    expect(header(0)).toBeUndefined();
+    expect(header(0)).toBeNull();
   });
 
   it("keeps a token learned from an envelope when a later payload omits $csrf", async () => {
@@ -187,7 +187,7 @@ describe("Next._init csrf seed", () => {
   it("leaves a safe method without the header even with a seed", async () => {
     win.Next._init({ $csrf: { header: "X-CSRFToken", token: "seeded" } });
     await win.Next.partial.fetch({ url: "/list/" });
-    expect(header(0)).toBeUndefined();
+    expect(header(0)).toBeNull();
   });
 
   it.each([
@@ -205,7 +205,7 @@ describe("Next._init csrf seed", () => {
     off();
     await win.Next.partial.fetch({ url: "/mutate/", method: "POST" });
     expect(ready).toBe(1);
-    expect(header(0)).toBeUndefined();
+    expect(header(0)).toBeNull();
     expect(win.Next.context.$csrf).toEqual(payload);
   });
 

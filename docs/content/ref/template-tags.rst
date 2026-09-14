@@ -216,6 +216,7 @@ Partial rendering
    It is mutually exclusive with ``lazy=``, and an interval below one second, above the browser timer ceiling, or malformed raises ``TemplateSyntaxError`` at parse time.
 
    An option without ``=`` and an unknown option key also raise ``TemplateSyntaxError`` at parse time, so a typo fails the compile rather than being silently dropped.
+   The name and every option value are quoted literals, so an unquoted bit raises rather than standing in for the variable it names.
 
 .. describe:: {% placeholder %}
 
@@ -243,6 +244,7 @@ Layouts
    Takes no arguments either, and an argument raises ``TemplateSyntaxError`` at parse time.
 
 Composition fills the first placeholder a layout carries and leaves any later one as a real node that renders its own fallback body.
+Django's own lexer finds them, so a placeholder written inside ``{% verbatim %}`` or ``{% comment %}`` is text rather than a hole and neither composition nor the checks count it.
 A ``layout.djx`` carrying no placeholder reports ``next.W001`` during ``manage.py check`` and one carrying several reports ``next.W078``.
 Nested layouts each carry their own placeholder and compose from innermost to outermost.
 

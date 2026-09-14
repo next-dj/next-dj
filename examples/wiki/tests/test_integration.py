@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import pytest
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.http import Http404
 from django.urls import path, reverse
@@ -447,7 +448,7 @@ class TestUnits:
         self, routing_doc: Article
     ) -> None:
         unrelated = path("elsewhere/", lambda _request: None, name="elsewhere")
-        backend = HybridRouterBackend()
+        backend = HybridRouterBackend(settings.NEXT_FRAMEWORK["PAGE_BACKENDS"][0])
         with patch(
             "wiki.backends.FileRouterBackend.generate_urls", return_value=[unrelated]
         ):

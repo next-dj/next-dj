@@ -10,6 +10,7 @@ from django.http import HttpRequest
 from django.test import override_settings
 
 import next.pages.loaders as loaders_module
+from next.caches import BoundedCache
 from next.conf import next_framework_settings
 from next.pages.loaders import (
     DjxTemplateLoader,
@@ -28,6 +29,7 @@ from next.pages.loaders import (
     reset_module_memo,
 )
 from next.pages.processors import _get_context_processors, _import_context_processor
+from next.utils import MAX_ANCESTOR_WALK_DEPTH
 from tests.support import default_page_router_config, file_router_config_entry
 
 
@@ -376,56 +378,27 @@ class TestLayoutTemplateLoader:
         assert result[0] == Path(tmp_path).resolve()
 
     @pytest.mark.parametrize(
-        (
-            "test_case",
-            "create_layout",
-            "create_template",
-            "template_content",
-            "expected_result",
-        ),
+        ("sibling_layout", "expected"),
         [
-            (
-                "with_local_layout",
-                True,
-                True,
-                "<h1>Test Content</h1>",
-                "<h1>Test Content</h1>",
-            ),
-            (
-                "without_local_layout",
-                False,
-                True,
-                "<h1>Test Content</h1>",
-                "{% #template %}<h1>Test Content</h1>{% /template %}",
-            ),
-            ("no_template_file", False, False, None, "{% template %}"),
+            (True, "<ancestor><h1>Body</h1></ancestor>"),
+            (False, "<ancestor>{% #template %}<h1>Body</h1>{% /template %}</ancestor>"),
         ],
-        ids=["with_local_layout", "without_local_layout", "no_template_file"],
+        ids=["with_local_layout", "without_local_layout"],
     )
-    def test_wrap_in_placeholder_scenarios(
-        self,
-        tmp_path,
-        test_case,
-        create_layout,
-        create_template,
-        template_content,
-        expected_result,
+    def test_compose_body_pairs_a_body_no_local_layout_owns(
+        self, tmp_path, sibling_layout, expected
     ) -> None:
         """A body becomes a paired placeholder only when no local layout owns it."""
         loader = LayoutTemplateLoader()
+        (tmp_path / "layout.djx").write_text("<ancestor>{% template %}</ancestor>")
+        page_dir = tmp_path / "sub"
+        page_dir.mkdir()
+        if sibling_layout:
+            (page_dir / "layout.djx").write_text("{% template %}")
 
-        if create_layout:
-            layout_file = tmp_path / "layout.djx"
-            layout_file.write_text("layout content")
+        result = loader.compose_body("<h1>Body</h1>", page_dir / "page.py")
 
-        if create_template:
-            template_file = tmp_path / "template.djx"
-            template_file.write_text(template_content)
-
-        page_file = tmp_path / "page.py"
-        result = loader._wrap_in_placeholder(page_file)
-
-        assert result == expected_result
+        assert result == expected
 
     def test_find_layout_files_with_duplicate_additional_layouts(
         self, tmp_path
@@ -536,35 +509,24 @@ class TestLayoutTemplateLoader:
         assert local_layout in result
         assert additional_layout in result
 
-    def test_load_template_with_single_layout(self, tmp_path) -> None:
+    def test_compose_body_with_single_layout(self, tmp_path) -> None:
         """One ancestor layout wraps the body it composes into its placeholder."""
         loader = LayoutTemplateLoader()
-
-        layout_file = tmp_path / "layout.djx"
-        layout_content = "<html><body>{% template %}</body></html>"
-        layout_file.write_text(layout_content)
-
+        (tmp_path / "layout.djx").write_text("<html><body>{% template %}</body></html>")
         sub_dir = tmp_path / "sub"
         sub_dir.mkdir()
-        template_file = sub_dir / "template.djx"
-        template_content = "<h1>Test Content</h1>"
-        template_file.write_text(template_content)
 
-        page_file = sub_dir / "page.py"
-        result = loader.load_template(page_file)
+        result = loader.compose_body("<h1>Test Content</h1>", sub_dir / "page.py")
 
-        assert result is not None
         assert result == (
             "<html><body>{% #template %}<h1>Test Content</h1>"
             "{% /template %}</body></html>"
         )
 
-    def test_load_template_with_multiple_layouts(self, tmp_path) -> None:
+    def test_compose_body_with_multiple_layouts(self, tmp_path) -> None:
         """Nested layouts compose outermost first, with the body innermost."""
         loader = LayoutTemplateLoader()
-
-        root_layout = tmp_path / "layout.djx"
-        root_layout.write_text(
+        (tmp_path / "layout.djx").write_text(
             "<html><head><title>Root</title></head><body>{% template %}</body></html>"
         )
 
@@ -575,54 +537,43 @@ class TestLayoutTemplateLoader:
 
         nested_dir = sub_dir / "nested"
         nested_dir.mkdir()
-        template_file = nested_dir / "template.djx"
-        template_content = "<h1>Test Content</h1>"
-        template_file.write_text(template_content)
 
-        page_file = nested_dir / "page.py"
-        result = loader.load_template(page_file)
+        result = loader.compose_body("<h1>Test Content</h1>", nested_dir / "page.py")
 
-        assert result is not None
         assert result == (
             "<html><head><title>Root</title></head><body>"
             "<div class='sub-layout'>{% #template %}<h1>Test Content</h1>"
             "{% /template %}</div></body></html>"
         )
 
-    def test_load_template_without_template_djx(self, tmp_path) -> None:
-        """A layout with no body behind it composes to an empty ``template`` block."""
+    def test_compose_body_leaves_an_empty_slot_for_an_empty_body(
+        self, tmp_path
+    ) -> None:
+        """A layout with no body behind it composes to an empty slot."""
         loader = LayoutTemplateLoader()
+        (tmp_path / "layout.djx").write_text("<html><body>{% template %}</body></html>")
 
-        layout_file = tmp_path / "layout.djx"
-        layout_file.write_text("<html><body>{% template %}</body></html>")
+        result = loader.compose_body("", tmp_path / "page.py")
 
-        page_file = tmp_path / "page.py"
-
-        result = loader.load_template(page_file)
-
-        assert result is not None
-        assert "<html><body>" in result
-        assert "</body></html>" in result
-        assert "{% template %}" in result
+        assert result == "<html><body></body></html>"
 
     @pytest.mark.parametrize(
         "placeholder",
         ["{% template %}", "{%  template  %}", "{%\n  template\n%}"],
         ids=["tight", "padded", "multiline"],
     )
-    def test_load_template_layout_accepts_whitespace_inside_the_tag(
+    def test_compose_body_accepts_whitespace_inside_the_tag(
         self, tmp_path, placeholder
     ) -> None:
         """Whitespace inside the placeholder tag composes the same as the tight form."""
         loader = LayoutTemplateLoader()
         (tmp_path / "layout.djx").write_text(f"<html>{placeholder}</html>")
-        (tmp_path / "template.djx").write_text("<h1>Body</h1>")
 
-        result = loader.load_template(tmp_path / "page.py")
+        result = loader.compose_body("<h1>Body</h1>", tmp_path / "page.py")
 
         assert result == "<html><h1>Body</h1></html>"
 
-    def test_load_template_replaces_the_paired_placeholder_and_its_fallback(
+    def test_compose_body_replaces_the_paired_placeholder_and_its_fallback(
         self, tmp_path
     ) -> None:
         """A composed page takes the place of the whole paired construct."""
@@ -630,25 +581,52 @@ class TestLayoutTemplateLoader:
         (tmp_path / "layout.djx").write_text(
             "<html>{% #template %}<p>no page here</p>{% /template %}</html>"
         )
-        (tmp_path / "template.djx").write_text("<h1>Body</h1>")
 
-        result = loader.load_template(tmp_path / "page.py")
+        result = loader.compose_body("<h1>Body</h1>", tmp_path / "page.py")
 
         assert result == "<html><h1>Body</h1></html>"
 
-    def test_load_template_fills_only_the_first_placeholder(self, tmp_path) -> None:
+    def test_compose_body_fills_only_the_first_placeholder(self, tmp_path) -> None:
         """A layout with two placeholders composes the page into the first one."""
         loader = LayoutTemplateLoader()
         (tmp_path / "layout.djx").write_text(
             "<html>{% template %}<hr>{% #template %}<p>spare</p>{% /template %}</html>"
         )
-        (tmp_path / "template.djx").write_text("<h1>Body</h1>")
 
-        result = loader.load_template(tmp_path / "page.py")
+        result = loader.compose_body("<h1>Body</h1>", tmp_path / "page.py")
 
         assert result == (
             "<html><h1>Body</h1><hr>{% #template %}<p>spare</p>{% /template %}</html>"
         )
+
+    def test_compose_body_passes_over_a_layout_with_no_placeholder(
+        self, tmp_path
+    ) -> None:
+        """A layout naming no placeholder cannot host the page, so the chain goes on."""
+        loader = LayoutTemplateLoader()
+        (tmp_path / "layout.djx").write_text("<html>{% template %}</html>")
+        sub_dir = tmp_path / "sub"
+        sub_dir.mkdir()
+        (sub_dir / "layout.djx").write_text("<div>no hole here</div>")
+        nested_dir = sub_dir / "nested"
+        nested_dir.mkdir()
+
+        result = loader.compose_body("<h1>Body</h1>", nested_dir / "page.py")
+
+        assert result == "<html>{% #template %}<h1>Body</h1>{% /template %}</html>"
+
+    def test_the_ancestor_walk_stops_at_the_depth_cap(self, tmp_path) -> None:
+        """A layout further up than the cap is out of reach, so the walk ends there."""
+        loader = LayoutTemplateLoader()
+        deepest = tmp_path.joinpath(*["d"] * MAX_ANCESTOR_WALK_DEPTH)
+        deepest.mkdir(parents=True)
+        near_layout = deepest.parent / "layout.djx"
+        near_layout.write_text("near layout")
+        (tmp_path / "layout.djx").write_text("layout above the cap")
+
+        layout_files = loader._find_layout_files(deepest / "page.py")
+
+        assert layout_files == [near_layout]
 
     def test_find_layout_files(self, tmp_path) -> None:
         """The walk collects every ``layout.djx`` from the page up to the tree root."""
@@ -743,7 +721,7 @@ class TestLayoutTemplateLoader:
         _page_roots()
 
         with override_settings(INSTALLED_APPS=["django.contrib.contenttypes"]):
-            assert loaders_module._PAGE_ROOTS_CACHE["value"] is None
+            assert loaders_module._page_roots.cache_info().currsize == 0
 
     def test_forgetting_the_page_roots_asks_the_routers_again(self, tmp_path) -> None:
         """A reload from code moves what the routers report, memo and all."""
@@ -795,6 +773,50 @@ class TestLayoutTemplateLoader:
             body, page_file
         )
 
+    def test_compose_layout_hierarchy_skips_a_verbatim_placeholder(
+        self, tmp_path
+    ) -> None:
+        """A placeholder under ``{% verbatim %}`` is text, so the real hole is filled."""
+        loader = LayoutTemplateLoader()
+        layout_file = tmp_path / "layout.djx"
+        layout_file.write_text(
+            "{% verbatim %}{% template %}{% endverbatim %}<main>{% template %}</main>"
+        )
+
+        result = loader._compose_layout_hierarchy("<p>body</p>", [layout_file])
+
+        assert result == (
+            "{% verbatim %}{% template %}{% endverbatim %}<main><p>body</p></main>"
+        )
+
+    def test_compose_layout_hierarchy_skips_a_commented_placeholder(
+        self, tmp_path
+    ) -> None:
+        """A placeholder inside ``{% comment %}`` fills nothing either."""
+        loader = LayoutTemplateLoader()
+        layout_file = tmp_path / "layout.djx"
+        layout_file.write_text(
+            "{% comment %}{% template %}{% endcomment %}<main>{% template %}</main>"
+        )
+
+        result = loader._compose_layout_hierarchy("<p>body</p>", [layout_file])
+
+        assert result.endswith("<main><p>body</p></main>")
+
+    def test_compose_layout_hierarchy_fills_a_paired_placeholder_whole(
+        self, tmp_path
+    ) -> None:
+        """A placeholder inside the fallback belongs to it, so the pair fills as one."""
+        loader = LayoutTemplateLoader()
+        layout_file = tmp_path / "layout.djx"
+        layout_file.write_text(
+            "<main>{% #template %}<i>{% template %}</i>{% /template %}</main>"
+        )
+
+        result = loader._compose_layout_hierarchy("<p>body</p>", [layout_file])
+
+        assert result == "<main><p>body</p></main>"
+
     def test_compose_layout_hierarchy_exception_handling(self, tmp_path) -> None:
         """A layout that cannot be read leaves the body unwrapped instead of raising."""
         loader = LayoutTemplateLoader()
@@ -809,15 +831,16 @@ class TestLayoutTemplateLoader:
             result = loader._compose_layout_hierarchy("test content", [layout_file])
             assert result == "test content"
 
-    def test_load_template_no_layout_files(self, tmp_path) -> None:
-        """A page with no layout above it yields ``None``."""
+    def test_compose_body_without_layouts_keeps_the_body_verbatim(
+        self, tmp_path
+    ) -> None:
+        """A page with no layout above it composes to its own body."""
         loader = LayoutTemplateLoader()
-
         page_file = tmp_path / "page.py"
         page_file.write_text("template = 'test'")
 
-        result = loader.load_template(page_file)
-        assert result is None
+        assert loader.can_load(page_file) is False
+        assert loader.compose_body("<h1>Body</h1>", page_file) == "<h1>Body</h1>"
 
 
 class TestContextProcessors:
@@ -1184,7 +1207,9 @@ class TestTemplateLoaderContract:
     def test_built_in_source_names(self) -> None:
         assert DjxTemplateLoader.source_name == "template.djx"
         assert PythonTemplateLoader.source_name == "template"
-        assert LayoutTemplateLoader.source_name == ""
+
+    def test_the_layout_loader_is_no_chain_loader(self) -> None:
+        assert not issubclass(LayoutTemplateLoader, TemplateLoader)
 
     def test_djx_source_path_returns_sibling_when_exists(self, tmp_path: Path) -> None:
         page_file = tmp_path / "page.py"
@@ -1252,9 +1277,7 @@ class TestBuildRegisteredLoaders:
     """`build_registered_loaders` reads `TEMPLATE_LOADERS` and caches."""
 
     def _reset_cache(self) -> None:
-        # the cache is a single-slot holder mutated in place, never rebound,
-        # so a stale None on this worker cannot break the production reads
-        loaders_module._REGISTERED_LOADERS_CACHE["value"] = None
+        build_registered_loaders.cache_clear()
 
     def setup_method(self) -> None:
         self._reset_cache()
@@ -1300,9 +1323,9 @@ class TestBuildRegisteredLoaders:
     def test_settings_reload_resets_cache(self) -> None:
         build_registered_loaders()
 
-        assert loaders_module._REGISTERED_LOADERS_CACHE["value"] is not None
+        assert build_registered_loaders.cache_info().currsize == 1
         next_framework_settings.reload()
-        assert loaders_module._REGISTERED_LOADERS_CACHE["value"] is None
+        assert build_registered_loaders.cache_info().currsize == 0
 
     @override_settings(
         NEXT_FRAMEWORK={
@@ -1574,7 +1597,7 @@ class TestTheModuleMemoIsBounded:
         self, tmp_path, monkeypatch
     ) -> None:
         """A project with more pages than the bound holds the ones it just read."""
-        monkeypatch.setattr(loaders_module, "_MODULE_MEMO_MAX_SIZE", 2)
+        monkeypatch.setattr(loaders_module, "_MODULE_MEMO", BoundedCache(2))
         reset_module_memo()
         pages = self._write_pages(tmp_path, ("first", "second", "third"))
 
@@ -1587,7 +1610,7 @@ class TestTheModuleMemoIsBounded:
         self, tmp_path, monkeypatch
     ) -> None:
         """A hit answers from the memo, so the entries keep the order they landed in."""
-        monkeypatch.setattr(loaders_module, "_MODULE_MEMO_MAX_SIZE", 2)
+        monkeypatch.setattr(loaders_module, "_MODULE_MEMO", BoundedCache(2))
         reset_module_memo()
         first, second = self._write_pages(tmp_path, ("first", "second"))
         _load_python_module_memo(first)

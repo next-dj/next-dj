@@ -18,7 +18,7 @@ from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 
 from next.conf import next_framework_settings
-from next.utils import defining_file
+from next.introspect import defining_file
 
 from .backends import (
     ActionGuard,
@@ -186,9 +186,8 @@ def _module_declared_file(cls: type) -> str | None:
 def _definition_file_of(cls: type) -> str:
     """Return the file where cls was declared, empty when no frame names one.
 
-    `__init_subclass__` runs while the declaring frame is still on the stack,
-    so the walk answers wherever the module cannot. A foreign file never
-    survives it, which is why the caller needs no framework arm.
+    `__init_subclass__` runs while the declaring frame is still on the stack, so the
+    walk answers wherever the module cannot, and a foreign file never survives it.
     """
     file_path = _module_declared_file(cls)
     if file_path is None or _is_foreign_file(file_path):

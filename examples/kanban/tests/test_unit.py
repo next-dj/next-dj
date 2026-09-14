@@ -232,8 +232,10 @@ class TestCardProvider:
         assert provider.compile_resolve(_param(DCard[Card])) is None
 
 
-class TestMoveCardFormClean:
-    def test_cross_board_move_rejected(self, make_card: Callable[..., Card]) -> None:
+class TestMoveCardFormTargets:
+    def test_cross_board_target_is_not_a_valid_choice(
+        self, make_card: Callable[..., Card]
+    ) -> None:
         other_board = Board.objects.create(title="Other", slug="other")
         other_col = Column.objects.create(board=other_board, title="X", position=0)
         card = make_card(title="Stay")
@@ -241,28 +243,38 @@ class TestMoveCardFormClean:
         form = MoveCardForm(
             data={
                 "card_id": str(card.pk),
-                "target_column_id": str(other_col.pk),
+                "target_column": str(other_col.pk),
                 "target_position": "0",
             }
         )
         assert not form.is_valid()
-        assert "across boards" in str(form.errors)
+        assert "target_column" in form.errors
 
-    def test_unknown_card_rejected(self) -> None:
+    def test_same_board_target_validates(
+        self, column: Column, make_card: Callable[..., Card]
+    ) -> None:
+        card = make_card(title="Move me")
         form = MoveCardForm(
             data={
-                "card_id": "99999",
-                "target_column_id": "99999",
+                "card_id": str(card.pk),
+                "target_column": str(column.pk),
                 "target_position": "0",
             }
         )
-        assert not form.is_valid()
-        assert "Unknown card" in str(form.errors)
+        assert form.is_valid()
+        assert form.cleaned_data["target_column"] == column
 
-    def test_missing_fields_skip_database_lookups(self) -> None:
-        form = MoveCardForm(data={"card_id": "", "target_column_id": ""})
+    def test_unknown_card_leaves_no_valid_target(self) -> None:
+        form = MoveCardForm(
+            data={"card_id": "99999", "target_column": "99999", "target_position": "0"}
+        )
         assert not form.is_valid()
-        assert "card_id" in form.errors
+        assert "target_column" in form.errors
+
+    def test_missing_card_skips_the_narrowing_query(self) -> None:
+        form = MoveCardForm(data={"card_id": "", "target_column": ""})
+        assert not form.is_valid()
+        assert "target_column" in form.errors
 
 
 class TestCreateCardFormClean:
@@ -273,19 +285,19 @@ class TestCreateCardFormClean:
         column.save()
         make_card(title="One")
 
-        form = CreateCardForm(data={"column_id": str(column.pk), "title": "Two"})
+        form = CreateCardForm(data={"column": str(column.pk), "title": "Two"})
         assert not form.is_valid()
         assert "WIP limit" in str(form.errors)
 
     def test_unknown_column_rejected(self) -> None:
-        form = CreateCardForm(data={"column_id": "99999", "title": "Lost"})
+        form = CreateCardForm(data={"column": "99999", "title": "Lost"})
         assert not form.is_valid()
-        assert "Unknown column" in str(form.errors)
+        assert "column" in form.errors
 
     def test_blank_form_short_circuits_clean(self) -> None:
-        form = CreateCardForm(data={"column_id": "", "title": ""})
+        form = CreateCardForm(data={"column": "", "title": ""})
         assert not form.is_valid()
-        assert "column_id" in form.errors
+        assert "column" in form.errors
 
 
 class TestViteManifestBackendRegisterFile:
@@ -495,7 +507,7 @@ class TestCreateCardHandlerRace:
     ) -> None:
         column.wip_limit = 2
         column.save()
-        form = CreateCardForm(data={"column_id": str(column.pk), "title": "Late"})
+        form = CreateCardForm(data={"column": str(column.pk), "title": "Late"})
         make_card(title="One")
         assert form.is_valid()
         make_card(title="Two", position=1)

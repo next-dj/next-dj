@@ -15,4 +15,4 @@ class PollsConfig(AppConfig):
         )
         default_stems.register("template", "page")
 
-        from polls import providers, signals  # noqa: F401, PLC0415
+        from polls import providers, signals

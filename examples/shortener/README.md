@@ -146,11 +146,11 @@ class CreateLinkForm(Form):
     )
 
     class Meta:
-        success_url = "/"
+        success_url = page_reverse_lazy()
         success_message = "Short link created for %(url)s."
 ```
 
-`on_valid` receives only the parameters it declares — the DI resolver fills what the signature asks for. Delegating to `super().on_valid(request)` follows `Meta.success_url`, and the dispatcher flashes `Meta.success_message` (interpolated over `cleaned_data` with `%` formatting) through `django.contrib.messages`. The home page drains the queue in a `flash_messages` context callable and renders each entry through the shared `alert` component. `ComponentWidget("input", type="url", ...)` makes `{{ form.url }}` render through the shared `input` component instead of Django's default widget, so a form field and a hand-written control look identical.
+`on_valid` receives only the parameters it declares — the DI resolver fills what the signature asks for. Delegating to `super().on_valid(request)` follows `Meta.success_url`, which `page_reverse_lazy()` fills from the route tree instead of a path literal, and the dispatcher flashes `Meta.success_message` (interpolated over `cleaned_data` with `%` formatting) through `django.contrib.messages`. The home page calls the shared `flash_messages` component, which drains the queue and maps each level tag onto an `alert` variant, so an error flash is red rather than green. `ComponentWidget("input", type="url", ...)` makes `{{ form.url }}` render through the shared `input` component instead of Django's default widget, so a form field and a hand-written control look identical.
 
 Creating the row is its own problem: [`_create_link_with_unique_slug`](shortener/routes/page.py) tries random six-character slugs inside `transaction.atomic()` and catches `IntegrityError` from the unique constraint, widening the slug by one character every ten collisions. The database decides uniqueness, so two concurrent submissions cannot both win a slug.
 

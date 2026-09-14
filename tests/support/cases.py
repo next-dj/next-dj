@@ -205,14 +205,7 @@ PERMISSION_HOOK_BAD_TYPE = object()
 
 @dataclass(frozen=True, slots=True)
 class PermissionHookCase:
-    """One row for the dynamic permission-hook return-contract matrix.
-
-    ``hook_return`` is the value a hook returns, or one of the
-    ``PERMISSION_HOOK_*`` sentinels for the raise and bad-type branches.
-    ``expected_status`` is the HTTP status of a full dispatch, or None when
-    the hook is expected to raise (PermissionDenied at the view boundary
-    surfaces as 403 through the test client, TypeError propagates raw).
-    """
+    """One row for the dynamic permission-hook return-contract matrix."""
 
     id: str
     hook_return: object

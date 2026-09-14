@@ -79,7 +79,7 @@ The manager already consults ``module.template`` directly, so registering this l
    :members:
 
 ``LayoutTemplateLoader`` composes nested ``layout.djx`` wrappers around the page template, walking every ancestor directory upward from the page, bounded at 64 levels.
-It runs on a dedicated path and is not registered through ``TEMPLATE_LOADERS``.
+It is no ``TemplateLoader``, because the chain supplies a body and this wraps one, so it is never registered through ``TEMPLATE_LOADERS``.
 
 .. autoclass:: next.pages.loaders.LayoutTemplateLoader
    :members:

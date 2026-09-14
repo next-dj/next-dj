@@ -55,7 +55,7 @@ def _view_for(page_file: Path) -> Iterator[Callable[..., HttpResponseBase]]:
     per-request path and none of the build-time work.
     """
     module = _load_python_module_memo(page_file)
-    view = page_singleton._create_unified_view(page_file, {}, module)
+    view = page_singleton._create_unified_view(page_file, module)
     try:
         yield view
     finally:
@@ -65,10 +65,8 @@ def _view_for(page_file: Path) -> Iterator[Callable[..., HttpResponseBase]]:
 class TestBenchColdViewGet:
     """The same GETs with the composed layers thrown away before every round.
 
-    `Page.clear_template_caches` drops the layout skeleton, the composed source,
-    and the compiled template together, so a cold round prices the composition
-    and the parse that a warm row never pays. The page module stays imported,
-    the way it does in production once the process has served the page once.
+    `clear_template_caches` drops the composed source and compiled template,
+    so each cold round re-pays the composition and parse a warm round skips.
     """
 
     @pytest.mark.benchmark(group="pages.view")

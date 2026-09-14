@@ -87,7 +87,7 @@ export function Board() {
         headers: { "X-CSRFToken": ctx.csrf ?? "" },
         body: new URLSearchParams({
           card_id: cardId,
-          target_column_id: targetColumnId,
+          target_column: targetColumnId,
           target_position: String(targetPosition),
           csrfmiddlewaretoken: ctx.csrf ?? "",
         }),
@@ -120,7 +120,7 @@ export function Board() {
         method: "POST",
         headers: { "X-CSRFToken": ctx.csrf ?? "" },
         body: new URLSearchParams({
-          column_id: String(columnId),
+          column: String(columnId),
           title: text,
           csrfmiddlewaretoken: ctx.csrf ?? "",
         }),

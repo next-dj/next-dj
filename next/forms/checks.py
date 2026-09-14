@@ -357,10 +357,8 @@ _PAGE_MODULE_NAME = "page.py"
 def check_wizard_url_param_route(*args, **kwargs) -> list[CheckMessage]:
     """Error when a page-scoped wizard's page path lacks the url_param segment.
 
-    Only wizards declared in a page module are inspected. The page file
-    path maps one to one onto the route, so a missing segment is a
-    definite misconfiguration. Wizards declared in shared or component
-    modules have no statically known route and are skipped.
+    Only wizards declared in a page module are inspected, since the page file path
+    maps one to one onto the route and a missing segment is a definite misconfiguration.
     """
     messages: list[CheckMessage] = []
     for meta in _iter_registered_actions():
@@ -489,9 +487,9 @@ def check_form_anchor_files(*args, **kwargs) -> list[CheckMessage]:
 def check_action_guard_permissions(*args, **kwargs) -> list[CheckMessage]:
     """Warn when permission_required is declared without django.contrib.auth.
 
-    This inspects the static `ActionGuard` only. The dynamic `check_permissions`
-    and `has_object_permission` hooks run application code per request and are
-    not statically inspectable, so no check covers them.
+    Inspects the static `ActionGuard` only, since the dynamic `check_permissions` and
+    `has_object_permission` hooks run application code per request and are not
+    statically inspectable.
     """
     if "django.contrib.auth" in settings.INSTALLED_APPS:
         return []

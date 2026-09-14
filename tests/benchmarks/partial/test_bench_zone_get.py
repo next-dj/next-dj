@@ -58,7 +58,7 @@ def _zone_view(
     for i in range(providers):
         registry.register_context(page_file, f"k_{i}", _cheap_provider, zone=f"z_{i}")
     module = _load_python_module_memo(page_file)
-    view = page_singleton._create_unified_view(page_file, {}, module)
+    view = page_singleton._create_unified_view(page_file, module)
     try:
         yield view
     finally:

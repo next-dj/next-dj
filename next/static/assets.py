@@ -1,9 +1,7 @@
 """Value objects and kind registry for static assets.
 
-The module has no internal dependencies, so it imports before the app registry is ready.
-
-The registry ships empty and the bootstrap registers the built-in kinds through the same
-public `register` call user code uses, so core code special-cases none.
+Has no internal dependencies, so it imports before the app registry is ready, and ships
+empty so built-in kinds register through the same public API user code uses.
 """
 
 from __future__ import annotations
@@ -32,9 +30,7 @@ _LOAD_INLINE_TAGS: Final[dict[str, str]] = {"link": "style", "script": "script"}
 class StaticNamespace:
     """Namespace constants used when building staticfiles URL paths.
 
-    The `NEXT` constant is the top-level directory under which the
-    framework publishes co-located assets inside the Django staticfiles
-    tree. Public URLs have the form `/static/next/<logical_name>.<ext>`.
+    Public URLs have the form `/static/next/<logical_name>.<ext>`.
     """
 
     NEXT: Final = "next"
@@ -57,10 +53,7 @@ class StaticAsset:
 class KindRegistry:
     """Mutable registry mapping asset kinds to extension, slot, and renderer.
 
-    A registration binds the file suffix discovery looks for, the
-    placeholder slot the rendered tags land in, and the backend method
-    that renders a URL of the kind. The registry ships empty so built-in
-    kinds go through the same public `register` call user code uses.
+    Ships empty, so built-in kinds use the same public `register` call user code does.
     """
 
     def __init__(self) -> None:
@@ -154,9 +147,8 @@ class KindRegistry:
     def load(self, kind: str, *, inline: bool = False) -> str | None:
         """Return the client insertion verb for the kind, or None when it has none.
 
-        An unregistered kind or a custom renderer has no verb the runtime can act on, so
-        the wire omits the field rather than guessing, and with `inline` the verb also
-        needs the kind's `inline_tag` to be the element the runtime builds.
+        An unregistered kind or custom renderer has no verb, so the wire omits the
+        field. With `inline`, the verb also needs the kind's `inline_tag` to match.
         """
         renderer = self._renderers.get(kind)
         if renderer is None:

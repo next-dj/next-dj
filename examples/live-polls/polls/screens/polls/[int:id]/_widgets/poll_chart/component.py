@@ -8,9 +8,7 @@ from next import component
 def results(poll: Poll) -> dict[str, object]:
     """Build the snapshot the Vue layer reads from `window.Next.context.results`.
 
-    `serialize=True` seeds the payload into `window.Next.context` so the island has data
-    the instant it mounts. The live stream refreshes the `poll-results` zone instead of
-    patching context, so later paints read the re-rendered `data-poll-chart-data` block.
+    `serialize=True` seeds `window.Next.context` so the island has data on mount.
     """
     choices = list(poll.choices.order_by("pk"))
     total = poll.choices.aggregate(total=Sum("votes"))["total"] or 0

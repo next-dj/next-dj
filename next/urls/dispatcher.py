@@ -1,9 +1,7 @@
 """Walk filesystem page trees once to emit routes and register components.
 
-`FilesystemTreeDispatcher` runs the shared `walk_page_tree` once per
-page-tree root. It yields `(url_path, page_file)` pairs for every
-discovered `page.py` (plus virtual `template.djx`-only pages), and
-registers `_components` folders it encounters along the way.
+`FilesystemTreeDispatcher` runs the shared `walk_page_tree` once per root, yielding
+`(url_path, page_file)` pairs and registering `_components` folders along the way.
 """
 
 from __future__ import annotations

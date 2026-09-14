@@ -1,8 +1,7 @@
 """Map bracket segments in file-based URL paths to Django converters.
 
-The `URLPatternParser` turns a filesystem-style logical URL trail into
-a Django path pattern. Bracket syntax `[name]` maps to `<str:name>`,
-`[int:id]` maps to `<int:id>`, and `[[args]]` maps to `<path:args>`.
+`URLPatternParser` turns a filesystem-style trail into a Django path pattern: `[name]`
+maps to `<str:name>`, `[int:id]` to `<int:id>`, and `[[args]]` to `<path:args>`.
 """
 
 from __future__ import annotations
@@ -12,6 +11,8 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, ClassVar
 from uuid import UUID
+
+from next.utils import normalise_route_name
 
 from .errors import (
     DuplicateURLParameterError,
@@ -112,22 +113,18 @@ class URLPatternParser:
         for match in self._bracket_pattern.finditer(url_path):
             wild = match.group("wild")
             if wild is not None:
-                name = wild.replace("-", "_")
+                name = normalise_route_name(wild)
             else:
                 raw_name, _ = self._parse_param_name_and_type(match.group("param"))
-                name = raw_name.replace("-", "_")
+                name = normalise_route_name(raw_name)
             if name in seen and name not in duplicates:
                 duplicates.append(name)
             seen.add(name)
         return duplicates
 
     def _route_name(self, raw_name: str, url_path: str) -> str:
-        """Return the Django route name for a bracket name, refusing a bad one.
-
-        Django accepts only a Python identifier between its angle brackets, and
-        the check that reports the directory reads the same rule.
-        """
-        name = raw_name.replace("-", "_")
+        """Return the Django route name for a bracket name, refusing a bad one."""
+        name = normalise_route_name(raw_name)
         if not name.isidentifier():
             raise InvalidURLParameterError(name, url_path)
         return name

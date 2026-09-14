@@ -430,9 +430,8 @@ class FormWizard:
     def save_step(self, step: str, data: dict[str, Any]) -> None:
         """Persist cleaned data for one step through the backend.
 
-        Any already-loaded mapping is updated in place instead of being
-        invalidated, so the request avoids a reload round-trip after a
-        save and sibling instances sharing the request memo see the save.
+        Any already-loaded mapping is updated in place rather than invalidated, so the
+        request skips a reload round-trip and sibling instances sharing its memo see it.
         """
         self._backend.save_step(self.request, self.storage_id, step, data)
         stored = self._loaded
@@ -468,9 +467,9 @@ class FormWizard:
     def current_step(self) -> str:
         """Return the active step from the URL kwarg, defaulting to the first.
 
-        URL kwargs that exist but lack the `Meta.url_param` key signal a route whose
-        step segment is named differently, which would pin the wizard to its first step
-        forever, so that misconfiguration raises instead of falling back.
+        URL kwargs that exist but lack the `Meta.url_param` key signal a step segment
+        named differently, so that misconfiguration raises rather than pinning the
+        wizard to its first step forever.
         """
         names = self.step_names()
         raw = self.url_kwargs.get(self.url_param)

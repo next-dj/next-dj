@@ -1,9 +1,7 @@
 """Eager page-module loader used in tests.
 
-`eager_load_pages` walks a pages directory and imports every `page.py`
-file so that `@context` and `@forms.action` side effects register
-before a test dispatches HTTP requests. Results are memoised per
-absolute directory so repeated calls during a pytest session are cheap.
+`eager_load_pages` imports every `page.py` under a directory so `@context` and
+`@forms.action` side effects register before a test dispatches HTTP requests.
 """
 
 from __future__ import annotations

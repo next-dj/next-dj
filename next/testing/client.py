@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING, Any, cast
 
 from django.test import Client
@@ -10,7 +9,8 @@ from django.test import Client
 from next.forms.uid import ORIGIN_FIELD_NAME
 from next.partial import keys
 from next.partial.envelope import Envelope
-from next.partial.headers import CONTENT_TYPE, REQUEST_FLAG, VERSION, ZONE
+from next.partial.headers import REQUEST_FLAG, VERSION, ZONE
+from next.partial.manager import partial_backend_manager
 
 from .actions import resolve_action_url
 
@@ -19,17 +19,11 @@ if TYPE_CHECKING:
     from django.http import HttpResponse
 
 
-_PARTIAL_HEADER = f"HTTP_{REQUEST_FLAG.upper().replace('-', '_')}"
-_ZONE_HEADER = f"HTTP_{ZONE.upper().replace('-', '_')}"
-_VERSION_HEADER = f"HTTP_{VERSION.upper().replace('-', '_')}"
-
-
 class PartialEnvelope:
     """Structural view over a decoded patch envelope for test assertions.
 
     The payload is rebuilt into the producer's own envelope objects, so the helpers
-    answer from named fields rather than from a second reading of the wire, and the
-    mappings they hand back are the producer's serialization of those fields.
+    answer from named fields instead of a second reading of the wire.
     """
 
     def __init__(self, data: dict[str, Any]) -> None:
@@ -112,14 +106,15 @@ class PartialEnvelope:
 def envelope_of(response: HttpResponse) -> PartialEnvelope:
     """Return the structural envelope view of a partial response.
 
-    Raises when the response is not a patch envelope, so a navigation
-    fallback never silently passes a structural assertion.
+    Raises when the response is not a patch envelope, so a navigation fallback never
+    silently passes a structural assertion.
     """
+    backend = partial_backend_manager.get()
     content_type = response["Content-Type"].split(";")[0].strip()
-    if content_type != CONTENT_TYPE:
+    if content_type != backend.content_type:
         msg = f"response is not a patch envelope, content type is {content_type!r}"
         raise AssertionError(msg)
-    return PartialEnvelope(json.loads(response.content.decode()))
+    return PartialEnvelope(backend.deserialize_envelope(response.content).as_dict())
 
 
 class NextClient(Client):
@@ -138,6 +133,7 @@ class NextClient(Client):
         partial: bool = False,
         zones: str | tuple[str, ...] | None = None,
         version: str | None = None,
+        headers: dict[str, str] | None = None,
         **extra,
     ) -> HttpResponse:
         """Resolve `action_name` and POST `data` to the resulting URL.
@@ -149,15 +145,14 @@ class NextClient(Client):
         payload: dict[str, Any] = dict(data or {})
         if origin is not None:
             payload.setdefault(ORIGIN_FIELD_NAME, origin)
-        headers: dict[str, Any] = {}
+        sent = dict(headers or {})
         if partial:
-            headers[_PARTIAL_HEADER] = "1"
+            sent[REQUEST_FLAG] = "1"
         if zones is not None:
-            headers[_ZONE_HEADER] = zones if isinstance(zones, str) else ",".join(zones)
+            sent[ZONE] = zones if isinstance(zones, str) else ",".join(zones)
         if version is not None:
-            headers[_VERSION_HEADER] = version
-        headers.update(extra)
-        return cast("HttpResponse", self.post(url, data=payload, **headers))
+            sent[VERSION] = version
+        return cast("HttpResponse", self.post(url, data=payload, headers=sent, **extra))
 
     def get_action_url(self, action_name: str) -> str:
         """Return the reverse URL for a registered form action."""
@@ -169,20 +164,21 @@ class NextClient(Client):
         zones: str | tuple[str, ...],
         *,
         version: str | None = None,
+        headers: dict[str, str] | None = None,
         **extra,
     ) -> HttpResponse:
         """GET `url` as a partial request for the named zones.
 
-        `zones` is one name or a tuple of names joined into the
-        `X-Next-Zone` header. `version` sets the client asset version
-        header so tests can drive the version-sync branch.
+        `zones` joins into the `X-Next-Zone` header, and `version` sets the client
+        asset version header so tests can drive the version-sync branch.
         """
         names = zones if isinstance(zones, str) else ",".join(zones)
-        headers: dict[str, Any] = {_PARTIAL_HEADER: "1", _ZONE_HEADER: names}
+        sent = dict(headers or {})
+        sent[REQUEST_FLAG] = "1"
+        sent[ZONE] = names
         if version is not None:
-            headers["HTTP_X_NEXT_VERSION"] = version
-        headers.update(extra)
-        return cast("HttpResponse", self.get(url, **headers))
+            sent[VERSION] = version
+        return cast("HttpResponse", self.get(url, headers=sent, **extra))
 
 
 __all__ = ["NextClient", "PartialEnvelope", "envelope_of"]

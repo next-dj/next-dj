@@ -1,5 +1,5 @@
 from django.utils.safestring import SafeString
-from wiki.markdown_render import render_markdown
+from markup import render_markdown
 from wiki.models import Article
 from wiki.providers import DArticle
 

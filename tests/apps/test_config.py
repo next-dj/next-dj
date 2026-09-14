@@ -17,11 +17,11 @@ from django.utils.autoreload import (
 from next.apps import autoreload as next_autoreload, components as next_components
 from next.components import FileComponentsBackend, components_manager
 from next.deps import resolver
-from next.deps.resolver import _signature_cache
+from next.deps.introspect import _signature_cache
 from next.pages import loaders as pages_loaders
 from next.pages.watch import get_pages_directories_for_watch
 from next.partial.shaper import PartialShaperImpl
-from next.ports import PartialShaperSlot, RouterAccessSlot, StaticAssetsSlot
+from next.ports import PortSlot
 from next.server import NextStatReloader
 from next.static import get_static_manager
 from next.static.manager import default_manager
@@ -408,7 +408,7 @@ class TestDependencyResolverInstall:
     def test_ready_binds_the_partial_shaper_before_discovery_can_fail(self) -> None:
         """A discovery failure leaves the shaper port bound for the process."""
         config = apps.get_app_config("next")
-        slot = PartialShaperSlot()
+        slot = PortSlot("partial shaper")
         with (
             patch("next.apps.config.partial_shaper_slot", slot),
             patch.object(next_components, "install", side_effect=RuntimeError("boom")),
@@ -420,7 +420,7 @@ class TestDependencyResolverInstall:
     def test_ready_binds_the_router_port_before_discovery_can_fail(self) -> None:
         """The watcher and the checks find a router builder however ready ends."""
         config = apps.get_app_config("next")
-        slot = RouterAccessSlot()
+        slot = PortSlot("router access port")
         with (
             patch("next.apps.config.router_access_slot", slot),
             patch.object(next_components, "install", side_effect=RuntimeError("boom")),
@@ -432,7 +432,7 @@ class TestDependencyResolverInstall:
     def test_ready_binds_the_static_port_before_discovery_can_fail(self) -> None:
         """The render path finds the lazy static handle however ready ends."""
         config = apps.get_app_config("next")
-        slot = StaticAssetsSlot()
+        slot = PortSlot("static assets port")
         with (
             patch("next.apps.config.static_assets_slot", slot),
             patch.object(next_components, "install", side_effect=RuntimeError("boom")),

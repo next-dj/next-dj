@@ -20,7 +20,7 @@ def _scanned_root(root: Path) -> Iterator[None]:
     manager.backends = (MagicMock(),)
     with (
         patch("next.partial.checks.get_router_manager", return_value=(manager, [])),
-        patch("next.checks.common.get_pages_directories", return_value=[root]),
+        patch("next.discovery.get_pages_directories", return_value=[root]),
     ):
         yield
 
@@ -29,10 +29,8 @@ def _scanned_root(root: Path) -> Iterator[None]:
 def _context_pages(*pages: tuple[Path, str, str]) -> Iterator[None]:
     """Point the page-scanning checks at real on-disk page directories.
 
-    Each entry is a `page.py` path, its source, and the `template.djx` body
-    next to it. The composed-template walk imports the source and the global
-    page instance compiles the body through its layout loader, so a zone tag
-    and a `@context` registration both land as they do in production.
+    Real imports and compiles mimic production, so a zone tag and a
+    `@context` registration land here the same way they do live.
     """
     root = pages[0][0].parent.parent
     for page_file, source, body in pages:
@@ -390,10 +388,8 @@ class TestZoneInComponentCheck:
 @pytest.fixture()
 def restore_op_registry():
     """Snapshot and restore the patch-op registry around a test."""
-    ops = set(patch_op_registry._ops)
     custom = set(patch_op_registry._custom)
     yield
-    patch_op_registry._ops = ops
     patch_op_registry._custom = custom
 
 

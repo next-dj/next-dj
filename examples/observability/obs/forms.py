@@ -3,6 +3,7 @@ from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 
 from next.forms import Form
 from next.partial import Patches, zone_requested
+from next.urls import page_reverse, with_query
 
 
 WINDOW_CHOICES = (("1m", "Last minute"), ("5m", "Last 5 minutes"), ("1h", "Last hour"))
@@ -10,6 +11,7 @@ DEFAULT_WINDOW = "5m"
 LIVE_TOTALS_ZONE = "live-totals"
 WINDOW_LABEL_ZONE = "stats-window"
 METRIC_PULSE_OP = "metric-pulse"
+STATS_PAGE = "stats"
 
 
 class WindowFilterForm(Form):
@@ -35,9 +37,8 @@ class WindowFilterForm(Form):
     def on_valid(self, request: HttpRequest) -> HttpResponse:
         """Re-aggregate the totals under the picked window and pulse the change.
 
-        An apply morphs the `live-totals` zone and the `stats-window` label so the
-        heading never names a stale window, and emits `metric-pulse` for the co-located
-        handler. A caller without the zone redirects instead.
+        An apply morphs `live-totals` and the `stats-window` label so the heading never
+        names a stale window, and emits `metric-pulse` for the co-located handler.
         """
         # Pick the literal out of WINDOW_CHOICES so the redirect target is
         # built from trusted constants, with request data used only to compare.
@@ -45,7 +46,9 @@ class WindowFilterForm(Form):
             value for value, _ in WINDOW_CHOICES if value == self.cleaned_data["window"]
         )
         if not zone_requested(request, LIVE_TOTALS_ZONE):
-            return HttpResponseRedirect(f"/stats/?window={chosen}")
+            return HttpResponseRedirect(
+                with_query(page_reverse(STATS_PAGE), window=chosen)
+            )
         return (
             Patches(request)
             .morph(zone=LIVE_TOTALS_ZONE)

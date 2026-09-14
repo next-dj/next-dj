@@ -7,9 +7,9 @@ from next.urls.dispatcher import scan_pages_tree
 class TestScanPagesDirectory:
     """Edge cases for the standalone scan helper including skip_dir_names."""
 
-    def test_oserror_on_iterdir_returns_nothing(self, tmp_path) -> None:
-        """OSError from iterdir produces no routes."""
-        with patch.object(Path, "iterdir", side_effect=OSError):
+    def test_a_directory_that_does_not_list_returns_nothing(self, tmp_path) -> None:
+        """A tree the process cannot read produces no routes."""
+        with patch("next.utils.os.scandir", side_effect=OSError):
             result = list(scan_pages_tree(tmp_path))
         assert result == []
 
@@ -72,3 +72,24 @@ class TestScanPagesDirectory:
             )
         assert len(calls) == 1
         assert calls[0][0].name == "_components"
+
+    def test_another_skipped_folder_registers_nothing(self, tmp_path) -> None:
+        """Only the components folder is registered, any other skip is passed over."""
+        (tmp_path / "_private").mkdir()
+        calls: list[Path] = []
+
+        def capture(folder: Path, root: Path, scope: str) -> None:
+            calls.append(folder)
+
+        with patch(
+            "next.urls.dispatcher.register_components_folder_from_router_walk", capture
+        ):
+            list(
+                scan_pages_tree(
+                    tmp_path,
+                    skip_dir_names=("_private", "_components"),
+                    register_components=True,
+                    components_folder_name="_components",
+                )
+            )
+        assert calls == []

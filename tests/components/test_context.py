@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
+from next.caches import BoundedCache
 from next.components import (
     ComponentContextManager,
     ComponentContextRegistry,
@@ -17,7 +18,12 @@ from next.components import (
 )
 from next.components.renderers import _inject_component_context
 from next.static import StaticCollector
-from tests.support import attribution, handler_declared_here, record_path_calls
+from tests.support import (
+    assert_bounded_by_insert_age,
+    attribution,
+    handler_declared_here,
+    record_path_calls,
+)
 from tests.support.components import build_composite_component
 
 
@@ -614,34 +620,19 @@ class TestComponentContextRegistryLookupCache:
 class TestComponentContextRegistryLookupBound:
     """The lookup memo is bounded and keyed on the resolved path."""
 
-    def test_a_full_memo_evicts_the_oldest_insert(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Only the path looked up last survives a memo of one."""
-        monkeypatch.setattr(_CONTEXT_MODULE, "_LOOKUP_CACHE_MAX_SIZE", 1)
+    def test_the_memo_holds_the_paths_looked_up_last(self, tmp_path: Path) -> None:
+        """A full memo drops its oldest insert and a warm lookup reorders nothing."""
         reg = ComponentContextRegistry()
-        first = tmp_path / "a" / "component.py"
-        second = tmp_path / "b" / "component.py"
 
-        reg.get_functions(first)
-        reg.get_functions(second)
+        def install(bound: int) -> tuple[BoundedCache, ...]:
+            reg._lookup_cache = BoundedCache(bound)
+            return (reg._lookup_cache,)
 
-        assert list(reg._lookup_cache) == [second]
-
-    def test_a_warm_lookup_leaves_a_full_memo_in_insert_order(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A warm lookup reorders nothing, so the path memoised first goes first."""
-        monkeypatch.setattr(_CONTEXT_MODULE, "_LOOKUP_CACHE_MAX_SIZE", 2)
-        reg = ComponentContextRegistry()
-        paths = [tmp_path / name / "component.py" for name in ("a", "b", "c")]
-
-        reg.get_functions(paths[0])
-        reg.get_functions(paths[1])
-        reg.get_functions(paths[0])
-        reg.get_functions(paths[2])
-
-        assert list(reg._lookup_cache) == [paths[1], paths[2]]
+        assert_bounded_by_insert_age(
+            install,
+            reg.get_functions,
+            [tmp_path / name / "component.py" for name in ("a", "b", "c")],
+        )
 
     def test_two_spellings_of_one_file_answer_the_same_functions(
         self, tmp_path: Path

@@ -16,6 +16,7 @@ from next.static import (
     StaticCollector,
     StaticFilesBackend,
     StaticManager,
+    default_kinds,
     default_manager,
     get_static_manager,
     reset_default_manager,
@@ -27,6 +28,7 @@ from next.static.manager import (
     forget_manager_page_roots,
 )
 from next.static.scripts import CSRF_PAYLOAD_KEY, DEV_PAYLOAD_KEY, NextScriptBuilder
+from tests.support import restored_static_registries
 
 
 STYLES_PLACEHOLDER = "<!-- next:styles -->"
@@ -102,8 +104,10 @@ class TestEnsureBackends:
     ) -> None:
         assert isinstance(fresh_manager.default_backend, StaticFilesBackend)
 
-    def test_len_equals_configured_count(self, fresh_manager: StaticManager) -> None:
-        assert len(fresh_manager) == 1
+    def test_backends_expose_the_configured_count(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        assert len(fresh_manager.backends) == 1
 
     def test_page_roots_cached(self, fresh_manager: StaticManager) -> None:
         roots1 = fresh_manager.page_roots()
@@ -152,8 +156,6 @@ class TestForgetManagerPageRoots:
 
     def test_an_unbuilt_handle_is_left_alone(self, reset_default: None) -> None:
         """A manager nothing has built yet reads the trees fresh anyway."""
-        reset_default_manager()
-
         forget_manager_page_roots()
 
         assert default_manager._wrapped is empty
@@ -162,7 +164,6 @@ class TestForgetManagerPageRoots:
         self, reset_default: None, tmp_path: Path
     ) -> None:
         """The live manager drops what it held without being replaced."""
-        reset_default_manager()
         manager = get_static_manager()
         with mock.patch(
             "next.static.manager.get_pages_directories_for_watch", return_value=[]
@@ -184,8 +185,6 @@ class TestForgetManagerBackendUrls:
 
     def test_an_unbuilt_handle_is_left_alone(self, reset_default: None) -> None:
         """A manager nothing has built yet holds no backend and no memo."""
-        reset_default_manager()
-
         forget_manager_backend_urls()
 
         assert default_manager._wrapped is empty
@@ -194,7 +193,6 @@ class TestForgetManagerBackendUrls:
         self, reset_default: None
     ) -> None:
         """Not just the first one, which is all the render pipeline reads."""
-        reset_default_manager()
         with override_settings(NEXT_FRAMEWORK=PAIRED_BACKENDS):
             manager = get_static_manager()
             manager._ensure_backends()
@@ -202,25 +200,26 @@ class TestForgetManagerBackendUrls:
                 backend._url_cache[("a", ".css")] = f"/static/next/a{position}.css"
 
             with override_settings(STATIC_URL="/assets/"):
-                assert [backend._url_cache for backend in manager._backends] == [{}, {}]
+                assert [len(backend._url_cache) for backend in manager._backends] == [
+                    0,
+                    0,
+                ]
 
     def test_a_manifest_setting_also_drops_the_runtime_bundle_url(
         self, reset_default: None
     ) -> None:
         """The script tag and the preload hint read that URL through the same storage."""
-        reset_default_manager()
         manager = get_static_manager()
-        before = manager._next_script_builder().url
+        before = manager.script_builder().url
 
         with override_settings(STATIC_URL="/assets/"):
-            after = manager._next_script_builder().url
+            after = manager.script_builder().url
 
         assert before.startswith("/static/")
         assert after.startswith("/assets/")
 
     def test_an_unrelated_setting_keeps_every_memo(self, reset_default: None) -> None:
         """Only a setting that rebuilds the storage moves the URLs it answered."""
-        reset_default_manager()
         with override_settings(NEXT_FRAMEWORK=PAIRED_BACKENDS):
             manager = get_static_manager()
             manager._ensure_backends()
@@ -228,8 +227,11 @@ class TestForgetManagerBackendUrls:
                 backend._url_cache[("a", ".css")] = "/static/next/a.css"
 
             with override_settings(LANGUAGE_CODE="fr"):
-                held = [dict(backend._url_cache) for backend in manager._backends]
-        assert held == [{("a", ".css"): "/static/next/a.css"}] * 2
+                held = [
+                    backend._url_cache.get(("a", ".css"))
+                    for backend in manager._backends
+                ]
+        assert held == ["/static/next/a.css"] * 2
 
 
 class TestAppListChanges:
@@ -239,7 +241,6 @@ class TestAppListChanges:
         self, reset_default: None, tmp_path: Path
     ) -> None:
         """The override reaches the live manager, resolver memo and all."""
-        reset_default_manager()
         manager = get_static_manager()
         with mock.patch(
             "next.static.manager.get_pages_directories_for_watch", return_value=[]
@@ -261,7 +262,6 @@ class TestAppListChanges:
         self, reset_default: None, tmp_path: Path
     ) -> None:
         """Only the app list moves what an `APP_DIRS` router reports."""
-        reset_default_manager()
         manager = get_static_manager()
         with mock.patch(
             "next.static.manager.get_pages_directories_for_watch",
@@ -299,7 +299,7 @@ class TestReloadConfig:
             "next.static.manager.staticfiles_storage.url",
             return_value="/static/next/next.min.js",
         ):
-            manager._next_script_builder()
+            manager.script_builder()
         assert manager._script_builder is not None
         manager.reload()
         assert manager._script_builder is None
@@ -326,7 +326,7 @@ class TestReloadConfig:
             ),
         ):
             manager.reload()
-        assert len(manager) == 1
+        assert len(manager.backends) == 1
         assert "is not a StaticBackend subclass" in caplog.text
 
     def test_entry_without_backend_uses_the_default_class(self) -> None:
@@ -352,13 +352,13 @@ class TestReloadConfig:
             }
         ):
             manager.reload()
-        assert len(manager) == 1
+        assert len(manager.backends) == 1
 
     def test_empty_backends_seeds_default(self) -> None:
         manager = StaticManager()
         with override_settings(NEXT_FRAMEWORK={"STATIC_BACKENDS": []}):
             manager.reload()
-        assert len(manager) == 1
+        assert len(manager.backends) == 1
 
 
 class TestBackendsLoadedOnce:
@@ -372,7 +372,7 @@ class TestBackendsLoadedOnce:
                 StaticManager, "reload", autospec=True
             ) as reload_mock:
                 manager._ensure_backends()
-                len(manager)
+                assert len(manager.backends) == 1
         reload_mock.assert_not_called()
 
     def test_unusable_settings_do_not_reload_on_every_access(self) -> None:
@@ -403,29 +403,30 @@ class TestInjectStyles:
         assert STYLES_PLACEHOLDER not in out
 
     def test_inline_body_wrapped_by_kind(self, fresh_manager: StaticManager) -> None:
-        fresh_manager._ensure_backends()
-        backend = fresh_manager.default_backend
-        css = StaticAsset(url="", kind="css", inline="body{color:red}")
-        js = StaticAsset(url="", kind="js", inline="console.log(1)")
-        assert fresh_manager._render_one(css, backend, None) == (
-            "<style>body{color:red}</style>"
-        )
-        assert fresh_manager._render_one(js, backend, None) == (
-            "<script>console.log(1)</script>"
-        )
+        collector = StaticCollector()
+        collector.add(StaticAsset(url="", kind="css", inline="body{color:red}"))
+        collector.add(StaticAsset(url="", kind="js", inline="console.log(1)"))
+        html = f"<head>{STYLES_PLACEHOLDER}</head><body>{SCRIPTS_PLACEHOLDER}</body>"
+
+        out = fresh_manager.inject(html, collector)
+
+        assert "<style>body{color:red}</style>" in out
+        assert "<script>console.log(1)</script>" in out
 
     def test_inline_body_verbatim_when_kind_has_no_inline_tag(
         self, fresh_manager: StaticManager
     ) -> None:
-        fresh_manager._ensure_backends()
-        asset = StaticAsset(url="", kind="raw", inline="<custom>x</custom>")
-        with mock.patch(
-            "next.static.manager.default_kinds.inline_tag", return_value=None
-        ):
-            rendered = fresh_manager._render_one(
-                asset, fresh_manager.default_backend, None
+        """A kind naming no element contributes its body as it stands."""
+        with restored_static_registries():
+            default_kinds.register(
+                "raw", extension=".raw", slot="styles", renderer="render_link_tag"
             )
-        assert rendered == "<custom>x</custom>"
+            collector = StaticCollector()
+            collector.add(StaticAsset(url="", kind="raw", inline="<custom>x</custom>"))
+            out = fresh_manager.inject(f"<head>{STYLES_PLACEHOLDER}</head>", collector)
+
+        assert "<custom>x</custom>" in out
+        assert "<style>" not in out
 
     def test_empty_collector_empties_placeholder(
         self, fresh_manager: StaticManager
@@ -811,7 +812,7 @@ class TestInjectForwardsRequest:
         with (
             mock.patch.object(
                 fresh_manager,
-                "_next_script_builder",
+                "script_builder",
                 return_value=NextScriptBuilder(
                     "/static/next/next.min.js", policy=ScriptInjectionPolicy.DISABLED
                 ),
@@ -842,10 +843,8 @@ class TestInjectForwardsRequest:
 class TestBackendRewritesEveryAssetUrl:
     """A backend that rewrites `asset_url` reaches every URL the page carries.
 
-    The runtime bundle is not a collected asset, so a backend that only
-    rewrote through the renderer methods would leave `next.min.js` and its
-    preload hint pointing at the unrewritten URL. A hook composed onto the
-    instance has to count as a rewrite exactly like an override on the class.
+    The runtime bundle isn't a collected asset, so a composed hook must
+    rewrite it just like a class override does.
     """
 
     @staticmethod
@@ -1004,7 +1003,6 @@ class TestDiscoveryForwarding:
 
 class TestDefaultManagerLazy:
     def test_resolves_to_static_manager(self, reset_default: None) -> None:
-        reset_default_manager()
         assert isinstance(default_manager.default_backend, StaticFilesBackend)
 
     def test_is_lazy_object_class(self) -> None:
@@ -1017,7 +1015,6 @@ class TestDefaultManagerLazy:
         assert default_manager._wrapped is empty
 
     def test_setup_is_idempotent(self, reset_default: None) -> None:
-        reset_default_manager()
         a = default_manager.default_backend
         b = default_manager.default_backend
         assert a is b
@@ -1026,7 +1023,6 @@ class TestDefaultManagerLazy:
         self, reset_default: None
     ) -> None:
         """The accessor hands out the live manager, not the lazy handle."""
-        reset_default_manager()
         manager = get_static_manager()
         assert isinstance(manager, StaticManager)
         assert manager is get_static_manager()

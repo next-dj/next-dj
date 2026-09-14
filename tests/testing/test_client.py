@@ -1,14 +1,34 @@
+from typing import override
+
 import pytest
 from django.test import Client
 
+from next.partial.backends import JsonPartialProtocolBackend
 from next.partial.envelope import Asset, Envelope, FormMeta, Patch
-from next.testing import NextClient, PartialEnvelope, envelope_of
+from next.testing import (
+    NextClient,
+    PartialEnvelope,
+    envelope_of,
+    override_next_settings,
+)
 from tests.forms import actions
 
 
 # `actions` registers the baseline form actions on import. Bind it so the
 # module survives unused-import cleanup whatever the collection order is.
 _BASELINE_ACTIONS = actions
+
+
+class ReversedJsonBackend(JsonPartialProtocolBackend):
+    """A wire format nothing but this backend can read, named from settings."""
+
+    @override
+    def serialize_envelope(self, envelope: Envelope) -> bytes:
+        return super().serialize_envelope(envelope)[::-1]
+
+    @override
+    def deserialize_envelope(self, body: bytes) -> Envelope:
+        return super().deserialize_envelope(body[::-1])
 
 
 class TestNextClient:
@@ -22,7 +42,8 @@ class TestNextClient:
     def test_post_action_dispatches_form(self) -> None:
         client = NextClient(enforce_csrf_checks=False)
         response = client.post_action("simple_form_redirect", {"name": "Carol"})
-        assert response.status_code in (200, 302)
+        assert response.status_code == 302
+        assert response["Location"] == "/done/"
 
     @pytest.mark.django_db()
     def test_post_action_origin_fills_hidden_field(self) -> None:
@@ -45,6 +66,8 @@ class TestNextClient:
             origin="/no/such/route/",
         )
         assert response.status_code == 200
+        assert response["X-Next-Form"] == "invalid"
+        assert b"<p>test page</p>" in response.content
 
 
 class TestGetZones:
@@ -66,6 +89,13 @@ class TestGetZones:
     def test_extra_headers_forwarded(self) -> None:
         response = NextClient().get_zones("/zoned/", "alpha", HTTP_X_CUSTOM="present")
         assert response.wsgi_request.headers["X-Custom"] == "present"
+
+    def test_headers_mapping_travels_beside_the_partial_ones(self) -> None:
+        response = NextClient().get_zones(
+            "/zoned/", "alpha", headers={"X-Custom": "present"}
+        )
+        assert response.wsgi_request.headers["X-Custom"] == "present"
+        assert response.wsgi_request.headers["X-Next-Zone"] == "alpha"
 
 
 class TestPostActionPartialHeaders:
@@ -98,6 +128,19 @@ class TestPostActionPartialHeaders:
             "simple_form", {"name": ""}, origin="/", partial=True, version="9f3c"
         )
         assert response.wsgi_request.headers["X-Next-Version"] == "9f3c"
+
+    @pytest.mark.django_db()
+    def test_headers_mapping_travels_beside_the_partial_ones(self) -> None:
+        client = NextClient(enforce_csrf_checks=False)
+        response = client.post_action(
+            "simple_form",
+            {"name": ""},
+            origin="/",
+            partial=True,
+            headers={"X-Custom": "present"},
+        )
+        assert response.wsgi_request.headers["X-Custom"] == "present"
+        assert response.wsgi_request.headers["X-Next-Request"] == "1"
 
 
 class TestEnvelopeHelpers:
@@ -147,6 +190,21 @@ class TestEnvelopeHelpers:
         envelope = envelope_of(NextClient().get_zones("/zoned/", "alpha"))
         with pytest.raises(AssertionError, match="no op targets zone"):
             envelope.html_for_zone("absent")
+
+
+class TestEnvelopeReadsThroughTheBackend:
+    """The view decodes with the backend that wrote the body, not with JSON."""
+
+    def test_a_replaced_wire_format_still_reads(self) -> None:
+        with override_next_settings(
+            PARTIAL_BACKENDS=[
+                {"BACKEND": "tests.testing.test_client.ReversedJsonBackend"}
+            ]
+        ):
+            response = NextClient().get_zones("/zoned/", "alpha")
+
+            assert response.content.startswith(b"}")
+            assert envelope_of(response).zone_targets() == ["alpha"]
 
 
 class TestEnvelopeDecoding:
@@ -226,22 +284,22 @@ class TestEnvelopeStrictness:
     """A payload that is not a whole envelope fails loudly instead of half answering."""
 
     def test_missing_version_raises(self) -> None:
-        with pytest.raises(KeyError):
+        with pytest.raises(KeyError, match="version"):
             _ = PartialEnvelope({"ops": []}).ops
 
     def test_op_without_a_verb_raises(self) -> None:
-        with pytest.raises(KeyError):
+        with pytest.raises(KeyError, match="op"):
             _ = PartialEnvelope({"version": "v1", "ops": [{"html": "<p></p>"}]}).ops
 
     def test_asset_without_a_url_raises(self) -> None:
-        with pytest.raises(KeyError):
+        with pytest.raises(KeyError, match="url"):
             _ = PartialEnvelope({"version": "v1", "assets": [{"kind": "css"}]}).assets
 
     def test_form_meta_without_errors_raises(self) -> None:
         view = PartialEnvelope(
             {"version": "v1", "form": {"uid": "ab12", "valid": True}}
         )
-        with pytest.raises(KeyError):
+        with pytest.raises(KeyError, match="errors"):
             view.form_meta()
 
     def test_raw_payload_stays_readable(self) -> None:

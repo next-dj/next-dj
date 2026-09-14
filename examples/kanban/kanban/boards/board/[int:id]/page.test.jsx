@@ -79,7 +79,7 @@ describe("Board", () => {
 
     const body = new URLSearchParams(opts.body);
     expect(body.get("card_id")).toBe("10");
-    expect(body.get("target_column_id")).toBe("2");
+    expect(body.get("target_column")).toBe("2");
     expect(body.get("csrfmiddlewaretoken")).toBe("test-csrf-token");
   });
 
@@ -182,7 +182,7 @@ describe("Board", () => {
     expect(opts.method).toBe("POST");
 
     const body = new URLSearchParams(opts.body);
-    expect(body.get("column_id")).toBe("2");
+    expect(body.get("column")).toBe("2");
     expect(body.get("title")).toBe("Write docs");
     expect(body.get("csrfmiddlewaretoken")).toBe("test-csrf-token");
   });

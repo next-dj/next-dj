@@ -67,7 +67,7 @@ The server is the only author of a target, the client never names one.
      - The default verb.
        Morph the target into the HTML.
        The target names a zone or a form by uid.
-       ``extract: true`` carries a whole document the client trims to the target.
+       ``extract: true`` carries a whole document the client trims to the target, and ``morph_form(uid, html)`` is the builder route that sets it.
        ``morph(zone=, overrides=)`` merges a mapping into the zone's render context, so a handler can bind a value the zone body reads without registering a provider for it.
      - ``extract: false``
    * - ``replace``

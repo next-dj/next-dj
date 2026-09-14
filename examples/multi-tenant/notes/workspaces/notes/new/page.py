@@ -1,13 +1,13 @@
 from django import forms as django_forms
 from django.http import HttpRequest, HttpResponseRedirect
-from django.urls import reverse
 from django.utils.safestring import SafeString
-from notes.markdown_render import render_markdown
+from markup import render_markdown
 from notes.models import Note
 from notes.providers import DTenant
 
 from next import context
 from next.forms import ComponentWidget, Form
+from next.urls import page_reverse
 
 
 class NoteCreateForm(Form):
@@ -29,7 +29,7 @@ class NoteCreateForm(Form):
             body=self.cleaned_data.get("body", ""),
         )
         return HttpResponseRedirect(
-            reverse("next:page_notes_int_note_id_edit", kwargs={"note_id": note_obj.pk})
+            page_reverse("notes/[int:note_id]/edit", note_id=note_obj.pk)
         )
 
 

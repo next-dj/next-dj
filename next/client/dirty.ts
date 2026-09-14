@@ -4,8 +4,6 @@
 
 /** Tracks which elements the user touched, keyed against per-request snapshots. */
 export interface DirtyTracker {
-  /** Stamp the element as locally touched. */
-  stamp(el: Element): void;
   /** The current counter, captured at fetch time. */
   snapshot(): number;
   /** An element is dirty when its stamp is later than the request snapshot. */
@@ -30,8 +28,8 @@ export function createDirtyTracker(deps: DirtyDeps = {}): DirtyTracker {
   let last = 0;
   const next = deps.next ?? (() => (counter += 1));
   let stamps = new WeakMap<Element, number>();
-  let installed: Document | null = null;
-  let listener: ((event: Event) => void) | null = null;
+  // One controller per install, so no teardown drifts from the capture flag it set.
+  let controller: AbortController | null = null;
 
   function stamp(el: Element): void {
     last = next();
@@ -39,30 +37,25 @@ export function createDirtyTracker(deps: DirtyDeps = {}): DirtyTracker {
   }
 
   function detach(): void {
-    if (installed !== null && listener !== null) {
-      for (const name of TOUCH_EVENTS) {
-        installed.removeEventListener(name, listener, true);
-      }
-    }
-    installed = null;
-    listener = null;
+    controller?.abort();
+    controller = null;
   }
 
   function install(doc: Document): void {
     detach();
-    // The capture phase reaches a toggle on <details>, which does not bubble.
-    listener = (event) => {
+    controller = new AbortController();
+    const signal = controller.signal;
+    const listener = (event: Event): void => {
       const el = event.target;
       if (el instanceof Element) stamp(el);
     };
+    // The capture phase reaches a toggle on <details>, which does not bubble.
     for (const name of TOUCH_EVENTS) {
-      doc.addEventListener(name, listener, true);
+      doc.addEventListener(name, listener, { capture: true, signal });
     }
-    installed = doc;
   }
 
   return {
-    stamp,
     snapshot: () => last,
     isDirtySince(snapshot) {
       return (el) => {

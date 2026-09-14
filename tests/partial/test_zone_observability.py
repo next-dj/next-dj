@@ -40,13 +40,7 @@ def _partial_of(source: str, engine: Engine) -> tuple[Template, ZoneNode]:
 
 
 class TestStandaloneDebugContract:
-    """A standalone zone render keeps an honest DEBUG traceback.
-
-    These cases drive `ZonePartial.render` through the branch where
-    `context.template is None`, so `bind_template` puts the partial on
-    `render_context.template` and its `get_exception_info` is the only
-    delegate. The inline page-render case never reaches this branch.
-    """
+    """A standalone zone render keeps an honest DEBUG traceback."""
 
     def test_template_debug_during_through_bind_template(self) -> None:
         engine = _debug_engine()
@@ -76,13 +70,7 @@ class TestStandaloneDebugContract:
 
 
 class TestUnboundZoneDebugDoesNotCrash:
-    """A zone with no bound page template renders honestly under DEBUG.
-
-    The render goes through the real `Node.render_annotated` path, so a
-    body exception under `engine.debug` must not surface as the
-    `AttributeError` that an undelegated `render_context.template` would
-    raise. With no page template the debug info is simply empty.
-    """
+    """A zone with no bound page template renders honestly under DEBUG."""
 
     def test_body_exception_is_raised_verbatim(self) -> None:
         engine = _debug_engine()
@@ -195,7 +183,7 @@ class TestRegistryIsolatedFromGetPath:
             tmp_path, 'a {% zone "z" %}<p>{{ t }}</p>{% endzone %} b'
         )
         module = _load_python_module_memo(page_file)
-        view = page_instance._create_unified_view(page_file, {}, module)
+        view = page_instance._create_unified_view(page_file, module)
         response = view(_make_request())
         assert b'<div data-next-zone="z">' in response.content
         assert len(_zone_cache) == 0
@@ -207,7 +195,7 @@ class TestRegistryIsolatedFromGetPath:
             tmp_path, '{% zone "z" %}<p>{{ t }}</p>{% endzone %}'
         )
         module = _load_python_module_memo(page_file)
-        view = page_instance._create_unified_view(page_file, {}, module)
+        view = page_instance._create_unified_view(page_file, module)
         view(_make_request())
         assert len(_zone_cache) == 0
 

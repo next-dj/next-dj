@@ -1,9 +1,6 @@
 """Sentinels, cycle error, and per-resolution cache used during DI resolution.
 
-The `DependencyCache` object accumulates resolved dependency values
-during a single resolution pass. The `_IN_PROGRESS` and `_CACHE_MISS`
-sentinels separate the three cache-lookup outcomes (hit, miss, and
-in-progress) without collapsing `None`-valued hits into misses.
+`_IN_PROGRESS` and `_CACHE_MISS` keep a `None`-valued hit from reading as a miss.
 """
 
 from __future__ import annotations
@@ -21,10 +18,7 @@ REQUEST_DEP_CACHE_ATTR: Final[str] = "_next_dep_cache"
 def get_request_dep_cache(request: object | None) -> dict[str, Any] | None:
     """Return the dispatch-scoped dep cache attached to `request`, or `None`.
 
-    `FormActionDispatch.dispatch` attaches its `dep_cache` dict to the
-    request so downstream renderers (page context, component context)
-    can rejoin the same DI cache during a validation-failure re-render.
-    Consumers wrap the returned dict in `DependencyCache` to share state.
+    `FormActionDispatch.dispatch` attaches this so a re-render can rejoin the DI cache.
     """
     if request is None:
         return None

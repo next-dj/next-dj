@@ -112,7 +112,7 @@ The dispatch-time form signals (``action_dispatched``, ``form_validation_failed`
      - After ``Page.render`` produces HTML and injects static assets.
        ``duration_ms`` times the render.
        ``context_keys`` is the tuple of context keys.
-       Fired only when a receiver is connected, and the ``duration_ms`` timer runs under the same gate.
+       Fired only when a receiver for ``Page`` is connected, and the ``duration_ms`` timer runs under the same gate.
    * - ``patch_op_registered``
      - ``PatchOpRegistry``
      - ``name``

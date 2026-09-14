@@ -3,6 +3,7 @@
 // scroll survive a patch. Matching runs on id-sets, then a child walk reuses.
 
 import { defaultMove } from "./adapters";
+import { ATTR_KEY } from "./protocol";
 
 /** Whether a morph replaces the target itself or only its children. */
 export type MorphMode = "node" | "children";
@@ -44,10 +45,10 @@ interface Ctx {
 // Read the id through getAttribute: the `id` property is subject to DOM
 // clobbering, an `<input name="id">` shadows form.id.
 function readId(el: Element, dev: boolean): string | null {
-  const key = el.getAttribute("data-next-key");
+  const key = el.getAttribute(ATTR_KEY);
   if (key !== null) {
     if (dev && el.getAttribute("id") !== null) {
-      console.warn("[next.morph] data-next-key and id on one node", el);
+      console.warn(`[next.morph] ${ATTR_KEY} and id on one node`, el);
     }
     return key;
   }
@@ -64,7 +65,7 @@ function collectIds(
   dev: boolean,
 ): void {
   consume(root, root, into, universe, dev);
-  const tagged = root.querySelectorAll("[id],[data-next-key]");
+  const tagged = root.querySelectorAll(`[id],[${ATTR_KEY}]`);
   for (const el of Array.from(tagged)) {
     consume(el, root, into, universe, dev);
   }

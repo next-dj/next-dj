@@ -48,6 +48,23 @@ class TestSerializeEnvelope:
         assert "сохранено".encode() in body
 
 
+class TestDeserializeEnvelope:
+    """The default backend reads back the envelope it wrote."""
+
+    def test_body_round_trips_through_the_backend(self) -> None:
+        backend = JsonPartialProtocolBackend()
+        envelope = _sample_envelope()
+        assert backend.deserialize_envelope(backend.serialize_envelope(envelope)) == (
+            envelope
+        )
+
+    def test_reader_carries_the_ops_of_the_body(self) -> None:
+        backend = JsonPartialProtocolBackend()
+        body = backend.serialize_envelope(_sample_envelope())
+        read = backend.deserialize_envelope(body)
+        assert [op.op for op in read.ops] == ["replace", "event"]
+
+
 class TestSseEvent:
     """The SSE frame wraps the same JSON envelope as a `next-patches` event."""
 
@@ -89,6 +106,9 @@ class _TurboProtocolBackend(PartialProtocolBackend):
     def sse_event(self, envelope: Envelope) -> str:
         return f"event: turbo\ndata: {len(envelope.ops)}\n\n"
 
+    def deserialize_envelope(self, body: bytes) -> Envelope:
+        return Envelope(version=body.decode())
+
 
 class TestProtocolContract:
     """The family root is abstract and names the wire format contract."""
@@ -109,3 +129,20 @@ class TestProtocolContract:
     def test_replacement_backend_inherits_options(self) -> None:
         backend = _TurboProtocolBackend({"OPTIONS": {"VERSION": "7"}})
         assert backend.options == {"VERSION": "7"}
+
+    def test_replacement_backend_reads_its_own_format_back(self) -> None:
+        backend = _TurboProtocolBackend()
+        assert backend.deserialize_envelope(b"v9").version == "v9"
+
+    def test_a_backend_without_a_reader_is_abstract(self) -> None:
+        class _WriteOnly(PartialProtocolBackend):
+            content_type = "text/plain"
+
+            def serialize_envelope(self, envelope: Envelope) -> bytes:
+                return b""
+
+            def sse_event(self, envelope: Envelope) -> str:
+                return ""
+
+        with pytest.raises(TypeError, match="deserialize_envelope"):
+            _WriteOnly()

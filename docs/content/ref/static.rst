@@ -46,6 +46,14 @@ Manager
 It builds its wrapped ``StaticManager`` lazily on first access.
 ``reset_default_manager`` drops that wrapped instance so the next access rebuilds it, which keeps the manager consistent when ``NEXT_FRAMEWORK`` changes under ``override_settings``.
 
+Injection
+~~~~~~~~~
+
+.. automodule:: next.static.inject
+   :members:
+
+``StaticManager.inject`` delegates to a ``PlaceholderInjector`` bound to the manager, which reads the active backend, the URL rewrite, and the script builder through it.
+
 Scripts
 ~~~~~~~
 

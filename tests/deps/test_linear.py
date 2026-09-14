@@ -12,8 +12,8 @@ from next.deps import (
     Depends,
     UnknownDependencyError,
 )
+from next.deps.introspect import forget_introspection_caches, introspect_key
 from next.deps.linear import LinearDependencyResolver
-from next.deps.resolver import _introspect_key
 from next.forms import DForm
 from next.pages.context import Context
 from next.testing import make_resolution_context
@@ -423,6 +423,17 @@ class TestProviderContract:
                 assert _agree(filler(context), provider.resolve(param, context))
 
 
+@pytest.fixture()
+def forgotten_hint_memos():
+    """Clear the process-wide introspection memos around a test that fills them.
+
+    A resolved hint is memoised under the function object, so it outlives the test.
+    """
+    forget_introspection_caches()
+    yield
+    forget_introspection_caches()
+
+
 class TestKnownDivergence:
     """The one difference between the paths is what each of them memoises."""
 
@@ -431,7 +442,7 @@ class TestKnownDivergence:
         linear = LinearDependencyResolver()
         assert planned.resolve_dependencies(_defaulted) == {"value": 7}
         assert linear.resolve_dependencies(_defaulted) == {"value": 7}
-        assert _introspect_key(_defaulted) in planned._plan_cache
+        assert introspect_key(_defaulted) in planned._plan_cache
         assert dict(linear._plan_cache) == {}
 
     def test_an_unresolvable_hint_is_left_out_of_the_plan_cache(self) -> None:
@@ -440,9 +451,10 @@ class TestKnownDivergence:
         assert planned.resolve_dependencies(
             _unresolvable
         ) == linear.resolve_dependencies(_unresolvable)
-        assert _introspect_key(_unresolvable) not in planned._plan_cache
+        assert introspect_key(_unresolvable) not in planned._plan_cache
 
-    def test_a_late_name_is_picked_up_by_both(self) -> None:
+    @pytest.mark.usefixtures("forgotten_hint_memos")
+    def test_a_late_name_is_picked_up_by_both(self, monkeypatch) -> None:
         planned = DependencyResolver()
         linear = LinearDependencyResolver()
         assert planned.resolve_dependencies(_deferred, request=_REQUEST) == {
@@ -451,13 +463,10 @@ class TestKnownDivergence:
         assert linear.resolve_dependencies(_deferred, request=_REQUEST) == {
             "value": None
         }
-        globals()["_LateHttpRequest"] = HttpRequest
-        try:
-            assert planned.resolve_dependencies(_deferred, request=_REQUEST) == {
-                "value": _REQUEST
-            }
-            assert linear.resolve_dependencies(_deferred, request=_REQUEST) == {
-                "value": _REQUEST
-            }
-        finally:
-            del globals()["_LateHttpRequest"]
+        monkeypatch.setitem(globals(), "_LateHttpRequest", HttpRequest)
+        assert planned.resolve_dependencies(_deferred, request=_REQUEST) == {
+            "value": _REQUEST
+        }
+        assert linear.resolve_dependencies(_deferred, request=_REQUEST) == {
+            "value": _REQUEST
+        }

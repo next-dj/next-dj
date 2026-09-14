@@ -18,12 +18,15 @@ examples/_shared/
 │   ├── badge/{component.djx,component.py}
 │   ├── input/    textarea/    label/    field/
 │   ├── alert/{component.djx,component.py}
+│   ├── flash_messages/{component.djx,component.py}
 │   ├── table/    nav/    nav_link/{component.djx,component.py}
 │   ├── page_header/    container.djx    section/    separator.djx
 │   ├── empty_state/    skeleton/    avatar/    stat_card/
 │   ├── dropdown/{component.djx,component.mjs}
 │   ├── dialog/{component.djx,component.mjs}
 │   └── markdown_preview/{component.djx,component.py,component.css,component.mjs}
+├── fragments.py   # render one component by name into a patch payload
+├── markup.py      # Markdown to safe HTML, shared by the wiki and multi-tenant forms
 └── static/shared/
     └── css/
         ├── tokens.css     # CSS custom properties (--background, --primary, --radius, …)
@@ -58,9 +61,11 @@ The `DIRS` entry registers `_shared/_components` as a **global** root. Component
 
 `STATICFILES_DIRS` adds the shared static tree so `tokens.css` and `base.css` resolve under `/static/shared/...`.
 
+The kit also ships two plain Python modules, so an app that imports them needs the directory on the import path. The examples add `sys.path.insert(0, str(SHARED_DIR))` next to `SHARED_DIR` in `config/settings.py`, which mirrors the `pythonpath = . ../_shared` line their `pytest.ini` already carries. `markup.py` holds `render_markdown`, the escape-then-render-then-strip pipeline the wiki and multi-tenant forms preview with. `fragments.py` holds `render_fragment(name, template_path, request, **props)`, which resolves one component through `next.components.get_component` and renders it through `render_component`, the pair a patch builder needs when it wants a component's markup without a wrapper template.
+
 ## Shared client behaviour
 
-The `markdown_preview` component is the one place the live Markdown preview behaviour lives. It is a pure presentation shell — its `component.djx` draws a labelled pane around a `{{ rendered_html }}` slot, its co-located `component.mjs` keeps the pane in sync with the surrounding textarea, and its `component.py` declares only the `marked` CDN under `scripts`. The framework auto-discovers the co-located `component.mjs` (emitted as `<script type="module">`) and `component.css` and dedupes them into the page slots, so no manual static path is needed. The script registers through `Next.partial.onMount("[data-markdown-preview]", ...)` and walks up to the enclosing `<form>` to find its textarea, so it binds the same way for both apps without hardcoding a field name. Each app keeps its own server-side render and injects the HTML through the `rendered_html` prop — [`wiki`](../wiki/) reuses its `render_markdown` helper, [`multi-tenant`](../multi-tenant/) renders through the `markdown` package — while the shell and the client behaviour stay shared.
+The `markdown_preview` component is the one place the live Markdown preview behaviour lives. It is a pure presentation shell — its `component.djx` draws a labelled pane around a `{{ rendered_html }}` slot, its co-located `component.mjs` keeps the pane in sync with the surrounding textarea, and its `component.py` declares only the `marked` CDN under `scripts`. The framework auto-discovers the co-located `component.mjs` (emitted as `<script type="module">`) and `component.css` and dedupes them into the page slots, so no manual static path is needed. The script registers through `Next.partial.onMount("[data-markdown-preview]", ...)` and walks up to the enclosing `<form>` to find its textarea, so it binds the same way for both apps without hardcoding a field name. Both apps render server-side through the shared [`markup.py`](markup.py) helper and inject the HTML through the `rendered_html` prop, so the security-sensitive escaping lives in one file rather than in a copy per example.
 
 Each example houses the shared HTML envelope in a project-level page root listed under `PAGE_BACKENDS["DIRS"]` — `chrome/`, `host/`, `site/`, `frame/`, `shell/`, `portal/`, `instrument/`, `marketplace/`, `cockpit/`, `studio/`, or `root_pages/` depending on the project. The dir contains a single `layout.djx` (and optionally `_<components-dir>/` for project-shared components) that wraps every page rendered by the per-app `PAGES_DIR` tree:
 
@@ -158,6 +163,7 @@ Every entry below is a void call (`{% component "name" prop=value %}`) or a bloc
 | `label` | `for_id`, `text`, `extra` | `content` (falls back to `{{ text }}`) |
 | `field` | `label`, `for_id`, `required`, `help`, `error`, `extra` | `control` |
 | `alert` | `variant` (default/info/success/warning/destructive), `title`, `text`, `extra` | `content` (falls back to `{{ text }}`) |
+| `flash_messages` | — (drains `django.contrib.messages` off the request and maps each level tag onto an `alert` variant) | — |
 | `table` | `extra`, `wrapper_extra` | `content` (write raw `<thead>`/`<tbody>`/`<tr>` inside) |
 | `nav` | `extra` | `content` |
 | `nav_link` | `url_name` (Django named route) **or** `url` (literal), `url_kwargs`, `url_args`, `active_when` (substring match against `resolver_match.view_name`), `label`, `variant` (tabs/pills/bar), `extra` | `content` (falls back to `{{ label }}`) |

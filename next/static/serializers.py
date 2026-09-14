@@ -1,13 +1,12 @@
 """Pluggable JS-context serializers for `@context(serialize=True)` values.
 
-`StaticCollector.add_js_context` delegates value encoding to a `JsContextSerializer`.
-The default implementation uses `DjangoJSONEncoder`. Applications that want to
-serialise pydantic models, msgspec structs, or any other type can point the
-`JS_CONTEXT_SERIALIZER` option at a class that implements the protocol.
+`StaticCollector.add_js_context` delegates encoding to a `JsContextSerializer`,
+pluggable via `JS_CONTEXT_SERIALIZER` for pydantic, msgspec, or another type.
 """
 
 from __future__ import annotations
 
+import functools
 import json
 from typing import TYPE_CHECKING, Protocol, override, runtime_checkable
 
@@ -66,15 +65,20 @@ class PydanticJsContextSerializer:
                 "Install it or switch JS_CONTEXT_SERIALIZER to another class."
             )
             raise ImportError(msg)
-        self._encoder = _make_pydantic_encoder(pydantic)
+        self._encoder = _pydantic_encoder(pydantic)
 
     def dumps(self, value: object) -> str:
         """Return a compact JSON string with pydantic models unwrapped."""
         return json.dumps(value, cls=self._encoder, separators=(",", ":"))
 
 
-def _make_pydantic_encoder(module: ModuleType) -> type[DjangoJSONEncoder]:
-    """Build an encoder that unwraps `BaseModel` via the validated module."""
+@functools.cache
+def _pydantic_encoder(module: ModuleType) -> type[DjangoJSONEncoder]:
+    """Return the encoder unwrapping `BaseModel` of the validated module.
+
+    Built once per module rather than per serializer, because defining a class
+    costs a namespace and an MRO while the encoder it yields holds no state.
+    """
     base_model = module.BaseModel
 
     class _PydanticAwareEncoder(DjangoJSONEncoder):
@@ -96,9 +100,8 @@ _default_serializer: JsContextSerializer = JsonJsContextSerializer()
 def resolve_serializer() -> JsContextSerializer:
     """Return the configured serializer or the process-wide default.
 
-    The resolver reads `NEXT_FRAMEWORK["JS_CONTEXT_SERIALIZER"]` on
-    every call. Returning a fresh instance each time keeps the hot path
-    free of caching edge cases during test overrides.
+    The dotted path is read on every call, so a settings override takes effect from
+    the call that follows it, and the shipped serializers hold no state to share.
     """
     path = getattr(next_framework_settings, "JS_CONTEXT_SERIALIZER", None)
     if not path:

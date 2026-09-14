@@ -24,9 +24,8 @@ def _dev_origin() -> str:
 def inject_vite_dev_assets(sender: object, **kwargs) -> None:
     """Prepend the React Refresh preamble and the Vite HMR client.
 
-    Both assets are URL-form module scripts because the collector force-appends inline
-    ones, and `@vitejs/plugin-react` needs the preamble to run before any jsx module.
-    Base64 in a `data:` URL keeps the preamble a single self-contained script tag.
+    Both ride as URL-form module scripts since the collector force-appends inline ones,
+    and `@vitejs/plugin-react` needs the preamble to run before any jsx module.
     """
     origin = _dev_origin()
     if not origin or not _has_module_assets(sender):

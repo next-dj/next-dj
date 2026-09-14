@@ -67,7 +67,7 @@ class IntentOnlyShaper:
         *,
         action_name: str,
         uid: str,
-        wizard: FormWizard | None,
+        wizard: FormWizard | None = None,
     ) -> NoReturn:
         """Fail because a submission naming no validate field must never reach here."""
         del backend, request, form, intent, action_name, uid, wizard

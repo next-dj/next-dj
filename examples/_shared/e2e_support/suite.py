@@ -50,8 +50,7 @@ def base_url(live_server: LiveServer) -> str:
 def browser_context_args(browser_context_args: dict[str, object]) -> dict[str, object]:
     """Pin everything that would otherwise drift between machines.
 
-    The fixture lives here rather than in the browser plugin because `-p` registers
-    that plugin during preparse, before the entry points load, so pytest-playwright's
-    own `browser_context_args` would be registered later and shadow this one.
+    Lives here, not in the browser plugin, because `-p` registers that plugin during
+    preparse, before pytest-playwright's own fixture of the same name can shadow it.
     """
     return {**browser_context_args, **CONTEXT_ARGS}

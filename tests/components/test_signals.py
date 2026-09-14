@@ -296,10 +296,10 @@ class TestComponentRenderedSignal:
         assert event.kwargs["info"] is info
         assert event.kwargs["template_path"] == template_path
 
-    def test_render_component_skips_send_without_listeners(
+    def test_render_component_sends_with_no_listener_connected(
         self, tmp_path: Path
     ) -> None:
-        """``render_component`` does not dispatch when no listener is connected."""
+        """``render_component`` announces the render whoever is or is not listening."""
         template_path = tmp_path / "card.djx"
         template_path.write_text("<h3>{{ title }}</h3>")
         info = ComponentInfo(
@@ -313,4 +313,4 @@ class TestComponentRenderedSignal:
         with patch.object(component_rendered, "send") as send:
             html = render_component(info, {"title": "Hello"})
         assert "Hello" in html
-        send.assert_not_called()
+        assert send.call_count == 1

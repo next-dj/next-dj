@@ -1,8 +1,7 @@
 """Reference resolver that fills parameters without a compiled plan.
 
-A compiled plan trusts the static verdicts and the compile hooks of every provider, and
-nothing else in the framework re-derives what those two owe `can_handle` and `resolve`.
-This resolver is the second opinion the plan is checked against.
+Nothing else re-derives what a compiled plan trusts blindly from providers, so this
+resolver is kept as the second opinion the plan is checked against.
 """
 
 from __future__ import annotations
@@ -10,13 +9,13 @@ from __future__ import annotations
 import inspect
 from typing import TYPE_CHECKING, Any, override
 
-from .resolver import (
-    _HINT_ERRORS,
-    DependencyResolver,
-    UnknownDependencyError,
+from .introspect import (
+    HINT_ERRORS,
     cached_signature,
     cached_type_hints,
+    prepared_parameter,
 )
+from .resolver import DependencyResolver, UnknownDependencyError
 
 
 if TYPE_CHECKING:
@@ -32,13 +31,12 @@ type _FillTarget = tuple[str, inspect.Parameter, object]
 class LinearDependencyResolver(DependencyResolver):
     """Fill each parameter from the first provider whose `can_handle` claims it.
 
-    Selectable through `NEXT_FRAMEWORK["DEPENDENCY_RESOLVER"]` and written apart from
-    `compile_plan`, so the two paths can only agree by agreeing. It answers what the
-    default resolver answers and pays the whole provider walk per parameter to do it.
+    Selectable via `NEXT_FRAMEWORK["DEPENDENCY_RESOLVER"]`, it picks providers
+    independently of `compile_plan`, at the cost of a full walk per parameter.
     """
 
     def _fill_targets(self, func: Callable[..., Any]) -> tuple[_FillTarget, ...]:
-        """Return the parameters of `func` to fill, resolved the way a compile does.
+        """Return the parameters of `func` to fill, prepared the way a compile does.
 
         Unresolved hints leave the raw annotations in place, so a name only a later
         import defines is picked up on the next resolve rather than frozen out.
@@ -49,20 +47,13 @@ class LinearDependencyResolver(DependencyResolver):
             return ()
         try:
             hints: dict[str, Any] = cached_type_hints(func)
-        except _HINT_ERRORS:
+        except HINT_ERRORS:
             hints = {}
-        empty = inspect.Parameter.empty
         targets: list[_FillTarget] = []
         for name, raw in signature.parameters.items():
             if self.skips(raw):
                 continue
-            annotation = hints.get(name, raw.annotation)
-            param = (
-                raw
-                if annotation is raw.annotation
-                else raw.replace(annotation=annotation)
-            )
-            fallback = None if param.default is empty else param.default
+            param, fallback = prepared_parameter(name, raw, hints)
             targets.append((name, param, fallback))
         return tuple(targets)
 

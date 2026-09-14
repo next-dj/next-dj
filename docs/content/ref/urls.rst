@@ -9,7 +9,7 @@ Module summary
 ``next.urls`` exposes the router backends ``RouterBackend`` and ``FileRouterBackend``.
 It re-exports ``PageRoot`` from :doc:`utils`, the labelled page tree a backend reports from ``page_roots`` for the system checks to walk and for the development watcher to observe.
 It also exposes the ``RouterFactory`` and ``RouterManager`` that build and own them.
-The ``URLPatternParser`` for bracket-segment parsing is part of the public surface, together with the ``URLParameterError`` base and its ``DuplicateURLParameterError`` and ``InvalidURLParameterError`` refusals, and ``RouterConstructionError`` for a router the factory cannot build.
+The ``URLPatternParser`` for bracket-segment parsing is part of the public surface, together with the ``URLParameterError`` base and its ``DuplicateURLParameterError`` and ``InvalidURLParameterError`` refusals.
 
 It also exposes the ``page_reverse``, ``page_reverse_lazy``, and ``with_query`` reverse helpers, the ``get_multi_values`` query reader, and the Django integration name ``app_name``.
 The ``TrieURLResolver`` that dispatches URL resolution through a route trie completes the routing surface.
@@ -47,8 +47,8 @@ Within a backend both the per-application pattern lists and the patterns from th
 Reverse-name population iterates the wrapped sequence with ``reversed()``, which it answers through an explicit ``__reversed__`` that builds the pattern list once per pass.
 
 ``RouterManager`` owns the active backend list, and the ``router_manager`` singleton exposes ``reload()`` to rebuild it.
-``reload()`` logs and skips a backend entry whose construction raises ``ImproperlyConfigured``, the type ``RouterFactory`` reports for an unimportable ``BACKEND`` path, a malformed file-router entry, and a constructor that refuses the arguments the factory passes.
-Any other exception from a custom backend propagates and stops startup.
+``reload()`` loads the list through the shared backend loader, which logs and skips an entry whose ``BACKEND`` path does not resolve into the family and an entry whose backend answers ``ImproperlyConfigured``, a malformed file-router entry among them.
+Any other exception from a custom backend propagates and stops startup, because a constructor that refuses the entry is a bug in that backend rather than a misconfigured site.
 ``reload(notify=False)`` rebuilds the backends without clearing the Django URL caches and without sending ``router_reloaded``, for a caller that reloads from inside a receiver of that signal.
 
 ``backends`` returns the loaded list as a tuple and builds it from ``PAGE_BACKENDS`` on the first read, so a caller that asks before the first resolve reads the configured routers instead of an empty tuple.
@@ -92,10 +92,9 @@ Errors
 ``URLParameterError`` is the base of every bracket-segment refusal, and it carries the refused ``param_name``, the ``url_path`` it sat in, and the ``file_path`` that ``with_file`` fills in.
 ``DuplicateURLParameterError`` covers a normalised parameter name repeated within one trail and a second ``[[wildcard]]`` segment.
 ``InvalidURLParameterError`` covers a name that is no Python identifier once a hyphen is read as an underscore, which :func:`~django.urls.path` refuses while it compiles the route.
-``RouterConstructionError`` covers the other refusal the area raises, a router class whose constructor does not take the arguments ``RouterFactory`` builds a router with.
 
-All four names are exported from ``next.urls``.
-The two parameter refusals share the ``URLParameterError`` base, so a caller catches either one on its own or both through the base, while ``RouterConstructionError`` is an ``ImproperlyConfigured`` and is caught with the rest of the backend family.
+All three names are exported from ``next.urls``.
+The two refusals share the ``URLParameterError`` base, so a caller catches either one on its own or both through the base, and ``with_file`` clones the refusal past its constructor so a parser subclass is free to declare one of its own shape.
 
 .. automodule:: next.urls.errors
    :members:

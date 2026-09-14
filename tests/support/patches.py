@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 from next.deps import provider_registry, resolver
 from next.static import default_kinds, default_placeholders
 from next.static.discovery import default_stems
-from tests.support.helpers import next_framework_settings_for_checks
+from tests.support.helpers import next_framework_settings_stand_in
 
 
 if TYPE_CHECKING:
@@ -20,9 +20,8 @@ if TYPE_CHECKING:
 def _advance_version(registry: object, *, reached: int = 0) -> None:
     """Leave the version of `registry` past every generation it has carried.
 
-    Two registry states sharing a version would make a genuinely stale plan
-    read fresh, so a restore rolls the state back and the counter forward.
-    `reached` is the version a restore is about to rewind past.
+    Two registry states sharing a version would let a stale plan read as
+    fresh, so a restore rolls the state back and the counter forward.
     """
     registry._version = max(registry.version, reached) + 1
 
@@ -31,11 +30,8 @@ def _advance_version(registry: object, *, reached: int = 0) -> None:
 def restored_provider_registry() -> Generator[None, None, None]:
     """Put the provider registry and the singleton's provider list back afterwards.
 
-    A provider class declared inside a test registers itself for the whole
-    process, so the class list goes back to what the body found and the
-    singleton is left to resync from a version it has never seen. The
-    instantiated providers go back too, because the rebuild that follows
-    republishes them and a reader that never resolves would see the test's.
+    A provider class declared in a test registers itself for the whole process, so this
+    restores both the class list and the singleton's providers.
     """
     classes = list(provider_registry)
     head = list(resolver._head)
@@ -78,9 +74,8 @@ def bound_dependency(
 def restored_static_registries() -> Generator[None, None, None]:
     """Put the stem, kind, and slot registries back the way the body found them.
 
-    All three are process globals whose generation every asset plan compares
-    against, so a test teaching the framework a new shape puts them back and
-    `_advance_version` keeps the counter moving forward.
+    These are process globals an asset plan's generation check compares
+    against, so `_advance_version` bumps the counter forward after restoring.
     """
     registries = (default_stems, default_kinds, default_placeholders)
     saved = [copy.deepcopy(registry.__dict__) for registry in registries]
@@ -104,9 +99,7 @@ def patched_watch_sources(
 ) -> Generator[None, None, None]:
     """Answer the four watch seams `next.static.finders` reads from one call.
 
-    The finder asks for page roots and then for every template, layout, and
-    component path the reloader watches, so a caller that leaves one seam
-    unpatched reads the real project tree into its assertions.
+    Leaving one seam unpatched leaks the real project tree into the caller's assertions.
     """
     with (
         patch(
@@ -155,7 +148,7 @@ def patch_checks_router_manager(
         patch("next.pages.checks.get_router_manager", return_value=(mock_mgr, [])),
         patch("next.urls.checks.get_router_manager", return_value=(mock_mgr, [])),
         patch(
-            "next.checks.common.get_pages_directories", return_value=[pages_directory]
+            "next.discovery.get_pages_directories", return_value=[pages_directory]
         ) as mock_get_pages_dirs,
     ):
         yield mock_mgr, mock_router, mock_get_pages_dirs
@@ -179,8 +172,8 @@ def patch_checks_router_manager_with_routers(
 @contextmanager
 def patch_checks_components_manager(*fake_backends) -> Generator[MagicMock, None, None]:
     """Patch components-check settings and `ComponentsManager` with fake backends."""
-    mock_ns = next_framework_settings_for_checks(
-        backends=[
+    mock_ns = next_framework_settings_stand_in(
+        COMPONENT_BACKENDS=[
             {
                 "BACKEND": "next.components.FileComponentsBackend",
                 "DIRS": [],

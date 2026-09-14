@@ -1,39 +1,32 @@
 """Template-text loaders and the layout composition engine.
 
-The manager consults `module.template` before the `TEMPLATE_LOADERS` chain, which holds
-only `DjxTemplateLoader`. Registering `PythonTemplateLoader` only moves what `next.W043`
-reports about the body source, and `LayoutTemplateLoader` stays off the chain.
+`module.template` is consulted before the `TEMPLATE_LOADERS` chain runs.
 """
 
 from __future__ import annotations
 
 import contextlib
+import functools
 import importlib.util
 import logging
 from abc import ABC, abstractmethod
-from collections import OrderedDict
 from typing import TYPE_CHECKING, ClassVar, override
 
 from django.core.signals import setting_changed
 
+from next.caches import BoundedCache
 from next.conf import next_framework_settings
 from next.conf.imports import import_class_cached
 from next.conf.signals import settings_reloaded
 from next.pages.errors import PageModuleImportError
-from next.templatetags.pages import (
-    PLACEHOLDER,
-    PLACEHOLDER_CLOSE,
-    PLACEHOLDER_OPEN,
-    PLACEHOLDER_PATTERN,
-)
 from next.utils import (
     MAX_ANCESTOR_WALK_DEPTH,
     classify_dirs_entries,
     resolve_base_dir,
     stat_mtime_ns,
-    store_bounded,
 )
 
+from .placeholder import PLACEHOLDER_CLOSE, PLACEHOLDER_OPEN, placeholder_spans
 from .watch import get_pages_directories_for_watch
 
 
@@ -77,10 +70,8 @@ def _record_load_error(file_path: Path, exc: Exception, mtime: float | None) -> 
 def last_load_error(file_path: Path) -> PageModuleImportError | None:
     """Return the recorded import failure while `file_path` is unchanged on disk.
 
-    A record the file has outlived is dropped here rather than left to arm
-    `has_load_errors` forever. Every call wraps the stored cause in a fresh
-    `PageModuleImportError`, because re-raising one shared instance would
-    grow its traceback per request and pin each request's frame locals.
+    Wraps the stored cause in a fresh `PageModuleImportError` each call, since
+    re-raising one instance would grow its traceback per request.
     """
     entry = _LAST_LOAD_ERROR.get(file_path)
     if entry is None:
@@ -137,8 +128,7 @@ def _load_python_module(file_path: Path) -> types.ModuleType | None:
         return module
 
 
-_MODULE_MEMO: OrderedDict[Path, tuple[int, types.ModuleType | None]] = OrderedDict()
-_MODULE_MEMO_MAX_SIZE = 2048
+_MODULE_MEMO: BoundedCache[Path, tuple[int, types.ModuleType | None]] = BoundedCache()
 
 
 def _load_python_module_memo(file_path: Path) -> types.ModuleType | None:
@@ -149,7 +139,7 @@ def _load_python_module_memo(file_path: Path) -> types.ModuleType | None:
     """
     mtime = stat_mtime_ns(file_path)
     if mtime is None:
-        _MODULE_MEMO.pop(file_path, None)
+        _MODULE_MEMO.pop(file_path)
         return _load_python_module(file_path)
 
     cached = _MODULE_MEMO.get(file_path)
@@ -159,7 +149,7 @@ def _load_python_module_memo(file_path: Path) -> types.ModuleType | None:
         return cached[1]
 
     module = _load_python_module(file_path)
-    store_bounded(_MODULE_MEMO, file_path, (mtime, module), _MODULE_MEMO_MAX_SIZE)
+    _MODULE_MEMO[file_path] = (mtime, module)
     return module
 
 
@@ -175,36 +165,51 @@ def reset_module_memo() -> None:
     _MODULE_MEMO.clear()
 
 
-# A single-slot holder mutated in place, so a reset needs no `global`.
-_ADDITIONAL_LAYOUTS_CACHE: dict[str, tuple[Path, ...] | None] = {"value": None}
+def _pages_dirs_for_config(config: dict) -> list[Path]:
+    """Return candidate roots from one router `DIRS` entry (paths only)."""
+    path_roots, _ = classify_dirs_entries(config.get("DIRS"), resolve_base_dir())
+    return list(path_roots)
+
+
+@functools.cache
+def _additional_layout_files() -> tuple[Path, ...]:
+    """Return root-level `layout.djx` files from each page backend `DIRS`.
+
+    A tuple, so a caller cannot reorder the shared result.
+    """
+    configs = next_framework_settings.PAGE_BACKENDS or []
+    if not isinstance(configs, list):
+        configs = []
+    candidates = (
+        layout
+        for config in configs
+        if isinstance(config, dict)
+        for directory in _pages_dirs_for_config(config)
+        if directory.exists() and (layout := directory / "layout.djx").exists()
+    )
+    return tuple(dict.fromkeys(candidates))
 
 
 def _reset_additional_layouts_cache(**kwargs) -> None:
     """Drop cached root-level `layout.djx` paths on settings reload."""
-    _ADDITIONAL_LAYOUTS_CACHE["value"] = None
+    _additional_layout_files.cache_clear()
 
 
 settings_reloaded.connect(_reset_additional_layouts_cache)
 
 
-_PAGE_ROOTS_CACHE: dict[str, tuple[Path, ...] | None] = {"value": None}
-
-
+@functools.cache
 def _page_roots() -> tuple[Path, ...]:
     """Return the resolved page trees the routers report, memoised.
 
     Reading them probes the trees of every router, too much work per walk.
     """
-    cached = _PAGE_ROOTS_CACHE["value"]
-    if cached is None:
-        cached = tuple(get_pages_directories_for_watch())
-        _PAGE_ROOTS_CACHE["value"] = cached
-    return cached
+    return tuple(get_pages_directories_for_watch())
 
 
 def forget_page_roots(**kwargs) -> None:
     """Drop the memoised page trees so the next walk asks the routers again."""
-    _PAGE_ROOTS_CACHE["value"] = None
+    _page_roots.cache_clear()
 
 
 def _on_setting_changed(*, setting: str, **kwargs) -> None:
@@ -246,9 +251,7 @@ def read_module_string_lists(
 class TemplateLoader(ABC):
     """Pluggable source of template text for a `page.py` path.
 
-    Subclasses set `source_name` to the filename they back. Typical
-    values are `"template.djx"` or `"template.md"`. The name is
-    surfaced in the `next.W043` body-source conflict check.
+    Subclasses set `source_name` to their filename, surfaced by the `next.W043` check.
     """
 
     source_name: ClassVar[str] = ""
@@ -322,23 +325,15 @@ def _as_placeholder_fallback(body: str) -> str:
     return f"{PLACEHOLDER_OPEN}{body}{PLACEHOLDER_CLOSE}"
 
 
-class LayoutTemplateLoader(TemplateLoader):
-    """Compose nested `layout.djx` wrappers around the page template."""
+class LayoutTemplateLoader:
+    """Compose nested `layout.djx` wrappers around the page template.
 
-    @override
+    No `TemplateLoader`, because the chain supplies a body and this wraps one.
+    """
+
     def can_load(self, file_path: Path) -> bool:
         """Return whether at least one `layout.djx` exists on the path."""
         return bool(self._find_layout_files(file_path))
-
-    @override
-    def load_template(self, file_path: Path) -> str | None:
-        """Return the composed template with the page inside the innermost slot."""
-        layout_files = self._find_layout_files(file_path)
-        if not layout_files:
-            return None
-
-        template_content = self._wrap_in_placeholder(file_path)
-        return self._compose_layout_hierarchy(template_content, layout_files)
 
     def compose_skeleton(self, file_path: Path) -> str:
         """Return the layout chain for `file_path` with a slot where the body goes.
@@ -355,10 +350,8 @@ class LayoutTemplateLoader(TemplateLoader):
     def compose_body(self, body: str, file_path: Path) -> str:
         """Wrap `body` through the ancestor layout chain for `file_path`.
 
-        Returns `body` verbatim when no layouts apply. When a sibling `layout.djx`
-        exists the innermost layout owns the placeholder, so `body` is substituted
-        as-is. Otherwise `body` becomes the fallback of a paired placeholder, which
-        renders it wherever the ancestor layout puts the hole.
+        A sibling `layout.djx` substitutes `body` directly, otherwise `body` becomes
+        the fallback of a paired placeholder the ancestor layout renders in its place.
         """
         layout_files = self._find_layout_files(file_path)
         if not layout_files:
@@ -428,43 +421,12 @@ class LayoutTemplateLoader(TemplateLoader):
         return layout_files
 
     def _get_additional_layout_files(self) -> Sequence[Path]:
-        """Return root-level `layout.djx` files from each page backend `DIRS`.
-
-        The memo is a tuple, so a caller cannot reorder the shared result.
-        """
-        cached = _ADDITIONAL_LAYOUTS_CACHE["value"]
-        if cached is not None:
-            return cached
-        configs = next_framework_settings.PAGE_BACKENDS or []
-        if not isinstance(configs, list):
-            configs = []
-        candidates = (
-            layout
-            for c in configs
-            if isinstance(c, dict)
-            for d in self._get_pages_dirs_for_config(c)
-            if d.exists() and (layout := d / "layout.djx").exists()
-        )
-        result = tuple(dict.fromkeys(candidates))
-        _ADDITIONAL_LAYOUTS_CACHE["value"] = result
-        return result
+        """Return the memoised root-level `layout.djx` files of every page backend."""
+        return _additional_layout_files()
 
     def _get_pages_dirs_for_config(self, config: dict) -> list[Path]:
         """Return candidate roots from one router `DIRS` entry (paths only)."""
-        path_roots, _ = classify_dirs_entries(config.get("DIRS"), resolve_base_dir())
-        return list(path_roots)
-
-    def _wrap_in_placeholder(self, file_path: Path) -> str:
-        """Return the page body as a placeholder fallback when needed."""
-        template_file = file_path.parent / "template.djx"
-        if template_file.exists():
-            with contextlib.suppress(OSError, UnicodeDecodeError):
-                content = template_file.read_text(encoding="utf-8")
-                layout_file = file_path.parent / "layout.djx"
-                if layout_file.exists():
-                    return content
-                return _as_placeholder_fallback(content)
-        return PLACEHOLDER
+        return _pages_dirs_for_config(config)
 
     def _compose_layout_hierarchy(
         self, template_content: str, layout_files: list[Path]
@@ -478,35 +440,21 @@ class LayoutTemplateLoader(TemplateLoader):
         for layout_file in layout_files:
             with contextlib.suppress(OSError, UnicodeDecodeError):
                 layout_content = layout_file.read_text(encoding="utf-8")
-                match = PLACEHOLDER_PATTERN.search(layout_content)
-                if match is not None:
-                    # Sliced in, because `re.sub` would read escapes in the body.
-                    result = (
-                        layout_content[: match.start()]
-                        + result
-                        + layout_content[match.end() :]
-                    )
+                spans = placeholder_spans(layout_content)
+                if spans:
+                    start, end = spans[0]
+                    # Sliced in, because a substitution would read escapes in the body.
+                    result = layout_content[:start] + result + layout_content[end:]
         return result
 
 
-# A single-slot holder mutated in place, so a reset needs no `global`.
-_REGISTERED_LOADERS_CACHE: dict[str, tuple[TemplateLoader, ...] | None] = {
-    "value": None
-}
-
-
+@functools.cache
 def build_registered_loaders() -> Sequence[TemplateLoader]:
     """Instantiate `TEMPLATE_LOADERS` dotted paths into `TemplateLoader` instances.
 
-    Entries that cannot be imported or are not `TemplateLoader` subclasses are skipped
-    with a debug-level log. `check_template_loaders` is the user-visible report for the
-    same misconfigurations. The result is memoised as a tuple and reset on
-    `settings_reloaded`, so a caller cannot reorder the chain every later render reads.
+    Bad entries are skipped with a debug log rather than raised, since
+    `check_template_loaders` already reports the same misconfiguration to the user.
     """
-    cached = _REGISTERED_LOADERS_CACHE["value"]
-    if cached is not None:
-        return cached
-
     configured = next_framework_settings.TEMPLATE_LOADERS
     seen: set[type[TemplateLoader]] = set()
     instances: list[TemplateLoader] = []
@@ -530,14 +478,12 @@ def build_registered_loaders() -> Sequence[TemplateLoader]:
         seen.add(cls)
         instances.append(cls())
 
-    memoised = tuple(instances)
-    _REGISTERED_LOADERS_CACHE["value"] = memoised
-    return memoised
+    return tuple(instances)
 
 
 def _reset_registered_loaders_cache(**kwargs) -> None:
     """Drop cached loader instances on settings reload."""
-    _REGISTERED_LOADERS_CACHE["value"] = None
+    build_registered_loaders.cache_clear()
 
 
 settings_reloaded.connect(_reset_registered_loaders_cache)

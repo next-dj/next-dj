@@ -61,28 +61,14 @@ def typing_optional(cls: type) -> object:
     return Optional.__getitem__(cls)
 
 
-def next_framework_settings_for_checks(*, backends: list) -> object:
-    """Stand-in for ``next_framework_settings`` in checks tests."""
-    return SimpleNamespace(
-        COMPONENT_BACKENDS=backends,
-        PAGE_BACKENDS=list(NextFrameworkSettings.DEFAULTS["PAGE_BACKENDS"]),
-        URL_NAME_TEMPLATE=NextFrameworkSettings.DEFAULTS["URL_NAME_TEMPLATE"],
-    )
-
-
-def next_framework_settings_for_checks_backends_value(backends: object) -> object:
-    """Stand-in when ``COMPONENT_BACKENDS`` is not a list (or None)."""
-    default_pages = list(NextFrameworkSettings.DEFAULTS["PAGE_BACKENDS"])
-    return SimpleNamespace(
-        COMPONENT_BACKENDS=backends,
-        PAGE_BACKENDS=default_pages,
-        URL_NAME_TEMPLATE=NextFrameworkSettings.DEFAULTS["URL_NAME_TEMPLATE"],
-    )
-
-
-def next_framework_settings_component_backends_list(backends: object) -> object:
-    """Patch stand-in with only ``COMPONENT_BACKENDS`` (may be wrong type)."""
-    return SimpleNamespace(COMPONENT_BACKENDS=backends)
+def next_framework_settings_stand_in(**overrides: object) -> SimpleNamespace:
+    """Stand in for ``next_framework_settings``, defaulting every key a test skips."""
+    values: dict[str, object] = {
+        key: list(value) if isinstance(value, list) else value
+        for key, value in NextFrameworkSettings.DEFAULTS.items()
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
 
 
 def _ctx(
@@ -147,6 +133,7 @@ def named_temp_py(content: str, *, suffix: str = ".py") -> Generator[Path, None,
 def file_router_config_entry(
     *,
     pages_dir: Path | str | None = None,
+    pages_dir_name: str = "pages",
     app_dirs: bool = False,
     dirs: list[object] | None = None,
     options: dict[str, object] | None = None,
@@ -158,7 +145,7 @@ def file_router_config_entry(
         dirs_list = [pages_dir, *dirs_list]
     return {
         "BACKEND": "next.urls.FileRouterBackend",
-        "PAGES_DIR": "pages",
+        "PAGES_DIR": pages_dir_name,
         "APP_DIRS": app_dirs,
         "DIRS": dirs_list,
         "OPTIONS": opts,
@@ -170,17 +157,19 @@ def default_page_router_config(pages_dir: Path | str) -> list[dict[str, object]]
     return [file_router_config_entry(pages_dir=pages_dir)]
 
 
-def file_router_backend_from_params(params: object) -> object:
-    """Build FileRouterBackend from tuple params or return params unchanged."""
-    if isinstance(params, tuple):
-        if len(params) == 3:
-            return FileRouterBackend(params[0], app_dirs=params[1], options=params[2])
-        if len(params) == 2:
-            return FileRouterBackend(params[0], app_dirs=params[1])
-        if len(params) == 1:
-            return FileRouterBackend(params[0])
-        return params
-    return params
+def file_router(
+    *,
+    pages_dir: str = "pages",
+    app_dirs: bool = True,
+    dirs: list[object] | None = None,
+    options: dict[str, object] | None = None,
+) -> FileRouterBackend:
+    """Build a ``FileRouterBackend`` from a complete ``PAGE_BACKENDS`` entry."""
+    return FileRouterBackend(
+        file_router_config_entry(
+            pages_dir_name=pages_dir, app_dirs=app_dirs, dirs=dirs, options=options
+        )
+    )
 
 
 def counting_provider(calls: list[str], name: str) -> Callable[[], str]:

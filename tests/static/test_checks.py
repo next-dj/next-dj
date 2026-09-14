@@ -164,6 +164,20 @@ class TestOptionsWarnings:
             messages = check_static_backends(app_configs=None)
         assert "next.W031" not in _ids(messages)
 
+    def test_options_that_are_no_mapping_name_no_tag(self) -> None:
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "STATIC_BACKENDS": [
+                    {
+                        "BACKEND": "next.static.StaticFilesBackend",
+                        "OPTIONS": ["css_tag", "<link>"],
+                    }
+                ]
+            }
+        ):
+            messages = check_static_backends(app_configs=None)
+        assert "next.W031" not in _ids(messages)
+
 
 class TestChecksRegistered:
     """System check discovery picks up every static check under the NEXT tag."""
@@ -388,7 +402,7 @@ class TestReservedJsContextKeyCheck:
             "def unread():\n"
             "    return 3\n"
         )
-        loaders_module._MODULE_MEMO.pop(page_file, None)
+        loaders_module._MODULE_MEMO.pop(page_file)
         with patch_checks_router_manager(pages_directory=tmp_path):
             messages = check_reserved_js_context_keys()
         assert _ids(messages) == ["next.W075"]
@@ -406,7 +420,7 @@ class TestReservedJsContextKeyCheck:
             "def provider():\n"
             "    return False\n"
         )
-        loaders_module._MODULE_MEMO.pop(page_file, None)
+        loaders_module._MODULE_MEMO.pop(page_file)
         with patch_checks_router_manager(pages_directory=tmp_path):
             messages = check_reserved_js_context_keys()
         assert _ids(messages) == ["next.W075"]
@@ -446,7 +460,7 @@ class TestReservedJsContextKeyCheck:
             "def csrf_token():\n"
             '    return {"token": "app"}\n'
         )
-        loaders_module._MODULE_MEMO.pop(page_file, None)
+        loaders_module._MODULE_MEMO.pop(page_file)
         with patch_checks_router_manager(pages_directory=tmp_path):
             messages = check_reserved_js_context_keys()
         assert messages == []

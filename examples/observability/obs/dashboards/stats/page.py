@@ -23,9 +23,8 @@ def _minutes_for(window: str) -> int:
 def live_zone() -> str:
     """Name the zone the filter form re-aggregates without leaving the page.
 
-    Page-local, not inherited, so only this index carries the
-    `live-totals` zone the filter form targets. The nested stats sub-pages
-    keep an empty value and fall back to a full submit.
+    Page-local, not inherited, so only this index carries the zone the filter targets
+    while nested stats sub-pages keep an empty value and fall back to a full submit.
     """
     return LIVE_TOTALS_ZONE
 
@@ -52,8 +51,7 @@ def live_stats(window: str = DEFAULT_WINDOW) -> dict[str, Any]:
     """Build the windowed snapshot exposed under `window.Next.context.live_stats`.
 
     The decorator override wraps the payload in `{"v": 1, "data": ...}` while sibling
-    keys stay flat through the global `JS_CONTEXT_SERIALIZER`. Counts come from
-    `metrics.read_window`, so `?window=` really narrows the aggregation.
+    keys stay flat through the global `JS_CONTEXT_SERIALIZER`.
     """
     minutes = _minutes_for(window)
     pages = metrics.read_window("pages.rendered", minutes)

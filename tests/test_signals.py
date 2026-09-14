@@ -1,4 +1,6 @@
+import ast
 import weakref
+from pathlib import Path
 
 import pytest
 from django.dispatch import Signal
@@ -30,6 +32,14 @@ def _noop_receiver(**kwargs: object) -> None:
     return None
 
 
+def _reads_receivers(path: Path) -> bool:
+    tree = ast.parse(path.read_text())
+    return any(
+        isinstance(node, ast.Attribute) and node.attr == "receivers"
+        for node in ast.walk(tree)
+    )
+
+
 class _GuardedSender:
     """The sender a guard asks about."""
 
@@ -41,9 +51,9 @@ class _OtherSender:
 class TestFrameworkSignalCaching:
     """`use_caching` is on wherever every sender is a stable weak-referenceable object.
 
-    A cached signal keys its receiver lookup on a `weakref.WeakKeyDictionary` entry for
-    the sender, which buys a lock-free `has_listeners` on the render hot paths and costs
-    a sender that cannot be weak-referenced or is rebuilt for every send.
+    Caching keys receiver lookup on a `WeakKeyDictionary` entry for the
+    sender, trading a rebuilt-per-send sender for a lock-free `has_listeners`
+    check on render hot paths.
     """
 
     @pytest.mark.parametrize("name", sorted(CACHED_SIGNALS))
@@ -89,7 +99,10 @@ class TestCollectorFinalizedStaysUncached:
         first = default_manager.create_collector()
         second = default_manager.create_collector()
         assert first is not second
-        assert weakref.ref(second) is not None
+
+    def test_a_collector_is_weak_referenceable(self) -> None:
+        collector = default_manager.create_collector()
+        assert weakref.ref(collector)() is collector
 
 
 class TestCachedSignalSenderContract:
@@ -115,33 +128,30 @@ class TestCachedSignalSenderContract:
         assert signal.has_listeners(StaticAsset) is False
 
 
-class TestTwoStageListenerGuard:
-    """The two-stage guard answers exactly what `has_listeners` alone answers.
+class TestNoReceiverListIntrospection:
+    """No emitter reads `Signal.receivers`. The guard asks `has_listeners` instead."""
 
-    A non-empty receiver list is necessary for a signal to have a listener, so reading
-    the attribute first settles a signal nobody connected to without building a sender
-    cache entry. Django opens its own `Signal.send` with the same check.
-    """
+    def test_no_module_reads_the_receiver_list(self) -> None:
+        package = Path(framework_signals.__file__).parent
+        offenders = sorted(
+            str(path.relative_to(package))
+            for path in package.rglob("*.py")
+            if _reads_receivers(path)
+        )
+        assert offenders == []
 
-    def test_no_receiver_at_all_answers_false_through_both_forms(self) -> None:
-        signal = Signal(use_caching=True)
 
-        assert not signal.receivers
-        assert signal.has_listeners(_GuardedSender) is False
+class TestGuardedEmittersAskPerSender:
+    """The guards that remain answer one sender, never the whole receiver list."""
 
-    def test_a_receiver_for_another_sender_answers_false_through_both_forms(
-        self,
-    ) -> None:
+    def test_a_receiver_for_another_sender_leaves_the_guard_shut(self) -> None:
         signal = Signal(use_caching=True)
         signal.connect(_noop_receiver, sender=_OtherSender, weak=False)
 
-        assert signal.receivers
         assert signal.has_listeners(_GuardedSender) is False
-        assert bool(signal.receivers and signal.has_listeners(_GuardedSender)) is False
 
-    def test_a_receiver_for_this_sender_answers_true_through_both_forms(self) -> None:
+    def test_a_receiver_for_this_sender_opens_the_guard(self) -> None:
         signal = Signal(use_caching=True)
         signal.connect(_noop_receiver, sender=_GuardedSender, weak=False)
 
         assert signal.has_listeners(_GuardedSender) is True
-        assert bool(signal.receivers and signal.has_listeners(_GuardedSender)) is True

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from next.conf.merge import merge_user_settings
 from next.conf.settings import NextFrameworkSettings
 
 
@@ -50,5 +51,4 @@ class TestBenchSettingsMerge:
                 {"BACKEND": "myapp.backends.MetricsBackend", "OPTIONS": {}},
             ]
         }
-        settings = NextFrameworkSettings()
-        benchmark(settings._build_flat_merged, user_dict)
+        benchmark(merge_user_settings, NextFrameworkSettings.DEFAULTS, user_dict)

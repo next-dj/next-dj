@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from next.checks.common import get_router_manager, iter_page_tree_component_folders
 from next.conf.signals import settings_reloaded
+from next.discovery import get_router_manager, iter_page_tree_component_folders
 
 from .context import component
 from .manager import ComponentsManager
@@ -20,8 +20,15 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-# One manager per check run instead of rescanning the component trees per check.
-_COMPONENTS_MANAGER_CACHE: dict[str, ComponentsManager | None] = {"value": None}
+class _ComponentsManagerCache:
+    """The one manager a check run builds, instead of one per asking check."""
+
+    def __init__(self) -> None:
+        """Start with nothing built."""
+        self.held: ComponentsManager | None = None
+
+
+_components_manager_cache = _ComponentsManagerCache()
 
 
 def get_components_manager() -> ComponentsManager:
@@ -30,13 +37,13 @@ def get_components_manager() -> ComponentsManager:
     The manager is this module's own, because the live registry holds only what
     requests have already made the router walk. Dropped on `settings_reloaded`.
     """
-    cached = _COMPONENTS_MANAGER_CACHE["value"]
+    cached = _components_manager_cache.held
     if cached is not None:
         return cached
     manager = ComponentsManager()
     # This module owns the manager, so no listener hears about its backends.
     manager.reload(notify=False)
-    _COMPONENTS_MANAGER_CACHE["value"] = manager
+    _components_manager_cache.held = manager
     _register_page_tree_component_folders(manager)
     return manager
 
@@ -56,7 +63,7 @@ def _register_page_tree_component_folders(manager: ComponentsManager) -> None:
 
 def reset_components_manager_cache(**kwargs) -> None:
     """Drop the cached `ComponentsManager` so the next read rebuilds it."""
-    _COMPONENTS_MANAGER_CACHE["value"] = None
+    _components_manager_cache.held = None
 
 
 settings_reloaded.connect(reset_components_manager_cache)

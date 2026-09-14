@@ -25,9 +25,7 @@ class GoldenCase:
 def serialize_case(case: GoldenCase) -> tuple[bytes, dict[str, object]]:
     """Serialise one case to its envelope bytes and metadata, without writing.
 
-    Both the drift pin and the shape assertions build from this, so the
-    verification path never touches the filesystem and the committed
-    fixtures are regenerated only through the explicit `write_case`.
+    The verification path never touches disk; only `write_case` regenerates fixtures.
     """
     backend = JsonPartialProtocolBackend()
     body = backend.serialize_envelope(case.envelope)
@@ -101,9 +99,7 @@ def read_meta_bytes(name: str) -> bytes:
 def committed_drift(case: GoldenCase) -> str | None:
     """Return a message when the committed fixtures drifted from the case.
 
-    Compares the bytes on disk against a fresh serialisation. A non-None
-    result names the drifted artefact so the pin test fails loudly and the
-    fixtures get regenerated through `write_case` rather than silently.
+    A non-None result names the drifted artefact, so the pin fails loudly, not silently.
     """
     body, meta = serialize_case(case)
     if read_envelope_bytes(case.name) != body:

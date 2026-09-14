@@ -1,10 +1,6 @@
 """Context annotation marker and providers that feed `context_data` into DI.
 
-`Context` is the default-value marker used on page and layout parameters
-to request a value from context_data. `ContextByDefaultProvider` handles
-parameters whose default is a `Context` instance. `ContextByNameProvider`
-injects context values when the parameter name already exists as a context key.
-`ContextResult` packages the full context and its JavaScript-serializable subset.
+Values inject via an explicit `Context` default, or by name against an existing key.
 """
 
 from __future__ import annotations
@@ -17,7 +13,6 @@ from next.deps import RESERVED_KEYS, DependencyResolver, RegisteredParameterProv
 
 if TYPE_CHECKING:
     import inspect
-    from collections.abc import Mapping
 
     from next.deps import ResolutionContext
     from next.deps.plan import ParameterFiller
@@ -25,19 +20,6 @@ if TYPE_CHECKING:
 
 
 _CONTEXT_DEFAULT_UNSET: object = object()
-
-
-def _from_context_data(
-    context_data: Mapping[str, Any], key: str, default: object
-) -> object:
-    """Read `key` from context data, leaving the names dedicated providers own alone.
-
-    A reserved key reaches the context data untouched, because nothing copies
-    the mapping to strip it, so the marker stays blind to it here instead.
-    """
-    if key in RESERVED_KEYS:
-        return default
-    return context_data.get(key, default)
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,31 +67,17 @@ class ContextByDefaultProvider(RegisteredParameterProvider):
 
     @override
     def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:
-        """Resolve the value from context_data, a callable, or a constant."""
-        marker = param.default
-        if not isinstance(marker, Context):
+        """Fill the parameter through the very plan the compiler builds for it.
+
+        One decision tree serves both paths, so a marker the compiler learns to read
+        cannot mean one thing in a compiled plan and another in a plan-free resolve.
+        """
+        if not isinstance(param.default, Context):
             return None
-
-        source = marker.source
-        context_data = context.context_data
-        default_value: object = (
-            None if marker.default is _CONTEXT_DEFAULT_UNSET else marker.default
-        )
-
-        if source is None:
-            return _from_context_data(context_data, param.name, default_value)
-
-        if isinstance(source, str):
-            return _from_context_data(context_data, source, default_value)
-
-        if callable(source):
-            resolved = self._resolver.resolve(source, context)
-            return source(**resolved)
-
-        return source
+        return self.compile_resolve(param)(context)
 
     @override
-    def compile_resolve(self, param: inspect.Parameter) -> ParameterFiller | None:
+    def compile_resolve(self, param: inspect.Parameter) -> ParameterFiller:
         """Settle the source and the default of the marker, once per plan.
 
         A reserved key never reaches the marker, so the parameter takes its default.

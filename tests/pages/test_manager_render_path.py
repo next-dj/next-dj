@@ -7,11 +7,13 @@ import pytest
 from django.core.exceptions import PermissionDenied
 from django.test import override_settings
 
-from next.pages import Page, manager as manager_mod
+from next.caches import BoundedCache
+from next.pages import Page
 from next.pages.loaders import _load_python_module_memo
 from next.testing import envelope_of
 from next.utils import stat_mtime_ns
 from tests.support import (
+    assert_bounded_by_insert_age,
     build_nested_page,
     build_page_request,
     build_zone_request,
@@ -41,87 +43,78 @@ def _build_dynamic_page(directory: Path, *, returns: str = "'<p>dynamic</p>'") -
 class TestTemplateSourceSnapshot:
     """The mtime snapshot the composition caches compare themselves against."""
 
-    def test_record_template_source_mtimes_empty_paths(
+    def test_record_composed_with_no_sources_snapshots_nothing(
         self, page_instance, tmp_path, watched_template_edits
     ) -> None:
         """A page with no source at all records no snapshot to compare against."""
         page_file = tmp_path / "page.py"
-        with mock.patch.object(
-            page_instance, "_get_template_source_paths", return_value=[]
-        ):
-            page_instance._record_template_source_mtimes(
-                page_file, page_instance._template_source_mtimes
-            )
-        assert page_file not in page_instance._template_source_mtimes
+        templates = page_instance._templates
+        with mock.patch.object(templates, "source_paths", return_value=[]):
+            templates.record_composed(page_file)
+        assert page_file not in templates.composed_sources
 
-    def test_record_template_source_mtimes_skips_unstatable_sources(
+    def test_record_composed_skips_unstatable_sources(
         self, page_instance, tmp_path, watched_template_edits
     ) -> None:
         """Sources that vanish between the walk and the stat leave no snapshot."""
         page_file = tmp_path / "page.py"
+        templates = page_instance._templates
         with mock.patch.object(
-            page_instance,
-            "_get_template_source_paths",
-            return_value=[tmp_path / "gone.djx"],
+            templates, "source_paths", return_value=[tmp_path / "gone.djx"]
         ):
-            page_instance._record_template_source_mtimes(
-                page_file, page_instance._template_source_mtimes
-            )
-        assert page_file not in page_instance._template_source_mtimes
+            templates.record_composed(page_file)
+        assert page_file not in templates.composed_sources
 
-    def test_record_template_source_mtimes_snapshots_walked_dirs(
+    def test_record_composed_snapshots_walked_dirs(
         self, page_instance, tmp_path, watched_template_edits
     ) -> None:
         """The snapshot covers the directories the layout walk visits."""
         page_file = tmp_path / "page.py"
         page_file.write_text("x = 1")
-        page_instance._record_template_source_mtimes(
-            page_file, page_instance._template_source_mtimes
-        )
-        assert tmp_path in page_instance._template_source_mtimes[page_file]
+        templates = page_instance._templates
+        templates.record_composed(page_file)
+        assert tmp_path in templates.composed_sources[page_file]
 
-    def test_is_template_stale_reads_a_vanished_source_as_stale(
+    def test_record_skeleton_drops_a_snapshot_it_cannot_retake(
+        self, page_instance, tmp_path, watched_template_edits
+    ) -> None:
+        """A page that lost every source keeps no snapshot of the ones it had."""
+        page_file = tmp_path / "page.py"
+        templates = page_instance._templates
+        templates.skeleton_sources[page_file] = {tmp_path / "gone.djx": 1000}
+        with mock.patch.object(templates, "source_paths", return_value=[]):
+            templates.record_skeleton(page_file)
+        assert page_file not in templates.skeleton_sources
+
+    def test_a_vanished_source_reads_as_stale(
         self, page_instance, tmp_path, watched_template_edits
     ) -> None:
         """A tracked source that no longer stats counts as a change."""
         page_file = tmp_path / "page.py"
         missing_path = tmp_path / "removed.djx"
-        page_instance._template_source_mtimes[page_file] = {missing_path: 1000}
-        assert (
-            page_instance._is_template_stale(
-                page_file, page_instance._template_source_mtimes
-            )
-            is True
-        )
+        templates = page_instance._templates
+        templates.composed_sources[page_file] = {missing_path: 1000}
+        assert templates.composed_is_stale(page_file) is True
 
-    def test_is_template_stale_sees_an_mtime_moved_backwards(
+    def test_an_mtime_moved_backwards_reads_as_stale(
         self, page_instance, tmp_path, watched_template_edits
     ) -> None:
         """A source restored to an older mtime by a checkout counts as a change."""
         page_file = tmp_path / "page.py"
         layout_file = tmp_path / "layout.djx"
         layout_file.write_text("<html>{% template %}</html>")
-        page_instance._template_source_mtimes[page_file] = {
+        templates = page_instance._templates
+        templates.skeleton_sources[page_file] = {
             layout_file: stat_mtime_ns(layout_file) + 5_000_000_000
         }
-        assert (
-            page_instance._is_template_stale(
-                page_file, page_instance._template_source_mtimes
-            )
-            is True
-        )
+        assert templates.skeleton_is_stale(page_file) is True
 
-    def test_is_template_stale_is_false_without_a_snapshot(
+    def test_a_path_without_a_snapshot_is_never_stale(
         self, page_instance, tmp_path, watched_template_edits
     ) -> None:
         """A path the store never saw is never stale."""
         page_file = tmp_path / "page.py"
-        assert (
-            page_instance._is_template_stale(
-                page_file, page_instance._template_source_mtimes
-            )
-            is False
-        )
+        assert page_instance._templates.composed_is_stale(page_file) is False
 
 
 class TestComposedTemplateCache:
@@ -135,9 +128,9 @@ class TestComposedTemplateCache:
         page_file.write_text("x = 1")
         (tmp_path / "template.djx").write_text("<h1>{{ title }}</h1>")
         page_instance.render(page_file, title="One")
-        compiled = page_instance._compiled_registry[page_file]
+        compiled = page_instance._templates.compiled[page_file]
         result = page_instance.render(page_file, title="Two")
-        assert page_instance._compiled_registry[page_file] is compiled
+        assert page_instance._templates.compiled[page_file] is compiled
         assert "<h1>Two</h1>" in result
 
     def test_stale_source_recompiles(
@@ -149,10 +142,10 @@ class TestComposedTemplateCache:
         djx = tmp_path / "template.djx"
         djx.write_text("<h1>{{ title }}</h1>")
         page_instance.render(page_file, title="One")
-        compiled = page_instance._compiled_registry[page_file]
+        compiled = page_instance._templates.compiled[page_file]
         djx.write_text("<h2>{{ title }}</h2>")
         result = page_instance.render(page_file, title="Two")
-        assert page_instance._compiled_registry[page_file] is not compiled
+        assert page_instance._templates.compiled[page_file] is not compiled
         assert "<h2>Two</h2>" in result
 
     def test_stale_layout_recompiles(
@@ -178,9 +171,9 @@ class TestComposedTemplateCache:
         page_file.write_text("x = 1")
         (tmp_path / "template.djx").write_text("<h1>old</h1>")
         page_instance.render(page_file)
-        assert page_file in page_instance._compiled_registry
+        assert page_file in page_instance._templates.compiled
         page_instance.register_template(page_file, "<p>replaced</p>")
-        assert page_file not in page_instance._compiled_registry
+        assert page_file not in page_instance._templates.compiled
         template = page_instance.composed_template_for(page_file)
         assert template.source == "<p>replaced</p>"
 
@@ -205,7 +198,7 @@ class TestComposedTemplateCache:
         )
         response = unified_view(page_instance, page_file)(build_page_request())
         assert b"dynamic" in response.content
-        assert page_file not in page_instance._compiled_registry
+        assert page_file not in page_instance._templates.compiled
 
 
 class TestStaticFastPathView:
@@ -219,12 +212,12 @@ class TestStaticFastPathView:
         view = unified_view(page_instance, page_file)
 
         view(build_page_request(), title="One")
-        compiled = page_instance._compiled_registry[page_file]
+        compiled = page_instance._templates.compiled[page_file]
         reads = record_path_calls(monkeypatch, "read_text", path_under(tmp_path))
         view(build_page_request(), title="Two")
 
         assert reads == []
-        assert page_instance._compiled_registry[page_file] is compiled
+        assert page_instance._templates.compiled[page_file] is compiled
 
     def test_html_matches_the_body_resolution_path(
         self, page_instance, tmp_path
@@ -278,9 +271,9 @@ class TestStaticFastPathView:
         page_file = tmp_path / "page.py"
         (tmp_path / "template.djx").write_text("<p>virtual</p>")
 
-        view = page_instance._create_unified_view(page_file, {}, None)
+        view = page_instance._create_unified_view(page_file, None)
         assert view(build_page_request()).content == b"<p>virtual</p>"
-        assert page_file in page_instance._template_registry
+        assert page_file in page_instance._templates.composed
 
     def test_recompose_reads_the_current_template_attribute(
         self, page_instance, tmp_path, watched_template_edits
@@ -330,8 +323,8 @@ class TestLayoutSkeletonCache:
         response = unified_view(page_instance, page_file)(build_page_request())
 
         assert response.content == b"<html><p>dynamic</p></html>"
-        assert page_file not in page_instance._template_registry
-        assert "dynamic" not in page_instance._skeleton_registry[page_file]
+        assert page_file not in page_instance._templates.composed
+        assert "dynamic" not in page_instance._templates.skeleton[page_file]
 
     def test_second_request_walks_the_layout_chain_once(
         self, page_instance, tmp_path, monkeypatch
@@ -587,7 +580,7 @@ class TestTemplateStalenessGate:
 
         page_instance.render(page_file, title="One")
 
-        assert page_file in page_instance._template_source_mtimes
+        assert page_file in page_instance._templates.composed_sources
 
     def test_a_watch_turned_on_later_sees_an_edit(
         self, page_instance, tmp_path
@@ -612,7 +605,7 @@ class TestTemplateStalenessGate:
 
         page_instance.render(page_file, title="One")
 
-        assert page_file in page_instance._template_source_mtimes
+        assert page_file in page_instance._templates.composed_sources
 
     def test_a_layout_restored_to_an_older_mtime_recomposes(
         self, page_instance, tmp_path, watched_template_edits
@@ -718,61 +711,39 @@ class TestTemplateRegistryBound:
         (page_dir / "template.djx").write_text(body)
         return page_file
 
-    def test_a_full_registry_evicts_the_oldest_insert(
-        self, page_instance, tmp_path, monkeypatch
+    def test_both_composition_layers_hold_the_pages_rendered_last(
+        self, page_instance, tmp_path
     ) -> None:
-        """Both composition layers keep only the page rendered last."""
-        monkeypatch.setattr(manager_mod, "_TEMPLATE_REGISTRY_MAX_SIZE", 1)
-        first = self._static_page(tmp_path, "first")
-        second = self._static_page(tmp_path, "second")
+        """A full registry drops its oldest, and a warm render reorders nothing."""
 
-        page_instance.render(first)
-        page_instance.render(second)
+        def install(bound: int) -> tuple[BoundedCache, ...]:
+            page_instance._templates.composed = BoundedCache(bound)
+            page_instance._templates.compiled = BoundedCache(bound)
+            return (
+                page_instance._templates.composed,
+                page_instance._templates.compiled,
+            )
 
-        assert list(page_instance._template_registry) == [second]
-        assert list(page_instance._compiled_registry) == [second]
+        assert_bounded_by_insert_age(
+            install,
+            page_instance.render,
+            [self._static_page(tmp_path, name) for name in ("a", "b", "c")],
+        )
 
-    def test_a_warm_render_leaves_a_full_registry_in_insert_order(
-        self, page_instance, tmp_path, monkeypatch
-    ) -> None:
-        """A warm render reorders nothing, so the page written first goes first."""
-        monkeypatch.setattr(manager_mod, "_TEMPLATE_REGISTRY_MAX_SIZE", 2)
-        pages = [self._static_page(tmp_path, name) for name in ("a", "b", "c")]
-
-        page_instance.render(pages[0])
-        page_instance.render(pages[1])
-        page_instance.render(pages[0])
-        page_instance.render(pages[2])
-
-        assert list(page_instance._template_registry) == [pages[1], pages[2]]
-        assert list(page_instance._compiled_registry) == [pages[1], pages[2]]
-
-    def test_a_full_skeleton_registry_evicts_the_oldest_insert(
-        self, page_instance, tmp_path, monkeypatch
+    def test_the_skeleton_registry_holds_the_layouts_read_last(
+        self, page_instance, tmp_path
     ) -> None:
         """The layout skeletons are bounded the same way the compositions are."""
-        monkeypatch.setattr(manager_mod, "_TEMPLATE_REGISTRY_MAX_SIZE", 1)
-        first = _build_dynamic_page(tmp_path / "first")
-        second = _build_dynamic_page(tmp_path / "second")
 
-        page_instance._layout_skeleton_for(first)
-        page_instance._layout_skeleton_for(second)
+        def install(bound: int) -> tuple[BoundedCache, ...]:
+            page_instance._templates.skeleton = BoundedCache(bound)
+            return (page_instance._templates.skeleton,)
 
-        assert list(page_instance._skeleton_registry) == [second]
-
-    def test_a_warm_skeleton_leaves_a_full_registry_in_insert_order(
-        self, page_instance, tmp_path, monkeypatch
-    ) -> None:
-        """Reading the older skeleton again reorders nothing under the bound."""
-        monkeypatch.setattr(manager_mod, "_TEMPLATE_REGISTRY_MAX_SIZE", 2)
-        pages = [_build_dynamic_page(tmp_path / name) for name in ("a", "b", "c")]
-
-        page_instance._layout_skeleton_for(pages[0])
-        page_instance._layout_skeleton_for(pages[1])
-        page_instance._layout_skeleton_for(pages[0])
-        page_instance._layout_skeleton_for(pages[2])
-
-        assert list(page_instance._skeleton_registry) == [pages[1], pages[2]]
+        assert_bounded_by_insert_age(
+            install,
+            page_instance._layout_skeleton_for,
+            [_build_dynamic_page(tmp_path / name) for name in ("a", "b", "c")],
+        )
 
     def test_a_source_evicted_alone_leaves_no_stale_compiled_form(
         self, page_instance, tmp_path
@@ -780,14 +751,14 @@ class TestTemplateRegistryBound:
         """A rebuilt source drops the compiled form the earlier one produced."""
         page_file = self._static_page(tmp_path, "page", body="<h1>old</h1>")
         page_instance.render(page_file)
-        stale = page_instance._compiled_registry[page_file]
+        stale = page_instance._templates.compiled[page_file]
 
-        page_instance._template_registry.pop(page_file)
+        page_instance._templates.composed.pop(page_file)
         (page_file.parent / "template.djx").write_text("<h1>new</h1>")
         result = page_instance.render(page_file)
 
         assert "<h1>new</h1>" in result
-        assert page_instance._compiled_registry[page_file] is not stale
+        assert page_instance._templates.compiled[page_file] is not stale
 
     def test_a_compiled_form_evicted_alone_recompiles_from_the_held_source(
         self, page_instance, tmp_path, monkeypatch
@@ -795,9 +766,9 @@ class TestTemplateRegistryBound:
         """The surviving source answers the recompile without a disk read."""
         page_file = self._static_page(tmp_path, "page")
         page_instance.render(page_file)
-        source = page_instance._template_registry[page_file]
+        source = page_instance._templates.composed[page_file]
 
-        page_instance._compiled_registry.pop(page_file)
+        page_instance._templates.compiled.pop(page_file)
         reads = record_path_calls(monkeypatch, "read_text", path_under(tmp_path))
         template = page_instance.composed_template_for(page_file)
 

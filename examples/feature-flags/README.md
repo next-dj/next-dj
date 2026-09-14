@@ -183,7 +183,7 @@ class BulkToggleForm(Form):
     )
 
     class Meta:
-        success_url = "/admin/"
+        success_url = page_reverse_lazy("admin")
         success_message = "Flag toggles saved."
 
     def __init__(self, *args, **kwargs):
@@ -206,7 +206,7 @@ Three details worth noting:
 
 - `choices` is populated in `__init__` rather than at class-define time so the field reflects the current set of flags on every request.
 - Only **changed** flags are saved. Untouched rows do not fire `post_save`, which keeps the cache-invalidation receiver honest — nothing gets invalidated unless there is a real state transition.
-- The redirect and the flash come from the declarative success contract. `Meta.success_url` and `Meta.success_message` let the overridden `on_valid` end with `super().on_valid(request)` instead of a hand-built `HttpResponseRedirect`. The base method redirects to `/admin/` and flashes "Flag toggles saved." through Django's messages framework. A `flash_messages` context drains the queue and the admin template renders it in an `alert` banner.
+- The redirect and the flash come from the declarative success contract. `Meta.success_url` and `Meta.success_message` let the overridden `on_valid` end with `super().on_valid(request)` instead of a hand-built `HttpResponseRedirect`. The base method redirects to the URL `page_reverse_lazy("admin")` resolves once the URLconf is ready, and flashes "Flag toggles saved." through Django's messages framework. The admin template calls the shared `flash_messages` component, which drains the queue and maps each level tag onto an `alert` variant.
 
 The widget has Tailwind `class="hidden"` so each checkbox is visually replaced by an inline `<input type="checkbox">` in the template — the label wraps the whole row so the entire card is clickable.
 

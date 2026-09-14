@@ -10,10 +10,14 @@ import json
 import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
-from typing import Any, override
+from typing import Any, cast, override
 
 
 _INIT_CALL_RE = re.compile(r"Next\._init\(\s*(?=\{)")
+
+# One object decoded from the offset the regex stopped at, so neither the tail of
+# the page nor the rest of the script body is scanned to find where it ends.
+_DECODER = json.JSONDecoder()
 
 
 class _FirstTagAttrs(HTMLParser):
@@ -154,30 +158,6 @@ def _input_fields(fragment: str, *, hidden_only: bool) -> dict[str, str]:
     return parser.fields
 
 
-def _json_object_at(text: str, start: int) -> str:
-    depth = 0
-    in_string = False
-    escaped = False
-    for index, char in enumerate(text[start:], start=start):
-        if escaped:
-            escaped = False
-        elif in_string:
-            if char == "\\":
-                escaped = True
-            elif char == '"':
-                in_string = False
-        elif char == '"':
-            in_string = True
-        elif char == "{":
-            depth += 1
-        elif char == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start : index + 1]
-    msg = "Unterminated object in the Next._init call"
-    raise LookupError(msg)
-
-
 def find_anchor(html: str, *, href: str | None = None, text: str | None = None) -> str:
     """Return the first `<a>...</a>` substring that matches the filters.
 
@@ -253,16 +233,19 @@ def hidden_fields(fragment: str) -> dict[str, str]:
 def init_payload(html: str) -> dict[str, Any]:
     """Return the payload of the `Next._init(...)` bootstrap call in a page.
 
-    The call is a script body rather than markup, so the object is located by regex
-    and then delimited by a brace scan that survives nesting and braces inside JSON
-    strings. Raises `LookupError` when the call is absent or unterminated.
+    The call is a script body rather than markup, so the object is located by regex and
+    decoded from there. Raises `LookupError` when the call is absent or malformed.
     """
     match = _INIT_CALL_RE.search(html)
     if match is None:
         msg = "Next._init call not found"
         raise LookupError(msg)
-    payload: dict[str, Any] = json.loads(_json_object_at(html, match.end()))
-    return payload
+    try:
+        payload, _ = _DECODER.raw_decode(html, match.end())
+    except json.JSONDecodeError as e:
+        msg = f"Malformed object in the Next._init call: {e}"
+        raise LookupError(msg) from e
+    return cast("dict[str, Any]", payload)
 
 
 def _class_tokens(fragment: str) -> set[str]:

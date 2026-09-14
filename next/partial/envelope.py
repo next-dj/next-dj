@@ -109,9 +109,7 @@ class FormMeta:
 class Envelope:
     """A patch envelope carrying ordered ops and protocol meta.
 
-    Every field but `version` is optional, an absent value is empty on
-    the wire. The `csrf` and `request_id` meta are stamped only when set
-    so the wire shape stays stable whether or not they travel.
+    `csrf` and `request_id` stamp only when set, so the wire shape stays stable.
     """
 
     version: str

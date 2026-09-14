@@ -4,13 +4,14 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from django.http import HttpRequest
 from django.template import Context, Template
 from django.template.base import TemplateSyntaxError
 from django.template.engine import Engine
-from django.test import override_settings
+from django.test import RequestFactory, override_settings
 from django.utils.safestring import SafeString
 
-from next.components import ComponentInfo, components_manager
+from next.components import ComponentInfo, component, components_manager
 from next.static import StaticCollector
 from next.templatetags import components as component_tags
 from next.templatetags.components import ComponentNode
@@ -310,13 +311,7 @@ class TestComponentTag:
         must_contain: tuple[str, ...],
         must_not_contain: tuple[str, ...],
     ) -> None:
-        """Plain string literals reach ``{{ prop }}`` as text, not as HTML.
-
-        Django marks a bare quoted literal safe, so a prop carrying markup
-        like ``visit /s/<slug>/`` would interpolate as raw HTML and lose the
-        token to the browser parser. A literal without a filter chain has
-        that marker stripped, leaving ``|safe`` as the explicit opt-in.
-        """
+        """Plain string literals reach ``{{ prop }}`` as text, not as HTML."""
         (tmp_path / "card.djx").write_text("<article>{{ body }}</article>")
         info = ComponentInfo(
             name="card",
@@ -394,12 +389,7 @@ class TestComponentTag:
     def test_free_children_splice_markup_while_props_stay_escaped(
         self, tmp_path: Path
     ) -> None:
-        """Children arrive as finished HTML while props of the same text do not.
-
-        The caller renders children before the component runs, so autoescaping
-        already happened there and a second pass would print the tags. Props
-        travel their own channel and keep escaping untrusted text.
-        """
+        """Children arrive as finished HTML while props of the same text do not."""
         result = self._render_box(
             tmp_path,
             "<div>{{ children }}|{{ note }}</div>",
@@ -473,6 +463,57 @@ class TestComponentTag:
                 Context({"current_template_path": str(tmp_path / "t.djx")})
             )
         assert "Kept" in result
+
+    def test_component_tag_drops_a_prop_no_template_could_read(
+        self, tmp_path: Path
+    ) -> None:
+        """A key that is no identifier is dropped, and the props after it survive."""
+        (tmp_path / "card.djx").write_text("<h1>{{ title }}</h1>")
+        with patch.object(
+            components_manager,
+            "get_component",
+            return_value=ComponentInfo(
+                name="card",
+                scope_root=tmp_path,
+                scope_relative="",
+                template_path=tmp_path / "card.djx",
+                module_path=None,
+                is_simple=True,
+            ),
+        ):
+            t = Template(
+                '{% load components %}{% component "card" data-x="1" title="Kept" %}'
+            )
+            result = t.render(
+                Context({"current_template_path": str(tmp_path / "t.djx")})
+            )
+        assert result == "<h1>Kept</h1>"
+
+    def test_component_tag_prop_takes_a_filter_argument_with_spaces(
+        self, tmp_path: Path
+    ) -> None:
+        """The value is a full filter expression, quoted spaces included."""
+        (tmp_path / "card.djx").write_text("<h1>{{ title }}</h1>")
+        with patch.object(
+            components_manager,
+            "get_component",
+            return_value=ComponentInfo(
+                name="card",
+                scope_root=tmp_path,
+                scope_relative="",
+                template_path=tmp_path / "card.djx",
+                module_path=None,
+                is_simple=True,
+            ),
+        ):
+            t = Template(
+                "{% load components %}"
+                '{% component "card" title=missing|default:"a b" %}'
+            )
+            result = t.render(
+                Context({"current_template_path": str(tmp_path / "t.djx")})
+            )
+        assert result == "<h1>a b</h1>"
 
     def test_component_tag_resolves_variable_prop_from_context(
         self, tmp_path: Path
@@ -710,6 +751,47 @@ class TestComponentAnchorContext:
         assert f'data-anchor="{module_path}"' in result
         assert "S[]" in result
         assert "C[]" in result
+
+
+class TestRequestFromTheCallerContext:
+    """A request the caller context carries is the one the component resolves."""
+
+    def test_a_context_provider_receives_the_caller_request(
+        self, tmp_path: Path
+    ) -> None:
+        """The flattened context names the request, so no fallback lookup is needed."""
+        comp_dir = tmp_path / "probe"
+        comp_dir.mkdir()
+        (comp_dir / "component.djx").write_text("<b>{{ seen }}</b>")
+        module_path = comp_dir / "component.py"
+        module_path.write_text("# empty\n")
+
+        def seen(request: HttpRequest) -> str:
+            return request.path
+
+        component._registry.register(module_path, "seen", seen)
+        info = ComponentInfo(
+            name="probe",
+            scope_root=tmp_path,
+            scope_relative="",
+            template_path=comp_dir / "component.djx",
+            module_path=module_path,
+            is_simple=False,
+        )
+        request = RequestFactory().get("/dashboard/")
+
+        with patch.object(components_manager, "get_component", return_value=info):
+            template = Template('{% load components %}{% component "probe" %}')
+            result = template.render(
+                Context(
+                    {
+                        "current_template_path": str(tmp_path / "page.djx"),
+                        "request": request,
+                    }
+                )
+            )
+
+        assert result == "<b>/dashboard/</b>"
 
 
 def _render_slotted(
@@ -1004,12 +1086,7 @@ class TestSetSlotTag:
             assert forbidden not in result
 
     def test_set_slot_renders_empty_when_slot_injected_empty(self) -> None:
-        """An explicitly empty slot renders nothing and skips the fallback body.
-
-        Passing ``{% #slot "x" %}{% /slot %}`` at the call site sets
-        ``slot_x`` to an empty string. The default body must not run in
-        that case, because the caller asked for the slot to render empty.
-        """
+        """An explicitly empty slot renders nothing and skips the fallback body."""
         t = Template(
             '{% load components %}{% #set_slot "label" %}fallback{% /set_slot %}'
         )
@@ -1411,14 +1488,7 @@ class TestComponentRenderGolden:
     def test_page_with_slots_and_props_renders_the_pinned_html(
         self, tmp_path: Path
     ) -> None:
-        """Slots, the set_slot fallback, and prop shadowing produce one fixed string.
-
-        The context the tag hands to the renderer is built in place, so the
-        expectation is spelled out rather than asserted piecewise. Free
-        children and slot bodies both arrive marked safe, because the caller
-        already rendered and escaped them, while the ``title`` prop is the
-        escaping channel and reaches the component as plain text.
-        """
+        """Slots, the set_slot fallback, and prop shadowing produce one fixed string."""
         (tmp_path / "card.djx").write_text(_GOLDEN_COMPONENT)
         info = ComponentInfo(
             name="card",

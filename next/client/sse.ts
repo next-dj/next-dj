@@ -87,9 +87,9 @@ export function createSse(deps: SseDeps): Sse {
   const pageUrl = deps.pageUrl ?? (() => currentUrl(doc));
   // Keyed by url so a re-scan of a re-inserted container opens no second stream.
   const connections = new Map<string, Connection>();
-  // A ring of the last ECHO_LIMIT own ids. A Map answers membership in constant
-  // time and keeps insertion order, so its first key is the oldest.
-  const echo = new Map<string, true>();
+  // A ring of the last ECHO_LIMIT own ids. A Set answers membership in constant
+  // time and keeps insertion order, so its first value is the oldest.
+  const echo = new Set<string>();
   let paused = false;
   // The clock at the last pause, so resume measures the hidden span.
   let pausedAt = 0;
@@ -98,13 +98,12 @@ export function createSse(deps: SseDeps): Sse {
   function remember(id: string): void {
     // Re-inserting renews the id, so its newest use decides its age.
     echo.delete(id);
-    echo.set(id, true);
-    if (echo.size > ECHO_LIMIT) {
-      for (const oldest of echo.keys()) {
-        echo.delete(oldest);
-        break;
-      }
-    }
+    echo.add(id);
+    if (echo.size <= ECHO_LIMIT) return;
+    // The set always holds one entry above the limit, so oldest is never undefined.
+    const [oldest] = echo;
+    /* v8 ignore next */
+    if (oldest !== undefined) echo.delete(oldest);
   }
 
   function isEcho(id: string | undefined): boolean {

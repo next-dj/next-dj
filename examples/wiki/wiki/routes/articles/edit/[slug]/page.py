@@ -3,7 +3,7 @@ from typing import ClassVar
 from django import forms as django_forms
 from django.http import HttpRequest, HttpResponseRedirect
 from django.utils.safestring import SafeString
-from wiki.markdown_render import render_markdown
+from markup import render_markdown
 from wiki.models import RESERVED_SLUGS, Article
 from wiki.providers import DArticle
 

@@ -7,4 +7,4 @@ class ShortenerConfig(AppConfig):
 
     def ready(self) -> None:
         """Register DI providers and connect the action-dispatch receiver."""
-        from shortener import providers, receivers  # noqa: F401, PLC0415
+        from shortener import providers, receivers

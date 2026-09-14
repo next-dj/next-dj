@@ -143,10 +143,8 @@ class TestValidateBehindGuard:
 class TestValidateBehindViewPermissions:
     """A validate request denied by the view-permission layer runs no validator.
 
-    This form carries no action guard, only a `check_permissions` view hook, so the
-    denial proves the second authorization layer stops an anonymous blur on its own,
-    independent of the action guard. The hook runs before the form binds, so the unique-
-    email validator is never an anonymous brute-force oracle.
+    The hook runs before the form binds, so an anonymous blur never turns
+    the unique-email validator into a brute-force oracle.
     """
 
     def test_anonymous_validate_is_denied_not_an_envelope(

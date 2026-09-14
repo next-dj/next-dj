@@ -163,10 +163,10 @@ describe("createSse", () => {
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
     const envelopeBody = '{"version":"v1","ops":[],"assets":[],"form":null}';
-    const sent: { headers: Record<string, string> }[] = [];
+    const sent: Headers[] = [];
     const wire = new Wire({
       fetch: async (_url, init) => {
-        sent.push({ headers: init.headers as Record<string, string> });
+        sent.push(new Headers(init.headers));
         return new Response(envelopeBody, {
           status: 200,
           headers: { "content-type": CONTENT_TYPE },
@@ -178,7 +178,7 @@ describe("createSse", () => {
       rememberRequestId: (id) => sse.remember(id),
     });
     await wire.fetch({ url: "/_next/form/u1/", method: "POST", uid: "u1" });
-    const echoed = sent[0]!.headers[HEADER_REQUEST_ID];
+    const echoed = sent[0]!.get(HEADER_REQUEST_ID) ?? "";
     opened[0]!.message(envelope([{ op: "refresh", zone: "poll" }], echoed));
     expect(applied).toHaveLength(0);
     opened[0]!.message(envelope([{ op: "refresh", zone: "poll" }], "other"));

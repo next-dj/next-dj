@@ -150,7 +150,7 @@ The ``next.W054`` system check warns at startup when a ``ComponentWidget`` refer
 It is a warning rather than an error because the component may come from an app imported later in the boot sequence.
 Both ``next.W054`` and the field-type check ``next.W055`` described under `When not to use it`_ walk the registered form-class actions only, so a ``ComponentWidget`` on a wizard step form or on a form marked ``Meta.abstract = True`` is never inspected and surfaces at render time instead.
 A form built by a ``form_class`` factory is out of reach for the same reason, because the registry holds the callable rather than the class it returns.
-A reference that still fails to resolve at render time raises ``next.forms.UnregisteredComponentError``, a ``RuntimeError`` subclass whose message names the search anchor and the closest visible component names.
+A reference that still fails to resolve at render time raises ``next.forms.UnregisteredComponentError``, a ``LookupError`` subclass whose message names the search anchor and the closest visible component names.
 
 Before and after
 ----------------

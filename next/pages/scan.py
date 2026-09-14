@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from next.checks.common import first_visit, get_router_manager, iter_scanned_page_pairs
+from next.discovery import first_visit, get_router_manager, iter_scanned_page_pairs
 
 from .loaders import _load_python_module_memo
 from .manager import page
@@ -25,11 +25,7 @@ def iter_existing_scanned_page_pairs(
 ) -> Iterator[tuple[str, Path]]:
     """Yield the routed URL trail and path of each existing `page.py`, once.
 
-    The identity is the resolved path, so a tree reached through a symlink
-    reports once, under the URL trail of the walk that reached it first. The
-    spelling the router walked is what travels on, because the loader and the
-    page-context registry both key on that spelling. Virtual
-    `template.djx`-only pages carry a non-existent path and are skipped.
+    Deduped by resolved path but yielded under the spelling the registry keys on.
     """
     for router in router_manager.backends:
         for url_path, page_path in iter_scanned_page_pairs(router):
@@ -47,33 +43,35 @@ def iter_existing_scanned_pages(
         yield page_path
 
 
-def load_scanned_page_modules(router_manager: RouterManager) -> None:
-    """Execute every existing routed `page.py` once, through the mtime memo.
+def load_scanned_page_modules(router_manager: RouterManager) -> list[tuple[str, Path]]:
+    """Execute every existing routed `page.py`, answering the ones that loaded.
 
     A page-scoped registration exists only once its `page.py` has run.
     """
-    for page_path in iter_existing_scanned_pages(router_manager, set()):
-        _load_python_module_memo(page_path)
+    return [
+        (url_path, page_path)
+        for url_path, page_path in iter_existing_scanned_page_pairs(
+            router_manager, set()
+        )
+        if _load_python_module_memo(page_path) is not None
+    ]
 
 
 def iter_serialized_page_context_keys() -> Iterator[tuple[Path, str]]:
     """Yield the `page.py` path and key of every keyed `serialize=True` context.
 
-    A keyless `serialize=True` callable spreads the keys of the dict it
-    returns at render time, so those keys exist only at runtime and never
-    travel through here. One page reached through two spellings yields its
-    keys once, under the spelling the registry keys on.
+    A keyless callable spreads its keys only at render time, so those never travel
+    through here, and a page reached through two spellings yields its keys once.
     """
     router_manager, _errors = get_router_manager()
     if router_manager is None:
         return
-    registry = page._context_manager._context_registry
-    for page_path in iter_existing_scanned_pages(router_manager, set()):
-        if _load_python_module_memo(page_path) is None:
-            continue
-        for key, entry in registry.get(page_path, {}).items():
-            if entry.serialize and key is not None:
-                yield page_path, key
+    # A page registers only once it runs, so the walk imports before the registry reads.
+    pages = load_scanned_page_modules(router_manager)
+    serialized = page._context_manager.serialized_keys()
+    for _url_path, page_path in pages:
+        for key in serialized.get(page_path, ()):
+            yield page_path, key
 
 
 __all__ = [

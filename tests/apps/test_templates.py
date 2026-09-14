@@ -134,9 +134,10 @@ class TestLexerInstall:
         assert template_base.tag_re.pattern == _WIDENED_TAG_PATTERN
 
     def test_second_install_keeps_the_compiled_pattern(self) -> None:
-        next_templates.install()
-        installed = template_base.tag_re
-        next_templates.install()
+        with override_settings(TEMPLATES=[_django_engine()]):
+            next_templates.install()
+            installed = template_base.tag_re
+            next_templates.install()
         assert template_base.tag_re is installed
 
     def test_unrecognised_pattern_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -147,14 +148,14 @@ class TestLexerInstall:
 
 
 class TestBuiltinsFollowAnOverride:
-    """``override_settings(TEMPLATES=...)`` rebuilds the engines, so builtins reinstall."""
+    """An override of `TEMPLATES` rebuilds the engines, so the builtins reinstall."""
 
     def test_next_tags_resolve_under_overridden_templates(self) -> None:
         with override_settings(TEMPLATES=[_django_engine()]):
             assert Template('{% component "card" %}').render(Context({})) == ""
 
     def test_engine_dicts_are_never_written_in_place(self) -> None:
-        """The settings module owns those dicts and an override restores them by reference."""
+        """The settings module owns those dicts and gets them back by reference."""
         engine = _django_engine()
         with override_settings(TEMPLATES=[engine]):
             assert settings.TEMPLATES[0]["OPTIONS"]["builtins"]

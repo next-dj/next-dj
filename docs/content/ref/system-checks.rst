@@ -53,7 +53,7 @@ Shared helpers
 ~~~~~~~~~~~~~~
 
 ``next.checks.common`` holds helpers reused across subsystem check modules.
-It is imported indirectly by those modules rather than by ``register_all``.
+It is imported indirectly by those modules rather than by ``register_all``, and the router manager and the page-tree walk it passes on live in ``next.discovery``, outside this package, because production code reads them too.
 
 .. automodule:: next.checks.common
    :members:
@@ -154,7 +154,7 @@ Errors
      - ``next.urls.checks``
    * - ``next.E007``
      - The router manager fails to initialize.
-     - ``next.checks.common``
+     - ``next.discovery``
    * - ``next.E008``
      - A ``[param]`` directory uses invalid parameter syntax, names a converter Django has no registration for, or names a parameter that is no Python identifier.
      - ``next.pages.checks``
@@ -371,8 +371,12 @@ Errors
    * - ``next.E081``
      - ``NEXT_FRAMEWORK['PAGE_BACKENDS']`` is not a list, so no page backend entry can be read.
      - ``next.urls.checks``
+   * - ``next.E082``
+     - A route names a bracket parameter Django refuses as a route name, so the route reaches neither the URLconf nor the conflict map.
+       The directory-level counterpart is ``next.E008``, which reads the same normalisation rule.
+     - ``next.urls.checks``
 
-A code emitted by ``next.checks.common`` is produced by a shared helper that the listed subsystem check modules call.
+A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.
 
 Warnings
 ~~~~~~~~

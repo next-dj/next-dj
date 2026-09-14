@@ -95,8 +95,8 @@ def _emit_form_access_denied(
     reason: Literal["raised", "denied", "response"],
     sender: type,
 ) -> None:
-    """Send `form_access_denied` when any receiver is connected."""
-    if form_access_denied.receivers and form_access_denied.has_listeners(sender):
+    """Send `form_access_denied` when a receiver listens for this sender."""
+    if form_access_denied.has_listeners(sender):
         form_access_denied.send(
             sender=sender,
             action_name=action_name,

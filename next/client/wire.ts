@@ -359,24 +359,26 @@ export class Wire {
     return response.text();
   }
 
-  #headers(request: WireRequest, method: string): Record<string, string> {
-    const headers: Record<string, string> = {
+  // Headers, not a plain record, so a caller writing a name in another case still
+  // collides with the runtime's own and each header is stamped exactly once.
+  #headers(request: WireRequest, method: string): Headers {
+    const headers = new Headers({
       [REQUEST_FLAG]: "1",
       [HEADER_ACCEPT]: ACCEPT,
       ...request.headers,
-    };
+    });
     // The version travels only once the client has learned one from an
     // envelope, so the first request of a page asserts no stale version.
     const version = this.#version();
-    if (version) headers[HEADER_VERSION] = version;
-    if (request.zone !== undefined) headers[HEADER_ZONE] = request.zone;
+    if (version) headers.set(HEADER_VERSION, version);
+    if (request.zone !== undefined) headers.set(HEADER_ZONE, request.zone);
     if (!SAFE_METHODS.has(method)) {
       const csrf = this.#csrf();
-      if (csrf !== undefined) headers[csrf.header] = csrf.token;
+      if (csrf !== undefined) headers.set(csrf.header, csrf.token);
       // A true mutation carries a ring id so the SSE bridge suppresses its own echo.
-      if (request.abortable !== true && headers[HEADER_REQUEST_ID] === undefined) {
+      if (request.abortable !== true && !headers.has(HEADER_REQUEST_ID)) {
         const id = newRequestId();
-        headers[HEADER_REQUEST_ID] = id;
+        headers.set(HEADER_REQUEST_ID, id);
         this.#rememberRequestId(id);
       }
     }

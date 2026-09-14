@@ -258,9 +258,8 @@ class TestDevFlagChannel:
 class TestSparklineStaysOutsideEveryZone:
     """No zone on the dashboard renders the sparkline mount.
 
-    The `next.W074` silencing in `config/settings.py` is honest only while
-    the Babel-compiled `component.jsx` never has to ride a patch envelope,
-    so this walk fails the moment the widget is pulled into a zone.
+    The `next.W074` silencing in `config/settings.py` is honest only while the
+    Babel-compiled widget never rides a patch envelope, so this fails if it ever is.
     """
 
     def test_full_render_owns_the_sparkline(self, next_client) -> None:

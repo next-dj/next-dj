@@ -68,18 +68,18 @@ describe("Wire headers", () => {
   it("sends the intent headers on a GET", async () => {
     const h: Harness = makeWire(async () => envelopeResponse(ENVELOPE));
     await h.wire.fetch({ url: "/list/", zone: "request-list" });
-    const headers = h.calls[0]!.init.headers as Record<string, string>;
-    expect(headers[REQUEST_FLAG]).toBe("1");
-    expect(headers.Accept).toBe(ACCEPT);
-    expect(headers["X-Next-Version"]).toBe("v1");
-    expect(headers["X-Next-Zone"]).toBe("request-list");
+    const headers = new Headers(h.calls[0]!.init.headers);
+    expect(headers.get(REQUEST_FLAG)).toBe("1");
+    expect(headers.get("Accept")).toBe(ACCEPT);
+    expect(headers.get("X-Next-Version")).toBe("v1");
+    expect(headers.get("X-Next-Zone")).toBe("request-list");
   });
 
   it("omits the version header before the client has learned one", async () => {
     const h = makeWire(async () => envelopeResponse(ENVELOPE), { version: "" });
     await h.wire.fetch({ url: "/list/", zone: "request-list" });
-    const headers = h.calls[0]!.init.headers as Record<string, string>;
-    expect("X-Next-Version" in headers).toBe(false);
+    const headers = new Headers(h.calls[0]!.init.headers);
+    expect(headers.has("X-Next-Version")).toBe(false);
   });
 
   it("adds the CSRF header from the payload on unsafe methods", async () => {
@@ -87,8 +87,8 @@ describe("Wire headers", () => {
       csrf: { header: "X-CSRFToken", token: "tok" },
     });
     await h.wire.fetch({ url: "/_next/form/u1/", method: "POST", uid: "u1" });
-    const headers = h.calls[0]!.init.headers as Record<string, string>;
-    expect(headers["X-CSRFToken"]).toBe("tok");
+    const headers = new Headers(h.calls[0]!.init.headers);
+    expect(headers.get("X-CSRFToken")).toBe("tok");
   });
 
   it("omits the CSRF header on safe methods", async () => {
@@ -96,8 +96,8 @@ describe("Wire headers", () => {
       csrf: { header: "X-CSRFToken", token: "tok" },
     });
     await h.wire.fetch({ url: "/list/", zone: "z" });
-    const headers = h.calls[0]!.init.headers as Record<string, string>;
-    expect(headers["X-CSRFToken"]).toBeUndefined();
+    const headers = new Headers(h.calls[0]!.init.headers);
+    expect(headers.has("X-CSRFToken")).toBe(false);
   });
 });
 
@@ -544,8 +544,8 @@ describe("Wire abortable validation", () => {
       queue: "validate:u",
       abortable: true,
     });
-    const headers = h.calls[0]!.init.headers as Record<string, string>;
-    expect(headers["X-Next-Zone"]).toBe("wizard");
+    const headers = new Headers(h.calls[0]!.init.headers);
+    expect(headers.get("X-Next-Zone")).toBe("wizard");
   });
 
   it("queues an abortable POST on its own key, not on the declared zone", async () => {
@@ -607,8 +607,8 @@ describe("Wire echo request id", () => {
     return { wire, remembered, calls };
   }
 
-  function header(calls: { init: RequestInit }[], name: string): string | undefined {
-    return (calls[0]!.init.headers as Record<string, string>)[name];
+  function header(calls: { init: RequestInit }[], name: string): string | null {
+    return new Headers(calls[0]!.init.headers).get(name);
   }
 
   it("stamps a request id on a mutation and reports it to the ring", async () => {
@@ -622,7 +622,7 @@ describe("Wire echo request id", () => {
   it("does not stamp a request id on a safe GET", async () => {
     const h = withRemember(async () => envelopeResponse(ENVELOPE));
     await h.wire.fetch({ url: "/list/", zone: "z" });
-    expect(header(h.calls, HEADER_REQUEST_ID)).toBeUndefined();
+    expect(header(h.calls, HEADER_REQUEST_ID)).toBeNull();
     expect(h.remembered).toEqual([]);
   });
 
@@ -634,7 +634,7 @@ describe("Wire echo request id", () => {
       zone: "z",
       abortable: true,
     });
-    expect(header(h.calls, HEADER_REQUEST_ID)).toBeUndefined();
+    expect(header(h.calls, HEADER_REQUEST_ID)).toBeNull();
     expect(h.remembered).toEqual([]);
   });
 
@@ -667,6 +667,21 @@ describe("Wire echo request id", () => {
       headers: { [HEADER_REQUEST_ID]: "given" },
     });
     expect(header(h.calls, HEADER_REQUEST_ID)).toBe("given");
+    expect(h.remembered).toEqual([]);
+  });
+
+  it("sees a caller id written in another case as the same header", async () => {
+    const h = withRemember(async () => envelopeResponse(ENVELOPE));
+    await h.wire.fetch({
+      url: "/_next/form/u1/",
+      method: "POST",
+      uid: "u1",
+      headers: { "x-next-request-id": "given" },
+    });
+    const sent = new Headers(h.calls[0]!.init.headers);
+    expect(Array.from(sent).filter(([name]) => name === "x-next-request-id")).toEqual([
+      ["x-next-request-id", "given"],
+    ]);
     expect(h.remembered).toEqual([]);
   });
 });

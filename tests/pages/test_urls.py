@@ -1,6 +1,8 @@
 import pytest
 
-from next.urls import FileRouterBackend, URLPatternParser
+from next.pages.manager import views as views_module
+from next.urls import URLPatternParser
+from tests.support import file_router
 
 
 class TestURLPatternParser:
@@ -154,7 +156,7 @@ class TestURLPatternParser:
 
     def test_scan_pages_directory_virtual_view_detection(self, tmp_path) -> None:
         """A directory holding only ``template.djx`` routes to a synthesised ``page.py``."""
-        backend = FileRouterBackend()
+        backend = file_router()
 
         virtual_dir = tmp_path / "virtual"
         virtual_dir.mkdir()
@@ -264,8 +266,8 @@ def render(request, **kwargs):
             assert pattern.name == expected_pattern_name
             if expected_template:
                 page_instance.render(page_file)
-                assert page_file in page_instance._template_registry
-                assert page_instance._template_registry[page_file] == expected_template
+                assert page_file in page_instance._templates.composed
+                assert page_instance._templates.composed[page_file] == expected_template
         else:
             assert pattern is None
 
@@ -327,52 +329,45 @@ def render(request, **kwargs):
 
 
 class TestPageCreateUrlPattern:
-    """``_create_regular_page_pattern`` refusing pages it cannot serve."""
+    """``create_url_pattern`` refusing pages it cannot serve."""
 
-    def test_create_regular_page_pattern_broken_import_still_routes(
-        self, page_instance, tmp_path
-    ) -> None:
+    def test_a_broken_import_still_routes(self, page_instance, tmp_path) -> None:
         """A ``page.py`` that fails to import still gets a fail-loud pattern."""
         page_file = tmp_path / "page.py"
         page_file.write_text("invalid python syntax {")
 
-        url_parser = URLPatternParser()
-        django_pattern, parameters = url_parser.parse_url_pattern("test")
-        clean_name = url_parser.prepare_url_name("test")
+        result = page_instance.create_url_pattern("test", page_file, URLPatternParser())
 
-        result = page_instance._create_regular_page_pattern(
-            page_file, django_pattern, parameters, clean_name
-        )
         assert result is not None
         assert result.callback.next_page_path == page_file
 
-    def test_create_regular_page_pattern_missing_module_yields_none(
-        self, page_instance, tmp_path
-    ) -> None:
+    def test_a_missing_module_yields_no_pattern(self, page_instance, tmp_path) -> None:
         """A ``page.py`` path with no loadable module and no error yields no pattern."""
         page_file = tmp_path / "page.py"
 
-        url_parser = URLPatternParser()
-        django_pattern, parameters = url_parser.parse_url_pattern("test")
-        clean_name = url_parser.prepare_url_name("test")
+        result = page_instance.create_url_pattern("test", page_file, URLPatternParser())
 
-        result = page_instance._create_regular_page_pattern(
-            page_file, django_pattern, parameters, clean_name
-        )
         assert result is None
 
-    def test_create_regular_page_pattern_no_template_no_render(
-        self, page_instance, tmp_path
+    def test_a_module_importlib_cannot_build_yields_no_pattern(
+        self, page_instance, tmp_path, monkeypatch
     ) -> None:
+        """A file that builds no module and records no error routes nothing."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text("template = 'body'")
+        monkeypatch.setattr(
+            views_module, "_load_python_module_memo", lambda _path: None
+        )
+
+        result = page_instance.create_url_pattern("test", page_file, URLPatternParser())
+
+        assert result is None
+
+    def test_no_body_source_yields_no_pattern(self, page_instance, tmp_path) -> None:
         """A module with neither a body nor ``render()`` yields no pattern."""
         page_file = tmp_path / "page.py"
         page_file.write_text("def other_function(): pass")
 
-        url_parser = URLPatternParser()
-        django_pattern, parameters = url_parser.parse_url_pattern("test")
-        clean_name = url_parser.prepare_url_name("test")
+        result = page_instance.create_url_pattern("test", page_file, URLPatternParser())
 
-        result = page_instance._create_regular_page_pattern(
-            page_file, django_pattern, parameters, clean_name
-        )
         assert result is None

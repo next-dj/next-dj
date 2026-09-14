@@ -20,9 +20,9 @@ Resolver
 
 .. data:: next.deps.resolver.resolver
 
-   The shared resolver singleton used by pages, form actions, and component renderers throughout the framework.
-   The object is built once at import time and never swapped, so every reference points at the same instance for the life of the process.
-   ``DEPENDENCY_RESOLVER`` retypes that instance in place at startup and again on every settings reload, so a class named there adds no instance slots and no second base, and its ``__init__`` never runs.
+   The shared resolver holder used by pages, form actions, and component renderers throughout the framework.
+   It forwards every attribute to the resolver in force, so a reference taken before a swap reads the object that replaced it.
+   ``DEPENDENCY_RESOLVER`` builds that object at startup and again on every settings reload, and ``next.deps.resolver.current_resolver`` returns it for a caller that would otherwise pay the forwarding per attribute.
    Import it as ``from next.deps import resolver`` when you need to call ``resolver.resolve_dependencies`` from a custom provider or a test helper.
 
 ``DEPENDENCY_RESOLVER`` selects the class the singleton takes on, and it accepts any ``DependencyResolver`` subclass.
@@ -51,6 +51,17 @@ A ``compile_resolve`` that is present but not callable is refused with a ``TypeE
 
 .. automodule:: next.deps.providers
    :members:
+
+Introspection
+~~~~~~~~~~~~~
+
+.. automodule:: next.deps.introspect
+   :members:
+   :exclude-members: HINT_ERRORS, IntrospectKey
+
+``cached_signature``, ``cached_type_hints`` and ``cached_accepts_var_keyword`` read one fact off a callable and memoise it under that callable, so a plan compile and a provider asking the same question pay for the read once.
+The memos are bounded, because a dev reload mints a fresh function object per save and each one would otherwise stay pinned with its globals.
+``prepared_parameter`` is the parameter preparation both the plan compiler and the plan-free resolver fill from, so the second opinion they hold each other to is the choice of provider rather than the shape of the parameter.
 
 Plan
 ~~~~

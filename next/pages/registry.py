@@ -1,21 +1,18 @@
-"""Per-`page.py` context-callable registry and layout watch helpers.
-
-Context callables are keyed by the `page.py` that declared them, and the watch helpers
-list `template.djx` and `layout.djx` for the autoreloader and the static finder.
-"""
+"""Per-`page.py` context-callable registry, keyed by the file that declared each one."""
 
 from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from next.deps import DependencyResolver, get_request_dep_cache, resolver
-from next.utils import MisattributedContext, MisattributionLog, callable_name
+from next.caches import BoundedCache
+from next.deps import get_request_dep_cache
+from next.deps.resolver import current_resolver
+from next.introspect import MisattributedContext, MisattributionLog, callable_name
 
 from .context import ContextResult
 from .paths import page_path_info
 from .signals import context_registered
-from .watch import get_pages_directories_for_watch
 
 
 if TYPE_CHECKING:
@@ -44,9 +41,7 @@ class PageContextEntry(NamedTuple):
 class ZoneBinding(NamedTuple):
     """One registered `@context` seen through its zone binding.
 
-    The zone diagnostics pair a bound callable with the callables reading its key, so
-    the zones travel next to the callable while the rest of the entry stays inside the
-    registry. A `zones` of `None` marks a callable every render runs.
+    Zones travel apart from the entry, and `zones=None` means every render runs it.
     """
 
     key: str | None
@@ -61,45 +56,22 @@ logger = logging.getLogger(__name__)
 type _OrderedEntries = tuple[tuple[str | None, PageContextEntry], ...]
 
 
-def get_layout_djx_paths_for_watch() -> set[Path]:
-    """Return every `layout.djx` path under page trees."""
-    result: set[Path] = set()
-    for pages_path in get_pages_directories_for_watch():
-        try:
-            for path in pages_path.rglob("layout.djx"):
-                result.add(path.resolve())
-        except OSError as e:
-            logger.debug("Cannot rglob layout.djx under %s: %s", pages_path, e)
-    return result
-
-
-def get_template_djx_paths_for_watch() -> set[Path]:
-    """Return every `template.djx` path under page trees."""
-    result: set[Path] = set()
-    for pages_path in get_pages_directories_for_watch():
-        try:
-            for path in pages_path.rglob("template.djx"):
-                result.add(path.resolve())
-        except OSError as e:
-            logger.debug("Cannot rglob template.djx under %s: %s", pages_path, e)
-    return result
-
-
 class PageContextRegistry:
     """Register per-`page.py` context callables and merge their output."""
 
-    def __init__(self, resolver: DependencyResolver | None = None) -> None:
-        """Initialise with an optional resolver and an empty registry."""
+    def __init__(self) -> None:
+        """Start with an empty registry and no memoised merge order."""
         self._context_registry: dict[Path, dict[str | None, PageContextEntry]] = {}
         # Keyless callables share the `None` slot, so the registry keeps only
         # the last. Retain the overwritten names for the `next.E018` diagnostic.
         self._keyless_conflicts: dict[Path, list[str]] = {}
         self._misattributions = MisattributionLog()
-        self._resolver = resolver
         self._version = 0
         self._memo_version = 0
-        self._merge_order: dict[Path, _OrderedEntries] = {}
-        self._inheritable: dict[Path, _OrderedEntries] = {}
+        # Bounded, because a router is free to name page paths without end while
+        # the registry itself only ever holds the files a `@context` ran in.
+        self._merge_order: BoundedCache[Path, _OrderedEntries] = BoundedCache()
+        self._inheritable: BoundedCache[Path, _OrderedEntries] = BoundedCache()
 
     @property
     def version(self) -> int:
@@ -112,12 +84,6 @@ class PageContextRegistry:
     def _bump(self) -> None:
         """Mark the registry as moved so the per-path memos rebuild."""
         self._version += 1
-
-    def _get_resolver(self) -> DependencyResolver:
-        """Return the injected resolver or the shared singleton."""
-        if self._resolver is not None:
-            return self._resolver
-        return resolver
 
     def reset(self) -> None:
         """Drop every registered context so the next import repopulates it.
@@ -162,6 +128,27 @@ class PageContextRegistry:
                     func=entry.func,
                 )
                 for key, entry in entries.items()
+            )
+            for file_path, entries in self._context_registry.items()
+        }
+
+    def keyless_conflicts(self) -> dict[Path, tuple[str, ...]]:
+        """Return the keyless callables that overwrote one another, per file."""
+        return {
+            file_path: tuple(names)
+            for file_path, names in self._keyless_conflicts.items()
+        }
+
+    def serialized_keys(self) -> dict[Path, tuple[str, ...]]:
+        """Return the keys every keyed `serialize=True` callable publishes, per file.
+
+        A keyless one spreads the keys of its result at render time and declares none.
+        """
+        return {
+            file_path: tuple(
+                key
+                for key, entry in entries.items()
+                if key is not None and entry.serialize
             )
             for file_path, entries in self._context_registry.items()
         }
@@ -236,6 +223,9 @@ class PageContextRegistry:
         )
         context_data.update(inherited_context)
 
+        # Read once for the whole merge, because every attribute taken off the
+        # shared holder is a call forwarded to the object behind it.
+        active = current_resolver()
         for key, entry in self._entries_in_merge_order(file_path):
             # `isdisjoint` tests the batch without allocating an intersection.
             if (
@@ -244,7 +234,7 @@ class PageContextRegistry:
                 and entry.zones.isdisjoint(_requested_zones)
             ):
                 continue
-            resolved = self._get_resolver().resolve_dependencies(
+            resolved = active.resolve_dependencies(
                 entry.func,
                 request=request,
                 _cache=dep_cache,
@@ -256,11 +246,11 @@ class PageContextRegistry:
             if key is None:
                 context_data.update(result)
                 if entry.serialize:
-                    for k, v in result.items():
-                        if k not in js_context:
-                            js_context[k] = v
-                            if entry.serializer is not None:
-                                js_context_serializers[k] = entry.serializer
+                    # The one keyless callable opens the merge, so js_context is empty.
+                    js_context.update(result)
+                    if entry.serializer is not None:
+                        for k in result:
+                            js_context_serializers[k] = entry.serializer
             else:
                 context_data[key] = result
                 if entry.serialize and key not in js_context:
@@ -284,13 +274,16 @@ class PageContextRegistry:
     ) -> dict[str, Any]:
         """Return values from ancestor `page.py` callables marked `inherit_context`.
 
-        Runs every `@context(..., inherit_context=True)` callable an ancestor
-        `page.py` registered, with no sibling `layout.djx` required, so the
-        envelope under ``PAGE_BACKENDS["DIRS"]`` reaches descendant routes.
+        No sibling `layout.djx` is required, so the envelope under
+        ``PAGE_BACKENDS["DIRS"]`` reaches descendant routes.
         """
         inherited_context: dict[str, Any] = {}
-        for key, entry in self._inheritable_entries(file_path):
-            resolved = self._get_resolver().resolve_dependencies(
+        entries = self._inheritable_entries(file_path)
+        if not entries:
+            return inherited_context
+        active = current_resolver()
+        for key, entry in entries:
+            resolved = active.resolve_dependencies(
                 entry.func,
                 request=request,
                 _cache=dep_cache,

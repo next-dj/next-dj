@@ -33,8 +33,8 @@ from next.forms.base import (
 )
 from next.forms.diagnostics import registration_diagnostics
 from next.forms.manager import form_action_manager
+from next.introspect import defining_file
 from next.pages.loaders import _load_python_module
-from next.utils import defining_file
 from tests.support import importable_dir
 
 
@@ -867,13 +867,7 @@ class TestComputeScope:
 
 
 class TestPermissionHookAnnotationSafety:
-    """The DI-inspected hook modules keep real, non-string annotations.
-
-    A `from __future__ import annotations` in base.py or wizard.py would
-    stringify every subclass annotation and break the resolver reading a
-    user's `check_permissions(cls, board: Board)`. The hook return
-    annotations stay the real `PermissionOutcome` alias, never the string.
-    """
+    """The DI-inspected hook modules keep real, non-string annotations."""
 
     @pytest.mark.parametrize(
         "hook",

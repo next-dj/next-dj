@@ -6,29 +6,24 @@ routers and form actions without touching the page tree at import time.
 
 from __future__ import annotations
 
-import logging
 import threading
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, overload, override
 
-from django.core.exceptions import ImproperlyConfigured
 from django.urls import URLPattern, URLResolver, clear_url_caches
 from django.urls.resolvers import RoutePattern
 
-from next.backends import backend_entries, resolve_setting_class
+from next.backends import backend_entries, load_backends, resolve_setting_class
 from next.conf.signals import settings_reloaded
 from next.forms.manager import form_action_manager
 
-from .backends import RouterBackend, RouterFactory
+from .backends import RouterBackend
 from .resolver import TrieURLResolver
 from .signals import router_reloaded
 
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Iterator
-
-
-logger = logging.getLogger(__name__)
 
 
 class RouterManager:
@@ -95,28 +90,18 @@ class RouterManager:
     def reload(self, *, notify: bool = True) -> None:
         """Rebuild backends from `PAGE_BACKENDS` and notify listeners.
 
-        A misconfigured entry costs its own backend and nothing else, as it
-        does for every other backend family. Anything else a router raises
-        while it is built is a bug in that router and reaches the caller.
-
-        The URL caches are cleared and `router_reloaded` fires after the rebuild, so
-        receivers see one consistent state. The reentrant lock answers a receiver that
-        reloads again from this thread, and `notify=False` leaves both alone.
+        The URL caches clear and `router_reloaded` fires after the rebuild. A reentrant
+        lock lets a receiver reload from this thread, and `notify=False` skips both.
         """
         with self._lock:
             self.version += 1
             self._config_cache = None
 
-            built: list[RouterBackend] = []
             # Recorded for the whole build, so a backend reading the manager during
             # construction is answered instead of deadlocking on this thread's lock.
             self._building_thread = threading.get_ident()
             try:
-                for config in self._get_next_pages_config():
-                    try:
-                        built.append(RouterFactory.create_backend(config))
-                    except ImproperlyConfigured:
-                        logger.exception("error creating router from config %s", config)
+                built = load_backends(self._get_next_pages_config(), base=RouterBackend)
             finally:
                 self._building_thread = None
 
@@ -154,10 +139,8 @@ settings_reloaded.connect(_on_settings_reloaded)
 class _LazyUrlPatterns(Sequence["URLPattern | URLResolver"]):
     """Defer expanding router and form patterns until first use.
 
-    Not a `list` subclass, so `include()` defers materialisation to the
-    first resolve. Explicit `__reversed__` keeps the resolver's reverse
-    walk to one list build instead of one per index. The concat is cached
-    against the router and form-action manager versions.
+    Skips `list` so `include()` defers materialisation, overrides `__reversed__` to
+    avoid a per-index list build, and caches the concat against both manager versions.
     """
 
     def __init__(self) -> None:
@@ -225,10 +208,9 @@ def _build_url_resolver() -> URLResolver:
 class _LazyResolverSlot(Sequence["URLPattern | URLResolver"]):
     """Hold the outer resolver in one slot and build it on first read.
 
-    Building at import time would read `NEXT_FRAMEWORK` before Django
-    settings are configured, which keeps `next.urls` and everything
-    importing it out of reach of a pytest plugin, loaded before
-    pytest-django exports `DJANGO_SETTINGS_MODULE` from the ini file.
+    Building at import time would read `NEXT_FRAMEWORK` before Django settings are
+    configured, which a pytest plugin hits ahead of pytest-django exporting the ini
+    file's `DJANGO_SETTINGS_MODULE`.
     """
 
     def __init__(self) -> None:

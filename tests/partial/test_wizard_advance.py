@@ -1,8 +1,9 @@
 import pytest
 from django.http import HttpResponse
 
-from next.partial import ZoneRenderResult, shaping as shaping_module
+from next.partial import ZoneRenderResult
 from next.partial.headers import CONTENT_TYPE
+from next.partial.shaping import outcomes as outcomes_module
 from next.static.assets import StaticAsset
 from next.static.manager import default_manager
 from next.testing import NextClient, envelope_of
@@ -88,24 +89,19 @@ class TestWizardAdvanceWithoutPartialSwitch:
 
 @pytest.mark.django_db()
 class TestWizardAdvanceRendersZoneNotPageView:
-    """The advance renders only the next step zone, never the step page view.
-
-    The advance builds the next wizard and renders its master zone through
-    `render_zone`, so the step page view never runs and authorization stays in the
-    action guard. The zone render fires exactly once, for the next step's page and zone.
-    """
+    """The advance renders only the next step zone, never the step page view."""
 
     def test_advance_renders_one_zone_and_no_page_view(
         self, next_client: NextClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         calls: list[tuple] = []
-        original = shaping_module.render_zone
+        original = outcomes_module.render_zone
 
         def _spy(page_path, zones, request, **kwargs):
             calls.append((page_path, zones))
             return original(page_path, zones, request, **kwargs)
 
-        monkeypatch.setattr(shaping_module, "render_zone", _spy)
+        monkeypatch.setattr(outcomes_module, "render_zone", _spy)
         _advance_identity(next_client, zones="wizard-zone")
         assert len(calls) == 1
         _page_path, zones = calls[0]
@@ -116,10 +112,8 @@ class TestWizardAdvanceRendersZoneNotPageView:
 class TestWizardAdvanceCsrfMeta:
     """A token rotation on a step advance stamps the CSRF meta on the morph.
 
-    The success funnel and the invalid shape already prove the uniform
-    stamp. The advance reads the rotation flag before the next step's zone
-    re-render mints a token, so a login mid-wizard refreshes the document
-    tokens on the same envelope that swaps the step.
+    The advance reads the rotation flag before minting the next step's
+    token, so a mid-wizard login and the step swap share one envelope.
     """
 
     def test_rotation_on_advance_stamps_csrf(
@@ -127,7 +121,7 @@ class TestWizardAdvanceCsrfMeta:
     ) -> None:
         # The submit request rotated its token, modelled by forcing the flag
         # the shaper reads before any step re-render mints a fresh one.
-        monkeypatch.setattr(shaping_module, "_csrf_rotated", lambda _request: True)
+        monkeypatch.setattr(outcomes_module, "_csrf_rotated", lambda _request: True)
         response = _advance_identity(next_client, zones="wizard-zone")
         envelope = envelope_of(response).data
         assert "csrf" in envelope
@@ -167,12 +161,7 @@ class TestWizardInvalidStepZoneMorph:
 
 @pytest.mark.django_db()
 class TestWizardAdvanceShipsZoneAssetsAndContext:
-    """A step whose zone body introduces assets ships the manifest and delta.
-
-    The render is stubbed so the next step's zone carries a co-located
-    asset and a serialize provider, proving the advance forwards both the
-    asset manifest and the js-context delta a fresh step first introduces.
-    """
+    """A step whose zone body introduces assets ships the manifest and delta."""
 
     def test_advance_forwards_assets_and_context_delta(
         self, next_client: NextClient, monkeypatch: pytest.MonkeyPatch
@@ -186,7 +175,7 @@ class TestWizardAdvanceShipsZoneAssetsAndContext:
             collector=collector,
         )
         monkeypatch.setattr(
-            shaping_module, "render_zone", lambda *args, **kwargs: crafted
+            outcomes_module, "render_zone", lambda *args, **kwargs: crafted
         )
         response = _advance_identity(next_client, zones="wizard-zone")
         envelope = envelope_of(response)
@@ -239,9 +228,8 @@ class TestWizardAdvanceWholePage:
 class TestWizardAdvanceStorageBudget:
     """One round trip to wizard storage per advanced step.
 
-    A failing assertion means the partial advance grew a storage
-    round-trip. The mid-step submit pays one save for the draft and one
-    load for the next step's prefilled form, nothing more.
+    A failing assertion means the advance grew a storage round-trip: one
+    save for the draft, one load for the prefilled next step, nothing more.
     """
 
     def test_partial_advance_pays_one_save_and_one_load(

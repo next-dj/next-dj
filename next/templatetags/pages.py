@@ -6,7 +6,6 @@ and the paired body is the fallback shown where composition never reached.
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING, override
 
 from django import template
@@ -24,18 +23,6 @@ _END_BLOCK_TEMPLATE = ("/template",)
 
 _SINGLE_TAKES_NO_ARGS = "{% template %} tag takes no arguments"
 _PAIRED_TAKES_NO_ARGS = "{% #template %} tag takes no arguments"
-
-# The canonical spellings, written by composition and named by the checks.
-PLACEHOLDER = "{% template %}"
-PLACEHOLDER_OPEN = "{% #template %}"
-PLACEHOLDER_CLOSE = "{% /template %}"
-
-# Whitespace is as free here as in the lexed tag, and the paired construct spans
-# whatever sits between its ends, so composition matches what Django would parse.
-_SINGLE_FORM = r"\{%\s*template\s*%\}"
-_PAIRED_FORM = r"\{%\s*#template\s*%\}(?s:.*?)\{%\s*/template\s*%\}"
-
-PLACEHOLDER_PATTERN = re.compile(f"{_PAIRED_FORM}|{_SINGLE_FORM}")
 
 
 def _reject_arguments(token: Token, message: str) -> None:

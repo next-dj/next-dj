@@ -1,8 +1,7 @@
 """Pytest plugin wiring the next.dj test scaffold to ini options and fixtures.
 
 Enabled per project with `-p next.testing.plugin` rather than a `pytest11` entry point,
-which keeps the framework out of unrelated runs and a coverage gate honest, because
-pytest imports entry-point plugins before pytest-cov starts measuring.
+since pytest imports entry-point plugins before pytest-cov starts measuring.
 """
 
 from __future__ import annotations

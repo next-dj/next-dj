@@ -217,7 +217,7 @@ class TestUrlMemoInvalidation:
 
         backend.forget_urls()
 
-        assert backend._url_cache == {}
+        assert not backend._url_cache
 
 
 class TestStaticBackendReexport:

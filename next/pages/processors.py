@@ -1,14 +1,11 @@
 """Context-processor discovery and loading.
 
-Context processors come from two sources. First, each entry in
-`NEXT_FRAMEWORK["PAGE_BACKENDS"]` may list processors under
-`OPTIONS.context_processors`. Second, Django's `TEMPLATES` setting
-includes its own `OPTIONS.context_processors`. Both sources merge with
-Next-router entries taking precedence and duplicates dropped.
+Sourced from `PAGE_BACKENDS` and Django's `TEMPLATES`, Next-router entries winning ties.
 """
 
 from __future__ import annotations
 
+import functools
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -40,26 +37,12 @@ def _import_context_processor(
     return None
 
 
-# A single-slot holder mutated in place, so a reset needs no `global`.
-_CONTEXT_PROCESSORS_CACHE: dict[str, list[Callable[[Any], dict[str, Any]]] | None] = {
-    "value": None
-}
-
-
+@functools.cache
 def _get_context_processors() -> list[Callable[[Any], dict[str, Any]]]:
-    """Return the merged context processors from Next routers and Django.
+    """Merge the router and `TEMPLATES` processor paths and import each one.
 
     The merge depends on settings alone, so it is memoised until one of them changes.
     """
-    cached = _CONTEXT_PROCESSORS_CACHE["value"]
-    if cached is None:
-        cached = _build_context_processors()
-        _CONTEXT_PROCESSORS_CACHE["value"] = cached
-    return cached
-
-
-def _build_context_processors() -> list[Callable[[Any], dict[str, Any]]]:
-    """Merge the router and `TEMPLATES` processor paths and import each one."""
     configs = next_framework_settings.PAGE_BACKENDS
     if not isinstance(configs, list):
         configs = []
@@ -83,7 +66,7 @@ def _build_context_processors() -> list[Callable[[Any], dict[str, Any]]]:
 
 def _reset_context_processors_cache(**kwargs) -> None:
     """Drop the memoised processors so the next render rebuilds the list."""
-    _CONTEXT_PROCESSORS_CACHE["value"] = None
+    _get_context_processors.cache_clear()
 
 
 def _on_setting_changed(*, setting: str, **kwargs) -> None:

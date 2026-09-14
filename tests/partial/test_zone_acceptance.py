@@ -23,7 +23,7 @@ def counted_page():
 
     Dropping the memo re-executes the module so its providers outlive a neighbour.
     """
-    _MODULE_MEMO.pop(COUNTED_PAGE, None)
+    _MODULE_MEMO.pop(COUNTED_PAGE)
     _load_python_module_memo(COUNTED_PAGE)
     probe.reset_counters()
     return probe
@@ -120,12 +120,7 @@ class TestZoneBatchOneContextCollection:
 
 
 class TestUnrequestedZonesDoNotRender:
-    """A zone GET renders only the named zone bodies and no others.
-
-    A failing assertion here means a change started rendering zone bodies
-    the request never asked for. The counters live in the zone bodies, so
-    a body that did not execute leaves its counter at zero.
-    """
+    """A zone GET renders only the named zone bodies and no others."""
 
     def test_single_zone_renders_only_itself(self, counted_page) -> None:
         NextClient().get_zones("/counted/", "alpha")

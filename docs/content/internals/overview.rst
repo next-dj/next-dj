@@ -177,7 +177,7 @@ The set of submodules differs by area, and :doc:`adding-an-area` states the cont
    * - ``next.static``
      - ``manager``, ``collector``, ``discovery``, ``backends``, ``assets``, ``scripts``, ``serializers``, ``defaults``, ``finders``, ``checks``, ``signals``.
    * - ``next.partial``
-     - ``manager``, ``registry``, ``backends``, ``zone``, ``render``, ``envelope``, ``errors``, ``patches``, ``shaping``, ``shaper``, ``sse``, ``view``, ``headers``, ``keys``, ``origin``, ``checks``, ``signals``.
+     - ``manager``, ``registry``, ``backends``, ``zone``, ``render``, ``envelope``, ``errors``, ``patches``, ``shaping`` (``outcomes``, ``validate``, ``scrub``, ``targets``, ``csrf``, ``responses``), ``shaper``, ``sse``, ``view``, ``headers``, ``keys``, ``origin``, ``checks``, ``signals``.
    * - ``next.deps``
      - ``resolver``, ``linear``, ``plan``, ``providers``, ``registry``, ``cache``, ``context``, ``markers``, ``errors``, ``signals``.
    * - ``next.server``
@@ -190,16 +190,18 @@ The set of submodules differs by area, and :doc:`adding-an-area` states the cont
    * - ``next.apps``
      - ``config``, ``autoreload``, ``templates``, ``staticfiles``, ``components``, ``checks``.
    * - ``next.backends``
-     - A single flat module that provides ``load_backends``, ``backend_entries``, ``resolve_backend_class``, ``resolve_setting_class``, ``SingleBackendManager``, and ``BackendRoot`` for every settings-driven backend family.
+     - A single flat module that provides ``load_backends``, ``backend_entries``, ``resolve_backend_class``, ``resolve_setting_class``, ``BackendListManager``, ``SingleBackendManager``, and ``BackendRoot`` for every settings-driven backend family.
    * - ``next.ports``
      - A single flat module holding the protocols and slots one subsystem calls another through.
        ``PartialShaper`` lets the page and form paths shape partial responses without importing ``next.partial``, ``RouterAccess`` lets the page watcher and the checks build routers without importing ``next.urls``, and ``StaticAssets`` lets the render path reach the static manager without importing ``next.static``.
    * - ``next.utils``
      - A single flat module holding the path helpers, the ``PageRoot`` value object, the ``template_edits_watched`` predicate, and the declaration-site attribution that several subsystems share.
    * - ``next.errors``
-     - A single flat module holding the exceptions more than one subsystem raises, the ``DIRS`` shape refusal and the four a backend entry the loader cannot resolve produces.
+     - A single flat module holding the exceptions more than one subsystem raises, the ``DIRS`` shape refusal and the six a backend the loader cannot resolve produces.
    * - ``next.signals``
      - A single flat module that re-exports every signal its owning subpackage declares, for a receiver that subscribes across subsystems.
+   * - ``next.discovery``
+     - A single flat module holding the per-run router manager and the walk of the page trees it routes, read by the system checks, the component sources, and the page scan alike.
    * - ``next.checks``
      - ``__init__`` aggregates system-check registration across every subpackage.
        ``common`` provides shared helpers used by individual ``checks`` modules.

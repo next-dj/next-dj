@@ -40,12 +40,12 @@ def zone_response(
     A zone named on a dynamic body has no compiled source to render, so it is a 400
     before any render, and a version mismatch on a safe method is a 409.
     """
-    backend = partial_backend_manager.get()
-    version = asset_version()
     if dynamic_body:
         return _bad_request("zone in dynamic body")
+    version = asset_version()
     if request.method in _SAFE_METHODS and _version_conflict(intent, version):
         return _conflict()
+    backend = partial_backend_manager.get()
     try:
         result = render_zone(page_path, intent.zones, request, url_kwargs=url_kwargs)
     except UnknownZoneError:
@@ -72,14 +72,13 @@ def _build_envelope(
 ) -> Envelope:
     """Assemble one envelope patching every rendered zone with its assets.
 
-    An `append` or `prepend` merge intent patches each zone with the matching verb, so a
-    paginating request grows the zone rather than replacing its body. The verb is
-    server-authored from the parsed intent, never named by the client.
+    An append/prepend merge intent grows the zone rather than replacing it. The verb is
+    server-authored from the parsed intent, never named directly by the client.
     """
     patches = Patches.versioned(version, request=request)
     for name in result.html:
         _patch_zone(patches, name, result, intent.merge)
-    patches._absorb_zone_result(result)
+    patches.absorb_zone_result(result)
     return patches.envelope()
 
 
@@ -88,9 +87,8 @@ def _patch_zone(
 ) -> None:
     """Patch one zone in place, morphing it or merging deduplicated children.
 
-    A morph addresses the wrapped marker element, an append or prepend
-    grafts the bare inner body so the merge deduplicates children against
-    the live zone rather than nesting a second wrapper inside it.
+    A morph addresses the wrapped marker element, while an append or prepend grafts
+    the bare inner body to avoid nesting a second wrapper inside it.
     """
     target = {keys.ZONE: name}
     if merge is MergeMode.APPEND:

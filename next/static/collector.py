@@ -1,15 +1,7 @@
 """Collector, dedup strategies, JS context policies, and placeholder slots.
 
-Rendering flows are stateful. Every HTTP request spins up a fresh collector that rides
-along in the template context, absorbs every `{% use_style %}`, `{% #use_script %}`,
-co-located `template.css`, and `styles` or `scripts` list entry, then hands the
-accumulated set back to the static manager when the template finishes.
-
-Dedup and merge semantics plug in as strategies at construction, not hardcoded here.
-
-The collector is also fully type-agnostic. Each asset routes to a slot named in
-`KindRegistry`, and the buckets live in a slot-keyed dictionary on the collector. There
-is no built-in knowledge of `css`, `js`, or any other specific kind here.
+A fresh collector rides in the template context per request. It is fully type-agnostic,
+routing each asset to a slot named in `KindRegistry` with no built-in kind knowledge.
 """
 
 from __future__ import annotations
@@ -18,14 +10,14 @@ import hashlib
 import json
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
 
 from .assets import StaticAsset, default_kinds
 from .serializers import JsContextSerializer, resolve_serializer
 
 
 if TYPE_CHECKING:
-    from collections.abc import Hashable, Iterator, Sequence
+    from collections.abc import Collection, Hashable, Iterator, Sequence
     from pathlib import Path
 
 
@@ -44,7 +36,6 @@ def _inline_dedup_key(asset: StaticAsset) -> tuple[str, str, str]:
     return ("inline", asset.kind, asset.inline or "")
 
 
-@runtime_checkable
 class DedupStrategy(Protocol):
     """Key-based dedup strategy consumed by the static collector.
 
@@ -112,7 +103,6 @@ class IdentityDedup:
         return ("unique", self._counter)
 
 
-@runtime_checkable
 class JsContextPolicy(Protocol):
     """Merge strategy for the collector JS context."""
 
@@ -194,10 +184,7 @@ class DeepMergePolicy:
 class PlaceholderSlot:
     """Binding between a `{% collect_* %}` placeholder name and its token.
 
-    The `name` field identifies the slot. Assets routed to this slot by
-    `KindRegistry.slot(asset.kind)` accumulate in the collector under this name. The
-    `token` field is the HTML comment marker emitted by the matching template tag at
-    render time and replaced by the static manager during injection.
+    `token` is the HTML comment the matching template tag emits and injection replaces.
     """
 
     name: str
@@ -207,9 +194,8 @@ class PlaceholderSlot:
 class PlaceholderRegistry:
     """Mutable registry of placeholder slots.
 
-    The registry ships empty. Framework bootstrap registers built-in slots such as
-    `styles` and `scripts`, and user code registers additional slots with the same
-    `register` call when introducing new asset destinations.
+    Ships empty, bootstrap registers built-in slots like `styles` and `scripts`
+    through the same public `register` call user code uses.
     """
 
     def __init__(self) -> None:
@@ -262,19 +248,19 @@ class PlaceholderRegistry:
 default_placeholders: PlaceholderRegistry = PlaceholderRegistry()
 
 
+class JsContextPayload(NamedTuple):
+    """The three parallel mappings one init payload is assembled from."""
+
+    values: dict[str, Any]
+    encoded: dict[str, str]
+    serializers: dict[str, JsContextSerializer]
+
+
 class StaticCollector:
     """Accumulate static asset references during a single page render.
 
-    The optional `dedup` argument plugs in a custom dedup strategy. The default is
-    `UrlDedup`. The optional `js_context_policy` argument plugs in a custom merge
-    strategy for the JS context. The default is `FirstWinsPolicy`, which ensures
-    page-level context wins over component-level context.
-
-    Assets are added through the `add` method and later consumed by the static manager
-    during injection. The collector has no knowledge of backends or rendering. It
-    coordinates insertion order, deduplication, and JS context merging.
-
-    Buckets are keyed by slot through `KindRegistry`, so a new kind gets a new bucket.
+    `FirstWinsPolicy`, the default js_context_policy, makes page-level context win
+    over component-level context. Buckets are keyed by slot through `KindRegistry`.
     """
 
     def __init__(
@@ -300,13 +286,8 @@ class StaticCollector:
     def add(self, asset: StaticAsset, *, prepend: bool = False) -> bool:
         """Add the asset unless its dedup key was already recorded, and report which.
 
-        Inline assets always append because their dedup key derives from the body.
-        URL-form assets with `prepend=True` are inserted before existing append entries
-        while keeping registration order among prepended items.
-
-        The asset routes to the bucket named by `KindRegistry.slot(asset.kind)`.
-        Unregistered kinds raise `KeyError` so misconfiguration surfaces immediately.
-        The answer is what keeps a caller from announcing an asset that never landed.
+        Inline assets always append since their dedup key derives from the body. An
+        unregistered kind raises `KeyError` rather than masking the misconfiguration.
         """
         key = self._dedup.key(asset)
         if key in self._seen_keys:
@@ -378,9 +359,8 @@ class StaticCollector:
     ) -> str:
         """Return the cached JSON fragment for a key or re-encode on miss.
 
-        A miss happens when a merge policy overwrote the value after
-        add_js_context cached its fragment, so the value is re-encoded
-        through the same per-key serializer the collector recorded.
+        A miss happens when a merge policy overwrote the value after `add_js_context`
+        cached its fragment, requiring a re-encode through the recorded serializer.
         """
         encoded = self._js_context_encoded.get(key)
         if encoded is None:
@@ -391,15 +371,36 @@ class StaticCollector:
     def js_context_encoded(self) -> dict[str, str]:
         """Return the merged js-context as per-key encoded JSON fragments.
 
-        Each fragment is the exact byte output add_js_context validated,
-        so the init script assembles its payload without re-serialising.
-        Callers must not mutate the returned mapping.
+        Each fragment is the exact bytes `add_js_context` validated, so the init
+        script assembles its payload without re-serialising.
         """
         default = self._get_js_serializer()
         return {
             key: self._encoded_fragment(key, value, default)
             for key, value in self._js_context.items()
         }
+
+    def js_context_payload(self, *, reserved: Collection[str] = ()) -> JsContextPayload:
+        """Return the js-context mappings with every reserved key left out.
+
+        A colliding key drops its fragment and its serializer along with its value,
+        so a framework-owned payload key means one thing in every environment.
+        """
+        values = self._js_context
+        serializers = self._js_context_serializers
+        collided = {key for key in values if key in reserved}
+        if not collided:
+            return JsContextPayload(values, self.js_context_encoded(), serializers)
+        default = self._get_js_serializer()
+        return JsContextPayload(
+            {k: v for k, v in values.items() if k not in collided},
+            {
+                key: self._encoded_fragment(key, value, default)
+                for key, value in values.items()
+                if key not in collided
+            },
+            {k: v for k, v in serializers.items() if k not in collided},
+        )
 
     def js_context_wire(self) -> dict[str, Any]:
         """Return the merged js-context as wire-ready JSON values.

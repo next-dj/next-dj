@@ -9,6 +9,10 @@ from next.deps import DDependencyBase, RegisteredParameterProvider, ResolutionCo
 from next.deps.plan import ParameterFiller
 
 
+# The one POST key `CardProvider` and `MoveCardForm` both read.
+CARD_PARAM = "card_id"
+
+
 class DBoard[T](DDependencyBase[T]):
     """Annotate a parameter with ``DBoard[Board]`` to inject the matching row."""
 
@@ -74,27 +78,26 @@ class CardProvider(RegisteredParameterProvider):
     """Resolve ``DCard[Model]`` parameters from a POST ``card_id`` field."""
 
     def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:
-        """Match ``DCard[...]`` annotations when the request carries ``card_id``."""
+        """Match ``DCard[...]`` annotations when the request carries a card id."""
         if get_origin(param.annotation) is not DCard:
             return False
         request = getattr(context, "request", None)
         if request is None:
             return False
-        return bool(request.POST.get("card_id"))
+        return bool(request.POST.get(CARD_PARAM))
 
     def static_can_handle(self, param: inspect.Parameter) -> bool | None:
         """Rule out every other annotation and leave the POST check to ``can_handle``.
 
-        A card is owned only while the request carries ``card_id``, so the plan
-        keeps this provider a runtime candidate rather than a terminal, and the
-        compiler never asks a candidate for a compiled filler.
+        A card is owned only while the request carries ``card_id``, so this stays a
+        runtime candidate rather than a compiled terminal.
         """
         return None if get_origin(param.annotation) is DCard else False
 
     def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:
         """Fetch the card matching POST ``card_id``, or raise ``Http404``."""
         (model_cls,) = get_args(param.annotation)
-        pk = context.request.POST.get("card_id")
+        pk = context.request.POST.get(CARD_PARAM)
         try:
             return model_cls.objects.select_related("column__board").get(pk=pk)
         except model_cls.DoesNotExist as exc:

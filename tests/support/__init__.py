@@ -21,6 +21,7 @@ from tests.support.backends import (
     file_components_entry,
     watching_components_entry,
 )
+from tests.support.caches import assert_bounded_by_insert_age
 from tests.support.cases import (
     COERCE_URL_VALUE_CASES,
     URL_BY_ANNOTATION_RESOLVE_CASES,
@@ -56,12 +57,11 @@ from tests.support.helpers import (
     build_mock_http_request,
     counting_provider,
     default_page_router_config,
-    file_router_backend_from_params,
+    file_router,
     file_router_config_entry,
     inspect_parameter,
     named_temp_py,
-    next_framework_settings_component_backends_list,
-    next_framework_settings_for_checks_backends_value,
+    next_framework_settings_stand_in,
     typing_optional,
 )
 from tests.support.pages import (
@@ -91,6 +91,7 @@ from tests.support.patches import (
 )
 from tests.support.ports import IntentOnlyShaper
 from tests.support.routers import (
+    EntryRouter,
     MalformedRootsRouter,
     OddComponentsNameRouter,
     OddSkipNamesRouter,
@@ -119,6 +120,7 @@ __all__ = [
     "CountingWizardBackend",
     "DeferringProvider",
     "DummyComponentsBackend",
+    "EntryRouter",
     "GuardedTenantForm",
     "IntentOnlyShaper",
     "MalformedRootsRouter",
@@ -147,6 +149,7 @@ __all__ = [
     "_minimal_resolver",
     "_resolver_with_form",
     "action_uid",
+    "assert_bounded_by_insert_age",
     "bound_dependency",
     "build_mock_http_request",
     "build_nested_page",
@@ -157,15 +160,14 @@ __all__ = [
     "default_page_router_config",
     "failing_watch_components_entry",
     "file_components_entry",
-    "file_router_backend_from_params",
+    "file_router",
     "file_router_config_entry",
     "handler_declared_here",
     "importable_dir",
     "inspect_parameter",
     "isolated_form_registries",
     "named_temp_py",
-    "next_framework_settings_component_backends_list",
-    "next_framework_settings_for_checks_backends_value",
+    "next_framework_settings_stand_in",
     "partial_meta",
     "partial_request",
     "patch_checks_components_manager",

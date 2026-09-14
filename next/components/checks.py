@@ -222,11 +222,9 @@ def _root_scope_entries(
 def _resolution_is_ordering(first: _RootScopeEntry, second: _RootScopeEntry) -> bool:
     """Whether only registration order decides between two same-named components.
 
-    A `COMPONENT_BACKENDS` root and a page tree score alike, and the resolver
-    hands the page tree the win as a project-local override, so that pair is
-    decided by a rule rather than by order. Two roots of the same kind score
-    alike with nothing left to break the tie, but only where one template can
-    reach both, which for page trees means one tree sitting inside the other.
+    A `COMPONENT_BACKENDS` root and a page tree score alike, but the page tree wins as
+    a project-local override rather than by order, so only two roots of the same kind
+    with reachable scopes fall back to order.
     """
     if first.everywhere != second.everywhere:
         return False
@@ -345,17 +343,16 @@ def check_component_py_no_pages_context(*args, **kwargs) -> list[CheckMessage]:
 def check_component_context_registration_files(*args, **kwargs) -> list[CheckMessage]:
     """Flag a `@component.context` no component render collects (`next.E075`).
 
-    A registration keys on the file declaring the callable, so decorating an
-    imported helper binds it to that module, and decorating a callable from a
-    sibling `component.py` binds it to that other component.
+    A registration keys on the file declaring the callable, so decorating an imported
+    helper or a sibling `component.py` callable binds it to that other module instead.
     """
     configs = next_framework_settings.COMPONENT_BACKENDS
     if not isinstance(configs, list) or not configs:
         return []
 
     for backend in _checked_backends():
-        # Called for the import it performs, which is what runs the
-        # decorators this check then reads out of the registry.
+        # Called for the import it performs, which is what runs the decorators this
+        # check then reads out of the registry.
         backend.import_component_modules()
 
     return registration_file_errors(

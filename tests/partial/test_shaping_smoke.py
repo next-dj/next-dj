@@ -85,12 +85,7 @@ class TestCsrfMetaRidesEveryShape:
 
 @pytest.mark.django_db()
 class TestWizardAdvanceMorphsTheNextStepZone:
-    """A partial step advance morphs the master zone of the next step.
-
-    The wizard page declares the `wizard-zone` master. A valid first step
-    advances without a redirect, the second wizard binds to the next step
-    page and renders the unbound scope form into a zone morph.
-    """
+    """A partial step advance morphs the master zone of the next step."""
 
     def test_advance_returns_a_zone_morph_envelope(
         self, next_client: NextClient

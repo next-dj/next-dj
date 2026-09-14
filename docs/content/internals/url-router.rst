@@ -37,7 +37,7 @@ Modules
    ``RouterBackend`` is the abstract contract.
    Its concrete ``page_roots``, ``components_folder_name``, and ``skip_dir_names`` methods form the route introspection contract described below.
    ``FileRouterBackend`` implements file based routing.
-   ``RouterFactory`` looks up backends by dotted path.
+   ``RouterFactory`` builds the router one entry names, for the callers that build one at a time.
 
 ``next.urls.parser``.
    Turns directory names into URL patterns.
@@ -150,7 +150,7 @@ Extension points
 ----------------
 
 - Subclass ``RouterBackend`` to feed the resolver from a different source, or subclass ``FileRouterBackend`` to add patterns or augment naming on the file-based backend.
-- Register a custom backend in ``RouterFactory`` and reference it through the settings dotted path.
+- Reference a custom backend through its dotted path under ``PAGE_BACKENDS``, and take the entry as the single constructor argument.
 - Subscribe to ``route_registered`` to observe each new pattern.
   It fires once per discovered pattern with ``sender=FileRouterBackend`` and the ``url_path`` and ``file_path`` keyword arguments.
   See :doc:`/content/ref/signals`.

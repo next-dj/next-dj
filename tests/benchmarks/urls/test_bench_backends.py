@@ -4,32 +4,23 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from next.urls import FileRouterBackend
 from tests.benchmarks.factories import build_pages_tree
-from tests.support import importable_dir
+from tests.support import file_router, importable_dir
 
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
+    from next.urls import FileRouterBackend
+
 
 def _router_for(tree: Path) -> FileRouterBackend:
-    return FileRouterBackend(
-        app_dirs=False,
-        extra_root_paths=[tree],
-        skip_dir_names=frozenset(),
-        components_folder_name="_components",
-    )
+    return file_router(app_dirs=False, dirs=[tree])
 
 
 def _app_dirs_router() -> FileRouterBackend:
-    return FileRouterBackend(
-        app_dirs=True,
-        extra_root_paths=[],
-        skip_dir_names=frozenset(),
-        components_folder_name="_components",
-    )
+    return file_router(app_dirs=True)
 
 
 def _write_apps(
@@ -74,9 +65,8 @@ def installed_many_apps(tmp_path: Path, settings) -> Iterator[None]:
 class TestBenchFileRouter:
     """A fresh backend per round, because the second call is a cache copy.
 
-    The tree walk runs once per backend and every later `generate_urls` copies
-    `_root_patterns_cache`, so timing a reused backend times a list copy of the
-    leaf count instead of the discovery these sizes exist to measure.
+    `generate_urls` copies `_root_patterns_cache` after the first tree walk,
+    so reusing a backend would time a list copy instead of the discovery.
     """
 
     @pytest.mark.benchmark(group="urls.backends")

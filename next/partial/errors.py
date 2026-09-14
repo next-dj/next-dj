@@ -10,9 +10,8 @@ if TYPE_CHECKING:
 class UnknownZoneError(LookupError):
     """Raised when a partial request names a zone the page does not declare.
 
-    The unified view turns this into a 400 before any zone renders, so a
-    typo or a stale client never trips a partial render. The message names
-    the declared zones so a builder-path typo points at what is available.
+    The unified view turns this into a 400 before any zone renders, and the message
+    names the declared zones so a typo points at what is available.
     """
 
     def __init__(self, zone_name: str, declared: tuple[str, ...] = ()) -> None:
@@ -80,9 +79,8 @@ class BuiltinPatchOpError(ValueError):
 class ReservedEventNameError(ValueError):
     """Raised when `event()` names a framework-owned client-bus event.
 
-    The `ready` and `context-updated` events and the `partial:` and
-    `next:` prefixes belong to the runtime lifecycle, so an app event under
-    one of those names is refused rather than forging a framework signal.
+    The `ready`/`context-updated` events and the `partial:`/`next:` prefixes are
+    runtime-owned, refused here rather than letting an app event forge one.
     """
 
     def __init__(self, name: str) -> None:
@@ -116,10 +114,8 @@ class ForeignPageNotAuthorizedError(PermissionError):
 class DynamicForeignPageError(ValueError):
     """Raised when an OOB morph names a foreign page with a `render()` body.
 
-    A `render()` string body never reaches the composed-template cache, so
-    it has no compiled source to render a standalone zone against. The OOB
-    view branch refuses the same shape with a 400, so the builder refuses
-    it here rather than morphing the page's stale static template.
+    A `render()` body never reaches the composed-template cache, so it has no compiled
+    source for a standalone zone morph. The OOB view branch refuses the same shape.
     """
 
     def __init__(self, page_path: "Path") -> None:
@@ -175,9 +171,7 @@ class ReservedContextKeyError(ValueError):
 class UnknownDedupeError(ValueError):
     """Raised when a merge op names a dedupe strategy the client cannot apply.
 
-    The client keys a merge row by `data-next-key` then `id`, so only
-    `key` and `id` mean anything on the wire, an unknown value is refused
-    at the builder rather than dropped to a silent no-dedup downstream.
+    The client keys a merge row by `data-next-key` then `id`, its only meaningful pair.
     """
 
     def __init__(self, dedupe: str) -> None:
@@ -207,9 +201,7 @@ class CrossSiteHrefError(ValueError):
 class LayerHrefWithoutZoneError(ValueError):
     """Raised when a layer seeds an href but names no zone to load it into.
 
-    The client fetch path needs a zone to know which fragment of the href
-    to pull, so an href without one would silently open an empty modal,
-    which is a caller bug refused at the builder.
+    The client fetch needs a zone to pull the fragment, else it opens an empty modal.
     """
 
     def __init__(self, href: str) -> None:

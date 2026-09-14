@@ -1,28 +1,17 @@
 """Pluggable backend contract and Django-staticfiles default implementation.
 
-The default backend resolves URLs through Django staticfiles, so manifest hashing, S3
-storage, and CDN configuration from Django settings apply automatically.
-
-The abstract `StaticBackend` only mandates `register_file`. Renderer methods are
-concrete on the default backend and selected per asset by `KindRegistry.renderer(kind)`.
-Custom backends extend the surface by adding more named methods such as
-`render_babel_script_tag` and registering kinds that point to them.
-
-Instances are built from `NEXT_FRAMEWORK['STATIC_BACKENDS']` entries by the static
-manager, which emits the `backend_loaded` signal for each one so user code may react to
-backend construction. The manager also drives `forget_urls` over that same list whenever
-a setting rebuilds the storage the memoised URLs were resolved against.
+The default backend resolves URLs through Django staticfiles,
+so manifest, S3, and CDN settings apply automatically.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections import OrderedDict
 from typing import TYPE_CHECKING, Any, ClassVar, override
 
 from django.contrib.staticfiles.storage import staticfiles_storage
 
-from next.utils import store_capped
+from next.caches import BoundedCache
 
 from .assets import StaticNamespace
 
@@ -34,10 +23,6 @@ if TYPE_CHECKING:
     from django.http import HttpRequest
 
 
-# Bounded against a backend asked for logical names without end, not as an eviction
-# policy, so the stalest insert goes and a warm tag reorders nothing.
-_URL_CACHE_MAX_SIZE = 2048
-
 # Changing one of these rebuilds `staticfiles_storage`, so every URL resolved
 # through the manifest it held answers for a manifest that is gone.
 MANIFEST_SETTINGS = frozenset({"STATIC_ROOT", "STATIC_URL", "STORAGES"})
@@ -46,27 +31,16 @@ MANIFEST_SETTINGS = frozenset({"STATIC_ROOT", "STATIC_URL", "STORAGES"})
 class StaticBackend(ABC):
     """Pluggable strategy for resolving asset files to URLs and rendering tags.
 
-    The constructor accepts the full backend entry from `STATIC_BACKENDS`, which has the
-    shape `{"BACKEND": "...", "OPTIONS": {...}}`. The base class stores the mapping on
-    the `config` property. Subclasses are free to read any keys they expose to users.
-
-    The only abstract requirement is `register_file`. The concrete `asset_url`
-    hook rewrites a resolved URL per request and covers every asset the pipeline
-    renders. Renderer methods are added by subclasses and selected per asset
-    through `KindRegistry.renderer(kind)`. The default backend below ships
-    `render_link_tag` and `render_script_tag` for the built-in `css` and `js`
-    kinds. Custom backends register additional kinds and expose matching methods.
-
-    The base also owns the memo a backend fills with what it resolved, keyed by
-    logical name and suffix, because a backend that remembers a URL needs the
-    framework to tell it when the storage behind that URL is rebuilt. The
-    `forget_urls` hook is that telling, and the static manager drives it.
+    The base class memoises what each backend resolves, so `forget_urls` exists for
+    the framework to tell it when the storage behind those URLs is rebuilt.
     """
 
     def __init__(self, config: Mapping[str, Any] | None = None) -> None:
         """Store the raw config mapping and prime the URL memo it may fill."""
         self._config: Mapping[str, Any] = config or {}
-        self._url_cache: OrderedDict[tuple[str, str], str] = OrderedDict()
+        # Bounded against a backend asked for logical names without end rather than
+        # as a policy, so the stalest insert goes and a warm tag reorders nothing.
+        self._url_cache: BoundedCache[tuple[str, str], str] = BoundedCache()
 
     @property
     def config(self) -> Mapping[str, Any]:
@@ -76,11 +50,8 @@ class StaticBackend(ABC):
     def asset_url(self, url: str, *, request: HttpRequest | None = None) -> str:
         """Return the public URL of an already-resolved asset for this render.
 
-        The default answer is the URL as `register_file` resolved it. A backend
-        whose URLs vary per request, such as a per-tenant prefix, overrides this
-        one hook so the rewrite reaches every rendered asset and the `next.min.js`
-        runtime alike, which no renderer method can do because the runtime tag
-        and its preload hint are built by the framework.
+        Overriding this one hook lets a per-request scheme, such as a per-tenant
+        prefix, reach even the framework-built `next.min.js` runtime tag.
         """
         del request
         return url
@@ -88,9 +59,8 @@ class StaticBackend(ABC):
     def forget_urls(self) -> None:
         """Drop every memoised URL, so the next lookup resolves it again.
 
-        A backend that remembers what it resolved somewhere other than the
-        base memo overrides this one hook, so a setting rebuilding the storage
-        behind those URLs reaches it whatever shape the memo has.
+        A backend that remembers resolved URLs outside the base memo overrides this
+        hook, so a storage rebuild reaches it regardless of the memo's shape.
         """
         self._url_cache.clear()
 
@@ -98,24 +68,15 @@ class StaticBackend(ABC):
     def register_file(self, source_path: Path, logical_name: str, kind: str) -> str:
         """Register a co-located asset file and return its public URL.
 
-        The `source_path` argument is the absolute path to the source file on
-        disk. The `logical_name` argument is the path without an extension,
-        for example `"about"` or `"components/card"`. The `kind` argument
-        must be a kind registered in the default kind registry. The method
-        raises `RuntimeError` when the asset cannot be resolved to a URL.
-        Discovery asks on every render rather than remembering the answer, so a
-        backend is free to resolve the same file to a different URL per request.
+        Discovery asks on every render rather than caching the answer, so a backend
+        may resolve the same file to a different URL per request.
         """
 
 
 class StaticFilesBackend(StaticBackend):
     """Resolve co-located asset URLs through Django staticfiles.
 
-    Assets live in the `next/` staticfiles namespace so manifest
-    storage, S3 storage, and CDN settings apply automatically.
-
-    The `css_tag` and `js_tag` options hold format strings for the `<link>` and
-    `<script>` tags, each needing `{url}` and free to carry extra attributes.
+    `css_tag`, `js_tag`, and `module_tag` hold format strings needing `{url}`.
     """
 
     _DEFAULT_CSS_TAG: ClassVar[str] = '<link rel="stylesheet" href="{url}">'
@@ -156,7 +117,7 @@ class StaticFilesBackend(StaticBackend):
                 "finder is enabled."
             )
             raise RuntimeError(msg) from e
-        store_capped(self._url_cache, cache_key, url, _URL_CACHE_MAX_SIZE)
+        self._url_cache[cache_key] = url
         return url
 
     def render_link_tag(self, url: str, *, request: HttpRequest | None = None) -> str:

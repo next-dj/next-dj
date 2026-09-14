@@ -25,13 +25,7 @@ class OriginSource(enum.StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class PartialOrigin:
-    """The host page an out-of-band morph addresses, with its URL kwargs.
-
-    `page_path` names the page source whose zone a `done` handler morphs
-    out of band, `url_kwargs` are that page's captured URL parameters, and
-    `source` records whether the host page came from the `X-Next-Origin`
-    header or fell back to the posted form origin.
-    """
+    """The host page an out-of-band morph addresses, with its URL kwargs."""
 
     page_path: "Path | None"
     url_kwargs: dict[str, object]

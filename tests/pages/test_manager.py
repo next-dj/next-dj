@@ -19,6 +19,7 @@ from next.pages.loaders import (
     TemplateLoader,
     _load_python_module,
     _load_python_module_memo,
+    build_registered_loaders,
 )
 from next.pages.registry import PageContextRegistry
 from next.static import default_manager as static_default_manager
@@ -35,7 +36,7 @@ class TestPage:
 
     def test_init(self, page_instance) -> None:
         """A fresh ``Page`` starts with empty registries and its own layout loader."""
-        assert page_instance._template_registry == {}
+        assert not page_instance._templates.composed
         assert isinstance(page_instance._context_manager, PageContextRegistry)
         assert isinstance(page_instance._layout_loader, LayoutTemplateLoader)
 
@@ -46,8 +47,8 @@ class TestPage:
 
         page_instance.register_template(file_path, template_str)
 
-        assert file_path in page_instance._template_registry
-        assert page_instance._template_registry[file_path] == template_str
+        assert file_path in page_instance._templates.composed
+        assert page_instance._templates.composed[file_path] == template_str
 
     def test_clear_template_caches_recomposes_a_rewritten_page(
         self, page_instance, tmp_path
@@ -70,18 +71,18 @@ class TestPage:
         """One call drops every composed layer and the mtimes behind them."""
         file_path = Path("/test/path/page.py")
         page_instance.register_template(file_path, "<p>x</p>")
-        page_instance._compiled_registry[file_path] = Template("<p>x</p>")
-        page_instance._template_source_mtimes[file_path] = {}
-        page_instance._skeleton_registry[file_path] = "<p>x</p>"
-        page_instance._skeleton_source_mtimes[file_path] = {}
+        page_instance._templates.compiled[file_path] = Template("<p>x</p>")
+        page_instance._templates.composed_sources[file_path] = {}
+        page_instance._templates.skeleton[file_path] = "<p>x</p>"
+        page_instance._templates.skeleton_sources[file_path] = {}
 
         page_instance.clear_template_caches()
 
-        assert page_instance._template_registry == {}
-        assert page_instance._compiled_registry == {}
-        assert page_instance._template_source_mtimes == {}
-        assert page_instance._skeleton_registry == {}
-        assert page_instance._skeleton_source_mtimes == {}
+        assert not page_instance._templates.composed
+        assert not page_instance._templates.compiled
+        assert not page_instance._templates.composed_sources
+        assert not page_instance._templates.skeleton
+        assert not page_instance._templates.skeleton_sources
 
     @pytest.mark.parametrize(
         ("decorator_type", "expected_key"),
@@ -370,9 +371,9 @@ class TestPageHasTemplateAndLazyRender:
         page_file = tmp_path / "page.py"
         page_file.write_text("y = 2")
         (tmp_path / "template.djx").write_text("<h1>{{ title }}</h1>")
-        assert page_file not in page_instance._template_registry
+        assert page_file not in page_instance._templates.composed
         result = page_instance.render(page_file, title="Lazy")
-        assert page_file in page_instance._template_registry
+        assert page_file in page_instance._templates.composed
         assert "Lazy" in result
 
     def test_render_with_no_body_source_returns_empty_block(
@@ -454,16 +455,19 @@ class TestGlobalPageInstance:
         The global `page` singleton holds providers registered at URL-conf build time,
         so a bare clear would leave a later render on the same xdist worker with none.
         """
-        template_snapshot = dict(page._template_registry)
+        template_snapshot = {
+            path: page._templates.composed[path] for path in page._templates.composed
+        }
         context_snapshot = {
             path: dict(entries)
             for path, entries in page._context_manager._context_registry.items()
         }
-        page._template_registry.clear()
+        page._templates.composed.clear()
         page._context_manager._context_registry.clear()
         yield
-        page._template_registry.clear()
-        page._template_registry.update(template_snapshot)
+        page._templates.composed.clear()
+        for path, source in template_snapshot.items():
+            page._templates.composed[path] = source
         page._context_manager._context_registry.clear()
         page._context_manager._context_registry.update(context_snapshot)
 
@@ -471,8 +475,8 @@ class TestGlobalPageInstance:
         """The exported ``page`` is a ``Page`` carrying the same registries."""
         assert page is not None
         assert isinstance(page, Page)
-        assert page._template_registry == {}
-        assert page._context_manager._context_registry == {}
+        assert not page._templates.composed
+        assert not page._context_manager._context_registry
 
     def test_context_alias(self) -> None:
         """The exported ``context`` is the singleton's own bound decorator."""
@@ -483,8 +487,8 @@ class TestGlobalPageInstance:
         template_str = "Global template: {{ message }}"
         page.register_template(global_file_path, template_str)
 
-        assert global_file_path in page._template_registry
-        assert page._template_registry[global_file_path] == template_str
+        assert global_file_path in page._templates.composed
+        assert page._templates.composed[global_file_path] == template_str
 
     def test_global_page_context_registration(self) -> None:
         """A context function registered on the singleton lands in its registry."""
@@ -644,7 +648,7 @@ class TestLayoutIntegration:
         assert "<html><body>" in result
         assert "<h1>Hi</h1>" in result
         assert "</body></html>" in result
-        assert page_file in page_instance._template_registry
+        assert page_file in page_instance._templates.composed
 
     def test_render_with_layout_template_detection(
         self, page_instance, tmp_path
@@ -702,11 +706,11 @@ class TestUnifiedViewBodyResolution:
 
     @pytest.fixture(autouse=True)
     def _isolate(self):
-        page._template_registry.clear()
-        page._template_source_mtimes.clear()
+        page._templates.composed.clear()
+        page._templates.composed_sources.clear()
         yield
-        page._template_registry.clear()
-        page._template_source_mtimes.clear()
+        page._templates.composed.clear()
+        page._templates.composed_sources.clear()
 
     def test_template_attribute_with_ancestor_layout_composes(
         self, page_instance, tmp_path
@@ -1118,6 +1122,23 @@ class TestAuthorizationOutcomeBrokenPage:
             page_instance.authorization_outcome(page_file, build_page_request())
 
 
+class TestAuthorizationOutcomeVirtualPage:
+    """`authorization_outcome` on a page whose body comes from `template.djx` alone."""
+
+    def test_a_page_without_a_module_resolves_its_static_body(
+        self, page_instance, tmp_path
+    ) -> None:
+        """A `template.djx`-only page has no module to carry a guard or a render."""
+        (tmp_path / "template.djx").write_text("<p>virtual</p>")
+
+        response, dynamic = page_instance.authorization_outcome(
+            tmp_path / "page.py", build_page_request()
+        )
+
+        assert response is None
+        assert dynamic is False
+
+
 class TestLoadStaticBodyEdgeCases:
     """`Page._load_static_body` edge cases."""
 
@@ -1194,15 +1215,14 @@ class TestCustomTemplateLoaderIntegration:
 
     @pytest.fixture(autouse=True)
     def _install_md_loader(self):
-        # the cache is a single-slot holder mutated in place, never rebound,
-        # so a stale value on this worker cannot break the production reads
-        loaders_module._REGISTERED_LOADERS_CACHE["value"] = [_MdLoader()]
-        page._template_registry.clear()
-        page._template_source_mtimes.clear()
-        yield
-        loaders_module._REGISTERED_LOADERS_CACHE["value"] = None
-        page._template_registry.clear()
-        page._template_source_mtimes.clear()
+        with override_settings(
+            NEXT_FRAMEWORK={"TEMPLATE_LOADERS": ["tests.pages.test_manager._MdLoader"]}
+        ):
+            build_registered_loaders.cache_clear()
+            page.clear_template_caches()
+            yield
+        build_registered_loaders.cache_clear()
+        page.clear_template_caches()
 
     def test_custom_loader_body_is_rendered_through_layout(
         self, page_instance, tmp_path
@@ -1246,5 +1266,5 @@ class TestCustomTemplateLoaderIntegration:
         md.write_text("body")
         page_file = tmp_path / "page.py"
         page_file.write_text("")
-        paths = page_instance._get_template_source_paths(page_file)
+        paths = page_instance._templates.source_paths(page_file)
         assert md in paths

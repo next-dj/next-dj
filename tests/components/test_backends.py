@@ -17,7 +17,7 @@ from next.components import (
 from tests.support import (
     DUMMY_COMPONENTS_BACKEND,
     DummyComponentsBackend,
-    next_framework_settings_component_backends_list as _next_framework_settings_component_backends_list,
+    next_framework_settings_stand_in as _stand_in,
 )
 
 
@@ -476,8 +476,8 @@ class TestComponentsManagerLoading:
     def test_entry_without_backend_falls_back_to_the_file_backend(self) -> None:
         """An entry naming no ``BACKEND`` still gets the filesystem source."""
         mgr = ComponentsManager()
-        mock_ns = _next_framework_settings_component_backends_list(
-            [{"DIRS": [], "COMPONENTS_DIR": "_components"}]
+        mock_ns = _stand_in(
+            COMPONENT_BACKENDS=[{"DIRS": [], "COMPONENTS_DIR": "_components"}]
         )
         with patch("next.backends.next_framework_settings", mock_ns):
             mgr.reload()
@@ -486,8 +486,10 @@ class TestComponentsManagerLoading:
     def test_backend_receives_its_own_config_entry(self) -> None:
         """The whole entry is handed to the backend constructor."""
         mgr = ComponentsManager()
-        mock_ns = _next_framework_settings_component_backends_list(
-            [{"BACKEND": DUMMY_COMPONENTS_BACKEND, "OPTIONS": {"marker": 7}}]
+        mock_ns = _stand_in(
+            COMPONENT_BACKENDS=[
+                {"BACKEND": DUMMY_COMPONENTS_BACKEND, "OPTIONS": {"marker": 7}}
+            ]
         )
         with patch("next.backends.next_framework_settings", mock_ns):
             mgr.reload()
@@ -498,15 +500,13 @@ class TestComponentsManagerLoading:
     def test_entry_outside_the_family_is_skipped(self) -> None:
         """A class that is no ``ComponentsBackend`` never joins the list."""
         mgr = ComponentsManager()
-        mock_ns = _next_framework_settings_component_backends_list(
-            [{"BACKEND": "builtins.dict"}]
-        )
+        mock_ns = _stand_in(COMPONENT_BACKENDS=[{"BACKEND": "builtins.dict"}])
         with patch("next.backends.next_framework_settings", mock_ns):
             mgr.reload()
         assert mgr._backends == []
 
     def test_dummy_backend_lookups_are_empty(self) -> None:
-        """DummyComponentsBackend does not resolve names and reports no visible components."""
+        """The dummy backend resolves no name and reports no visible component."""
         b = DummyComponentsBackend({})
         assert b.get_component("x", Path("/t.djx")) is None
         assert b.collect_visible_components(Path("/t.djx")) == {}
@@ -518,14 +518,14 @@ class TestComponentsManagerLoading:
     def test_manager_skips_non_list_config_and_non_dict_entries(self) -> None:
         """If ``COMPONENT_BACKENDS`` is not a list, return early. Non-dict entries are skipped."""
         mgr = ComponentsManager()
-        mock_ns = _next_framework_settings_component_backends_list("bad")
+        mock_ns = _stand_in(COMPONENT_BACKENDS="bad")
         with patch("next.backends.next_framework_settings", mock_ns):
             mgr.reload()
             assert mgr._backends == []
 
         mgr2 = ComponentsManager()
-        mock_ns2 = _next_framework_settings_component_backends_list(
-            [
+        mock_ns2 = _stand_in(
+            COMPONENT_BACKENDS=[
                 None,
                 {
                     "BACKEND": "next.components.FileComponentsBackend",

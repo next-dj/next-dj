@@ -14,9 +14,9 @@ from next.deps import (
     ResolutionContext,
     UnknownDependencyError,
 )
+from next.deps.introspect import introspect_key
 from next.deps.markers import DependsProvider
 from next.deps.plan import EMPTY_PLAN, compile_plan
-from next.deps.resolver import _introspect_key
 from next.forms import DForm
 from next.forms.markers import CleanedDataProvider, FormProvider
 from next.pages.context import Context, ContextByDefaultProvider, ContextByNameProvider
@@ -493,7 +493,7 @@ class TestGoldenMatrix:
     def test_non_introspectable_callable_yields_empty(self) -> None:
         planned = DependencyResolver()
         assert planned.resolve_dependencies(int) == {}
-        assert planned._plan_cache[_introspect_key(int)][1] is EMPTY_PLAN
+        assert planned._plan_cache[introspect_key(int)][1] is EMPTY_PLAN
 
 
 class TestTemplateContextGoldenMatrix:
@@ -524,11 +524,11 @@ class TestTemplateContextGoldenMatrix:
         """The kwargs path and the component path read the same cache entry."""
         planned = _with_theme()
         planned.resolve_dependencies(_markers, _context_data={"page_value": 42})
-        cached = planned._plan_cache[_introspect_key(_markers)][1]
+        cached = planned._plan_cache[introspect_key(_markers)][1]
         planned.resolve_with_template_context(
             _markers, template_context={"page_value": 42}
         )
-        assert planned._plan_cache[_introspect_key(_markers)][1] is cached
+        assert planned._plan_cache[introspect_key(_markers)][1] is cached
 
 
 class TestPlanShape:
@@ -536,7 +536,7 @@ class TestPlanShape:
 
     def _plan(self, planned: DependencyResolver, func) -> dict[str, PlanEntry]:
         planned.resolve_dependencies(func)
-        return plan_by_name(planned._plan_cache[_introspect_key(func)][1])
+        return plan_by_name(planned._plan_cache[introspect_key(func)][1])
 
     def test_marker_parameters_end_in_a_terminal(self) -> None:
         planned = _with_theme()
@@ -580,7 +580,7 @@ class TestPlanShape:
     def test_fallback_is_the_default_object_itself(self) -> None:
         planned = DependencyResolver()
         planned.resolve_dependencies(_uncovered)
-        entries = plan_by_name(planned._plan_cache[_introspect_key(_uncovered)][1])
+        entries = plan_by_name(planned._plan_cache[introspect_key(_uncovered)][1])
         assert entries["plain"].fallback is None
         assert entries["with_default"].fallback == 7
         default = inspect.signature(_uncovered).parameters["with_default"].default
@@ -639,7 +639,7 @@ class TestPlanShape:
     def test_entry_carries_the_resolved_annotation(self) -> None:
         planned = DependencyResolver()
         planned.resolve_dependencies(_string_url)
-        (entry,) = plan_entries(planned._plan_cache[_introspect_key(_string_url)][1])
+        (entry,) = plan_entries(planned._plan_cache[introspect_key(_string_url)][1])
         assert entry.param.annotation is int
         assert entry.param.name == "user_id"
 
@@ -683,7 +683,7 @@ class TestInvalidation:
         assert planned.resolve_dependencies(_plain) == {"plain": None}
         assert planned.resolve_dependencies(_plain) == {"plain": None}
         assert len(compiles) == 1
-        entry = planned._plan_cache[_introspect_key(_plain)]
+        entry = planned._plan_cache[introspect_key(_plain)]
         assert entry[0] == planned._providers_version == 1
 
     def test_mutations_bump_and_recompile(self, compiles) -> None:
@@ -730,11 +730,11 @@ class TestInvalidation:
         with pytest.raises(UnknownDependencyError):
             planned.resolve_dependencies(_later)
         version = planned._providers_version
-        entry = planned._plan_cache[_introspect_key(_later)]
+        entry = planned._plan_cache[introspect_key(_later)]
         planned.register_dependency("later", lambda: "bound")
         assert planned.resolve_dependencies(_later) == {"value": "bound"}
         assert planned._providers_version == version
-        assert planned._plan_cache[_introspect_key(_later)] is entry
+        assert planned._plan_cache[introspect_key(_later)] is entry
 
 
 class TestReplay:
@@ -965,7 +965,7 @@ class _ValueCompileProvider(_NullCompileProvider):
 def _fillers(planned: DependencyResolver, func) -> dict[str, object]:
     return {
         name: fill
-        for name, _c, _fb, _p, fill in planned._plan_cache[_introspect_key(func)][1]
+        for name, _c, _fb, _p, fill in planned._plan_cache[introspect_key(func)][1]
     }
 
 

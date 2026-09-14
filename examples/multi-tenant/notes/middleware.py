@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 from django.conf import settings
 from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseRedirect
+from django.utils.http import url_has_allowed_host_and_scheme
 
 from notes.models import Tenant
 
@@ -18,6 +19,7 @@ HEADER_NAME = "HTTP_X_TENANT"
 QUERY_PARAM = "tenant"
 COOKIE_NAME = "next_tenant"
 TENANT_STATIC_PREFIX = "/_t/"
+HOME_PATH = "/"
 MISSING_TENANT_BODY = "Missing X-Tenant header."
 MISSING_TENANT_DEBUG_HINT = " In DEBUG you may also pass ?tenant=<slug> for a demo."
 UNKNOWN_TENANT_BODY = "Unknown tenant."
@@ -31,19 +33,8 @@ def is_debug_fallback_enabled() -> bool:
 class TenantMiddleware:
     """Resolve the active tenant for every request out of the `X-Tenant` header.
 
-    A request header is attacker-controlled, so this shape isolates tenants only behind
-    a reverse proxy that owns the header. That proxy has to be the single route to the
-    application, has to derive the slug from something it owns rather than from
-    anything the client sent, and has to set the header on every request it forwards so
-    an inbound copy is overwritten instead of passed along. A proxy that fills the
-    header in only when it is absent keeps the forged value, and an application exposed
-    directly hands one tenant's notes to anybody who names another tenant's slug.
-
-    Reading the tenant from the signed-in user's membership rows or from the request
-    host needs no proxy, and the how-to on scoping requests per tenant weighs the three
-    shapes against each other. The DEBUG fallback here additionally accepts a
-    `?tenant=<slug>` query parameter and a `next_tenant` cookie so the demo is
-    browsable without a header-injecting extension, and it is off in production.
+    Safe only behind a reverse proxy that is the sole route in, derives the slug
+    itself, and always overwrites rather than fills in a client-supplied header.
     """
 
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
@@ -70,6 +61,8 @@ class TenantMiddleware:
 
         if debug_query:
             response = HttpResponseRedirect(_strip_tenant_query(request))
+            # No `secure=True`, because the fallback that writes this cookie runs only
+            # under DEBUG, where the demo is served over plain HTTP.
             response.set_cookie(COOKIE_NAME, slug, httponly=True, samesite="Lax")
             return response
 
@@ -105,12 +98,16 @@ def _resolve_tenant_slug(request: HttpRequest) -> tuple[str | None, bool, bool]:
 
 
 def _strip_tenant_query(request: HttpRequest) -> str:
-    """Return the request path with the `tenant` query parameter removed."""
+    """Return the request path with the `tenant` query parameter removed.
+
+    A path the client sent as `//host/...` is a protocol-relative URL in a `Location`
+    header, so the target passes the same vetting Django's own `LoginView` applies.
+    """
     remaining = request.GET.copy()
     remaining.pop(QUERY_PARAM, None)
-    # A path the client sent as `//host/...` is a protocol-relative URL in a Location
-    # header and would redirect off-site, so the leading slashes collapse to one.
-    path = "/" + request.path.lstrip("/")
+    target = request.path
     if remaining:
-        return f"{path}?{remaining.urlencode()}"
-    return path
+        target = f"{target}?{remaining.urlencode()}"
+    if not url_has_allowed_host_and_scheme(target, allowed_hosts=None):
+        return HOME_PATH
+    return target

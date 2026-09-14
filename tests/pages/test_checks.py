@@ -28,12 +28,13 @@ from next.pages.checks import (
 )
 from next.pages.manager import page
 from next.pages.registry import PageContextRegistry
-from next.urls import FileRouterBackend, PageRoot, RouterBackend
+from next.urls import PageRoot, RouterBackend
 from tests.support import (
     MalformedRootsRouter,
     RaisingRootsRouter,
     RootPagesRouter,
     SkippingRouter,
+    file_router,
     importable_dir,
     patch_checks_router_manager,
     patch_checks_router_manager_with_routers,
@@ -163,8 +164,36 @@ class TestLayoutChecks:
                 "next.W078",
                 "Composition fills the first one",
             ),
+            (
+                "<html>{% verbatim %}{% template %}{% endverbatim %}</html>",
+                "next.W001",
+                "carries no {% template %} placeholder",
+            ),
+            (
+                "<html>{% comment %}{% template %}{% endcomment %}</html>",
+                "next.W001",
+                "carries no {% template %} placeholder",
+            ),
+            (
+                (
+                    "<html>{% verbatim %}{% template %}{% endverbatim %}"
+                    "{% template %}</html>"
+                ),
+                None,
+                None,
+            ),
         ],
-        ids=["single", "padded", "paired", "missing", "repeated", "mixed_forms"],
+        ids=[
+            "single",
+            "padded",
+            "paired",
+            "missing",
+            "repeated",
+            "mixed_forms",
+            "verbatim",
+            "commented",
+            "verbatim_beside_real",
+        ],
     )
     def test_check_layout_templates_scenarios(
         self, tmp_path, layout_body, expected_id, msg_substring
@@ -301,7 +330,7 @@ class TestMemoAndBrokenPages:
         """A syntactically invalid page.py surfaces as E017 only, never E012."""
         page_file = tmp_path / "page.py"
         page_file.write_text("def render( invalid syntax {\n")
-        loaders_module._MODULE_MEMO.pop(page_file, None)
+        loaders_module._MODULE_MEMO.pop(page_file)
 
         with patch_checks_router_manager_with_routers(routers=[_AppRouter(tmp_path)]):
             messages = check_page_functions(None)
@@ -312,7 +341,7 @@ class TestMemoAndBrokenPages:
         """A page.py with a real render body raises no E012."""
         page_file = tmp_path / "page.py"
         page_file.write_text('def render(request, **kwargs):\n    return "x"\n')
-        loaders_module._MODULE_MEMO.pop(page_file, None)
+        loaders_module._MODULE_MEMO.pop(page_file)
 
         with patch_checks_router_manager_with_routers(routers=[_AppRouter(tmp_path)]):
             messages = check_page_functions(None)
@@ -323,7 +352,7 @@ class TestMemoAndBrokenPages:
         """A valid but bodyless page.py keeps the genuine no-body-source E012."""
         page_file = tmp_path / "page.py"
         page_file.write_text("")
-        loaders_module._MODULE_MEMO.pop(page_file, None)
+        loaders_module._MODULE_MEMO.pop(page_file)
 
         with patch_checks_router_manager_with_routers(routers=[_AppRouter(tmp_path)]):
             messages = check_page_functions(None)
@@ -334,7 +363,7 @@ class TestMemoAndBrokenPages:
         """Two check passes over one page.py exec the module at most once per mtime."""
         page_file = tmp_path / "page.py"
         page_file.write_text('template = "hi"\n')
-        loaders_module._MODULE_MEMO.pop(page_file, None)
+        loaders_module._MODULE_MEMO.pop(page_file)
 
         real_load = loaders_module._load_python_module
         calls: list[Path] = []
@@ -348,7 +377,7 @@ class TestMemoAndBrokenPages:
         router = _AppRouter(tmp_path)
         with (
             patch_checks_router_manager_with_routers(routers=[router]),
-            patch("next.checks.common.get_pages_directories", return_value=[tmp_path]),
+            patch("next.discovery.get_pages_directories", return_value=[tmp_path]),
         ):
             check_page_functions(None)
             check_context_functions(None)
@@ -364,9 +393,7 @@ class TestCheckTemplateLoaders:
         return list(check_template_loaders())
 
     def _reset_loader_cache(self) -> None:
-        # the cache is a single-slot holder mutated in place, never rebound,
-        # so a stale None on this worker cannot break the production reads
-        loaders_module._REGISTERED_LOADERS_CACHE["value"] = None
+        loaders_module.build_registered_loaders.cache_clear()
 
     @override_settings(
         NEXT_FRAMEWORK={"TEMPLATE_LOADERS": ["next.pages.loaders.DjxTemplateLoader"]}
@@ -565,6 +592,66 @@ def get_context_data():
             errors = check_context_functions(None)
             assert errors == []
 
+    def test_string_annotation_reads_as_the_type_it_names(self, tmp_path) -> None:
+        """A quoted `dict` annotation resolves, so a correct page draws no error."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text(
+            "from next.pages import context\n\n"
+            "@context\n"
+            'def data() -> "dict":\n'
+            "    return {}\n"
+        )
+        loaders_module._MODULE_MEMO.pop(page_file)
+
+        with patch_checks_router_manager(pages_directory=tmp_path):
+            assert check_context_functions(None) == []
+
+    def test_deferred_annotations_read_as_the_type_they_name(self, tmp_path) -> None:
+        """A page.py deferring its annotations keeps a working DI and a clean check."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text(
+            "from __future__ import annotations\n\n"
+            "from next.pages import context\n\n"
+            "@context\n"
+            "def data() -> dict:\n"
+            "    return {}\n"
+        )
+        loaders_module._MODULE_MEMO.pop(page_file)
+
+        with patch_checks_router_manager(pages_directory=tmp_path):
+            assert check_context_functions(None) == []
+
+    def test_string_annotation_naming_no_type_is_left_alone(self, tmp_path) -> None:
+        """An annotation nothing resolves is no ground to block the page."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text(
+            "from next.pages import context\n\n"
+            "@context\n"
+            'def data() -> "Nowhere":\n'
+            "    return {}\n"
+        )
+        loaders_module._MODULE_MEMO.pop(page_file)
+
+        with patch_checks_router_manager(pages_directory=tmp_path):
+            assert check_context_functions(None) == []
+
+    def test_string_annotation_naming_a_non_mapping_still_errors(
+        self, tmp_path
+    ) -> None:
+        """The quoted spelling of a wrong return type reports as the bare one does."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text(
+            "from next.pages import context\n\n"
+            "@context\n"
+            'def data() -> "str":\n'
+            "    return {}\n"
+        )
+        loaders_module._MODULE_MEMO.pop(page_file)
+
+        with patch_checks_router_manager(pages_directory=tmp_path):
+            errors = check_context_functions(None)
+        assert [error.id for error in errors] == ["next.E029"]
+
     def test_e029_on_page_context_attribute_form(self, tmp_path) -> None:
         """E029 fires on the canonical `@page.context` keyless form."""
         page_file = tmp_path / "page.py"
@@ -575,7 +662,7 @@ from next.pages import page
 def get_context_data() -> str:
     return {}
         """)
-        loaders_module._MODULE_MEMO.pop(page_file, None)
+        loaders_module._MODULE_MEMO.pop(page_file)
 
         with patch_checks_router_manager(pages_directory=tmp_path):
             errors = check_context_functions(None)
@@ -592,7 +679,7 @@ from next.pages import context
 async def get_context_data() -> str:
     return {}
         """)
-        loaders_module._MODULE_MEMO.pop(page_file, None)
+        loaders_module._MODULE_MEMO.pop(page_file)
 
         with patch_checks_router_manager(pages_directory=tmp_path):
             errors = check_context_functions(None)
@@ -609,7 +696,7 @@ from next.pages import context as ctx
 def get_context_data() -> str:
     return {}
         """)
-        loaders_module._MODULE_MEMO.pop(page_file, None)
+        loaders_module._MODULE_MEMO.pop(page_file)
 
         with patch_checks_router_manager(pages_directory=tmp_path):
             errors = check_context_functions(None)
@@ -626,7 +713,7 @@ from next.pages import page
 def get_context_data() -> str:
     return {}
         """)
-        loaders_module._MODULE_MEMO.pop(page_file, None)
+        loaders_module._MODULE_MEMO.pop(page_file)
 
         with patch_checks_router_manager(pages_directory=tmp_path):
             first = check_context_functions(None)
@@ -865,7 +952,7 @@ class TestPageModuleImports:
         real.mkdir()
         (real / "page.py").write_text("def render( invalid syntax {\n")
         (tmp_path / "link").symlink_to(real, target_is_directory=True)
-        router = FileRouterBackend(app_dirs=False, extra_root_paths=[tmp_path])
+        router = file_router(app_dirs=False, dirs=[tmp_path])
 
         with patch_checks_router_manager_with_routers(routers=[router]):
             messages = check_page_module_imports(None)
@@ -1160,7 +1247,7 @@ class TestContextChecksDeduplicate:
             "    return {}\n"
         )
         (tmp_path / "link").symlink_to(real, target_is_directory=True)
-        router = FileRouterBackend(app_dirs=False, extra_root_paths=[tmp_path])
+        router = file_router(app_dirs=False, dirs=[tmp_path])
 
         with patch_checks_router_manager_with_routers(routers=[router]):
             messages = check_context_functions(None)
@@ -1183,9 +1270,9 @@ class TestContextRegistrationFileCheck:
             "from tests.support.attribution import handler_declared_here\n\n"
             "context('greeting')(handler_declared_here)\n"
         )
-        loaders_module._MODULE_MEMO.pop(page_file, None)
+        loaders_module._MODULE_MEMO.pop(page_file)
         with (
-            patch.object(page, "_context_manager", PageContextRegistry(None)),
+            patch.object(page, "_context_manager", PageContextRegistry()),
             patch_checks_router_manager(pages_directory=tmp_path),
         ):
             messages = check_context_registration_files(None)
@@ -1205,9 +1292,9 @@ class TestContextRegistrationFileCheck:
             "from donor.page import donated\n\n"
             "context('greeting')(donated)\n"
         )
-        loaders_module._MODULE_MEMO.pop(page_file, None)
+        loaders_module._MODULE_MEMO.pop(page_file)
         with (
-            patch.object(page, "_context_manager", PageContextRegistry(None)),
+            patch.object(page, "_context_manager", PageContextRegistry()),
             patch_checks_router_manager(pages_directory=tmp_path),
             importable_dir(tmp_path),
         ):
@@ -1224,9 +1311,9 @@ class TestContextRegistrationFileCheck:
             "from tests.support.attribution import handler_declared_here\n\n"
             "context('greeting')(functools.partial(handler_declared_here))\n"
         )
-        loaders_module._MODULE_MEMO.pop(page_file, None)
+        loaders_module._MODULE_MEMO.pop(page_file)
         with (
-            patch.object(page, "_context_manager", PageContextRegistry(None)),
+            patch.object(page, "_context_manager", PageContextRegistry()),
             patch_checks_router_manager(pages_directory=tmp_path),
         ):
             messages = check_context_registration_files(None)
@@ -1241,9 +1328,9 @@ class TestContextRegistrationFileCheck:
             "def greeting() -> str:\n"
             "    return 'hi'\n"
         )
-        loaders_module._MODULE_MEMO.pop(page_file, None)
+        loaders_module._MODULE_MEMO.pop(page_file)
         with (
-            patch.object(page, "_context_manager", PageContextRegistry(None)),
+            patch.object(page, "_context_manager", PageContextRegistry()),
             patch_checks_router_manager(pages_directory=tmp_path),
         ):
             messages = check_context_registration_files(None)
@@ -1321,7 +1408,7 @@ class TestRealFileRouterBackend:
     def test_app_tree_and_dirs_root_both_report(self, tmp_path, settings) -> None:
         """An APP_DIRS router reports its app trees and its DIRS roots alike."""
         dirs_root = self._build_project(tmp_path)
-        router = FileRouterBackend(app_dirs=True, extra_root_paths=[dirs_root])
+        router = file_router(app_dirs=True, dirs=[dirs_root])
 
         with importable_dir(tmp_path):
             settings.INSTALLED_APPS = [*settings.INSTALLED_APPS, "shop_app"]
@@ -1340,7 +1427,7 @@ class TestRealFileRouterBackend:
         """A DIRS entry pointing at an app tree does not double every report."""
         self._build_project(tmp_path)
         app_pages = tmp_path / "shop_app" / "pages"
-        router = FileRouterBackend(app_dirs=True, extra_root_paths=[app_pages])
+        router = file_router(app_dirs=True, dirs=[app_pages])
 
         with importable_dir(tmp_path):
             settings.INSTALLED_APPS = [*settings.INSTALLED_APPS, "shop_app"]
@@ -1356,7 +1443,7 @@ class TestRealFileRouterBackend:
         """A DIRS root inside an app tree reaches one page twice, reported once."""
         self._build_project(tmp_path)
         nested = tmp_path / "shop_app" / "pages" / "hollow"
-        router = FileRouterBackend(app_dirs=True, extra_root_paths=[nested])
+        router = file_router(app_dirs=True, dirs=[nested])
 
         with importable_dir(tmp_path):
             settings.INSTALLED_APPS = [*settings.INSTALLED_APPS, "shop_app"]
@@ -1375,9 +1462,7 @@ class TestRealFileRouterBackend:
         app_pages = tmp_path / "shop_app" / "pages"
         (app_pages / "items" / "[id]").mkdir(parents=True)
         (tmp_path / "shop_app" / "__init__.py").write_text("")
-        router = FileRouterBackend(
-            app_dirs=True, extra_root_paths=[app_pages / "items"]
-        )
+        router = file_router(app_dirs=True, dirs=[app_pages / "items"])
 
         with importable_dir(tmp_path):
             settings.INSTALLED_APPS = [*settings.INSTALLED_APPS, "shop_app"]
@@ -1411,7 +1496,7 @@ class TestRealFileRouterBackend:
         """The real discovery of an app tree still surfaces a raising import."""
         dirs_root = self._build_project(tmp_path)
         broken = tmp_path / "shop_app" / "pages" / "broken" / "page.py"
-        router = FileRouterBackend(app_dirs=True, extra_root_paths=[dirs_root])
+        router = file_router(app_dirs=True, dirs=[dirs_root])
 
         with importable_dir(tmp_path):
             settings.INSTALLED_APPS = [*settings.INSTALLED_APPS, "shop_app"]
@@ -1434,7 +1519,7 @@ class TestSkippedDirectoriesLeaveThePageChecks:
     def test_the_components_folder_a_backend_names_is_skipped(self, tmp_path) -> None:
         """A page.py inside the components folder is no route and no report."""
         self._write_bodyless_page(tmp_path, "_components/card")
-        router = FileRouterBackend(app_dirs=False, extra_root_paths=[tmp_path])
+        router = file_router(app_dirs=False, dirs=[tmp_path])
 
         with patch_checks_router_manager_with_routers(routers=[router]):
             assert check_page_functions(None) == []
@@ -1443,9 +1528,7 @@ class TestSkippedDirectoriesLeaveThePageChecks:
     def test_a_dirs_segment_the_file_router_refuses_is_skipped(self, tmp_path) -> None:
         """The skip set the file router builds from DIRS holds for the checks too."""
         self._write_bodyless_page(tmp_path, "drafts/wip")
-        router = FileRouterBackend(
-            app_dirs=False, extra_root_paths=[tmp_path, Path("drafts")]
-        )
+        router = file_router(app_dirs=False, dirs=[tmp_path, Path("drafts")])
 
         with patch_checks_router_manager_with_routers(routers=[router]):
             assert check_page_functions(None) == []
@@ -1592,7 +1675,7 @@ class TestUnroutedWorkingDirectoryPages:
         monkeypatch.chdir(tmp_path)
 
         with patch("next.utils.settings", Mock(BASE_DIR=None)):
-            router = FileRouterBackend(app_dirs=False)
+            router = file_router(app_dirs=False)
             with patch_checks_router_manager_with_routers(routers=[router]):
                 messages = check_unrouted_working_directory_pages(None)
 
@@ -1614,7 +1697,7 @@ class TestUnroutedWorkingDirectoryPages:
         monkeypatch.chdir(tmp_path)
 
         with patch("next.utils.settings", Mock(BASE_DIR=None)):
-            router = FileRouterBackend(app_dirs=False)
+            router = file_router(app_dirs=False)
             with patch_checks_router_manager_with_routers(routers=[router]):
                 functions = check_page_functions(None)
                 structure = check_pages_structure(None)
@@ -1626,7 +1709,7 @@ class TestUnroutedWorkingDirectoryPages:
         directory = self._write_unrouted_tree(tmp_path)
         monkeypatch.chdir(tmp_path)
 
-        router = FileRouterBackend(app_dirs=False, extra_root_paths=[directory])
+        router = file_router(app_dirs=False, dirs=[directory])
         with patch_checks_router_manager_with_routers(routers=[router]):
             assert check_unrouted_working_directory_pages(None) == []
 
@@ -1637,7 +1720,7 @@ class TestUnroutedWorkingDirectoryPages:
         monkeypatch.chdir(tmp_path)
 
         with patch("next.utils.settings", Mock(BASE_DIR=tmp_path)):
-            router = FileRouterBackend(app_dirs=False)
+            router = file_router(app_dirs=False)
             with patch_checks_router_manager_with_routers(routers=[router]):
                 assert check_unrouted_working_directory_pages(None) == []
 
@@ -1647,7 +1730,7 @@ class TestUnroutedWorkingDirectoryPages:
         monkeypatch.chdir(tmp_path)
 
         with patch("next.utils.settings", Mock(BASE_DIR=None)):
-            router = FileRouterBackend(app_dirs=False)
+            router = file_router(app_dirs=False)
             with patch_checks_router_manager_with_routers(routers=[router]):
                 assert check_unrouted_working_directory_pages(None) == []
 
@@ -1660,7 +1743,7 @@ class TestUnroutedWorkingDirectoryPages:
         monkeypatch.chdir(tmp_path)
 
         with patch("next.utils.settings", Mock(BASE_DIR=None)):
-            router = FileRouterBackend(app_dirs=False)
+            router = file_router(app_dirs=False)
             with patch_checks_router_manager_with_routers(routers=[router]):
                 assert check_unrouted_working_directory_pages(None) == []
 
@@ -1672,9 +1755,7 @@ class TestUnroutedWorkingDirectoryPages:
         (app_pages / "page.py").write_text('template = "ok"\n')
         monkeypatch.chdir(tmp_path)
 
-        router = FileRouterBackend(
-            app_dirs=False, extra_root_paths=[tmp_path / "pages" / "pages"]
-        )
+        router = file_router(app_dirs=False, dirs=[tmp_path / "pages" / "pages"])
         with patch_checks_router_manager_with_routers(routers=[router]):
             assert check_unrouted_working_directory_pages(None) == []
 
@@ -1710,7 +1791,7 @@ class TestBracketDirectoryNamesDjangoRefuses:
         directory = tmp_path / name
         directory.mkdir(parents=True)
         (directory / "page.py").write_text('template = "ok"\n')
-        router = FileRouterBackend(app_dirs=False, extra_root_paths=[tmp_path])
+        router = file_router(app_dirs=False, dirs=[tmp_path])
         reset_check_caches()
         with patch_checks_router_manager_with_routers(routers=[router]):
             return check_pages_structure(None)

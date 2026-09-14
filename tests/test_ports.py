@@ -1,15 +1,14 @@
 import inspect
 
 import pytest
+from django.core.exceptions import ImproperlyConfigured
 
 from next.partial.shaper import PartialShaperImpl
 from next.ports import (
     PartialShaper,
-    PartialShaperSlot,
+    PortSlot,
     RouterAccess,
-    RouterAccessSlot,
     StaticAssets,
-    StaticAssetsSlot,
     partial_shaper_slot,
     router_access_slot,
     static_assets_slot,
@@ -50,33 +49,34 @@ class TestUnboundSlot:
     """An unbound slot fails loudly instead of answering None."""
 
     def test_get_raises_before_set(self) -> None:
-        with pytest.raises(RuntimeError, match="unbound"):
-            PartialShaperSlot().get()
+        with pytest.raises(ImproperlyConfigured, match="unbound"):
+            PortSlot("partial shaper").get()
 
     @pytest.mark.parametrize(
-        ("slot_class", "subject"),
-        [
-            (PartialShaperSlot, "partial shaper"),
-            (RouterAccessSlot, "router access port"),
-            (StaticAssetsSlot, "static assets port"),
-        ],
+        "subject", ["partial shaper", "router access port", "static assets port"]
     )
-    def test_each_slot_names_what_is_unbound(self, slot_class, subject) -> None:
-        with pytest.raises(RuntimeError, match=subject):
-            slot_class().get()
+    def test_the_message_names_the_subject_the_slot_was_built_with(
+        self, subject
+    ) -> None:
+        with pytest.raises(ImproperlyConfigured, match=subject):
+            PortSlot(subject).get()
+
+    def test_a_slot_carries_no_instance_dictionary(self) -> None:
+        """Three process-wide singletons, so the slot stays a two-field object."""
+        assert not hasattr(PortSlot("partial shaper"), "__dict__")
 
 
 class TestBoundSlot:
     """A bound slot answers the very object it was given."""
 
     def test_get_returns_the_bound_object(self) -> None:
-        slot = PartialShaperSlot()
+        slot = PortSlot("partial shaper")
         shaper = IntentOnlyShaper()
         slot.set(shaper)
         assert slot.get() is shaper
 
     def test_set_replaces_the_previous_binding(self) -> None:
-        slot = PartialShaperSlot()
+        slot = PortSlot("partial shaper")
         slot.set(IntentOnlyShaper())
         replacement = IntentOnlyShaper()
         slot.set(replacement)
@@ -148,6 +148,21 @@ class TestStaticAssetsPort:
     )
     def test_the_static_manager_matches_the_port(self, name) -> None:
         assert _call_shape(StaticManager, name) == _call_shape(StaticAssets, name)
+
+
+class TestSubscriptedSlotSingletons:
+    """A subscripted slot is the plain holder, so the three singletons behave alike."""
+
+    @pytest.mark.parametrize(
+        "slot",
+        [
+            pytest.param(partial_shaper_slot, id="partial_shaper"),
+            pytest.param(router_access_slot, id="router_access"),
+            pytest.param(static_assets_slot, id="static_assets"),
+        ],
+    )
+    def test_the_process_slots_are_port_slots(self, slot) -> None:
+        assert isinstance(slot, PortSlot)
 
 
 class TestAppComposition:

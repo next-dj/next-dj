@@ -21,12 +21,6 @@ class TestPageContextRegistry:
         """A fresh registry holds no entries."""
         assert context_manager._context_registry == {}
 
-    def test_get_resolver_returns_injected_resolver(self) -> None:
-        """When resolver is injected, _get_resolver() returns it."""
-        r = DependencyResolver()
-        cm = PageContextRegistry(resolver=r)
-        assert cm._get_resolver() is r
-
     @pytest.mark.parametrize(
         ("key", "func_return", "expected_result"),
         [
@@ -173,12 +167,7 @@ class TestPageContextRegistry:
     def test_collect_inherited_context_bounded_depth(
         self, context_manager, tmp_path
     ) -> None:
-        """The ancestor walk is bounded by `MAX_ANCESTOR_WALK_DEPTH`.
-
-        This test fabricates a 70-level deep tree, past the 64 cap,
-        and asserts the call returns in bounded time with an empty
-        merged context rather than iterating all 70 ancestors.
-        """
+        """The ancestor walk is bounded by `MAX_ANCESTOR_WALK_DEPTH`."""
         deep = tmp_path
         for i in range(70):
             deep = deep / f"d{i}"
@@ -257,13 +246,7 @@ class TestPageContextRegistry:
     def test_collect_inherited_context_without_sibling_layout(
         self, context_manager, tmp_path
     ) -> None:
-        """`inherit_context=True` works without a sibling ``layout.djx``.
-
-        The shared HTML envelope can live in a project-level page root
-        registered via ``PAGE_BACKENDS["DIRS"]``, in which case
-        intermediate ``page.py`` modules do not need a layout sibling
-        for their inheritable context to surface on descendant routes.
-        """
+        """`inherit_context=True` works without a sibling ``layout.djx``."""
         section_dir = tmp_path / "section"
         section_dir.mkdir()
         section_page = section_dir / "page.py"

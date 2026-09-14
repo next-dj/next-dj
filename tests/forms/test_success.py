@@ -27,19 +27,12 @@ def _lazy_success_url() -> str:
     return "/lazy-done/"
 
 
-class _FakeModelMeta:
-    """Model options stub making an object pass _is_model_instance."""
-
-    model = object
-
-
-class FakeInstanceWithUrl:
-    """Model-like object exposing get_absolute_url."""
-
-    _meta = _FakeModelMeta()
-
-    def get_absolute_url(self) -> str:
-        return "/things/7/"
+def _group_with(**attrs: object) -> Group:
+    """Return an unsaved model instance carrying the given extra attributes."""
+    instance = Group(name="things")
+    for name, value in attrs.items():
+        setattr(instance, name, value)
+    return instance
 
 
 class MessageForm(Form):
@@ -128,7 +121,7 @@ class InstanceReturnForm(Form):
 
     def on_valid(self, request: HttpRequest) -> object:
         """Return an instance so dispatch redirects via get_absolute_url."""
-        return FakeInstanceWithUrl()
+        return _group_with(get_absolute_url=lambda: "/things/7/")
 
 
 class GroupSuccessForm(ModelForm):
@@ -506,20 +499,18 @@ class TestModelInstanceNormalisation:
     """ensure_http_response turns model instances into canonical redirects."""
 
     def test_instance_with_get_absolute_url_redirects(self) -> None:
-        resp = FormActionDispatch.ensure_http_response(FakeInstanceWithUrl())
+        instance = _group_with(get_absolute_url=lambda: "/things/7/")
+        resp = FormActionDispatch.ensure_http_response(instance)
         assert resp.status_code == 302
         assert resp.url == "/things/7/"
 
     def test_instance_without_canonical_url_falls_back_to_url_sniff(self) -> None:
-        instance = type(
-            "WithUrlField", (), {"_meta": _FakeModelMeta(), "url": "/legacy/"}
-        )()
-        resp = FormActionDispatch.ensure_http_response(instance)
+        resp = FormActionDispatch.ensure_http_response(_group_with(url="/legacy/"))
         assert resp.status_code == 302
         assert resp.url == "/legacy/"
 
     def test_instance_without_any_url_warns(self) -> None:
-        bare = type("Bare", (), {"_meta": _FakeModelMeta()})()
+        bare = Group(name="bare")
         with pytest.warns(RuntimeWarning, match="unsupported"):
             resp = FormActionDispatch.ensure_http_response(bare)
         assert resp.status_code == 204

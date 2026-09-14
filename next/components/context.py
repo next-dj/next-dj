@@ -6,31 +6,25 @@ The file declaring each callable is recorded, so only its component's context ru
 from __future__ import annotations
 
 import sys
-from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, overload
 
+from next.caches import BoundedCache
 from next.deps import RESERVED_KEYS
-from next.utils import (
+from next.introspect import (
     MisattributedContext,
     MisattributionLog,
     callable_name,
     defining_file,
-    resolved_tree,
-    store_capped,
 )
+from next.utils import resolved_tree
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from next.static.serializers import JsContextSerializer
-
-
-# Bounded because a render may spell a component path no earlier render spelled,
-# and a project holds far fewer components than the bound ever reaches.
-_LOOKUP_CACHE_MAX_SIZE = 2048
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,8 +49,10 @@ class ComponentContextRegistry:
         self._registry: dict[Path, dict[str | None, ContextFunction]] = {}
         self._misattributions = MisattributionLog()
         self._version = 0
-        self._lookup_cache: OrderedDict[Path, tuple[ContextFunction, ...]] = (
-            OrderedDict()
+        # Bounded because a render may spell a component path no earlier render
+        # spelled, and a project holds far fewer components than the bound reaches.
+        self._lookup_cache: BoundedCache[Path, tuple[ContextFunction, ...]] = (
+            BoundedCache()
         )
         self._lookup_version = 0
 
@@ -78,8 +74,8 @@ class ComponentContextRegistry:
     ) -> None:
         """Record a `@component.context` declared outside the running file.
 
-        The registration binds to `declared_in`, which no render of
-        `registered_from` reads, so the pair feeds the `next.E075` diagnostic.
+        The registration binds to `declared_in`, which no render of `registered_from`
+        reads, so the pair feeds the `next.E075` diagnostic.
         """
         self._misattributions.record(registered_from, declared_in, func)
 
@@ -141,11 +137,8 @@ class ComponentContextRegistry:
     def get_functions(self, component_path: Path) -> Sequence[ContextFunction]:
         """Return a tuple of registered context functions for `component_path`.
 
-        Results are memoised under the path as passed and thrown away when the registry
-        version moves, so a warm render pays neither the resolve nor the tuple build. A
-        symlinked spelling costs its own entry and answers what its plain one answers,
-        because the registry behind both is keyed by the resolved path. The empty result
-        is memoised too, because most components register no context function at all.
+        Memoised under the path as passed, including the empty result, and dropped only
+        when the registry version moves, so a symlinked spelling costs its own entry.
         """
         if self._lookup_version != self._version:
             self._lookup_cache.clear()
@@ -155,9 +148,7 @@ class ComponentContextRegistry:
             return cached
         resolved = resolved_tree(component_path)
         functions = tuple(self._registry.get(resolved, {}).values())
-        store_capped(
-            self._lookup_cache, component_path, functions, _LOOKUP_CACHE_MAX_SIZE
-        )
+        self._lookup_cache[component_path] = functions
         return functions
 
     def _is_same_function(

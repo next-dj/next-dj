@@ -1,8 +1,20 @@
 from pathlib import Path
 
+import pytest
+
+from next.caches import BoundedCache
 from next.pages import paths as paths_mod
 from next.pages.paths import clear_page_path_info, forget_page_path_info, page_path_info
 from next.utils import MAX_ANCESTOR_WALK_DEPTH
+from tests.support import assert_bounded_by_insert_age
+
+
+@pytest.fixture(autouse=True)
+def _fresh_page_path_memo():
+    """Clear the page-path memo, whose tmp_path keys never expire on their own."""
+    clear_page_path_info()
+    yield
+    clear_page_path_info()
 
 
 class TestPagePathInfo:
@@ -116,29 +128,15 @@ class TestPagePathInfoMemo:
 class TestPagePathInfoBound:
     """The memo drops its oldest insert once it is full."""
 
-    def test_the_memo_evicts_the_oldest_insert(self, tmp_path, monkeypatch) -> None:
-        """A full memo holds only the page read last."""
-        monkeypatch.setattr(paths_mod, "_PAGE_PATH_INFO_CACHE_MAX_SIZE", 1)
-        clear_page_path_info()
-        first = tmp_path / "a" / "page.py"
-        second = tmp_path / "b" / "page.py"
+    def test_the_memo_holds_the_pages_read_last(self, tmp_path, monkeypatch) -> None:
+        """A full memo drops its oldest insert and a warm read reorders nothing."""
 
-        page_path_info(first)
-        page_path_info(second)
+        def install(bound: int) -> tuple[BoundedCache, ...]:
+            monkeypatch.setattr(paths_mod, "_PAGE_PATH_INFO_CACHE", BoundedCache(bound))
+            return (paths_mod._PAGE_PATH_INFO_CACHE,)
 
-        assert list(paths_mod._PAGE_PATH_INFO_CACHE) == [second]
-
-    def test_a_read_leaves_a_full_memo_in_insert_order(
-        self, tmp_path, monkeypatch
-    ) -> None:
-        """A warm read reorders nothing, so the page read first goes first."""
-        monkeypatch.setattr(paths_mod, "_PAGE_PATH_INFO_CACHE_MAX_SIZE", 2)
-        clear_page_path_info()
-        pages = [tmp_path / name / "page.py" for name in ("a", "b", "c")]
-
-        page_path_info(pages[0])
-        page_path_info(pages[1])
-        page_path_info(pages[0])
-        page_path_info(pages[2])
-
-        assert list(paths_mod._PAGE_PATH_INFO_CACHE) == [pages[1], pages[2]]
+        assert_bounded_by_insert_age(
+            install,
+            page_path_info,
+            [tmp_path / name / "page.py" for name in ("a", "b", "c")],
+        )

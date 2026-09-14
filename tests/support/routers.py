@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from next.urls import PageRoot, RouterBackend
+
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 
 class RootPagesRouter(RouterBackend):
@@ -19,6 +24,18 @@ class RootPagesRouter(RouterBackend):
     def page_roots(self) -> list[PageRoot]:
         """Return every configured root page tree."""
         return [PageRoot(path=tree, label="Root") for tree in self._root_trees]
+
+
+class EntryRouter(RouterBackend):
+    """Third-party backend built from the ``PAGE_BACKENDS`` entry that names it."""
+
+    def __init__(self, config: Mapping[str, Any]) -> None:
+        """Keep the entry, the way a backend reading its own keys would."""
+        self.config = dict(config)
+
+    def generate_urls(self) -> list:
+        """Contribute no patterns."""
+        return []
 
 
 class RaisingRootsRouter(RouterBackend):

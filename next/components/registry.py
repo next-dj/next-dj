@@ -1,21 +1,15 @@
 """Component registry and visibility resolver.
 
-`ComponentRegistry` is the ordered collection of discovered
-`ComponentInfo` entries used by a backend. It tracks which scope roots
-were registered as globally visible and exposes a version counter
-used by `ComponentVisibilityResolver` to invalidate its caches.
-
-`ComponentVisibilityResolver` decides which component names
-are in scope for a given template file path. It lazily builds a
-scope index from the registry and caches per-template results.
+`ComponentRegistry` orders one backend's discovered `ComponentInfo` entries and versions
+them for `ComponentVisibilityResolver`, which lazily indexes and caches which component
+names are in scope for a given template file path.
 """
 
 from __future__ import annotations
 
-from collections import OrderedDict
 from typing import TYPE_CHECKING
 
-from next.utils import store_bounded
+from next.caches import LruCache
 
 from .signals import component_registered, components_registered
 
@@ -25,9 +19,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from .info import ComponentInfo
-
-
-_VISIBILITY_CACHE_MAX_SIZE = 2048
 
 
 class ComponentRegistry:
@@ -58,10 +49,8 @@ class ComponentRegistry:
     def register_many(self, components: Iterable[ComponentInfo]) -> None:
         """Index every component from the iterable in order.
 
-        Follows the Django bulk convention (`bulk_create` skips per-instance
-        `post_save`). Receivers that need per-item events should subscribe to
-        `components_registered` and read the `infos` tuple. The singular
-        `component_registered` is not fired from this path.
+        Follows the Django bulk convention (`bulk_create` skips `post_save`), firing the
+        plural `components_registered` signal only, never the singular one.
         """
         added = tuple(components)
         if not added:
@@ -114,12 +103,8 @@ class ComponentVisibilityResolver:
     def __init__(self, registry: ComponentRegistry) -> None:
         """Bind the resolver to a `ComponentRegistry` and allocate caches."""
         self._registry = registry
-        self._path_cache: OrderedDict[tuple[Path, Path], list[str] | None] = (
-            OrderedDict()
-        )
-        self._result_cache: OrderedDict[Path, Mapping[str, ComponentInfo]] = (
-            OrderedDict()
-        )
+        self._path_cache: LruCache[tuple[Path, Path], list[str] | None] = LruCache()
+        self._result_cache: LruCache[Path, Mapping[str, ComponentInfo]] = LruCache()
         self._scope_index: dict[
             Path, tuple[int, list[tuple[int, int, ComponentInfo]]]
         ] = {}
@@ -175,9 +160,10 @@ class ComponentVisibilityResolver:
             self._scope_index_registry_version = -1
             self._cached_registry_version = self._registry.version
 
-        if template_path in self._result_cache:
-            self._result_cache.move_to_end(template_path)
+        try:
             return self._result_cache[template_path]
+        except KeyError:
+            pass
 
         candidates: list[tuple[int, int, str, int, ComponentInfo]] = []
         for position, dirs_origin, component in self._candidate_components(
@@ -200,9 +186,7 @@ class ComponentVisibilityResolver:
                 result[name] = info
                 seen.add(name)
 
-        store_bounded(
-            self._result_cache, template_path, result, _VISIBILITY_CACHE_MAX_SIZE
-        )
+        self._result_cache[template_path] = result
         return result
 
     def _calculate_visibility_score(
@@ -224,11 +208,12 @@ class ComponentVisibilityResolver:
         self, template_path: Path, scope_root: Path
     ) -> list[str] | None:
         cache_key = (template_path, scope_root)
-        if cache_key in self._path_cache:
-            self._path_cache.move_to_end(cache_key)
+        try:
             return self._path_cache[cache_key]
+        except KeyError:
+            pass
         value = self._compute_relative_parts(template_path, scope_root)
-        store_bounded(self._path_cache, cache_key, value, _VISIBILITY_CACHE_MAX_SIZE)
+        self._path_cache[cache_key] = value
         return value
 
     def _compute_relative_parts(

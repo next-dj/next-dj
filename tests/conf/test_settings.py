@@ -14,7 +14,7 @@ from next.checks import (
     check_next_pages_configuration,
 )
 from next.conf import NextFrameworkSettings, next_framework_settings
-from next.urls import RouterBackend, RouterFactory
+from next.conf.merge import merge_user_settings
 
 
 class TestLazyFixtureWiring:
@@ -110,7 +110,7 @@ class TestNextFrameworkSettingsDjangoIntegration:
 
 
 class TestNextFrameworkSettingsFlatMerge:
-    """Unit tests for NextFrameworkSettings._build_flat_merged."""
+    """Unit tests for the merge behind `NextFrameworkSettings`."""
 
     @pytest.mark.parametrize(
         ("user", "expected_routers_len"),
@@ -124,7 +124,7 @@ class TestNextFrameworkSettingsFlatMerge:
         expected_routers_len: int,
     ) -> None:
         """PAGE_BACKENDS length follows the merged user value."""
-        merged = fresh_next_framework_settings._build_flat_merged(user)
+        merged = merge_user_settings(fresh_next_framework_settings.DEFAULTS, user)
         assert len(merged["PAGE_BACKENDS"]) == expected_routers_len
 
     def test_build_flat_merge_empty_component_backends(
@@ -132,7 +132,7 @@ class TestNextFrameworkSettingsFlatMerge:
     ) -> None:
         """Explicit empty COMPONENT_BACKENDS is preserved."""
         user = {"COMPONENT_BACKENDS": []}
-        merged = fresh_next_framework_settings._build_flat_merged(user)
+        merged = merge_user_settings(fresh_next_framework_settings.DEFAULTS, user)
         assert merged["COMPONENT_BACKENDS"] == []
 
 
@@ -310,20 +310,6 @@ class TestStaticDiscoveryCacheSetting:
         with override_settings(NEXT_FRAMEWORK={"STATIC_DISCOVERY_CACHE": False}):
             assert next_framework_settings.STATIC_DISCOVERY_CACHE is False
 
-    @pytest.mark.parametrize(
-        "raw",
-        [1, 0, "", "False", [], None],
-        ids=["one", "zero", "empty_str", "false_str", "empty_list", "none"],
-    )
-    def test_coercion_matches_existing_bool_keys(
-        self, fresh_next_framework_settings: NextFrameworkSettings, raw: object
-    ) -> None:
-        """The merge coerces the key with bool() like every bool key."""
-        merged = fresh_next_framework_settings._build_flat_merged(
-            {"STATIC_DISCOVERY_CACHE": raw}
-        )
-        assert merged["STATIC_DISCOVERY_CACHE"] is bool(raw)
-
     def test_key_passes_unknown_key_check(self) -> None:
         """System checks accept STATIC_DISCOVERY_CACHE as a known key."""
         with override_settings(NEXT_FRAMEWORK={"STATIC_DISCOVERY_CACHE": False}):
@@ -428,22 +414,15 @@ class TestNextFrameworkChecksUnknownKeys:
 
     def test_non_file_router_entry_only_backend_key(self) -> None:
         """Non-file router entries must not carry extra configuration keys."""
-        backend_path = "conf_test_checks.MinimalRouter"
+        backend_path = "tests.support.routers.EntryRouter"
 
-        class MinimalRouter(RouterBackend):
-            def generate_urls(self) -> list:
-                return []
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "PAGE_BACKENDS": [{"BACKEND": backend_path, "PAGES_DIR": "pages"}]
+            }
+        ):
+            errors = check_next_pages_configuration()
 
-        RouterFactory.register_backend(backend_path, MinimalRouter)
-        try:
-            with override_settings(
-                NEXT_FRAMEWORK={
-                    "PAGE_BACKENDS": [{"BACKEND": backend_path, "PAGES_DIR": "pages"}]
-                }
-            ):
-                errors = check_next_pages_configuration()
-        finally:
-            RouterFactory._backends.pop(backend_path, None)
         assert any(e.id == "next.E035" for e in errors)
 
 
@@ -467,15 +446,15 @@ class TestStrictLoadingSetting:
         [1, 0, "", "False", [], None],
         ids=["one", "zero", "empty_str", "false_str", "empty_list", "none"],
     )
-    @pytest.mark.parametrize("key", ["STRICT_LOADING", "STRICT_CONTEXT"])
+    @pytest.mark.parametrize("key", sorted(NextFrameworkSettings.BOOL_KEYS))
     def test_coercion_matches_existing_bool_keys(
         self,
         fresh_next_framework_settings: NextFrameworkSettings,
         key: str,
         raw: object,
     ) -> None:
-        """The merge coerces STRICT_LOADING with bool() like every bool key."""
-        merged = fresh_next_framework_settings._build_flat_merged({key: raw})
+        """Every bool key coerces its override with `bool()`."""
+        merged = merge_user_settings(fresh_next_framework_settings.DEFAULTS, {key: raw})
         assert merged[key] is bool(raw)
 
 

@@ -40,6 +40,30 @@ export interface NextEventMap {
 type NextListener = (payload: Record<string, unknown>) => void;
 type NextPlugin<T> = (next: typeof Next) => T;
 
+// The bus rides an EventTarget, so the fan-out snapshot and the removal are the
+// platform's. The try is ours: an EventTarget hands a throw to the global handler.
+class NextBus extends EventTarget {
+  emit(event: string, payload: Record<string, unknown>): void {
+    this.dispatchEvent(new CustomEvent(event, { detail: payload }));
+  }
+
+  subscribe(event: string, listener: NextListener): () => void {
+    const controller = new AbortController();
+    this.addEventListener(
+      event,
+      (received) => {
+        try {
+          listener((received as CustomEvent<Record<string, unknown>>).detail);
+        } catch (e) {
+          console.error("[next] listener threw", e);
+        }
+      },
+      { signal: controller.signal },
+    );
+    return () => controller.abort();
+  }
+}
+
 // The init payload is untyped JSON, so the seed is taken only when both halves
 // are strings. A half-filled pair would stamp a broken header on every mutation.
 function readCsrf(value: unknown): CsrfPayload | undefined {
@@ -53,11 +77,11 @@ function readCsrf(value: unknown): CsrfPayload | undefined {
 /** The window-exposed runtime facade, a static class since there is one per page. */
 class Next {
   static #context: Record<string, unknown> = {};
-  static #listeners = new Map<string, Set<NextListener>>();
+  static #bus = new NextBus();
   static #ready = false;
 
   static partial: PartialSurface = createPartial({
-    dispatch: (event, payload) => Next.#dispatch(event, payload),
+    dispatch: (event, payload) => Next.#bus.emit(event, payload),
     mergeContext: (data) => Next.#mergeContext(data),
   });
 
@@ -85,32 +109,26 @@ class Next {
     Next.#context = context;
     Next.#ready = true;
     // The initial seed is one big delta, so every seeded key is changed.
-    Next.#dispatch("context-updated", { context, changed: Object.keys(context) });
+    Next.#bus.emit("context-updated", { context, changed: Object.keys(context) });
     // Mount before ready listeners run, so a ready handler sees a mounted document.
     Next.partial.ready();
-    Next.#dispatch("ready", context);
+    Next.#bus.emit("ready", context);
   }
 
   /** Subscribe to a runtime event, returning an unsubscribe function. */
-  // The overloads are a type-only narrowing, every listener lands in one Map.
+  // The overloads are a type-only narrowing, every listener lands on one bus.
   static on<K extends keyof NextEventMap>(
     event: K,
     listener: (payload: NextEventMap[K]) => void,
   ): () => void;
   static on(event: string, listener: (payload: unknown) => void): () => void;
   static on(event: string, listener: NextListener): () => void {
-    let bucket = Next.#listeners.get(event);
-    if (bucket === undefined) {
-      bucket = new Set();
-      Next.#listeners.set(event, bucket);
-    }
-    bucket.add(listener);
+    const off = Next.#bus.subscribe(event, listener);
+    // ready alone describes a state, not a moment, so a late subscriber gets a replay.
     if (event === "ready" && Next.#ready) {
       listener({ ...Next.#context });
     }
-    return () => {
-      bucket.delete(listener);
-    };
+    return off;
   }
 
   static use<T>(plugin: NextPlugin<T>): T {
@@ -121,20 +139,7 @@ class Next {
   static #mergeContext(data: Record<string, unknown>): void {
     const changed = Object.keys(data);
     Next.#context = { ...Next.#context, ...data };
-    Next.#dispatch("context-updated", { context: Next.#context, changed });
-  }
-
-  static #dispatch(event: string, payload: Record<string, unknown>): void {
-    const bucket = Next.#listeners.get(event);
-    if (bucket === undefined) return;
-    // Snapshot against mid-fan-out mutation, a throwing listener cannot stop the rest.
-    for (const listener of [...bucket]) {
-      try {
-        listener(payload);
-      } catch (e) {
-        console.error("[next] listener threw", e);
-      }
-    }
+    Next.#bus.emit("context-updated", { context: Next.#context, changed });
   }
 }
 

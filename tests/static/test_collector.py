@@ -465,6 +465,48 @@ class TestJsContextEncoded:
         assert collector.js_context_encoded() == {"k": '{"a":1}'}
 
 
+class TestJsContextPayload:
+    """`js_context_payload` drops a reserved key from all three mappings at once."""
+
+    class _CustomSerializer:
+        """Serializer that wraps the value into a sentinel envelope."""
+
+        def dumps(self, value: object) -> str:
+            return f'{{"_custom":{value!r}}}'.replace("'", '"')
+
+    def test_nothing_reserved_hands_every_key_back(
+        self, collector: StaticCollector
+    ) -> None:
+        collector.add_js_context("theme", "dark")
+
+        payload = collector.js_context_payload()
+
+        assert payload.values == {"theme": "dark"}
+        assert payload.encoded == {"theme": '"dark"'}
+        assert payload.serializers == {}
+
+    def test_a_colliding_key_leaves_no_trace(self, collector: StaticCollector) -> None:
+        """Its fragment and its serializer go with its value, not one without."""
+        custom = self._CustomSerializer()
+        collector.add_js_context("$csrf", "stolen", serializer=custom)
+        collector.add_js_context("theme", "dark")
+
+        payload = collector.js_context_payload(reserved={"$csrf"})
+
+        assert payload.values == {"theme": "dark"}
+        assert payload.encoded == {"theme": '"dark"'}
+        assert payload.serializers == {}
+
+    def test_a_reserved_key_nobody_registered_costs_nothing(
+        self, collector: StaticCollector
+    ) -> None:
+        collector.add_js_context("theme", "dark")
+
+        payload = collector.js_context_payload(reserved={"$csrf"})
+
+        assert payload.values is collector.js_context()
+
+
 class TestPlaceholderRegistry:
     """PlaceholderRegistry stores slot metadata keyed by slot name."""
 

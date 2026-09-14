@@ -647,12 +647,12 @@ Patching
    * - ``StaticCollectorProxy``
      - Handle exposing the collector most recently built inside the patch.
 
-A ``StaticCollectorProxy`` is yielded by ``patch_static_collector(capture=True)``.
+A ``StaticCollectorProxy`` is yielded by ``patch_static_collector()``.
 Its ``.collector`` attribute holds the collector most recently built inside the block, so a page that renders twice leaves the second one, and a test can assert on the emitted styles and scripts without parsing HTML.
 Pass ``factory=`` to swap the collector implementation entirely.
 The callable runs in place of the default ``create_collector`` and returns a custom ``StaticCollector`` for the duration of the block.
 
-Use ``patch_static_collector(capture=True)`` to inspect which assets a page emits.
+Use ``patch_static_collector()`` to inspect which assets a page emits.
 
 .. code-block:: python
    :caption: tests/test_static_capture.py
@@ -661,7 +661,7 @@ Use ``patch_static_collector(capture=True)`` to inspect which assets a page emit
    from next.testing.patching import patch_static_collector
 
    def test_collects_styles() -> None:
-       with patch_static_collector(capture=True) as proxy:
+       with patch_static_collector() as proxy:
            NextClient().get("/")
        assert proxy.collector is not None
        styles = proxy.collector.assets_in_slot("styles")

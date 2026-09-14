@@ -275,6 +275,28 @@ describe("append and prepend dedup", () => {
     expect(document.querySelector("#r1")!.textContent).toBe("new");
   });
 
+  it("dedupes on the id attribute, not on a clobbered id property", () => {
+    document.body.innerHTML = '<ul data-next-zone="rows"><li id="r1">old</li></ul>';
+    // A browser exposes an <input name="id"> inside a form as an own id property,
+    // shadowing the attribute. jsdom models no named getter, so it is staged here.
+    Object.defineProperty(document.querySelector("li")!, "id", {
+      value: document.createElement("input"),
+    });
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "append",
+          target: { zone: "rows" },
+          dedupe: "id",
+          html: '<li id="r1">new</li>',
+        },
+      ]),
+    );
+    expect(document.querySelectorAll("li")).toHaveLength(1);
+    expect(document.querySelector("#r1")!.textContent).toBe("new");
+  });
+
   it("dedupe id appends a row that carries a key but no id", () => {
     document.body.innerHTML =
       '<ul data-next-zone="rows"><li data-next-key="1">old</li></ul>';
@@ -772,7 +794,11 @@ describe("refresh verb", () => {
       close: () => undefined,
       toast: () => undefined,
     };
-    const { applier } = makeApplier({ refresh, layers, here: () => "/modal/" });
+    const { applier } = makeApplier({
+      refresh,
+      layers: () => layers,
+      here: () => "/modal/",
+    });
     applier.apply(envelope([{ op: "refresh", zone: "feed" }]));
     expect(refresh).toHaveBeenCalledWith({
       url: "/owner/",
@@ -791,7 +817,11 @@ describe("refresh verb", () => {
       close: () => undefined,
       toast: () => undefined,
     };
-    const { applier } = makeApplier({ refresh, layers, here: () => "/page/" });
+    const { applier } = makeApplier({
+      refresh,
+      layers: () => layers,
+      here: () => "/page/",
+    });
     applier.apply(envelope([{ op: "refresh", zone: "gone" }]));
     expect(refresh).toHaveBeenCalledWith({
       url: "/page/",
@@ -933,7 +963,7 @@ describe("asset bridge pipeline", () => {
       versionMismatch: () => false,
       acceptVersion: () => undefined,
     };
-    const { applier } = makeApplier({ assets });
+    const { applier } = makeApplier({ assets: () => assets });
     applier.apply(envelope([{ op: "inner", target: { zone: "z" }, html: "new" }]));
     expect(order).toEqual(["css", "js"]);
     expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("new");
@@ -947,7 +977,7 @@ describe("asset bridge pipeline", () => {
       versionMismatch: () => true,
       acceptVersion: () => undefined,
     };
-    const { applier } = makeApplier({ assets });
+    const { applier } = makeApplier({ assets: () => assets });
     applier.apply(envelope([{ op: "inner", target: { zone: "z" }, html: "new" }]));
     expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("old");
   });

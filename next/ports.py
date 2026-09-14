@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, ClassVar, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+from django.core.exceptions import ImproperlyConfigured
 
 
 if TYPE_CHECKING:
@@ -14,16 +16,9 @@ if TYPE_CHECKING:
     from next.forms.backends import FormActionBackend
     from next.forms.dispatch.responses import ActionOutcome
     from next.forms.wizard import FormWizard
+    from next.partial.headers import PartialIntent
     from next.static import StaticCollector
     from next.urls import RouterBackend, RouterManager
-
-
-def _unbound(subject: str) -> str:
-    """Spell the failure of a slot read before the app finished starting."""
-    return (
-        f"The {subject} is unbound, which means the next app never finished "
-        "starting. NextFrameworkConfig.ready() binds it."
-    )
 
 
 class PortSlot[T]:
@@ -33,11 +28,12 @@ class PortSlot[T]:
     slot never rebinds itself once the app is ready.
     """
 
-    _unbound_message: ClassVar[str] = _unbound("port")
+    __slots__ = ("_impl", "_subject")
 
-    def __init__(self) -> None:
-        """Start unbound so a missing composition step fails loudly."""
+    def __init__(self, subject: str) -> None:
+        """Start unbound under the name an early read is reported against."""
         self._impl: T | None = None
+        self._subject = subject
 
     def set(self, impl: T) -> None:
         """Bind the implementation composed in `AppConfig.ready`."""
@@ -46,27 +42,15 @@ class PortSlot[T]:
     def get(self) -> T:
         """Return the bound implementation."""
         if self._impl is None:
-            raise RuntimeError(self._unbound_message)
+            raise ImproperlyConfigured(self._unbound_message())
         return self._impl
 
-
-class PartialIntentView(Protocol):
-    """What a caller reads off a parsed partial-request intent."""
-
-    @property
-    def partial(self) -> bool:
-        """Whether the request asks for a partial response at all."""
-        ...
-
-    @property
-    def zones(self) -> tuple[str, ...]:
-        """Names of the zones the request asks to re-render."""
-        ...
-
-    @property
-    def validate_fields(self) -> tuple[str, ...]:
-        """Names of the fields the request asks to validate only."""
-        ...
+    def _unbound_message(self) -> str:
+        """Spell the failure of a slot read before the app finished starting."""
+        return (
+            f"The {self._subject} is unbound, which means the next app never "
+            "finished starting. NextFrameworkConfig.ready() binds it."
+        )
 
 
 class PartialShaper(Protocol):
@@ -76,7 +60,7 @@ class PartialShaper(Protocol):
     intent travels on as an argument so no shape method re-reads the request.
     """
 
-    def intent(self, request: HttpRequest) -> PartialIntentView:
+    def intent(self, request: HttpRequest) -> PartialIntent:
         """Return what the request headers ask for."""
         ...
 
@@ -84,7 +68,7 @@ class PartialShaper(Protocol):
         self,
         page_path: Path,
         request: HttpRequest,
-        intent: PartialIntentView,
+        intent: PartialIntent,
         *,
         dynamic_body: bool,
         url_kwargs: dict[str, object],
@@ -103,22 +87,22 @@ class PartialShaper(Protocol):
         backend: FormActionBackend,
         request: HttpRequest,
         form: BaseForm | BaseFormSet,
-        intent: PartialIntentView,
+        intent: PartialIntent,
         *,
         action_name: str,
         uid: str,
-        wizard: FormWizard | None,
+        wizard: FormWizard | None = None,
     ) -> HttpResponse:
         """Return the form morph envelope of a validate-only pass."""
         ...
 
 
 class RouterAccess(Protocol):
-    """Builds the routers of `next.urls` for an area that cannot import it.
+    """The import seam `next.urls` opens for an area that cannot import it.
 
-    `next.urls` routes to pages and so imports `next.pages`, which leaves the
-    watcher and the system checks reaching back the other way. They ask here
-    instead and the composition root supplies the one implementation.
+    Both methods answer the concrete classes of that area rather than a routing
+    abstraction, since `next.urls` imports `next.pages` and the watcher and checks
+    reach back the other way.
     """
 
     def create_backend(self, config: dict[str, Any]) -> RouterBackend:
@@ -133,8 +117,8 @@ class RouterAccess(Protocol):
 class StaticAssets(Protocol):
     """The static-manager surface one page render calls.
 
-    `next.static` reads page trees and page modules and so imports
-    `next.pages`, which leaves the render path reaching back the other way.
+    `next.static` reads page trees and page modules and so imports `next.pages`, which
+    leaves the render path reaching back the other way.
     """
 
     def create_collector(self) -> StaticCollector:
@@ -157,38 +141,16 @@ class StaticAssets(Protocol):
         ...
 
 
-class PartialShaperSlot(PortSlot["PartialShaper"]):
-    """Holds the one shaper implementation composed at app startup."""
-
-    _unbound_message: ClassVar[str] = _unbound("partial shaper")
-
-
-class RouterAccessSlot(PortSlot["RouterAccess"]):
-    """Holds the one router builder composed at app startup."""
-
-    _unbound_message: ClassVar[str] = _unbound("router access port")
-
-
-class StaticAssetsSlot(PortSlot["StaticAssets"]):
-    """Holds the one static manager composed at app startup."""
-
-    _unbound_message: ClassVar[str] = _unbound("static assets port")
-
-
-partial_shaper_slot = PartialShaperSlot()
-router_access_slot = RouterAccessSlot()
-static_assets_slot = StaticAssetsSlot()
+partial_shaper_slot = PortSlot["PartialShaper"]("partial shaper")
+router_access_slot = PortSlot["RouterAccess"]("router access port")
+static_assets_slot = PortSlot["StaticAssets"]("static assets port")
 
 
 __all__ = [
-    "PartialIntentView",
     "PartialShaper",
-    "PartialShaperSlot",
     "PortSlot",
     "RouterAccess",
-    "RouterAccessSlot",
     "StaticAssets",
-    "StaticAssetsSlot",
     "partial_shaper_slot",
     "router_access_slot",
     "static_assets_slot",

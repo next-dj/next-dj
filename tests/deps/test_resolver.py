@@ -11,6 +11,7 @@ from unittest.mock import ANY
 import pytest
 from django.http import HttpRequest
 
+from next.caches import LruCache
 from next.deps import (
     RESERVED_KEYS,
     DependencyCycleError,
@@ -19,22 +20,21 @@ from next.deps import (
     RegisteredParameterProvider,
     ResolutionContext,
     UnknownDependencyError,
+    introspect as _introspect_module,
     provider_registry,
     resolver,
 )
 from next.deps.cache import _IN_PROGRESS, DependencyCache
-from next.deps.resolver import (
-    _CLAIMED_RESERVED,
-    _UNCLAIMED_RESERVED,
-    _introspect_key,
+from next.deps.introspect import (
     _signature_cache,
     _type_hints_cache,
     _var_keyword_cache,
     cached_accepts_var_keyword,
     cached_signature,
     cached_type_hints,
-    forget_dep_caches,
+    introspect_key,
 )
+from next.deps.resolver import _CLAIMED_RESERVED, _UNCLAIMED_RESERVED, forget_dep_caches
 from next.testing import make_resolution_context
 from next.urls import HttpRequestProvider, UrlKwargsProvider
 from tests.support import (
@@ -714,14 +714,14 @@ class TestCachedAcceptsVarKeyword:
         def fn(**kwargs) -> None:
             return None
 
-        key = _introspect_key(fn)
+        key = introspect_key(fn)
         try:
             assert cached_accepts_var_keyword(fn) is True
             # A poisoned memo entry proves the second call never re-inspects.
             _var_keyword_cache[key] = False
             assert cached_accepts_var_keyword(fn) is False
         finally:
-            _var_keyword_cache.pop(key, None)
+            _var_keyword_cache.pop(key)
 
     def test_bound_method_keys_by_function(self) -> None:
         class Holder:
@@ -729,12 +729,12 @@ class TestCachedAcceptsVarKeyword:
                 return None
 
         holder = Holder()
-        key = _introspect_key(holder.method)
+        key = introspect_key(holder.method)
         try:
             assert cached_accepts_var_keyword(holder.method) is True
             assert key in _var_keyword_cache
         finally:
-            _var_keyword_cache.pop(key, None)
+            _var_keyword_cache.pop(key)
 
 
 class TestDependencyResolverProvides:
@@ -816,10 +816,11 @@ class TestBoundedCaches:
     """Every per-callable memo evicts its oldest entry past the bound."""
 
     @pytest.fixture()
-    def _tiny_bound(self, monkeypatch) -> None:
-        monkeypatch.setattr(_resolver_module, "_INTROSPECTION_CACHE_MAX_SIZE", 1)
+    def _tiny_memos(self, monkeypatch) -> None:
+        for name in ("_signature_cache", "_type_hints_cache", "_var_keyword_cache"):
+            monkeypatch.setattr(_introspect_module, name, LruCache(1))
 
-    @pytest.mark.usefixtures("_tiny_bound")
+    @pytest.mark.usefixtures("_tiny_memos")
     def test_introspection_memos_drop_the_oldest_entry(self) -> None:
         def first(a: int) -> None:
             return None
@@ -827,19 +828,17 @@ class TestBoundedCaches:
         def second(b: int) -> None:
             return None
 
-        for memo in (_signature_cache, _type_hints_cache, _var_keyword_cache):
-            memo.clear()
         cached_signature(first)
         cached_type_hints(first)
         cached_accepts_var_keyword(first)
         cached_signature(second)
         cached_type_hints(second)
         cached_accepts_var_keyword(second)
-        for memo in (_signature_cache, _type_hints_cache, _var_keyword_cache):
-            assert _introspect_key(first) not in memo
-            assert _introspect_key(second) in memo
+        for name in ("_signature_cache", "_type_hints_cache", "_var_keyword_cache"):
+            memo = getattr(_introspect_module, name)
+            assert introspect_key(first) not in memo
+            assert introspect_key(second) in memo
 
-    @pytest.mark.usefixtures("_tiny_bound")
     def test_plan_cache_drops_the_oldest_entry(self) -> None:
         def first(a: int) -> None:
             return None
@@ -848,11 +847,12 @@ class TestBoundedCaches:
             return None
 
         instance = _minimal_resolver()
+        instance._plan_cache = LruCache(1)
         instance.resolve_dependencies(first)
         instance.resolve_dependencies(second)
-        assert list(instance._plan_cache) == [_introspect_key(second)]
+        assert list(instance._plan_cache) == [introspect_key(second)]
         assert instance.resolve_dependencies(first) == {"a": None}
-        assert list(instance._plan_cache) == [_introspect_key(first)]
+        assert list(instance._plan_cache) == [introspect_key(first)]
 
 
 class _HooklessProvider:
@@ -1006,7 +1006,7 @@ class TestUnhashableCallable:
         instance = DependencyResolver()
         handler = _UnhashableHandler()
         assert instance.resolve_dependencies(handler) == {"plain": 3}
-        assert instance._plan_cache == {}
+        assert not instance._plan_cache
 
     def test_provides_answers_from_a_fresh_plan(self) -> None:
         instance = DependencyResolver()
@@ -1074,9 +1074,9 @@ class TestMemoRecency:
             memo.clear()
             read(first)
             read(second)
-            assert list(memo)[-1] == _introspect_key(second)
+            assert list(memo)[-1] == introspect_key(second)
             read(first)
-            assert list(memo)[-1] == _introspect_key(first)
+            assert list(memo)[-1] == introspect_key(first)
 
     def test_a_hit_makes_the_plan_the_freshest(self) -> None:
         def first(a: int) -> None:
@@ -1088,9 +1088,9 @@ class TestMemoRecency:
         instance = _minimal_resolver()
         instance.resolve_dependencies(first)
         instance.resolve_dependencies(second)
-        assert list(instance._plan_cache)[-1] == _introspect_key(second)
+        assert list(instance._plan_cache)[-1] == introspect_key(second)
         instance.resolve_dependencies(first)
-        assert list(instance._plan_cache)[-1] == _introspect_key(first)
+        assert list(instance._plan_cache)[-1] == introspect_key(first)
 
 
 class TestProvisionalPlan:
@@ -1105,7 +1105,7 @@ class TestProvisionalPlan:
             assert instance.resolve_dependencies(
                 _deferred_request, request=request
             ) == {"request": None}
-        assert _introspect_key(_deferred_request) not in instance._plan_cache
+        assert introspect_key(_deferred_request) not in instance._plan_cache
         assert "did not resolve" in caplog.text
 
         globals()["_LateRequest"] = HttpRequest
@@ -1114,12 +1114,12 @@ class TestProvisionalPlan:
         finally:
             del globals()["_LateRequest"]
         assert resolved == {"request": request}
-        assert _introspect_key(_deferred_request) in instance._plan_cache
+        assert introspect_key(_deferred_request) in instance._plan_cache
 
     def test_an_annotation_the_parser_refuses_is_survived(self) -> None:
         instance = DependencyResolver()
         assert instance.resolve_dependencies(_broken_annotation) == {"value": 1}
-        assert _introspect_key(_broken_annotation) not in instance._plan_cache
+        assert introspect_key(_broken_annotation) not in instance._plan_cache
 
 
 class TestPlanVersionStamp:
@@ -1132,7 +1132,7 @@ class TestPlanVersionStamp:
         instance = DependencyResolver()
         instance.prepend_provider(_MutatingProvider(instance))
         instance.resolve_dependencies(fn)
-        stamped, _plan = instance._plan_cache[_introspect_key(fn)]
+        stamped, _plan = instance._plan_cache[introspect_key(fn)]
         assert stamped < instance._providers_version
 
 

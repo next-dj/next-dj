@@ -172,6 +172,18 @@ class TestKeylessContextMerges:
         assert context_data["headline"] == "HELLO"
         assert context_data["title"] == "hello"
 
+    def test_a_keyless_return_that_is_no_dict_merges_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        """Only a mapping names keys, so anything else leaves the context alone."""
+        mgr, info, module_path = build_composite_component(tmp_path)
+        mgr._registry.register(module_path, None, lambda: "not a mapping")
+        context_data: dict = {"env": "prod"}
+
+        _inject(mgr, info, context_data)
+
+        assert context_data == {"env": "prod"}
+
     def test_keyed_context_still_overwrites(self, tmp_path: Path) -> None:
         """A keyed registration names one key explicitly and is not guarded."""
         mgr, info, module_path = build_composite_component(tmp_path)

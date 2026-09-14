@@ -3,13 +3,13 @@ from django.http import HttpRequest
 from django.test import RequestFactory
 
 from next.deps import Depends
-from next.deps.linear import LinearDependencyResolver
-from next.deps.resolver import (
-    DependencyResolver,
+from next.deps.introspect import (
     cached_accepts_var_keyword,
     cached_signature,
     cached_type_hints,
 )
+from next.deps.linear import LinearDependencyResolver
+from next.deps.resolver import DependencyResolver
 from next.pages.context import Context
 from next.urls import DUrl
 from tests.support import build_mock_http_request
@@ -107,9 +107,7 @@ def _resolve_four_markers(planned: DependencyResolver) -> dict[str, object]:
 class TestBenchDependencyResolver:
     """Resolve cost per signature shape.
 
-    The paired CI comparison matches runs by test id, so an id that already
-    carries a baseline keeps measuring the shape that baseline measured and a
-    new shape takes a new id rather than reusing one.
+    CI compares baselines by test id, so renaming one starts a fresh baseline.
     """
 
     @pytest.mark.benchmark(group="deps.resolver")
@@ -219,10 +217,8 @@ class TestBenchDependencyResolver:
 class TestBenchInjectionPlan:
     """Cold compile against warm replay of the same four-marker handler.
 
-    Both run under the same pedantic harness with a fresh resolver per round, so
-    the gap between the two is the price of ``compile_plan`` for one callable.
-    The signature and type-hint memos are process-wide and warm after the first
-    round, which leaves the static-verdict walk as the cold cost.
+    Signature and type-hint memos are process-wide and warm after the first
+    round, so only the initial static-verdict walk pays the cold-compile price.
     """
 
     @pytest.mark.benchmark(group="deps.plan")

@@ -17,7 +17,7 @@ from django.http import (
     HttpResponseRedirect,
     QueryDict,
 )
-from django.template import Context, Template
+from fragments import render_fragment
 
 from next import Depends, action
 from next.deps import resolver
@@ -37,8 +37,6 @@ _CHANGE_TEMPLATE_PATH = (
     / "change"
     / "template.djx"
 )
-_ROW_TEMPLATE = Template('{% component "inline_row" row=row token=token %}')
-_COUNT_TEMPLATE = Template("{{ count }} saved")
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,9 +84,8 @@ class AdminFormSpec:
     def auto_id(self) -> str:
         """Id template namespacing the main form's fields by model.
 
-        A server-opened layer drops one change view's markup into another's
-        document, so a bare `id_%s` would render `id_title` twice and every
-        `<label for=...>` inside the layer would address the page behind it.
+        A server-opened layer drops one change view's markup into another's document,
+        so a bare `id_%s` would repeat `id_title` and steal the outer form's labels.
         """
         return f"id_{self.model_name}_%s"
 
@@ -281,10 +278,8 @@ class AdminInlineSpec:
     def _auto_id(self, instance: Model) -> str:
         """Return the id template that keeps every row's fields addressable.
 
-        A keyed row form posts under the plain field names, so a `prefix=`
-        would rewrite the wire and break the handlers. `auto_id` touches
-        only the rendered ids, and without it every row on a change page
-        repeats `id_title` and steals the parent form's label.
+        A keyed row form posts under plain field names, so a `prefix=` would break the
+        handlers, and namespacing only the id keeps every row's `id_title` unique.
         """
         suffix = instance.pk if instance.pk is not None else "add"
         return f"id_{self.token}_{suffix}_%s"
@@ -330,9 +325,8 @@ class AdminInlineSpec:
 def _build_form_class(spec: AdminFormSpec) -> type[django_forms.Form]:
     """Wrap `ModelAdmin.get_form` so inline-formset errors surface on the main form.
 
-    `AdminForm.clean()` rebuilds the inline formsets bound to the same POST data and
-    raises `ValidationError` if any row is broken, so the dispatcher re-renders the
-    origin page and `form_state` shows the errors next to the bad rows.
+    `clean()` rebuilds the inline formsets against the same POST and raises when a
+    row is broken, so the dispatcher re-renders the origin page with the row errors.
     """
     base = spec.model_admin.get_form(spec.request, spec.instance, change=spec.is_change)
 
@@ -364,9 +358,8 @@ def admin_spec(
 ) -> AdminFormSpec:
     """Resolve `(model, ModelAdmin, instance)` once per dispatch.
 
-    Registered as a named dependency so `Depends("admin_spec")` shares a
-    single resolution across factory, `get_initial`, action handler, and
-    any re-render component context within the same POST.
+    Named so `Depends("admin_spec")` shares one resolution across the factory,
+    `get_initial`, the action handler, and any re-render context in the same POST.
     """
     return AdminFormSpec.resolve(request, app_label, model_name, pk=pk)
 
@@ -458,25 +451,20 @@ def admin_inline_add_form_factory(
 def _render_inline_row(inline: AdminInlineSpec, obj: Model) -> str:
     """Render one clean keyed inline row form for a replace patch.
 
-    The change template path travels as `current_template_path` so the `inline_row`
-    component resolves the same way the change view render does.
+    The change template is the anchor, so `inline_row` resolves as the page render does.
     """
-    row = inline._row(obj, None)
-    return _ROW_TEMPLATE.render(
-        Context(
-            {
-                "row": row,
-                "token": inline.token,
-                "request": inline.spec.request,
-                "current_template_path": _CHANGE_TEMPLATE_PATH,
-            }
-        )
+    return render_fragment(
+        "inline_row",
+        _CHANGE_TEMPLATE_PATH,
+        inline.spec.request,
+        row=inline._row(obj, None),
+        token=inline.token,
     )
 
 
 def _count_badge(inline: AdminInlineSpec) -> str:
     """Render the live row-count text for an inner patch into the badge."""
-    return _COUNT_TEMPLATE.render(Context({"count": inline.children().count()}))
+    return f"{inline.children().count()} saved"
 
 
 def _flash_save(spec: AdminFormSpec, obj: Model, *, verb: str) -> None:
@@ -497,9 +485,7 @@ def handle_inline_change(
 ) -> HttpResponse:
     """Save one edited inline row and swap it in place for the new values.
 
-    A live runtime replaces the keyed row form with the clean saved form
-    and refreshes the row-count badge in place. Without the runtime the
-    builder falls back to the parent change view.
+    A live runtime swaps in the saved values and refreshes the row-count badge in place.
     """
     inline = AdminInlineSpec.for_request(spec)
     if not inline.has_change_permission():
@@ -528,10 +514,8 @@ def handle_inline_add(
 ) -> HttpResponse:
     """Create one inline row and open its own editor in a result layer.
 
-    A live runtime opens the new row's standalone change view `record` zone in a result
-    layer, so the client fetches that zone and morphs the editor into the modal for
-    immediate detail edits, then refreshes the parent's row-count badge in place.
-    Without the runtime the builder falls back to the parent change view.
+    A live runtime opens the new row's `record` zone in a result layer for immediate
+    detail edits, then refreshes the parent's row-count badge in place.
     """
     inline = AdminInlineSpec.for_request(spec)
     if not inline.has_add_permission():
@@ -556,9 +540,8 @@ def handle_inline_add(
 def handle_discard(request: HttpRequest) -> HttpResponse:
     """Dismiss the editor layer server-side, carrying a discard reason.
 
-    Unlike a `layer_close(result=...)` accept, this closes the layer as a rejection, so
-    the client fires `partial:layer-dismissed` and skips accept side effects. Without a
-    client runtime the action falls back to the dashboard instead.
+    Closing as a rejection rather than a `layer_close(result=...)` accept fires
+    `partial:layer-dismissed` and skips accept side effects.
     """
     if not is_partial_request(request):
         return HttpResponseRedirect(utils.dashboard_url())

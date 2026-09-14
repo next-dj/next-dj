@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from django import forms, forms as django_forms
+from django.contrib.auth.models import Group
 from django.http import HttpRequest, HttpResponseRedirect
 
 from next.forms import BaseModelForm, Form, ModelForm
@@ -308,10 +309,7 @@ class TestBaseFormGetInitial:
 
             @classmethod
             def get_initial(cls, request: HttpRequest) -> object:
-                mock_instance = MagicMock()
-                mock_instance._meta = MagicMock()
-                mock_instance._meta.model = MagicMock()
-                return mock_instance
+                return Group(name="editors")
 
         request = HttpRequest()
         with pytest.raises(

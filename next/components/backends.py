@@ -50,9 +50,8 @@ class ComponentsBackend(ABC):
     def import_component_modules(self) -> tuple[Path, ...]:
         """Execute the module of every known component and return their paths.
 
-        Separate from `discover`, which only populates the registry, because
-        `LAZY_COMPONENT_MODULES` leaves those modules unexecuted until a
-        render needs one and a caller reading decorator state cannot wait.
+        Separate from `discover`, since `LAZY_COMPONENT_MODULES` leaves modules
+        unexecuted until a render needs one, and decorator state cannot wait that long.
         """
         return ()
 
@@ -76,9 +75,9 @@ class ComponentsBackend(ABC):
     def global_component_roots(self) -> Iterable[Path]:
         """Return the scope roots whose root-scope components resolve everywhere.
 
-        A shared root makes its root-scope components visible
-        from every template, a page tree does not, and the
-        cross-root name check reads this to tell the two apart.
+        A shared root makes its root-scope components visible from every template, a
+        page tree does not, and the cross-root name check reads this to tell the two
+        apart.
         """
         return ()
 

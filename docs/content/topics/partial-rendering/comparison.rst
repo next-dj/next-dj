@@ -114,7 +114,7 @@ Who owns the wire format
 ------------------------
 
 next.dj treats the wire as a project decision.
-``PARTIAL_BACKENDS`` holds one active protocol backend, and ``PartialProtocolBackend`` requires ``serialize_envelope`` and ``sse_event`` over the same envelope object.
+``PARTIAL_BACKENDS`` holds one active protocol backend, and ``PartialProtocolBackend`` requires ``serialize_envelope``, ``sse_event``, and ``deserialize_envelope`` over the same envelope object.
 The default serializes compact JSON under ``application/vnd.next.patches+json``, and a replacement changes the format without touching shaping or the registries.
 The client side of the same seam is ``Next.partial.parseHook``, which turns a foreign content type into an envelope before the apply pipeline runs.
 The cost of owning the format is that a custom envelope becomes a compatibility surface the project maintains itself, against a client that has to learn to read it.

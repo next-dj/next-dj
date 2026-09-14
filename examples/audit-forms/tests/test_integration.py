@@ -292,7 +292,7 @@ class TestSessionResume:
         body = response.content.decode()
         assert "Computing" in body
         assert 'data-step-section="identity" data-state="saved"' in body
-        assert "data-saved-badge" in body
+        assert "✓ saved" in body
 
 
 def _wizard_storage_id() -> str:
@@ -500,7 +500,14 @@ class TestStepSection:
         response = next_client.get("/request/scope/")
         body = response.content.decode()
         assert 'data-step-section="identity" data-state="saved"' in body
-        assert "data-saved-badge" in body
+        assert "✓ saved" in body
+
+    def test_long_saved_value_is_truncated_in_the_summary(self, next_client) -> None:
+        long_name = "y" * 100
+        _post_step(next_client, "identity", {**IDENTITY, "full_name": long_name})
+        body = next_client.get("/request/scope/").content.decode()
+        assert long_name not in body
+        assert "y" * 59 + "\u2026" in body
 
     def test_invalid_submission_renders_errors_state(self, next_client) -> None:
         response = _post_step(next_client, "identity", {**IDENTITY, "email": ""})

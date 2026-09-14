@@ -81,10 +81,8 @@ EVENT_BRIDGE = """
 def pytest_configure() -> None:
     """Let the suite reach the ORM from the thread playwright parks its loop in.
 
-    The sync API keeps a running asyncio loop in a greenlet of the main thread, so
-    Django's async guard fires on the ORM calls `transactional_db` makes from there
-    and every browser test errors out before it starts. Living in the plugin rather
-    than in a conftest keeps the guard armed for every suite that never loads it.
+    Django's async guard fires on ORM calls from that greenlet, so this lives in
+    the plugin rather than a conftest to stay armed for every suite that loads it.
     """
     os.environ.setdefault("DJANGO_ALLOW_ASYNC_UNSAFE", "1")
 
@@ -173,8 +171,7 @@ class PageProbe:
         """Return responses the runtime stamped as partial, optionally one zone.
 
         A batched trigger sends every target in one comma-separated header, so a
-        zone matches when it appears in that list rather than equalling it. The
-        `since` index skips the responses a caller already accounted for.
+        zone matches when it appears in that list rather than equalling it.
         """
         matched = []
         for response in self.responses[since:]:
@@ -335,11 +332,8 @@ def expect_no_partial_request(
 ) -> None:
     """Fail unless the interaction since the baseline left the server untouched.
 
-    The runtime dispatches `partial:before-request` synchronously before it awaits the
-    fetch, so the event is already recorded once the playwright call that triggered it
-    returns. The response listener alone would pass while the request is still in
-    flight, which is the very regression these assertions guard against, and it stays
-    only as a second reading that catches a bridge which never installed.
+    The runtime records `partial:before-request` before the triggering call returns,
+    so the response-count check alone would still pass while a request is in flight.
     """
     sent = _requested_count(page) - since.sent
     if sent > 0:

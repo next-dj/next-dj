@@ -13,8 +13,8 @@ export default defineConfig({
       include: ["next/client/*.ts"],
       exclude: [
         "next/client/*.test.ts",
-        // Every seam in adapters.ts is a thin pass-through to a browser global jsdom
-        // cannot model, so the file is excluded rather than painted with fake hits.
+        // What is left in adapters.ts is a thin hand-off to a browser global jsdom
+        // cannot implement, so the file is excluded rather than painted with fake hits.
         "next/client/adapters.ts",
       ],
       // A cumulative 100% across every metric, mirroring the Python core, with no buffer.

@@ -21,10 +21,8 @@ _RESERVED_FORM_KEYS = frozenset(
 def _safe_form_payload(request: HttpRequest) -> dict[str, list[str]]:
     """Capture POST keys for the audit row, dropping framework-internal fields.
 
-    Multi-value fields (checkbox groups, multi-selects) preserve every
-    submitted value via `QueryDict.lists()`. Production projects should
-    extend `_RESERVED_FORM_KEYS` with any password / secret field names
-    they use, since this payload is persisted to the audit log.
+    A real project should extend `_RESERVED_FORM_KEYS` with any password or secret
+    field names it uses, since this payload is persisted to the audit log.
     """
     return {
         key: values
@@ -52,18 +50,15 @@ def _step_from_origin(request: HttpRequest) -> str:
 class AuditedFormActionBackend(RegistryFormActionBackend):
     """Registry backend that writes a backend-sourced `AuditEntry` per dispatch.
 
-    Two rows land per request, `request_started` with the captured payload and
-    `dispatched` with the resolved status, while `access.receivers` writes a parallel
-    row from the signals so the admin page shows both channels.
+    Writes `request_started` and `dispatched` rows alongside the signal-sourced ones
+    `access.receivers` writes, so the admin page shows both channels side by side.
     """
 
     def dispatch(self, request: HttpRequest, uid: str) -> HttpResponse:
         """Wrap the registry dispatch with two backend-sourced audit rows.
 
-        An unknown UID has no action, so the 404 from `super().dispatch` is not audited.
-
-        The dispatched row consumes `request.session["access_request_just_created"]` so
-        it attaches to the freshly created `AccessRequest` exactly once.
+        Consuming `request.session["access_request_just_created"]` here, rather than in
+        the handler, ties the dispatched row to the request the handler just created.
         """
         key = self._uid_to_name.get(uid)
         if key is None:

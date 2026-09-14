@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createLayers } from "./layers";
+import { createLayers, nativeDialog } from "./layers";
 import type { DialogAdapter, LayerDeps, LayerStack, PopStateAdapter } from "./layers";
 import { HEADER_ORIGIN, HEADER_ZONE } from "./protocol";
 
@@ -954,5 +954,108 @@ describe("layer open is single-flight and rolls back on failure", () => {
     expect(layers.size()).toBe(0);
     expect(opener.hasAttribute("data-next-busy")).toBe(false);
     expect(opener.hasAttribute("aria-busy")).toBe(false);
+  });
+});
+
+describe("the native dialog adapter", () => {
+  // jsdom models a <dialog> as a bare element, so showModal and close are stood up
+  // here while the dismiss listeners under test stay the real ones.
+  function stagedDialog(): HTMLDialogElement {
+    const dialog = document.createElement("dialog");
+    Object.assign(dialog, {
+      showModal(): void {
+        dialog.open = true;
+      },
+      close(value?: string): void {
+        dialog.open = false;
+        if (value !== undefined) dialog.returnValue = value;
+        dialog.dispatchEvent(new Event("close"));
+      },
+      returnValue: "",
+    });
+    document.body.append(dialog);
+    return dialog;
+  }
+
+  beforeEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("opens modally and focuses the autofocus child", () => {
+    const dialog = stagedDialog();
+    dialog.innerHTML = "<button>plain</button><button autofocus>go</button>";
+    nativeDialog().open(dialog, () => undefined);
+    expect(dialog.open).toBe(true);
+    expect(document.activeElement).toBe(dialog.querySelector("[autofocus]"));
+  });
+
+  it("focuses the dialog itself when nothing claims autofocus", () => {
+    const dialog = stagedDialog();
+    // jsdom leaves a <dialog> unfocusable, so the call is the observable part.
+    const focus = vi.spyOn(dialog, "focus");
+    nativeDialog().open(dialog, () => undefined);
+    expect(focus).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports Escape as a dismiss and keeps the dialog for the runtime to close", () => {
+    const dialog = stagedDialog();
+    const reasons: string[] = [];
+    nativeDialog().open(dialog, (reason) => reasons.push(reason));
+    const cancel = new Event("cancel", { cancelable: true });
+    dialog.dispatchEvent(cancel);
+    expect(reasons).toEqual(["escape"]);
+    expect(cancel.defaultPrevented).toBe(true);
+    expect(dialog.open).toBe(true);
+  });
+
+  it("reports a dialog-form close under its return value", () => {
+    const dialog = stagedDialog();
+    const reasons: string[] = [];
+    nativeDialog().open(dialog, (reason) => reasons.push(reason));
+    dialog.close("saved");
+    expect(reasons).toEqual(["saved"]);
+  });
+
+  it("names a valueless close after the dialog itself", () => {
+    const dialog = stagedDialog();
+    const reasons: string[] = [];
+    nativeDialog().open(dialog, (reason) => reasons.push(reason));
+    dialog.close();
+    expect(reasons).toEqual(["dialog"]);
+  });
+
+  it("reads a click on the dialog itself as the backdrop, inner clicks as content", () => {
+    const dialog = stagedDialog();
+    dialog.innerHTML = "<p>body</p>";
+    const reasons: string[] = [];
+    nativeDialog().open(dialog, (reason) => reasons.push(reason));
+    dialog
+      .querySelector("p")!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(reasons).toEqual([]);
+    dialog.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(reasons).toEqual(["backdrop"]);
+  });
+
+  it("a runtime close ends the dialog without answering itself", () => {
+    const dialog = stagedDialog();
+    const reasons: string[] = [];
+    const control = nativeDialog().open(dialog, (reason) => reasons.push(reason));
+    control();
+    expect(dialog.open).toBe(false);
+    expect(reasons).toEqual([]);
+    // The gestures are unbound too, so a late event finds nothing to answer.
+    dialog.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(reasons).toEqual([]);
+  });
+
+  it("a runtime close after a user close leaves the closed dialog alone", () => {
+    const dialog = stagedDialog();
+    const reasons: string[] = [];
+    const control = nativeDialog().open(dialog, (reason) => reasons.push(reason));
+    dialog.close("saved");
+    control();
+    expect(reasons).toEqual(["saved"]);
+    expect(dialog.open).toBe(false);
   });
 });

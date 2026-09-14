@@ -406,14 +406,12 @@ A clean exit confirms that every page resolves and every name is unique.
 Extension points
 ----------------
 
-Three surfaces let you replace or augment the router.
+Two surfaces let you replace or augment the router.
 
 - ``next.urls.RouterBackend`` is the abstract contract for any source of URL patterns.
 - ``next.urls.FileRouterBackend`` is the default file-based implementation.
-- ``next.urls.RouterFactory.register_backend`` maps a dotted path to a custom backend.
-  Registration is optional.
-  ``RouterFactory`` imports any dotted path it does not already know, so listing the class in ``PAGE_BACKENDS`` is enough.
-  Register it when you want the class validated at registration time rather than at the first router build.
+
+A custom backend is named by its dotted path under ``PAGE_BACKENDS``, exactly as every other backend family is named, and it takes that entry as its single constructor argument.
 
 Subclass ``FileRouterBackend`` to add additional patterns or augment URL names without writing a backend from scratch.
 See :doc:`extending` for a worked example.

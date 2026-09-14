@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 from django.core.checks import CheckMessage, Error, Tags, register
-from django.utils.module_loading import import_string
 
 from next.checks import NEXT
 from next.checks.common import (
@@ -15,12 +14,12 @@ from next.checks.common import (
     get_router_manager,
     page_tree_skip_names,
 )
-from next.conf import next_framework_settings
+from next.conf import import_class_cached, next_framework_settings
 from next.conf.signals import settings_reloaded
 
-from .backends import FileRouterBackend, RouterBackend, RouterFactory
+from .backends import FILE_ROUTER_CONFIG_KEYS, FileRouterBackend, RouterBackend
 from .dispatcher import scan_pages_tree
-from .errors import DuplicateURLParameterError
+from .errors import DuplicateURLParameterError, URLParameterError
 from .parser import default_url_parser
 
 
@@ -31,13 +30,9 @@ if TYPE_CHECKING:
     from .manager import RouterManager
 
 
-FILE_ROUTER_BACKEND = "next.urls.FileRouterBackend"
-
 _PAGE_BACKEND_SETTINGS_KEY = "PAGE_BACKENDS"
 
-_FILE_ROUTER_PAGE_CONFIG_KEYS = frozenset(
-    {"BACKEND", "APP_DIRS", "DIRS", "OPTIONS", "PAGES_DIR"}
-)
+_FILE_ROUTER_PAGE_CONFIG_KEYS = frozenset({"BACKEND", *FILE_ROUTER_CONFIG_KEYS})
 
 _NON_FILE_ROUTER_PAGE_CONFIG_KEYS = frozenset({"BACKEND"})
 
@@ -45,15 +40,18 @@ _CollectedPattern = tuple[str, str, str, frozenset[str]]
 """`(django_pattern, url_path, source, parameter_names)` for one route."""
 
 
-def _router_backend_path_is_valid(backend_path: str) -> bool:
-    """Return True when `backend_path` names a registered or importable backend."""
-    if RouterFactory.is_registered(backend_path):
-        return True
+def _router_class(backend_path: str) -> type[RouterBackend] | None:
+    """Return the router class `backend_path` names, or None when it names none.
+
+    One read answers both whether the entry is valid and whether it is a file router.
+    """
     try:
-        resolved = import_string(backend_path)
+        resolved = import_class_cached(backend_path)
     except ImportError:
-        return False
-    return isinstance(resolved, type) and issubclass(resolved, RouterBackend)
+        return None
+    if isinstance(resolved, type) and issubclass(resolved, RouterBackend):
+        return resolved
+    return None
 
 
 def _validate_config_structure(config: object, index: int) -> list[CheckMessage]:
@@ -214,7 +212,11 @@ def _validate_config_fields(config: dict[str, Any], index: int) -> list[CheckMes
     errors: list[CheckMessage] = []
 
     backend = config.get("BACKEND")
-    if backend is not None and not _router_backend_path_is_valid(str(backend)):
+    if backend is None:
+        return errors
+
+    router_class = _router_class(str(backend))
+    if router_class is None:
         errors.append(
             Error(
                 f'NEXT_FRAMEWORK["{_PAGE_BACKEND_SETTINGS_KEY}"][{index}] specifies '
@@ -223,26 +225,11 @@ def _validate_config_fields(config: dict[str, Any], index: int) -> list[CheckMes
                 id="next.E004",
             )
         )
+        return errors
 
-    is_file_router = False
-    if backend == FILE_ROUTER_BACKEND:
-        is_file_router = True
-    elif backend is not None and isinstance(backend, str):
-        try:
-            backend_class = import_string(backend)
-            is_file_router = isinstance(backend_class, type) and issubclass(
-                backend_class, FileRouterBackend
-            )
-        except (ImportError, AttributeError):
-            pass
-
-    if is_file_router:
+    if issubclass(router_class, FileRouterBackend):
         errors.extend(_validate_file_router_backend_fields(config, index))
-    elif (
-        backend is not None
-        and isinstance(backend, str)
-        and _router_backend_path_is_valid(backend)
-    ):
+    else:
         rf = f"NEXT_FRAMEWORK['{_PAGE_BACKEND_SETTINGS_KEY}'][{index}]"
         errors.extend(
             errors_for_unknown_keys(
@@ -257,9 +244,9 @@ def _validate_config_fields(config: dict[str, Any], index: int) -> list[CheckMes
 def check_next_pages_configuration(*args, **kwargs) -> list[CheckMessage]:
     """Validate `PAGE_BACKENDS` inside merged `NEXT_FRAMEWORK`.
 
-    A `NEXT_FRAMEWORK` that is no dict belongs to the configuration layer and is
-    reported once as `next.E077`. The merged value falls back to the defaults here,
-    so the page checks run against a shape they can read.
+    A non-dict `NEXT_FRAMEWORK` is reported once as `next.E077` elsewhere, so the merged
+    value falls back to the defaults here and the page checks run against a shape they
+    can read.
     """
     next_pages = next_framework_settings.PAGE_BACKENDS
     if not isinstance(next_pages, list):
@@ -353,16 +340,27 @@ def check_reverse_name_collisions(*args, **kwargs) -> list[CheckMessage]:
     return errors
 
 
-# One collection walk shared by the two URL checks in a run. The memo holds the
-# manager itself rather than its `id`, so a later manager can never alias it.
-_COLLECTED_PATTERNS_CACHE: dict[
-    str, tuple[RouterManager, list[_CollectedPattern], list[CheckMessage]] | None
-] = {"value": None}
+class _CollectedPatternsMemo:
+    """One collection walk shared by the two URL checks of a run.
+
+    The manager is held rather than its `id`, so a later one can never alias it.
+    """
+
+    def __init__(self) -> None:
+        """Start with no walk on record."""
+        self.router_manager: RouterManager | None = None
+        self.patterns: list[_CollectedPattern] = []
+        self.errors: list[CheckMessage] = []
+
+
+_collected_patterns = _CollectedPatternsMemo()
 
 
 def reset_collected_patterns_cache(**kwargs) -> None:
     """Drop memoised collected patterns so the next check run recollects."""
-    _COLLECTED_PATTERNS_CACHE["value"] = None
+    _collected_patterns.router_manager = None
+    _collected_patterns.patterns = []
+    _collected_patterns.errors = []
 
 
 settings_reloaded.connect(reset_collected_patterns_cache)
@@ -372,13 +370,12 @@ def _collect_all_patterns(
     router_manager: RouterManager,
 ) -> tuple[list[_CollectedPattern], list[CheckMessage]]:
     """Return per-run memoised patterns as fresh lists callers may mutate."""
-    cached = _COLLECTED_PATTERNS_CACHE["value"]
-    if cached is not None and cached[0] is router_manager:
-        _, patterns, errors = cached
-    else:
+    if _collected_patterns.router_manager is not router_manager:
         patterns, errors = _collect_all_patterns_uncached(router_manager)
-        _COLLECTED_PATTERNS_CACHE["value"] = (router_manager, patterns, errors)
-    return list(patterns), list(errors)
+        _collected_patterns.patterns = patterns
+        _collected_patterns.errors = errors
+        _collected_patterns.router_manager = router_manager
+    return list(_collected_patterns.patterns), list(_collected_patterns.errors)
 
 
 def _collect_all_patterns_uncached(
@@ -459,28 +456,32 @@ def _collect_url_patterns(
     for url_path, page_file in scan_pages_tree(pages_path, skip_dir_names):
         try:
             django_pattern, parameters = default_url_parser.parse_url_pattern(url_path)
-        except DuplicateURLParameterError as exc:
-            # Two wildcards with distinct names raise without a name
-            # duplicate, so fall back to the name the parser flagged.
-            names = default_url_parser.duplicate_parameter_names(url_path) or [
-                exc.param_name
-            ]
-            errors.append(
-                Error(
-                    f"URL pattern '{url_path}' has duplicate parameter "
-                    f"names: {names}. "
-                    "Each parameter must have a unique name.",
-                    obj=str(page_file),
-                    id="next.E028",
-                )
-            )
-        except (ValueError, TypeError):
-            continue
+        except URLParameterError as exc:
+            errors.append(_parameter_refusal_error(exc, url_path, page_file))
         else:
             source = f"{context}: {page_file.relative_to(pages_path)}"
             patterns.append((django_pattern, url_path, source, frozenset(parameters)))
 
     return patterns
+
+
+def _parameter_refusal_error(
+    exc: URLParameterError, url_path: str, page_file: Path
+) -> Error:
+    """Report one parser refusal under the code its own subclass owns."""
+    if isinstance(exc, DuplicateURLParameterError):
+        # Two wildcards with distinct names raise without a name duplicate, so fall back
+        # to the name the parser flagged.
+        names = default_url_parser.duplicate_parameter_names(url_path) or [
+            exc.param_name
+        ]
+        return Error(
+            f"URL pattern '{url_path}' has duplicate parameter names: {names}. "
+            "Each parameter must have a unique name.",
+            obj=str(page_file),
+            id="next.E028",
+        )
+    return Error(str(exc), obj=str(page_file), id="next.E082")
 
 
 __all__ = [

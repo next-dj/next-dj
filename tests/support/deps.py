@@ -48,9 +48,8 @@ class OtherForm(forms.Form):
 class DeferringProvider:
     """Protocol provider that defers every static verdict and claims one name.
 
-    It records the parameters and the contexts it is asked about, so a test can
-    prove the resolver puts a candidate on the replay path. A name of None
-    claims nothing and leaves the recording as the only thing it does.
+    Records every parameter and context asked about, so a test can prove a candidate
+    reached the replay path.
     """
 
     def __init__(self, name: str | None = "flag", value: object = "STUB") -> None:

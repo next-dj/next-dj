@@ -1,12 +1,7 @@
 """Discover and render DJX components for templates.
 
-Each subsystem lives in a small submodule. `info` holds the value object, `loading` the
-module cache, `scanner` the filesystem walk, `registry` the ordered store and visibility
-resolver, `context` the `@component.context` decorator, `renderers` the render
-strategies, `backends` the backend contract, `manager` the orchestrator, `sources` the
-manager over every component source, `watch` the read-only autoreload scan, and `facade`
-the short helpers used from templates. Internal classes are reachable with deep imports
-of the form `from next.components.registry import ComponentRegistry`.
+Each subsystem lives in its own submodule, and internal classes stay reachable through
+deep imports such as `from next.components.registry import ComponentRegistry`.
 """
 
 from __future__ import annotations

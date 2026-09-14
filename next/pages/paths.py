@@ -6,11 +6,11 @@ and dropped by the lifecycle that rebuilds a composition.
 
 from __future__ import annotations
 
-from collections import OrderedDict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from next.utils import MAX_ANCESTOR_WALK_DEPTH, store_capped
+from next.caches import BoundedCache
+from next.utils import MAX_ANCESTOR_WALK_DEPTH
 
 
 if TYPE_CHECKING:
@@ -32,9 +32,7 @@ class PagePathInfo:
 
 # Bounded because a router may name a page path no earlier read named, and each
 # entry pins an ancestor tuple until the process ends.
-_PAGE_PATH_INFO_CACHE_MAX_SIZE = 2048
-
-_PAGE_PATH_INFO_CACHE: OrderedDict[Path, PagePathInfo] = OrderedDict()
+_PAGE_PATH_INFO_CACHE: BoundedCache[Path, PagePathInfo] = BoundedCache()
 
 
 def page_path_info(file_path: Path) -> PagePathInfo:
@@ -42,9 +40,7 @@ def page_path_info(file_path: Path) -> PagePathInfo:
     info = _PAGE_PATH_INFO_CACHE.get(file_path)
     if info is None:
         info = _build_page_path_info(file_path)
-        store_capped(
-            _PAGE_PATH_INFO_CACHE, file_path, info, _PAGE_PATH_INFO_CACHE_MAX_SIZE
-        )
+        _PAGE_PATH_INFO_CACHE[file_path] = info
     return info
 
 
@@ -67,7 +63,7 @@ def _build_page_path_info(file_path: Path) -> PagePathInfo:
 
 def forget_page_path_info(file_path: Path) -> None:
     """Drop the facts of one page so the next read consults the disk again."""
-    _PAGE_PATH_INFO_CACHE.pop(file_path, None)
+    _PAGE_PATH_INFO_CACHE.pop(file_path)
 
 
 def clear_page_path_info() -> None:

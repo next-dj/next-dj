@@ -5,18 +5,17 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, override
+from typing import TYPE_CHECKING, Any, override
 
 from django.apps import apps
 from django.core.exceptions import AppRegistryNotReady, ImproperlyConfigured
 
-from next.backends import resolve_backend_class
+from next.backends import instantiate_backend, resolve_backend_class
 from next.conf import next_framework_settings
 from next.pages import page
 from next.utils import PageRoot, classify_dirs_entries, resolve_base_dir, resolved_tree
 
 from .dispatcher import FilesystemTreeDispatcher
-from .errors import RouterConstructionError
 from .parser import default_url_parser
 from .signals import route_registered
 
@@ -33,9 +32,10 @@ logger = logging.getLogger(__name__)
 # framework ships a `next/pages` package that otherwise reads as a page tree.
 _NON_PAGE_APP_ROOTS = ("django", "next")
 
-# The keys a file router entry carries. They have no defaults here, because a
-# partial entry is a settings mistake the checks name rather than a shorthand.
-_FILE_ROUTER_KEYS = ("PAGES_DIR", "APP_DIRS", "OPTIONS", "DIRS")
+# The keys a file router entry carries beside BACKEND, read here and validated by
+# the checks. They have no defaults, because a partial entry is a settings mistake
+# the checks name rather than a shorthand.
+FILE_ROUTER_CONFIG_KEYS = ("PAGES_DIR", "APP_DIRS", "OPTIONS", "DIRS")
 
 
 def _is_framework_app(app_name: str) -> bool:
@@ -66,7 +66,10 @@ def _installed_app_directories() -> dict[str, Path]:
 
 
 class RouterBackend(ABC):
-    """Pluggable source of `URLPattern` and `URLResolver` entries."""
+    """Pluggable source of `URLPattern` and `URLResolver` entries.
+
+    A backend takes its own `PAGE_BACKENDS` entry as its single constructor argument.
+    """
 
     @abstractmethod
     def generate_urls(self) -> list[URLPattern | URLResolver]:
@@ -97,8 +100,10 @@ class RouterBackend(ABC):
         return frozenset()
 
 
-def _narrow_file_router_options(options: dict[str, Any]) -> dict[str, Any]:
+def _narrow_file_router_options(options: object) -> dict[str, Any]:
     """Keep only keys consumed by `next.pages` (e.g. `context_processors`)."""
+    if not isinstance(options, dict):
+        return {}
     cp = options.get("context_processors")
     if not isinstance(cp, list):
         cp = []
@@ -111,49 +116,43 @@ def _narrow_file_router_options(options: dict[str, Any]) -> dict[str, Any]:
 class FileRouterBackend(RouterBackend):
     """Discover `page.py` (and virtual pages) under app and optional root trees."""
 
-    DEFAULT_COMPONENTS_FOLDER_NAME: ClassVar[str] = "_components"
+    def __init__(self, config: Mapping[str, Any]) -> None:
+        """Read the pages dir, the extra roots, and the narrowed OPTIONS off the entry.
 
-    def __init__(
-        self,
-        pages_dir: str | None = None,
-        *,
-        app_dirs: bool | None = None,
-        extra_root_paths: list[Path] | None = None,
-        skip_dir_names: frozenset[str] | None = None,
-        components_folder_name: str | None = None,
-        options: dict[str, Any] | None = None,
-    ) -> None:
-        """Configure pages dir, extra roots, skip-dir names, and narrowed OPTIONS."""
-        self.pages_dir = pages_dir if pages_dir is not None else "pages"
-        self.app_dirs = app_dirs if app_dirs is not None else True
-        raw_opts = dict(options) if options else {}
-        base_dir = resolve_base_dir()
+        A subclass renaming the component folder overrides
+        `_resolve_components_folder_name`, which is read here and nowhere else.
+        """
+        self._require_config_keys(config)
+        self.pages_dir = str(config["PAGES_DIR"])
+        self.app_dirs = bool(config["APP_DIRS"])
+        self.options = _narrow_file_router_options(config["OPTIONS"])
 
-        comp_name = (
-            self.DEFAULT_COMPONENTS_FOLDER_NAME
-            if components_folder_name is None
-            else components_folder_name
-        )
-        if extra_root_paths is None or skip_dir_names is None:
-            dirs_list = list(extra_root_paths or [])
-            # Already resolved, because the classification probes what it keeps.
-            roots, segment_names = classify_dirs_entries(dirs_list, base_dir)
-            skip = frozenset({comp_name, *segment_names})
-        else:
-            # `page_roots` promises resolved absolute trees, and a subclass
-            # passing both keywords bypasses the classification that resolves.
-            roots = [resolved_tree(root) for root in extra_root_paths]
-            skip = skip_dir_names
+        components_dir = self._resolve_components_folder_name()
+        # Already resolved, because the classification probes what it keeps.
+        roots, segment_names = classify_dirs_entries(config["DIRS"], resolve_base_dir())
         self._extra_root_paths = roots
-        self._skip_dir_names = skip
-        self._components_folder_name = comp_name
+        self._skip_dir_names = frozenset({components_dir, *segment_names})
+        self._components_folder_name = components_dir
 
-        self.options = _narrow_file_router_options(raw_opts)
         self._patterns_cache: dict[str, list[URLPattern | URLResolver]] = {}
         self._app_pages_path_cache: dict[str, tuple[Path, Path | None]] = {}
         self._root_patterns_cache: list[URLPattern | URLResolver] | None = None
         self._root_pages_paths_cache: list[Path] | None = None
         self._url_parser = default_url_parser
+
+    @classmethod
+    def _require_config_keys(cls, config: Mapping[str, Any]) -> None:
+        """Refuse an entry that leaves out one of the keys a file router reads."""
+        for required in FILE_ROUTER_CONFIG_KEYS:
+            if required not in config:
+                rest = ", ".join(
+                    key for key in FILE_ROUTER_CONFIG_KEYS if key != required
+                )
+                msg = (
+                    f"A {cls.__name__} entry needs {required!r} alongside "
+                    f"{rest}, got {config!r}."
+                )
+                raise ImproperlyConfigured(msg)
 
     @override
     def components_folder_name(self) -> str | None:
@@ -187,36 +186,6 @@ class FileRouterBackend(RouterBackend):
         return (
             f"<{self.__class__.__name__} pages_dir='{self.pages_dir}' "
             f"app_dirs={self.app_dirs}>"
-        )
-
-    @override
-    def __eq__(self, other: object) -> bool:
-        """Return True when the other backend has the same pages configuration."""
-        if not isinstance(other, FileRouterBackend):
-            return False
-        return (
-            self.pages_dir == other.pages_dir
-            and self.app_dirs == other.app_dirs
-            and self.options == other.options
-            and self._extra_root_paths == other._extra_root_paths
-            and self._skip_dir_names == other._skip_dir_names
-            and self._components_folder_name == other._components_folder_name
-        )
-
-    @override
-    def __hash__(self) -> int:
-        """Hash from pages config including extra roots and skip names."""
-        cp = self.options.get("context_processors")
-        cp_t = tuple(cp) if isinstance(cp, list) else ()
-        return hash(
-            (
-                self.pages_dir,
-                self.app_dirs,
-                tuple(self._extra_root_paths),
-                tuple(sorted(self._skip_dir_names)),
-                self._components_folder_name,
-                cp_t,
-            )
         )
 
     @override
@@ -360,93 +329,21 @@ class FileRouterBackend(RouterBackend):
 
 
 class RouterFactory:
-    """Build `RouterBackend` instances from `PAGE_BACKENDS`-style dicts."""
+    """Build one `RouterBackend` from one `PAGE_BACKENDS` entry.
 
-    _backends: ClassVar[dict[str, type[RouterBackend]]] = {
-        "next.urls.FileRouterBackend": FileRouterBackend
-    }
+    `RouterManager` loads the whole list through `next.backends`. This is the
+    single-entry build the router access port hands the development watcher.
+    """
 
     @classmethod
-    def register_backend(cls, name: str, backend_class: type[RouterBackend]) -> None:
-        """Map a dotted backend path to a class for `create_backend`.
+    def create_backend(cls, config: Mapping[str, Any]) -> RouterBackend:
+        """Return the router named by `config['BACKEND']`, built from the entry.
 
-        Validates at registration so a bad class fails loudly here instead of
-        silently on the first `create_backend` during a router reload.
+        Every router of the family takes the entry, so nothing here knows one of them.
         """
-        candidate: object = backend_class
-        if not isinstance(candidate, type) or not issubclass(candidate, RouterBackend):
-            msg = f"Backend {name!r} is not a RouterBackend subclass"
-            raise TypeError(msg)
-        cls._backends[name] = candidate
-
-    @classmethod
-    def is_registered(cls, name: str) -> bool:
-        """Report whether `name` maps to a registered backend class.
-
-        Contract-only seam, so adjacent areas never read the class registry directly.
-        """
-        return name in cls._backends
-
-    @classmethod
-    def _backend_class(cls, config: Mapping[str, Any]) -> type[RouterBackend]:
-        """Return the registered class for the entry, or resolve its dotted path."""
-        dotted = config.get("BACKEND")
-        registered = cls._backends.get(dotted) if isinstance(dotted, str) else None
-        if registered is not None:
-            return registered
-        try:
-            return resolve_backend_class(config, base=RouterBackend)
-        except ImportError as exc:
-            msg = f"Router backend {dotted!r} could not be imported: {exc}"
-            raise ImproperlyConfigured(msg) from exc
-
-    @classmethod
-    def _create_file_router(
-        cls, backend_class: type[FileRouterBackend], config: Mapping[str, Any]
-    ) -> RouterBackend:
-        """Build one file router from the keys its entry carries."""
-        for req in _FILE_ROUTER_KEYS:
-            if req not in config:
-                rest = ", ".join(key for key in _FILE_ROUTER_KEYS if key != req)
-                msg = (
-                    f"A {backend_class.__name__} entry needs {req!r} alongside "
-                    f"{rest}, got {config!r}."
-                )
-                raise ImproperlyConfigured(msg)
-        base_dir = resolve_base_dir()
-        raw_opts = config.get("OPTIONS")
-        if not isinstance(raw_opts, dict):
-            raw_opts = {}
-        path_roots, segment_names = classify_dirs_entries(config.get("DIRS"), base_dir)
-        components_dir = FileRouterBackend._resolve_components_folder_name()
-        try:
-            return backend_class(
-                pages_dir=config.get("PAGES_DIR", "pages"),
-                app_dirs=bool(config.get("APP_DIRS", True)),
-                extra_root_paths=path_roots,
-                skip_dir_names=frozenset({components_dir, *segment_names}),
-                components_folder_name=components_dir,
-                options=_narrow_file_router_options(raw_opts),
-            )
-        except TypeError as exc:
-            raise RouterConstructionError(backend_class.__name__, exc) from exc
-
-    @classmethod
-    def create_backend(cls, config: dict[str, Any]) -> RouterBackend:
-        """Instantiate the backend class named by `config["BACKEND"]`.
-
-        Every misconfigured entry answers `ImproperlyConfigured`, the type the
-        shared backend loader raises, so one handler covers the whole family.
-        """
-        backend_class = cls._backend_class(config)
-        if issubclass(backend_class, FileRouterBackend):
-            return cls._create_file_router(backend_class, config)
-        try:
-            # A router of any other shape reads its own configuration, so the
-            # entry names it and nothing else reaches its constructor.
-            return backend_class()
-        except TypeError as exc:
-            raise RouterConstructionError(backend_class.__name__, exc) from exc
+        return instantiate_backend(
+            resolve_backend_class(config, base=RouterBackend), config
+        )
 
 
 __all__ = ["FileRouterBackend", "RouterBackend", "RouterFactory"]

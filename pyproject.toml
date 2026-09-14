@@ -138,6 +138,9 @@ addopts = [
 
 [tool.coverage.run]
 parallel = true
+# Statement coverage alone passes a condition whose false arm is unreachable, which
+# is how a dead disjunct and an always-true guard both survived a 100% gate here.
+branch = true
 source = ["next"]
 omit = [
     "*/tests/*",
@@ -176,6 +179,7 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "class .*\\bProtocol\\):",
     "@(abc\\.)?abstractmethod",
+    "@(typing\\.)?overload",
     "if TYPE_CHECKING:",
 ]
 
@@ -214,11 +218,16 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
-# Standalone gate scripts run by path, deliberately not an importable package
-"docs/prose_lint.py" = ["INP001"]
-"docs/snippet_lint.py" = ["INP001"]
+# Standalone gate scripts run by path, deliberately not an importable package whose
+# module docstring would stand in for the help text their argument parser already prints
+"build_hooks.py" = ["D100"]
+"docs/prose_lint.py" = ["INP001", "D100"]
+"docs/snippet_lint.py" = ["INP001", "D100"]
 # The ASCII banner is the package docstring, so summary-line rules cannot hold there
 "next/__init__.py" = ["D205", "D210", "D400", "D415"]
+# `DEFAULTS` is open for third-party keys and every value carries the shape of its own
+# key, so the one accessor over all of them can name no return narrower than `Any`
+"next/conf/settings.py" = ["ANN401"]
 "examples/*" = [
     "ARG002",
     "D100", "D101", "D103", "D104", "D105", "D106",
@@ -226,6 +235,9 @@ ignore = [
     "INP001",
     "S105",
 ]
+# `AppConfig.ready()` is the one place an app may import its receivers, and the
+# import exists for its side effect, so both rules are wrong for these files only.
+"examples/**/apps.py" = ["F401", "PLC0415"]
 "tests/**/*.py" = ["D100", "D104"]
 "tests/pages/*" = ["INP001"]
 "tests/site_pages/*" = ["INP001"]
