@@ -65,8 +65,9 @@ Bootstrap
 
 Django calls ``NextFrameworkConfig.ready()`` once per process after all applications load.
 The hook calls ``register_all()`` to register the framework system checks.
-It then runs nine startup steps in a fixed order.
-The first, ``apply_resolver_setting()``, points the dependency-injection singleton at the configured resolver class, ahead of every step that imports user modules.
+It then runs ten startup steps in a fixed order.
+The first connects four ``router_reloaded`` receivers, ``forget_watch_state``, ``forget_page_roots``, ``forget_manager_page_roots``, and ``forget_dep_caches``, so a router rebuild leaves no watch, page-root, or dependency cache holding a stale generation.
+The second, ``apply_resolver_setting()``, points the dependency-injection singleton at the configured resolver class, ahead of every step that imports user modules.
 The next three bind the ``next.ports`` slots that the request path, the watcher, and the checks all read.
 They run early for the same reason the resolver setting does, so no discovery failure leaves a process behind with an unbound port.
 The next four install autoreload, template-tag builtins, staticfiles integration, and component bootstrap into the Django runtime.
@@ -167,7 +168,7 @@ The set of submodules differs by area, and :doc:`adding-an-area` states the cont
    * - Subsystem
      - Submodules
    * - ``next.pages``
-     - ``manager``, ``registry``, ``loaders``, ``context``, ``processors``, ``scan``, ``paths``, ``errors``, ``checks``, ``signals``, ``watch``.
+     - ``manager``, ``registry``, ``loaders``, ``context``, ``processors``, ``scan``, ``paths``, ``placeholder``, ``errors``, ``checks``, ``signals``, ``watch``.
    * - ``next.components``
      - ``manager``, ``registry``, ``scanner``, ``sources``, ``loading``, ``renderers``, ``context``, ``facade``, ``info``, ``backends``, ``watch``, ``checks``, ``signals``.
    * - ``next.urls``
@@ -175,11 +176,11 @@ The set of submodules differs by area, and :doc:`adding-an-area` states the cont
    * - ``next.forms``
      - ``manager``, ``dispatch`` (``build``, ``permissions``, ``responses``, ``wizard``), ``backends``, ``decorators``, ``base``, ``markers``, ``serializers``, ``formsets``, ``uid``, ``rendering``, ``autodiscover``, ``wizard``, ``widgets``, ``origin``, ``diagnostics``, ``errors``, ``checks``, ``signals``.
    * - ``next.static``
-     - ``manager``, ``collector``, ``discovery``, ``backends``, ``assets``, ``scripts``, ``serializers``, ``defaults``, ``finders``, ``checks``, ``signals``.
+     - ``manager``, ``collector``, ``discovery``, ``backends``, ``assets``, ``scripts``, ``inject``, ``serializers``, ``defaults``, ``finders``, ``checks``, ``signals``.
    * - ``next.partial``
      - ``manager``, ``registry``, ``backends``, ``zone``, ``render``, ``envelope``, ``errors``, ``patches``, ``shaping`` (``outcomes``, ``validate``, ``scrub``, ``targets``, ``csrf``, ``responses``), ``shaper``, ``sse``, ``view``, ``headers``, ``keys``, ``origin``, ``checks``, ``signals``.
    * - ``next.deps``
-     - ``resolver``, ``linear``, ``plan``, ``providers``, ``registry``, ``cache``, ``context``, ``markers``, ``errors``, ``signals``.
+     - ``resolver``, ``linear``, ``plan``, ``providers``, ``registry``, ``cache``, ``context``, ``markers``, ``introspect``, ``errors``, ``signals``.
    * - ``next.server``
      - ``autoreload``, ``watcher``, ``roots``, ``signals``.
    * - ``next.conf``

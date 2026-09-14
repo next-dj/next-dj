@@ -173,6 +173,9 @@ The project uses ``doc8`` for RST style.
 The linter catches trailing whitespace and inconsistent indentation.
 It does not police line length, because semantic newlines put one sentence on one line however long that sentence runs.
 
+``docs/snippet_lint.py`` checks every code block instead of the surrounding prose.
+It parses Python blocks with :mod:`ast`, flags a ``NEXT_FRAMEWORK`` key that ``next/conf/defaults.py`` does not define, and catches an unbalanced template tag, and :doc:`quality-gates` states where it runs.
+
 Translation notes
 -----------------
 

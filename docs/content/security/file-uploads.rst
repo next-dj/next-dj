@@ -112,6 +112,11 @@ Combine the three layers, an extension allow list, a media type read from the le
            msg = "The file type is not accepted."
            raise ValidationError(msg)
 
+.. note::
+
+   ``python-magic``, imported above as ``magic``, and the system ``libmagic`` library it wraps are a third-party dependency, not shipped by next.dj.
+   Install the package separately (``pip install python-magic``) and the platform ``libmagic`` package before enabling this validator.
+
 .. code-block:: python
    :caption: notes/forms.py
 

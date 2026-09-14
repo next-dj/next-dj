@@ -36,7 +36,6 @@ StaticAsset
 
 ``url``.
    The public URL of the asset.
-   Empty for inline assets.
 
 ``kind``.
    The asset kind, such as ``css``, ``js``, or ``module``.

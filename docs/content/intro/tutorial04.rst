@@ -162,6 +162,7 @@ It receives the same DI-resolved parameters as any other callable, including URL
 
 The reverse name ``next:page_notes_id`` assumes the untyped ``notes/[id]/`` directory used in this tutorial.
 A typed segment such as ``notes/[int:id]/`` produces ``page_notes_int_id`` instead.
+
 The factory passed to ``form_class`` is dependency-resolved at dispatch time, so it receives the captured URL ``id`` and returns the form class paired with the ``instance`` to bind.
 The dispatcher builds and validates that bound form before it calls ``update_note``, so the handler only saves it.
 An ``id`` that matches no note makes ``get_object_or_404`` return Django's standard 404 response.
@@ -225,6 +226,7 @@ The rendered form carries several hidden inputs from different sources.
 ``confirm`` is a real field on ``DeleteNoteForm``, so the template posts it explicitly.
 The ``{% form %}`` tag emits the framework fields itself.
 ``csrfmiddlewaretoken`` carries the CSRF token and ``_next_form_origin`` records the page URL with its query string, such as ``/notes/7/`` or ``/?q=gro``.
+
 The dispatcher resolves that path against the URLconf, which recovers the captured ``id`` through the URL converter.
 The action handler therefore resolves ``DUrl["id", int]`` without any extra argument on the tag.
 
@@ -277,7 +279,7 @@ The complete file now looks like this.
        class Meta:
            login_required = True
 
-       def on_valid(self, request: HttpRequest, note_id: DUrl["id", int]):
+       def on_valid(self, request: HttpRequest, note_id: DUrl["id", int]) -> HttpResponseRedirect:
            get_object_or_404(Note, pk=note_id).delete()
            return HttpResponseRedirect(reverse("next:page_"))
 

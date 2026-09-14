@@ -138,22 +138,23 @@ The ``url_kwargs`` dict and ``request.GET`` are both untrusted.
 .. code-block:: python
    :caption: notes/providers.py
 
+   import inspect
    import re
    from typing import get_origin
 
    from django.http import Http404
    from notes.models import Link
 
-   from next.deps import DDependencyBase, RegisteredParameterProvider
+   from next.deps import DDependencyBase, RegisteredParameterProvider, ResolutionContext
 
    class DLink[T](DDependencyBase[T]):
        __slots__ = ()
 
    class LinkProvider(RegisteredParameterProvider):
-       def can_handle(self, param, _context) -> bool:
+       def can_handle(self, param: inspect.Parameter, _context: ResolutionContext) -> bool:
            return get_origin(param.annotation) is DLink
 
-       def resolve(self, param, context):
+       def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> Link:
            slug = str(context.url_kwargs["slug"])
            if not re.fullmatch(r"[a-zA-Z0-9-]{1,50}", slug):
                raise Http404
@@ -176,20 +177,25 @@ Browsers read a leading double slash as a protocol relative URL and treat ``//ev
 
 Django ships ``url_has_allowed_host_and_scheme`` in ``django.utils.http`` for this task.
 
+A ``DQuery`` marker reads ``request.GET``, which is empty on the POST that ``{% form %}`` sends to the dispatch endpoint rather than to the page URL, the same rule :doc:`/content/faq/usage` states for reconstructing a redirect's query string from ``cleaned_data``.
+A login page needs the destination to survive that hop, so forward it as a hidden form field populated from the page's own query string, or read it from the origin page's query string through the already-resolved origin ``next.forms.resolve_origin`` returns, instead of relying on ``DQuery`` directly.
+The field below is the hidden-field form, rendered by the login page as ``{{ form.next_url }}`` with its initial value read from ``request.GET.get("next", "/")``.
+
 .. code-block:: python
    :caption: notes/actions.py
 
    from django.http import HttpRequest, HttpResponseRedirect
    from django.utils.http import url_has_allowed_host_and_scheme
 
-   from next.forms import CharField, Form
-   from next.urls import DQuery
+   from next.forms import CharField, Form, HiddenInput
 
    class LoginForm(Form):
        username = CharField()
        password = CharField()
+       next_url = CharField(required=False, widget=HiddenInput)
 
-       def on_valid(self, request: HttpRequest, next_url: DQuery[str] = "/") -> HttpResponseRedirect:
+       def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
+           next_url = self.cleaned_data.get("next_url") or "/"
            if not url_has_allowed_host_and_scheme(
                url=next_url,
                allowed_hosts={request.get_host()},

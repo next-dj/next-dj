@@ -39,6 +39,8 @@ Built-in kinds
 The static subsystem does not privilege CSS or JS in core code.
 The three built-in kinds register through the same public API that a project uses for a new kind.
 
+.. _topics-static-asset-kinds-registry:
+
 The registry
 ------------
 
@@ -94,7 +96,7 @@ Register kinds in ``AppConfig.ready`` so the kind exists before the first reques
            )
 
 The ``jsx`` kind now lands in the ``scripts`` slot and renders through ``render_module_tag``.
-The ``register`` call also accepts an optional ``inline_tag`` keyword, the HTML wrapper element such as ``"style"`` or ``"script"`` that wraps an inline body, defaulting to verbatim.
+The ``register`` call also accepts an optional ``inline_tag`` keyword, see :ref:`topics-static-asset-kinds-registry`.
 A repeated call with identical parameters is idempotent.
 A repeated call with different parameters raises ``ValueError``.
 
@@ -233,6 +235,7 @@ System checks
 
 The static system checks ``next.W030``, ``next.W031``, and ``next.E036`` through ``next.E038`` validate the backend configuration.
 The ``next.W042`` check validates the ``JS_CONTEXT_SERIALIZER`` setting.
+
 The ``next.W074`` check walks the registered kinds and warns about each one whose renderer carries no client insertion verb.
 The ``next.W076`` check walks the same kinds and warns about each one whose ``inline_tag`` is not the element its renderer's verb builds, so its URL form travels in a patch envelope while its inline bodies do not.
 Both checks read the registry of the running process, so a kind that was never registered is outside their reach.

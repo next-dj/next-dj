@@ -45,6 +45,8 @@ Manager
 ``default_manager`` is the process-wide static manager handle exported from ``next.static``.
 It builds its wrapped ``StaticManager`` lazily on first access.
 ``reset_default_manager`` drops that wrapped instance so the next access rebuilds it, which keeps the manager consistent when ``NEXT_FRAMEWORK`` changes under ``override_settings``.
+``get_static_manager`` returns the live ``StaticManager`` instance behind the lazy ``default_manager`` handle, and ``next.testing.patching`` uses it to patch a backend directly in tests.
+``collect_component_assets`` is the entry point that folds a component's co-located assets into a caller-supplied collector, and ``next.templatetags.components`` and ``next.forms.widgets`` both call it.
 
 Injection
 ~~~~~~~~~
@@ -88,6 +90,7 @@ Staticfiles finder
 It maps assets such as ``template.css``, ``layout.js``, ``component.css``, and any registered stems to their source files under the ``next/`` staticfiles namespace.
 It surfaces every such asset to ``collectstatic`` for production output, to ``manage.py findstatic``, and to the staticfiles view that serves files directly while ``DEBUG`` is true.
 Asset URLs themselves come from ``staticfiles_storage.url``, not from the finder.
+
 Staticfiles asks the finder once per referenced asset, so the mapping is held rather than walked again for every lookup.
 It is rebuilt when a stem or kind registration changes which filenames count, when the page or component trees the routers report change, and, while ``DEBUG`` is true, when the mtime of any directory inside those trees moves.
 That last check is what picks up an asset added at runtime, and it is skipped when ``DEBUG`` is false, where only a reconfiguration moves what the walk finds.

@@ -267,6 +267,7 @@ Its payload is an object with two fields, where ``context`` is the whole merged 
 The initial seed lists every seeded key in ``changed``.
 A partial zone render ships a js-context delta in its patch envelope, see :doc:`/content/topics/partial-rendering/how-it-works`.
 The runtime merges the delta into ``window.Next.context`` and fires ``context-updated`` again with only the delta keys in ``changed``.
+
 The ``"ready"`` event fires once the first context is loaded, and its listener receives the context object itself.
 A ``ready`` listener registered after that point receives an immediate replay with the current context.
 The partial runtime fires further ``partial:*`` events on the same bus, see :doc:`/content/topics/partial-rendering/reference`.

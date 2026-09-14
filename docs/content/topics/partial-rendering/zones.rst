@@ -189,6 +189,7 @@ A zone may not sit directly inside a ``{% with %}`` either, because the with-bin
 This one is the warning ``next.W067`` rather than an error, so move the bindings into a context provider or inside the zone body.
 A ``lazy=`` zone needs a ``{% placeholder %}`` branch.
 A zone belongs to a page, not a component, so a ``{% zone %}`` in a component template is rejected.
+A zone name must be an ASCII slug, letters, digits, hyphens, or underscores, because it travels in the ``X-Next-Zone`` header, which is latin-1 (``next.E061``).
 See :doc:`/content/ref/system-checks` for the full list and the check codes.
 
 See also

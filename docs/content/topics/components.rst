@@ -123,7 +123,7 @@ Global scope.
 
 Two components with the same name are valid when their scopes differ, for example one in a page tree and one in a ``DIRS`` root, or one at a tree root and one under a route below it.
 One name in each of two page trees is valid too, because neither tree is visible from the other.
-What is rejected is a name the resolver cannot decide: two components under one route scope (``next.E020``), or one name at the root scope of two ``DIRS`` roots, which are both visible everywhere (``next.E034``).
+The resolver rejects a name it cannot decide between two components under one route scope (``next.E020``) or one name at the root scope of two ``DIRS`` roots, both visible everywhere (``next.E034``).
 Both clashes are reported by system checks, covered in the `System checks`_ section below.
 
 Calling a component

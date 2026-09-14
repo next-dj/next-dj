@@ -31,6 +31,7 @@ Advanced.
    ``OriginSource`` lives in ``next.partial.origin``.
    ``ZoneInfo`` and ``zones_of`` live in ``next.partial.registry``.
    The custom-verb exceptions live in ``next.partial.errors``.
+
    The ``signals`` and ``checks`` submodules carry the partial telemetry.
    Use these when writing a custom protocol backend, a wire-format plugin, or telemetry.
 
@@ -38,6 +39,7 @@ Framework machinery.
    ``REQUEST_ID`` is the ``X-Next-Request-Id`` header name and lives in ``next.partial.headers``.
    ``PartialIntent`` and ``MergeMode`` live in ``next.partial.headers``.
    ``PartialOrigin`` lives in ``next.partial.origin``.
+
    ``ActionRef``, ``shape_validate``, and ``drain_messages`` live in ``next.partial.shaping``.
    ``PatchOpRegistry``, the ``patch_op_registry`` instance, and ``BUILTIN_OPS`` live in ``next.partial.registry``.
    ``PartialShaperImpl``, the implementation the app binds into the :doc:`next.ports <ports>` slot at startup, lives in ``next.partial.shaper``.
@@ -180,6 +182,7 @@ Exceptions
 ``UnknownZoneError`` is raised when a partial request names a zone the template does not declare, surfacing as a 400 before any render.
 ``ForeignPageNotAuthorizedError`` is raised when an out-of-band morph of a foreign page fails that page's own authorization, so a zone never travels in a response the page would have denied.
 ``LayerHrefWithoutZoneError`` is raised when a layer seeds an ``href`` but names no ``zone=`` to load it into, so the builder refuses the layer instead of opening an empty one on the client.
+
 The remaining nine are rarely caught and stay out of the curated surface.
 They guard the custom-verb contract, the event-name, context-key, and dedupe vocabularies, and the foreign-page and href rules, and live in ``next.partial.errors``.
 

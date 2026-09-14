@@ -133,6 +133,11 @@ A target carries exactly one address key, and the client resolves ``zone``, then
 ``zone`` names a ``data-next-zone`` wrapper and ``form`` names an action uid.
 ``field`` is a ``[uid, name]`` pair addressing one named input of a form by its uid.
 ``css`` is a raw selector, the escape hatch a bare layer shell relies on.
+No ``Patches`` builder method produces a field target, so a handler that needs one constructs the ``Patch`` by hand and appends it to the envelope.
+
+.. code-block:: python
+
+   Patch(op="morph", target={"field": [uid, "email"]}, html=rendered_input)
 
 A handler that returns ``None`` under the runtime also drains the pending :doc:`django.contrib.messages <django:ref/contrib/messages>` into ``toast`` patches, one per message, with the message level mapped to the toast variant.
 The drained variants are ``info``, ``success``, ``warning``, and ``error``, with ``debug`` mapped to ``info``.
@@ -231,7 +236,7 @@ All values are ASCII, and zone names are ASCII slugs.
      - Every mutation
      - The ring id used to suppress an SSE echo.
    * - ``X-Next-Origin``
-     - Every layer request, the open GET and the accept re-GET
+     - Every layer request, the open GET, the accept re-GET, and a mutation submitted from a form inside the layer.
      - The path and query string of the page that hosts a layer, for a server-side morph of its zones.
    * - CSRF header
      - Every unsafe method once the runtime holds a token
@@ -561,6 +566,7 @@ The layer stack carries the members a page drives plus the seams the applier and
 A call naming neither an href nor a zone shows a bare shell, pushes no history entry, and resolves as soon as the shell is in the document.
 ``close(detail)`` closes the top layer and returns nothing, accepting with a ``result`` key and dismissing with ``dismiss`` and ``reason``.
 ``size()`` returns the number of open layers, ``toast(text, variant)`` appends one toast as ``textContent``, and ``urlFor(el)`` returns the URL of the page that owns an element, the address a poll tick re-GETs.
+``hostFor(el)`` returns the host page of the layer that owns an element, absent for an element outside every layer, the seam that stamps ``X-Next-Origin`` on a mutation submitted from a form inside the layer.
 ``resolveZone``, ``resolveSelector``, ``busy``, and ``install`` are the resolution and instrumentation seams, reachable because the stack is one object rather than because a page drives them.
 
 The stream registry is narrower.

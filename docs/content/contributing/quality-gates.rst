@@ -48,6 +48,9 @@ GitHub Actions runs the same work split across jobs, and adds the documentation 
    * - Documentation prose
      - ``make docs-lint``
      - ``docs`` job, and the ``prose-lint`` pre-commit hook
+   * - Documentation code snippets
+     - ``make docs-lint``
+     - ``docs`` job, "Check documentation code snippets" step
    * - Benchmarks
      - ``make bench``
      - ``bench`` workflow on every pull request
@@ -111,6 +114,10 @@ Neither of those two sees semantic newlines, so ``docs/prose_lint.py`` covers th
 It reports a line that holds the end of one sentence and the start of the next, and a sentence wrapped onto a second physical line, and it skips literal blocks, inline literals, roles, abbreviations, file names, and version numbers so the signal stays usable.
 The ``docs`` job runs it before the build, ``make docs-lint`` runs it locally, ``make docs`` runs it before ``sphinx-build``, and the ``prose-lint`` pre-commit hook runs it over the changed files under ``docs/content/``.
 The rule it enforces is stated in :doc:`style-guide`.
+
+``docs/snippet_lint.py`` checks the code blocks themselves.
+It parses every Python code block with :mod:`ast` to catch a syntax error, flags a ``NEXT_FRAMEWORK`` key that ``next/conf/defaults.py`` does not define, and reports an unbalanced DJX or Django template tag in a template block.
+``make docs-lint`` runs it after ``docs/prose_lint.py``, and the ``docs`` job runs it as its own "Check documentation code snippets" step.
 
 Support matrix
 --------------

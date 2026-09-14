@@ -121,6 +121,7 @@ The typed ``[int:id]`` directory form rejects non-numeric URLs at routing time b
 The ``DUrl["id", int]`` annotation is a :term:`DI marker`, the mechanism :doc:`overview` introduces and :doc:`/content/topics/dependency-injection` covers in full.
 It tells the resolver to read the ``id`` segment captured by the ``[id]`` directory and coerce it to ``int``.
 The segment name is given explicitly because the parameter ``note_id`` differs from the captured segment.
+
 The :func:`~django.shortcuts.get_object_or_404` shortcut is the standard Django way to fetch a row or return a 404 response.
 An ``id`` that matches no note returns Django's standard 404 response.
 See :doc:`/content/howto/customize-error-pages` for customising what the visitor sees.
@@ -231,7 +232,7 @@ A layout's markup does not appear on the page.
    The supported types are documented in :doc:`/content/topics/dependency-injection`.
    ``DUrl["name"]`` returns the captured segment in string form.
    When the Python parameter name differs from the segment, use ``DUrl["id", int]`` for an ``[id]`` directory.
-   A parameter no provider handles receives ``None``, so check that the segment name in ``DUrl["name"]`` matches the bracketed directory.
+   A ``DUrl`` segment whose name is not captured by the URL resolves to ``None``, so check that the segment name in ``DUrl["name"]`` matches the bracketed directory.
 
 Inherited context not available in a descendant.
    Make sure the ``page.py`` that publishes the context sits in a directory above the page that consumes it, and the context function declares ``inherit_context=True``.

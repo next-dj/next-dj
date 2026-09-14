@@ -133,7 +133,7 @@ The dispatch-time form signals (``action_dispatched``, ``form_validation_failed`
      - ``NextFrameworkSettings``
      - none
      - After ``NextFrameworkSettings.reload`` drops its caches.
-       Every receiver runs even when one raises, so a receiver that validates a settings value never leaves the managers behind it holding state built from the settings just replaced.
+       Every receiver runs even when one raises, so a receiver that validates a settings value never leaves the managers behind it holding state built from the settings that reload discarded.
        The first error reaches the caller that asked for the reload once the chain is done.
    * - ``sse_stream_closed``
      - ``PatchEventStream``

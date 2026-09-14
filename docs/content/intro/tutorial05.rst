@@ -88,6 +88,7 @@ Create ``tests/test_notes_e2e.py``.
 ``post_action`` resolves an action name to its URL and POSTs in one call, and its ``origin`` keyword fills the hidden ``_next_form_origin`` field the ``{% form %}`` tag emits in the browser.
 ``get_action_url`` returns that URL without dispatching.
 ``get_zones`` sends a GET as a partial request for the named zones, which :doc:`tutorial06` puts to work.
+
 The router itself is built lazily through Django's URL resolver, exactly as in production.
 Use the same ``client.get`` and ``client.post`` calls you already know.
 

@@ -31,7 +31,7 @@ Advanced.
       * - Area
         - Names
       * - Backends
-        - ``FormActionBackend``, ``RegistryFormActionBackend``, ``ActionRegistration``, ``ActionGuard``
+        - ``FormActionBackend``, ``RegistryFormActionBackend``, ``RegistryBackendSnapshot``, ``ActionRegistration``, ``ActionGuard``
       * - Outcomes
         - ``ActionOutcome``, ``ActionOutcomeKind``
       * - Specs

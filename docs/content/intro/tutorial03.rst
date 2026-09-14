@@ -158,8 +158,8 @@ The collector emits one ``<script>`` tag for the file at the location of ``{% co
 Composite components with component context
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A component that pairs a template with a ``component.py`` is a composite component.
-Some components need Python logic.
+A component living in its own folder, like ``note_card``, is a composite component.
+Composite components can add Python logic through a ``component.py`` module, which the note card does next.
 The note card formats a short preview from the body when one is present.
 Add a ``component.py`` next to the template.
 

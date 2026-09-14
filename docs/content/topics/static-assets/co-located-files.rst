@@ -157,6 +157,7 @@ Each variable is a list of strings.
 The slot is picked from the registered placeholder name, ``styles`` or ``scripts``.
 Every registered placeholder slot works the same way, because discovery reads a module-level variable named after each slot.
 A project that registers a ``preload`` slot may declare a module-level ``preload`` list next to it.
+
 The kind is inferred from the URL extension through the kind registry.
 URLs with an unknown extension are dropped with a debug log.
 A URL whose kind belongs to a different slot than the list name is also dropped with a debug log, so a stylesheet URL in ``scripts`` never renders.

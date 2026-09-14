@@ -179,8 +179,9 @@ Update the ``CreateNoteForm`` class in ``notes/forms.py`` and merge the new impo
 On that path the handler saves the note and returns a morph of the ``note-list`` zone, which re-renders the list from the ``notes`` context with the new note included.
 On the no-JavaScript path ``super().on_valid`` keeps the inherited behaviour.
 It saves and redirects to origin, and the reload shows the new note.
+
 ``Patches(...).response()`` already answers a submission made without the runtime with a 303 to the posted origin, so the branch is not what keeps that path working.
-The branch stays explicit so the inherited ``Meta.success_url`` and ``Meta.success_message`` handling survives.
+The branch stays explicit so the inherited ``Meta.success_url`` handling survives.
 
 The form tag itself does not change.
 

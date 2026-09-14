@@ -151,11 +151,17 @@ Use these cookie flags in production.
    :caption: config/settings.py
 
    CSRF_COOKIE_SECURE = True
-   CSRF_COOKIE_HTTPONLY = False
+   CSRF_COOKIE_HTTPONLY = True
    CSRF_COOKIE_SAMESITE = "Lax"
 
-Keep ``CSRF_COOKIE_HTTPONLY`` false only when project JavaScript reads the token out of the cookie, as the fetch wrapper above does.
-The bundled runtime reads the token from the ``$csrf`` init payload instead of the cookie, so a project that leaves unsafe requests to the runtime can set ``CSRF_COOKIE_HTTPONLY = True`` and keep the cookie out of reach of scripts.
+The bundled runtime reads the token from the ``$csrf`` init payload instead of the cookie, so a project that leaves unsafe requests to the runtime keeps ``CSRF_COOKIE_HTTPONLY = True`` and the cookie out of reach of scripts.
+
+.. code-block:: python
+   :caption: config/settings.py, when project JavaScript reads the cookie directly
+
+   CSRF_COOKIE_HTTPONLY = False
+
+Set ``CSRF_COOKIE_HTTPONLY`` to false only when project JavaScript reads the token out of the cookie itself, as the fetch wrapper above does.
 
 Common pitfalls
 ---------------

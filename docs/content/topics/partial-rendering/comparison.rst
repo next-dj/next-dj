@@ -1,7 +1,7 @@
 .. _topics-partial-rendering-comparison:
 
-Zones compared with htmx, Turbo, and Unicorn
-============================================
+Zones compared with htmx, Turbo, and Django Unicorn
+===================================================
 
 Zones answer a question several mature projects already answer.
 htmx, Turbo, and Django Unicorn each ship a working partial-update model, each has a larger user base than next.dj, and for many projects one of them is the better choice.

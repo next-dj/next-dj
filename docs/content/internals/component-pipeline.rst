@@ -103,7 +103,7 @@ Registration order operates inside a single ``FileComponentsBackend``.
 Across backends, the order of entries in ``COMPONENT_BACKENDS`` decides which backend is consulted first.
 
 Two components sharing a name under one ``(scope_root, scope_relative)`` pair are reported by ``next.E020``, because nothing in the sort key above tells them apart.
-``next.E034`` reports one name at the root scope of two roots the same template resolves against with neither taking precedence: two ``DIRS`` roots, which are visible everywhere, or one page tree nested inside another.
+``next.E034`` reports one name at the root scope of two roots the same template resolves against with neither taking precedence, for example two ``DIRS`` roots, which are visible everywhere, or one page tree nested inside another.
 A page tree and a ``DIRS`` root sharing a name are decided by the origin dimension of the sort key, so that pair is silent.
 
 Filter expression props

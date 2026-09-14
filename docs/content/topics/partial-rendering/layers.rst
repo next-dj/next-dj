@@ -133,7 +133,8 @@ With Tailwind Play CDN ``@apply`` is available inside a ``<style type="text/tail
      }
    </style>
 
-The ``next.dj`` examples use both patterns through the shared ``_shared/static/shared/css/base.css`` file.
+The shared ``examples/_shared/static/shared/css/base.css`` file uses only the plain-CSS pattern shown above.
+The Tailwind ``@apply`` block is an alternative for a project that already runs Tailwind.
 
 See also
 --------

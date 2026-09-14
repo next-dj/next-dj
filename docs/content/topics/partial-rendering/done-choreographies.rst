@@ -124,8 +124,8 @@ The comparison
      - A one-GET gap between close and list
      - Close, list, and toast apply in one envelope
    * - Without the runtime
-     - Identical: a 303 to ``fallback``
-     - Identical
+     - A 303 to ``fallback``, and the list zone never renders because ``done`` builds no morph of it
+     - A 303 to ``fallback`` too, but the response still renders the foreign zone into the envelope the redirect then discards
 
 The recommendation is accept and re-GET as the default.
 The deciding argument is not the round trip but the authorization and the decoupling.

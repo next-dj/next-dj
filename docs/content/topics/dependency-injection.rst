@@ -473,8 +473,9 @@ Real annotations remove that failure mode outright, which is why a ``page.py`` o
 Two rules.
 
 Do not use future annotations in modules with DI parameters.
-   ``page.py``, ``component.py``, and ``providers.py`` need real annotations.
+   ``page.py``, ``component.py``, action handlers, and any ``get_initial`` need real annotations.
    Plain Python files that only import the framework can use future annotations freely.
+   A custom provider module such as ``notes/providers.py`` is never introspected by :func:`typing.get_type_hints`, so it can use future annotations freely too.
 
 Keep DI types runtime importable.
    A hint the resolver cannot evaluate never becomes the type a provider matches on.

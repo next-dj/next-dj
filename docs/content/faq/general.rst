@@ -32,10 +32,7 @@ Is next.dj production ready
 ---------------------------
 
 Every merge passes the same strict and verifiable gates, and :doc:`/content/contributing/quality-gates` states what each one measures and which command reproduces it.
-The limiting factor is the other half of the answer, because the public API is not frozen.
-
-The boundary is API stability.
-The documented public surface is the contract, and :ref:`faq-safe-symbols` below defines exactly what it covers.
+The public API is not frozen, so the documented public surface is the contract rather than a guarantee, and :ref:`faq-safe-symbols` below defines exactly what it covers.
 That contract can still change in ways that require edits to application code, and the manual carries no release history by policy, so each change states its own impact in the pull request that makes it.
 Pin the Python and Django releases the matrix tests (see :doc:`/content/intro/install`), pin an exact next.dj release, and read the pull requests behind an upgrade before taking it.
 

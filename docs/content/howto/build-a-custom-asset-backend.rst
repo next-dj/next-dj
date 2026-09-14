@@ -67,17 +67,20 @@ A custom backend can intercept one kind and resolve it elsewhere, then delegate 
            if kind != "jsx":
                return super().register_file(source_path, logical_name, kind)
            if self._dev_origin:
-               return self._build_dev_url(source_path, logical_name)
+               return self._build_dev_url(source_path)
            if self._manifest_path:
                return self._resolve_from_manifest(source_path, logical_name)
            return super().register_file(source_path, logical_name, kind)
 
-       def _build_dev_url(self, source_path: Path, logical_name: str) -> str:
-           try:
-               relative = source_path.relative_to(self._vite_root)
-           except ValueError:
-               return super().register_file(source_path, logical_name, "jsx")
-           return f"{self._dev_origin.rstrip('/')}/{relative.as_posix()}"
+       def _build_dev_url(self, source_path: Path) -> str:
+           if self._vite_root:
+               try:
+                   rel = source_path.relative_to(Path(self._vite_root))
+               except ValueError:
+                   pass
+               else:
+                   return f"{self._dev_origin}/{rel}"
+           return f"{self._dev_origin}/{source_path.name}"
 
 The constructor reads its own keys from the ``OPTIONS`` mapping.
 ``register_file`` receives the absolute ``source_path``, the extension-free ``logical_name``, and the registered ``kind``.
