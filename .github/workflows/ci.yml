@@ -104,14 +104,14 @@ jobs:
       - uses: ./.github/actions/setup-python-uv
       - name: Check prose semantic newlines
         run: uv run python docs/prose_lint.py docs/content
-      - name: Install docs dependencies
-        run: uv sync --locked --group docs
       - name: Check documentation code snippets
         run: uv run python docs/snippet_lint.py docs/content
+      - name: Install docs dependencies as Read the Docs does
+        run: uv sync --frozen --no-dev --group docs
       - name: Build documentation (fail on warnings)
-        run: uv run sphinx-build -T -W --keep-going -b html docs docs/_build
+        run: uv run --no-sync sphinx-build -T -W --keep-going -b html docs docs/_build
       - name: Check documentation links
-        run: uv run sphinx-build -b linkcheck docs docs/_build
+        run: uv run --no-sync sphinx-build -b linkcheck docs docs/_build
 
   test-js:
     runs-on: ubuntu-latest
