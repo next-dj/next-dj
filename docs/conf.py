@@ -78,6 +78,8 @@ autodoc_default_options = {
     "exclude-members": "__weakref__,staticfiles_storage",
 }
 
+autodoc_mock_imports = ["pytest"]
+
 # autosummary configuration
 autosummary_generate = True
 
