@@ -191,7 +191,7 @@ It registers nothing on the collector, so it also works in a render that has non
 ``{% asset %}`` is the recommended spelling for an asset URL in a next.dj template.
 A paired benchmark on one machine measures it at roughly 1.9 times cheaper than Django's ``{% static %}`` for the same name, because the backend answers a repeat from its memo while the Django tag asks storage on every render.
 Resolving a reference that is already a URL, the shape a template written today holds, costs about 125 nanoseconds per tag on the same run.
-Both numbers are indicative rather than contractual, and the pair they come from is :repo:`tests/benchmarks/static/test_bench_resolve.py <blob/main/tests/benchmarks/static/test_bench_resolve.py>`.
+Both numbers are indicative rather than contractual, and the pair they come from is ``tests/benchmarks/static/test_bench_resolve.py``.
 
 Django's ``{% static %}`` keeps working and is the better choice where the value must be identical for every request.
 ``{% asset %}`` output can vary per request, because ``asset_url`` receives the request, and a value that varies must not be baked into a ``{% cache %}`` fragment keyed on something else.
