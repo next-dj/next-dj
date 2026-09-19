@@ -17,6 +17,13 @@ from notes.middleware import TenantMiddleware
 from notes.models import Note, Tenant
 from notes.providers import DTenant, TenantProvider
 from notes.receivers import _on_form_access_denied
+from notes.themes import (
+    DEFAULT_ACCENT,
+    THEME_STYLESHEETS,
+    TenantTheme,
+    accent_color,
+    theme_stylesheet,
+)
 
 
 pytestmark = pytest.mark.django_db
@@ -239,12 +246,53 @@ class TestTenantProvider:
         assert resolved is request.tenant
 
 
+class TestShippedThemes:
+    """The theme table is the only source of a stylesheet reference."""
+
+    @pytest.mark.parametrize(
+        ("key", "expected"),
+        [(TenantTheme.ACME, "notes/css/acme.css"), (TenantTheme.SHARED, "")],
+        ids=["acme", "shared"],
+    )
+    def test_known_key_maps_to_a_shipped_reference(self, key, expected) -> None:
+        assert theme_stylesheet(key) == expected
+
+    @pytest.mark.parametrize(
+        "stored",
+        [
+            "",
+            "midnight",
+            "https://evil.test/x.css",
+            "../../media/uploads/evil.css",
+            "data:text/css,body{background:url('https://evil.test/beacon')}",
+        ],
+        ids=["empty", "unknown_key", "absolute_url", "traversal", "data_uri"],
+    )
+    def test_unknown_key_falls_back_to_the_shared_default(self, stored: str) -> None:
+        assert theme_stylesheet(stored) == THEME_STYLESHEETS[TenantTheme.SHARED]
+
+    def test_hex_accent_passes_through(self) -> None:
+        assert accent_color("#2563eb") == "#2563eb"
+
+    @pytest.mark.parametrize(
+        "stored",
+        ["", "red", "#2563eb;background:url(https://evil.test/beacon)"],
+        ids=["empty", "keyword", "extra_declaration"],
+    )
+    def test_other_accent_shapes_fall_back(self, stored: str) -> None:
+        assert accent_color(stored) == DEFAULT_ACCENT
+
+
 class TestTenantTheme:
     """`tenant_theme` maps the active tenant to CSS variables."""
 
     def test_returns_empty_dict_when_request_has_no_tenant(self) -> None:
         request = HttpRequest()
-        assert tenant_theme(request) == {"tenant_theme": {}, "tenant_theme_css": ""}
+        assert tenant_theme(request) == {
+            "tenant_theme": {},
+            "tenant_theme_css": "",
+            "tenant_stylesheet": "",
+        }
 
     def test_returns_css_variables_for_known_tenant(
         self, tenant_request: Callable[..., HttpRequest]
@@ -253,6 +301,26 @@ class TestTenantTheme:
         result = tenant_theme(request)
         assert result["tenant_theme"] == {"--tenant-accent": "#2563eb"}
         assert "#2563eb" in result["tenant_theme_css"]
+
+    def test_maps_the_stored_key_to_a_shipped_stylesheet(
+        self, tenant_request: Callable[..., HttpRequest]
+    ) -> None:
+        request = tenant_request(theme=TenantTheme.ACME)
+        assert tenant_theme(request)["tenant_stylesheet"] == "notes/css/acme.css"
+
+    def test_tampered_key_yields_the_shared_default(
+        self, tenant_request: Callable[..., HttpRequest]
+    ) -> None:
+        request = tenant_request(theme="https://evil.test/x.css")
+        result = tenant_theme(request)
+        assert result["tenant_stylesheet"] == THEME_STYLESHEETS[TenantTheme.SHARED]
+
+    def test_tampered_accent_yields_the_default_colour(
+        self, tenant_request: Callable[..., HttpRequest]
+    ) -> None:
+        request = tenant_request(primary_color="red;background:url(https://evil.test)")
+        result = tenant_theme(request)
+        assert result["tenant_theme_css"] == f"--tenant-accent:{DEFAULT_ACCENT}"
 
 
 class TestTenantPrefixStaticBackend:
@@ -395,3 +463,7 @@ class TestDemoSeed:
         seed_demo()
         assert Tenant.objects.count() == len(DEMO_TENANTS)
         assert Note.objects.count() == 3
+
+    def test_seeded_themes_name_shipped_keys(self, demo_data) -> None:
+        stored = set(Tenant.objects.values_list("theme", flat=True))
+        assert stored <= set(THEME_STYLESHEETS)

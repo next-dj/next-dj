@@ -9,9 +9,15 @@ from next.partial.errors import ReservedPatchKeyError
 from next.partial.headers import CONTENT_TYPE
 from next.partial.registry import patch_op_registry
 from next.partial.render import ZoneRenderResult
-from next.static import KindRegistry
+from next.static import KindRegistry, StaticAsset
 from next.static.manager import default_manager
-from tests.support import partial_request
+from next.testing import override_next_settings
+from tests.support import (
+    BUILD_MANIFEST,
+    MANIFEST_BACKENDS,
+    BuildManifestBackend,
+    partial_request,
+)
 
 
 class TestAddAssetResolvesLoad:
@@ -103,6 +109,77 @@ class TestAddAssetFollowsTheBackendRewrite:
         )
         assert envelope.assets[0].url == ""
         assert asked == []
+
+
+class TestAddAssetResolvesTheReference:
+    """A patch envelope and a full render put a value through the same resolution."""
+
+    def test_a_name_reaches_the_envelope_as_a_public_url(self) -> None:
+        envelope = (
+            Patches(partial_request("/")).add_asset("css", "css/app.css").envelope()
+        )
+        assert envelope.assets[0].url == "/static/css/app.css"
+
+    def test_a_ready_url_reaches_the_envelope_unchanged(self) -> None:
+        envelope = (
+            Patches(partial_request("/"))
+            .add_asset("css", "https://cdn/app.css")
+            .envelope()
+        )
+        assert envelope.assets[0].url == "https://cdn/app.css"
+
+    def test_an_inline_body_never_reaches_the_resolver(self, monkeypatch) -> None:
+        asked = []
+
+        def record(reference: str) -> str:
+            asked.append(reference)
+            return reference
+
+        monkeypatch.setattr(default_manager, "resolve_url", record)
+        envelope = (
+            Patches(partial_request("/"))
+            .add_asset("css", "", inline=".x {}")
+            .envelope()
+        )
+        assert envelope.assets[0].url == ""
+        assert asked == []
+
+
+class TestManifestBackendAnswersTheSameOnBothPaths:
+    """A backend mapping names to build outputs agrees across page and patch.
+
+    The build URL is no staticfiles name, so a second pass through the manifest
+    would quietly fall back to storage and hand the client a different URL.
+    """
+
+    def test_a_patch_asset_carries_the_build_url_the_page_carries(self) -> None:
+        with override_next_settings(**MANIFEST_BACKENDS):
+            page_url = default_manager.resolve_url("css/app.css")
+            envelope = (
+                Patches(partial_request("/")).add_asset("css", "css/app.css").envelope()
+            )
+
+        assert page_url == BUILD_MANIFEST["css/app.css"]
+        assert envelope.assets[0].url == page_url
+
+    def test_a_zone_asset_is_recorded_rather_than_resolved_again(self) -> None:
+        with override_next_settings(**MANIFEST_BACKENDS):
+            collector = default_manager.create_collector()
+            page_url = default_manager.resolve_url("css/app.css")
+            collector.add(StaticAsset(url=page_url, kind="css"))
+            backend = default_manager.default_backend
+            asked = list(backend.resolved)
+            envelope = (
+                Patches.versioned("v1")
+                .absorb_zone_result(
+                    ZoneRenderResult(html={}, bodies={}, collector=collector)
+                )
+                .envelope()
+            )
+
+        assert isinstance(backend, BuildManifestBackend)
+        assert envelope.assets[0].url == page_url
+        assert backend.resolved == asked
 
 
 class TestPatchesBuilder:

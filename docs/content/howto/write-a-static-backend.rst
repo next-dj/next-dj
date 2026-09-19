@@ -9,13 +9,14 @@ To resolve asset URLs through an external manifest, see :doc:`/content/howto/bui
 Problem
 -------
 
-You want collected assets to render with extra attributes such as ``crossorigin`` or to load from a CDN host.
+You want collected assets to render with extra attributes such as ``crossorigin`` or to load from a host that depends on the request.
 
 Solution
 --------
 
 For attribute-only changes, set the ``css_tag``, ``js_tag``, and ``module_tag`` options on the default backend.
 For URL rewriting, subclass ``StaticFilesBackend`` and override ``asset_url``.
+A single static host that is the same for every request belongs in ``STATIC_URL`` rather than in a backend, see :doc:`/content/deployment/static-files`.
 
 Walkthrough
 -----------
@@ -47,18 +48,19 @@ The format string must contain the ``{url}`` placeholder.
 Subclass for URL rewriting
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-When the URL itself must change, subclass ``StaticFilesBackend`` and override ``asset_url``.
+When the URL itself must change per request, subclass ``StaticFilesBackend`` and override ``asset_url``.
 
 .. code-block:: python
    :caption: notes/backends.py
 
+   from notes.access import active_shard
+
    from next.static import StaticFilesBackend
 
-   CDN = "https://cdn.example.com"
-
-   class CdnBackend(StaticFilesBackend):
+   class ShardedCdnBackend(StaticFilesBackend):
        def asset_url(self, url, *, request=None) -> str:
-           return f"{CDN}{url}"
+           host = active_shard(request)
+           return f"{host}{url}" if url.startswith("/") else url
 
 ``asset_url`` receives the URL and an optional ``request`` keyword.
 One override covers ``.css``, ``.js``, and ``.mjs`` assets plus the ``next.min.js`` runtime bundle and its preload hint, in a full-page render and in the asset manifest of a partial patch envelope alike.
@@ -71,7 +73,7 @@ Register the backend.
 
    NEXT_FRAMEWORK = {
        "STATIC_BACKENDS": [
-           {"BACKEND": "notes.backends.CdnBackend", "OPTIONS": {}}
+           {"BACKEND": "notes.backends.ShardedCdnBackend", "OPTIONS": {}}
        ]
    }
 
@@ -117,7 +119,7 @@ Verification
 ------------
 
 Reload a page and inspect the HTML.
-Every ``<link>`` and ``<script>`` tag carries the new attributes or the CDN host, the ``next.min.js`` tag and its preload hint included.
+Every ``<link>`` and ``<script>`` tag carries the new attributes or the rewritten host, the ``next.min.js`` tag and its preload hint included.
 
 Run ``uv run python manage.py check`` and confirm the backend is registered.
 
@@ -127,5 +129,6 @@ See also
 .. seealso::
 
    :doc:`/content/topics/static-assets/backends` for the backend contract.
+   :doc:`/content/topics/static-assets/name-resolution` for the ``resolve_url`` seam a name goes through.
    :doc:`/content/topics/static-assets/asset-kinds` for the renderer methods.
    :doc:`/content/howto/build-a-custom-asset-backend` for resolving URLs through an external manifest.

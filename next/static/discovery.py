@@ -319,7 +319,7 @@ class AssetDiscovery:
         )
 
     def _apply_plan(self, plan: _AssetPlan, collector: StaticCollector) -> None:
-        """Hand every file the plan found to the backend, then its module URLs."""
+        """Hand every file the plan found to the backend, then its module assets."""
         for found in plan.files:
             self._register_file(found, collector)
         for asset in plan.module_assets:
@@ -461,10 +461,10 @@ class AssetDiscovery:
         return lists if lists is not None else {}
 
     def _module_assets(self, lists: dict[str, list[str]]) -> tuple[StaticAsset, ...]:
-        """Turn every URL the module lists name into an asset.
+        """Turn every reference the module lists name into a resolved asset.
 
-        Built with the plan rather than on every render, because these URLs
-        are literals the backend is never asked about.
+        Resolved with the plan rather than per render, because `resolve_url` answers
+        for a file space the plan's own URL generation already tracks.
         """
         assets: list[StaticAsset] = []
         for slot_name, urls in lists.items():
@@ -475,9 +475,10 @@ class AssetDiscovery:
         return tuple(assets)
 
     def _module_asset(self, url: str, slot_name: str) -> StaticAsset | None:
-        """Resolve a module-level URL to an asset of the kind its suffix names.
+        """Resolve a module-level reference to an asset of the kind its suffix names.
 
-        Drops a URL with an unregistered extension or a kind in a different slot.
+        Drops a URL with an unregistered extension, a kind belonging to a different
+        slot, or a reference the backend refuses on a co-located file's own terms.
         """
         suffix = _url_suffix(url)
         if not suffix:
@@ -497,7 +498,17 @@ class AssetDiscovery:
                 slot_name,
             )
             return None
-        return StaticAsset(url=url, kind=kind)
+        try:
+            resolved = self._provider.default_backend.resolve_url(url)
+        except (OSError, ValueError) as e:
+            logger.warning(
+                "Failed to resolve module asset %r: %s",
+                url,
+                e,
+                extra={"reference": url, "kind": kind},
+            )
+            return None
+        return StaticAsset(url=resolved, kind=kind)
 
     def _register_file(self, found: FoundAsset, collector: StaticCollector) -> None:
         """Register a file with the backend and add the result to the collector.

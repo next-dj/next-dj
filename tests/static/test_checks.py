@@ -3,23 +3,31 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
+from django.conf import settings
 from django.core.checks import Error, Warning as DjangoWarning
 from django.core.checks.registry import registry
 from django.test import override_settings
 
 import next.pages.loaders as loaders_module
 import next.static.checks as checks_module
+from next.apps.staticfiles import _APP_DIRECTORIES_PATH
 from next.checks import NEXT
 from next.components import FileComponentsBackend
 from next.static import KindRegistry
 from next.static.checks import (
+    check_app_directories_finder,
     check_asset_kinds_are_loadable,
     check_inline_asset_bodies_are_loadable,
     check_js_context_serializer,
     check_reserved_js_context_keys,
     check_static_backends,
 )
-from tests.support import patch_checks_router_manager
+from tests.support import (
+    APP_FINDER_CASES,
+    PROJECT_APP_DIRECTORIES_FINDER,
+    AppFinderCase,
+    patch_checks_router_manager,
+)
 
 
 def _ids(messages: list) -> list[str]:
@@ -463,4 +471,33 @@ class TestReservedJsContextKeyCheck:
         loaders_module._MODULE_MEMO.pop(page_file)
         with patch_checks_router_manager(pages_directory=tmp_path):
             messages = check_reserved_js_context_keys()
+        assert messages == []
+
+
+class TestAppDirectoriesFinderCheck:
+    """Which configured finder entry earns ``next.E083`` and which stays silent."""
+
+    @pytest.mark.parametrize("case", APP_FINDER_CASES, ids=lambda case: case.id)
+    def test_entry_is_refused_only_when_it_publishes_the_package(
+        self, case: AppFinderCase
+    ) -> None:
+        with override_settings(STATICFILES_FINDERS=[case.path]):
+            messages = check_app_directories_finder(app_configs=None)
+
+        assert _ids(messages) == (["next.E083"] if case.refused else [])
+
+    def test_the_refusal_names_the_entry_and_the_replacement(self) -> None:
+        with override_settings(STATICFILES_FINDERS=[PROJECT_APP_DIRECTORIES_FINDER]):
+            (message,) = check_app_directories_finder(app_configs=None)
+
+        assert isinstance(message, Error)
+        assert PROJECT_APP_DIRECTORIES_FINDER in message.msg
+        assert "next.static.NextAppDirectoriesFinder" in message.msg
+
+    def test_the_stock_path_is_rewritten_before_the_check_reads_it(self) -> None:
+        with override_settings(STATICFILES_FINDERS=[_APP_DIRECTORIES_PATH]):
+            configured = list(settings.STATICFILES_FINDERS)
+            messages = check_app_directories_finder(app_configs=None)
+
+        assert _APP_DIRECTORIES_PATH not in configured
         assert messages == []

@@ -348,7 +348,7 @@ Errors
    * - ``next.E076``
      - A ``NEXT_FRAMEWORK`` value has a type the settings merge silently drops in favour of the framework default.
        The check covers ``PAGE_BACKENDS``, ``COMPONENT_BACKENDS``, ``STATIC_BACKENDS``, and ``TEMPLATE_LOADERS`` as lists.
-       It also covers ``COMPONENT_TEMPLATE_LOADER``, ``DEPENDENCY_RESOLVER``, ``URL_NAME_TEMPLATE``, and ``URL_RESOLVER`` as strings and ``NEXT_JS_OPTIONS`` as a dict.
+       It also covers ``COMPONENT_TEMPLATE_LOADER``, ``DEPENDENCY_RESOLVER``, ``URL_NAME_TEMPLATE``, and ``URL_RESOLVER`` as strings, ``STATIC_VERSION`` as a string or ``None``, and ``NEXT_JS_OPTIONS`` as a dict.
        ``PARTIAL_BACKENDS``, ``FORM_ACTION_BACKENDS``, ``FORM_ANCHOR_FILES``, ``FORM_WIZARD_BACKEND``, and ``JS_CONTEXT_SERIALIZER`` carry their own per-key checks, ``next.E067``, ``next.E044``, ``next.E052``, ``next.E051``, and ``next.W042``, so this probe leaves them out.
      - ``next.conf.checks``
    * - ``next.E077``
@@ -375,6 +375,11 @@ Errors
      - A route names a bracket parameter Django refuses as a route name, so the route reaches neither the URLconf nor the conflict map.
        The directory-level counterpart is ``next.E008``, which reads the same normalisation rule.
      - ``next.urls.checks``
+   * - ``next.E083``
+     - ``STATICFILES_FINDERS`` lists an ``AppDirectoriesFinder`` subclass that does not extend ``next.static.NextAppDirectoriesFinder``, and the configuration is refused rather than reported as a risk.
+       The framework's ``next/static`` directory is the ``next.static`` Python package, so such a finder hands ``collectstatic`` the framework's own modules and their bytecode cache to publish into ``STATIC_ROOT``.
+       Django's stock path is substituted automatically, so the check fires only for a finder the project wrote itself, and subclassing ``next.static.NextAppDirectoriesFinder`` clears it.
+     - ``next.static.checks``
 
 A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.
 

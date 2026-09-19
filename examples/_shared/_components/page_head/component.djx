@@ -2,7 +2,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ title|default:'next.dj' }}</title>
-  <link rel="icon" href="data:image/svg+xml,{{ favicon_href }}">
+  {% if favicon %}
+    <link rel="icon" href="{% asset favicon %}">
+  {% else %}
+    <link rel="icon" href="data:image/svg+xml,{{ favicon_href }}">
+  {% endif %}
   <script src="https://cdn.tailwindcss.com{% if tailwind_plugins %}?plugins={{ tailwind_plugins }}{% endif %}"></script>
   <script>
     tailwind.config = {
@@ -67,9 +71,9 @@
       },
     };
   </script>
-  {% use_style "/static/shared/css/tokens.css" %}
-  {% use_style "/static/shared/css/base.css" %}
-  {% use_module "/static/shared/js/base.mjs" %}
+  {% use_style "shared/css/tokens.css" %}
+  {% use_style "shared/css/base.css" %}
+  {% use_module "shared/js/base.mjs" %}
   {% collect_styles %}
   {% set_slot "extra" %}
 </head>

@@ -138,29 +138,32 @@ Common patterns
 
 A ``layout.css`` at the root applies to every page under that layout because layout assets enter the collector first.
 A ``layout.css`` at an inner layout scopes the styles to pages below that layout only.
+:doc:`/content/howto/ship-a-site-wide-stylesheet` walks through the site-wide case and the two spellings that join it.
 Use ``component.js`` for plain behaviour and ``component.mjs`` when the script depends on ECMAScript module imports.
 
 .. _topics-static-module-lists:
 
-External URLs via module lists
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Named assets via module lists
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Declare ``styles`` and ``scripts`` at module level in ``page.py`` or ``component.py`` to register external URLs alongside co-located files.
+Declare ``styles`` and ``scripts`` at module level in ``page.py`` or ``component.py`` to register further assets alongside co-located files.
 
 .. code-block:: python
    :caption: notes/pages/_components/note_card/component.py
 
-   styles = ["https://cdn.example.com/reset.css"]
-   scripts = ["https://cdn.example.com/vendor.js", "/static/local/widget.mjs"]
+   styles = ["site/reset.css"]
+   scripts = ["https://cdn.example.com/vendor.js", "site/widget.mjs"]
 
 Each variable is a list of strings.
+An entry is read the same way a template tag argument is, as a staticfiles name when it has the shape of one and as a finished URL otherwise, see :doc:`name-resolution`.
 The slot is picked from the registered placeholder name, ``styles`` or ``scripts``.
 Every registered placeholder slot works the same way, because discovery reads a module-level variable named after each slot.
 A project that registers a ``preload`` slot may declare a module-level ``preload`` list next to it.
 
-The kind is inferred from the URL extension through the kind registry.
-URLs with an unknown extension are dropped with a debug log.
-A URL whose kind belongs to a different slot than the list name is also dropped with a debug log, so a stylesheet URL in ``scripts`` never renders.
+The kind is inferred through the kind registry from the extension of the authored entry, before any resolution happens, so a manifest hash in the final filename never changes the kind.
+Entries with an unknown extension are dropped with a debug log.
+An entry whose kind belongs to a different slot than the list name is also dropped with a debug log, so a stylesheet in ``scripts`` never renders.
+A name that staticfiles cannot resolve raises out of the render, the same way a missing co-located file does.
 
 See also
 --------
@@ -168,6 +171,7 @@ See also
 .. seealso::
 
    :doc:`overview` for the pipeline trace.
+   :doc:`name-resolution` for the rule that decides a name from a URL.
    :doc:`template-tags` for the injection point in the layout.
    :doc:`asset-kinds` for the kind to extension mapping.
    :doc:`custom-stems` for extra stem names.

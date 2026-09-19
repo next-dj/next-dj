@@ -52,6 +52,12 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 
 .. rubric:: Static assets
 
+:doc:`ship-a-site-wide-stylesheet`
+   Load one stylesheet on every page of the site.
+
+:doc:`use-a-compiled-stylesheet`
+   Connect a bundler output that belongs to no page or component.
+
 :doc:`add-a-new-asset-kind`
    Recognise a new file extension during static collection.
 
@@ -144,6 +150,8 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    resolve-feature-flags-with-di
    build-a-composite-component
    share-components-across-projects
+   ship-a-site-wide-stylesheet
+   use-a-compiled-stylesheet
    add-a-new-asset-kind
    add-a-custom-stem
    write-a-static-backend

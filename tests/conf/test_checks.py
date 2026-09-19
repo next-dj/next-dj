@@ -27,6 +27,7 @@ VALID_TYPED_VALUES: dict[str, object] = {
     "DEPENDENCY_RESOLVER": "next.deps.DependencyResolver",
     "COMPONENT_TEMPLATE_LOADER": "next.components.CachedComponentTemplateLoader",
     "NEXT_JS_OPTIONS": {},
+    "STATIC_VERSION": "2026.9.19",
 }
 
 
@@ -48,6 +49,7 @@ class TestValueTypeErrors:
             ("DEPENDENCY_RESOLVER", []),
             ("COMPONENT_TEMPLATE_LOADER", []),
             ("NEXT_JS_OPTIONS", []),
+            ("STATIC_VERSION", 42),
         ],
         ids=[
             "list_key_given_str",
@@ -59,6 +61,7 @@ class TestValueTypeErrors:
             "str_key_given_list_deps_resolver",
             "str_key_given_list_template_loader",
             "dict_key_given_list",
+            "optional_str_key_given_int",
         ],
     )
     def test_mistyped_key_yields_error(self, key: str, bad_value: object) -> None:
@@ -66,6 +69,15 @@ class TestValueTypeErrors:
             messages = check_next_framework_value_types()
         assert [m.id for m in messages] == ["next.E076"]
         assert f"NEXT_FRAMEWORK[{key!r}]" in messages[0].msg
+
+    def test_an_explicit_none_survives_an_optional_key(self) -> None:
+        with override_settings(NEXT_FRAMEWORK={"STATIC_VERSION": None}):
+            assert check_next_framework_value_types() == []
+
+    def test_an_explicit_none_on_a_required_key_still_errors(self) -> None:
+        with override_settings(NEXT_FRAMEWORK={"URL_RESOLVER": None}):
+            messages = check_next_framework_value_types()
+        assert [m.id for m in messages] == ["next.E076"]
 
     def test_silent_on_valid_map_of_every_typed_key(self) -> None:
         with override_settings(NEXT_FRAMEWORK=dict(VALID_TYPED_VALUES)):

@@ -163,6 +163,7 @@ Asset manifest
 
 The ``assets`` key of an envelope lists the co-located assets the rendered targets registered.
 Each entry carries ``kind`` and ``url`` always, plus ``inline`` and ``load`` when they apply.
+A reference a zone body registers, through ``{% use_style %}``, ``{% use_script %}``, or a module-level list, is resolved by the same backend on both paths, so the ``url`` of an entry is the URL a full render prints for that asset.
 
 .. list-table::
    :header-rows: 1

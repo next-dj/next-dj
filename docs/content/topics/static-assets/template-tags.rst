@@ -3,14 +3,32 @@
 Static template tags
 ====================
 
-The static pipeline registers five Django template tags plus two inline block forms.
+The static pipeline registers six Django template tags plus two inline block forms.
 ``{% collect_styles %}`` and ``{% collect_scripts %}`` mark placeholder slots in the layout.
-``{% use_style %}``, ``{% use_script %}``, and ``{% use_module %}`` register an external URL on the active collector.
+``{% use_style %}``, ``{% use_script %}``, and ``{% use_module %}`` register an asset on the active collector.
+``{% asset %}`` returns one URL for a raw attribute and registers nothing.
 ``{% #use_style %}`` and ``{% #use_script %}`` are block forms that capture an inline body.
 
 .. contents::
    :local:
    :depth: 2
+
+Names and URLs
+--------------
+
+Every tag that takes an asset reference reads it the same way.
+A reference carrying no scheme, no host, no query, and no fragment, whose path is non-empty and does not start with a slash, is a Django staticfiles name and is resolved through the configured storage.
+Any other reference reaches the document as written, so a CDN URL, a root-relative path, and a data URL all pass through untouched.
+
+.. code-block:: jinja
+   :caption: notes/pages/template.djx
+
+   {% use_style "site/tokens.css" %}
+   {% use_style "https://cdn.example.com/reset.css" %}
+
+The first tag emits ``/static/site/tokens.css`` under a plain ``STATIC_URL`` and the hashed filename under a manifest storage.
+The second emits the URL it was given.
+:doc:`name-resolution` states the rule in full, lists every shape that passes through, and covers what happens when a name resolves to nothing.
 
 collect_styles
 --------------
@@ -60,27 +78,31 @@ See :ref:`Runtime script options <topics-static-js-runtime-script-options>` for 
 use_style
 ---------
 
-``{% use_style %}`` registers an external CSS URL on the active collector.
+``{% use_style %}`` registers a CSS asset on the active collector.
 
 .. code-block:: jinja
    :caption: notes/pages/template.djx
 
+   {% use_style "site/tokens.css" %}
    {% use_style "https://cdn.example.com/reset.css" %}
 
+The argument is a staticfiles name or a finished URL, see `Names and URLs`_.
 The asset is prepended to the collector so shared dependencies load before co-located styles.
 The CSS cascade therefore flows from generic dependencies to page specific styling.
-The tag takes no ``kind`` argument and always registers a ``css`` asset, so a URL of another kind goes through ``{% use_script %}`` with an explicit ``kind``.
+The tag takes no ``kind`` argument and always registers a ``css`` asset, so an asset of another kind goes through ``{% use_script %}`` with an explicit ``kind``.
 
 use_script
 ----------
 
-``{% use_script %}`` registers an external URL on the active collector.
+``{% use_script %}`` registers an asset on the active collector under the given kind.
 
 .. code-block:: jinja
    :caption: notes/pages/template.djx
 
+   {% use_script "site/vendor.js" %}
    {% use_script "https://cdn.example.com/vendor.js" %}
 
+The first argument is a staticfiles name or a finished URL, read the same way as in ``use_style``.
 The asset is prepended to the collector the same way as ``use_style``.
 
 The optional ``kind`` argument defaults to ``js``, which renders a classic ``<script>`` tag.
@@ -89,7 +111,7 @@ Any other registered kind works too, and the registry decides both the slot the 
 .. code-block:: jinja
    :caption: notes/pages/template.djx
 
-   {% use_script "https://cdn.example.com/vendor.mjs" kind="module" %}
+   {% use_script "site/vendor.mjs" kind="module" %}
    {% use_script "https://cdn.example.com/inter.woff2" kind="font" %}
 
 A custom kind registered through ``KindRegistry.register`` therefore needs no template tag of its own, see :doc:`asset-kinds`.
@@ -103,19 +125,20 @@ use_module
 .. code-block:: jinja
    :caption: notes/pages/template.djx
 
-   {% use_module "https://cdn.example.com/vendor.mjs" %}
+   {% use_module "site/vendor.mjs" %}
 
 The asset registers under kind ``module`` and renders as a ``<script type="module">`` tag through the backend ``render_module_tag`` hook.
 The browser defers a module script, so the prepend controls markup order, not execution order relative to classic scripts.
 The tag has no ``#use_module`` block form.
 The ``module`` kind names no inline wrapper element, so a block body would land in the slot verbatim instead of as an inline ES module, see :doc:`asset-kinds`.
 
-The same URL registered under two kinds is two assets, so ``{% use_script %}`` and ``{% use_module %}`` on one URL emit both a classic and a module tag, see :doc:`deduplication`.
+The same asset registered under two kinds is two assets, so ``{% use_script %}`` and ``{% use_module %}`` on one reference emit both a classic and a module tag, see :doc:`deduplication`.
 
 .. note::
 
    The ``use_*`` registration tags and their block forms need the request-scoped collector that the page pipeline puts in the template context.
    A template rendered outside that pipeline, for example through ``render_to_string`` in a plain view, silently registers nothing and emits nothing.
+   ``{% asset %}`` is the exception, because it returns a value instead of registering one.
 
 Inline blocks
 -------------
@@ -150,6 +173,61 @@ The collector deduplicates inline entries by the rendered body, so two identical
    A block form needs the same request-scoped collector as the void form.
    A template rendered outside the page pipeline registers nothing and emits nothing, and the body never reaches the document.
 
+asset
+-----
+
+``{% asset %}`` returns the public URL of one reference as a string, for a raw ``href``, ``src``, or ``content`` attribute.
+
+.. code-block:: jinja
+   :caption: notes/pages/layout.djx
+
+   <link rel="icon" href="{% asset "site/favicon.svg" %}">
+
+The first argument is a staticfiles name, a finished URL, or a context variable holding either.
+An unset or empty variable renders nothing, so a missing value never becomes a link back to the current page.
+The tag runs the same resolution the registration tags run and then the per-request URL hook of the active backend, so a named file carries the manifest hash and a per-tenant prefix exactly as a collected asset does.
+It registers nothing on the collector, so it also works in a render that has none, such as a template rendered through ``render_to_string`` in a plain view.
+
+``{% asset %}`` is the recommended spelling for an asset URL in a next.dj template.
+A paired benchmark on one machine measures it at roughly 1.9 times cheaper than Django's ``{% static %}`` for the same name, because the backend answers a repeat from its memo while the Django tag asks storage on every render.
+Resolving a reference that is already a URL costs about 125 nanoseconds per tag on the same run.
+Both numbers are indicative rather than contractual, and the pair they come from is ``tests/benchmarks/static/test_bench_resolve.py``.
+
+Django's ``{% static %}`` keeps working and is the better choice where the value must be identical for every request.
+``{% asset %}`` output can vary per request, because ``asset_url`` receives the request, and a value that varies must not be baked into a ``{% cache %}`` fragment keyed on something else.
+
+The ``as`` form binds the URL to a template variable.
+
+.. code-block:: jinja
+   :caption: notes/pages/layout.djx
+
+   {% asset "site/app.css" as app_css %}
+   <link rel="preload" as="style" href="{{ app_css }}">
+   <link rel="stylesheet" href="{{ app_css }}">
+
+.. note::
+
+   The returned URL is HTML escaped like any other template output, so an ampersand between two query parameters renders as ``&amp;``.
+   That is the correct spelling inside an attribute, and the browser reads it as a single ampersand.
+
+Versioning a URL
+~~~~~~~~~~~~~~~~
+
+The optional ``version`` argument, a literal or a context value, sets a ``v`` query parameter on the URL.
+
+.. code-block:: jinja
+   :caption: notes/pages/layout.djx
+
+   {% asset "site/app.css" version=build_id %}
+
+The value is coerced to a string and percent encoded, and a URL that already carries a query keeps every other pair while a ``v`` pair already in it is replaced rather than doubled.
+The version is set after the backend hook, so a rewritten URL keeps it, and an opaque URI such as ``data:`` or ``blob:`` owns no query string and carries no version at all.
+
+``STATIC_VERSION`` in ``NEXT_FRAMEWORK`` sets the same parameter for every URL the pipeline renders, co-located files, module lists, tag assets, and the ``next.min.js`` runtime included.
+A ``version`` on a single ``{% asset %}`` call wins over the project value for that one URL, and ``version=""`` is the way to spell "no version here" while the project value is set.
+
+:doc:`/content/deployment/static-files` covers when a project wants a global version, why a content hash is the better answer, and the one backend shape that takes no version parameter at all.
+
 Placement rules
 ---------------
 
@@ -179,8 +257,13 @@ Common patterns
 Vendor CSS before component styles
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Use ``{% use_style %}`` for a vendor stylesheet.
+Use ``{% use_style %}`` for a vendor stylesheet, a name for a file the project ships and a URL for one a third party hosts.
 The prepend behaviour guarantees the vendor file loads before any co-located ``component.css``.
+
+Site-wide stylesheet
+~~~~~~~~~~~~~~~~~~~~
+
+Write ``{% use_style %}`` once in the root ``layout.djx``, which every page below it inherits, see :doc:`/content/howto/ship-a-site-wide-stylesheet`.
 
 Critical inline CSS
 ~~~~~~~~~~~~~~~~~~~
@@ -198,6 +281,7 @@ See also
 .. seealso::
 
    :doc:`co-located-files` for what becomes an asset.
+   :doc:`name-resolution` for the rule that decides a name from a URL.
    :doc:`deduplication` for how duplicates are avoided.
    :doc:`backends` for the rendered tag output.
    :doc:`/content/ref/template-tags` for the full tag catalog.

@@ -66,7 +66,9 @@ Staticfiles integration
    :members:
 
 ``staticfiles.install()`` calls ``next.static.register_defaults`` to register the built-in ``css``, ``js``, and ``module`` kinds and the ``styles`` and ``scripts`` slots.
-The module also connects a ``setting_changed`` receiver, so an override that replaces ``STATICFILES_FINDERS`` gets the framework finder appended again as soon as the override lands.
+The installer appends ``NextStaticFilesFinder`` and puts ``NextAppDirectoriesFinder`` in place of the stock ``AppDirectoriesFinder``, which keeps the framework package itself out of ``STATIC_ROOT``.
+A list that names the stock path beside the framework one collapses to a single entry, so a project that already lists ``NextAppDirectoriesFinder`` gains no duplicate scan.
+The module also connects a ``setting_changed`` receiver, so an override that replaces ``STATICFILES_FINDERS`` gets both back as soon as the override lands.
 
 Autoreload installer
 ~~~~~~~~~~~~~~~~~~~~

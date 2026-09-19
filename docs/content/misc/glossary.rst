@@ -22,6 +22,11 @@ Terms used throughout the next.dj documentation.
       A combination of extension and renderer that decides how an asset becomes HTML.
       Bundled kinds are ``css``, ``js``, and ``module``.
 
+   asset name
+      An asset reference carrying no scheme, no host, no query, and no fragment, whose path is relative.
+      The pipeline resolves it through Django staticfiles, while every other reference reaches the document as written.
+      See :doc:`/content/topics/static-assets/name-resolution`.
+
    backend
       A subsystem implementation registered through ``NEXT_FRAMEWORK``.
       Used for the router, the components backend, the static backend chain, and the form action chain.

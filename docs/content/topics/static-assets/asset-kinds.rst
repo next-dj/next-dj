@@ -216,14 +216,16 @@ Register the slot before the kind that targets it.
 A kind whose ``slot`` names no registered slot collects into a bucket the manager never reads, so its assets vanish with no error and no warning.
 
 The layout must contain the slot token, or a template tag that emits it, for the manager to find a place to inject.
-A module-level list named after the slot, such as ``preload = [...]`` in ``page.py``, registers external URLs into it, see :ref:`topics-static-module-lists`.
-From a template, ``{% use_script "<url>" kind="font" %}`` registers the same URL, because the ``kind`` argument reaches every registered kind, see :doc:`template-tags`.
+A module-level list named after the slot, such as ``preload = [...]`` in ``page.py``, registers names and URLs into it, see :ref:`topics-static-module-lists`.
+From a template, ``{% use_script "<reference>" kind="font" %}`` registers the same asset, because the ``kind`` argument reaches every registered kind, see :doc:`template-tags`.
 
 Module kind
 -----------
 
 The ``module`` kind renders ``<script type="module" src="...">`` through ``render_module_tag``.
 Discovery picks it up from a co-located ``.mjs`` file, a ``scripts`` module-level list entry, or the ``{% use_module %}`` tag, which is the ``kind="module"`` shorthand for ``{% use_script %}``, see :doc:`template-tags`.
+A module-level list entry is classified from the extension it was written with, before name resolution runs, see :doc:`name-resolution`.
+A tag carries its kind explicitly instead of inferring one, so ``{% use_script "site/app.mjs" %}`` registers a ``js`` asset and ``{% use_module %}`` is the spelling that registers a module.
 Customise the rendered output through the ``module_tag`` key in the backend ``OPTIONS`` mapping, see :doc:`backends`.
 
 The ``module`` kind carries no ``inline_tag``, so it renders an inline body verbatim, as do custom kinds registered without an ``inline_tag``.

@@ -7,7 +7,7 @@ script. `ScriptInjectionPolicy.DISABLED` or `MANUAL` opts out.
 from __future__ import annotations
 
 from . import signals
-from .assets import KindRegistry, StaticAsset, default_kinds
+from .assets import KindRegistry, StaticAsset, default_kinds, static_name
 from .backends import StaticBackend, StaticFilesBackend
 from .collector import (
     PlaceholderRegistry,
@@ -17,7 +17,8 @@ from .collector import (
 )
 from .defaults import register_defaults
 from .discovery import AssetDiscovery
-from .finders import NextStaticFilesFinder
+from .errors import StaticAssetNotFoundError, StaticAssetTraversalError
+from .finders import NextAppDirectoriesFinder, NextStaticFilesFinder
 from .manager import (
     StaticManager,
     collect_component_assets,
@@ -39,6 +40,7 @@ __all__ = [
     "JsContextSerializer",
     "JsonJsContextSerializer",
     "KindRegistry",
+    "NextAppDirectoriesFinder",
     "NextScriptBuilder",
     "NextStaticFilesFinder",
     "PlaceholderRegistry",
@@ -46,6 +48,8 @@ __all__ = [
     "PydanticJsContextSerializer",
     "ScriptInjectionPolicy",
     "StaticAsset",
+    "StaticAssetNotFoundError",
+    "StaticAssetTraversalError",
     "StaticBackend",
     "StaticCollector",
     "StaticFilesBackend",
@@ -59,4 +63,5 @@ __all__ = [
     "reset_default_manager",
     "resolve_serializer",
     "signals",
+    "static_name",
 ]

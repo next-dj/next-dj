@@ -23,7 +23,7 @@ Collector.
    ``StaticCollector`` accumulates and deduplicates the assets touched by the current render.
 
 Backend.
-   A ``StaticBackend`` resolves on-disk paths into URLs and renders the tags.
+   A ``StaticBackend`` resolves on-disk paths and authored references into URLs and renders the tags.
    ``StaticFilesBackend`` is the bundled one.
 
 Placeholder slots and template tags.
@@ -41,7 +41,7 @@ StaticAsset
    The asset kind, such as ``css``, ``js``, or ``module``.
 
 ``source_path``.
-   The path of the co-located file on disk, or ``None`` for inline and external assets.
+   The path of the co-located file on disk, or ``None`` for an inline asset and for one declared by reference.
 
 ``inline``.
    The pre-rendered inline body, or ``None`` for URL assets.
@@ -69,6 +69,8 @@ Discovery records it as a ``css`` ``StaticAsset`` because ``component`` is a reg
 A render that uses the component adds the asset to the collector, which deduplicates it.
 After the page renders, the static manager replaces the ``styles`` slot token emitted by ``{% collect_styles %}`` with the link tags produced by ``render_link_tag`` on the active backend.
 ``register_file`` resolves the on-disk path to a public URL through Django staticfiles during discovery, so manifest hashing and CDN settings apply to the URL that ``render_link_tag`` formats into the tag.
+
+An asset named in a template tag or in a module-level list takes the second door into the same pipeline, where ``resolve_url`` stands in for ``register_file`` and everything after it is shared, see :doc:`name-resolution`.
 
 The same flow applies to ``component.js`` (kind ``js``, classic script) and ``component.mjs`` (kind ``module``, ECMAScript module), which both land in the ``scripts`` slot emitted by ``{% collect_scripts %}``.
 The extension picks the kind, so a file named ``component.js`` never renders through ``render_module_tag``.
@@ -112,6 +114,7 @@ See also
 .. seealso::
 
    :doc:`co-located-files` for the filename conventions.
+   :doc:`name-resolution` for the rule that decides a name from a URL.
    :doc:`template-tags` for ``{% collect_styles %}`` and ``{% collect_scripts %}``.
    :doc:`asset-kinds` for registering a new kind.
    :doc:`/content/ref/static` for the public API.

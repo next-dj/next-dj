@@ -58,6 +58,13 @@ GitHub Actions runs the same work split across jobs, and adds the documentation 
      - ``make pre-commit-run``
      - ``security`` and ``dependency-review`` jobs
 
+Test order
+----------
+
+``pytest-randomly`` shuffles the suite on every run, so a test that leans on state another test left behind fails instead of passing by accident.
+The seed is printed in the pytest header as ``Using --randomly-seed=<n>``, and passing that value back through ``--randomly-seed=<n>`` replays the exact order.
+Benchmarks run with ``-p no:randomly``, because a paired comparison needs the same order on both sides.
+
 Test coverage
 -------------
 
@@ -139,6 +146,8 @@ The job finishes with the vitest run and its coverage thresholds.
 
 ``next/client/next.ts`` is the single entry point that mounts ``window.Next`` and pulls in the morph, apply, wire, layer, trigger, asset, and stream modules.
 ``make build-js`` runs the same esbuild pass locally, minifying the bundle to ``next/static/next/next.min.js`` with a source map beside it and targeting ES2022.
+The map is external and the bundle carries no ``sourceMappingURL`` comment, so browser devtools load the map only when a developer points them at it, while manifest storage finds no reference to rewrite at ``collectstatic`` time.
+``build_hooks.py`` reads the bundle before packaging and raises on one that carries the comment, and ``NEXT_DJ_SKIP_JS_BUILD=1`` skips the npm run and packages the bundle already on disk.
 The compiled file is a build product rather than a tracked source file, and the packaging configuration lists it as a build artefact so a distribution carries it.
 
 Supply chain

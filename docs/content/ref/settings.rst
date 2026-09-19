@@ -47,6 +47,7 @@ Each key accepts one shape, and a value of any other type is dropped in favour o
 - The list keys (``PAGE_BACKENDS``, ``COMPONENT_BACKENDS``, ``STATIC_BACKENDS``, ``FORM_ACTION_BACKENDS``, ``PARTIAL_BACKENDS``, ``TEMPLATE_LOADERS``, ``FORM_ANCHOR_FILES``) accept a list.
 - The mapping keys (``NEXT_JS_OPTIONS``, ``FORM_WIZARD_BACKEND``) accept a dict.
 - The dotted-path keys (``URL_RESOLVER``, ``DEPENDENCY_RESOLVER``, ``COMPONENT_TEMPLATE_LOADER``) accept a string naming an importable class, and ``JS_CONTEXT_SERIALIZER`` accepts such a dotted path or ``None``.
+- ``STATIC_VERSION`` accepts a string or ``None``.
 - ``URL_NAME_TEMPLATE`` also accepts a string, but a format template such as ``page_{name}`` rather than a dotted path.
 - The bool flags (``STRICT_CONTEXT``, ``STRICT_LOADING``, ``LAZY_COMPONENT_MODULES``, ``FORM_AUTODISCOVER``, ``STATIC_DISCOVERY_CACHE``) accept any value and pass through ``bool()``.
 
@@ -451,6 +452,24 @@ A settings reload drops the static manager and the discovery behind it, so ``ove
 The page-root lookup that maps a page file to its tree is memoised separately and is not affected, because it is a pure function of the path and the configured roots and it is dropped whole whenever those roots move.
 
 See :doc:`/content/topics/static-assets/index` for the discovery rules.
+
+STATIC_VERSION
+~~~~~~~~~~~~~~
+
+The version every rendered asset URL carries as a ``v`` query parameter.
+
+Default value ``None``.
+
+With the key unset no URL is touched.
+With a string in it, every URL the pipeline renders gains the parameter, co-located files, module-list assets, tag assets, ``{% asset %}`` values, and the ``next.min.js`` runtime alike, because they all pass the one manager hook that sets it.
+The parameter is set after the backend ``asset_url`` hook, so a rewritten URL keeps the version, and a URL that already carries a query keeps every other pair while a ``v`` pair already in it is replaced rather than doubled.
+An opaque URI such as ``data:`` or ``blob:`` owns no query string, so it reaches the document exactly as it was written.
+
+A value of any type other than a string or ``None`` is dropped in favour of the default and reported at ``manage.py check`` as ``next.E076``.
+Read the value from the environment or from a build artefact so every worker of a deployment renders the same URL.
+
+A project on :doc:`ManifestStaticFilesStorage <django:ref/contrib/staticfiles>` leaves the key unset, because the manifest already versions each file by its content.
+See :doc:`/content/deployment/static-files` for the trade-off and :doc:`/content/topics/static-assets/template-tags` for the per-URL ``version`` argument of ``{% asset %}``.
 
 Patching defaults
 -----------------

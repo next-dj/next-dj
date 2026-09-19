@@ -3,7 +3,7 @@
 Static backends
 ===============
 
-A static backend resolves an asset file to a public URL and renders the link, script, and module tags.
+A static backend resolves an asset file or an authored reference to a public URL and renders the link, script, and module tags.
 The framework ships ``StaticFilesBackend``.
 A custom backend rewrites URLs, adds attributes, or points at a CDN.
 
@@ -17,7 +17,8 @@ Backend contract
 A backend subclasses ``next.static.StaticBackend``, an abstract base class.
 The constructor receives the full backend entry from ``STATIC_BACKENDS``, a dict of the shape ``{"BACKEND": "...", "OPTIONS": {...}}``.
 
-The only abstract method is ``register_file``.
+The only abstract method is ``register_file``, which covers co-located files.
+``resolve_url``, ``asset_url``, and ``forget_urls`` are concrete on the base class, and a backend overrides the ones whose behaviour it changes.
 
 .. code-block:: python
    :caption: next/static/backends.py
@@ -36,11 +37,32 @@ The only abstract method is ``register_file``.
 
 Discovery catches ``OSError`` and ``ValueError`` from ``register_file`` and logs a warning, dropping that one asset.
 Any other exception, including ``RuntimeError``, propagates and aborts the render.
-The bundled ``StaticFilesBackend`` raises ``RuntimeError`` when an asset is missing from the Django staticfiles manifest, so a stale manifest aborts the render rather than dropping the asset.
+The bundled ``StaticFilesBackend`` raises ``StaticAssetNotFoundError``, a ``RuntimeError`` exported from ``next.static``, when an asset is missing from the Django staticfiles manifest, so a stale manifest aborts the render rather than dropping the asset.
 A custom backend that wants a soft fail for an unresolvable asset should raise ``ValueError``.
 
 Renderer methods are not abstract.
 A backend adds the renderer methods that its registered kinds reference, see :doc:`asset-kinds`.
+
+Resolving a name
+~~~~~~~~~~~~~~~~
+
+``resolve_url`` turns an authored reference into a public URL.
+Every ``{% use_style %}``, ``{% use_script %}``, ``{% use_module %}``, and ``{% asset %}`` value goes through it, as does every entry of a module-level ``styles`` or ``scripts`` list.
+
+.. code-block:: python
+   :caption: next/static/backends.py
+
+   def resolve_url(self, reference: str) -> str:
+       """Turn an authored asset reference into a public URL."""
+
+It is concrete on the base class and returns the reference unchanged, so a backend subclassing ``StaticBackend`` directly renders literal references until it overrides the method.
+``StaticFilesBackend`` overrides it, resolving a staticfiles name through storage and leaving every other shape alone, see :doc:`name-resolution`.
+The shape rule lives inside the method, so one override replaces both the rule and the lookup, and ``next.static.static_name`` is exported for a backend that wants to keep core's reading of a reference.
+Call it and handle the ``None`` it answers for a reference that is already a URL, see :ref:`ref-static` for the full return contract.
+A missing name raises ``StaticAssetNotFoundError``, the same error a co-located file missing from the manifest raises.
+
+Rewriting a URL per request
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``asset_url`` is concrete on the base class and returns the URL unchanged.
 
@@ -57,7 +79,7 @@ A backend adds the renderer methods that its registered kinds reference, see :do
 
 Every URL the pipeline renders passes through it, including the ``next.min.js`` runtime bundle and its preload hint, which the framework builds rather than a renderer method.
 A partial patch envelope carries bare URLs for the assets a zone body introduces, and those pass through the hook as well, so a zone morph reaches the client with the URLs a full-page render would have written.
-Override ``asset_url`` when the URL must change, override the renderer methods when the markup must change.
+Override ``resolve_url`` when a reference must be looked up elsewhere, override ``asset_url`` when a resolved URL must move for this request, and override the renderer methods when the markup must change.
 
 Invalidating a memo
 ~~~~~~~~~~~~~~~~~~~
@@ -70,11 +92,11 @@ The default backend
 -------------------
 
 ``StaticFilesBackend`` resolves assets through Django staticfiles.
-Assets live in the ``next/`` staticfiles namespace, so manifest storage, S3 storage, and CDN settings apply automatically.
+Co-located assets live in the ``next/`` staticfiles namespace and a named asset lives wherever the project put it, and manifest storage, S3 storage, and CDN settings apply to both automatically.
 
 .. note::
 
-   ``StaticFilesBackend`` caches resolved URLs per ``(logical_name, suffix)`` pair.
+   ``StaticFilesBackend`` caches what it resolved, a co-located file per ``(logical_name, suffix)`` pair and a reference per authored string, in one memo.
    A ``STATIC_ROOT``, ``STATIC_URL``, or ``STORAGES`` change drops that cache through ``forget_urls`` without rebuilding the backend, so a test that swaps storage through ``override_settings`` sees fresh URLs on the next render.
 
 The backend ships three renderer methods.
@@ -162,6 +184,8 @@ A renderer that is not overridden falls back to the parent output, which is why 
 
 To move the URL rather than the markup, override ``asset_url`` instead.
 One override then covers all three kinds and the runtime bundle, and the tag templates configured through ``css_tag``, ``js_tag``, ``module_tag``, and ``NEXT_JS_OPTIONS`` keep applying on top of the new URL.
+To look a reference up somewhere other than staticfiles, override ``resolve_url``, which runs once per reference rather than once per render.
+A single constant host in front of the static origin is neither, and belongs in ``STATIC_URL``, see :doc:`/content/deployment/static-files`.
 
 .. warning::
 
@@ -240,6 +264,7 @@ Per-tenant CDN
 ~~~~~~~~~~~~~~
 
 Use a request-aware ``asset_url`` that reads the tenant from the request and chooses a CDN host.
+A host that is the same for every request is ``STATIC_URL`` work rather than backend work.
 
 See also
 --------
@@ -247,6 +272,7 @@ See also
 .. seealso::
 
    :doc:`asset-kinds` for renderer method selection.
+   :doc:`name-resolution` for the reference shapes ``resolve_url`` receives.
    :doc:`deduplication` for the dedup strategy.
    :doc:`js-context` for the JS context policy.
    :doc:`/content/howto/write-a-static-backend` for a recipe.

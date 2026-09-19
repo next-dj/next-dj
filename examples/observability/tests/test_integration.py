@@ -1,6 +1,7 @@
 import re
 
 import pytest
+from config.storages import MANIFEST_STORAGES
 from django.core.management import call_command
 from django.test import override_settings
 from obs import metrics
@@ -24,6 +25,7 @@ from next.forms.signals import (
 from next.pages.signals import context_registered, page_rendered, template_loaded
 from next.server import iter_all_autoreload_watch_specs
 from next.server.signals import watch_specs_ready
+from next.static import get_static_manager
 from next.static.signals import (
     asset_registered,
     backend_loaded,
@@ -52,6 +54,21 @@ GROUP_SAMPLES: dict[str, list] = {
 
 
 pytestmark = pytest.mark.django_db
+
+
+CHART_JS_CDN = "https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"
+
+HASHED_CHART_THEME = re.compile(r"/static/dashboards/js/chart_theme\.[0-9a-f]+\.js")
+HASHED_RENDER_CHART = re.compile(r"/static/next/components/render_chart\.[0-9a-f]+\.js")
+
+
+@pytest.fixture()
+def manifest_storage(tmp_path):
+    with override_settings(
+        STATIC_ROOT=tmp_path / "collected", STORAGES=MANIFEST_STORAGES
+    ):
+        call_command("collectstatic", interactive=False, verbosity=0)
+        yield tmp_path / "collected"
 
 
 DASHBOARD_PATHS: tuple[str, ...] = (
@@ -230,6 +247,68 @@ class TestJsxAssetPipeline:
         assert body.index("chart.umd.min.js") < body.index(
             "/static/next/components/render_chart.js"
         )
+
+
+class TestStaticNameResolution:
+    """A page `scripts` list mixes staticfiles names with ready vendor URLs."""
+
+    def test_name_resolves_through_staticfiles(self, next_client) -> None:
+        body = next_client.get("/stats/").content.decode()
+        assert '<script src="/static/dashboards/js/chart_theme.js">' in body
+
+    def test_vendor_url_is_left_alone(self, next_client) -> None:
+        body = next_client.get("/stats/").content.decode()
+        assert f'<script src="{CHART_JS_CDN}">' in body
+
+    def test_theme_lands_between_the_vendor_url_and_the_widget_file(
+        self, next_client
+    ) -> None:
+        body = next_client.get("/stats/").content.decode()
+        assert (
+            body.index(CHART_JS_CDN)
+            < body.index("/static/dashboards/js/chart_theme.js")
+            < body.index("/static/next/components/render_chart.js")
+        )
+
+
+class TestManifestStorage:
+    """The `OBS_STATIC_MANIFEST=1` profile hashes every name through the manifest."""
+
+    def test_page_script_name_carries_a_content_hash(
+        self, next_client, manifest_storage
+    ) -> None:
+        body = next_client.get("/stats/").content.decode()
+        assert HASHED_CHART_THEME.search(body) is not None
+        assert '"/static/dashboards/js/chart_theme.js"' not in body
+
+    def test_vendor_url_in_the_same_list_stays_unhashed(
+        self, next_client, manifest_storage
+    ) -> None:
+        body = next_client.get("/stats/").content.decode()
+        assert f'<script src="{CHART_JS_CDN}">' in body
+
+    def test_colocated_widget_file_is_hashed_too(
+        self, next_client, manifest_storage
+    ) -> None:
+        body = next_client.get("/stats/").content.decode()
+        assert HASHED_RENDER_CHART.search(body) is not None
+
+    def test_hardcoded_path_misses_the_manifest(self, manifest_storage) -> None:
+        manager = get_static_manager()
+        literal = "/static/dashboards/js/chart_theme.js"
+        assert manager.resolve_url(literal) == literal
+        resolved = manager.resolve_url("dashboards/js/chart_theme.js")
+        assert HASHED_CHART_THEME.fullmatch(resolved) is not None
+
+    def test_collectstatic_leaves_every_python_module_behind(
+        self, manifest_storage
+    ) -> None:
+        leaked = [
+            entry.name
+            for entry in manifest_storage.rglob("*")
+            if entry.suffix in {".py", ".pyc"} or entry.name == "__pycache__"
+        ]
+        assert leaked == []
 
 
 class TestDevFlagChannel:

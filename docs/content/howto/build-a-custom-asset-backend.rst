@@ -25,9 +25,10 @@ Walkthrough
 Resolve URLs in ``register_file``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``register_file`` is the only abstract method on the backend contract.
+``register_file`` is the only abstract method on the backend contract, and it covers co-located files.
 The default implementation maps a logical name onto the Django staticfiles namespace.
 A custom backend can intercept one kind and resolve it elsewhere, then delegate every other kind to the parent.
+References authored in a template tag or a module list travel through ``resolve_url`` instead, which a backend reading a build manifest overrides the same way, see :ref:`topics-static-name-resolution-backend`.
 
 .. code-block:: python
    :caption: kanban/backends.py

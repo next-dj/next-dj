@@ -1,15 +1,18 @@
 import pytest
+from django.conf import settings
 from e2e_support.browser import (
     PageProbe,
     expect_no_partial_request,
     request_baseline,
     wait_for_runtime,
 )
-from notes.models import Note
+from notes.models import Note, Tenant
 from playwright.sync_api import Page, expect
 
 
 pytestmark = pytest.mark.e2e
+
+BUILD_ID = settings.ASSET_BUILD_ID
 
 NOTE_CARD = "[data-note-card]"
 PREVIEW = "[data-markdown-preview] .markdown-body"
@@ -57,10 +60,10 @@ def test_runtime_boots_and_serves_its_bundle(
     bundle = [
         response
         for response in next_probe.responses
-        if response.url.endswith("/static/next/next.min.js")
+        if response.url.partition("?")[0].endswith("/static/next/next.min.js")
     ]
     assert [response.url for response in bundle] == [
-        f"{base_url}/_t/acme/static/next/next.min.js"
+        f"{base_url}/_t/acme/static/next/next.min.js?v={BUILD_ID}"
     ]
     assert [response.status for response in bundle] == [200]
     assert page.evaluate("() => typeof window.Next") == "function"
@@ -104,17 +107,36 @@ def test_co_located_assets_load_under_the_tenant_prefix(
 
     assert len(prefixed) + len(unprefixed) == len(requested)
     assert unprefixed == []
-    served = {url.removeprefix(prefix) for url in prefixed}
+    served = {url.removeprefix(prefix).partition("?")[0] for url in prefixed}
     assert "next/next.min.js" in served
     assert "next/components/markdown_preview.mjs" in served
     assert "next/components/markdown_preview.css" in served
     assert "shared/css/tokens.css" in served
+    assert "notes/css/theme.css" in served
     statuses = {
         response.status
         for response in next_probe.responses
         if response.url.startswith(prefix)
     }
     assert statuses == {200}
+
+
+def test_a_tampered_theme_column_loads_no_foreign_stylesheet(
+    page: Page,
+    base_url: str,
+    demo_data: None,
+    tenant_query_fallback: None,
+    next_probe: PageProbe,
+) -> None:
+    Tenant.objects.filter(slug="acme").update(theme="https://evil.test/x.css")
+
+    open_as(page, base_url, "acme", "/notes/")
+
+    expect(page.locator('link[href*="evil.test"]')).to_have_count(0)
+    expect(page.locator('link[href*="notes/css/theme.css"]')).to_have_count(1)
+    assert [
+        response.url for response in next_probe.responses if "evil.test" in response.url
+    ] == []
 
 
 def test_typing_in_the_editor_updates_the_markdown_preview(

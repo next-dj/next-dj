@@ -163,11 +163,14 @@ Use an empty layout that contains only the placeholder.
 
 A sibling ``page.py`` in the same directory can publish inherited context for every page under ``/api/`` without that layout injecting any visible markup.
 
-Section specific static assets
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Layout scoped static assets
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Co-locate ``layout.css`` next to ``layout.djx`` to ship styles that apply only to pages under that directory.
 The static collector emits the file only when a request reaches a page below that layout.
+
+The root layout is the site-wide case of the same rule, because every page sits below it.
+A ``layout.css`` beside the root ``layout.djx`` reaches every page, and a ``{% use_style %}`` tag in that layout adds a file staticfiles serves or a URL a third party hosts, see :doc:`/content/howto/ship-a-site-wide-stylesheet`.
 
 Multiple backends and layout roots
 ----------------------------------
