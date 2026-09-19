@@ -6,6 +6,8 @@ A workspace for two independent tenants (Acme and Globex) that share the same Dj
 >
 > Two shapes need no proxy at all: read the tenant out of the signed-in user's membership rows, or out of `request.get_host()`, which `ALLOWED_HOSTS` narrows to the names the project publishes. [`docs/content/howto/scope-requests-per-tenant.rst`](../../docs/content/howto/scope-requests-per-tenant.rst) puts all three side by side in trust order. This example reads the header because that is the shape which shows a custom `RegisteredParameterProvider` and a request-aware static backend with the fewest moving parts, not because it is the shape to reach for first.
 
+> **What a tenant row may put in the document.** `Tenant.primary_color` lands in an inline `style` attribute on `<body>`, where a value like `red;background:url(https://evil.test/beacon)` appends declarations of its own, so `accent_color` in [`notes/themes.py`](notes/themes.py) passes the column through only when it is a bare hex colour and substitutes the project default otherwise. `Tenant.theme` is held at arm's length the same way one layer up: the column stores a key the project maps to a stylesheet it ships, never a reference a row wrote, which section 2 walks through.
+
 ## What you will see
 
 | URL | Description |
@@ -18,10 +20,10 @@ A workspace for two independent tenants (Acme and Globex) that share the same Dj
 
 Two tenants ship with the example in [`notes/demo.py`](notes/demo.py):
 
-| slug | name | accent | stylesheet |
+| slug | name | accent | theme key |
 | --- | --- | --- | --- |
-| `acme` | Acme Industries | `#2563eb` (blue) | `notes/css/acme.css`, a staticfiles name |
-| `globex` | Globex Corporation | `#16a34a` (green) | `/static/notes/css/theme.css`, a ready URL |
+| `acme` | Acme Industries | `#2563eb` (blue) | `acme`, mapped to the staticfiles name `notes/css/acme.css` |
+| `globex` | Globex Corporation | `#16a34a` (green) | `shared`, which adds no sheet beyond the one the layout registers |
 
 The header pill carries the tenant name, the accent strip and accent text use the CSS variable surfaced by the `tenant_theme` context processor, and every `<link>` and `<script>` URL, the `next.min.js` runtime bundle included, is prefixed with `/_t/acme/` or `/_t/globex/`.
 
@@ -49,7 +51,7 @@ There are two ways to drive the app:
 
   Choosing the tenant by hand like this is precisely the forgery the trust boundary above describes, and against a bare development server it works — which is why the boundary is stated rather than implied. The query and cookie fallbacks are disabled outside `DEBUG`. A request with no tenant at all returns `400 Missing X-Tenant header.`, and in `DEBUG` the body appends a one-line pointer at the query affordance. A slug that matches no row returns `404 Unknown tenant.`. Neither body repeats what the client sent: a body quoting the submitted slug is an oracle for enumerating tenant names, and in an HTML response it is a reflected-XSS sink.
 
-Tailwind loads via the Play CDN in the shared [`page_head`](../_shared/_components/page_head/component.djx) component. No Node, no build step. [`root_pages/layout.djx`](root_pages/layout.djx) calls it in block form and fills its `extra` slot with two `{% use_style %}` registrations. The first names [`static/notes/css/theme.css`](static/notes/css/theme.css), which holds the `.accent-bar` / `.accent-text` / `.accent-border` rules and reads `var(--tenant-accent)` with the shared primary colour as the fallback. The second names whatever the active tenant carries in `Tenant.stylesheet`, and section 2 walks what happens to each of those values. The variable itself is set once as an inline `style` on `<body>` from `tenant_theme_css`, so a page rendered without a tenant still has a usable palette.
+Tailwind loads via the Play CDN in the shared [`page_head`](../_shared/_components/page_head/component.djx) component. No Node, no build step. [`root_pages/layout.djx`](root_pages/layout.djx) calls it in block form and fills its `extra` slot with `{% use_style %}` registrations. The unconditional one names [`static/notes/css/theme.css`](static/notes/css/theme.css), which holds the `.accent-bar` / `.accent-text` / `.accent-border` rules and reads `var(--tenant-accent)` with the shared primary colour as the fallback. A tenant whose `Tenant.theme` key names a sheet of its own registers that one after it, and section 2 walks both hops. The variable itself is set once as an inline `style` on `<body>` from `tenant_theme_css`, so a page rendered without a tenant still has a usable palette.
 
 ## Walking the code
 
@@ -84,35 +86,40 @@ class TenantPrefixStaticBackend(StaticFilesBackend):
 
 One override is enough because every URL the pipeline renders goes through `asset_url` — the co-located `<link>` and `<script>` tags, the `next.min.js` runtime tag, and its `<link rel="preload">` hint. Rewriting inside `render_*_tag` instead would leave the runtime bundle on the unprefixed URL, because core builds that tag from `NEXT_JS_OPTIONS` rather than from a renderer method.
 
-The settings entries are two lines:
+The settings entry is one backend:
 
 ```python
 "STATIC_BACKENDS": [
     {"BACKEND": "notes.backends.TenantPrefixStaticBackend"},
 ],
-"STATIC_VERSION": ASSET_BUILD_ID,
 ```
 
 The `next.static` collector caches deduplicated URLs once. The `asset_url` hook lets you decorate URLs at injection time without forking that cache.
 
-Overriding `asset_url` alone leaves `resolve_url` inherited, and the two hooks run at different moments. `resolve_url` turns an authored reference into a public URL while the asset is registered, and `asset_url` decorates that URL for the request being rendered. The root layout registers the shared sheet by name and the active tenant's own sheet straight from the column that holds it:
+Overriding `asset_url` alone leaves `resolve_url` inherited, and the two hooks run at different moments. `resolve_url` turns an authored reference into a public URL while the asset is registered, and `asset_url` decorates that URL for the request being rendered. The root layout registers the shared sheet by name, and a sheet the active tenant's theme key names after it:
 
 ```django
 {% use_style "notes/css/theme.css" %}
 {% if tenant_stylesheet %}{% use_style tenant_stylesheet %}{% endif %}
 ```
 
-Acme reads `/_t/acme/static/notes/css/acme.css?v=2026.09.1` out of that second line. Three layers wrote the string and none of them knows about the others. Django staticfiles turned the name `notes/css/acme.css` into `/static/notes/css/acme.css`, the tenant backend prepended `/_t/acme`, and `STATIC_VERSION` stamped the build id. A backend that rewrites URLs composes on top of name resolution for free, which is the whole point of overriding one hook rather than the tag renderers.
+Acme reads `/_t/acme/static/notes/css/acme.css?v=2026.09.1` out of that second line. Three layers wrote the string and none of them knows about the others. Django staticfiles turned the name `notes/css/acme.css` into `/static/notes/css/acme.css`, the tenant backend prepended `/_t/acme`, and the `STATIC_VERSION` of section 3 stamped the build id. A backend that rewrites URLs composes on top of name resolution for free, which is the whole point of overriding one hook rather than the tag renderers.
 
-`Tenant.stylesheet` holds whatever the tenant was provisioned with, and the two demo rows are provisioned differently on purpose. `notes/css/acme.css` has no scheme, no host, no query and no leading slash, so it is a name and storage resolves it. `/static/notes/css/theme.css` starts with a slash, so it is already a URL and the pipeline hands it back untouched. The shape of the value decides, not the tag it arrived in and not where it came from.
+`Tenant.theme` holds a key, never a reference. The column is a `choices` field over `TenantTheme`, and [`notes/themes.py`](notes/themes.py) maps each key to a stylesheet the project ships, with the `shared` key mapping to nothing at all because the layout already registered the shared sheet for every tenant. The `tenant_theme` context processor looks the stored key up in that table, so the template receives a reference the project wrote and a key outside the table adds no sheet.
 
-The Globex row is the interesting one. The layout already registered `notes/css/theme.css` by name for every tenant, and Globex names that same file by path. Both spellings reach the collector as `/static/notes/css/theme.css`, the dedup key is the resolved URL, and the head carries one `<link>` rather than two. A project rewriting hardcoded paths into names one template at a time never double-loads a file halfway through the move.
-
-`STATIC_VERSION` reads `ASSET_BUILD_ID` from [`config/settings.py`](config/settings.py), which takes `NOTES_BUILD_ID` out of the environment and falls back to a literal for a checkout nobody deployed. A build id has to arrive from the deploy rather than be computed at import time, otherwise every process in a fleet stamps a different one and a shared cache never settles. The stamp lands on every URL the pipeline emits, so the vendor script of the shared markdown preview renders as `https://cdn.jsdelivr.net/npm/marked/marked.min.js?v=2026.09.1` too. This example serves its assets straight off disk, so the query parameter is the only thing that changes when a file changes. A project on `ManifestStaticFilesStorage` gets that from the filename instead and wants neither setting, which is what [`observability`](../observability/) shows.
+That indirection is the whole safety story. `{% use_style %}` renders whatever reference it is handed, and a reference that is no staticfiles name passes through byte for byte, so a column piped straight into the tag loads whatever origin it names. A stored `https://evil.test/x.css` or a `data:text/css,...` would render as written, and a `../../media/uploads/evil.css` would fail the request outright rather than load, which is the sink [`docs/content/security/static-assets.rst`](../../docs/content/security/static-assets.rst) tells projects to close.
 
 The prefix has to resolve to a file for the demo to render, so [`config/urls.py`](config/urls.py) maps `^_t/(?P<slug>[^/]+)/static/(?P<path>.*)$` to a view that drops the slug and forwards to `django.contrib.staticfiles.views.serve`. A real deployment points a CDN at `STATIC_URL` and lets the prefix decorate cache keys instead of routing.
 
-### 3. Shared root layout via `DIRS`
+### 3. One build id stamped on every URL
+
+```python
+"STATIC_VERSION": ASSET_BUILD_ID,
+```
+
+`STATIC_VERSION` reads `ASSET_BUILD_ID` from [`config/settings.py`](config/settings.py), which takes `NOTES_BUILD_ID` out of the environment and falls back to a literal for a checkout nobody deployed. A build id has to arrive from the deploy rather than be computed at import time, otherwise every process in a fleet stamps a different one and a shared cache never settles. The stamp lands on every URL the pipeline emits, so the vendor script of the shared markdown preview renders as `https://cdn.jsdelivr.net/npm/marked/marked.min.js?v=2026.09.1` too. This example serves its assets straight off disk, so the query parameter is the only thing that changes when a file changes. A project on `ManifestStaticFilesStorage` gets that from the filename instead and wants neither setting, which is what [`observability`](../observability/) shows.
+
+### 4. Shared root layout via `DIRS`
 
 The `notes` Django app does not own its HTML shell. The root template lives under [`root_pages/layout.djx`](root_pages/layout.djx) and the global components live under [`root_blocks/header/`](root_blocks/header/) and [`root_blocks/footer/`](root_blocks/footer/). The page and component backends pick them up through the `DIRS` setting:
 
@@ -139,7 +146,7 @@ This is the canonical way to share chrome across multiple Django apps. See [`doc
 
 The `<main>` element in that layout delegates its width to the shared [`container`](../_shared/_components/container.djx) component. A wrapper with a single insertion point needs no named slot, so the layout calls it in block form. Everything between the opening and closing tag arrives as free children, which the component splices with `{{ children }}`. The `{% template %}` of the page renders inside that call, so every page in the example lands in the same centred column.
 
-### 4. Inherit context for the active tenant
+### 5. Inherit context for the active tenant
 
 [`notes/workspaces/page.py`](notes/workspaces/page.py) registers two `@context` callables, and only the first one is inherited:
 
@@ -156,7 +163,7 @@ def recent_notes(active_tenant: DTenant) -> list[Note]:
 
 `inherit_context=True` lifts `tenant` to every descendant page, so [`notes/layout.djx`](notes/workspaces/notes/layout.djx) and both form templates print `tenant.slug` without re-resolving anything. `recent_notes` carries no flag, so it stays on the landing page that renders it and the `/notes/` list does not pay for a query it never shows.
 
-### 5. The two note forms and the shared preview
+### 6. The two note forms and the shared preview
 
 [`notes/workspaces/notes/new/page.py`](notes/workspaces/notes/new/page.py) defines `NoteCreateForm`, a plain `next.forms.Form` with no model behind it. The template reaches it as `{% form "note_create_form" %}`, the snake_case name the framework derives from the class. Its `on_valid` takes `active_tenant: DTenant` and passes it straight to `Note.objects.create`, so the tenant is stamped on the row by the same provider the pages use and the browser never sees a tenant field it could tamper with. The redirect goes to the new note's editor, not back to the list, so the author keeps typing where they left off.
 
@@ -166,7 +173,7 @@ Both forms declare their widgets with `next.forms.ComponentWidget`, naming the s
 
 The body textarea is rendered side by side with the shared `markdown_preview` shell ([`examples/_shared/_components/markdown_preview/`](../_shared/_components/markdown_preview/)). The shell is pure presentation. The body is rendered server-side by `render_markdown` from the shared [`examples/_shared/markup.py`](../_shared/markup.py), which escapes the raw body before the `markdown` package sees it, strips unsafe link URLs, and wraps the result in `SafeString`. Each page injects the HTML through the `rendered_html` prop, so the shell shows what the app rendered. The create page has no body yet and renders the empty string, which `render_markdown` answers with its placeholder paragraph, so the pane is never a blank box on first paint. The shell's co-located `component.mjs` is auto-discovered and served as a module script. `TenantPrefixStaticBackend` rewrites its `/static/next/components/markdown_preview.mjs` URL to `/_t/<slug>/static/...` so the script rides the same per-tenant prefix as the co-located CSS. The shell, the client behaviour, and the server-side render are all shared with the wiki form.
 
-### 6. Dynamic permission hooks on the edit form
+### 7. Dynamic permission hooks on the edit form
 
 The `get_object_or_404` in `get_initial` keeps one tenant from loading another tenant's note id. It does not cover two rules that are not about ownership. `NoteEditForm` layers those as the framework's two DI-resolved permission hooks.
 
@@ -222,7 +229,8 @@ The example pins an explicit asset `VERSION` in `PARTIAL_BACKENDS`, the shared c
 - [`next/deps/providers.py`](../../next/deps/providers.py) — the `RegisteredParameterProvider` ABC used by `TenantProvider`.
 - [`next/pages/registry.py`](../../next/pages/registry.py) — the `inherit_context` walk that lifts `tenant` to every descendant page.
 - [`docs/content/topics/static-assets/backends.rst`](../../docs/content/topics/static-assets/backends.rst) — the request-aware output section that this example anchors.
+- [`docs/content/security/static-assets.rst`](../../docs/content/security/static-assets.rst) — the rule behind the theme key table in section 2.
 - [`docs/content/topics/dependency-injection.rst`](../../docs/content/topics/dependency-injection.rst) — the request-scoped provider pattern.
-- [`docs/content/howto/enforce-object-level-permissions.rst`](../../docs/content/howto/enforce-object-level-permissions.rst) — the `check_permissions` and `has_object_permission` hooks used in section 6.
+- [`docs/content/howto/enforce-object-level-permissions.rst`](../../docs/content/howto/enforce-object-level-permissions.rst) — the `check_permissions` and `has_object_permission` hooks used in section 7.
 - [`docs/content/topics/forms/signals.rst`](../../docs/content/topics/forms/signals.rst) — the `form_access_denied` payload contract.
 - [`docs/content/ref/system-checks.rst`](../../docs/content/ref/system-checks.rst) — `next.W054` for `ComponentWidget` and `next.W069` for the asset-version guard.

@@ -58,6 +58,13 @@ GitHub Actions runs the same work split across jobs, and adds the documentation 
      - ``make pre-commit-run``
      - ``security`` and ``dependency-review`` jobs
 
+Test order
+----------
+
+``pytest-randomly`` shuffles the suite on every run, so a test that leans on state another test left behind fails instead of passing by accident.
+The seed is printed in the pytest header as ``Using --randomly-seed=<n>``, and passing that value back through ``--randomly-seed=<n>`` replays the exact order.
+Benchmarks run with ``-p no:randomly``, because a paired comparison needs the same order on both sides.
+
 Test coverage
 -------------
 

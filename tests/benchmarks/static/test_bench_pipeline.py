@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 _ASSET_COUNTS = (5, 20)
 _COLOCATED_ASSETS = 4
 _COMPONENT_INSTANCES = 50
+_STATIC_VERSION = "2026.9.19"
 
 
 def _page_html() -> str:
@@ -84,6 +85,30 @@ class TestBenchStaticPipeline:
         with override_settings(
             NEXT_FRAMEWORK={
                 "PAGE_BACKENDS": [file_router_config_entry(pages_dir=tmp_path)]
+            }
+        ):
+            page_file = _build_pipeline_page(tmp_path, assets)
+            manager = StaticManager()
+            html = _page_html()
+
+            def run() -> str:
+                collector = manager.create_collector()
+                manager.discover_page_assets(page_file, collector)
+                return manager.inject(html, collector)
+
+            run()
+            benchmark(run)
+
+    @pytest.mark.parametrize("assets", _ASSET_COUNTS, ids=["n5", "n20"])
+    @pytest.mark.benchmark(group="static.pipeline")
+    def test_page_pipeline_versioned(
+        self, tmp_path: Path, assets: int, benchmark
+    ) -> None:
+        """The same page with `STATIC_VERSION` set, so every URL is stamped."""
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "PAGE_BACKENDS": [file_router_config_entry(pages_dir=tmp_path)],
+                "STATIC_VERSION": _STATIC_VERSION,
             }
         ):
             page_file = _build_pipeline_page(tmp_path, assets)

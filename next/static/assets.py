@@ -1,14 +1,17 @@
 """Value objects and kind registry for static assets.
 
-Has no internal dependencies, so it imports before the app registry is ready, and ships
-empty so built-in kinds register through the same public API user code uses.
+Depends on nothing that needs the app registry, so it imports early, and ships empty
+so built-in kinds register through the same public API user code uses.
 """
 
 from __future__ import annotations
 
+import posixpath
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
-from urllib.parse import quote, urlsplit, urlunsplit
+from urllib.parse import quote, unquote, urlsplit, urlunsplit
+
+from .errors import StaticAssetTraversalError
 
 
 if TYPE_CHECKING:
@@ -31,29 +34,54 @@ _LOAD_INLINE_TAGS: Final[dict[str, str]] = {"link": "style", "script": "script"}
 _VERSION_QUERY_KEY: Final = "v"
 
 
+def _with_query_param(url: str, key: str, value: str) -> str:
+    """Return `url` carrying exactly one `key` pair, set to `value`.
+
+    Every other pair keeps the spelling it was authored with, while the named pair
+    moves to the end, because only the version is rewritten and nothing reads order.
+    """
+    split = urlsplit(url)
+    kept = [
+        pair
+        for pair in split.query.split("&")
+        if pair and unquote(pair.partition("=")[0]) != key
+    ]
+    kept.append(f"{quote(key, safe='')}={quote(value)}")
+    return urlunsplit(
+        (split.scheme, split.netloc, split.path, "&".join(kept), split.fragment)
+    )
+
+
 def with_version(url: str, version: object) -> str:
     """Return the URL carrying a `v` query parameter naming the given version.
 
-    Rebuilt through `urlsplit`, so a URL already holding a query gains one more pair.
+    An opaque URI such as `data:` or `blob:` owns no query, so a pair welded on
+    would land inside its payload and it passes through untouched instead.
     """
     value = "" if version is None else str(version)
     if not value:
         return url
     split = urlsplit(url)
-    pair = f"{_VERSION_QUERY_KEY}={quote(value)}"
-    query = f"{split.query}&{pair}" if split.query else pair
-    return urlunsplit((split.scheme, split.netloc, split.path, query, split.fragment))
+    if split.scheme and not split.netloc:
+        return url
+    return _with_query_param(url, _VERSION_QUERY_KEY, value)
 
 
-def is_static_name(reference: str) -> bool:
-    """Report whether a reference names a staticfiles path rather than a ready URL.
+def static_name(reference: str) -> str | None:
+    """Return the staticfiles name a reference holds, or None when it is a ready URL.
 
-    Read by the URL parser, so a scheme without `//` such as `data:` is no name.
+    Read by the URL parser, so a scheme without `//` such as `data:` is no name, and
+    the normalised path is what reaches a lookup rather than the reference verbatim.
     """
     split = urlsplit(reference)
     if split.scheme or split.netloc or split.query or split.fragment:
-        return False
-    return bool(split.path) and not split.path.startswith("/")
+        return None
+    if not split.path or split.path.startswith("/"):
+        return None
+    name = posixpath.normpath(split.path)
+    if name == ".." or name.startswith("../"):
+        raise StaticAssetTraversalError(reference)
+    return name
 
 
 class StaticNamespace:

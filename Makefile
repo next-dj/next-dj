@@ -87,6 +87,7 @@ BENCH_FLAGS ?= \
 	--benchmark-columns=mean,stddev,rounds \
 	--benchmark-sort=mean \
 	--benchmark-time-unit=auto \
+	-p no:randomly \
 	--no-cov \
 	--override-ini=addopts=
 

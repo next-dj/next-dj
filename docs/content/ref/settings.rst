@@ -461,8 +461,9 @@ The version every rendered asset URL carries as a ``v`` query parameter.
 Default value ``None``.
 
 With the key unset no URL is touched.
-With a string in it, every URL the pipeline renders gains the parameter, co-located files, module-list assets, tag assets, ``{% asset %}`` values, and the ``next.min.js`` runtime alike, because they all pass the one manager hook that appends it.
-The parameter is appended after the backend ``asset_url`` hook, so a rewritten URL keeps the version, and a URL that already carries a query gains one more pair rather than a second ``?``.
+With a string in it, every URL the pipeline renders gains the parameter, co-located files, module-list assets, tag assets, ``{% asset %}`` values, and the ``next.min.js`` runtime alike, because they all pass the one manager hook that sets it.
+The parameter is set after the backend ``asset_url`` hook, so a rewritten URL keeps the version, and a URL that already carries a query keeps every other pair while a ``v`` pair already in it is replaced rather than doubled.
+An opaque URI such as ``data:`` or ``blob:`` owns no query string, so it reaches the document exactly as it was written.
 
 A value of any type other than a string or ``None`` is dropped in favour of the default and reported at ``manage.py check`` as ``next.E076``.
 Read the value from the environment or from a build artefact so every worker of a deployment renders the same URL.

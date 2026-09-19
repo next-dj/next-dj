@@ -1,6 +1,7 @@
-"""Template tags for static asset injection slots.
+"""Template tags for static asset injection slots and reference resolution.
 
-Collect tags emit placeholders, use tags register assets `StaticManager.inject` fills.
+Collect tags emit placeholders, use tags register assets `StaticManager.inject`
+fills, and `asset` resolves a reference to a URL without touching a collector.
 """
 
 from __future__ import annotations
@@ -78,9 +79,7 @@ def use_module(context: template.Context, url: str) -> str:
 
 
 @register.simple_tag(takes_context=True)
-def asset(
-    context: template.Context, reference: str, *, version: object | None = None
-) -> str:
+def asset(context: template.Context, reference: str, *, version: object = None) -> str:
     """Return the public URL a reference names, ready for a raw `href` or `src`.
 
     An empty reference renders nothing, and no collector is needed or touched.

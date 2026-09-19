@@ -5,9 +5,13 @@ from typing import Any, ClassVar, cast, override
 
 from django.contrib.staticfiles.finders import AppDirectoriesFinder
 from django.core.exceptions import ImproperlyConfigured
+from django.http import HttpRequest
 
 from next.components import ComponentInfo, ComponentsBackend
-from next.static import StaticBackend, StaticFilesBackend, default_kinds
+from next.static import StaticBackend, StaticFilesBackend, default_kinds, static_name
+
+
+_VERSION_PAIR = "?v="
 
 
 class FakeBackend:
@@ -243,6 +247,54 @@ class RecordingStaticBackend(StaticFilesBackend):
         return f"/static/next/{logical_name}{default_kinds.extension(kind)}"
 
 
+class PrefixingStaticBackend(StaticFilesBackend):
+    """Backend that stamps a per-request prefix onto every asset URL.
+
+    Refuses a URL already carrying a version stamp, so a pipeline that stamped the
+    version before asking the hook fails here rather than passing unnoticed.
+    """
+
+    def asset_url(self, url: str, *, request: HttpRequest | None = None) -> str:
+        """Prefix a same-site URL while a request is in scope."""
+        if _VERSION_PAIR in url:
+            msg = f"the version stamp reached the rewriting hook: {url!r}"
+            raise AssertionError(msg)
+        if request is None or not url.startswith("/"):
+            return url
+        return f"/pfx{url}"
+
+
+PREFIXING_STATIC_BACKEND = f"{__name__}.PrefixingStaticBackend"
+PREFIXED_BACKENDS = {"STATIC_BACKENDS": [{"BACKEND": PREFIXING_STATIC_BACKEND}]}
+
+BUILD_MANIFEST: Mapping[str, str] = {"css/app.css": "/build/css/app.4f2a1b.css"}
+
+
+class BuildManifestBackend(StaticFilesBackend):
+    """Backend resolving a name through a build manifest, as the guide writes it.
+
+    Records every reference, so a caller tells a resolution from a second pass.
+    """
+
+    def __init__(self, config: Mapping[str, Any] | None = None) -> None:
+        """Start with no recorded resolution."""
+        super().__init__(config)
+        self.resolved: list[str] = []
+
+    def resolve_url(self, reference: str) -> str:
+        """Answer from the manifest and delegate a reference it does not name."""
+        self.resolved.append(reference)
+        name = static_name(reference)
+        if name is None:
+            return reference
+        built = BUILD_MANIFEST.get(name)
+        return built if built is not None else super().resolve_url(reference)
+
+
+BUILD_MANIFEST_BACKEND = f"{__name__}.BuildManifestBackend"
+MANIFEST_BACKENDS = {"STATIC_BACKENDS": [{"BACKEND": BUILD_MANIFEST_BACKEND}]}
+
+
 class StaticAssetProvider:
     """The narrow ``BackendProvider`` the asset discovery layer reads.
 
@@ -259,6 +311,10 @@ class StaticAssetProvider:
     def default_backend(self) -> StaticBackend:
         """Return the backend every registration goes through."""
         return self._backend
+
+    def forget_backend_urls(self) -> None:
+        """Drop the backend's URL memo the way a static manager does."""
+        self._backend.forget_urls()
 
     def page_roots(self) -> tuple[Path, ...]:
         """Return the resolved page trees discovery walks within."""

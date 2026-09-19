@@ -52,6 +52,7 @@ dev = [
     "pydantic>=2.0",
     "markdown>=3.7",
     "time-machine>=2.16",
+    "pytest-randomly==5.0.0",
 ]
 compat = [
     "django-crispy-forms>=2.3",

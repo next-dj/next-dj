@@ -6,6 +6,8 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
+from django.contrib.staticfiles.storage import StaticFilesStorage
+
 from next.deps import provider_registry, resolver
 from next.static import default_kinds, default_placeholders
 from next.static.discovery import default_stems
@@ -204,8 +206,8 @@ def static_names_resolved_by(
 ) -> Generator[MagicMock, None, None]:
     """Answer `staticfiles_storage.url` from a mapping and miss like a manifest does.
 
-    A name the mapping does not list raises the `ValueError` the manifest raises, so a
-    test spells the whole storage the backend sees in one literal.
+    A name the mapping does not list raises the manifest's own `ValueError`, and the
+    patch lands on the class so an `override_settings` inside the block cannot drop it.
     """
 
     def resolve(name: str) -> str:
@@ -214,7 +216,5 @@ def static_names_resolved_by(
             raise ValueError(msg)
         return urls[name]
 
-    with patch(
-        "next.static.backends.staticfiles_storage.url", side_effect=resolve
-    ) as url:
+    with patch.object(StaticFilesStorage, "url", side_effect=resolve) as url:
         yield url

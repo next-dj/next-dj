@@ -1,6 +1,7 @@
 import re
 
 import pytest
+from config.storages import MANIFEST_STORAGES
 from django.core.management import call_command
 from django.test import override_settings
 from obs import metrics
@@ -59,13 +60,6 @@ CHART_JS_CDN = "https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.j
 
 HASHED_CHART_THEME = re.compile(r"/static/dashboards/js/chart_theme\.[0-9a-f]+\.js")
 HASHED_RENDER_CHART = re.compile(r"/static/next/components/render_chart\.[0-9a-f]+\.js")
-
-MANIFEST_STORAGES = {
-    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
-    "staticfiles": {
-        "BACKEND": "django.contrib.staticfiles.storage.ManifestStaticFilesStorage"
-    },
-}
 
 
 @pytest.fixture()

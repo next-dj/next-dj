@@ -192,7 +192,7 @@ Static pipeline
    The tag registers nothing on the collector, so it works in a render that carries none.
    The returned URL is HTML escaped like any other template output, so an ampersand joining two query parameters renders as ``&amp;``.
 
-   ``version`` appends a ``v`` query parameter to that one URL and overrides ``NEXT_FRAMEWORK["STATIC_VERSION"]``, and ``version=""`` renders the URL with no version while the project value is set.
+   ``version`` sets a ``v`` query parameter on that one URL and overrides ``NEXT_FRAMEWORK["STATIC_VERSION"]``, and ``version=""`` renders the URL with no version while the project value is set.
    The ``as`` form binds the URL to a template variable instead of rendering it.
    It is the recommended spelling in next.dj templates, while Django's ``{% static %}`` stays valid and is preferable where the value must be identical for every request, such as inside a ``{% cache %}`` fragment.
 

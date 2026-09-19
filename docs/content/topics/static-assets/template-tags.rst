@@ -190,7 +190,7 @@ It registers nothing on the collector, so it also works in a render that has non
 
 ``{% asset %}`` is the recommended spelling for an asset URL in a next.dj template.
 A paired benchmark on one machine measures it at roughly 1.9 times cheaper than Django's ``{% static %}`` for the same name, because the backend answers a repeat from its memo while the Django tag asks storage on every render.
-Resolving a reference that is already a URL, the shape a template written today holds, costs about 125 nanoseconds per tag on the same run.
+Resolving a reference that is already a URL costs about 125 nanoseconds per tag on the same run.
 Both numbers are indicative rather than contractual, and the pair they come from is ``tests/benchmarks/static/test_bench_resolve.py``.
 
 Django's ``{% static %}`` keeps working and is the better choice where the value must be identical for every request.
@@ -213,25 +213,20 @@ The ``as`` form binds the URL to a template variable.
 Versioning a URL
 ~~~~~~~~~~~~~~~~
 
-The optional ``version`` argument, a literal or a context value, appends a ``v`` query parameter to the URL.
+The optional ``version`` argument, a literal or a context value, sets a ``v`` query parameter on the URL.
 
 .. code-block:: jinja
    :caption: notes/pages/layout.djx
 
    {% asset "site/app.css" version=build_id %}
 
-The value is coerced to a string and percent encoded, and a URL that already carries a query gains one more pair rather than a second ``?``.
-The version is appended after the backend hook, so a rewritten URL keeps it.
+The value is coerced to a string and percent encoded, and a URL that already carries a query keeps every other pair while a ``v`` pair already in it is replaced rather than doubled.
+The version is set after the backend hook, so a rewritten URL keeps it, and an opaque URI such as ``data:`` or ``blob:`` owns no query string and carries no version at all.
 
 ``STATIC_VERSION`` in ``NEXT_FRAMEWORK`` sets the same parameter for every URL the pipeline renders, co-located files, module lists, tag assets, and the ``next.min.js`` runtime included.
 A ``version`` on a single ``{% asset %}`` call wins over the project value for that one URL, and ``version=""`` is the way to spell "no version here" while the project value is set.
 
-.. warning::
-
-   A backend that returns a signed URL does not combine with ``version`` or ``STATIC_VERSION``.
-   A signature covers the query string, so an appended parameter invalidates it, and such a backend carries its own version instead.
-
-:doc:`/content/deployment/static-files` covers when a project wants a global version and why a content hash is the better answer.
+:doc:`/content/deployment/static-files` covers when a project wants a global version, why a content hash is the better answer, and the one backend shape that takes no version parameter at all.
 
 Placement rules
 ---------------

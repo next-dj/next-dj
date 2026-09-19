@@ -5,9 +5,10 @@ from django.template import Context, Template, TemplateSyntaxError
 from django.test import RequestFactory, override_settings
 
 from next.static import StaticAsset, StaticCollector
-from tests.static.test_manager import PREFIXED_BACKENDS
+from next.static.manager import default_manager
 from tests.support import (
     EMPTY_ASSET_CASES,
+    PREFIXED_BACKENDS,
     STATIC_NAME_CASES,
     EmptyAssetCase,
     static_names_resolved_by,
@@ -305,3 +306,27 @@ class TestAssetTagRefusesAnEmptyReference:
             '{% load next_static %}{% asset "" as href %}<link href="{{ href }}">'
         )
         assert out == '<link href="">'
+
+
+class TestAssetTagPipedIntoAUseTag:
+    """A resolved URL bound by `{% asset %}` keeps one version through injection."""
+
+    def test_the_version_is_stamped_once_on_the_injected_tag(
+        self, reset_default: None
+    ) -> None:
+        with override_settings(NEXT_FRAMEWORK={"STATIC_VERSION": "2026.9.19"}):
+            _, collector = _render(
+                "{% load next_static %}"
+                '{% asset "css/app.css" as href %}{% use_style href %}'
+            )
+            injected = default_manager.inject(
+                f"<head>{STYLES_PLACEHOLDER}</head>", collector
+            )
+
+        assert [a.url for a in collector.assets_in_slot("styles")] == [
+            "/static/css/app.css?v=2026.9.19"
+        ]
+        assert '<link rel="stylesheet" href="/static/css/app.css?v=2026.9.19">' in (
+            injected
+        )
+        assert "v=2026.9.19&v=" not in injected

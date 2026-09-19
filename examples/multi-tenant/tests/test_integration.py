@@ -7,6 +7,7 @@ import pytest
 from django.conf import settings
 from django.test import override_settings
 from notes.models import Note, Tenant
+from notes.themes import DEFAULT_ACCENT
 
 
 pytestmark = pytest.mark.django_db
@@ -150,6 +151,13 @@ class TestTenantPrefixStatic:
         assert '"/static/next/next.min.js"' not in body
 
 
+HOSTILE_THEME_VALUES = [
+    "https://evil.test/x.css",
+    "../../media/uploads/evil.css",
+    "data:text/css,body{background:url('https://evil.test/beacon')}",
+]
+
+
 class TestTenantStylesheets:
     """A theme reference is resolved, then prefixed, then stamped with the build id."""
 
@@ -170,13 +178,44 @@ class TestTenantStylesheets:
         assert f'href="/_t/acme/static/notes/css/acme.css?v={BUILD_ID}"' in body
 
     @override_settings(DEBUG=False)
-    def test_two_spellings_of_one_file_emit_one_link(
+    def test_the_shared_theme_key_adds_no_second_sheet(
         self, next_client: NextClient, globex: Tenant
     ) -> None:
         response = next_client.get("/notes/", HTTP_X_TENANT="globex")
         body = response.content.decode()
         assert body.count("notes/css/theme.css") == 1
         assert "notes/css/acme.css" not in body
+
+
+class TestTamperedThemeColumn:
+    """A stored value outside the shipped table never reaches the document."""
+
+    @pytest.mark.parametrize("stored", HOSTILE_THEME_VALUES)
+    @override_settings(DEBUG=False)
+    def test_hostile_value_renders_the_shared_sheet_instead(
+        self, next_client: NextClient, acme: Tenant, stored: str
+    ) -> None:
+        Tenant.objects.filter(pk=acme.pk).update(theme=stored)
+        response = next_client.get("/notes/", HTTP_X_TENANT="acme")
+        body = response.content.decode()
+        assert response.status_code == 200
+        assert stored not in body
+        assert "evil.test" not in body
+        assert "data:text/css" not in body
+        assert "media/uploads" not in body
+        assert f'href="/_t/acme/static/notes/css/theme.css?v={BUILD_ID}"' in body
+        assert body.count("notes/css/theme.css") == 1
+
+    @override_settings(DEBUG=False)
+    def test_hostile_accent_never_reaches_the_style_attribute(
+        self, next_client: NextClient, acme: Tenant
+    ) -> None:
+        stored = "red;background:url(https://evil.test/beacon)"
+        Tenant.objects.filter(pk=acme.pk).update(primary_color=stored)
+        response = next_client.get("/notes/", HTTP_X_TENANT="acme")
+        body = response.content.decode()
+        assert "evil.test" not in body
+        assert f"--tenant-accent:{DEFAULT_ACCENT}" in body
 
 
 class TestRootBlocks:

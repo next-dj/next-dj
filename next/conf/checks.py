@@ -14,7 +14,7 @@ from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, re
 from next.checks import NEXT, common
 
 from .defaults import USER_SETTING
-from .merge import OPTIONAL_STR_KEYS
+from .merge import OPTIONAL_STR_KEYS, UNSET, accepted_value
 from .settings import NextFrameworkSettings
 
 
@@ -76,15 +76,11 @@ def check_next_framework_value_types(*args, **kwargs) -> list[CheckMessage]:
     return _wrong_type_errors(raw) + _non_bool_warnings(raw)
 
 
-def _survives_merge(key: str, value: object) -> bool:
-    """Report whether one raw value reaches the merged settings under its key."""
-    if value is None and key in _TYPED_OPTIONAL_KEYS:
-        return True
-    return isinstance(value, _KEY_TYPES[key])
-
-
 def _wrong_type_errors(raw: dict[str, Any]) -> list[CheckMessage]:
-    """Report every key whose value type the settings merge would drop."""
+    """Report every key whose value type the settings merge would drop.
+
+    Asked of the merge itself, so the check and the merge cannot drift apart.
+    """
     return [
         Error(
             f"NEXT_FRAMEWORK[{key!r}] must be a {expected.__name__}, "
@@ -95,7 +91,7 @@ def _wrong_type_errors(raw: dict[str, Any]) -> list[CheckMessage]:
             id="next.E076",
         )
         for key, expected in _KEY_TYPES.items()
-        if key in raw and not _survives_merge(key, raw[key])
+        if key in raw and accepted_value(key, raw[key]) is UNSET
     ]
 
 

@@ -13,7 +13,7 @@ from django.contrib.staticfiles.storage import staticfiles_storage
 
 from next.caches import BoundedCache
 
-from .assets import StaticNamespace, is_static_name
+from .assets import StaticNamespace, static_name
 from .errors import StaticAssetNotFoundError
 
 
@@ -67,8 +67,8 @@ class StaticBackend(ABC):
     def forget_urls(self) -> None:
         """Drop every memoised URL, so the next lookup resolves it again.
 
-        A backend that remembers resolved URLs outside the base memo overrides this
-        hook, so a storage rebuild reaches it regardless of the memo's shape.
+        `StaticManager.forget_backend_urls` announces the rebuild and drops what else
+        held a URL, so this hook is a backend's own half of it, not an entry point.
         """
         self._url_cache.clear()
 
@@ -127,18 +127,21 @@ class StaticFilesBackend(StaticBackend):
     def resolve_url(self, reference: str) -> str:
         """Resolve a staticfiles name through storage and leave a ready URL alone.
 
-        Memoised in the shared URL memo, so `forget_urls` drops it with the file space.
+        The memo is read before the reference is classified, so a ready URL is parsed
+        once rather than on every render, and `forget_urls` drops both answers.
         """
-        if not is_static_name(reference):
-            return reference
         cache_key = ("name", reference)
         cached = self._url_cache.get(cache_key)
         if cached is not None:
             return cached
+        name = static_name(reference)
+        if name is None:
+            self._url_cache[cache_key] = reference
+            return reference
         try:
-            url = str(staticfiles_storage.url(reference))
+            url = str(staticfiles_storage.url(name))
         except ValueError as e:
-            raise StaticAssetNotFoundError(reference) from e
+            raise StaticAssetNotFoundError(name) from e
         self._url_cache[cache_key] = url
         return url
 

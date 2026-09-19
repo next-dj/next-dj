@@ -155,12 +155,12 @@ OBS_STATIC_MANIFEST=1 uv run python manage.py collectstatic --noinput
 OBS_STATIC_MANIFEST=1 uv run python manage.py runserver
 ```
 
-The environment variable puts `STORAGES["staticfiles"]` on `ManifestStaticFilesStorage`, which is the shape a deployment uses and not one a dev server wants, since every URL then has to be in a manifest `collectstatic` has already written. Under that profile the same page renders
+The environment variable puts `STORAGES["staticfiles"]` on `ManifestStaticFilesStorage`, which is the shape a deployment uses and not one a dev server wants, since every URL then has to be in a manifest `collectstatic` has already written. The mapping itself lives in [`config/storages.py`](config/storages.py), so the settings branch and the test that exercises it read the same one. Under that profile the same page renders
 
 ```html
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-<script src="/static/dashboards/js/chart_theme.06b66b52aecb.js"></script>
-<script src="/static/next/components/render_chart.c41fdc906680.js"></script>
+<script src="/static/dashboards/js/chart_theme.<hash>.js"></script>
+<script src="/static/next/components/render_chart.<hash>.js"></script>
 ```
 
 The name picked up a content hash, the vendor URL did not, and the widget's co-located file picked one up too, because `next.static.NextStaticFilesFinder` exposes co-located assets to `collectstatic` under the same `next/` namespace the pipeline resolves them through. Writing `/static/dashboards/js/chart_theme.js` by hand in the same list produces that exact string instead. `collectstatic` copies the unhashed file next to the hashed one, so nothing breaks loudly. It is simply a URL that stays the same while the file behind it changes, which is the failure mode a long cache header turns into a support ticket. A name is what buys the hash, and the hash is what makes an asset URL safe to cache for a year.

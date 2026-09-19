@@ -6,7 +6,7 @@ from e2e_support.browser import (
     request_baseline,
     wait_for_runtime,
 )
-from notes.models import Note
+from notes.models import Note, Tenant
 from playwright.sync_api import Page, expect
 
 
@@ -119,6 +119,24 @@ def test_co_located_assets_load_under_the_tenant_prefix(
         if response.url.startswith(prefix)
     }
     assert statuses == {200}
+
+
+def test_a_tampered_theme_column_loads_no_foreign_stylesheet(
+    page: Page,
+    base_url: str,
+    demo_data: None,
+    tenant_query_fallback: None,
+    next_probe: PageProbe,
+) -> None:
+    Tenant.objects.filter(slug="acme").update(theme="https://evil.test/x.css")
+
+    open_as(page, base_url, "acme", "/notes/")
+
+    expect(page.locator('link[href*="evil.test"]')).to_have_count(0)
+    expect(page.locator('link[href*="notes/css/theme.css"]')).to_have_count(1)
+    assert [
+        response.url for response in next_probe.responses if "evil.test" in response.url
+    ] == []
 
 
 def test_typing_in_the_editor_updates_the_markdown_preview(

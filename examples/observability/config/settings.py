@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 
+from config.storages import MANIFEST_STORAGES
 from next.conf import extend_default_backend
 
 
@@ -71,12 +72,7 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 if os.environ.get("OBS_STATIC_MANIFEST") == "1":
-    STORAGES = {
-        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
-        "staticfiles": {
-            "BACKEND": "django.contrib.staticfiles.storage.ManifestStaticFilesStorage"
-        },
-    }
+    STORAGES = MANIFEST_STORAGES
 
 SHARED_DIR = BASE_DIR.parent / "_shared"
 STATICFILES_DIRS = [BASE_DIR / "static", SHARED_DIR / "static"]

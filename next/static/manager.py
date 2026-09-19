@@ -123,11 +123,7 @@ class StaticManager(BackendListManager[StaticBackend]):
         )
 
     def asset_url(
-        self,
-        url: str,
-        *,
-        request: HttpRequest | None = None,
-        version: object | None = None,
+        self, url: str, *, request: HttpRequest | None = None, version: object = None
     ) -> str:
         """Return an already-resolved asset URL as the pipeline renders it.
 
@@ -147,7 +143,6 @@ class StaticManager(BackendListManager[StaticBackend]):
 
         Every registration point asks here, so a name and a co-located file agree.
         """
-        self._ensure_backends()
         return self.default_backend.resolve_url(reference)
 
     def script_builder(self) -> NextScriptBuilder:
@@ -222,9 +217,10 @@ class StaticManager(BackendListManager[StaticBackend]):
 
         Driven from the backend list, so a third-party backend memoising resolved URLs
         is invalidated on the same terms as the bundled one. The script builder is
-        dropped too, since it holds a URL read through that storage.
+        dropped too, and so is the discovery, whose plans hold resolved URLs.
         """
         self._script_builder = None
+        self._discovery = None
         for backend in self._backends:
             backend.forget_urls()
 
@@ -262,9 +258,11 @@ def get_static_manager() -> StaticManager:
     A caller that patches a method and restores it needs the instance itself, so a
     settings reload swapping the handle midway cannot misdirect the restore.
     """
-    if default_manager._wrapped is empty:
+    manager = default_manager._wrapped
+    if manager is empty:
         default_manager._setup()
-    return default_manager._wrapped
+        manager = default_manager._wrapped
+    return manager
 
 
 def collect_component_assets(

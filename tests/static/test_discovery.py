@@ -12,6 +12,7 @@ from next.caches import BoundedCache
 from next.components import ComponentInfo
 from next.static import (
     AssetDiscovery,
+    StaticAsset,
     StaticAssetNotFoundError,
     StaticCollector,
     StaticFilesBackend,
@@ -19,19 +20,14 @@ from next.static import (
     discovery as static_discovery,
 )
 from next.static.collector import HashContentDedup, default_placeholders
-from next.static.discovery import (
-    ListedAsset,
-    PathResolver,
-    StemRegistry,
-    _url_suffix,
-    default_stems,
-)
+from next.static.discovery import PathResolver, StemRegistry, _url_suffix, default_stems
 from next.static.signals import asset_registered
 from tests.support import (
     RecordingStaticBackend,
     StaticAssetProvider,
     assert_bounded_by_insert_age,
     component_info,
+    page_naming_one_style,
     record_path_calls,
     restored_static_registries,
     static_names_resolved_by,
@@ -766,15 +762,6 @@ def _tree_with_every_asset_shape(tmp_path: Path) -> Path:
     return page_path
 
 
-def _page_naming_one_style(tmp_path: Path) -> Path:
-    """Build a page whose `styles` list names a staticfiles asset rather than a URL."""
-    page_dir = tmp_path / "named"
-    page_dir.mkdir()
-    page_path = page_dir / "page.py"
-    page_path.write_text('styles = ["css/x.css"]\n')
-    return page_path
-
-
 def _bump(path: Path) -> None:
     """Push a path's mtime forward so a plan built from it goes stale."""
     moved = path.stat().st_mtime + 10
@@ -810,7 +797,7 @@ class TestAssetDiscoveryPagePlanWarmRender:
         self, tmp_path: Path
     ) -> None:
         """The plan holds the authored name, and the backend memo holds the URL."""
-        page_path = _page_naming_one_style(tmp_path)
+        page_path = page_naming_one_style(tmp_path)
         discovery = AssetDiscovery(
             StaticAssetProvider(StaticFilesBackend(), (tmp_path.resolve(),))
         )
@@ -2128,7 +2115,7 @@ class TestAssetDiscoveryModuleListNames:
     def test_a_bare_name_reaches_the_collector_as_a_public_url(
         self, tmp_path: Path
     ) -> None:
-        page_path = _page_naming_one_style(tmp_path)
+        page_path = page_naming_one_style(tmp_path)
         discovery = AssetDiscovery(
             StaticAssetProvider(StaticFilesBackend(), (tmp_path.resolve(),))
         )
@@ -2140,8 +2127,8 @@ class TestAssetDiscoveryModuleListNames:
             "/static/css/x.css"
         ]
 
-    def test_the_plan_keeps_the_authored_reference(self, tmp_path: Path) -> None:
-        page_path = _page_naming_one_style(tmp_path)
+    def test_the_plan_keeps_the_resolved_asset(self, tmp_path: Path) -> None:
+        page_path = page_naming_one_style(tmp_path)
         discovery = AssetDiscovery(
             StaticAssetProvider(StaticFilesBackend(), (tmp_path.resolve(),))
         )
@@ -2149,11 +2136,11 @@ class TestAssetDiscoveryModuleListNames:
         with static_names_resolved_by({"css/x.css": "/static/css/x.css"}):
             discovery.discover_page_assets(page_path, StaticCollector())
         assert discovery._page_plan_cache[page_path].module_assets == (
-            ListedAsset(reference="css/x.css", kind="css"),
+            StaticAsset(url="/static/css/x.css", kind="css"),
         )
 
-    def test_every_render_asks_the_backend_again(self, tmp_path: Path) -> None:
-        page_path = _page_naming_one_style(tmp_path)
+    def test_the_backend_is_asked_once_per_plan(self, tmp_path: Path) -> None:
+        page_path = page_naming_one_style(tmp_path)
         backend = _CountingResolveBackend()
         discovery = AssetDiscovery(StaticAssetProvider(backend, (tmp_path.resolve(),)))
 
@@ -2161,14 +2148,11 @@ class TestAssetDiscoveryModuleListNames:
         warm = StaticCollector()
         discovery.discover_page_assets(page_path, warm)
 
-        assert backend.resolved == ["css/x.css", "css/x.css"]
+        assert backend.resolved == ["css/x.css"]
         assert [a.url for a in warm.assets_in_slot("styles")] == ["/resolved/css/x.css"]
 
     def test_the_kind_is_read_from_the_authored_suffix(self, tmp_path: Path) -> None:
-        page_dir = tmp_path / "hashed"
-        page_dir.mkdir()
-        page_path = page_dir / "page.py"
-        page_path.write_text('styles = ["css/x.css"]\n')
+        page_path = page_naming_one_style(tmp_path)
         discovery = AssetDiscovery(
             StaticAssetProvider(StaticFilesBackend(), (tmp_path.resolve(),))
         )
@@ -2179,7 +2163,7 @@ class TestAssetDiscoveryModuleListNames:
         assert [a.kind for a in collector.assets_in_slot("styles")] == ["css"]
 
     def test_a_manifest_miss_leaves_the_render(self, tmp_path: Path) -> None:
-        page_path = _page_naming_one_style(tmp_path)
+        page_path = page_naming_one_style(tmp_path)
         discovery = AssetDiscovery(
             StaticAssetProvider(StaticFilesBackend(), (tmp_path.resolve(),))
         )
@@ -2197,7 +2181,7 @@ class TestAssetDiscoveryModuleListNames:
     def test_a_backend_leaking_a_raw_error_drops_the_asset(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture, error: type[Exception]
     ) -> None:
-        page_path = _page_naming_one_style(tmp_path)
+        page_path = page_naming_one_style(tmp_path)
         discovery = AssetDiscovery(
             StaticAssetProvider(_LeakingResolveBackend(error), (tmp_path.resolve(),))
         )
@@ -2206,8 +2190,11 @@ class TestAssetDiscoveryModuleListNames:
         with caplog.at_level("WARNING", logger="next.static.discovery"):
             discovery.discover_page_assets(page_path, collector)
 
-        assert collector.assets_in_slot("styles") == ()
-        assert any(
-            "Failed to resolve module asset 'css/x.css'" in r.getMessage()
+        (record,) = [
+            r
             for r in caplog.records
-        )
+            if "Failed to resolve module asset 'css/x.css'" in r.getMessage()
+        ]
+        assert collector.assets_in_slot("styles") == ()
+        assert record.reference == "css/x.css"
+        assert record.kind == "css"

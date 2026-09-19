@@ -1,6 +1,8 @@
 import ast
+import collections
 import inspect
 import pathlib
+import re
 
 import pytest
 
@@ -10,6 +12,24 @@ from next.checks import _LAZY_ATTRIBUTES, _LAZY_SOURCES_BY_MODULE
 
 _EAGER = frozenset({"NEXT", "register_all", "reset_check_caches"})
 _NEXT_ROOT = pathlib.Path(inspect.getfile(checks_package)).parent.parent
+_CHECK_ID = re.compile(r"^next\.[EWI]\d+$")
+
+
+def _check_id_owners() -> dict[str, set[str]]:
+    """Map every `next.*` check id in the tree to the modules that emit it."""
+    owners: dict[str, set[str]] = collections.defaultdict(set)
+    for path in sorted(_NEXT_ROOT.rglob("*.py")):
+        module = path.relative_to(_NEXT_ROOT.parent).as_posix()
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not isinstance(node, ast.keyword) or node.arg != "id":
+                continue
+            value = node.value
+            if isinstance(value, ast.Constant) and _CHECK_ID.match(str(value.value)):
+                owners[value.value].add(module)
+    return dict(owners)
+
+
+_CHECK_ID_OWNERS = _check_id_owners()
 
 
 def _defined_check_names(module_path: pathlib.Path) -> frozenset[str]:
@@ -112,3 +132,25 @@ class TestRetiredReExports:
     )
     def test_private_page_helper_is_gone(self, name: str) -> None:
         assert not hasattr(checks_package, name)
+
+
+class TestCheckIdAllocation:
+    """Every `next.*` check id is allocated to one module across the framework.
+
+    Two areas reaching for the same free number is invisible when each area asserts
+    its own id in isolation, so the whole tree is read in one pass here.
+    """
+
+    def test_the_tree_allocates_check_ids(self) -> None:
+        assert _CHECK_ID_OWNERS
+
+    def test_no_id_is_emitted_from_two_modules(self) -> None:
+        shared = {
+            check_id: sorted(modules)
+            for check_id, modules in _CHECK_ID_OWNERS.items()
+            if len(modules) > 1
+        }
+        assert shared == {}
+
+    def test_the_app_directories_finder_owns_its_own_id(self) -> None:
+        assert _CHECK_ID_OWNERS["next.E083"] == {"next/static/checks.py"}

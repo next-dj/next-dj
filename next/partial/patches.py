@@ -425,21 +425,28 @@ class Patches:
         return self
 
     def add_asset(self, kind: str, url: str, *, inline: str | None = None) -> "Patches":
-        """Record a co-located asset in the envelope manifest.
+        """Record an authored asset reference in the envelope manifest.
 
-        The verb comes from the kind registry, and the URL passes a full render's hooks.
+        The reference passes the resolution a full render gives it, so a backend
+        mapping names to build outputs answers the same on either path.
         """
-        resolved = (
-            default_manager.asset_url(
-                default_manager.resolve_url(url), request=self._request
-            )
-            if url
-            else url
+        return self._record_asset(
+            kind, default_manager.resolve_url(url) if url else url, inline=inline
         )
+
+    def _record_asset(
+        self, kind: str, url: str, *, inline: str | None = None
+    ) -> "Patches":
+        """Record an already-resolved asset URL under the verb its kind registers.
+
+        An inline body carries no URL, so it never reaches the per-render hook.
+        """
         self._assets.append(
             Asset(
                 kind=kind,
-                url=resolved,
+                url=default_manager.asset_url(url, request=self._request)
+                if url
+                else url,
                 inline=inline,
                 load=default_kinds.load(kind, inline=inline is not None),
             )
@@ -567,13 +574,13 @@ class Patches:
     def _collect_zone_assets(self, result: "ZoneRenderResult") -> "Patches":
         """Record the URL-form and inline-form assets a zone body collected.
 
-        This deliberately collects assets only. The builder verbs own context
-        through context(), so they never absorb the js-context delta.
+        The collector already holds resolved URLs, so they are recorded rather than
+        resolved again, and the js-context delta stays with the builder verbs.
         """
         for kind, body in result.inline_assets():
-            self.add_asset(kind, "", inline=body)
+            self._record_asset(kind, "", inline=body)
         for kind, url in result.url_assets():
-            self.add_asset(kind, url)
+            self._record_asset(kind, url)
         return self
 
     def absorb_zone_result(self, result: "ZoneRenderResult") -> "Patches":

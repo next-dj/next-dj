@@ -12,6 +12,7 @@ from django.contrib.staticfiles.finders import AppDirectoriesFinder
 from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register
 
 from next.checks import NEXT
+from next.checks.common import import_backend_class
 from next.components.sources import iter_serialized_component_context_keys
 from next.conf import import_class_cached, next_framework_settings
 from next.pages.scan import iter_serialized_page_context_keys
@@ -281,7 +282,7 @@ def _publishes_framework_package(path: object) -> bool:
     if not isinstance(path, str):
         return False
     try:
-        finder_class = import_class_cached(path)
+        finder_class = import_backend_class(path)
     except ImportError:
         return False
     return (
@@ -293,18 +294,22 @@ def _publishes_framework_package(path: object) -> bool:
 
 @register(NEXT)
 def check_app_directories_finder(*args, **kwargs) -> list[CheckMessage]:
-    """Warn about an app-directories finder that publishes the framework package."""
+    """Refuse an app-directories finder that publishes the framework package.
+
+    An error rather than a warning, because a warning leaves `collectstatic` free to
+    copy the framework's own sources into a directory the web server hands out.
+    """
     return [
-        DjangoWarning(
+        Error(
             f"STATICFILES_FINDERS entry {path!r} extends Django's "
             "AppDirectoriesFinder without extending "
             "next.static.NextAppDirectoriesFinder, so it treats next/static as "
             "an app static directory. That directory is the next.static Python "
-            "package, so collectstatic publishes the framework's own modules and "
-            "their bytecode cache into STATIC_ROOT. Subclass "
+            "package, so collectstatic would publish the framework's own modules "
+            "and their bytecode cache into STATIC_ROOT. Subclass "
             "next.static.NextAppDirectoriesFinder instead.",
             obj=settings,
-            id="next.W079",
+            id="next.E083",
         )
         for path in getattr(settings, "STATICFILES_FINDERS", [])
         if _publishes_framework_package(path)

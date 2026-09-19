@@ -4,9 +4,17 @@ from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
+from django.contrib.staticfiles.storage import staticfiles_storage
+from django.test import override_settings
 
 import next.static
-from next.static import StaticAssetNotFoundError, StaticBackend, StaticFilesBackend
+from next.static import (
+    StaticAssetNotFoundError,
+    StaticAssetTraversalError,
+    StaticBackend,
+    StaticFilesBackend,
+    static_name,
+)
 from next.static.backends import StaticBackend as _StaticBackendDirect
 from tests.support import static_names_resolved_by
 
@@ -263,6 +271,68 @@ class TestResolveUrl:
             backend.resolve_url("css/typo.css")
         assert excinfo.value.path == "css/typo.css"
 
+    def test_storage_is_asked_for_the_normalised_name(self) -> None:
+        backend = StaticFilesBackend()
+        with static_names_resolved_by(
+            {"css/theme.css": "/static/css/theme.css"}
+        ) as url:
+            resolved = backend.resolve_url("./css/x/../theme.css")
+        assert resolved == "/static/css/theme.css"
+        url.assert_called_once_with("css/theme.css")
+
+    def test_a_miss_names_the_normalised_name_rather_than_the_reference(self) -> None:
+        backend = StaticFilesBackend()
+        with (
+            static_names_resolved_by({}),
+            pytest.raises(StaticAssetNotFoundError) as excinfo,
+        ):
+            backend.resolve_url("css/./typo.css")
+        assert excinfo.value.path == "css/typo.css"
+
+    def test_a_reference_climbing_above_the_root_is_refused(self) -> None:
+        backend = StaticFilesBackend()
+        with (
+            static_names_resolved_by({}) as url,
+            pytest.raises(StaticAssetTraversalError),
+        ):
+            backend.resolve_url("../../etc/passwd.css")
+        assert url.call_count == 0
+
+
+class TestResolveUrlMemoIsReadFirst:
+    """The memo answers before the reference is classified a second time."""
+
+    def test_a_ready_url_is_held_as_a_pass_through(self) -> None:
+        backend = StaticFilesBackend()
+        with static_names_resolved_by({}):
+            backend.resolve_url(CSS_URL)
+        assert backend._url_cache[("name", CSS_URL)] == CSS_URL
+
+    def test_a_repeated_ready_url_is_classified_only_once(self) -> None:
+        backend = StaticFilesBackend()
+        with mock.patch(
+            "next.static.backends.static_name", side_effect=static_name
+        ) as classify:
+            first = backend.resolve_url(CSS_URL)
+            second = backend.resolve_url(CSS_URL)
+        assert (first, second) == (CSS_URL, CSS_URL)
+        classify.assert_called_once_with(CSS_URL)
+
+    def test_forget_urls_drops_the_pass_through_with_the_names(self) -> None:
+        backend = StaticFilesBackend()
+        with static_names_resolved_by(STORAGE):
+            backend.resolve_url("a.css")
+            backend.resolve_url(CSS_URL)
+
+        backend.forget_urls()
+
+        assert not backend._url_cache
+        with mock.patch(
+            "next.static.backends.static_name", side_effect=static_name
+        ) as classify:
+            backend.resolve_url(CSS_URL)
+        classify.assert_called_once_with(CSS_URL)
+
 
 class TestManifestMissReadsAlikeOnBothPaths:
     """A co-located file and an authored name fail with one error and one message."""
@@ -301,6 +371,33 @@ class TestUrlMemoKeySpaces:
             name_url = backend.resolve_url("a.css")
         assert (file_url, name_url) == ("/static/next/a.9f1.css", "/static/a.4b2.css")
         assert url.call_count == 2
+
+
+class TestStaticNamesResolvedBy:
+    """The storage stand-in outlives a settings override nested inside its block.
+
+    Patched on the class, because `STATIC_URL` rebuilds the lazy storage handle and
+    an instance patch would vanish with the instance it was installed on.
+    """
+
+    def test_an_override_inside_the_block_keeps_the_mapping(self) -> None:
+        with static_names_resolved_by({"a.css": "/static/a.css"}) as url:
+            before = StaticFilesBackend().resolve_url("a.css")
+            with override_settings(STATIC_URL="/assets/"):
+                during = StaticFilesBackend().resolve_url("a.css")
+            after = StaticFilesBackend().resolve_url("a.css")
+
+        assert (before, during, after) == ("/static/a.css",) * 3
+        assert url.call_count == 3
+
+    def test_the_stand_in_is_gone_once_the_block_closes(self) -> None:
+        with (
+            static_names_resolved_by({"a.css": "/static/a.css"}),
+            override_settings(STATIC_URL="/assets/"),
+        ):
+            pass
+
+        assert staticfiles_storage.url("a.css") == "/static/a.css"
 
 
 class TestStaticBackendReexport:

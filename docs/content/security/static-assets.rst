@@ -23,6 +23,9 @@ An empty ``STATIC_BACKENDS`` falls back to the bundled ``StaticFilesBackend``, a
 An asset reference that is no staticfiles name passes through to the rendered tag byte for byte, so a database column or a request value that reaches ``{% use_script %}`` or ``{% use_module %}`` loads whatever origin it names and is a script injection sink.
 Constrain such a value to a known set of references the project ships, and map the stored key to that set rather than rendering the stored string.
 
+A reference shaped like a staticfiles name is confined to the staticfiles root, and one that climbs above it with ``..`` raises ``StaticAssetTraversalError`` rather than resolving.
+The error subclasses Django's ``SuspiciousFileOperation``, itself a :exc:`~django.core.exceptions.SuspiciousOperation`, so the request answers HTTP 400 and the attempt is logged under ``django.security``, see :doc:`/content/topics/static-assets/name-resolution`.
+
 Content hash
 ------------
 

@@ -45,9 +45,9 @@ The default stems are ``component``, ``layout``, and ``template``, the default k
 Files registered under custom stems and custom kinds are copied through the same finder, so an extension added through ``default_kinds.register`` ships with the rest.
 Project ``static/`` directories and any directory listed in ``STATICFILES_DIRS`` are copied as well.
 
-A ``STATIC_ROOT`` an earlier release collected carries more than that.
-The stock app-directories finder read ``next/static`` as the framework's static directory, so it published the modules of the ``next.static`` package and their ``__pycache__`` at the top level of ``STATIC_ROOT``.
-``NextAppDirectoriesFinder`` leaves them out, and ``collectstatic --clear`` drops what an earlier deploy wrote there before collecting the current set.
+The framework's ``next/static`` directory is the ``next.static`` Python package rather than an application static directory, and ``NextAppDirectoriesFinder`` keeps it out of the app-directories scan, so ``collectstatic`` copies no framework module and no bytecode cache.
+A ``STATIC_ROOT`` holding Python sources at its top level is a leftover from a collect that ran under a finder which published them, and ``collectstatic --clear`` empties the directory before it collects the current set.
+A project-written ``AppDirectoriesFinder`` subclass that reintroduces the problem is refused as ``next.E083``.
 
 Hashed URLs
 -----------
@@ -72,9 +72,8 @@ Manifest storage
 For projects that use Django ``ManifestStaticFilesStorage`` the framework cooperates without extra configuration.
 ``collectstatic`` writes the manifest, the framework reads it at runtime, and the rendered HTML uses the manifested filenames.
 
-An earlier release failed this step on a wheel install.
-The shipped ``next.min.js`` carried a ``sourceMappingURL`` comment naming a map the wheel leaves out, and manifest storage raises a ``CommandError`` while rewriting a reference that resolves to nothing.
-The bundle carries no such comment now, so ``collectstatic`` under manifest storage completes on a wheel install with no ignore pattern and no post-processing exclusion.
+The shipped ``next.min.js`` carries no ``sourceMappingURL`` comment, so manifest post-processing finds no reference to rewrite and no map a wheel install leaves out.
+``collectstatic`` under manifest storage therefore completes on a wheel install with no ignore pattern and no post-processing exclusion.
 
 .. code-block:: python
    :caption: config/settings.py
@@ -92,7 +91,7 @@ Asset versioning
 It addresses each file by its content, so only a file that changed gets a new URL while everything else stays in the client cache.
 
 ``NEXT_FRAMEWORK["STATIC_VERSION"]`` serves a project that cannot run the manifest.
-It appends a ``v`` query parameter to every URL the pipeline renders, co-located files, named assets, ``{% asset %}`` values, and the ``next.min.js`` runtime alike.
+It sets a ``v`` query parameter on every URL the pipeline renders, co-located files, named assets, ``{% asset %}`` values, and the ``next.min.js`` runtime alike.
 
 .. code-block:: python
    :caption: config/settings.py

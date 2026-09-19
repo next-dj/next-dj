@@ -1,4 +1,5 @@
 from notes.models import Note, Tenant
+from notes.themes import TenantTheme
 
 
 DEMO_TENANTS = [
@@ -6,7 +7,7 @@ DEMO_TENANTS = [
         "slug": "acme",
         "name": "Acme Industries",
         "primary_color": "#2563eb",
-        "stylesheet": "notes/css/acme.css",
+        "theme": TenantTheme.ACME,
         "notes": [
             {
                 "title": "Welcome to Acme",
@@ -30,7 +31,7 @@ DEMO_TENANTS = [
         "slug": "globex",
         "name": "Globex Corporation",
         "primary_color": "#16a34a",
-        "stylesheet": "/static/notes/css/theme.css",
+        "theme": TenantTheme.SHARED,
         "notes": [
             {
                 "title": "Globex roadmap",
@@ -52,7 +53,7 @@ def seed_demo() -> None:
             defaults={
                 "name": tenant_data["name"],
                 "primary_color": tenant_data["primary_color"],
-                "stylesheet": tenant_data["stylesheet"],
+                "theme": tenant_data["theme"],
             },
         )
         for note_data in tenant_data["notes"]:

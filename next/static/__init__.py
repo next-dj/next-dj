@@ -7,7 +7,7 @@ script. `ScriptInjectionPolicy.DISABLED` or `MANUAL` opts out.
 from __future__ import annotations
 
 from . import signals
-from .assets import KindRegistry, StaticAsset, default_kinds, is_static_name
+from .assets import KindRegistry, StaticAsset, default_kinds, static_name
 from .backends import StaticBackend, StaticFilesBackend
 from .collector import (
     PlaceholderRegistry,
@@ -17,7 +17,7 @@ from .collector import (
 )
 from .defaults import register_defaults
 from .discovery import AssetDiscovery
-from .errors import StaticAssetNotFoundError
+from .errors import StaticAssetNotFoundError, StaticAssetTraversalError
 from .finders import NextAppDirectoriesFinder, NextStaticFilesFinder
 from .manager import (
     StaticManager,
@@ -49,6 +49,7 @@ __all__ = [
     "ScriptInjectionPolicy",
     "StaticAsset",
     "StaticAssetNotFoundError",
+    "StaticAssetTraversalError",
     "StaticBackend",
     "StaticCollector",
     "StaticFilesBackend",
@@ -58,9 +59,9 @@ __all__ = [
     "default_manager",
     "default_placeholders",
     "get_static_manager",
-    "is_static_name",
     "register_defaults",
     "reset_default_manager",
     "resolve_serializer",
     "signals",
+    "static_name",
 ]

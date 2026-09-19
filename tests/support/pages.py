@@ -52,6 +52,19 @@ def build_nested_page(root: Path, *, body: str = "<h1>{{ title }}</h1>") -> Path
     return page_file
 
 
+def page_naming_one_style(root: Path, *, directory: str = "named") -> Path:
+    """Write a page whose ``styles`` list names a staticfiles asset, not a URL.
+
+    The name is what makes the plan hold a URL a backend resolved rather than a
+    literal, so every test about resolved plans starts from this one shape.
+    """
+    page_dir = root / directory
+    page_dir.mkdir()
+    page_path = page_dir / "page.py"
+    page_path.write_text('styles = ["css/x.css"]\n')
+    return page_path
+
+
 def unified_view(page: Page, page_file: Path) -> Callable[..., HttpResponseBase]:
     """Return the view of `page_file` the way the URL builder creates it."""
     return page._create_unified_view(page_file, _load_python_module_memo(page_file))

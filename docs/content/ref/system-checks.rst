@@ -375,6 +375,11 @@ Errors
      - A route names a bracket parameter Django refuses as a route name, so the route reaches neither the URLconf nor the conflict map.
        The directory-level counterpart is ``next.E008``, which reads the same normalisation rule.
      - ``next.urls.checks``
+   * - ``next.E083``
+     - ``STATICFILES_FINDERS`` lists an ``AppDirectoriesFinder`` subclass that does not extend ``next.static.NextAppDirectoriesFinder``, and the configuration is refused rather than reported as a risk.
+       The framework's ``next/static`` directory is the ``next.static`` Python package, so such a finder hands ``collectstatic`` the framework's own modules and their bytecode cache to publish into ``STATIC_ROOT``.
+       Django's stock path is substituted automatically, so the check fires only for a finder the project wrote itself, and subclassing ``next.static.NextAppDirectoriesFinder`` clears it.
+     - ``next.static.checks``
 
 A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.
 
@@ -488,11 +493,6 @@ Warnings
        Composition fills the first one and every other renders its own fallback instead of the page.
        It carries its own code rather than sharing ``next.W001``, so silencing one layout mistake never silences the other.
      - ``next.pages.checks``
-   * - ``next.W079``
-     - ``STATICFILES_FINDERS`` lists an ``AppDirectoriesFinder`` subclass that does not extend ``next.static.NextAppDirectoriesFinder``.
-       The framework's ``next/static`` directory is the ``next.static`` Python package, so such a finder publishes framework modules and their bytecode cache into ``STATIC_ROOT``.
-       Django's stock path is substituted automatically, so the check fires only for a finder the project wrote itself.
-     - ``next.static.checks``
 
 .. note::
 

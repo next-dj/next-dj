@@ -14,8 +14,8 @@ The rule
 --------
 
 A reference is a name when it carries no scheme, no host, no query, and no fragment, and its path is non-empty and does not start with a slash.
-A name is resolved through the active static backend, which hands it to Django staticfiles.
-Every other reference reaches the document byte for byte as it was written.
+A name is normalised, checked against the staticfiles root it is relative to, and resolved through the active static backend, which hands it to Django staticfiles.
+Every other reference reaches the document as it was written.
 
 .. code-block:: jinja
    :caption: notes/pages/layout.djx
@@ -56,6 +56,7 @@ The shapes below are never treated as names.
 
 A reference that must stay literal is therefore spelled as one of these shapes.
 Writing ``/static/site/app.css`` by hand stays valid, at the price of ignoring ``STATIC_URL`` and the manifest.
+A project that sets ``NEXT_FRAMEWORK["STATIC_VERSION"]`` still stamps its ``v`` pair on the rendered URL, which replaces a ``v`` the reference already carries and leaves a ``data:`` or ``blob:`` reference alone, see :doc:`/content/ref/settings`.
 
 Where the rule applies
 ----------------------
@@ -65,6 +66,7 @@ Every surface that takes an asset reference resolves it.
 - ``{% use_style %}``, ``{% use_script %}``, and ``{% use_module %}`` in a template, see :doc:`template-tags`.
 - A module-level ``styles`` or ``scripts`` list in ``page.py`` or ``component.py``, see :ref:`topics-static-module-lists`.
 - ``{% asset %}``, which returns the URL for a raw ``href`` or ``src`` instead of registering anything.
+- ``Patches.add_asset`` in a partial patch builder, so an asset a patch introduces carries the URL a full render would have written, see :ref:`ref-partial`.
 
 The inline block forms ``{% #use_style %}`` and ``{% #use_script %}`` take no reference, because their body is the asset.
 Raw markup the project writes by hand is not scanned, so a ``<link href="...">`` written outside a tag reaches the browser as typed.
@@ -106,6 +108,17 @@ Run ``manage.py collectstatic`` and ``manage.py findstatic <name>`` before trust
 Names use forward slashes.
 A backslash is not normalised, and it resolves under a plain storage while raising under a manifest, so the two environments would disagree.
 
+A name that leaves the root
+---------------------------
+
+The root is enforced rather than assumed.
+A ``..`` segment that stays inside the root is normalised away, so ``site/css/../app.css`` is looked up as ``site/app.css``.
+A reference that climbs above the root raises ``StaticAssetTraversalError``, so ``{% asset "a/../../media/x.css" %}`` aborts the render rather than printing a URL outside the static tree.
+
+The error subclasses Django's ``SuspiciousFileOperation``, itself a :exc:`~django.core.exceptions.SuspiciousOperation`, which Django answers with HTTP 400 and logs under ``django.security``.
+It is exported as ``next.static.StaticAssetTraversalError``, and it carries the offending reference as written on its ``reference`` attribute.
+A reference built from stored or user-supplied data is therefore refused at the door rather than rendered, see :doc:`/content/security/static-assets`.
+
 Resolution and caching
 ----------------------
 
@@ -113,8 +126,8 @@ A name is resolved when the asset is registered, not when the tag is injected, s
 The default backend memoises each resolved reference for the life of the process, alongside the memo it keeps for co-located files.
 A ``STATIC_ROOT``, ``STATIC_URL``, or ``STORAGES`` change drops both through ``forget_urls``, so a test that swaps storage through ``override_settings`` sees fresh URLs on the next render.
 
-Asset discovery caches the plan it built for a page or a component, and that plan holds the authored references rather than the resolved URLs.
-A settings change therefore moves the URLs a cached plan produces without rebuilding the plan.
+Asset discovery caches the plan it built for a page or a component, and the assets a module list contributes are resolved once with that plan rather than once per render.
+A ``STATIC_ROOT``, ``STATIC_URL``, or ``STORAGES`` change rebuilds those plans along with the memos, so a cached plan hands out no URL read through the previous storage.
 
 In a module list the kind is inferred from the authored reference, so ``scripts = ["site/app.mjs"]`` is a ``module`` asset whatever the manifest does to the filename.
 
@@ -130,16 +143,17 @@ It is concrete on the base class and returns the reference unchanged, so a backe
 .. code-block:: python
    :caption: notes/backends.py
 
-   from next.static import StaticFilesBackend, is_static_name
+   from next.static import StaticFilesBackend, static_name
 
    class BuildManifestBackend(StaticFilesBackend):
        def resolve_url(self, reference: str) -> str:
-           if not is_static_name(reference):
+           name = static_name(reference)
+           if name is None:
                return reference
-           built = self._manifest.get(reference)
+           built = self._manifest.get(name)
            return built if built is not None else super().resolve_url(reference)
 
-``next.static.is_static_name`` is the predicate the default backend applies, exported so a custom backend answers the same shapes core does.
+``next.static.static_name`` is what the default backend resolves through, and a custom lookup calls it and handles the ``None`` it answers for a reference that is already a URL, see :ref:`ref-static` for the full return contract.
 ``resolve_url`` and ``asset_url`` carry different jobs.
 ``resolve_url`` turns an authored reference into a public URL once per reference, while ``asset_url`` rewrites an already resolved URL on every render, which is where a per-request scheme belongs.
 See :doc:`backends` for the full contract.

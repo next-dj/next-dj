@@ -24,6 +24,7 @@ from next.static.finders import (
     _ScanRoots,
     discover_colocated_static_assets,
 )
+from next.static.scripts import NEXT_JS_STATIC_PATH
 from tests.support import (
     MalformedRootsRouter,
     WatchSourcesCase,
@@ -516,6 +517,14 @@ _ADMIN_APP = "django.contrib.admin.apps.SimpleAdminConfig"
 _FRAMEWORK_APP = "next"
 
 
+def _bundle_root(tmp_path: Path, *names: str) -> Path:
+    """Build a runtime-bundle root holding the named build outputs and no others."""
+    (tmp_path / "next").mkdir()
+    for name in names:
+        (tmp_path / "next" / name).write_text("")
+    return tmp_path
+
+
 def _python_paths(paths: Iterable[str]) -> list[str]:
     """Return the published paths that name a Python module or its bytecode cache."""
     return [
@@ -528,17 +537,10 @@ def _python_paths(paths: Iterable[str]) -> list[str]:
 class TestRuntimeBundleMapping:
     """What the built client runtime contributes to the finder's mapping."""
 
-    @staticmethod
-    def _bundle_root(tmp_path: Path, *names: str) -> Path:
-        (tmp_path / "next").mkdir()
-        for name in names:
-            (tmp_path / "next" / name).write_text("")
-        return tmp_path
-
     def test_a_built_bundle_maps_the_script_and_its_sourcemap(
         self, tmp_path: Path
     ) -> None:
-        root = self._bundle_root(tmp_path, "next.min.js", "next.min.js.map")
+        root = _bundle_root(tmp_path, "next.min.js", "next.min.js.map")
 
         with mock.patch("next.static.finders._RUNTIME_BUNDLE_ROOT", root):
             mapping = _runtime_bundle_static_files()
@@ -552,7 +554,7 @@ class TestRuntimeBundleMapping:
         self, tmp_path: Path
     ) -> None:
         """A listed path with no file behind it makes `collectstatic` raise."""
-        root = self._bundle_root(tmp_path, "next.min.js")
+        root = _bundle_root(tmp_path, "next.min.js")
 
         with mock.patch("next.static.finders._RUNTIME_BUNDLE_ROOT", root):
             mapping = _runtime_bundle_static_files()
@@ -562,21 +564,103 @@ class TestRuntimeBundleMapping:
     def test_a_source_checkout_without_a_build_maps_nothing(
         self, tmp_path: Path
     ) -> None:
-        root = self._bundle_root(tmp_path)
+        root = _bundle_root(tmp_path)
 
         with mock.patch("next.static.finders._RUNTIME_BUNDLE_ROOT", root):
             assert _runtime_bundle_static_files() == {}
 
     def test_a_colocated_asset_wins_a_collision_with_a_bundle_path(
-        self, watched_tree: Path
+        self, tmp_path: Path, watched_tree: Path
     ) -> None:
-        with mock.patch(
-            "next.static.finders._runtime_bundle_static_files",
-            return_value={"next/about.css": Path("/bundle/about.css")},
-        ):
-            found = NextStaticFilesFinder().find("next/about.css")
+        colocated = watched_tree / "about" / "template.js"
+        root = _bundle_root(tmp_path, "next.min.js")
 
-        assert found == str((watched_tree / "about" / "template.css").resolve())
+        with (
+            mock.patch("next.static.finders._RUNTIME_BUNDLE_ROOT", root),
+            mock.patch(
+                "next.static.finders.discover_colocated_static_assets",
+                return_value={NEXT_JS_STATIC_PATH: colocated},
+            ),
+        ):
+            found = NextStaticFilesFinder().find(NEXT_JS_STATIC_PATH)
+
+        assert found == str(colocated)
+
+
+class TestRuntimeBundleIsStattedLive:
+    """The bundle is a fixed pair of paths, so it is read per lookup, not per scan."""
+
+    @pytest.mark.parametrize("debug", [True, False], ids=["debug", "production"])
+    def test_a_bundle_built_after_the_first_lookup_needs_no_restart(
+        self, tmp_path: Path, watched_tree: Path, *, debug: bool
+    ) -> None:
+        root = _bundle_root(tmp_path)
+        finder = NextStaticFilesFinder()
+
+        with (
+            override_settings(DEBUG=debug),
+            mock.patch("next.static.finders._RUNTIME_BUNDLE_ROOT", root),
+        ):
+            missing = finder.find(NEXT_JS_STATIC_PATH)
+            (root / NEXT_JS_STATIC_PATH).write_text("globalThis.next = {}")
+            built = finder.find(NEXT_JS_STATIC_PATH)
+
+        assert missing == []
+        assert built == str(root / NEXT_JS_STATIC_PATH)
+
+    def test_a_path_outside_the_bundle_pair_is_never_found(
+        self, tmp_path: Path, watched_tree: Path
+    ) -> None:
+        root = _bundle_root(tmp_path)
+        (root / "next" / "stray.js").write_text("")
+
+        with mock.patch("next.static.finders._RUNTIME_BUNDLE_ROOT", root):
+            assert NextStaticFilesFinder().find("next/stray.js") == []
+
+    def test_a_bundle_built_after_the_first_listing_is_listed_at_once(
+        self, tmp_path: Path, watched_tree: Path
+    ) -> None:
+        root = _bundle_root(tmp_path)
+        finder = NextStaticFilesFinder()
+
+        with mock.patch("next.static.finders._RUNTIME_BUNDLE_ROOT", root):
+            before = dict(finder.list(ignore_patterns=None))
+            (root / NEXT_JS_STATIC_PATH).write_text("globalThis.next = {}")
+            after = dict(finder.list(ignore_patterns=None))
+
+        assert NEXT_JS_STATIC_PATH not in before
+        assert NEXT_JS_STATIC_PATH in after
+        assert after[NEXT_JS_STATIC_PATH].path(NEXT_JS_STATIC_PATH) == str(
+            root / NEXT_JS_STATIC_PATH
+        )
+
+    def test_a_bundle_deleted_after_a_listing_stops_being_listed(
+        self, tmp_path: Path, watched_tree: Path
+    ) -> None:
+        root = _bundle_root(tmp_path)
+        (root / NEXT_JS_STATIC_PATH).write_text("globalThis.next = {}")
+        finder = NextStaticFilesFinder()
+
+        with mock.patch("next.static.finders._RUNTIME_BUNDLE_ROOT", root):
+            before = dict(finder.list(ignore_patterns=None))
+            (root / NEXT_JS_STATIC_PATH).unlink()
+            after = dict(finder.list(ignore_patterns=None))
+            missing = finder.find(NEXT_JS_STATIC_PATH)
+
+        assert NEXT_JS_STATIC_PATH in before
+        assert NEXT_JS_STATIC_PATH not in after
+        assert missing == []
+
+    def test_the_discovered_assets_are_listed_ahead_of_the_bundle(
+        self, tmp_path: Path, watched_tree: Path
+    ) -> None:
+        root = _bundle_root(tmp_path)
+        (root / NEXT_JS_STATIC_PATH).write_text("globalThis.next = {}")
+
+        with mock.patch("next.static.finders._RUNTIME_BUNDLE_ROOT", root):
+            listed = [path for path, _ in NextStaticFilesFinder().list(None)]
+
+        assert listed == ["next/about.css", "next/about.js", NEXT_JS_STATIC_PATH]
 
 
 class TestNextAppDirectoriesFinder:

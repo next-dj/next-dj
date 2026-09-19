@@ -71,10 +71,12 @@ Asset version
 .. code-block:: python
    :caption: config/settings.py
 
+   import os
+
    NEXT_FRAMEWORK["STATIC_VERSION"] = os.environ["BUILD_ID"]
 
 Set a version only for a deployment that cannot run a hashed staticfiles manifest.
-The value appends a ``v`` query parameter to every rendered asset URL, so a deploy invalidates the whole asset set at once, while a manifest reissues the URL of a changed file alone.
+The value sets a ``v`` query parameter on every rendered asset URL, so a deploy invalidates the whole asset set at once, while a manifest reissues the URL of a changed file alone.
 Read the value from the environment, because a value generated at startup differs per worker and makes a client refetch one file once per process.
 
 JS context serializer
@@ -142,9 +144,6 @@ When several recommendations apply at once, merge them into a single ``NEXT_FRAM
        "STRICT_CONTEXT": True,
        "STRICT_LOADING": True,
        "LAZY_COMPONENT_MODULES": False,
-       "STATIC_BACKENDS": [
-           {"BACKEND": "notes.backends.TenantPrefixStaticBackend", "OPTIONS": {}},
-       ],
        "JS_CONTEXT_SERIALIZER": "next.static.PydanticJsContextSerializer",
        "PAGE_BACKENDS": extend_default_backend(
            "PAGE_BACKENDS",

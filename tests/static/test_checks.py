@@ -475,22 +475,22 @@ class TestReservedJsContextKeyCheck:
 
 
 class TestAppDirectoriesFinderCheck:
-    """Which configured finder entry earns ``next.W079`` and which stays silent."""
+    """Which configured finder entry earns ``next.E083`` and which stays silent."""
 
     @pytest.mark.parametrize("case", APP_FINDER_CASES, ids=lambda case: case.id)
-    def test_entry_warns_only_when_it_publishes_the_package(
+    def test_entry_is_refused_only_when_it_publishes_the_package(
         self, case: AppFinderCase
     ) -> None:
         with override_settings(STATICFILES_FINDERS=[case.path]):
             messages = check_app_directories_finder(app_configs=None)
 
-        assert _ids(messages) == (["next.W079"] if case.warns else [])
+        assert _ids(messages) == (["next.E083"] if case.refused else [])
 
-    def test_the_warning_names_the_entry_and_the_replacement(self) -> None:
+    def test_the_refusal_names_the_entry_and_the_replacement(self) -> None:
         with override_settings(STATICFILES_FINDERS=[PROJECT_APP_DIRECTORIES_FINDER]):
             (message,) = check_app_directories_finder(app_configs=None)
 
-        assert isinstance(message, DjangoWarning)
+        assert isinstance(message, Error)
         assert PROJECT_APP_DIRECTORIES_FINDER in message.msg
         assert "next.static.NextAppDirectoriesFinder" in message.msg
 

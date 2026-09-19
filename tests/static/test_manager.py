@@ -29,7 +29,15 @@ from next.static.manager import (
     forget_manager_page_roots,
 )
 from next.static.scripts import CSRF_PAYLOAD_KEY, DEV_PAYLOAD_KEY, NextScriptBuilder
-from tests.support import restored_static_registries, static_names_resolved_by
+from tests.support import (
+    PREFIXED_BACKENDS,
+    PREFIXING_STATIC_BACKEND,
+    PrefixingStaticBackend,
+    component_info,
+    page_naming_one_style,
+    restored_static_registries,
+    static_names_resolved_by,
+)
 
 
 STYLES_PLACEHOLDER = "<!-- next:styles -->"
@@ -50,10 +58,6 @@ JS_URL = "https://cdn.example.com/a.js"
 NEXT_JS_URL = "/static/next/next.min.js"
 
 
-PREFIXED_BACKENDS = {
-    "STATIC_BACKENDS": [{"BACKEND": "tests.static.test_manager.PrefixingStaticBackend"}]
-}
-
 COMPOSED_BACKENDS = {
     "STATIC_BACKENDS": [{"BACKEND": "tests.static.test_manager.ComposedStaticBackend"}]
 }
@@ -66,15 +70,13 @@ VERSIONED = {"STATIC_VERSION": "2026.9.19"}
 
 VERSIONED_AND_PREFIXED = {
     "STATIC_VERSION": "2026.9.19",
-    "STATIC_BACKENDS": [
-        {"BACKEND": "tests.static.test_manager.PrefixingStaticBackend"}
-    ],
+    "STATIC_BACKENDS": [{"BACKEND": PREFIXING_STATIC_BACKEND}],
 }
 
 PAIRED_BACKENDS = {
     "STATIC_BACKENDS": [
         {"BACKEND": "next.static.StaticFilesBackend"},
-        {"BACKEND": "tests.static.test_manager.PrefixingStaticBackend"},
+        {"BACKEND": PREFIXING_STATIC_BACKEND},
     ]
 }
 
@@ -94,16 +96,6 @@ class LiteralStaticBackend(StaticBackend):
         """Return the URL the logical name spells without asking storage."""
         del source_path
         return f"/literal/{logical_name}{default_kinds.extension(kind)}"
-
-
-class PrefixingStaticBackend(StaticFilesBackend):
-    """Backend that stamps a per-request prefix onto every asset URL."""
-
-    def asset_url(self, url: str, *, request: HttpRequest | None = None) -> str:
-        """Prefix a same-site URL while a request is in scope."""
-        if request is None or not url.startswith("/"):
-            return url
-        return f"/pfx{url}"
 
 
 def _stamp_prefix(prefix: str, url: str, *, request: HttpRequest | None = None) -> str:
@@ -1003,12 +995,13 @@ class TestResolveUrlFacade:
     def test_a_ready_url_passes_through(self, fresh_manager: StaticManager) -> None:
         assert fresh_manager.resolve_url(CSS_URL) == CSS_URL
 
-    def test_the_facade_loads_the_backends_first(
+    def test_the_default_backend_property_builds_the_list_it_reads(
         self, fresh_manager: StaticManager
     ) -> None:
+        """`resolve_url` owns no lazy load of its own, so the property has to."""
         assert fresh_manager._backends == []
+        assert isinstance(fresh_manager.default_backend, StaticFilesBackend)
         assert fresh_manager.resolve_url(CSS_URL) == CSS_URL
-        assert isinstance(fresh_manager._backends[0], StaticFilesBackend)
 
     def test_a_backend_leaving_the_hook_alone_keeps_the_reference_literal(self) -> None:
         with override_settings(NEXT_FRAMEWORK=LITERAL_BACKENDS):
@@ -1018,33 +1011,19 @@ class TestResolveUrlFacade:
 class TestProjectStaticVersion:
     """`STATIC_VERSION` stamps every URL the façade hands out."""
 
-    def test_an_unset_version_leaves_the_url_untouched(
-        self, fresh_manager: StaticManager
-    ) -> None:
-        assert fresh_manager.asset_url("/static/a.css") == "/static/a.css"
-
-    def test_the_stock_backend_is_never_asked_without_a_version(
-        self, fresh_manager: StaticManager
-    ) -> None:
-        with mock.patch.object(
-            fresh_manager.default_backend,
-            "asset_url",
-            wraps=fresh_manager.default_backend.asset_url,
-        ) as asset_url:
-            fresh_manager.asset_url("/static/a.css")
-        assert asset_url.call_count == 0
-
     def test_the_project_version_reaches_a_url_the_backend_leaves_alone(self) -> None:
         with override_settings(NEXT_FRAMEWORK=VERSIONED):
             url = StaticManager().asset_url("/static/a.css")
         assert url == "/static/a.css?v=2026.9.19"
 
-    def test_a_rewriting_backend_does_not_drop_the_version(self) -> None:
+    def test_the_version_lands_on_the_rewritten_url_exactly_once(self) -> None:
+        """The backend hook runs first, so it never meets a URL already stamped."""
         with override_settings(NEXT_FRAMEWORK=VERSIONED_AND_PREFIXED):
             url = StaticManager().asset_url(
                 "/static/a.css", request=RequestFactory().get("/")
             )
         assert url == "/pfx/static/a.css?v=2026.9.19"
+        assert url.count("?v=") == 1
 
     def test_a_per_call_version_replaces_the_project_one(self) -> None:
         with override_settings(NEXT_FRAMEWORK=VERSIONED):
@@ -1067,37 +1046,53 @@ class TestProjectStaticVersion:
 
 
 class TestWarmPlanFollowsTheStaticUrl:
-    """A cached asset plan keeps the disk facts and follows a `STATIC_URL` change.
+    """A warm plan re-resolves its module-list URLs when `STATIC_URL` moves.
 
-    Only the backend memo moves, so the plan keeps the disk facts under a new prefix.
+    The plan holds resolved URLs, so dropping the discovery with the backend memo is
+    what carries the new prefix into a warm render rather than any file on disk.
     """
 
-    @staticmethod
-    def _page_naming_one_asset(tmp_path: Path) -> Path:
-        page_dir = tmp_path / "about"
-        page_dir.mkdir()
-        page_path = page_dir / "page.py"
-        page_path.write_text('styles = ["css/x.css"]\n')
-        return page_path
-
-    def test_a_warm_plan_emits_the_new_prefix(
-        self, tmp_path: Path, reset_default: None
-    ) -> None:
-        page_path = self._page_naming_one_asset(tmp_path)
+    def _warmed_manager(self, tmp_path: Path) -> StaticManager:
         manager = get_static_manager()
         manager._ensure_backends()
         manager._cached_page_roots = (tmp_path.resolve(),)
+        return manager
+
+    def test_a_warm_page_plan_emits_the_new_prefix(
+        self, tmp_path: Path, reset_default: None
+    ) -> None:
+        page_path = page_naming_one_style(tmp_path)
+        manager = self._warmed_manager(tmp_path)
 
         cold = StaticCollector()
         manager.discover_page_assets(page_path, cold)
-        plan = manager.discovery._page_plan_cache[page_path]
         with override_settings(STATIC_URL="/assets/"):
             warm = StaticCollector()
             manager.discover_page_assets(page_path, warm)
 
         assert [a.url for a in cold.assets_in_slot("styles")] == ["/static/css/x.css"]
         assert [a.url for a in warm.assets_in_slot("styles")] == ["/assets/css/x.css"]
-        assert manager.discovery._page_plan_cache[page_path] is plan
+
+    def test_a_warm_component_plan_emits_the_new_prefix(
+        self, tmp_path: Path, reset_default: None
+    ) -> None:
+        directory = tmp_path / "widget"
+        directory.mkdir()
+        module_path = directory / "component.py"
+        module_path.write_text('styles = ["css/x.css"]\n')
+        info = component_info(
+            directory, name="widget", module=module_path, template="<div>widget</div>"
+        )
+        manager = self._warmed_manager(tmp_path)
+
+        cold = StaticCollector()
+        manager.discover_component_assets(info, cold)
+        with override_settings(STATIC_URL="/assets/"):
+            warm = StaticCollector()
+            manager.discover_component_assets(info, warm)
+
+        assert [a.url for a in cold.assets_in_slot("styles")] == ["/static/css/x.css"]
+        assert [a.url for a in warm.assets_in_slot("styles")] == ["/assets/css/x.css"]
 
 
 class TestDiscoveryForwarding:

@@ -16,11 +16,7 @@ Solution
 
 For attribute-only changes, set the ``css_tag``, ``js_tag``, and ``module_tag`` options on the default backend.
 For URL rewriting, subclass ``StaticFilesBackend`` and override ``asset_url``.
-
-.. note::
-
-   A single static host that is the same for every request belongs in ``STATIC_URL`` rather than in a backend.
-   The setting moves every path the project renders, Django's own ``{% static %}`` included, see :doc:`/content/deployment/static-files`.
+A single static host that is the same for every request belongs in ``STATIC_URL`` rather than in a backend, see :doc:`/content/deployment/static-files`.
 
 Walkthrough
 -----------

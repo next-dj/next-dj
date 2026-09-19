@@ -214,6 +214,9 @@ A name spelled with a leading ``/`` or with a scheme is not a name and renders a
 A name that starts with the ``STATIC_URL`` prefix resolves under that prefix twice, so ``static/app.css`` with ``STATIC_URL = "static/"`` becomes ``/static/static/app.css``.
 A name resolving under the development server and failing in production points at a file that ``collectstatic`` never copied, because the plain storage resolves any name without checking that a file exists.
 
+A name that climbs above the staticfiles root, such as ``a/../../media/x.css``, raises ``StaticAssetTraversalError`` and the request answers HTTP 400.
+Spell the reference as a name inside the root, or pass the finished URL when the file is served from somewhere else.
+
 next.W030 empty static backends
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

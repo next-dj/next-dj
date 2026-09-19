@@ -57,7 +57,8 @@ Every ``{% use_style %}``, ``{% use_script %}``, ``{% use_module %}``, and ``{% 
 
 It is concrete on the base class and returns the reference unchanged, so a backend subclassing ``StaticBackend`` directly renders literal references until it overrides the method.
 ``StaticFilesBackend`` overrides it, resolving a staticfiles name through storage and leaving every other shape alone, see :doc:`name-resolution`.
-The shape rule lives inside the method, so one override replaces both the rule and the lookup, and ``next.static.is_static_name`` is exported for a backend that wants to keep core's answer for the rule.
+The shape rule lives inside the method, so one override replaces both the rule and the lookup, and ``next.static.static_name`` is exported for a backend that wants to keep core's reading of a reference.
+Call it and handle the ``None`` it answers for a reference that is already a URL, see :ref:`ref-static` for the full return contract.
 A missing name raises ``StaticAssetNotFoundError``, the same error a co-located file missing from the manifest raises.
 
 Rewriting a URL per request
@@ -184,11 +185,7 @@ A renderer that is not overridden falls back to the parent output, which is why 
 To move the URL rather than the markup, override ``asset_url`` instead.
 One override then covers all three kinds and the runtime bundle, and the tag templates configured through ``css_tag``, ``js_tag``, ``module_tag``, and ``NEXT_JS_OPTIONS`` keep applying on top of the new URL.
 To look a reference up somewhere other than staticfiles, override ``resolve_url``, which runs once per reference rather than once per render.
-
-.. note::
-
-   A single constant host in front of the static origin belongs in ``STATIC_URL`` rather than in ``asset_url``.
-   The setting moves every path the project renders, Django's own ``{% static %}`` included, see :doc:`/content/deployment/static-files`.
+A single constant host in front of the static origin is neither, and belongs in ``STATIC_URL``, see :doc:`/content/deployment/static-files`.
 
 .. warning::
 
@@ -267,7 +264,7 @@ Per-tenant CDN
 ~~~~~~~~~~~~~~
 
 Use a request-aware ``asset_url`` that reads the tenant from the request and chooses a CDN host.
-A CDN host that is the same for every request belongs in ``STATIC_URL`` instead.
+A host that is the same for every request is ``STATIC_URL`` work rather than backend work.
 
 See also
 --------

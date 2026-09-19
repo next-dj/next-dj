@@ -84,7 +84,7 @@ Each example houses the shared HTML envelope in a project-level page root listed
 </html>
 ```
 
-`page_head` owns the entire `<head>`. It pulls in the Tailwind Play CDN, inlines a `tailwind.config` that maps the design tokens to short colour names (`bg-primary`, `text-muted-foreground`, `border-border`, …), and registers `tokens.css`, `base.css` plus `base.mjs` by staticfiles name. Pass `tailwind_plugins="typography"` to add the matching CDN plugin parameter, or use the `extra` slot to inject extra `<link>`/`<meta>`/`<style>` tags. Pass `favicon` to point the tab icon at a staticfiles name, which `{% asset %}` resolves straight into the `href` without registering anything on the collector. Without it the component draws the `icon` emoji into an inline SVG data URI, so an example ships a tab icon without a binary asset and without a 404 on every page load. The two spellings sit side by side in the same file: the `use_*` tags feed the collector, `{% asset %}` only returns a value.
+`page_head` owns the entire `<head>`. It pulls in the Tailwind Play CDN, inlines a `tailwind.config` that maps the design tokens to short colour names (`bg-primary`, `text-muted-foreground`, `border-border`, …), and registers `tokens.css`, `base.css` plus `base.mjs` by staticfiles name. Pass `tailwind_plugins="typography"` to add the matching CDN plugin parameter, or use the `extra` slot to inject extra `<link>`/`<meta>`/`<style>` tags. Pass `favicon` to point the tab icon at a staticfiles name from the consuming project's own tree, which `{% asset %}` resolves straight into the `href` without registering anything on the collector. Without it the component draws the `icon` emoji into an inline SVG data URI, so an example ships a tab icon without a binary asset and without a 404 on every page load. The two spellings sit side by side in the same file: the `use_*` tags feed the collector, `{% asset %}` only returns a value.
 
 To register the project-level root, list it in both backends' `DIRS` when you also want components to live there:
 
@@ -226,6 +226,8 @@ Point the tab icon at a real file, or inject an extra tag into the page head:
   {% /slot %}
 {% /component %}
 ```
+
+The kit ships `shared/css` and `shared/js` and no icon, so `site/favicon.svg` is a name the consuming project owns: it is the one file [`examples/_template`](../_template/) puts in its own `static/` tree, and an example grown from the scaffold keeps it there. A name nothing ships still renders an `href`, so the tab icon 404s on every page load, and under `ManifestStaticFilesStorage` the resolution raises outright. Pass the prop only for a file the project ships, and leave it off to keep the `icon` emoji data URI.
 
 ## Prop / slot naming
 
