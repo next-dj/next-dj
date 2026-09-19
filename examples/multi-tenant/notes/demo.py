@@ -6,6 +6,7 @@ DEMO_TENANTS = [
         "slug": "acme",
         "name": "Acme Industries",
         "primary_color": "#2563eb",
+        "stylesheet": "notes/css/acme.css",
         "notes": [
             {
                 "title": "Welcome to Acme",
@@ -29,6 +30,7 @@ DEMO_TENANTS = [
         "slug": "globex",
         "name": "Globex Corporation",
         "primary_color": "#16a34a",
+        "stylesheet": "/static/notes/css/theme.css",
         "notes": [
             {
                 "title": "Globex roadmap",
@@ -50,6 +52,7 @@ def seed_demo() -> None:
             defaults={
                 "name": tenant_data["name"],
                 "primary_color": tenant_data["primary_color"],
+                "stylesheet": tenant_data["stylesheet"],
             },
         )
         for note_data in tenant_data["notes"]:

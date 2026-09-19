@@ -34,6 +34,7 @@ DEFAULTS: dict[str, Any] = {
     "COMPONENT_TEMPLATE_LOADER": "next.components.CachedComponentTemplateLoader",
     "STATIC_BACKENDS": [{"BACKEND": "next.static.StaticFilesBackend", "OPTIONS": {}}],
     "STATIC_DISCOVERY_CACHE": True,
+    "STATIC_VERSION": None,
     "FORM_ACTION_BACKENDS": [
         {"BACKEND": "next.forms.RegistryFormActionBackend", "OPTIONS": {}}
     ],

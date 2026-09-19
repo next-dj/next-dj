@@ -9,7 +9,10 @@ from next import context
 
 
 # Page level, not next to the widget, because it must land first.
-scripts = ["https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"]
+scripts = [
+    "https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js",
+    "dashboards/js/chart_theme.js",
+]
 
 WINDOW_TO_MINUTES = {"1m": 1, "5m": 5, "1h": 60}
 LIVE_TOTALS_ZONE = "live-totals"

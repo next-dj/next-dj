@@ -12,9 +12,10 @@ The runtime applies the patch envelopes the server authors, drives the ``data-ne
 It never invents a target or a swap strategy, so this page records what the runtime accepts rather than what it decides.
 
 The TypeScript sources live in ``next/client/`` and are not part of the installed package.
-``make build-js`` bundles ``next/client/next.ts`` with esbuild into ``next/static/next/next.min.js``, the single minified artefact the wheel ships as a staticfiles asset of the ``next`` application.
+``make build-js`` bundles ``next/client/next.ts`` with esbuild into ``next/static/next/next.min.js``, the single minified artefact the wheel ships.
 The wheel excludes ``next/client/`` outright, so a project never imports the TypeScript and installs no Node toolchain to serve the runtime.
 The script builder publishes the bundle under the static path ``next/next.min.js``, which the active staticfiles storage fingerprints like any other asset.
+``next/static`` is the ``next.static`` Python package rather than an application static directory, so ``NextAppDirectoriesFinder`` keeps the framework app out of the app-directories scan and ``NextStaticFilesFinder`` is the finder that serves the bundle, see :doc:`static`.
 
 One module graph sits behind the facade, and the table below names the piece each concern lives in.
 None of these modules is reachable from application code, so the names serve reading a stack trace rather than writing against them.

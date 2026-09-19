@@ -20,6 +20,9 @@ Add the directory whitelist to the backend and reject every path that falls outs
 
 An empty ``STATIC_BACKENDS`` falls back to the bundled ``StaticFilesBackend``, and ``manage.py check`` reports ``next.W030`` so the missing chain stays visible.
 
+An asset reference that is no staticfiles name passes through to the rendered tag byte for byte, so a database column or a request value that reaches ``{% use_script %}`` or ``{% use_module %}`` loads whatever origin it names and is a script injection sink.
+Constrain such a value to a known set of references the project ships, and map the stored key to that set rather than rendering the stored string.
+
 Content hash
 ------------
 
@@ -47,6 +50,7 @@ A custom backend overrides the renderer methods to add the ``integrity`` and ``c
 
    import base64
    import hashlib
+   from urllib.parse import urlsplit
 
    from django.contrib.staticfiles.storage import staticfiles_storage
 
@@ -58,12 +62,16 @@ A custom backend overrides the renderer methods to add the ``integrity`` and ``c
            return f'<link rel="stylesheet" href="{url}" integrity="{integrity}" crossorigin>'
 
        def _integrity_for(self, url: str) -> str:
-           relative_path = url.removeprefix(staticfiles_storage.base_url)
+           base_path = urlsplit(staticfiles_storage.base_url).path
+           relative_path = urlsplit(url).path.removeprefix(base_path)
            with staticfiles_storage.open(relative_path) as asset:
                digest = hashlib.sha384(asset.read()).digest()
            return "sha384-" + base64.b64encode(digest).decode("ascii")
 
 Apply the same pattern to ``render_script_tag`` and ``render_module_tag``.
+
+The URL reaching a renderer is the one the page prints, so it may carry a query and a host that the stored file does not.
+``NEXT_FRAMEWORK["STATIC_VERSION"]`` appends a ``v`` parameter to every rendered URL, and a per-request ``asset_url`` hook can prefix a CDN host, so the recipe splits both off with ``urlsplit`` before it strips the prefix and opens the file.
 
 The integrity attribute belongs to the server-rendered tag, so it covers a full page render.
 An asset a patch envelope brings for the first time is built by the client runtime from a fixed attribute set that carries no ``integrity`` and no ``crossorigin``, see :doc:`/content/topics/partial-rendering/limitations`.

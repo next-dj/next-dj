@@ -3,6 +3,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, ClassVar, cast, override
 
+from django.contrib.staticfiles.finders import AppDirectoriesFinder
 from django.core.exceptions import ImproperlyConfigured
 
 from next.components import ComponentInfo, ComponentsBackend
@@ -262,3 +263,13 @@ class StaticAssetProvider:
     def page_roots(self) -> tuple[Path, ...]:
         """Return the resolved page trees discovery walks within."""
         return self._roots
+
+
+class ProjectAppDirectoriesFinder(AppDirectoriesFinder):
+    """A project finder extending Django's app finder rather than the framework's.
+
+    The stock dotted path is rewritten before any check runs.
+    """
+
+
+PROJECT_APP_DIRECTORIES_FINDER = f"{__name__}.ProjectAppDirectoriesFinder"

@@ -18,6 +18,9 @@ The static pipeline discovers co-located CSS, JS, and module files, deduplicates
 :doc:`template-tags`
    Template tags that emit the collected output.
 
+:doc:`name-resolution`
+   When an asset reference is a staticfiles name and when it is a finished URL.
+
 :doc:`js-context`
    Exposing context to the browser through the ``Next`` object.
 
@@ -47,6 +50,7 @@ The static pipeline discovers co-located CSS, JS, and module files, deduplicates
    overview
    co-located-files
    template-tags
+   name-resolution
    js-context
    deduplication
    asset-kinds

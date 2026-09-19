@@ -1,4 +1,4 @@
-"""Django staticfiles finder that exposes next-dj co-located assets.
+"""Django staticfiles finders for next-dj co-located assets and the client runtime.
 
 Shares `PathResolver` with request-time discovery so both layers agree on every URL,
 and caches the mapping until the same freshness token discovery uses goes stale.
@@ -9,10 +9,11 @@ from __future__ import annotations
 import os
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, NamedTuple, overload, override
+from typing import TYPE_CHECKING, Final, Literal, NamedTuple, overload, override
 
+from django.apps import apps
 from django.conf import settings
-from django.contrib.staticfiles.finders import BaseFinder
+from django.contrib.staticfiles.finders import AppDirectoriesFinder, BaseFinder
 from django.contrib.staticfiles.utils import matches_patterns
 from django.core.files import File
 from django.core.files.storage import Storage
@@ -28,6 +29,7 @@ from next.utils import stat_mtime_ns, template_edits_watched
 
 from .assets import StaticNamespace, default_kinds
 from .discovery import PathResolver, default_stems, find_role_files
+from .scripts import NEXT_JS_STATIC_PATH
 
 
 if TYPE_CHECKING:
@@ -99,6 +101,22 @@ def discover_colocated_static_assets() -> dict[str, Path]:
         )
 
     return out
+
+
+_RUNTIME_BUNDLE_ROOT: Final = Path(__file__).parent
+_RUNTIME_BUNDLE_PATHS: Final = (NEXT_JS_STATIC_PATH, f"{NEXT_JS_STATIC_PATH}.map")
+
+
+def _runtime_bundle_static_files() -> dict[str, Path]:
+    """Map the built client runtime and its sourcemap into the `next/` namespace.
+
+    A source checkout carries no build output, so a missing file is left unmapped.
+    """
+    return {
+        logical_path: source
+        for logical_path in _RUNTIME_BUNDLE_PATHS
+        if (source := _RUNTIME_BUNDLE_ROOT / logical_path).is_file()
+    }
 
 
 class _MappedSourceStorage(Storage):
@@ -275,7 +293,7 @@ def _build_scan(roots: _ScanRoots) -> _Scan:
     registries = _registry_generation()
     watched = template_edits_watched()
     directories = _scan_directories(roots) if watched else ()
-    mapping = discover_colocated_static_assets()
+    mapping = {**_runtime_bundle_static_files(), **discover_colocated_static_assets()}
     return _Scan(
         mapping, _MappedSourceStorage(mapping), roots, registries, watched, directories
     )
@@ -320,10 +338,10 @@ class NextStaticFilesFinder(BaseFinder):
             self._scan = scan
         return scan
 
-    @overload
+    @overload  # type: ignore[override]
     def find(
         self, path: str, find_all: Literal[False] = ...
-    ) -> str | None: ...  # pragma: no cover
+    ) -> str | list[str]: ...  # pragma: no cover
 
     @overload
     def find(
@@ -333,7 +351,7 @@ class NextStaticFilesFinder(BaseFinder):
     @overload
     def find(
         self, path: str, *, all: Literal[False]
-    ) -> str | None: ...  # pragma: no cover
+    ) -> str | list[str]: ...  # pragma: no cover
 
     @overload
     def find(
@@ -343,14 +361,19 @@ class NextStaticFilesFinder(BaseFinder):
     @override
     def find(
         self, path: str, find_all: bool = False, **kwargs: bool
-    ) -> str | list[str] | None:
-        """Resolve the logical path to an absolute filesystem path or list."""
+    ) -> str | list[str]:
+        """Resolve the logical path to an absolute path, or an empty list on a miss.
+
+        A miss answers `[]` whatever `find_all` says, because `finders.find` reads any
+        other falsy answer as one more match. The declaration tracks that runtime rather
+        than the django-stubs one, which misreads the stock finders too.
+        """
         # Django's BaseFinder.find dictates a positional bool and a deprecated
         # `all` keyword, so the override matches it and normalises `all` back.
         find_all = kwargs.get("all", find_all)
         source = self._current_scan().mapping.get(path)
         if source is None:
-            return [] if find_all else None
+            return []
         resolved = str(source)
         return [resolved] if find_all else resolved
 
@@ -365,3 +388,32 @@ class NextStaticFilesFinder(BaseFinder):
             if matches_patterns(logical_path, patterns):
                 continue
             yield logical_path, scan.storage
+
+
+def _framework_app_name() -> str | None:
+    """Return the app name of the framework's own `AppConfig`.
+
+    Read from the app registry, so renaming the app cannot quietly republish it.
+    """
+    app_config = apps.get_containing_app_config(__name__)
+    name: str | None = getattr(app_config, "name", None)
+    return name
+
+
+class NextAppDirectoriesFinder(AppDirectoriesFinder):
+    """App static finder that leaves the framework's own package unpublished.
+
+    `next/static` is the `next.static` package, so the stock finder serves its modules.
+    """
+
+    @override
+    def __init__(self, app_names: Iterable[str] | None = None, *args, **kwargs) -> None:
+        """Build the stock app storages, then drop the framework's own app."""
+        super().__init__(app_names, *args, **kwargs)
+        framework_app = _framework_app_name()
+        self.apps = [name for name in self.apps if name != framework_app]
+        self.storages = {
+            name: storage
+            for name, storage in self.storages.items()
+            if name != framework_app
+        }

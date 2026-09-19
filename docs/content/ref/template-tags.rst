@@ -164,24 +164,37 @@ Static pipeline
    Marks the placeholder slot where collected JS and module tags are injected.
    Takes no arguments.
 
-.. describe:: {% use_style "<url>" %}
+.. describe:: {% use_style "<reference>" %}
 
-   Registers an external CSS URL on the active collector.
+   Registers a CSS asset on the active collector.
+   The reference is a Django staticfiles name or a finished URL, see :doc:`/content/topics/static-assets/name-resolution`.
    The asset is prepended so shared dependencies load before co-located styles.
-   The tag takes no ``kind`` argument and always registers a ``css`` asset, so a URL of another kind goes through ``{% use_script %}`` with an explicit ``kind``.
+   The tag takes no ``kind`` argument and always registers a ``css`` asset, so an asset of another kind goes through ``{% use_script %}`` with an explicit ``kind``.
 
-.. describe:: {% use_script "<url>" [kind="<kind>"] %}
+.. describe:: {% use_script "<reference>" [kind="<kind>"] %}
 
-   Registers an external URL on the active collector.
-   The asset is prepended the same way as ``use_style``.
+   Registers an asset on the active collector.
+   The reference is read the same way as in ``use_style``, and the asset is prepended the same way.
    The ``kind`` argument defaults to ``js`` and accepts any registered kind, which decides both the slot and the renderer.
+   The extension of the reference plays no part in it, so ``{% use_script "site/app.mjs" %}`` registers a ``js`` asset until the call names ``kind="module"``.
    An unregistered kind raises ``KeyError`` out of the render.
 
-.. describe:: {% use_module "<url>" %}
+.. describe:: {% use_module "<reference>" %}
 
-   Shorthand for ``{% use_script "<url>" kind="module" %}``.
+   Shorthand for ``{% use_script "<reference>" kind="module" %}``.
    The asset renders as a ``<script type="module">`` tag.
    Has no block form.
+
+.. describe:: {% asset "<reference>" [version="<value>"] [as <var>] %}
+
+   Returns the public URL of one reference as a string, for a raw ``href`` or ``src`` attribute.
+   The reference is resolved like a registration tag argument and then passes the backend ``asset_url`` hook for the current request.
+   The tag registers nothing on the collector, so it works in a render that carries none.
+   The returned URL is HTML escaped like any other template output, so an ampersand joining two query parameters renders as ``&amp;``.
+
+   ``version`` appends a ``v`` query parameter to that one URL and overrides ``NEXT_FRAMEWORK["STATIC_VERSION"]``, and ``version=""`` renders the URL with no version while the project value is set.
+   The ``as`` form binds the URL to a template variable instead of rendering it.
+   It is the recommended spelling in next.dj templates, while Django's ``{% static %}`` stays valid and is preferable where the value must be identical for every request, such as inside a ``{% cache %}`` fragment.
 
 .. describe:: {% #use_style %}...{% /use_style %}
 

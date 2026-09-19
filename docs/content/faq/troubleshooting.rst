@@ -202,6 +202,17 @@ Hashed URL does not change
 
 Hashed URLs come from the staticfiles manifest, so re-run ``collectstatic`` after the file content changes.
 The backend memoises each resolved asset URL for the life of the process, so restart the development server to pick up the new hash.
+A URL written by hand as ``/static/...`` never carries a hash at all, because it is a finished URL and the pipeline leaves it alone, see :doc:`/content/topics/static-assets/name-resolution`.
+
+A static name does not resolve
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``StaticAssetNotFoundError`` names a reference the staticfiles manifest does not hold, and the render aborts rather than dropping the tag.
+Run ``uv run python manage.py findstatic <name>`` to see which file the name maps to, and re-run ``collectstatic`` when the manifest predates the file.
+
+A name spelled with a leading ``/`` or with a scheme is not a name and renders as written, which is the usual reason a tag shows the literal string instead of a resolved URL.
+A name that starts with the ``STATIC_URL`` prefix resolves under that prefix twice, so ``static/app.css`` with ``STATIC_URL = "static/"`` becomes ``/static/static/app.css``.
+A name resolving under the development server and failing in production points at a file that ``collectstatic`` never copied, because the plain storage resolves any name without checking that a file exists.
 
 next.W030 empty static backends
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -1,0 +1,11 @@
+.accent-bar {
+  background: var(--tenant-accent, hsl(var(--primary)));
+}
+
+.accent-text {
+  color: var(--tenant-accent, hsl(var(--primary)));
+}
+
+.accent-border {
+  border-color: var(--tenant-accent, hsl(var(--primary)));
+}

@@ -35,7 +35,9 @@ STR_KEYS: Final[frozenset[str]] = frozenset(
         "URL_RESOLVER",
     }
 )
-OPTIONAL_STR_KEYS: Final[frozenset[str]] = frozenset({"JS_CONTEXT_SERIALIZER"})
+OPTIONAL_STR_KEYS: Final[frozenset[str]] = frozenset(
+    {"JS_CONTEXT_SERIALIZER", "STATIC_VERSION"}
+)
 BOOL_KEYS: Final[frozenset[str]] = frozenset(
     {
         "STRICT_CONTEXT",

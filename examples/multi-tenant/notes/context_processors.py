@@ -18,7 +18,11 @@ def tenant_theme(request: HttpRequest) -> dict[str, object]:
     """
     tenant = get_active_tenant(request)
     if tenant is None:
-        return {"tenant_theme": {}, "tenant_theme_css": ""}
+        return {"tenant_theme": {}, "tenant_theme_css": "", "tenant_stylesheet": ""}
     css_vars = {"--tenant-accent": tenant.primary_color}
     css = ";".join(f"{name}:{value}" for name, value in css_vars.items())
-    return {"tenant_theme": css_vars, "tenant_theme_css": css}
+    return {
+        "tenant_theme": css_vars,
+        "tenant_theme_css": css,
+        "tenant_stylesheet": tenant.stylesheet,
+    }

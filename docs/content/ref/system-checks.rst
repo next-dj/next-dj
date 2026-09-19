@@ -348,7 +348,7 @@ Errors
    * - ``next.E076``
      - A ``NEXT_FRAMEWORK`` value has a type the settings merge silently drops in favour of the framework default.
        The check covers ``PAGE_BACKENDS``, ``COMPONENT_BACKENDS``, ``STATIC_BACKENDS``, and ``TEMPLATE_LOADERS`` as lists.
-       It also covers ``COMPONENT_TEMPLATE_LOADER``, ``DEPENDENCY_RESOLVER``, ``URL_NAME_TEMPLATE``, and ``URL_RESOLVER`` as strings and ``NEXT_JS_OPTIONS`` as a dict.
+       It also covers ``COMPONENT_TEMPLATE_LOADER``, ``DEPENDENCY_RESOLVER``, ``URL_NAME_TEMPLATE``, and ``URL_RESOLVER`` as strings, ``STATIC_VERSION`` as a string or ``None``, and ``NEXT_JS_OPTIONS`` as a dict.
        ``PARTIAL_BACKENDS``, ``FORM_ACTION_BACKENDS``, ``FORM_ANCHOR_FILES``, ``FORM_WIZARD_BACKEND``, and ``JS_CONTEXT_SERIALIZER`` carry their own per-key checks, ``next.E067``, ``next.E044``, ``next.E052``, ``next.E051``, and ``next.W042``, so this probe leaves them out.
      - ``next.conf.checks``
    * - ``next.E077``
@@ -488,6 +488,11 @@ Warnings
        Composition fills the first one and every other renders its own fallback instead of the page.
        It carries its own code rather than sharing ``next.W001``, so silencing one layout mistake never silences the other.
      - ``next.pages.checks``
+   * - ``next.W079``
+     - ``STATICFILES_FINDERS`` lists an ``AppDirectoriesFinder`` subclass that does not extend ``next.static.NextAppDirectoriesFinder``.
+       The framework's ``next/static`` directory is the ``next.static`` Python package, so such a finder publishes framework modules and their bytecode cache into ``STATIC_ROOT``.
+       Django's stock path is substituted automatically, so the check fires only for a finder the project wrote itself.
+     - ``next.static.checks``
 
 .. note::
 

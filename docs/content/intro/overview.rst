@@ -75,9 +75,10 @@ Partial rendering.
    See :doc:`/content/topics/partial-rendering/index`.
 
 Co-located assets.
-   A stylesheet or a script for one page or component costs a static file path, a manual ``{% static %}`` tag, and the discipline to remove the tag when the markup goes.
+   A stylesheet or a script for one page or component costs a static file path, a tag repeated in every template that needs it, and the discipline to remove the tag when the markup goes.
    A file whose stem matches the ``template.djx``, ``layout.djx``, or ``component.djx`` beside it is discovered as that owner's asset instead, so ``component.css`` and ``component.js`` belong to the component that owns them.
    The ``{% collect_styles %}`` and ``{% collect_scripts %}`` tags mark the slots in the layout where the collected assets of the rendered page land.
+   A file that no page or component owns, such as a compiled bundle, is named in a tag and resolved through Django staticfiles, which is where ``{% static %}`` reads from as well.
    See :doc:`/content/topics/static-assets/index`.
 
 .. _intro-overview-django-unchanged:

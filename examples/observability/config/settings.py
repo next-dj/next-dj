@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from next.conf import extend_default_backend
@@ -67,6 +68,15 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+
+if os.environ.get("OBS_STATIC_MANIFEST") == "1":
+    STORAGES = {
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.ManifestStaticFilesStorage"
+        },
+    }
 
 SHARED_DIR = BASE_DIR.parent / "_shared"
 STATICFILES_DIRS = [BASE_DIR / "static", SHARED_DIR / "static"]
@@ -104,8 +114,8 @@ NEXT_FRAMEWORK = {
         }
     ],
     "JS_CONTEXT_SERIALIZER": "obs.serializers.PydanticJsContextSerializer",
-    # Assets are served from disk, so no hashed manifest exists to derive an
-    # asset version from and the default sentinel would leave the guard silent.
+    # Without the manifest profile assets are served from disk, so no hashed manifest
+    # exists to derive an asset version from and the sentinel leaves the guard silent.
     "PARTIAL_BACKENDS": extend_default_backend(
         "PARTIAL_BACKENDS", OPTIONS={"VERSION": "v1"}
     ),

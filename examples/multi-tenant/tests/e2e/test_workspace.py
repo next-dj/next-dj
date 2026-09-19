@@ -1,4 +1,5 @@
 import pytest
+from django.conf import settings
 from e2e_support.browser import (
     PageProbe,
     expect_no_partial_request,
@@ -10,6 +11,8 @@ from playwright.sync_api import Page, expect
 
 
 pytestmark = pytest.mark.e2e
+
+BUILD_ID = settings.ASSET_BUILD_ID
 
 NOTE_CARD = "[data-note-card]"
 PREVIEW = "[data-markdown-preview] .markdown-body"
@@ -57,10 +60,10 @@ def test_runtime_boots_and_serves_its_bundle(
     bundle = [
         response
         for response in next_probe.responses
-        if response.url.endswith("/static/next/next.min.js")
+        if response.url.partition("?")[0].endswith("/static/next/next.min.js")
     ]
     assert [response.url for response in bundle] == [
-        f"{base_url}/_t/acme/static/next/next.min.js"
+        f"{base_url}/_t/acme/static/next/next.min.js?v={BUILD_ID}"
     ]
     assert [response.status for response in bundle] == [200]
     assert page.evaluate("() => typeof window.Next") == "function"
@@ -104,11 +107,12 @@ def test_co_located_assets_load_under_the_tenant_prefix(
 
     assert len(prefixed) + len(unprefixed) == len(requested)
     assert unprefixed == []
-    served = {url.removeprefix(prefix) for url in prefixed}
+    served = {url.removeprefix(prefix).partition("?")[0] for url in prefixed}
     assert "next/next.min.js" in served
     assert "next/components/markdown_preview.mjs" in served
     assert "next/components/markdown_preview.css" in served
     assert "shared/css/tokens.css" in served
+    assert "notes/css/theme.css" in served
     statuses = {
         response.status
         for response in next_probe.responses

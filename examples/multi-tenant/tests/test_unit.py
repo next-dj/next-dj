@@ -244,7 +244,11 @@ class TestTenantTheme:
 
     def test_returns_empty_dict_when_request_has_no_tenant(self) -> None:
         request = HttpRequest()
-        assert tenant_theme(request) == {"tenant_theme": {}, "tenant_theme_css": ""}
+        assert tenant_theme(request) == {
+            "tenant_theme": {},
+            "tenant_theme_css": "",
+            "tenant_stylesheet": "",
+        }
 
     def test_returns_css_variables_for_known_tenant(
         self, tenant_request: Callable[..., HttpRequest]
@@ -253,6 +257,12 @@ class TestTenantTheme:
         result = tenant_theme(request)
         assert result["tenant_theme"] == {"--tenant-accent": "#2563eb"}
         assert "#2563eb" in result["tenant_theme_css"]
+
+    def test_surfaces_the_tenant_stylesheet_reference(
+        self, tenant_request: Callable[..., HttpRequest]
+    ) -> None:
+        request = tenant_request(stylesheet="notes/css/acme.css")
+        assert tenant_theme(request)["tenant_stylesheet"] == "notes/css/acme.css"
 
 
 class TestTenantPrefixStaticBackend:

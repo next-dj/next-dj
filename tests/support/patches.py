@@ -13,7 +13,13 @@ from tests.support.helpers import next_framework_settings_stand_in
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator, Iterable, Set as AbstractSet
+    from collections.abc import (
+        Callable,
+        Generator,
+        Iterable,
+        Mapping,
+        Set as AbstractSet,
+    )
     from pathlib import Path
 
 
@@ -190,3 +196,25 @@ def patch_checks_components_manager(*fake_backends) -> Generator[MagicMock, None
         ),
     ):
         yield mock_manager
+
+
+@contextmanager
+def static_names_resolved_by(
+    urls: Mapping[str, str],
+) -> Generator[MagicMock, None, None]:
+    """Answer `staticfiles_storage.url` from a mapping and miss like a manifest does.
+
+    A name the mapping does not list raises the `ValueError` the manifest raises, so a
+    test spells the whole storage the backend sees in one literal.
+    """
+
+    def resolve(name: str) -> str:
+        if name not in urls:
+            msg = f"The file '{name}' could not be found"
+            raise ValueError(msg)
+        return urls[name]
+
+    with patch(
+        "next.static.backends.staticfiles_storage.url", side_effect=resolve
+    ) as url:
+        yield url

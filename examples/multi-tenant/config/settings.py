@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 
@@ -70,11 +71,13 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 
+ASSET_BUILD_ID = os.environ.get("NOTES_BUILD_ID", "2026.09.1")
+
 SHARED_DIR = BASE_DIR.parent / "_shared"
 # The shared kit ships Python helpers next to its components, so the directory joins the
 # import path the way `pytest.ini` already adds it for the test run.
 sys.path.insert(0, str(SHARED_DIR))
-STATICFILES_DIRS = [SHARED_DIR / "static"]
+STATICFILES_DIRS = [BASE_DIR / "static", SHARED_DIR / "static"]
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -101,9 +104,10 @@ NEXT_FRAMEWORK = {
         }
     ],
     "STATIC_BACKENDS": [{"BACKEND": "notes.backends.TenantPrefixStaticBackend"}],
+    "STATIC_VERSION": ASSET_BUILD_ID,
     # Assets are served from disk, so no hashed manifest exists to derive an
     # asset version from and the default sentinel would leave the guard silent.
     "PARTIAL_BACKENDS": extend_default_backend(
-        "PARTIAL_BACKENDS", OPTIONS={"VERSION": "v1"}
+        "PARTIAL_BACKENDS", OPTIONS={"VERSION": ASSET_BUILD_ID}
     ),
 }

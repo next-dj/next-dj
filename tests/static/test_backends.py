@@ -6,8 +6,9 @@ from unittest import mock
 import pytest
 
 import next.static
-from next.static import StaticBackend, StaticFilesBackend
+from next.static import StaticAssetNotFoundError, StaticBackend, StaticFilesBackend
 from next.static.backends import StaticBackend as _StaticBackendDirect
+from tests.support import static_names_resolved_by
 
 
 if TYPE_CHECKING:
@@ -15,6 +16,9 @@ if TYPE_CHECKING:
 
     from django.http import HttpRequest
 
+
+STORAGE = {"next/a.css": "/static/next/a.css", "a.css": "/static/a.css"}
+REBUILT = {"next/a.css": "/static/next/a.9f1.css", "a.css": "/static/a.4b2.css"}
 
 CSS_URL = "https://cdn.example.com/site.css"
 JS_URL = "https://cdn.example.com/site.js"
@@ -218,6 +222,85 @@ class TestUrlMemoInvalidation:
         backend.forget_urls()
 
         assert not backend._url_cache
+
+
+class TestResolveUrl:
+    """`resolve_url` turns an authored reference into the URL a document prints."""
+
+    def test_the_base_contract_keeps_the_reference_literal(self) -> None:
+        backend = _CollectingBackend()
+        assert backend.resolve_url("css/theme.css") == "css/theme.css"
+
+    def test_a_name_resolves_through_staticfiles(self) -> None:
+        backend = StaticFilesBackend()
+        with static_names_resolved_by(
+            {"css/theme.css": "/static/css/theme.css"}
+        ) as url:
+            resolved = backend.resolve_url("css/theme.css")
+        assert resolved == "/static/css/theme.css"
+        url.assert_called_once_with("css/theme.css")
+
+    def test_a_ready_url_never_reaches_storage(self) -> None:
+        backend = StaticFilesBackend()
+        with static_names_resolved_by({}) as url:
+            assert backend.resolve_url(CSS_URL) == CSS_URL
+        assert url.call_count == 0
+
+    def test_a_repeated_name_is_answered_from_the_memo(self) -> None:
+        backend = StaticFilesBackend()
+        with static_names_resolved_by({"a.css": "/static/a.css"}) as url:
+            first = backend.resolve_url("a.css")
+            second = backend.resolve_url("a.css")
+        assert (first, second) == ("/static/a.css", "/static/a.css")
+        assert url.call_count == 1
+
+    def test_a_manifest_miss_raises_with_the_reference_on_it(self) -> None:
+        backend = StaticFilesBackend()
+        with (
+            static_names_resolved_by({}),
+            pytest.raises(StaticAssetNotFoundError) as excinfo,
+        ):
+            backend.resolve_url("css/typo.css")
+        assert excinfo.value.path == "css/typo.css"
+
+
+class TestManifestMissReadsAlikeOnBothPaths:
+    """A co-located file and an authored name fail with one error and one message."""
+
+    def test_both_paths_raise_the_same_error_class(self, tmp_path: Path) -> None:
+        backend = StaticFilesBackend()
+        with static_names_resolved_by({}):
+            with pytest.raises(StaticAssetNotFoundError) as colocated:
+                backend.register_file(tmp_path / "x.css", "x", "css")
+            with pytest.raises(StaticAssetNotFoundError) as named:
+                backend.resolve_url("next/x.css")
+        assert str(colocated.value) == str(named.value)
+        assert colocated.value.path == named.value.path == "next/x.css"
+
+
+class TestUrlMemoKeySpaces:
+    """One memo holds both resolvers, so their keys can never answer for each other."""
+
+    def test_a_file_and_a_name_keep_their_own_answers(self, tmp_path: Path) -> None:
+        backend = StaticFilesBackend()
+        with static_names_resolved_by(STORAGE):
+            file_url = backend.register_file(tmp_path / "a.css", "a", "css")
+            name_url = backend.resolve_url("a.css")
+        assert (file_url, name_url) == ("/static/next/a.css", "/static/a.css")
+
+    def test_forget_urls_clears_both_spaces_in_one_call(self, tmp_path: Path) -> None:
+        backend = StaticFilesBackend()
+        with static_names_resolved_by(STORAGE):
+            backend.register_file(tmp_path / "a.css", "a", "css")
+            backend.resolve_url("a.css")
+
+        backend.forget_urls()
+
+        with static_names_resolved_by(REBUILT) as url:
+            file_url = backend.register_file(tmp_path / "a.css", "a", "css")
+            name_url = backend.resolve_url("a.css")
+        assert (file_url, name_url) == ("/static/next/a.9f1.css", "/static/a.4b2.css")
+        assert url.call_count == 2
 
 
 class TestStaticBackendReexport:

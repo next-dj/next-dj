@@ -85,6 +85,7 @@ if TYPE_CHECKING:
         check_zone_not_in_loop,
     )
     from next.static.checks import (
+        check_app_directories_finder,
         check_asset_kinds_are_loadable,
         check_inline_asset_bodies_are_loadable,
         check_js_context_serializer,
@@ -169,6 +170,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_zone_not_in_loop",
     ),
     "next.static.checks": (
+        "check_app_directories_finder",
         "check_asset_kinds_are_loadable",
         "check_inline_asset_bodies_are_loadable",
         "check_js_context_serializer",
@@ -191,6 +193,7 @@ __all__ = [
     "NEXT",
     "check_action_applied_to_class",
     "check_action_guard_permissions",
+    "check_app_directories_finder",
     "check_asset_kinds_are_loadable",
     "check_builtin_tag_libraries_complete",
     "check_component_context_registration_files",

@@ -58,11 +58,24 @@ Static backend
    :caption: config/settings.py
 
    NEXT_FRAMEWORK["STATIC_BACKENDS"] = [
-       {"BACKEND": "notes.backends.CdnBackend", "OPTIONS": {}},
+       {"BACKEND": "notes.backends.TenantPrefixStaticBackend", "OPTIONS": {}},
    ]
 
-Point at a CDN aware backend in production.
+Point at a custom backend where the asset URL varies per request, for example a per-tenant prefix.
+A single CDN host in front of the static origin belongs in ``STATIC_URL`` instead, where every rendered path agrees with it, see :doc:`static-files`.
 The default ``StaticFilesBackend`` is appropriate for single host deployments where the same process serves both HTML and static files.
+
+Asset version
+-------------
+
+.. code-block:: python
+   :caption: config/settings.py
+
+   NEXT_FRAMEWORK["STATIC_VERSION"] = os.environ["BUILD_ID"]
+
+Set a version only for a deployment that cannot run a hashed staticfiles manifest.
+The value appends a ``v`` query parameter to every rendered asset URL, so a deploy invalidates the whole asset set at once, while a manifest reissues the URL of a changed file alone.
+Read the value from the environment, because a value generated at startup differs per worker and makes a client refetch one file once per process.
 
 JS context serializer
 ---------------------
@@ -130,7 +143,7 @@ When several recommendations apply at once, merge them into a single ``NEXT_FRAM
        "STRICT_LOADING": True,
        "LAZY_COMPONENT_MODULES": False,
        "STATIC_BACKENDS": [
-           {"BACKEND": "notes.backends.CdnBackend", "OPTIONS": {}},
+           {"BACKEND": "notes.backends.TenantPrefixStaticBackend", "OPTIONS": {}},
        ],
        "JS_CONTEXT_SERIALIZER": "next.static.PydanticJsContextSerializer",
        "PAGE_BACKENDS": extend_default_backend(

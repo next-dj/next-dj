@@ -56,6 +56,13 @@ class FoundAsset(NamedTuple):
     kind: str
 
 
+class ListedAsset(NamedTuple):
+    """One asset reference a module list names, before a backend resolves it."""
+
+    reference: str
+    kind: str
+
+
 class _AssetPlan(NamedTuple):
     """What one page or component contributes, and where it was read from.
 
@@ -64,7 +71,7 @@ class _AssetPlan(NamedTuple):
     """
 
     files: tuple[FoundAsset, ...]
-    module_assets: tuple[StaticAsset, ...]
+    module_assets: tuple[ListedAsset, ...]
     directory_mtimes: tuple[tuple[Path, int | None], ...]
     registries: tuple[int, int, int]
 
@@ -319,11 +326,11 @@ class AssetDiscovery:
         )
 
     def _apply_plan(self, plan: _AssetPlan, collector: StaticCollector) -> None:
-        """Hand every file the plan found to the backend, then its module URLs."""
+        """Hand every file the plan found to the backend, then its module names."""
         for found in plan.files:
             self._register_file(found, collector)
-        for asset in plan.module_assets:
-            collector.add(asset)
+        for listed in plan.module_assets:
+            self._register_listed(listed, collector)
 
     def _build_page_asset_plan(self, file_path: Path) -> _AssetPlan:
         """Probe every role directory behind `file_path` in one pass."""
@@ -460,13 +467,12 @@ class AssetDiscovery:
         )
         return lists if lists is not None else {}
 
-    def _module_assets(self, lists: dict[str, list[str]]) -> tuple[StaticAsset, ...]:
-        """Turn every URL the module lists name into an asset.
+    def _module_assets(self, lists: dict[str, list[str]]) -> tuple[ListedAsset, ...]:
+        """Turn every URL the module lists name into a descriptor of its kind.
 
-        Built with the plan rather than on every render, because these URLs
-        are literals the backend is never asked about.
+        Classified with the plan and resolved per render, so no URL is baked in.
         """
-        assets: list[StaticAsset] = []
+        assets: list[ListedAsset] = []
         for slot_name, urls in lists.items():
             for url in urls:
                 asset = self._module_asset(url, slot_name)
@@ -474,8 +480,8 @@ class AssetDiscovery:
                     assets.append(asset)
         return tuple(assets)
 
-    def _module_asset(self, url: str, slot_name: str) -> StaticAsset | None:
-        """Resolve a module-level URL to an asset of the kind its suffix names.
+    def _module_asset(self, url: str, slot_name: str) -> ListedAsset | None:
+        """Classify a module-level URL by the kind its authored suffix names.
 
         Drops a URL with an unregistered extension or a kind in a different slot.
         """
@@ -497,7 +503,7 @@ class AssetDiscovery:
                 slot_name,
             )
             return None
-        return StaticAsset(url=url, kind=kind)
+        return ListedAsset(reference=url, kind=kind)
 
     def _register_file(self, found: FoundAsset, collector: StaticCollector) -> None:
         """Register a file with the backend and add the result to the collector.
@@ -522,6 +528,23 @@ class AssetDiscovery:
         asset = StaticAsset(url=url, kind=found.kind, source_path=found.source_path)
         if collector.add(asset):
             asset_registered.send(sender=asset, collector=collector, backend=backend)
+
+    def _register_listed(self, listed: ListedAsset, collector: StaticCollector) -> None:
+        """Resolve a module-list reference through the backend and collect the asset.
+
+        Failure reads like a co-located one, so the same two errors log and drop it.
+        """
+        try:
+            url = self._provider.default_backend.resolve_url(listed.reference)
+        except (OSError, ValueError) as e:
+            logger.warning(
+                "Failed to resolve module asset %r: %s",
+                listed.reference,
+                e,
+                extra={"reference": listed.reference, "kind": listed.kind},
+            )
+            return
+        collector.add(StaticAsset(url=url, kind=listed.kind))
 
     def _walk_layouts(self, file_path: Path, page_root: Path | None) -> _LayoutWalk:
         """Walk up from the page directory, outermost first, and stat as it goes.

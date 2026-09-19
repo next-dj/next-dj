@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
 from next.urls import DUrl
+from tests.support.backends import PROJECT_APP_DIRECTORIES_FINDER
 
 
 if TYPE_CHECKING:
@@ -271,4 +272,147 @@ WATCHED_BACKENDS_CASES: tuple[WatchedBackendsCase, ...] = (
     WatchedBackendsCase("skip_name_entry", ("skipping",)),
     WatchedBackendsCase("existing_and_missing", ("existing", "missing")),
     WatchedBackendsCase("unimportable_and_extra_root", ("unimportable", "extra_root")),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class StaticNameCase:
+    """One reference the shape predicate reads, pinned to the verdict it must give."""
+
+    id: str
+    reference: str
+    expected: bool
+
+
+STATIC_NAME_CASES: tuple[StaticNameCase, ...] = (
+    StaticNameCase("bare_name", "css/theme.css", True),
+    StaticNameCase("rooted_path", "/static/x.css", False),
+    StaticNameCase("protocol_relative", "//cdn/x.css", False),
+    StaticNameCase("absolute_url", "https://cdn/x.css", False),
+    StaticNameCase("data_url", "data:text/css,body{}", False),
+    StaticNameCase("query_only", "?v=1", False),
+    StaticNameCase("fragment_only", "#anchor", False),
+    StaticNameCase("windows_drive", "C:\\x.css", False),
+    StaticNameCase("empty", "", False),
+    StaticNameCase("name_with_query", "app.css?v=2", False),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class VersionedUrlCase:
+    """One URL and one version value, pinned to the URL the append has to yield."""
+
+    id: str
+    url: str
+    version: object
+    expected: str
+
+
+VERSIONED_URL_CASES: tuple[VersionedUrlCase, ...] = (
+    VersionedUrlCase("bare_url", "/static/a.css", "7", "/static/a.css?v=7"),
+    VersionedUrlCase(
+        "existing_query", "/static/a.css?x=1", "7", "/static/a.css?x=1&v=7"
+    ),
+    VersionedUrlCase(
+        "reserved_character", "/static/a.css", "a&b", "/static/a.css?v=a%26b"
+    ),
+    VersionedUrlCase("coerced_int", "/static/a.css", 42, "/static/a.css?v=42"),
+    VersionedUrlCase(
+        "fragment_kept", "/static/a.css#top", "7", "/static/a.css?v=7#top"
+    ),
+    VersionedUrlCase("none_is_dropped", "/static/a.css", None, "/static/a.css"),
+    VersionedUrlCase("empty_is_dropped", "/static/a.css", "", "/static/a.css"),
+    VersionedUrlCase("absolute_url", "https://cdn/a.css", "7", "https://cdn/a.css?v=7"),
+)
+
+
+_STOCK_APP_FINDER = "django.contrib.staticfiles.finders.AppDirectoriesFinder"
+_FILESYSTEM_FINDER = "django.contrib.staticfiles.finders.FileSystemFinder"
+_NEXT_APP_FINDER = "next.static.NextAppDirectoriesFinder"
+_NEXT_FINDER = "next.static.NextStaticFilesFinder"
+
+
+@dataclass(frozen=True, slots=True)
+class AppFinderCase:
+    """One ``STATICFILES_FINDERS`` entry, pinned to whether it earns the warning."""
+
+    id: str
+    path: object
+    warns: bool
+
+
+APP_FINDER_CASES: tuple[AppFinderCase, ...] = (
+    AppFinderCase("project_subclass", PROJECT_APP_DIRECTORIES_FINDER, True),
+    AppFinderCase("framework_finder", _NEXT_APP_FINDER, False),
+    AppFinderCase("stock_finder", _STOCK_APP_FINDER, False),
+    AppFinderCase("filesystem_finder", _FILESYSTEM_FINDER, False),
+    AppFinderCase("unimportable", "tests.support.nowhere.Missing", False),
+    AppFinderCase("not_a_string", 123, False),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class FinderInstallCase:
+    """One configured finder list, pinned to the list ``install`` leaves behind."""
+
+    id: str
+    configured: tuple[str, ...]
+    expected: tuple[str, ...]
+
+
+FINDER_INSTALL_CASES: tuple[FinderInstallCase, ...] = (
+    FinderInstallCase(
+        "stock_before_framework",
+        (_STOCK_APP_FINDER, _NEXT_APP_FINDER),
+        (_NEXT_APP_FINDER, _NEXT_FINDER),
+    ),
+    FinderInstallCase(
+        "framework_before_stock",
+        (_NEXT_APP_FINDER, _STOCK_APP_FINDER),
+        (_NEXT_APP_FINDER, _NEXT_FINDER),
+    ),
+    FinderInstallCase(
+        "framework_app_finder_twice",
+        (_NEXT_APP_FINDER, _NEXT_APP_FINDER),
+        (_NEXT_APP_FINDER, _NEXT_FINDER),
+    ),
+    FinderInstallCase(
+        "stock_app_finder_twice",
+        (_STOCK_APP_FINDER, _STOCK_APP_FINDER),
+        (_NEXT_APP_FINDER, _NEXT_FINDER),
+    ),
+    FinderInstallCase(
+        "framework_finder_twice", (_NEXT_FINDER, _NEXT_FINDER), (_NEXT_FINDER,)
+    ),
+    FinderInstallCase(
+        "other_finder_twice_survives",
+        (_FILESYSTEM_FINDER, _FILESYSTEM_FINDER),
+        (_FILESYSTEM_FINDER, _FILESYSTEM_FINDER, _NEXT_FINDER),
+    ),
+    FinderInstallCase(
+        "project_subclass_beside_the_framework_one",
+        (PROJECT_APP_DIRECTORIES_FINDER, _NEXT_APP_FINDER),
+        (PROJECT_APP_DIRECTORIES_FINDER, _NEXT_APP_FINDER, _NEXT_FINDER),
+    ),
+    FinderInstallCase(
+        "order_is_preserved",
+        (_FILESYSTEM_FINDER, _STOCK_APP_FINDER, _NEXT_APP_FINDER, _NEXT_FINDER),
+        (_FILESYSTEM_FINDER, _NEXT_APP_FINDER, _NEXT_FINDER),
+    ),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class EmptyAssetCase:
+    """One ``{% asset %}`` reference the tag refuses before the manager is asked."""
+
+    id: str
+    reference: object
+
+
+EMPTY_ASSET_CASES: tuple[EmptyAssetCase, ...] = (
+    EmptyAssetCase("empty_string", ""),
+    EmptyAssetCase("none", None),
+    EmptyAssetCase("integer", 123),
+    EmptyAssetCase("bytes", b"css/app.css"),
 )

@@ -7,6 +7,7 @@ class Tenant(models.Model):
     slug = models.SlugField(max_length=64, unique=True)
     name = models.CharField(max_length=120)
     primary_color = models.CharField(max_length=16, default="#0f172a")
+    stylesheet = models.CharField(max_length=200, blank=True, default="")
     is_active = models.BooleanField(default=True)
 
     class Meta:

@@ -5,8 +5,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from next.static import KindRegistry, StaticAsset, default_kinds
-from next.static.assets import StaticNamespace
+from next.static import KindRegistry, StaticAsset, default_kinds, is_static_name
+from next.static.assets import StaticNamespace, with_version
+from tests.support import STATIC_NAME_CASES, VERSIONED_URL_CASES
 
 
 if TYPE_CHECKING:
@@ -292,3 +293,26 @@ class TestStaticNamespace:
 
     def test_next_namespace(self) -> None:
         assert StaticNamespace.NEXT == "next"
+
+
+class TestIsStaticName:
+    """The shape predicate tells an authored staticfiles name from a ready URL."""
+
+    @pytest.mark.parametrize(
+        "case", STATIC_NAME_CASES, ids=[c.id for c in STATIC_NAME_CASES]
+    )
+    def test_the_shape_of_a_reference_decides_the_verdict(self, case) -> None:
+        assert is_static_name(case.reference) is case.expected
+
+
+class TestWithVersion:
+    """`with_version` stamps the `v` query parameter a project pins its assets to."""
+
+    @pytest.mark.parametrize(
+        "case", VERSIONED_URL_CASES, ids=[c.id for c in VERSIONED_URL_CASES]
+    )
+    def test_the_version_lands_where_the_url_shape_puts_it(self, case) -> None:
+        assert with_version(case.url, case.version) == case.expected
+
+    def test_a_second_append_adds_a_second_pair(self) -> None:
+        assert with_version(with_version("/a.css", "1"), "2") == "/a.css?v=1&v=2"

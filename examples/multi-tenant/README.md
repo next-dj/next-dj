@@ -18,10 +18,10 @@ A workspace for two independent tenants (Acme and Globex) that share the same Dj
 
 Two tenants ship with the example in [`notes/demo.py`](notes/demo.py):
 
-| slug     | name               | accent            |
-| -------- | ------------------ | ----------------- |
-| `acme`   | Acme Industries    | `#2563eb` (blue)  |
-| `globex` | Globex Corporation | `#16a34a` (green) |
+| slug | name | accent | stylesheet |
+| --- | --- | --- | --- |
+| `acme` | Acme Industries | `#2563eb` (blue) | `notes/css/acme.css`, a staticfiles name |
+| `globex` | Globex Corporation | `#16a34a` (green) | `/static/notes/css/theme.css`, a ready URL |
 
 The header pill carries the tenant name, the accent strip and accent text use the CSS variable surfaced by the `tenant_theme` context processor, and every `<link>` and `<script>` URL, the `next.min.js` runtime bundle included, is prefixed with `/_t/acme/` or `/_t/globex/`.
 
@@ -49,7 +49,7 @@ There are two ways to drive the app:
 
   Choosing the tenant by hand like this is precisely the forgery the trust boundary above describes, and against a bare development server it works — which is why the boundary is stated rather than implied. The query and cookie fallbacks are disabled outside `DEBUG`. A request with no tenant at all returns `400 Missing X-Tenant header.`, and in `DEBUG` the body appends a one-line pointer at the query affordance. A slug that matches no row returns `404 Unknown tenant.`. Neither body repeats what the client sent: a body quoting the submitted slug is an oracle for enumerating tenant names, and in an HTML response it is a reflected-XSS sink.
 
-Tailwind loads via the Play CDN in the shared [`page_head`](../_shared/_components/page_head/component.djx) component. No Node, no build step. [`root_pages/layout.djx`](root_pages/layout.djx) calls it in block form and fills its `extra` slot with the `.accent-bar` / `.accent-text` / `.accent-border` rules, which read `var(--tenant-accent)` with the shared primary colour as the fallback. The variable itself is set once as an inline `style` on `<body>` from `tenant_theme_css`, so a page rendered without a tenant still has a usable palette.
+Tailwind loads via the Play CDN in the shared [`page_head`](../_shared/_components/page_head/component.djx) component. No Node, no build step. [`root_pages/layout.djx`](root_pages/layout.djx) calls it in block form and fills its `extra` slot with two `{% use_style %}` registrations. The first names [`static/notes/css/theme.css`](static/notes/css/theme.css), which holds the `.accent-bar` / `.accent-text` / `.accent-border` rules and reads `var(--tenant-accent)` with the shared primary colour as the fallback. The second names whatever the active tenant carries in `Tenant.stylesheet`, and section 2 walks what happens to each of those values. The variable itself is set once as an inline `style` on `<body>` from `tenant_theme_css`, so a page rendered without a tenant still has a usable palette.
 
 ## Walking the code
 
@@ -69,7 +69,7 @@ The chain has three links:
 
    The framework injects the `Tenant` instance directly. Every query in the example that reaches a tenant-owned row carries that filter: the two note listings, the `Note.objects.create` of the create form, and the `get_object_or_404(Note, pk=note_id, tenant=tenant)` behind both the editor's `note` context and its `get_initial`. Middleware that attaches a tenant repairs nothing if one queryset forgets to use it. Page modules never start with `from __future__ import annotations` and import `DTenant` at runtime. The resolver does evaluate string hints through `get_type_hints`, but a single name it cannot evaluate — a marker or a model imported only under `if TYPE_CHECKING` — drops the whole callable back to its raw annotations, where `get_origin` sees a string and the parameter silently falls through to another provider.
 
-### 2. Per-tenant static URL prefix
+### 2. Per-tenant asset URLs
 
 The custom backend lives in [`notes/backends.py`](notes/backends.py). It overrides only `asset_url`, the request-aware URL hook of `StaticBackend`. The `request` keyword argument is the hook that core threads through `StaticManager.inject(...)`. For absolute URLs (CDN strings) the method falls back to the unmodified URL.
 
@@ -84,15 +84,31 @@ class TenantPrefixStaticBackend(StaticFilesBackend):
 
 One override is enough because every URL the pipeline renders goes through `asset_url` — the co-located `<link>` and `<script>` tags, the `next.min.js` runtime tag, and its `<link rel="preload">` hint. Rewriting inside `render_*_tag` instead would leave the runtime bundle on the unprefixed URL, because core builds that tag from `NEXT_JS_OPTIONS` rather than from a renderer method.
 
-The settings entry is a single line:
+The settings entries are two lines:
 
 ```python
 "STATIC_BACKENDS": [
     {"BACKEND": "notes.backends.TenantPrefixStaticBackend"},
-]
+],
+"STATIC_VERSION": ASSET_BUILD_ID,
 ```
 
 The `next.static` collector caches deduplicated URLs once. The `asset_url` hook lets you decorate URLs at injection time without forking that cache.
+
+Overriding `asset_url` alone leaves `resolve_url` inherited, and the two hooks run at different moments. `resolve_url` turns an authored reference into a public URL while the asset is registered, and `asset_url` decorates that URL for the request being rendered. The root layout registers the shared sheet by name and the active tenant's own sheet straight from the column that holds it:
+
+```django
+{% use_style "notes/css/theme.css" %}
+{% if tenant_stylesheet %}{% use_style tenant_stylesheet %}{% endif %}
+```
+
+Acme reads `/_t/acme/static/notes/css/acme.css?v=2026.09.1` out of that second line. Three layers wrote the string and none of them knows about the others. Django staticfiles turned the name `notes/css/acme.css` into `/static/notes/css/acme.css`, the tenant backend prepended `/_t/acme`, and `STATIC_VERSION` stamped the build id. A backend that rewrites URLs composes on top of name resolution for free, which is the whole point of overriding one hook rather than the tag renderers.
+
+`Tenant.stylesheet` holds whatever the tenant was provisioned with, and the two demo rows are provisioned differently on purpose. `notes/css/acme.css` has no scheme, no host, no query and no leading slash, so it is a name and storage resolves it. `/static/notes/css/theme.css` starts with a slash, so it is already a URL and the pipeline hands it back untouched. The shape of the value decides, not the tag it arrived in and not where it came from.
+
+The Globex row is the interesting one. The layout already registered `notes/css/theme.css` by name for every tenant, and Globex names that same file by path. Both spellings reach the collector as `/static/notes/css/theme.css`, the dedup key is the resolved URL, and the head carries one `<link>` rather than two. A project rewriting hardcoded paths into names one template at a time never double-loads a file halfway through the move.
+
+`STATIC_VERSION` reads `ASSET_BUILD_ID` from [`config/settings.py`](config/settings.py), which takes `NOTES_BUILD_ID` out of the environment and falls back to a literal for a checkout nobody deployed. A build id has to arrive from the deploy rather than be computed at import time, otherwise every process in a fleet stamps a different one and a shared cache never settles. The stamp lands on every URL the pipeline emits, so the vendor script of the shared markdown preview renders as `https://cdn.jsdelivr.net/npm/marked/marked.min.js?v=2026.09.1` too. This example serves its assets straight off disk, so the query parameter is the only thing that changes when a file changes. A project on `ManifestStaticFilesStorage` gets that from the filename instead and wants neither setting, which is what [`observability`](../observability/) shows.
 
 The prefix has to resolve to a file for the demo to render, so [`config/urls.py`](config/urls.py) maps `^_t/(?P<slug>[^/]+)/static/(?P<path>.*)$` to a view that drops the slug and forwards to `django.contrib.staticfiles.views.serve`. A real deployment points a CDN at `STATIC_URL` and lets the prefix decorate cache keys instead of routing.
 
@@ -195,11 +211,11 @@ def _on_form_access_denied(action_name, layer, reason, request, **kwargs):
 
 ### The asset-version guard needs an explicit version
 
-The example pins an explicit asset `VERSION` in `PARTIAL_BACKENDS`, the shared convention explained in the [examples README](../README.md#conventions-every-example-follows).
+The example pins an explicit asset `VERSION` in `PARTIAL_BACKENDS`, the shared convention explained in the [examples README](../README.md#conventions-every-example-follows). Here the pin is the same `ASSET_BUILD_ID` that feeds `STATIC_VERSION`, so one deploy value stamps both the asset URLs and the guard that tells an open tab its JavaScript is stale.
 
 ## Further reading
 
-- [`next/static/backends.py`](../../next/static/backends.py) — the `StaticBackend` ABC with the `asset_url` hook and its `request=` kwarg.
+- [`next/static/backends.py`](../../next/static/backends.py) — the `StaticBackend` ABC with the `asset_url` hook and its `request=` kwarg, plus the `resolve_url` hook this example inherits.
 - [`next/static/manager.py`](../../next/static/manager.py) — the `StaticManager.inject` call site that threads `request`.
 - [`next/urls/backends.py`](../../next/urls/backends.py) — the `FileRouterBackend.DIRS` handling that makes `root_pages/` work.
 - [`next/components/backends.py`](../../next/components/backends.py) — the matching `FileComponentsBackend.DIRS` handling for `root_blocks/`.

@@ -17,6 +17,7 @@ from next.conf import import_class_cached, next_framework_settings
 from next.conf.signals import settings_reloaded
 from next.pages.watch import get_pages_directories_for_watch
 
+from .assets import with_version
 from .backends import MANIFEST_SETTINGS, StaticBackend
 from .collector import StaticCollector
 from .discovery import AssetDiscovery, PathResolver
@@ -48,6 +49,12 @@ def _rewrites_asset_urls(backend: StaticBackend) -> bool:
     return getattr(backend.asset_url, "__func__", None) is not StaticBackend.asset_url
 
 
+def _project_static_version() -> str | None:
+    """Return the version every asset URL carries, or None when none is configured."""
+    version = next_framework_settings.STATIC_VERSION
+    return str(version) if version else None
+
+
 class StaticManager(BackendListManager[StaticBackend]):
     """Coordinate static backends, asset discovery, and the injector they feed.
 
@@ -66,6 +73,7 @@ class StaticManager(BackendListManager[StaticBackend]):
         self._dedup_factory: Callable[[], DedupStrategy] | None = None
         self._js_policy_factory: Callable[[], JsContextPolicy] | None = None
         self._rewrites_urls: bool = False
+        self._static_version: str | None = None
         self._injector = PlaceholderInjector(self)
 
     @property
@@ -114,16 +122,33 @@ class StaticManager(BackendListManager[StaticBackend]):
             html, collector, page_path=page_path, request=request
         )
 
-    def asset_url(self, url: str, *, request: HttpRequest | None = None) -> str:
+    def asset_url(
+        self,
+        url: str,
+        *,
+        request: HttpRequest | None = None,
+        version: object | None = None,
+    ) -> str:
         """Return an already-resolved asset URL as the pipeline renders it.
 
-        A full page render and a partial envelope both ask here,
-        so an unrewriting backend pays no call.
+        A caller-supplied version replaces the project one for that URL alone.
         """
         self._ensure_backends()
-        if not self._rewrites_urls:
+        if version is None:
+            version = self._static_version
+        if not self._rewrites_urls and version is None:
             return url
-        return self.default_backend.asset_url(url, request=request)
+        if self._rewrites_urls:
+            url = self.default_backend.asset_url(url, request=request)
+        return with_version(url, version)
+
+    def resolve_url(self, reference: str) -> str:
+        """Return the public URL an authored asset reference names.
+
+        Every registration point asks here, so a name and a co-located file agree.
+        """
+        self._ensure_backends()
+        return self.default_backend.resolve_url(reference)
 
     def script_builder(self) -> NextScriptBuilder:
         """Return the builder holding the runtime URL and the tag templates."""
@@ -158,6 +183,7 @@ class StaticManager(BackendListManager[StaticBackend]):
             signal=backend_loaded,
         )
         self._mark_loaded()
+        self._static_version = _project_static_version()
         self._resolve_collector_strategies()
 
     def _resolve_collector_strategies(self) -> None:

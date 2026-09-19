@@ -4,19 +4,22 @@ import os
 from contextlib import contextmanager
 from datetime import UTC
 from io import StringIO
+from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
-from django.contrib.staticfiles.finders import get_finders
+from django.conf import settings
+from django.contrib.staticfiles.finders import AppDirectoriesFinder, get_finders
 from django.core.management import call_command
 from django.test import override_settings
 
 from next.conf.signals import settings_reloaded
-from next.static import NextStaticFilesFinder
+from next.static import NextAppDirectoriesFinder, NextStaticFilesFinder
 from next.static.discovery import default_stems
 from next.static.finders import (
     _MappedSourceStorage,
+    _runtime_bundle_static_files,
     _scan_directories,
     _ScanRoots,
     discover_colocated_static_assets,
@@ -30,8 +33,7 @@ from tests.support import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
-    from pathlib import Path
+    from collections.abc import Iterable, Iterator
 
 
 _TEMPLATE_AND_LAYOUT = WatchSourcesCase(
@@ -113,8 +115,10 @@ class TestNextStaticFilesFinderFind:
     @pytest.mark.parametrize(
         "watched_tree", [_NOTHING_WATCHED], indirect=["watched_tree"]
     )
-    def test_find_returns_none_for_unknown_asset(self, watched_tree: Path) -> None:
-        assert NextStaticFilesFinder().find("next/missing.css") is None
+    def test_find_answers_an_empty_list_for_an_unknown_asset(
+        self, watched_tree: Path
+    ) -> None:
+        assert NextStaticFilesFinder().find("next/missing.css") == []
 
     def test_find_all_returns_list(self, watched_tree: Path) -> None:
         found = NextStaticFilesFinder().find("next/about.css", find_all=True)
@@ -139,6 +143,7 @@ class TestNextStaticFilesFinderList:
             "next/about.js",
             "next/layout.css",
             "next/layout.js",
+            *_runtime_bundle_static_files(),
         }
         storage = items["next/about.css"]
         assert storage.path("next/about.css") == str(
@@ -148,7 +153,14 @@ class TestNextStaticFilesFinderList:
     def test_list_respects_ignore_patterns(self, watched_tree: Path) -> None:
         items = dict(NextStaticFilesFinder().list(ignore_patterns=["*.js"]))
 
-        assert set(items) == {"next/about.css"}
+        assert set(items) == {
+            "next/about.css",
+            *(
+                path
+                for path in _runtime_bundle_static_files()
+                if not path.endswith(".js")
+            ),
+        }
 
 
 class TestScanDirectorySnapshot:
@@ -245,7 +257,7 @@ class TestFinderFreshness:
         asset.unlink()
         with override_settings(DEBUG=True):
             finder = NextStaticFilesFinder()
-            assert finder.find("next/about.js") is None
+            assert finder.find("next/about.js") == []
 
             asset.write_text("//")
             self._move_mtime(asset.parent)
@@ -312,12 +324,12 @@ class TestFinderFreshness:
         asset.unlink()
         with override_settings(DEBUG=False):
             finder = NextStaticFilesFinder()
-            assert finder.find("next/about.js") is None
+            assert finder.find("next/about.js") == []
 
             asset.write_text("//")
             self._move_mtime(asset.parent)
 
-            assert finder.find("next/about.js") is None
+            assert finder.find("next/about.js") == []
 
     def test_an_answer_read_without_watching_goes_when_watching_starts(
         self, watched_tree: Path
@@ -326,7 +338,7 @@ class TestFinderFreshness:
         asset.unlink()
         finder = NextStaticFilesFinder()
         with override_settings(DEBUG=False):
-            assert finder.find("next/about.js") is None
+            assert finder.find("next/about.js") == []
 
         asset.write_text("//")
         with override_settings(DEBUG=True):
@@ -346,7 +358,7 @@ class TestFinderFreshness:
                 ),
                 self._counted_scan() as scan,
             ):
-                assert finder.find("next/about.css") is None
+                assert finder.find("next/about.css") == []
 
             assert scan.call_count == 1
 
@@ -428,11 +440,13 @@ class TestMalformedRouterSurvival:
 
     def test_find_answers_nothing_instead_of_raising(self, pages_tree: Path) -> None:
         with self._malformed_router(pages_tree):
-            assert NextStaticFilesFinder().find("next/about.css") is None
+            assert NextStaticFilesFinder().find("next/about.css") == []
 
     def test_list_answers_nothing_instead_of_raising(self, pages_tree: Path) -> None:
         with self._malformed_router(pages_tree):
-            assert list(NextStaticFilesFinder().list(None)) == []
+            listed = [path for path, _ in NextStaticFilesFinder().list(None)]
+
+        assert listed == sorted(_runtime_bundle_static_files())
 
     def test_collectstatic_dry_run_survives(
         self, pages_tree: Path, tmp_path: Path
@@ -496,3 +510,103 @@ class TestCollectstaticIntegration:
             )
 
         assert "Skipping 'next/about.css' (not modified)" in out.getvalue()
+
+
+_ADMIN_APP = "django.contrib.admin.apps.SimpleAdminConfig"
+_FRAMEWORK_APP = "next"
+
+
+def _python_paths(paths: Iterable[str]) -> list[str]:
+    """Return the published paths that name a Python module or its bytecode cache."""
+    return [
+        path
+        for path in paths
+        if path.endswith((".py", ".pyc")) or "__pycache__" in Path(path).parts
+    ]
+
+
+class TestRuntimeBundleMapping:
+    """What the built client runtime contributes to the finder's mapping."""
+
+    @staticmethod
+    def _bundle_root(tmp_path: Path, *names: str) -> Path:
+        (tmp_path / "next").mkdir()
+        for name in names:
+            (tmp_path / "next" / name).write_text("")
+        return tmp_path
+
+    def test_a_built_bundle_maps_the_script_and_its_sourcemap(
+        self, tmp_path: Path
+    ) -> None:
+        root = self._bundle_root(tmp_path, "next.min.js", "next.min.js.map")
+
+        with mock.patch("next.static.finders._RUNTIME_BUNDLE_ROOT", root):
+            mapping = _runtime_bundle_static_files()
+
+        assert mapping == {
+            "next/next.min.js": root / "next" / "next.min.js",
+            "next/next.min.js.map": root / "next" / "next.min.js.map",
+        }
+
+    def test_a_missing_sourcemap_is_left_out_of_the_mapping(
+        self, tmp_path: Path
+    ) -> None:
+        """A listed path with no file behind it makes `collectstatic` raise."""
+        root = self._bundle_root(tmp_path, "next.min.js")
+
+        with mock.patch("next.static.finders._RUNTIME_BUNDLE_ROOT", root):
+            mapping = _runtime_bundle_static_files()
+
+        assert mapping == {"next/next.min.js": root / "next" / "next.min.js"}
+
+    def test_a_source_checkout_without_a_build_maps_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        root = self._bundle_root(tmp_path)
+
+        with mock.patch("next.static.finders._RUNTIME_BUNDLE_ROOT", root):
+            assert _runtime_bundle_static_files() == {}
+
+    def test_a_colocated_asset_wins_a_collision_with_a_bundle_path(
+        self, watched_tree: Path
+    ) -> None:
+        with mock.patch(
+            "next.static.finders._runtime_bundle_static_files",
+            return_value={"next/about.css": Path("/bundle/about.css")},
+        ):
+            found = NextStaticFilesFinder().find("next/about.css")
+
+        assert found == str((watched_tree / "about" / "template.css").resolve())
+
+
+class TestNextAppDirectoriesFinder:
+    """The app finder publishes every app static directory but the framework's own."""
+
+    def test_the_framework_app_is_dropped_and_every_other_app_is_kept(self) -> None:
+        with override_settings(INSTALLED_APPS=[*settings.INSTALLED_APPS, _ADMIN_APP]):
+            stock = AppDirectoriesFinder()
+            finder = NextAppDirectoriesFinder()
+
+        assert _FRAMEWORK_APP in stock.apps
+        assert finder.apps == [name for name in stock.apps if name != _FRAMEWORK_APP]
+        assert set(finder.storages) == set(stock.storages) - {_FRAMEWORK_APP}
+        assert "django.contrib.admin" in finder.storages
+
+    def test_the_finder_publishes_none_of_the_package_modules(self) -> None:
+        published = [path for path, _ in NextAppDirectoriesFinder().list(None)]
+
+        assert _python_paths(published) == []
+
+
+class TestNoPythonSourceIsCollected:
+    """No configured finder offers `collectstatic` a Python module to copy."""
+
+    def test_no_configured_finder_publishes_a_python_path(self) -> None:
+        published = [path for finder in get_finders() for path, _ in finder.list(None)]
+
+        assert _python_paths(published) == []
+
+    def test_the_stock_app_finder_is_the_one_that_would(self) -> None:
+        published = [path for path, _ in AppDirectoriesFinder().list(None)]
+
+        assert _python_paths(published) != []

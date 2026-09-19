@@ -427,11 +427,15 @@ class Patches:
     def add_asset(self, kind: str, url: str, *, inline: str | None = None) -> "Patches":
         """Record a co-located asset in the envelope manifest.
 
-        The verb comes from the kind registry, so an unregistered kind still travels
-        without it, and a URL passes the same `asset_url` hook a full render asks.
+        The verb comes from the kind registry, and the URL passes a full render's hooks.
         """
-        # An inline body carries no URL, so it never reaches the backend hook.
-        resolved = default_manager.asset_url(url, request=self._request) if url else url
+        resolved = (
+            default_manager.asset_url(
+                default_manager.resolve_url(url), request=self._request
+            )
+            if url
+            else url
+        )
         self._assets.append(
             Asset(
                 kind=kind,

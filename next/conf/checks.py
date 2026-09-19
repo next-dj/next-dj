@@ -14,6 +14,7 @@ from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, re
 from next.checks import NEXT, common
 
 from .defaults import USER_SETTING
+from .merge import OPTIONAL_STR_KEYS
 from .settings import NextFrameworkSettings
 
 
@@ -35,9 +36,11 @@ _TYPED_LIST_KEYS: frozenset[str] = NextFrameworkSettings.LIST_KEYS - {
     "FORM_ANCHOR_FILES",
     "PARTIAL_BACKENDS",
 }
+_TYPED_OPTIONAL_KEYS: frozenset[str] = OPTIONAL_STR_KEYS - {"JS_CONTEXT_SERIALIZER"}
 _KEY_TYPES: dict[str, type] = (
     dict.fromkeys(sorted(_TYPED_LIST_KEYS), list)
     | dict.fromkeys(sorted(NextFrameworkSettings.STR_KEYS), str)
+    | dict.fromkeys(sorted(_TYPED_OPTIONAL_KEYS), str)
     | {"NEXT_JS_OPTIONS": dict}
 )
 
@@ -73,6 +76,13 @@ def check_next_framework_value_types(*args, **kwargs) -> list[CheckMessage]:
     return _wrong_type_errors(raw) + _non_bool_warnings(raw)
 
 
+def _survives_merge(key: str, value: object) -> bool:
+    """Report whether one raw value reaches the merged settings under its key."""
+    if value is None and key in _TYPED_OPTIONAL_KEYS:
+        return True
+    return isinstance(value, _KEY_TYPES[key])
+
+
 def _wrong_type_errors(raw: dict[str, Any]) -> list[CheckMessage]:
     """Report every key whose value type the settings merge would drop."""
     return [
@@ -85,7 +95,7 @@ def _wrong_type_errors(raw: dict[str, Any]) -> list[CheckMessage]:
             id="next.E076",
         )
         for key, expected in _KEY_TYPES.items()
-        if key in raw and not isinstance(raw[key], expected)
+        if key in raw and not _survives_merge(key, raw[key])
     ]
 
 

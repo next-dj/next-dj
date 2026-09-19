@@ -105,6 +105,40 @@ class TestAddAssetFollowsTheBackendRewrite:
         assert asked == []
 
 
+class TestAddAssetResolvesTheReference:
+    """A patch envelope and a full render put a value through the same resolution."""
+
+    def test_a_name_reaches_the_envelope_as_a_public_url(self) -> None:
+        envelope = (
+            Patches(partial_request("/")).add_asset("css", "css/app.css").envelope()
+        )
+        assert envelope.assets[0].url == "/static/css/app.css"
+
+    def test_a_ready_url_reaches_the_envelope_unchanged(self) -> None:
+        envelope = (
+            Patches(partial_request("/"))
+            .add_asset("css", "https://cdn/app.css")
+            .envelope()
+        )
+        assert envelope.assets[0].url == "https://cdn/app.css"
+
+    def test_an_inline_body_never_reaches_the_resolver(self, monkeypatch) -> None:
+        asked = []
+
+        def record(reference: str) -> str:
+            asked.append(reference)
+            return reference
+
+        monkeypatch.setattr(default_manager, "resolve_url", record)
+        envelope = (
+            Patches(partial_request("/"))
+            .add_asset("css", "", inline=".x {}")
+            .envelope()
+        )
+        assert envelope.assets[0].url == ""
+        assert asked == []
+
+
 class TestPatchesBuilder:
     """The minimal builder emits HTML and HTML-less verbs in order."""
 

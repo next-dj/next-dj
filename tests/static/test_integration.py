@@ -6,6 +6,7 @@ from unittest import mock
 import pytest
 from django.contrib.staticfiles.storage import staticfiles_storage
 from django.template import Context, Template
+from django.test import override_settings
 
 from next.static import StaticCollector, StaticFilesBackend, StaticManager
 from next.static.collector import HEAD_CLOSE
@@ -178,3 +179,60 @@ class TestEmptyCollectorIntegration:
         assert "next/next.min.js" in out
         assert STYLES_PLACEHOLDER not in out
         assert SCRIPTS_PLACEHOLDER not in out
+
+
+class TestOneAssetSpelledTwoWays:
+    """Resolving before the collector sees a value is what lets dedup do its job."""
+
+    def test_two_spellings_emit_exactly_one_link(
+        self,
+        wired_manager: StaticManager,
+        collector: StaticCollector,
+        static_url_mock: None,
+        reset_default: None,
+    ) -> None:
+        template = Template(
+            "{% load next_static %}"
+            '{% use_style "css/app.css" %}'
+            '{% use_style "/static/css/app.css" %}'
+            f"{STYLES_PLACEHOLDER}"
+        )
+        rendered = template.render(Context({"_static_collector": collector}))
+
+        final = wired_manager.inject(rendered, collector)
+        assert final.count('<link rel="stylesheet"') == 1
+        assert 'href="/static/css/app.css"' in final
+
+
+class TestProjectStaticVersionReachesEveryAsset:
+    """A co-located file, a module name, a tag asset and the runtime agree on `?v=`."""
+
+    @staticmethod
+    def _page_with_every_door(tmp_path: Path) -> Path:
+        (tmp_path / "template.css").write_text("body{color:red}")
+        page_path = tmp_path / "page.py"
+        page_path.write_text('styles = ["shared/list.css"]\n')
+        return page_path
+
+    def test_every_url_in_one_render_carries_the_version(
+        self,
+        tmp_path: Path,
+        collector: StaticCollector,
+        static_url_mock: None,
+        reset_default: None,
+    ) -> None:
+        page_path = self._page_with_every_door(tmp_path)
+        with override_settings(NEXT_FRAMEWORK={"STATIC_VERSION": "2026.9.19"}):
+            manager = StaticManager()
+            manager._ensure_backends()
+            manager._cached_page_roots = (tmp_path.resolve(),)
+            manager.discover_page_assets(page_path, collector)
+            rendered = Template(
+                f'{{% load next_static %}}{{% asset "shared/tag.css" %}}{HTML_SHELL}'
+            ).render(Context({"_static_collector": collector}))
+            out = manager.inject(rendered, collector, page_path=page_path)
+
+        assert "/static/shared/tag.css?v=2026.9.19" in out
+        assert 'href="/static/next/index.css?v=2026.9.19"' in out
+        assert 'href="/static/shared/list.css?v=2026.9.19"' in out
+        assert 'src="/static/next/next.min.js?v=2026.9.19"' in out

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
+from urllib.parse import quote, urlsplit, urlunsplit
 
 
 if TYPE_CHECKING:
@@ -25,6 +26,34 @@ _RENDERER_LOADS: Final[dict[str, str]] = {
 # The element the runtime builds around an inline body for each verb. A kind whose
 # own `inline_tag` differs is withheld, and `module` names no element at all.
 _LOAD_INLINE_TAGS: Final[dict[str, str]] = {"link": "style", "script": "script"}
+
+
+_VERSION_QUERY_KEY: Final = "v"
+
+
+def with_version(url: str, version: object) -> str:
+    """Return the URL carrying a `v` query parameter naming the given version.
+
+    Rebuilt through `urlsplit`, so a URL already holding a query gains one more pair.
+    """
+    value = "" if version is None else str(version)
+    if not value:
+        return url
+    split = urlsplit(url)
+    pair = f"{_VERSION_QUERY_KEY}={quote(value)}"
+    query = f"{split.query}&{pair}" if split.query else pair
+    return urlunsplit((split.scheme, split.netloc, split.path, query, split.fragment))
+
+
+def is_static_name(reference: str) -> bool:
+    """Report whether a reference names a staticfiles path rather than a ready URL.
+
+    Read by the URL parser, so a scheme without `//` such as `data:` is no name.
+    """
+    split = urlsplit(reference)
+    if split.scheme or split.netloc or split.query or split.fragment:
+        return False
+    return bool(split.path) and not split.path.startswith("/")
 
 
 class StaticNamespace:

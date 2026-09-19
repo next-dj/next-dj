@@ -8,6 +8,7 @@ Module summary
 
 ``next.static`` exposes the asset discovery, the request-scoped collector, and the configured static backends.
 It also exposes the kind and placeholder registries, the ``next.min.js`` script builder, the staticfiles finder, and the JS context serializer.
+``is_static_name`` and ``StaticAssetNotFoundError`` cover the reference shape rule and the error a reference staticfiles cannot resolve raises, see :doc:`/content/topics/static-assets/name-resolution`.
 
 Public API
 ----------
@@ -35,6 +36,16 @@ Assets
 
 .. automodule:: next.static.assets
    :members:
+
+``is_static_name`` is the predicate the default backend applies to every authored reference, exported so a custom backend answers the same shapes.
+
+Errors
+~~~~~~
+
+.. automodule:: next.static.errors
+   :members:
+
+``StaticAssetNotFoundError`` subclasses ``RuntimeError``, and both ``register_file`` and ``resolve_url`` raise it, so a co-located file and an authored name fail on the same terms.
 
 Manager
 ~~~~~~~
@@ -95,6 +106,11 @@ Staticfiles asks the finder once per referenced asset, so the mapping is held ra
 It is rebuilt when a stem or kind registration changes which filenames count, when the page or component trees the routers report change, and, while ``DEBUG`` is true, when the mtime of any directory inside those trees moves.
 That last check is what picks up an asset added at runtime, and it is skipped when ``DEBUG`` is false, where only a reconfiguration moves what the walk finds.
 
+``NextAppDirectoriesFinder`` replaces Django's ``AppDirectoriesFinder`` in the same list.
+The framework ships its runtime bundle inside ``next/static``, which is also the ``next.static`` Python package, so the stock finder treats every framework module as an app static file and ``collectstatic`` copies them into ``STATIC_ROOT``.
+The subclass drops the framework app from the scan, and ``NextStaticFilesFinder`` serves ``next/next.min.js`` and its sourcemap instead.
+A project with its own app-directories finder subclasses ``NextAppDirectoriesFinder`` rather than Django's class, and ``next.W079`` reports one that does not.
+
 The finder is appended to ``STATICFILES_FINDERS`` automatically by ``NextFrameworkConfig.ready`` through ``next.apps.staticfiles.install``.
 The install step is idempotent and skips the entry when it is already present.
 You do not need to list it in ``STATICFILES_FINDERS`` yourself.
@@ -104,6 +120,7 @@ Confirm it is active by running ``manage.py findstatic next/components/note_card
 Replacing the finder means adding one rather than swapping one out.
 ``next.apps.staticfiles.install`` appends the framework entry whenever it is absent, and its ``setting_changed`` receiver appends it again after an override rewrites the list, so the shipped finder cannot be configured away.
 A project that needs a different mapping subclasses ``NextStaticFilesFinder``, overrides ``find`` or ``list``, and lists the subclass in ``STATICFILES_FINDERS`` ahead of the framework entry.
+An overriding ``find`` answers ``[]`` on a miss whatever ``find_all`` says, because ``django.contrib.staticfiles.finders.find`` wraps any other answer in a list and reads a returned ``None`` as one more match, which turns a missing file into a 500 from the staticfiles view rather than a 404.
 Staticfiles consults the finders in list order and the first match answers a lookup, so the subclass decides every path it claims while ``collectstatic`` still collects from both.
 
 Signals

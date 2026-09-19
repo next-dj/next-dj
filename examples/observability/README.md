@@ -2,7 +2,7 @@
 
 A self-hosted dashboard that watches the framework from the inside. Signals from eight framework subsystems land in nineteen receivers, accumulate in an in-process counter store, and surface in a table, a Chart.js bar chart, or a React sparkline. Nothing here monkey-patches the framework, every hook is a documented extension point.
 
-The page tree is `dashboards/`. The components live next to the pages that use them. The `JS_CONTEXT_SERIALIZER` setting points at a custom class. Two pages declare their CDN dependencies through page-level `scripts = [...]` lists so the framework collects them, dedupes them, and emits them through `{% collect_scripts %}` ahead of every widget's co-located file. Two co-located widgets read `window.Next.context.<key>`, the sparkline through a per-decorator serializer override that wraps the payload in a versioned envelope, the bar chart flat through the global default. The entire frontend arrives from CDNs, so the dashboard runs without `npm`. The static collector picks up `.css`, `.js`, and `.jsx` files, the last through a custom `BabelJsxBackend` that emits `<script type="text/babel">` tags.
+The page tree is `dashboards/`. The components live next to the pages that use them. The `JS_CONTEXT_SERIALIZER` setting points at a custom class. Two pages declare their CDN dependencies through page-level `scripts = [...]` lists so the framework collects them, dedupes them, and emits them through `{% collect_scripts %}` ahead of every widget's co-located file. One of those lists also holds a staticfiles name beside a vendor URL, and an opt-in profile runs the project on `ManifestStaticFilesStorage` so the name picks up a content hash the hardcoded path never would. Two co-located widgets read `window.Next.context.<key>`, the sparkline through a per-decorator serializer override that wraps the payload in a versioned envelope, the bar chart flat through the global default. The entire frontend arrives from CDNs, so the dashboard runs without `npm`. The static collector picks up `.css`, `.js`, and `.jsx` files, the last through a custom `BabelJsxBackend` that emits `<script type="text/babel">` tags.
 
 ## What you will see
 
@@ -37,6 +37,13 @@ uv run python manage.py flush_metrics
 
 Drains both the cumulative and the bucketed counters into the `obs.MetricSnapshot` table and empties the cache. The next render starts at zero.
 
+```bash
+OBS_STATIC_MANIFEST=1 uv run python manage.py collectstatic --noinput
+OBS_STATIC_MANIFEST=1 uv run python manage.py runserver
+```
+
+Runs the same project on `ManifestStaticFilesStorage`, the way a deployment serves it. Every asset URL then carries a content hash, and a render that asks for a file the manifest does not hold raises `StaticAssetNotFoundError` naming that file, so the profile is opt-in and `collectstatic` comes first. Section 4 walks what changes in the rendered HTML.
+
 Tailwind loads from a CDN in the shared `page_head` component pulled into `instrument/layout.djx`. Chart.js arrives through the framework static collector — the URL is declared in the page-level `scripts` list of `obs/dashboards/stats/page.py` and reaches the page via `{% collect_scripts %}`. Page-level scripts land in the injection order before every widget's co-located file, so the chart widget's `component.js` always finds `window.Chart` defined. React, ReactDOM, and Babel-standalone follow the same path from the `scripts` list in `obs/dashboards/page.py`, which keeps them ahead of the sparkline's own `component.jsx`. There is no build step.
 
 Browser-side Babel is a full-page technique, so the sparkline is the one widget that renders only on a full page load — it sits outside every zone and its `component.jsx` never rides a patch envelope. The framework says as much through `next.W074`, which `config/settings.py` silences on purpose with a comment. The silencing is honest only while that invariant holds, so `TestSparklineStaysOutsideEveryZone` in the e2e suite re-GETs every zone the dashboard declares and fails if the sparkline mount ever shows up in a zone body.
@@ -50,6 +57,8 @@ Both chart widgets mount through `Next.partial.onMount` with a WeakMap keyed by 
 ```
 instrument/
 └── layout.djx                <- root html shell, shared page_head brings Tailwind from CDN
+static/
+└── dashboards/js/chart_theme.js   <- project asset named by stats/page.py, hashed under the manifest profile
 obs/
 ├── apps.py                   <- imports receivers, registers the jsx kind and the metric-pulse verb
 ├── models.py                 <- MetricSnapshot persisted by flush_metrics
@@ -72,7 +81,7 @@ obs/
     │   └── sparkline/        <- React + JSX sparkline, full render only, react/babel cdn via page.py
     └── stats/
         ├── layout.djx        <- nested layout, tabs, filter form chrome
-        ├── page.py           <- @context live_stats, live_zone, scripts=[chart.js cdn]
+        ├── page.py           <- @context live_stats, live_zone, scripts=[chart.js cdn, chart_theme name]
         ├── template.djx      <- live-totals zone
         ├── template.js       <- defineOp("metric-pulse") flash handler, co-located
         ├── template.css      <- metric-pulse keyframe, co-located
@@ -126,7 +135,39 @@ default_kinds.register(
 
 [obs/backends.py](obs/backends.py) and [obs/static_policies.py](obs/static_policies.py).
 
-### 4. The pluggable JS context serializer at three levels
+### 4. Staticfiles names, vendor URLs, and the hashed manifest
+
+The Chart.js page declares two scripts in one list in [`obs/dashboards/stats/page.py`](obs/dashboards/stats/page.py):
+
+```python
+scripts = [
+    "https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js",
+    "dashboards/js/chart_theme.js",
+]
+```
+
+The first entry carries a scheme and a host, so it is a URL and the pipeline emits it as written. The second has no scheme, no host, no query and no leading slash, so it is a staticfiles name and Django storage answers for it. Both are declared the same way, in the same list, and the shape of the value is what decides. [`static/dashboards/js/chart_theme.js`](static/dashboards/js/chart_theme.js) copies the design tokens onto `Chart.defaults`, and it sits after the vendor URL because page-level scripts keep their declared order and it needs `window.Chart`.
+
+Every other example serves its assets off disk, where a name and a hardcoded `/static/...` path render the same string and the difference looks academic. This one ships the production profile that makes the difference visible:
+
+```bash
+OBS_STATIC_MANIFEST=1 uv run python manage.py collectstatic --noinput
+OBS_STATIC_MANIFEST=1 uv run python manage.py runserver
+```
+
+The environment variable puts `STORAGES["staticfiles"]` on `ManifestStaticFilesStorage`, which is the shape a deployment uses and not one a dev server wants, since every URL then has to be in a manifest `collectstatic` has already written. Under that profile the same page renders
+
+```html
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="/static/dashboards/js/chart_theme.06b66b52aecb.js"></script>
+<script src="/static/next/components/render_chart.c41fdc906680.js"></script>
+```
+
+The name picked up a content hash, the vendor URL did not, and the widget's co-located file picked one up too, because `next.static.NextStaticFilesFinder` exposes co-located assets to `collectstatic` under the same `next/` namespace the pipeline resolves them through. Writing `/static/dashboards/js/chart_theme.js` by hand in the same list produces that exact string instead. `collectstatic` copies the unhashed file next to the hashed one, so nothing breaks loudly. It is simply a URL that stays the same while the file behind it changes, which is the failure mode a long cache header turns into a support ticket. A name is what buys the hash, and the hash is what makes an asset URL safe to cache for a year.
+
+`TestManifestStorage` in [`tests/test_integration.py`](tests/test_integration.py) runs `collectstatic` into a temporary root under that profile and asserts the rendered page against it, so the hashing path is exercised by `make test-examples` rather than described here and left to rot. It also asserts that the collected tree holds no Python module, which is what lets the command above run without ignore flags.
+
+### 5. The pluggable JS context serializer at three levels
 
 ```python
 NEXT_FRAMEWORK = {
@@ -160,7 +201,7 @@ The framework records each override at the static collector level. At inject tim
 
 The same `Next._init(...)` payload carries the keys the framework owns outright. `$csrf` travels on every render, `$dev` only while `DEBUG` is on, and both are off limits to your own `@context` keys — a collision is reported as `next.W075` and the registered value never reaches `window.Next.context`. `TestDevFlagChannel` in the e2e suite pins both halves of the `$dev` contract.
 
-### 5. The receivers and the counter keys
+### 6. The receivers and the counter keys
 
 [obs/receivers.py](obs/receivers.py) wires the framework signals of eight subsystems. Every receiver delegates to `metrics.incr(kind, key)`, which bumps both the cumulative counter and the current minute bucket. The handlers stay thin because the example is a map between signal names and metric keys.
 
@@ -185,7 +226,7 @@ The page signals carry an absolute path, so `page_key` in [obs/receivers.py](obs
 
 Every group has at least one receiver. `TestSignalGroupsCovered` proves it by walking the dashboard and asserting that every signal in the table fires at least once. Three of them never fire on a plain render, so the test provokes a settings reload, a provider definition, and a watch-spec resolution inside the recorder window.
 
-### 6. The filter form, time-bucketing, and `action_dispatched`
+### 7. The filter form, time-bucketing, and `action_dispatched`
 
 `WindowFilterForm` carries one `ChoiceField`. Subclassing `next.forms.Form` in [obs/forms.py](obs/forms.py) auto-registers the action as `window_filter_form`. Its `on_valid` reads `is_partial_request`. A non-partial apply returns a `HttpResponseRedirect` with `?window=...` so subsequent full renders inherit the new window through the `@context("window", inherit_context=True)` callable in `obs/dashboards/stats/page.py`. The `window` callable reads the posted value first, so a partial apply re-aggregates without a context override the provider chain would ignore.
 
@@ -193,7 +234,7 @@ Behind the form, `metrics.incr` writes both a cumulative counter and a minute-fl
 
 The form component lives under [`_widgets/filter_window/`](obs/dashboards/_widgets/filter_window/). It uses `{% form "window_filter_form" %}` so submission goes through the framework dispatcher and `forms.action_dispatched` fires end to end, not only in tests. The template spells the block out twice behind an `{% if live_zone %}`, because the tag resolves `zone=` and writes the attribute either way, so an empty value would still stamp `data-next-target=""` on a page that declares no zone. Inside the block the template renders the bound field as `{{ form.window }}` — the styled `Select` widget declared on the form — and `WindowFilterForm.get_initial(request)` seeds it with the window currently on the query string, so the select always shows the active choice.
 
-### 7. A project-defined patch verb, `metric-pulse`
+### 8. A project-defined patch verb, `metric-pulse`
 
 The live page on `/stats/` wraps its totals in a `{% zone "live-totals" %}` and passes the index-only `live_zone` context to the filter form, so the form there carries `data-next-target="live-totals"` and applies as a partial. `ObsConfig.ready` calls `register_patch_op("metric-pulse")`, which clears the `next.E066` check and earns the generic `op()` channel on the builder. A partial apply returns
 
@@ -205,7 +246,7 @@ Patches(request).morph(zone="live-totals").morph(zone="stats-window").op(
 
 so the envelope carries the re-aggregated zone beside the custom verb with a payload the server authored. The `Window:` label sits in its own `{% zone "stats-window" %}` inside [`stats/layout.djx`](obs/dashboards/stats/layout.djx), which is what the second morph addresses. A zone may live anywhere in the composed template, layout chain included, and morphing the label alongside the cards keeps the heading from naming a window the numbers no longer cover. The client side is supplied by a co-located [`stats/template.js`](obs/dashboards/stats/template.js) that calls `window.Next.partial.defineOp("metric-pulse", ...)` to flash the refreshed numbers, paired with a [`stats/template.css`](obs/dashboards/stats/template.css) keyframe. Both load only on the live page because they are co-located with its template. The verb is an enhancement, the no-JavaScript path still redirects with `?window=...`.
 
-### 8. The flush command
+### 9. The flush command
 
 ```python
 def handle(self, *args, **options):

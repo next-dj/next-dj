@@ -5,17 +5,23 @@ Collect tags emit placeholders, use tags register assets `StaticManager.inject` 
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, cast, override
 
 from django import template
 from django.template.base import Node, NodeList
 from django.utils.safestring import SafeString
 
 from next.seeding import COLLECTOR_KEY
-from next.static import StaticAsset, StaticCollector, default_placeholders
+from next.static import (
+    StaticAsset,
+    StaticCollector,
+    default_placeholders,
+    get_static_manager,
+)
 
 
 if TYPE_CHECKING:
+    from django.http import HttpRequest
     from django.template.base import Parser, Token
 
 
@@ -71,6 +77,22 @@ def use_module(context: template.Context, url: str) -> str:
     return ""
 
 
+@register.simple_tag(takes_context=True)
+def asset(
+    context: template.Context, reference: str, *, version: object | None = None
+) -> str:
+    """Return the public URL a reference names, ready for a raw `href` or `src`.
+
+    An empty reference renders nothing, and no collector is needed or touched.
+    """
+    if not isinstance(reference, str) or not reference:
+        return ""
+    manager = get_static_manager()
+    request = cast("HttpRequest | None", context.get("request"))
+    url = manager.resolve_url(reference)
+    return manager.asset_url(url, request=request, version=version)
+
+
 def _register_asset(context: template.Context, url: str, kind: str) -> None:
     """Prepend an asset to the render's ``StaticCollector`` when context carries one.
 
@@ -82,7 +104,8 @@ def _register_asset(context: template.Context, url: str, kind: str) -> None:
     collector = context.get(COLLECTOR_KEY)
     if not isinstance(collector, StaticCollector):
         return
-    collector.add(StaticAsset(url=url, kind=kind), prepend=True)
+    resolved = get_static_manager().resolve_url(url)
+    collector.add(StaticAsset(url=resolved, kind=kind), prepend=True)
 
 
 class _InlineAssetNode(Node):
