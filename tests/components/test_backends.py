@@ -14,6 +14,7 @@ from next.components import (
     ModuleLoader,
     component_extra_roots_from_config,
 )
+from next.components.loading import last_load_error
 from tests.support import (
     DUMMY_COMPONENTS_BACKEND,
     DummyComponentsBackend,
@@ -636,6 +637,27 @@ class TestModuleLoader:
         assert loaded is not None
         assert path in shared
         assert ModuleLoader(shared).load(path) is loaded
+
+    def test_a_failing_import_is_recorded_for_the_system_check(
+        self, tmp_path: Path
+    ) -> None:
+        """A swallowed import failure is the one a render turns into a bare body."""
+        path = tmp_path / "broken.py"
+        path.write_text("from nowhere_at_all import BRAND\n")
+
+        assert ModuleLoader(ModuleCache()).load(path) is None
+
+        error = last_load_error(path)
+        assert isinstance(error, ImportError)
+
+    def test_a_later_success_clears_the_record(self, tmp_path: Path) -> None:
+        path = tmp_path / "flaky.py"
+        path.write_text("from nowhere_at_all import BRAND\n")
+        ModuleLoader(ModuleCache()).load(path)
+        path.write_text("BRAND = 'ok'\n")
+
+        assert ModuleLoader(ModuleCache()).load(path) is not None
+        assert last_load_error(path) is None
 
     def test_load_returns_none_when_spec_missing(self, tmp_path: Path) -> None:
         """_load_from_disk returns None when spec_from_file_location returns None."""

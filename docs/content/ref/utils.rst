@@ -22,7 +22,7 @@ Five more flat modules sit at the root of the package for the same reason, and a
 ``next.introspect`` backs decorator registration, attributing a decorated object to the file where it was declared, naming it for diagnostics, and collecting the registrations that landed on another file.
 ``next.discovery`` holds the per-run router manager and the walk of the page trees it routes, which the system checks, the component sources, and the page scan all read, and it reaches the routers through ``next.ports`` rather than by importing ``next.urls``.
 ``next.diagnostics`` holds ``BackendReadLog``, the guarded read a watch layer puts a third-party backend answer through, which drops a raising or malformed answer and reports each failing source once per configuration.
-``next.seeding`` holds the render-context keys the areas share and ``seed_collector``, the one hydration of a ``StaticCollector`` that a full page render and a standalone zone render both run through the ``next.ports`` static slot.
+``next.seeding`` holds the render-context keys the areas share, the ``RenderFrame`` that seeds them for a caller building its context from scratch, and ``seed_collector``, the one hydration of a ``StaticCollector`` that a full page render and a standalone zone render both run through the ``next.ports`` static slot.
 
 Public API
 ----------

@@ -130,6 +130,7 @@ Modules
 
 ``next.seeding``.
    ``seed_collector`` hydrates one collector from the render context and binds it back under ``COLLECTOR_KEY``, and it sits at the root of the package because the page render reaches this area through a port rather than an import.
+   The module holds the shared render-context keys and the ``RenderFrame`` that seeds them as well, so the collector travels with the other ambient values of a render.
 
 ``next.static.inject``.
    ``PlaceholderInjector`` renders what a collector holds into the placeholder tokens of a finished page, and the manager delegates its ``inject`` to one.

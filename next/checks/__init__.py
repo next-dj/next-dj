@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     )
     from next.components.checks import (
         check_component_context_registration_files,
+        check_component_module_imports,
         check_component_py_no_pages_context,
         check_cross_root_component_name_conflicts,
         check_duplicate_component_names,
@@ -106,6 +107,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
     ),
     "next.components.checks": (
         "check_component_context_registration_files",
+        "check_component_module_imports",
         "check_component_py_no_pages_context",
         "check_cross_root_component_name_conflicts",
         "check_duplicate_component_names",
@@ -197,6 +199,7 @@ __all__ = [
     "check_asset_kinds_are_loadable",
     "check_builtin_tag_libraries_complete",
     "check_component_context_registration_files",
+    "check_component_module_imports",
     "check_component_py_no_pages_context",
     "check_component_widget_components",
     "check_component_widget_field_types",

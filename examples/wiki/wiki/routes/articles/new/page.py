@@ -1,10 +1,7 @@
 from django import forms as django_forms
 from django.http import HttpRequest, HttpResponseRedirect
-from django.utils.safestring import SafeString
-from markup import render_markdown
 from wiki.models import RESERVED_SLUGS, Article
 
-from next import context
 from next.forms import ComponentWidget, Form
 
 
@@ -18,7 +15,7 @@ class ArticleCreateForm(Form):
     body_md = django_forms.CharField(
         required=False,
         widget=ComponentWidget(
-            "textarea", placeholder="# Markdown body", rows=12, markdown_source=True
+            "markdown_textarea", placeholder="# Markdown body", rows=12
         ),
     )
 
@@ -41,9 +38,3 @@ class ArticleCreateForm(Form):
             msg = "Slug already taken by another article."
             raise django_forms.ValidationError(msg)
         return slug
-
-
-@context("preview_html")
-def preview_html(request: HttpRequest) -> SafeString:
-    """Render the posted body to seed the preview pane between submissions."""
-    return render_markdown(request.POST.get("body_md", ""))

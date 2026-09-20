@@ -172,9 +172,11 @@ See :doc:`/content/topics/forms/field-components` for the topic guide.
 .. autoclass:: next.forms.ComponentWidget
    :members:
 
-``bind_component_widgets`` injects the page scope path, the live request, the static collector, and optionally the field errors onto every ``ComponentWidget`` of a form before rendering.
+``bind_component_widgets`` puts one render frame on every ``ComponentWidget`` of a form before rendering, holding the template path of the page, the path of its page module, the live request, and the static collector, plus the field errors when they are asked for.
 The ``{% form %}`` tag calls it, so application code needs it only when rendering a component-widget form outside the tag.
 It accepts a form or a formset and binds every member form of a formset, which is how formset rendering through ``{% form %}`` carries component widgets.
+It returns the frame it bound, and the ``{% form %}`` tag publishes that frame around the body of the tag, so the widgets of ``formset.empty_form``, which the formset builds on access and therefore after the bind, render under the same anchors.
+The frame is what lets a field component render further components, see :ref:`topics-forms-field-components-composition`.
 It imports from ``next.forms.widgets`` directly.
 
 .. autofunction:: next.forms.widgets.bind_component_widgets

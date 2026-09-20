@@ -21,6 +21,7 @@ from next.conf import next_framework_settings
 
 from .backends import ComponentsBackend
 from .context import component
+from .loading import last_load_error
 from .sources import get_components_manager
 
 
@@ -340,6 +341,36 @@ def check_component_py_no_pages_context(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
+def check_component_module_imports(*args, **kwargs) -> list[CheckMessage]:
+    """Report a `component.py` that raises while importing (`next.E084`).
+
+    The render falls back to the template alone, so a silent failure otherwise
+    reaches the browser as a component whose context never ran.
+    """
+    configs = next_framework_settings.COMPONENT_BACKENDS
+    if not isinstance(configs, list) or not configs:
+        return []
+
+    errors: list[CheckMessage] = []
+    for backend in _checked_backends():
+        for module_path in backend.import_component_modules():
+            error = last_load_error(module_path)
+            if error is None:
+                continue
+            errors.append(
+                Error(
+                    f"component.py at {module_path} failed to import "
+                    f"({type(error).__name__}: {error}). The render falls back "
+                    "to the template alone, so every @component.context of that "
+                    "module stays out of the body.",
+                    obj=str(module_path),
+                    id="next.E084",
+                )
+            )
+    return errors
+
+
+@register(NEXT)
 def check_component_context_registration_files(*args, **kwargs) -> list[CheckMessage]:
     """Flag a `@component.context` no component render collects (`next.E075`).
 
@@ -364,6 +395,7 @@ def check_component_context_registration_files(*args, **kwargs) -> list[CheckMes
 
 __all__ = [
     "check_component_context_registration_files",
+    "check_component_module_imports",
     "check_component_py_no_pages_context",
     "check_cross_root_component_name_conflicts",
     "check_duplicate_component_names",

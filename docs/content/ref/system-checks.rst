@@ -380,6 +380,10 @@ Errors
        The framework's ``next/static`` directory is the ``next.static`` Python package, so such a finder hands ``collectstatic`` the framework's own modules and their bytecode cache to publish into ``STATIC_ROOT``.
        Django's stock path is substituted automatically, so the check fires only for a finder the project wrote itself, and subclassing ``next.static.NextAppDirectoriesFinder`` clears it.
      - ``next.static.checks``
+   * - ``next.E084``
+     - A ``component.py`` raises while importing, so the render falls back to the template alone and every ``@component.context`` of that module stays out of the body.
+       The message names the recorded exception type and text, which is what tells a missing import path apart from a typo in the module.
+     - ``next.components.checks``
 
 A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.
 

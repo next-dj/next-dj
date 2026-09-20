@@ -21,10 +21,14 @@ from next.forms.manager import form_action_manager
 from next.forms.widgets import (
     COMPONENT_LOOKUP_CACHE_ATTR,
     ComponentWidget,
+    _project_anchor,
     bind_component_widgets,
 )
+from next.seeding import RenderFrame
 from next.static import StaticCollector
 from next.testing import override_component_backends
+from tests.support.components import components_config
+from tests.support.forms import echo_form, register_page_action
 
 
 _ECHO_TEMPLATE = (
@@ -44,11 +48,6 @@ _ECHO_TEMPLATE = (
 )
 
 
-def _components_config(root: Path) -> dict[str, object]:
-    """Build a FileComponentsBackend config rooted at `root`."""
-    return {"DIRS": [str(root)], "COMPONENTS_DIR": "_components"}
-
-
 @pytest.fixture()
 def echo_component(tmp_path: Path) -> Generator[Path, None, None]:
     """Register an `echo` component that prints context vars, yield the anchor path."""
@@ -56,7 +55,7 @@ def echo_component(tmp_path: Path) -> Generator[Path, None, None]:
     root.mkdir()
     (root / "echo.djx").write_text(_ECHO_TEMPLATE)
 
-    with override_component_backends(_components_config(root)):
+    with override_component_backends(components_config(root)):
         yield tmp_path / "page.djx"
 
 
@@ -69,28 +68,8 @@ def echo_box_component(tmp_path: Path) -> Generator[Path, None, None]:
     (comp_dir / "component.djx").write_text("<div>name={{ name }}</div>")
     (comp_dir / "component.css").write_text(".echo-box {}")
 
-    with override_component_backends(_components_config(root)):
+    with override_component_backends(components_config(root)):
         yield tmp_path / "page.djx"
-
-
-def _echo_form(widget: ComponentWidget) -> type[django_forms.Form]:
-    """Build a one-field plain Django form whose field uses `widget`."""
-
-    class _EchoForm(django_forms.Form):
-        field = django_forms.CharField(widget=widget, required=True)
-
-    return _EchoForm
-
-
-def _register_form(
-    name: str, form_class: type[django_forms.Form], file_path: str
-) -> None:
-    """Register a page-scoped form action through the default backend."""
-    form_action_manager.default_backend.register_action(
-        ActionRegistration(
-            name=name, file_path=file_path, scope="page", form_class=form_class
-        )
-    )
 
 
 class TestComponentWidgetInit:
@@ -120,7 +99,7 @@ class TestComponentWidgetRender:
 
     def test_returns_safestring_with_context_values(self, echo_component: Path) -> None:
         widget = ComponentWidget("echo", placeholder="URL slug", rows=12)
-        widget._template_path = echo_component
+        widget._frame = RenderFrame(template_path=echo_component)
         html = widget.render("slug", "hello", attrs={"id": "id_slug", "required": True})
         assert isinstance(html, SafeString)
         assert "name=slug" in html
@@ -128,27 +107,27 @@ class TestComponentWidgetRender:
 
     def test_spreads_extra_kwargs_into_context(self, echo_component: Path) -> None:
         widget = ComponentWidget("echo", placeholder="URL slug", rows=12)
-        widget._template_path = echo_component
+        widget._frame = RenderFrame(template_path=echo_component)
         html = widget.render("slug", "v", attrs={})
         assert "placeholder=URL slug" in html
         assert "rows=12" in html
 
     def test_spreads_attrs_to_top_level(self, echo_component: Path) -> None:
         widget = ComponentWidget("echo")
-        widget._template_path = echo_component
+        widget._frame = RenderFrame(template_path=echo_component)
         html = widget.render("slug", "v", attrs={"id": "id_slug", "required": True})
         assert "id=id_slug" in html
         assert "required=True" in html
 
     def test_errors_default_to_empty(self, echo_component: Path) -> None:
         widget = ComponentWidget("echo")
-        widget._template_path = echo_component
+        widget._frame = RenderFrame(template_path=echo_component)
         html = widget.render("slug", "v", attrs={})
         assert "errors=" in html
 
     def test_injected_errors_reach_context(self, echo_component: Path) -> None:
         widget = ComponentWidget("echo")
-        widget._template_path = echo_component
+        widget._frame = RenderFrame(template_path=echo_component)
         widget._errors = ["bad value"]
         html = widget.render("slug", "v", attrs={})
         assert "errors=bad value" in html
@@ -156,17 +135,36 @@ class TestComponentWidgetRender:
     def test_base_dir_fallback_without_template_path(
         self, echo_component: Path
     ) -> None:
-        # No _template_path set: render must fall back to settings.BASE_DIR. The
+        # No frame bound: render must fall back to settings.BASE_DIR. The
         # echo component is registered as a global root so it resolves anyway.
         widget = ComponentWidget("echo")
         html = widget.render("slug", "v", attrs={})
         assert "name=slug" in html
 
+    def test_working_directory_fallback_without_a_project_root(
+        self, echo_component: Path
+    ) -> None:
+        """A project naming no BASE_DIR still hands the lookup an anchor."""
+        widget = ComponentWidget("echo")
+
+        with mock.patch("next.forms.widgets.resolve_base_dir", return_value=None):
+            html = widget.render("slug", "v", attrs={})
+
+        assert "name=slug" in html
+
+    def test_the_fallback_anchor_is_a_file_inside_the_project_root(
+        self, settings, tmp_path: Path
+    ) -> None:
+        """A lookup walks outward from a directory, so the anchor names a file."""
+        settings.BASE_DIR = str(tmp_path)
+
+        assert _project_anchor().parent == tmp_path
+
     def test_unregistered_component_raises_lookup_error(
         self, echo_component: Path
     ) -> None:
         widget = ComponentWidget("does_not_exist")
-        widget._template_path = echo_component
+        widget._frame = RenderFrame(template_path=echo_component)
         with pytest.raises(LookupError, match="is not registered") as excinfo:
             widget.render("slug", "v", attrs=None)
         message = str(excinfo.value)
@@ -178,7 +176,7 @@ class TestComponentWidgetRender:
         self, echo_component: Path
     ) -> None:
         widget = ComponentWidget("eco")
-        widget._template_path = echo_component
+        widget._frame = RenderFrame(template_path=echo_component)
         with pytest.raises(LookupError, match="Closest matches") as excinfo:
             widget.render("slug", "v", attrs=None)
         assert "'echo'" in str(excinfo.value)
@@ -189,20 +187,19 @@ class TestComponentWidgetRequestCache:
 
     def test_repeat_render_hits_request_cache(self, echo_component: Path) -> None:
         widget = ComponentWidget("echo")
-        widget._template_path = echo_component
-        widget._request = HttpRequest()
+        widget._frame = RenderFrame(template_path=echo_component, request=HttpRequest())
         with mock.patch(
             "next.forms.widgets.get_component", wraps=get_component
         ) as lookup:
             widget.render("slug", "a", attrs={})
             widget.render("slug", "b", attrs={})
         assert lookup.call_count == 1
-        cache = getattr(widget._request, COMPONENT_LOOKUP_CACHE_ATTR)
+        cache = getattr(widget._frame.request, COMPONENT_LOOKUP_CACHE_ATTR)
         assert ("echo", str(echo_component)) in cache
 
     def test_render_without_request_skips_cache(self, echo_component: Path) -> None:
         widget = ComponentWidget("echo")
-        widget._template_path = echo_component
+        widget._frame = RenderFrame(template_path=echo_component)
         with mock.patch(
             "next.forms.widgets.get_component", wraps=get_component
         ) as lookup:
@@ -212,11 +209,10 @@ class TestComponentWidgetRequestCache:
 
     def test_unresolved_component_is_not_cached(self, echo_component: Path) -> None:
         widget = ComponentWidget("does_not_exist")
-        widget._template_path = echo_component
-        widget._request = HttpRequest()
+        widget._frame = RenderFrame(template_path=echo_component, request=HttpRequest())
         with pytest.raises(UnregisteredComponentError, match="is not registered"):
             widget.render("slug", "v", attrs={})
-        cache = getattr(widget._request, COMPONENT_LOOKUP_CACHE_ATTR)
+        cache = getattr(widget._frame.request, COMPONENT_LOOKUP_CACHE_ATTR)
         assert cache == {}
 
 
@@ -244,9 +240,9 @@ class TestComponentWidgetPropGuard:
         root = tmp_path / "_components"
         _write_guarded_component(root, f'{{"{prop}": "HIJACKED"}}')
         widget = ComponentWidget("guarded")
-        widget._template_path = tmp_path / "page.djx"
+        widget._frame = RenderFrame(template_path=tmp_path / "page.djx")
         with (
-            override_component_backends(_components_config(root)),
+            override_component_backends(components_config(root)),
             pytest.raises(ValueError, match=f"context returns '{prop}'"),
         ):
             widget.render("slug", "bound", attrs={})
@@ -255,9 +251,9 @@ class TestComponentWidgetPropGuard:
         root = tmp_path / "_components"
         _write_guarded_component(root, '{"placeholder": "HIJACKED"}')
         widget = ComponentWidget("guarded", placeholder="URL slug")
-        widget._template_path = tmp_path / "page.djx"
+        widget._frame = RenderFrame(template_path=tmp_path / "page.djx")
         with (
-            override_component_backends(_components_config(root)),
+            override_component_backends(components_config(root)),
             pytest.raises(ValueError, match="context returns 'placeholder'"),
         ):
             widget.render("slug", "bound", attrs={})
@@ -266,9 +262,9 @@ class TestComponentWidgetPropGuard:
         root = tmp_path / "_components"
         _write_guarded_component(root, '{"id": "HIJACKED"}')
         widget = ComponentWidget("guarded")
-        widget._template_path = tmp_path / "page.djx"
+        widget._frame = RenderFrame(template_path=tmp_path / "page.djx")
         with (
-            override_component_backends(_components_config(root)),
+            override_component_backends(components_config(root)),
             pytest.raises(ValueError, match="context returns 'id'"),
         ):
             widget.render("slug", "bound", attrs={"id": "id_slug"})
@@ -277,8 +273,8 @@ class TestComponentWidgetPropGuard:
         root = tmp_path / "_components"
         _write_guarded_component(root, '{"hint": "merged"}')
         widget = ComponentWidget("guarded")
-        widget._template_path = tmp_path / "page.djx"
-        with override_component_backends(_components_config(root)):
+        widget._frame = RenderFrame(template_path=tmp_path / "page.djx")
+        with override_component_backends(components_config(root)):
             html = widget.render("slug", "bound", attrs={})
         assert "hint=merged" in html
         assert "value=bound" in html
@@ -287,8 +283,8 @@ class TestComponentWidgetPropGuard:
         root = tmp_path / "_components"
         _write_guarded_component(root, '{"value": "HIJACKED", "name": "HIJACKED"}')
         widget = ComponentWidget("guarded")
-        form_class = _echo_form(widget)
-        with override_component_backends(_components_config(root)):
+        form_class = echo_form(widget)
+        with override_component_backends(components_config(root)):
             form = form_class(data={"field": "bound"})
             bind_component_widgets(form, template_path=tmp_path / "page.djx")
             with pytest.raises(ValueError, match="returns 'name', 'value'"):
@@ -300,7 +296,7 @@ class TestComponentWidgetConstructorAttrs:
 
     def test_constructor_attrs_reach_context(self, echo_component: Path) -> None:
         widget = ComponentWidget("echo", attrs={"data-x": "1"})
-        widget._template_path = echo_component
+        widget._frame = RenderFrame(template_path=echo_component)
         html = widget.render("slug", "v", attrs={})
         assert "data-x=1" in html
 
@@ -308,7 +304,7 @@ class TestComponentWidgetConstructorAttrs:
         self, echo_component: Path
     ) -> None:
         widget = ComponentWidget("echo", attrs={"data-x": "ctor"})
-        widget._template_path = echo_component
+        widget._frame = RenderFrame(template_path=echo_component)
         html = widget.render("slug", "v", attrs={"data-x": "render"})
         assert "data-x=render" in html
         assert "data-x=ctor" not in html
@@ -317,7 +313,7 @@ class TestComponentWidgetConstructorAttrs:
         self, echo_component: Path
     ) -> None:
         widget = ComponentWidget("echo", attrs={"data-x": "1"})
-        widget._template_path = echo_component
+        widget._frame = RenderFrame(template_path=echo_component)
         html = widget.render("slug", "v", attrs={"id": "id_slug"})
         assert "data-x=1" in html
         assert "id=id_slug" in html
@@ -330,7 +326,7 @@ class TestComponentWidgetAriaAliases:
         self, echo_component: Path
     ) -> None:
         widget = ComponentWidget("echo")
-        widget._template_path = echo_component
+        widget._frame = RenderFrame(template_path=echo_component)
         html = widget.render(
             "slug",
             "v",
@@ -343,14 +339,14 @@ class TestComponentWidgetAriaAliases:
         self, echo_component: Path
     ) -> None:
         widget = ComponentWidget("echo")
-        widget._template_path = echo_component
+        widget._frame = RenderFrame(template_path=echo_component)
         html = widget.render("slug", "v", attrs={"aria-invalid": "true"})
         assert "&#x27;aria-invalid&#x27;: &#x27;true&#x27;" in html
 
     def test_underscore_form_present_blocks_alias(self, echo_component: Path) -> None:
         # data_x already exists, so the data-x value must not overwrite it.
         widget = ComponentWidget("echo")
-        widget._template_path = echo_component
+        widget._frame = RenderFrame(template_path=echo_component)
         html = widget.render(
             "slug", "v", attrs={"data-x": "hyphen", "data_x": "underscore"}
         )
@@ -362,19 +358,19 @@ class TestComponentWidgetFormatValue:
 
     def test_non_string_value_formatted_to_string(self, echo_component: Path) -> None:
         widget = ComponentWidget("echo")
-        widget._template_path = echo_component
+        widget._frame = RenderFrame(template_path=echo_component)
         html = widget.render("when", date(2024, 1, 2), attrs={})
         assert "value=2024-01-02" in html
 
     def test_int_value_formatted_to_string(self, echo_component: Path) -> None:
         widget = ComponentWidget("echo")
-        widget._template_path = echo_component
+        widget._frame = RenderFrame(template_path=echo_component)
         html = widget.render("count", 7, attrs={})
         assert "value=7" in html
 
     def test_empty_value_becomes_none(self, echo_component: Path) -> None:
         widget = ComponentWidget("echo")
-        widget._template_path = echo_component
+        widget._frame = RenderFrame(template_path=echo_component)
         html = widget.render("slug", "", attrs={})
         assert "value=None" in html
 
@@ -386,9 +382,7 @@ class TestComponentWidgetAssetCollection:
         self, component_name: str, anchor: Path, collector: StaticCollector | None
     ) -> None:
         widget = ComponentWidget(component_name)
-        widget._template_path = anchor
-        if collector is not None:
-            widget._static_collector = collector
+        widget._frame = RenderFrame(template_path=anchor, collector=collector)
         with mock.patch(
             "next.static.backends.staticfiles_storage.url",
             return_value="/static/next/components/echo_box.css",
@@ -410,9 +404,9 @@ class TestComponentWidgetAssetCollection:
         assert collector.assets_in_slot("scripts") == ()
 
     def test_no_collector_does_not_collect(self, echo_box_component: Path) -> None:
-        # No _static_collector bound: render is a no-op for asset discovery.
+        # No collector on the frame: render is a no-op for asset discovery.
         widget = ComponentWidget("echo_box")
-        widget._template_path = echo_box_component
+        widget._frame = RenderFrame(template_path=echo_box_component)
         html = widget.render("slug", "v", attrs={})
         assert "name=slug" in html
 
@@ -422,32 +416,32 @@ class TestBindComponentWidgets:
 
     def test_sets_template_path_and_request(self, echo_component: Path) -> None:
         widget = ComponentWidget("echo")
-        form = _echo_form(widget)()
+        form = echo_form(widget)()
         request = object()
         bind_component_widgets(form, template_path=echo_component, request=request)
         bound_widget = form.fields["field"].widget
-        assert bound_widget._template_path == echo_component
-        assert bound_widget._request is request
+        assert bound_widget._frame.template_path == echo_component
+        assert bound_widget._frame.request is request
 
     def test_sets_static_collector(self, echo_component: Path) -> None:
         widget = ComponentWidget("echo")
-        form = _echo_form(widget)()
+        form = echo_form(widget)()
         collector = StaticCollector()
         bind_component_widgets(form, template_path=echo_component, collector=collector)
         bound_widget = form.fields["field"].widget
-        assert bound_widget._static_collector is collector
+        assert bound_widget._frame.collector is collector
 
     def test_collector_defaults_to_none(self, echo_component: Path) -> None:
         widget = ComponentWidget("echo")
-        form = _echo_form(widget)()
+        form = echo_form(widget)()
         bind_component_widgets(form, template_path=echo_component)
         bound_widget = form.fields["field"].widget
-        assert bound_widget._static_collector is None
+        assert bound_widget._frame.collector is None
 
     def test_with_errors_sets_field_errors(self, echo_component: Path) -> None:
         widget = ComponentWidget("echo")
         # Bound but invalid: a required field left blank yields non-empty errors.
-        form = _echo_form(widget)(data={"field": ""})
+        form = echo_form(widget)(data={"field": ""})
         bind_component_widgets(form, template_path=echo_component, with_errors=True)
         bound_widget = form.fields["field"].widget
         assert bound_widget._errors == form["field"].errors
@@ -455,7 +449,7 @@ class TestBindComponentWidgets:
 
     def test_without_errors_keeps_empty_default(self, echo_component: Path) -> None:
         widget = ComponentWidget("echo")
-        form = _echo_form(widget)(data={"field": ""})
+        form = echo_form(widget)(data={"field": ""})
         bind_component_widgets(form, template_path=echo_component, with_errors=False)
         bound_widget = form.fields["field"].widget
         assert bound_widget._errors == ()
@@ -469,11 +463,11 @@ class TestBindComponentWidgets:
         bind_component_widgets(form, template_path=echo_component)
         plain_widget = form.fields["plain"].widget
         comp_widget = form.fields["comp"].widget
-        assert not hasattr(plain_widget, "_template_path")
-        assert comp_widget._template_path == echo_component
+        assert not hasattr(plain_widget, "_frame")
+        assert comp_widget._frame.template_path == echo_component
 
     def test_formset_binds_each_member_form(self, echo_component: Path) -> None:
-        formset_class = formset_factory(_echo_form(ComponentWidget("echo")), extra=2)
+        formset_class = formset_factory(echo_form(ComponentWidget("echo")), extra=2)
         formset = formset_class()
         request = object()
         collector = StaticCollector()
@@ -483,14 +477,14 @@ class TestBindComponentWidgets:
         assert len(formset.forms) == 2
         for member in formset.forms:
             bound_widget = member.fields["field"].widget
-            assert bound_widget._template_path == echo_component
-            assert bound_widget._request is request
-            assert bound_widget._static_collector is collector
+            assert bound_widget._frame.template_path == echo_component
+            assert bound_widget._frame.request is request
+            assert bound_widget._frame.collector is collector
 
     def test_formset_with_errors_binds_member_errors(
         self, echo_component: Path
     ) -> None:
-        formset_class = formset_factory(_echo_form(ComponentWidget("echo")), extra=0)
+        formset_class = formset_factory(echo_form(ComponentWidget("echo")), extra=0)
         formset = formset_class(
             data={
                 "form-TOTAL_FORMS": "1",
@@ -510,7 +504,7 @@ class TestCheckComponentWidgetComponents:
         class _MissingForm(django_forms.Form):
             field = django_forms.CharField(widget=ComponentWidget("nope"))
 
-        _register_form("missing_form", _MissingForm, str(echo_component))
+        register_page_action("missing_form", _MissingForm, str(echo_component))
         warnings = check_component_widget_components()
         assert len(warnings) == 1
         assert isinstance(warnings[0], DjangoWarning)
@@ -521,7 +515,7 @@ class TestCheckComponentWidgetComponents:
         class _OkForm(django_forms.Form):
             field = django_forms.CharField(widget=ComponentWidget("echo"))
 
-        _register_form("ok_form", _OkForm, str(echo_component))
+        register_page_action("ok_form", _OkForm, str(echo_component))
         assert check_component_widget_components() == []
 
     def test_same_missing_component_reported_once(self, echo_component: Path) -> None:
@@ -529,7 +523,7 @@ class TestCheckComponentWidgetComponents:
             one = django_forms.CharField(widget=ComponentWidget("nope"))
             two = django_forms.CharField(widget=ComponentWidget("nope"))
 
-        _register_form("two_field_form", _TwoFieldForm, str(echo_component))
+        register_page_action("two_field_form", _TwoFieldForm, str(echo_component))
         warnings = check_component_widget_components()
         assert len(warnings) == 1
         assert warnings[0].id == "next.W054"
@@ -538,7 +532,7 @@ class TestCheckComponentWidgetComponents:
         class _PlainForm(django_forms.Form):
             field = django_forms.CharField(widget=django_forms.TextInput())
 
-        _register_form("plain_form", _PlainForm, str(echo_component))
+        register_page_action("plain_form", _PlainForm, str(echo_component))
         assert check_component_widget_components() == []
 
     def test_meta_with_no_form_class_is_skipped(self) -> None:
@@ -579,7 +573,7 @@ class TestCheckComponentWidgetFieldTypes:
         class _FileForm(django_forms.Form):
             upload = django_forms.FileField(widget=ComponentWidget("echo"))
 
-        _register_form("file_form", _FileForm, str(echo_component))
+        register_page_action("file_form", _FileForm, str(echo_component))
         warnings = check_component_widget_field_types()
         assert len(warnings) == 1
         assert isinstance(warnings[0], DjangoWarning)
@@ -594,7 +588,7 @@ class TestCheckComponentWidgetFieldTypes:
                 require_all_fields=False,
             )
 
-        _register_form("multi_form", _MultiForm, str(echo_component))
+        register_page_action("multi_form", _MultiForm, str(echo_component))
         warnings = check_component_widget_field_types()
         assert len(warnings) == 1
         assert warnings[0].id == "next.W055"
@@ -604,7 +598,7 @@ class TestCheckComponentWidgetFieldTypes:
         class _CharForm(django_forms.Form):
             slug = django_forms.CharField(widget=ComponentWidget("echo"))
 
-        _register_form("char_form", _CharForm, str(echo_component))
+        register_page_action("char_form", _CharForm, str(echo_component))
         assert check_component_widget_field_types() == []
 
     def test_textarea_widget_char_field_yields_no_warning(
@@ -613,7 +607,7 @@ class TestCheckComponentWidgetFieldTypes:
         class _BodyForm(django_forms.Form):
             body = django_forms.CharField(widget=django_forms.Textarea())
 
-        _register_form("body_form", _BodyForm, str(echo_component))
+        register_page_action("body_form", _BodyForm, str(echo_component))
         assert check_component_widget_field_types() == []
 
     def test_file_field_without_component_widget_is_clean(
@@ -622,7 +616,7 @@ class TestCheckComponentWidgetFieldTypes:
         class _PlainFileForm(django_forms.Form):
             upload = django_forms.FileField(widget=django_forms.ClearableFileInput())
 
-        _register_form("plain_file_form", _PlainFileForm, str(echo_component))
+        register_page_action("plain_file_form", _PlainFileForm, str(echo_component))
         assert check_component_widget_field_types() == []
 
     def test_meta_with_no_form_class_is_skipped(self) -> None:

@@ -15,12 +15,16 @@ from next.components.facade import render_component
 from next.components.manager import components_manager
 from next.components.renderers import COMPONENT_PROPS_CONTEXT_KEY
 from next.pages.manager import page
+from next.seeding import RenderFrame
+from next.static import collect_component_assets
 
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from django.http import HttpRequest
+
+    from next.static import StaticCollector
 
 
 def render_page(
@@ -44,22 +48,32 @@ def render_component_by_name(
     context: Mapping[str, Any] | None = None,
     props: Mapping[str, Any] | None = None,
     request: HttpRequest | None = None,
+    collector: StaticCollector | None = None,
+    page_module_path: Path | str | None = None,
 ) -> str:
     """Render component `name` as resolved from the template path `at`.
 
-    `at` drives visibility, `context` stands in for the ambient page scope, and
-    `props` for the names a `{% component %}` call site would pass.
+    The seeded frame is what a nested tag composes from, and `context` outranks it.
     """
     anchor = Path(at) if not isinstance(at, Path) else at
     info = components_manager.get_component(name, anchor)
     if info is None:
         msg = f"Component not visible from {anchor}: {name!r}"
         raise LookupError(msg)
-    context_data = dict(context or {})
+    frame = RenderFrame(
+        template_path=anchor,
+        page_module_path=page_module_path,
+        request=request,
+        collector=collector,
+    )
+    collect_component_assets(info, frame.collector)
+    context_data: dict[str, Any] = {}
+    frame.seed(context_data)
+    context_data.update(context or {})
     context_data.update(props or {})
     # Publishing `context` too would guard keys a page render leaves shadowable.
     context_data[COMPONENT_PROPS_CONTEXT_KEY] = frozenset(props or ())
-    return render_component(info, context_data, request=request)
+    return render_component(info, context_data, request=frame.request)
 
 
 __all__ = ["render_component_by_name", "render_page"]

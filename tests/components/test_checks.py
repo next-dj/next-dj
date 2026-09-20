@@ -9,6 +9,7 @@ from django.test import override_settings
 from next.checks import (
     NEXT,
     check_component_context_registration_files,
+    check_component_module_imports,
     check_component_py_no_pages_context,
     check_cross_root_component_name_conflicts,
     check_duplicate_component_names,
@@ -350,6 +351,43 @@ class TestChecks:
         assert [e.id for e in errors] == ["next.E075"]
         assert "donated" in errors[0].msg
         assert str(donor_dir / "component.py") in errors[0].msg
+
+    def test_a_component_py_that_fails_to_import_is_e084(
+        self, tmp_path: Path, min_component_config: dict
+    ) -> None:
+        """A swallowed import failure reaches the browser as a context that never ran."""
+        module_path = tmp_path / "component.py"
+        module_path.write_text("from nowhere_at_all import BRAND\n")
+        fake_backend = FileComponentsBackend(dict(min_component_config))
+        fake_backend._registry.register(
+            ComponentInfo("card", tmp_path, "", None, module_path, False)
+        )
+        fake_backend._loaded = True
+
+        with patch_checks_components_manager(fake_backend):
+            errors = check_component_module_imports()
+
+        assert [e.id for e in errors] == ["next.E084"]
+        assert "nowhere_at_all" in errors[0].msg
+
+    def test_a_component_py_that_imports_reports_nothing(
+        self, tmp_path: Path, min_component_config: dict
+    ) -> None:
+        module_path = tmp_path / "component.py"
+        module_path.write_text("BRAND = 'next'\n")
+        fake_backend = FileComponentsBackend(dict(min_component_config))
+        fake_backend._registry.register(
+            ComponentInfo("card", tmp_path, "", None, module_path, False)
+        )
+        fake_backend._loaded = True
+
+        with patch_checks_components_manager(fake_backend):
+            assert check_component_module_imports() == []
+
+    def test_check_component_module_imports_empty_when_no_config(self) -> None:
+        mock_ns = _stand_in(COMPONENT_BACKENDS=None)
+        with patch("next.components.checks.next_framework_settings", mock_ns):
+            assert check_component_module_imports() == []
 
     def test_component_context_declared_in_component_py_reports_nothing(
         self, tmp_path: Path, min_component_config: dict

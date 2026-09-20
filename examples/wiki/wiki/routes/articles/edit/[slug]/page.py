@@ -2,8 +2,6 @@ from typing import ClassVar
 
 from django import forms as django_forms
 from django.http import HttpRequest, HttpResponseRedirect
-from django.utils.safestring import SafeString
-from markup import render_markdown
 from wiki.models import RESERVED_SLUGS, Article
 from wiki.providers import DArticle
 
@@ -19,7 +17,7 @@ class ArticleEditForm(ModelForm):
         widgets: ClassVar = {
             "slug": ComponentWidget("input"),
             "title": ComponentWidget("input"),
-            "body_md": ComponentWidget("textarea", rows=12, markdown_source=True),
+            "body_md": ComponentWidget("markdown_textarea", rows=12),
         }
 
     def has_object_permission(self) -> PermissionOutcome:
@@ -48,11 +46,3 @@ class ArticleEditForm(ModelForm):
 def article(item: DArticle[Article]) -> Article:
     """Inject the article addressed by the URL slug for the template."""
     return item
-
-
-@context("preview_html")
-def preview_html(request: HttpRequest, item: DArticle[Article]) -> SafeString:
-    """Render the body that feeds the live preview between submissions."""
-    posted = request.POST.get("body_md")
-    body = posted if posted is not None else item.body_md
-    return render_markdown(body)

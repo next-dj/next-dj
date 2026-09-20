@@ -20,7 +20,14 @@ from next.caches import DEFAULT_CACHE_SIZE, LruCache
 from next.deps import get_request_dep_cache
 from next.deps.cache import DependencyCache
 from next.deps.resolver import current_resolver
-from next.seeding import COLLECTOR_KEY
+from next.seeding import (
+    ACTION_ANCHOR_KEY,
+    COLLECTOR_KEY,
+    COMPONENT_MODULE_PATH_KEY,
+    PAGE_MODULE_PATH_KEY,
+    REQUEST_KEY,
+    TEMPLATE_PATH_KEY,
+)
 from next.utils import template_edits_watched
 
 from .context import component
@@ -44,14 +51,15 @@ COMPONENT_PROPS_CONTEXT_KEY = "_component_props"
 # Keys the render path owns, so overwriting one breaks the render itself.
 _RESERVED_CONTEXT_KEYS = frozenset(
     {
+        ACTION_ANCHOR_KEY,
         COLLECTOR_KEY,
+        COMPONENT_MODULE_PATH_KEY,
         COMPONENT_PROPS_CONTEXT_KEY,
+        PAGE_MODULE_PATH_KEY,
+        REQUEST_KEY,
+        TEMPLATE_PATH_KEY,
         "children",
         "csrf_token",
-        "current_component_module_path",
-        "current_page_module_path",
-        "current_template_path",
-        "request",
     }
 )
 
@@ -222,7 +230,7 @@ def _stamp_component_anchor(info: ComponentInfo, context_dict: dict[str, Any]) -
     Always written, so a component without a component.py never inherits
     the anchor of an enclosing component or a caller-supplied value.
     """
-    context_dict["current_component_module_path"] = (
+    context_dict[COMPONENT_MODULE_PATH_KEY] = (
         str(info.module_path) if info.module_path is not None else None
     )
 
@@ -357,7 +365,7 @@ class SimpleComponentRenderer:
         context_dict = dict(context_data)
         _stamp_component_anchor(info, context_dict)
         if request is not None:
-            context_dict.setdefault("request", request)
+            context_dict.setdefault(REQUEST_KEY, request)
             _merge_csrf_context(context_dict, request)
         return template.render(DjangoTemplateContext(context_dict))
 
@@ -388,7 +396,7 @@ class CompositeComponentRenderer:
 
         module = self._module_loader.load(info.module_path)
         if module is None:
-            return self._fallback_to_template(info, context_data)
+            return self._fallback_to_template(info, context_data, request)
 
         render_func = getattr(module, "render", None)
         if callable(render_func):
@@ -421,6 +429,20 @@ class CompositeComponentRenderer:
             return result.content.decode()
         return str(result)
 
+    def _template_context(
+        self,
+        info: ComponentInfo,
+        context_data: Mapping[str, Any],
+        request: HttpRequest | None,
+    ) -> dict[str, Any]:
+        """Return the context a template render of `info` starts from."""
+        context_dict = dict(context_data)
+        _stamp_component_anchor(info, context_dict)
+        if request is not None:
+            context_dict[REQUEST_KEY] = request
+            _merge_csrf_context(context_dict, request)
+        return context_dict
+
     def _render_with_template(
         self,
         info: ComponentInfo,
@@ -431,24 +453,28 @@ class CompositeComponentRenderer:
         if template is None:
             return ""
 
-        context_dict = dict(context_data)
-        _stamp_component_anchor(info, context_dict)
-        if request is not None:
-            context_dict["request"] = request
-            _merge_csrf_context(context_dict, request)
-
+        context_dict = self._template_context(info, context_data, request)
         _inject_component_context(info, context_dict, request)
 
         return template.render(DjangoTemplateContext(context_dict))
 
     def _fallback_to_template(
-        self, info: ComponentInfo, context_data: Mapping[str, Any]
+        self,
+        info: ComponentInfo,
+        context_data: Mapping[str, Any],
+        request: HttpRequest | None,
     ) -> str:
+        """Render the template of a `component.py` that failed to import.
+
+        A decorator of that module may have registered before the import raised, so
+        running the registrations would call into half-executed globals.
+        """
         template = self._template_loader.load_template(info)
         if template is None:
             return ""
-        context_dict = dict(context_data)
-        _stamp_component_anchor(info, context_dict)
+
+        context_dict = self._template_context(info, context_data, request)
+
         return template.render(DjangoTemplateContext(context_dict))
 
 

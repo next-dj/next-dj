@@ -3,6 +3,11 @@ from pathlib import Path
 from next.components import ComponentContextManager, ComponentInfo
 
 
+def components_config(root: Path) -> dict[str, object]:
+    """Build a `FileComponentsBackend` config rooted at `root`."""
+    return {"DIRS": [str(root)], "COMPONENTS_DIR": "_components"}
+
+
 def component_info(
     directory: Path,
     *,

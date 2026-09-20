@@ -206,6 +206,7 @@ The page import happens in a session-scoped autouse fixture, which runs the ``@c
 The loader memoises each absolute directory, so listing the same root twice imports it once.
 
 ``next_components`` matters for a suite that renders components without going through HTTP, and for a project that sets ``LAZY_COMPONENT_MODULES = True`` in ``NEXT_FRAMEWORK``.
+It also registers the components folders the configured page trees carry, which a live registry otherwise holds only once a request has made the router walk that tree, so a component beside a page resolves in a test that renders it before any request.
 See :ref:`ref-settings` for the description of that flag.
 
 ``next_clear_cache`` drops the default cache in an autouse fixture that runs before every test.
@@ -561,6 +562,8 @@ HTML utilities
 
 ``next.testing.html`` provides assertions for inspecting rendered HTML fragments.
 ``render_component_by_name`` takes ``at``, the template path the component is referenced from, which is what drives which components are visible.
+The same path is seeded as the ambient template path of the body, so a nested ``{% component %}`` resolves from it too, and a ``context`` entry naming that key wins over the seed.
+Pass ``collector=`` a ``StaticCollector`` to capture the co-located assets of the component and of anything it nests.
 
 .. code-block:: python
    :caption: html assertions

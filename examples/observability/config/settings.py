@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 
 from config.storages import MANIFEST_STORAGES
@@ -75,6 +76,7 @@ if os.environ.get("OBS_STATIC_MANIFEST") == "1":
     STORAGES = MANIFEST_STORAGES
 
 SHARED_DIR = BASE_DIR.parent / "_shared"
+sys.path.insert(0, str(SHARED_DIR))
 STATICFILES_DIRS = [BASE_DIR / "static", SHARED_DIR / "static"]
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

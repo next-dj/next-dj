@@ -1,10 +1,22 @@
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+from django.http import HttpRequest
+
 from next.seeding import (
+    ACTION_ANCHOR_KEY,
     COLLECTOR_KEY,
+    EMPTY_FRAME,
     JS_CONTEXT_KEY,
     JS_SERIALIZERS_KEY,
+    PAGE_MODULE_PATH_KEY,
+    REQUEST_KEY,
+    TEMPLATE_PATH_KEY,
+    RenderFrame,
+    ambient_frame,
+    current_ambient_frame,
     seed_collector,
 )
 from next.static import StaticCollector
@@ -92,3 +104,87 @@ class TestSeedCollector:
             collector = seed_collector(page_path, {})
 
         assets.discover_page_assets.assert_called_once_with(page_path, collector)
+
+
+class TestRenderFrame:
+    """The ambient keys a caller building its own context has to carry."""
+
+    def test_the_anchor_lands_under_the_template_path_key(self, tmp_path: Path) -> None:
+        context_data: dict[str, object] = {}
+        anchor = tmp_path / "page.djx"
+
+        RenderFrame(template_path=anchor).seed(context_data)
+
+        assert context_data[TEMPLATE_PATH_KEY] is anchor
+
+    def test_the_page_anchor_and_the_collector_ride_along(self, tmp_path: Path) -> None:
+        context_data: dict[str, object] = {}
+        collector = StaticCollector()
+        frame = RenderFrame(page_module_path=tmp_path / "page.py", collector=collector)
+
+        frame.seed(context_data)
+
+        assert context_data[PAGE_MODULE_PATH_KEY] == tmp_path / "page.py"
+        assert context_data[COLLECTOR_KEY] is collector
+
+    def test_an_empty_frame_seeds_every_key_empty(self) -> None:
+        """The frame is plain data, so an unbound one names no path of its own."""
+        context_data: dict[str, object] = {}
+
+        EMPTY_FRAME.seed(context_data)
+
+        assert context_data[TEMPLATE_PATH_KEY] is None
+        assert context_data[PAGE_MODULE_PATH_KEY] is None
+        assert context_data[ACTION_ANCHOR_KEY] is None
+        assert context_data[COLLECTOR_KEY] is None
+
+    def test_the_request_is_left_to_the_render(self) -> None:
+        """The render strategies stamp the request, so the seed keeps off it."""
+        context_data: dict[str, object] = {}
+
+        request = MagicMock(spec=HttpRequest)
+
+        RenderFrame(request=request).seed(context_data)
+
+        assert REQUEST_KEY not in context_data
+
+    def test_the_frame_is_frozen(self, tmp_path: Path) -> None:
+        frame = RenderFrame(template_path=tmp_path)
+
+        with pytest.raises(FrozenInstanceError):
+            frame.template_path = tmp_path / "other.djx"  # type: ignore[misc]
+
+    def test_the_action_anchor_of_the_enclosing_form_rides_along(
+        self, tmp_path: Path
+    ) -> None:
+        context_data: dict[str, object] = {}
+        anchor = tmp_path / "component.py"
+
+        RenderFrame(action_anchor=anchor).seed(context_data)
+
+        assert context_data[ACTION_ANCHOR_KEY] is anchor
+
+
+class TestAmbientFrame:
+    """The frame a render publishes for the widgets a bind had no instance to reach."""
+
+    def test_nothing_is_published_by_default(self) -> None:
+        assert current_ambient_frame() is EMPTY_FRAME
+
+    def test_the_frame_stands_for_the_block(self, tmp_path: Path) -> None:
+        frame = RenderFrame(template_path=tmp_path / "page.djx")
+
+        with ambient_frame(frame):
+            assert current_ambient_frame() is frame
+
+    def test_the_frame_around_it_comes_back(self, tmp_path: Path) -> None:
+        """A nested form publishes its own frame and leaves the outer one standing."""
+        outer = RenderFrame(template_path=tmp_path / "outer.djx")
+        inner = RenderFrame(template_path=tmp_path / "inner.djx")
+
+        with ambient_frame(outer):
+            with ambient_frame(inner):
+                assert current_ambient_frame() is inner
+            assert current_ambient_frame() is outer
+
+        assert current_ambient_frame() is EMPTY_FRAME

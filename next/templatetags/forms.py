@@ -20,7 +20,16 @@ from next.forms.uid import (
     validated_origin_path,
 )
 from next.forms.widgets import bind_component_widgets
-from next.seeding import COLLECTOR_KEY
+from next.seeding import (
+    ACTION_ANCHOR_KEY,
+    COLLECTOR_KEY,
+    COMPONENT_MODULE_PATH_KEY,
+    PAGE_MODULE_PATH_KEY,
+    REQUEST_KEY,
+    TEMPLATE_PATH_KEY,
+    RenderFrame,
+    ambient_frame,
+)
 
 
 _MIN_FORM_TAG_BITS = 2
@@ -85,25 +94,38 @@ def do_form(parser: template.base.Parser, token: template.base.Token) -> "FormNo
 
 def _page_path_from_context(context: template.Context) -> str | None:
     """Return the current page module path stored in the render context."""
-    raw_page = context.get("current_page_module_path")
+    raw_page = context.get(PAGE_MODULE_PATH_KEY)
     return str(raw_page) if raw_page else None
 
 
 def _component_path_from_context(context: template.Context) -> str | None:
     """Return the current component module path stored in the render context."""
-    raw_component = context.get("current_component_module_path")
+    raw_component = context.get(COMPONENT_MODULE_PATH_KEY)
     return str(raw_component) if raw_component else None
+
+
+def _action_anchor_from_context(context: template.Context) -> str | None:
+    """Return the anchor the actions of the enclosing form resolve against."""
+    raw_anchor = context.get(ACTION_ANCHOR_KEY)
+    return str(raw_anchor) if raw_anchor else None
 
 
 def _anchor_lookup_from_context(
     context: template.Context, action_name: str
 ) -> "tuple[str | None, ActionMeta | None]":
-    """Return the lookup anchor, with the meta when the component anchor wins."""
-    component_path = _component_path_from_context(context)
-    if component_path is not None:
-        meta = resolve_component_anchor(action_name, component_path)
+    """Return the lookup anchor, with the meta when a scoped anchor wins.
+
+    A field component sits under the anchor of the form around it as well as its own.
+    """
+    for anchor in (
+        _component_path_from_context(context),
+        _action_anchor_from_context(context),
+    ):
+        if anchor is None:
+            continue
+        meta = resolve_component_anchor(action_name, anchor)
         if meta is not None:
-            return component_path, meta
+            return anchor, meta
     return _page_path_from_context(context), None
 
 
@@ -163,7 +185,7 @@ class FormNode(template.Node):
 
     def _get_request(self, context: template.Context) -> "HttpRequest":
         """Extract request from context or raise ImproperlyConfigured."""
-        request = context.get("request")
+        request = context.get(REQUEST_KEY)
         if request is None:
             msg = (
                 "{% form %} requires 'request' in template context. "
@@ -254,13 +276,15 @@ class FormNode(template.Node):
             )
             raise FormActionNotFoundError(msg, name=token)
 
-        page_path, meta = _anchor_lookup_from_context(context, action_name)
+        anchor_path, meta = _anchor_lookup_from_context(context, action_name)
 
         resolved_action_url = form_action_manager.get_action_url(
-            action_name, page_path=page_path
+            action_name, page_path=anchor_path
         )
         if meta is None:
-            meta = form_action_manager.get_action_meta(action_name, page_path=page_path)
+            meta = form_action_manager.get_action_meta(
+                action_name, page_path=anchor_path
+            )
 
         form_obj = context.get(action_name)
         if form_obj and hasattr(form_obj, "form"):
@@ -275,12 +299,15 @@ class FormNode(template.Node):
             form_instance = built.form if built is not None else None
             wizard_instance = getattr(built, "wizard", None) if built else None
 
+        frame: RenderFrame | None = None
         if form_instance is not None:
-            bind_component_widgets(
+            frame = bind_component_widgets(
                 form_instance,
-                template_path=context.get("current_template_path"),
+                template_path=context.get(TEMPLATE_PATH_KEY),
                 request=request,
                 collector=context.get(COLLECTOR_KEY),
+                page_module_path=_page_path_from_context(context),
+                action_anchor=anchor_path,
                 with_errors=form_instance.is_bound,
             )
 
@@ -296,6 +323,18 @@ class FormNode(template.Node):
         if wizard_instance is not None:
             push_kwargs["wizard"] = wizard_instance
         with context.push(**push_kwargs):
-            content = self.nodelist.render(context)
+            content = self._render_body(context, frame)
 
         return f"{opening_tag}\n{hidden_inputs}\n{content}\n</form>"
+
+    def _render_body(
+        self, context: template.Context, frame: "RenderFrame | None"
+    ) -> str:
+        """Render the tag body, publishing `frame` for a widget born mid-render.
+
+        A formset builds `empty_form` on access, so no bind reaches its widgets.
+        """
+        if frame is None:
+            return self.nodelist.render(context)
+        with ambient_frame(frame):
+            return self.nodelist.render(context)

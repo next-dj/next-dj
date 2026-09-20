@@ -24,7 +24,8 @@ examples/_shared/
 │   ├── empty_state/    skeleton/    avatar/    stat_card/
 │   ├── dropdown/{component.djx,component.mjs}
 │   ├── dialog/{component.djx,component.mjs}
-│   └── markdown_preview/{component.djx,component.py,component.css,component.mjs}
+│   ├── markdown_preview/{component.djx,component.py,component.css,component.mjs}
+│   └── markdown_textarea/{component.djx}                # textarea + preview pane, one widget target
 ├── fragments.py   # render one component by name into a patch payload
 ├── markup.py      # Markdown to safe HTML, shared by the wiki and multi-tenant forms
 └── static/shared/
@@ -35,13 +36,15 @@ examples/_shared/
 
 ## Wiring it into a project
 
-Two changes inside `config/settings.py`:
+Three changes inside `config/settings.py`:
 
 ```python
+import sys
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 SHARED_DIR = BASE_DIR.parent / "_shared"
+sys.path.insert(0, str(SHARED_DIR))
 
 STATICFILES_DIRS = [SHARED_DIR / "static"]
 
@@ -61,11 +64,11 @@ The `DIRS` entry registers `_shared/_components` as a **global** root. Component
 
 `STATICFILES_DIRS` adds the shared static tree, so `page_head` asks for `shared/css/tokens.css`, `shared/css/base.css` and `shared/js/base.mjs` by staticfiles name instead of by URL. A name follows `STATIC_URL` and picks up the digest under `ManifestStaticFilesStorage`, which a hardcoded `/static/shared/...` path never does.
 
-The kit also ships two plain Python modules, so an app that imports them needs the directory on the import path. The examples add `sys.path.insert(0, str(SHARED_DIR))` next to `SHARED_DIR` in `config/settings.py`, which mirrors the `pythonpath = . ../_shared` line their `pytest.ini` already carries. `markup.py` holds `render_markdown`, the escape-then-render-then-strip pipeline the wiki and multi-tenant forms preview with. `fragments.py` holds `render_fragment(name, template_path, request, **props)`, which resolves one component through `next.components.get_component` and renders it through `render_component`, the pair a patch builder needs when it wants a component's markup without a wrapper template.
+The kit also ships two plain Python modules, and `markdown_preview/component.py` imports one of them, so every project that registers the kit needs the directory on its import path, not only one that imports the modules from its own code. Every example adds `sys.path.insert(0, str(SHARED_DIR))` next to `SHARED_DIR` in `config/settings.py`, `_template` included, which mirrors the `pythonpath = . ../_shared` line their `pytest.ini` carries. A project that forgets the entry does not fail silently: the import failure of a `component.py` is reported by `manage.py check` as `next.E084`. `markup.py` holds `render_markdown`, the escape-then-render-then-strip pipeline the `markdown_preview` component and the wiki article page render with. `fragments.py` holds `render_fragment(name, template_path, request, **props)`, which resolves one component through `next.components.get_component` and renders it through `render_component`, the pair a patch builder needs when it wants a component's markup without a wrapper template.
 
 ## Shared client behaviour
 
-The `markdown_preview` component is the one place the live Markdown preview behaviour lives. It is a pure presentation shell — its `component.djx` draws a labelled pane around a `{{ rendered_html }}` slot, its co-located `component.mjs` keeps the pane in sync with the surrounding textarea, and its `component.py` declares only the `marked` CDN under `scripts`. The framework auto-discovers the co-located `component.mjs` (emitted as `<script type="module">`) and `component.css` and dedupes them into the page slots, so no manual static path is needed. The script registers through `Next.partial.onMount("[data-markdown-preview]", ...)` and walks up to the enclosing `<form>` to find its textarea, so it binds the same way for both apps without hardcoding a field name. Both apps render server-side through the shared [`markup.py`](markup.py) helper and inject the HTML through the `rendered_html` prop, so the security-sensitive escaping lives in one file rather than in a copy per example.
+The `markdown_preview` component is the one place the live Markdown preview behaviour lives. Its `component.djx` draws a labelled pane, its `component.py` turns the `source` prop into safe HTML through the shared [`markup.py`](markup.py) helper and declares the `marked` CDN under `scripts`, and its co-located `component.mjs` keeps the pane in sync with its control. No page template calls it. The `markdown_textarea` composite does: it renders the plain `textarea` primitive with `markdown_source=True` and the pane right under it, so `ComponentWidget("markdown_textarea", rows=12)` is a whole Markdown editor while `textarea` stays a control that knows nothing about Markdown. The framework auto-discovers the co-located `component.mjs` (emitted as `<script type="module">`) and `component.css` from inside that widget render and dedupes them into the page slots, so no manual static path is needed. The script registers through `Next.partial.onMount("[data-markdown-preview]", ...)` and binds to the `data-markdown-source` control before the pane, falling back to the nearest one in the pane's parent and then in the form, so two Markdown fields in one form each drive their own pane without hardcoding a field name. It remembers the pairing in a `WeakMap` rather than in a data attribute, because a morph drops an attribute the server markup does not carry and the mount pass would then wire a second listener onto the same control.
 
 Each example houses the shared HTML envelope in a project-level page root listed under `PAGE_BACKENDS["DIRS"]` — `chrome/`, `host/`, `site/`, `frame/`, `shell/`, `portal/`, `instrument/`, `marketplace/`, `cockpit/`, `studio/`, or `root_pages/` depending on the project. The dir contains a single `layout.djx` (and optionally `_<components-dir>/` for project-shared components) that wraps every page rendered by the per-app `PAGES_DIR` tree:
 
@@ -159,7 +162,7 @@ Every entry below is a void call (`{% component "name" prop=value %}`) or a bloc
 | `button` | `variant` (default/secondary/outline/ghost/destructive/link), `size` (sm/md/lg/icon), `type`, `href`, `target`, `name`/`value`, `disabled`, `text`, `extra` | `content` (falls back to `{{ text }}`) |
 | `card` | `title`, `description`, `extra` | `content`, `footer` |
 | `badge` | `variant` (default/secondary/outline/destructive/success/warning/info/muted), `text`, `extra` | `content` (falls back to `{{ text }}`) |
-| `input` / `textarea` | `type`, `name`, `id`, `value`, `placeholder`, `autocomplete`, `required`, `disabled`, `autofocus`, `rows` (textarea), `markdown_source` (textarea), `errors` (truthy list flips the border to destructive), `aria_invalid`, `aria_describedby`, `extra` | — |
+| `input` / `textarea` | `type`, `name`, `id`, `value`, `placeholder`, `autocomplete`, `required`, `disabled`, `autofocus`, `rows` (textarea), `markdown_source` (textarea, stamps `data-markdown-source="true"`), `errors` (truthy list flips the border to destructive), `aria_invalid`, `aria_describedby`, `extra` | — |
 | `label` | `for_id`, `text`, `extra` | `content` (falls back to `{{ text }}`) |
 | `field` | `label`, `for_id`, `required`, `help`, `error`, `extra` | `control` |
 | `alert` | `variant` (default/info/success/warning/destructive), `title`, `text`, `extra` | `content` (falls back to `{{ text }}`) |
@@ -173,9 +176,10 @@ Every entry below is a void call (`{% component "name" prop=value %}`) or a bloc
 | `app_shell` | `brand`, `brand_href`, `brand_icon`, `main_extra`, `header_visible` | `brand` (falls back to brand text + icon + href chrome), `nav`, `actions`, `content`, `page_footer` |
 | `dropdown` | `label`, `extra` | `trigger`, `items` |
 | `dialog` | `id`, `title`, `description`, `extra` | `content`, `footer` |
-| `markdown_preview` | `rendered_html` (server-rendered safe HTML for first paint), `label` (defaults to `Live preview`) | — |
+| `markdown_preview` | `source` (raw Markdown rendered server-side for first paint), `label` (defaults to `Live preview`) | — |
+| `markdown_textarea` | every `textarea` prop, passed through to the control it renders above the preview pane | — |
 
-The `input` and `textarea` primitives double as `ComponentWidget` targets: `next.forms.ComponentWidget("input")` renders the bound field through the component, filling `name`, `id`, `value`, `errors`, `aria_invalid`, and `aria_describedby` from the field's state on every render and re-render. The forms examples (shortener, wiki, multi-tenant, kanban, audit-forms) all bind their fields this way. The contract is documented in [`docs/content/topics/forms/field-components.rst`](../../docs/content/topics/forms/field-components.rst).
+The `input` and `textarea` primitives double as `ComponentWidget` targets: `next.forms.ComponentWidget("input")` renders the bound field through the component, filling `name`, `id`, `value`, `errors`, `aria_invalid`, and `aria_describedby` from the field's state on every render and re-render. The forms examples (shortener, wiki, multi-tenant, kanban, audit-forms) all bind their fields this way. A widget render is a full render frame of its own, so a widget target may compose: `markdown_textarea` calls both `{% component "textarea" %}` and `{% component "markdown_preview" %}` from inside the widget render, and the nested components' co-located CSS and JS land in the same document as the page's own assets. The contract is documented in [`docs/content/topics/forms/field-components.rst`](../../docs/content/topics/forms/field-components.rst).
 
 ## Quick recipes
 
@@ -247,7 +251,7 @@ The default-body path keeps the void call site short (`{% component "page_header
 
 When you move an existing project onto the shared kit:
 
-- Wire `SHARED_DIR`, `STATICFILES_DIRS`, and `COMPONENT_BACKENDS["DIRS"]` once in `settings.py`.
+- Wire `SHARED_DIR`, the `sys.path` entry, `STATICFILES_DIRS`, and `COMPONENT_BACKENDS["DIRS"]` once in `settings.py`.
 - Remove any per-app `nav_link` / `stat_card` / `card` that now duplicates a shared component, otherwise `manage.py check` raises `next.E034` (root namespace collision).
 - Replace the `<head>` boilerplate (CDN script, two `{% use_style %}` lines, the `{% use_module %}` line, `{% collect_styles %}`) with `{% component "page_head" title="…" icon="…" %}`.
 - Spell every project-local asset as a staticfiles name rather than a `/static/...` literal. `{% use_style %}`, `{% use_script %}`, `{% use_module %}` and the module-level `styles` and `scripts` lists hand a name to storage, and `{% asset %}` does the same for a bare `href` or `src`. A ready URL such as a CDN `https://` link passes through untouched.

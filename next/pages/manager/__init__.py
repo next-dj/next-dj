@@ -29,7 +29,14 @@ from next.pages.processors import _get_context_processors
 from next.pages.registry import PageContextRegistry
 from next.pages.signals import page_rendered, template_loaded
 from next.ports import static_assets_slot
-from next.seeding import JS_CONTEXT_KEY, JS_SERIALIZERS_KEY, seed_collector
+from next.seeding import (
+    JS_CONTEXT_KEY,
+    JS_SERIALIZERS_KEY,
+    PAGE_MODULE_PATH_KEY,
+    REQUEST_KEY,
+    TEMPLATE_PATH_KEY,
+    seed_collector,
+)
 
 from .templates import PageTemplateCache
 from .views import create_url_pattern, unified_view
@@ -164,8 +171,8 @@ class Page:
         """
         info = page_path_info(file_path)
         context_data: dict[str, object] = {
-            "current_template_path": info.template_path,
-            "current_page_module_path": info.module_path,
+            TEMPLATE_PATH_KEY: info.template_path,
+            PAGE_MODULE_PATH_KEY: info.module_path,
         }
         context_data.update(kwargs)
 
@@ -177,7 +184,7 @@ class Page:
         context_data[JS_SERIALIZERS_KEY] = context_result.js_context_serializers
 
         if request is not None:
-            context_data["request"] = request
+            context_data[REQUEST_KEY] = request
 
         context_processors = _get_context_processors()
         if request and context_processors:

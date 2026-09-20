@@ -1,11 +1,10 @@
 from django.utils.safestring import SafeString
+from markup import render_markdown
 
 from next import component
 
 
 scripts = ["https://cdn.jsdelivr.net/npm/marked/marked.min.js"]
-
-EMPTY_HTML = SafeString("")
 
 
 @component.context("label")
@@ -15,6 +14,6 @@ def label(label: str = "Live preview") -> str:
 
 
 @component.context("rendered_html")
-def rendered_html(rendered_html: SafeString = EMPTY_HTML) -> SafeString:
-    """Server-rendered HTML for first paint, empty when the caller renders later."""
-    return rendered_html
+def rendered_html(source: str | None = None) -> SafeString:
+    """Render the Markdown source for first paint, before the client takes over."""
+    return render_markdown(source or "")

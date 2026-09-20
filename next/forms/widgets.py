@@ -1,10 +1,10 @@
 """Form widgets that render through next-component runtime."""
 
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, override
 
 from django import forms as django_forms
-from django.conf import settings
 from django.forms import widgets as _django_widgets
 from django.forms.renderers import BaseRenderer
 from django.http import HttpRequest
@@ -13,7 +13,9 @@ from django.utils.safestring import SafeString
 from next.components.facade import get_component, render_component
 from next.components.manager import components_manager
 from next.components.renderers import COMPONENT_PROPS_CONTEXT_KEY
+from next.seeding import EMPTY_FRAME, RenderFrame, current_ambient_frame
 from next.static import StaticCollector, collect_component_assets
+from next.utils import resolve_base_dir
 
 from .errors import UnregisteredComponentError
 
@@ -29,13 +31,22 @@ if TYPE_CHECKING:
 COMPONENT_LOOKUP_CACHE_ATTR: Final[str] = "_next_component_lookup_cache"
 
 
+_UNBOUND_ANCHOR_NAME: Final[str] = "<unbound-widget>"
+
+
+def _project_anchor() -> Path:
+    """Return the anchor a widget searches from when no render bound one.
+
+    The name is synthetic, because a lookup walks outward from the directory of a file.
+    """
+    return (resolve_base_dir() or Path.cwd()) / _UNBOUND_ANCHOR_NAME
+
+
 class ComponentWidget(django_forms.Widget):
     """A form widget that renders a registered next-component."""
 
-    _template_path: "str | Path | None" = None
-    _request: HttpRequest | None = None
+    _frame: RenderFrame = EMPTY_FRAME
     _errors: "ErrorList | tuple[()]" = ()
-    _static_collector: StaticCollector | None = None
 
     def __init__(
         self,
@@ -49,9 +60,23 @@ class ComponentWidget(django_forms.Widget):
         self.extra_kwargs = component_kwargs
         super().__init__(attrs)
 
-    def _resolve_component(self, anchor: "str | Path") -> "ComponentInfo | None":
+    def _render_frame(self) -> "tuple[RenderFrame, str | Path]":
+        """Return the frame of this render and the anchor it searches from.
+
+        A widget of `empty_form` is built after the bind, so only the ambient one fits.
+        """
+        if self._frame.template_path is not None:
+            return self._frame, self._frame.template_path
+        ambient = current_ambient_frame()
+        if ambient.template_path is not None:
+            return ambient, ambient.template_path
+        anchor = _project_anchor()
+        return replace(ambient, template_path=anchor), anchor
+
+    def _resolve_component(
+        self, anchor: "str | Path", request: HttpRequest | None
+    ) -> "ComponentInfo | None":
         """Resolve the named component, cached per request when one is bound."""
-        request = self._request
         cache: dict[tuple[str, str], ComponentInfo] | None = None
         key = (self.component_name, str(anchor))
         if request is not None:
@@ -77,17 +102,15 @@ class ComponentWidget(django_forms.Widget):
     ) -> SafeString:
         """Resolve the component within scope and render it to HTML."""
         del renderer
-        anchor = (
-            self._template_path or getattr(settings, "BASE_DIR", None) or Path.cwd()
-        )
-        info = self._resolve_component(anchor)
+        frame, anchor = self._render_frame()
+        info = self._resolve_component(anchor, frame.request)
         if info is None:
             raise UnregisteredComponentError(
                 self.component_name,
                 anchor,
                 components_manager.collect_visible_components(Path(anchor)),
             )
-        collect_component_assets(info, self._static_collector)
+        collect_component_assets(info, frame.collector)
         merged = self.build_attrs(self.attrs, attrs or {})
         # Hyphenated keys such as aria-invalid cannot be read as template vars,
         # so they alias to an underscore form unless that name is already taken.
@@ -110,9 +133,10 @@ class ComponentWidget(django_forms.Widget):
         # Every name above comes from this widget and its field binding, so a
         # keyless component context must not take any of them over.
         context[COMPONENT_PROPS_CONTEXT_KEY] = frozenset(context)
+        frame.seed(context)
         # render_component returns template-rendered, already-escaped HTML, so a
         # SafeString wrapper matches the Widget.render contract without re-escaping.
-        html = render_component(info, context, request=self._request)
+        html = render_component(info, context, request=frame.request)
         return SafeString(html)
 
 
@@ -122,31 +146,46 @@ def bind_component_widgets(
     template_path: str | Path | None,
     request: HttpRequest | None = None,
     collector: StaticCollector | None = None,
+    page_module_path: str | Path | None = None,
+    action_anchor: str | Path | None = None,
     with_errors: bool = False,
+) -> RenderFrame:
+    """Inject the render frame and field errors onto ComponentWidgets, and return it.
+
+    The anchor is settled here, so a render reuses the frame instead of copying it.
+    """
+    frame = RenderFrame(
+        template_path=template_path or _project_anchor(),
+        page_module_path=page_module_path,
+        action_anchor=action_anchor,
+        request=request,
+        collector=collector,
+    )
+    _bind_frame(form, frame, with_errors=with_errors)
+    return frame
+
+
+def _bind_frame(
+    form: "django_forms.BaseForm | django_forms.BaseFormSet",
+    frame: RenderFrame,
+    *,
+    with_errors: bool,
 ) -> None:
-    """Inject scope path, request, collector, and field errors onto ComponentWidgets.
+    """Hand `frame` to every ComponentWidget of a form or of a formset member.
 
     A formset has no `fields` of its own, so each member form is bound instead.
     """
     if isinstance(form, django_forms.BaseFormSet):
         for member in form.forms:
-            bind_component_widgets(
-                member,
-                template_path=template_path,
-                request=request,
-                collector=collector,
-                with_errors=with_errors,
-            )
+            _bind_frame(member, frame, with_errors=with_errors)
         return
     for field_name, field in form.fields.items():
         widget = getattr(field, "widget", None)
         if not isinstance(widget, ComponentWidget):
             continue
         # Django deep-copies base_fields and their widgets per form instance, so
-        # these attributes stay scoped to this form and never leak across forms.
-        widget._template_path = template_path
-        widget._request = request
-        widget._static_collector = collector
+        # the frame stays scoped to this form and never leaks across forms.
+        widget._frame = frame
         if with_errors:
             widget._errors = form[field_name].errors
 

@@ -80,6 +80,11 @@ Modules
    A Django ``TEMPLATES`` change drops the render pipeline the same way, because a compiled component template carries the engine that built it.
    ``next.components.watch`` reads the loaded backends through the manager and asks each for ``watch_roots``, then walks those trees with a scanner of its own, so neither the component registries nor the router registry move.
 
+``next.seeding``.
+   ``RenderFrame`` carries the ambient values a component render inherits from the page around it, and its ``seed`` writes them into a context the caller is still building.
+   ``next.forms.widgets`` and ``next.testing.rendering`` hold a frame each, because both build their context from scratch instead of copying a surrounding scope.
+   ``ambient_frame`` publishes one for the span of a render, which is how a widget built after its form was bound still finds the anchors of that form.
+
 ``next.components.checks``.
    The components system checks, including ``next.E020`` and ``next.E034``.
    They read the per-run manager ``next.components.sources.get_components_manager`` builds, which registers the ``_components`` folders under the page trees itself instead of waiting for the router walk to reach them, so every check sees the same components whatever asked for the manager first.
@@ -128,6 +133,17 @@ Page context values reach the component through the template scope, not through 
 A component whose ``component.py`` defines a ``render`` function uses a fresh ``DependencyCache`` for that call instead of the shared request cache.
 The surrounding template scope (props and page context variables) is still forwarded to the resolver as DI parameters.
 The lazy ``csrf_token`` and any ``@component.context`` callables are not run on this path.
+
+Ambient render frame
+~~~~~~~~~~~~~~~~~~~~
+
+The ``{% component %}`` tag builds its child context from ``context.flatten()``, so the ambient keys of the surrounding render come along untouched.
+A caller that builds its context from scratch carries a ``RenderFrame`` instead and seeds it, which is what ``ComponentWidget`` and ``render_component_by_name`` do.
+The seed writes the anchor the lookup ran from, the path of the page module, the anchor the actions of the enclosing form resolve against, and the static collector, and it leaves the request to the render strategies that stamp it themselves.
+The frame is plain data, so ``bind_component_widgets`` settles the anchor once and a render reuses the frame it was handed rather than copying it.
+A widget no bind reached asks for the frame the ``{% form %}`` tag publishes around its body, which is what carries the anchors into the widgets of ``formset.empty_form``, and falls back to a synthetic name under ``BASE_DIR``, then under the working directory, so the walk starts at the project root rather than above it.
+The four seeded keys are reserved render keys, so an unkeyed ``@component.context`` that returns one raises ``ValueError`` under either caller.
+``render_component_by_name`` applies its ``context`` and ``props`` mappings over the seed, so a caller naming a seeded key replaces the seeded value.
 
 Signals
 -------

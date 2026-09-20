@@ -12,11 +12,12 @@
 
   <h2>Markdown preview</h2>
   <p>
-    The article forms reuse the shared <code>markdown_preview</code> shell. The
-    page renders the body to safe HTML and injects it through the
-    <code>rendered_html</code> prop for first paint. The co-located module then
-    wires the textarea to the preview pane for keystroke updates without leaving
-    the page.
+    The article forms reuse the shared <code>markdown_preview</code> shell. No
+    page template names it: the <code>markdown_textarea</code> composite calls
+    it from inside the field widget and hands it the bound value, which it
+    renders to safe HTML for first paint. The co-located module then wires the
+    textarea to the preview pane for keystroke updates without leaving the
+    page.
   </p>
 
   <h2>Block children</h2>

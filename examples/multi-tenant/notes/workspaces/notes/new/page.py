@@ -1,11 +1,8 @@
 from django import forms as django_forms
 from django.http import HttpRequest, HttpResponseRedirect
-from django.utils.safestring import SafeString
-from markup import render_markdown
 from notes.models import Note
 from notes.providers import DTenant
 
-from next import context
 from next.forms import ComponentWidget, Form
 from next.urls import page_reverse
 
@@ -16,7 +13,9 @@ class NoteCreateForm(Form):
     )
     body = django_forms.CharField(
         required=False,
-        widget=ComponentWidget("textarea", placeholder="# Markdown body", rows=8),
+        widget=ComponentWidget(
+            "markdown_textarea", placeholder="# Markdown body", rows=8
+        ),
     )
 
     def on_valid(
@@ -31,9 +30,3 @@ class NoteCreateForm(Form):
         return HttpResponseRedirect(
             page_reverse("notes/[int:note_id]/edit", note_id=note_obj.pk)
         )
-
-
-@context("preview_html")
-def preview_html() -> SafeString:
-    """Render the empty draft so the preview pane has its first-paint placeholder."""
-    return render_markdown("")

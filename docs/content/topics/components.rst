@@ -397,6 +397,7 @@ An ordinary page context key that reaches the component through the surrounding 
 
 Every render path that has a call site publishes its prop names, so the guard knows them.
 The ``{% component %}`` tag publishes the props of its own call, ``ComponentWidget`` publishes the names it fills for its field, and ``render_component_by_name`` publishes the keys of its ``props`` mapping while leaving its ``context`` mapping ambient.
+``ComponentWidget`` and ``render_component_by_name`` seed the ambient render keys beside those props, and the reserved set already covers those keys, so an unkeyed ``@component.context`` cannot take one over.
 A bare ``render_component`` has no call site, so it guards the reserved keys alone.
 The same component code therefore raises under ``{% component "note_card" preview=text %}`` and merges quietly under ``{% component "note_card" %}``.
 This failure leaves the render rather than degrading to an empty string, so ``STRICT_LOADING`` and ``DEBUG`` do not change it.

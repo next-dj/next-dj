@@ -1,0 +1,2 @@
+{% component "textarea" name=name id=id value=value rows=rows placeholder=placeholder required=required disabled=disabled errors=errors aria_invalid=aria_invalid aria_describedby=aria_describedby extra=extra markdown_source=True %}
+{% component "markdown_preview" source=value %}

@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 
 from next.conf import extend_default_backend
@@ -70,6 +71,7 @@ USE_TZ = True
 STATIC_URL = "static/"
 
 SHARED_DIR = BASE_DIR.parent / "_shared"
+sys.path.insert(0, str(SHARED_DIR))
 STATICFILES_DIRS = [SHARED_DIR / "static"]
 
 VITE_DEV_ORIGIN = "http://localhost:5173"

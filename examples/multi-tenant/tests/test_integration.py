@@ -376,7 +376,7 @@ class TestNoteCreate:
         assert response.status_code == 200
         body = response.content.decode()
         assert "Create note" in body
-        assert "Preview" in body
+        assert "Live preview" in body
 
     @override_settings(DEBUG=False)
     def test_post_creates_note_and_redirects_to_edit(
@@ -445,7 +445,7 @@ class TestNoteEditPage:
         assert response.status_code == 200
         body = response.content.decode()
         assert acme_note.title in body
-        assert "Preview" in body
+        assert "Live preview" in body
 
     @override_settings(DEBUG=False)
     def test_edit_page_prefixes_component_module(

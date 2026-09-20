@@ -21,6 +21,16 @@ logger = logging.getLogger(__name__)
 
 _CACHE_MISS = object()
 
+_LAST_LOAD_ERROR: dict[Path, Exception] = {}
+
+
+def last_load_error(file_path: Path) -> Exception | None:
+    """Return what the last import of `file_path` raised, while one stands.
+
+    A failed import degrades the render to the bare template, so a check names it.
+    """
+    return _LAST_LOAD_ERROR.get(file_path)
+
 
 class ModuleCache:
     """Remembers loaded Python modules by file path and drops the oldest when full."""
@@ -84,9 +94,11 @@ class ModuleLoader:
             spec.loader.exec_module(module)
         except (ImportError, AttributeError, OSError, SyntaxError) as e:
             logger.debug("Could not load module %s: %s", path, e)
+            _LAST_LOAD_ERROR[path] = e
             return None
         else:
+            _LAST_LOAD_ERROR.pop(path, None)
             return module
 
 
-__all__ = ["ModuleCache", "ModuleLoader"]
+__all__ = ["ModuleCache", "ModuleLoader", "last_load_error"]

@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 from next.conf import extend_default_backend
@@ -72,6 +73,7 @@ STATIC_URL = "static/"
 # The shared UI kit under examples/_shared/ supplies the static files and root component
 # tree that shadcn-style components such as `{% component "button" %}` render from.
 SHARED_DIR = BASE_DIR.parent / "_shared"
+sys.path.insert(0, str(SHARED_DIR))
 STATICFILES_DIRS = [BASE_DIR / "static", SHARED_DIR / "static"]
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

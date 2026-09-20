@@ -38,6 +38,7 @@ Framework-provided keys
 
 A page render starts with three keys populated.
 A component body rendered by ``{% component %}`` carries a fourth.
+A component rendered through ``ComponentWidget`` or through ``render_component_by_name`` is seeded with the same path keys and with the static collector, so a body outside a page render composes from the same anchors.
 The two path keys are seeded before any user-defined ``@context`` callable runs, while ``request`` joins the scope after context collection finishes.
 
 ``request``.

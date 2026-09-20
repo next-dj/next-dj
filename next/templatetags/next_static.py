@@ -12,7 +12,7 @@ from django import template
 from django.template.base import Node, NodeList
 from django.utils.safestring import SafeString
 
-from next.seeding import COLLECTOR_KEY
+from next.seeding import COLLECTOR_KEY, REQUEST_KEY
 from next.static import (
     StaticAsset,
     StaticCollector,
@@ -87,7 +87,7 @@ def asset(context: template.Context, reference: str, *, version: object = None) 
     if not isinstance(reference, str) or not reference:
         return ""
     manager = get_static_manager()
-    request = cast("HttpRequest | None", context.get("request"))
+    request = cast("HttpRequest | None", context.get(REQUEST_KEY))
     url = manager.resolve_url(reference)
     return manager.asset_url(url, request=request, version=version)
 
