@@ -74,7 +74,8 @@ The cost is that a new behaviour is a two-sided change.
 A custom verb is registered on the server with ``register_patch_op`` and supplied on the client with ``Next.partial.defineOp``, so a template author cannot express a new DOM operation from markup alone.
 The gain is that a response cannot ask a page to do anything the application never named.
 ``Patches.op()`` refuses an unregistered verb on the call that builds it, so the op never reaches the browser.
-``next.E066`` covers the registry side at ``manage.py check``, reporting a custom verb whose name is malformed or shadows a built-in one.
+Two system checks cover the registry side at ``manage.py check``.
+``next.E066`` reports a custom verb that shadows a built-in one, and ``next.E090`` reports a name that is not a valid verb token.
 See :doc:`/content/topics/partial-rendering/extending` for the three seams and :doc:`/content/topics/partial-rendering/limitations` for what the closed set does not cover.
 
 Stable URLs
@@ -143,8 +144,8 @@ String composition of layouts.
    A body produced by a ``render`` function stays out of that cache, and only the layout chain around it is cached and refilled per render.
 
 Block tag parsing changes process wide.
-   The framework widens the ``{% ... %}`` alternative of Django's tag pattern, so a block tag may span lines in every template the process loads.
-   A template that relies on a newline ending a block tag needs adjusting first, while variables and comments keep their stock behaviour.
+   The framework adds a line-spanning branch to Django's tag pattern, which is a process-wide rebind, but the branch matches only next.dj's own block tags.
+   Every other tag lexes as stock Django lexes it, so a template that relies on a newline ending ``{% if %}`` keeps working, and variables and comments keep their stock behaviour too.
 
 See also
 --------

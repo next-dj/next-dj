@@ -24,7 +24,7 @@ Pick names that fit the domain rather than reusing `routes` and `_widgets`. Ever
 - Tailwind loads from the Play CDN through the shared `page_head` component. No build step, no Node.
 - Project-local assets are spelled as staticfiles names, never as `/static/...` literals. `page_head` registers `shared/css/tokens.css`, `shared/css/base.css` and `shared/js/base.mjs` through `{% use_style %}` and `{% use_module %}`, and the `favicon="site/favicon.svg"` prop in `chrome/layout.djx` goes through `{% asset %}`, which returns the URL for a bare `href` and registers nothing. A name follows `STATIC_URL` and carries the storage digest, a literal path does neither.
 - `pytest.ini` is the whole test scaffold. `addopts` opts into the framework's pytest plugin with `-p next.testing.plugin`, `next_pages` points it at the page tree it imports once per session so the router is populated before the first request, `next_clear_cache` empties the cache between tests, and the `next_client` fixture is the test client that speaks the partial protocol.
-- `PARTIAL_BACKENDS` pins an explicit asset `VERSION`, and every example inherits that line from here. The [examples README](../README.md#conventions-every-example-follows) explains why it is pinned and what `next.W069` checks.
+- `STATIC_VERSION` names the deploy stamp, and every example serving its assets off disk inherits that line from here. The tag lands on every asset URL as a `v` parameter and on every partial response as the asset version, and the [examples README](../README.md#conventions-every-example-follows) explains what it guards, when to bump it, and which examples derive it from something else.
 - Every file is intentionally short. Fill in what you need, drop what you do not.
 
 ## How to run

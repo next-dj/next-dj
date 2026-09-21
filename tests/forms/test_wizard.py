@@ -16,8 +16,8 @@ from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.test import RequestFactory, override_settings
 
 from next.forms import Form, ModelForm, PermissionOutcome
-from next.forms.diagnostics import registration_diagnostics
 from next.forms.manager import form_action_manager
+from next.forms.registration import registration_diagnostics
 from next.forms.wizard import (
     CacheFormWizardBackend,
     FormWizard,

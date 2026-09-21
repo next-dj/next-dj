@@ -7,7 +7,7 @@ from django.http import HttpRequest
 
 import next.pages.registry as registry_module
 from next.deps import DependencyResolver
-from next.pages import Context, Page
+from next.pages import Context, Page, PageContextShapeError
 from next.pages.context import ContextByDefaultProvider
 from next.pages.registry import PageContextEntry, PageContextRegistry, ZoneBinding
 from next.static import StaticCollector
@@ -324,6 +324,53 @@ class TestPageContextRegistry:
         assert "inherited_key2" in result.context_data
         assert result.context_data["inherited_key1"] == "value1"
         assert result.context_data["inherited_key2"] == "value2"
+
+
+class TestKeylessContextShape:
+    """A keyless ``@context`` that answers no mapping names itself before failing."""
+
+    def test_keyless_context_returning_a_list_names_the_callable(
+        self, context_manager, test_file_path
+    ) -> None:
+        def rows() -> list:
+            return ["a", "b"]
+
+        context_manager.register_context(test_file_path, None, rows)
+
+        with pytest.raises(PageContextShapeError) as caught:
+            context_manager.collect_context(test_file_path)
+
+        assert caught.value.context_name == "rows"
+        assert caught.value.file_path == test_file_path
+        assert "rows" in str(caught.value)
+        assert str(test_file_path) in str(caught.value)
+
+    def test_inherited_keyless_context_returning_a_string_names_the_child_page(
+        self, context_manager, tmp_path
+    ) -> None:
+        """The child page is the one being built, so it is the path the error carries."""
+        parent = tmp_path / "page.py"
+        child = tmp_path / "child" / "page.py"
+
+        def banner() -> str:
+            return "not a mapping"
+
+        context_manager.register_context(parent, None, banner, inherit_context=True)
+
+        with pytest.raises(PageContextShapeError) as caught:
+            context_manager.collect_context(child)
+
+        assert caught.value.context_name == "banner"
+        assert caught.value.file_path == child
+
+    def test_the_error_reads_as_a_type_error(
+        self, context_manager, test_file_path
+    ) -> None:
+        """Callers catching the plain `dict.update` failure keep working."""
+        context_manager.register_context(test_file_path, None, lambda: 42)
+
+        with pytest.raises(TypeError):
+            context_manager.collect_context(test_file_path)
 
 
 class TestZoneBindings:

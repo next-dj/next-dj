@@ -7,7 +7,7 @@ Module summary
 --------------
 
 ``next.static`` exposes the asset discovery, the request-scoped collector, and the configured static backends.
-It also exposes the kind and placeholder registries, the ``next.min.js`` script builder, the staticfiles finder, and the JS context serializer.
+It also exposes the kind and placeholder registries, the ``next.min.js`` script builder, the two staticfiles finders, and the JS context serializer.
 ``static_name`` covers the reference shape rule, and ``StaticAssetNotFoundError`` and ``StaticAssetTraversalError`` name the two references the pipeline refuses, see :doc:`/content/topics/static-assets/name-resolution`.
 
 Public API
@@ -61,6 +61,15 @@ It builds its wrapped ``StaticManager`` lazily on first access.
 ``get_static_manager`` returns the live ``StaticManager`` instance behind the lazy ``default_manager`` handle, and ``next.testing.patching`` uses it to patch a backend directly in tests.
 ``collect_component_assets`` is the entry point that folds a component's co-located assets into a caller-supplied collector, and ``next.templatetags.components`` and ``next.forms.widgets`` both call it.
 
+Ports
+~~~~~
+
+.. automodule:: next.static.ports
+   :members:
+
+``StaticAssetsImpl`` binds the collector, the page and component discovery, and the injection entry points to the ``StaticAssets`` port of :doc:`ports`.
+Every method reads the manager when it is called, so a render path that holds the port sees whatever the current settings built, and ``AppConfig.ready`` composes the binding once.
+
 Injection
 ~~~~~~~~~
 
@@ -93,8 +102,8 @@ Defaults
 .. automodule:: next.static.defaults
    :members:
 
-Staticfiles finder
-~~~~~~~~~~~~~~~~~~
+Staticfiles finders
+~~~~~~~~~~~~~~~~~~~
 
 .. automodule:: next.static.finders
    :members:
@@ -129,7 +138,7 @@ Staticfiles consults the finders in list order and the first match answers a loo
 Signals
 -------
 
-See :doc:`signals` and :doc:`/content/topics/static-assets/signals` for the static signals (``asset_registered``, ``collector_finalized``, ``html_injected``, ``backend_loaded``).
+See :doc:`signals` and :doc:`/content/topics/static-assets/signals` for the static signals (``asset_registered``, ``collector_finalized``, ``html_injected``, ``static_backend_loaded``).
 
 See also
 --------

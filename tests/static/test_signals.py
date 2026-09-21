@@ -14,9 +14,9 @@ from next.static import (
 )
 from next.static.signals import (
     asset_registered,
-    backend_loaded,
     collector_finalized,
     html_injected,
+    static_backend_loaded,
 )
 from next.testing import SignalRecorder, capture_signals
 from tests.support import StaticAssetProvider
@@ -55,9 +55,9 @@ def capture_html_injected() -> Generator[SignalRecorder, None, None]:
 
 
 @pytest.fixture()
-def capture_backend_loaded() -> Generator[SignalRecorder, None, None]:
-    """Record ``backend_loaded`` emissions."""
-    with capture_signals(backend_loaded) as recorder:
+def capture_static_backend_loaded() -> Generator[SignalRecorder, None, None]:
+    """Record ``static_backend_loaded`` emissions."""
+    with capture_signals(static_backend_loaded) as recorder:
         yield recorder
 
 
@@ -228,22 +228,26 @@ class TestHtmlInjectedSignal:
         assert capture_html_injected.events[0].kwargs["request"] is sentinel
 
 
-class TestBackendLoadedSignal:
+class TestStaticBackendLoadedSignal:
     def test_fired_for_each_configured_backend(
-        self, fresh_manager: StaticManager, capture_backend_loaded: SignalRecorder
+        self,
+        fresh_manager: StaticManager,
+        capture_static_backend_loaded: SignalRecorder,
     ) -> None:
         config = {"BACKEND": "next.static.StaticFilesBackend", "OPTIONS": {}}
         with override_settings(NEXT_FRAMEWORK={"STATIC_BACKENDS": [config]}):
             fresh_manager._ensure_backends()
 
-        assert len(capture_backend_loaded) == 1
-        event = capture_backend_loaded.events[0]
+        assert len(capture_static_backend_loaded) == 1
+        event = capture_static_backend_loaded.events[0]
         assert event.sender is StaticFilesBackend
         assert event.kwargs["instance"] is fresh_manager.default_backend
         assert event.kwargs["config"] == config
 
     def test_sender_class_allows_filtering(
-        self, fresh_manager: StaticManager, capture_backend_loaded: SignalRecorder
+        self,
+        fresh_manager: StaticManager,
+        capture_static_backend_loaded: SignalRecorder,
     ) -> None:
         with override_settings(
             NEXT_FRAMEWORK={
@@ -251,22 +255,26 @@ class TestBackendLoadedSignal:
             }
         ):
             fresh_manager._ensure_backends()
-        senders = [e.sender for e in capture_backend_loaded]
+        senders = [e.sender for e in capture_static_backend_loaded]
         assert all(s is StaticFilesBackend for s in senders)
 
     def test_seeded_fallback_announces_itself(
-        self, fresh_manager: StaticManager, capture_backend_loaded: SignalRecorder
+        self,
+        fresh_manager: StaticManager,
+        capture_static_backend_loaded: SignalRecorder,
     ) -> None:
         with override_settings(NEXT_FRAMEWORK={"STATIC_BACKENDS": []}):
             fresh_manager._ensure_backends()
 
         assert isinstance(fresh_manager.default_backend, StaticFilesBackend)
-        assert [event.sender for event in capture_backend_loaded] == [
+        assert [event.sender for event in capture_static_backend_loaded] == [
             StaticFilesBackend
         ]
 
     def test_seed_after_a_skipped_entry_announces_itself(
-        self, fresh_manager: StaticManager, capture_backend_loaded: SignalRecorder
+        self,
+        fresh_manager: StaticManager,
+        capture_static_backend_loaded: SignalRecorder,
     ) -> None:
         with override_settings(
             NEXT_FRAMEWORK={"STATIC_BACKENDS": [{"BACKEND": "builtins.dict"}]}
@@ -274,9 +282,9 @@ class TestBackendLoadedSignal:
             fresh_manager._ensure_backends()
 
         assert isinstance(fresh_manager.default_backend, StaticFilesBackend)
-        assert [event.kwargs["instance"] for event in capture_backend_loaded] == [
-            fresh_manager.default_backend
-        ]
+        assert [
+            event.kwargs["instance"] for event in capture_static_backend_loaded
+        ] == [fresh_manager.default_backend]
 
 
 class TestSignalsAreDjangoSignals:
@@ -289,5 +297,5 @@ class TestSignalsAreDjangoSignals:
     def test_html_injected_has_send(self) -> None:
         assert hasattr(html_injected, "send")
 
-    def test_backend_loaded_has_send(self) -> None:
-        assert hasattr(backend_loaded, "send")
+    def test_static_backend_loaded_has_send(self) -> None:
+        assert hasattr(static_backend_loaded, "send")

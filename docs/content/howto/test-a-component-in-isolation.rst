@@ -33,10 +33,9 @@ A component that lives beside a page rather than in a configured root needs it, 
    addopts = -p next.testing.plugin
    next_components = true
 
-``eager_load_components`` covers the roots configured through ``COMPONENT_BACKENDS``.
-Component folders inside a page tree register during the URL router walk instead, which runs when the URLconf first loads.
-A suite whose other tests issue ``NextClient`` requests has already triggered the walk.
-A suite that renders components without any HTTP triggers it by reversing one route in a session fixture, for example with ``page_reverse()`` from ``next.urls``.
+``eager_load_components`` covers the roots configured through ``COMPONENT_BACKENDS`` and the component folders inside every configured page tree.
+It registers the page-tree folders itself before importing anything, which is the step a live registry otherwise performs only once a request has walked that tree.
+A suite that never issues an HTTP request therefore needs no route reversal or other way of staging the walk.
 
 Render the component
 ~~~~~~~~~~~~~~~~~~~~

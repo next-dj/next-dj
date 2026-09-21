@@ -66,7 +66,8 @@ A bad value therefore breaks every page, not only the pages that expose context.
 A path that cannot be imported raises ``ImportError``, and a class whose instance has no ``dumps(value) -> str`` method raises ``TypeError``.
 
 Run ``uv run python manage.py check`` before deploying.
-``next.W042`` reports a non-string value, an unimportable path, a name that is not a class, a class that cannot be instantiated with no arguments, and a class that does not implement the protocol.
+Five warnings split the failures, ``next.W042`` for a value that is not a dotted-path string, ``next.W079`` for a path that cannot be imported, ``next.W080`` for a path that imports into something other than a class, ``next.W081`` for a class that refuses to instantiate with no arguments, and ``next.W082`` for an instance without a ``dumps`` method.
+``next.W081`` is also what a missing pydantic package reports against ``PydanticJsContextSerializer``, whose constructor raises ``ImportError``.
 
 Per-key override
 ~~~~~~~~~~~~~~~~

@@ -9,27 +9,14 @@ It extends a regular Django project while leaving the ORM, admin, auth, and migr
 This page describes the mental model.
 Read it once before the tutorial, then refer back when the layout of a real project surprises you.
 
-Who this is for
----------------
+Why it exists
+-------------
 
 A Django project that grows a modern interactive frontend has historically pushed that frontend out of Django.
 The team adds React or Vue, then an API layer to feed it, a build toolchain to ship it, and a second copy of the application state so the two halves agree.
 next.dj exists to remove the reasons for that move, so a Django project stays enough for the whole application.
 It targets the interaction patterns that drove the split rather than the data layer, which Django already serves well.
-
-Three profiles map onto that goal.
-
-A team maintaining a server-rendered Django site.
-   The wiring shrinks.
-   The URL configuration, the view layer that exists only to render a template, and the per-form redirect plumbing move into the directory tree.
-
-A team running Django beside a separate single-page frontend.
-   The second stack becomes optional.
-   Partial rendering updates a named slice of a page from the server, so an interaction no longer needs a JSON endpoint plus a client-side copy of the state that renders it.
-
-A team that wants component structure without a JavaScript build step.
-   A component is a folder holding a template with optional Python, CSS, and JS beside it, and the framework collects those assets for the pages that use them.
-   The requirements in :doc:`install` stay Python, Django, and an ASGI or WSGI server.
+The requirements in :doc:`install` stay Python, Django, and an ASGI or WSGI server, with no JavaScript build step.
 
 What next.dj adds
 -----------------
@@ -71,13 +58,14 @@ Form actions.
 Partial rendering.
    Updating part of a page costs a JSON endpoint, a client-side template, and a second copy of the state that renders it.
    A ``{% zone %}`` block names a slice of a page the server can re-render on its own instead, and a form, filter, or link targets that zone.
-   Every interaction degrades to a full page cycle when JavaScript is off.
+   A form, filter, or link that targets a zone degrades to a full page cycle when JavaScript is off, because the markup it carries is an ordinary form or anchor either way.
+   A ``lazy=`` zone holds its placeholder, a ``poll=`` zone never re-fetches, and the Server-Sent Events bridge and the ``toast``, ``layer.open``, ``layer.close``, and ``event`` verbs have no server-rendered form at all.
    See :doc:`/content/topics/partial-rendering/index`.
 
 Co-located assets.
    A stylesheet or a script for one page or component costs a static file path, a tag repeated in every template that needs it, and the discipline to remove the tag when the markup goes.
    A file whose stem matches the ``template.djx``, ``layout.djx``, or ``component.djx`` beside it is discovered as that owner's asset instead, so ``component.css`` and ``component.js`` belong to the component that owns them.
-   The ``{% collect_styles %}`` and ``{% collect_scripts %}`` tags mark the slots in the layout where the collected assets of the rendered page land.
+   The ``{% collect_styles %}`` and ``{% collect_scripts %}`` tags mark the collector slots in the layout where the collected assets of the rendered page land.
    A file that no page or component owns, such as a compiled bundle, is named in a tag and resolved through Django staticfiles, which is where ``{% static %}`` reads from as well.
    See :doc:`/content/topics/static-assets/index`.
 
@@ -90,13 +78,25 @@ The ORM, migrations, admin, auth, and middleware stay the same as in a stock Dja
 next.dj adds the ``NEXT_FRAMEWORK`` dict, includes ``next.urls`` for the file router, and resolves ``.djx`` through ``DjxTemplateLoader``.
 Standard ``.html`` templates in other apps keep rendering, and they gain the framework tags, because next.dj registers its template tag libraries as Django builtins.
 
-One parsing change does reach every template the process loads.
-The framework widens the ``{% ... %}`` alternative of Django's template tag pattern at startup, so a block tag may span several lines while ``{{ ... }}`` and ``{# ... #}`` keep their stock behaviour.
-A template that relies on a newline ending a block tag needs adjusting before adopting next.dj, and :doc:`/content/ref/template-tags` states the rule.
-
-For the design principles behind that split, read :doc:`/content/misc/design-philosophy`.
+One parsing change reaches the lexer every template in the process shares.
+The framework adds a line-spanning branch to Django's template tag pattern at startup, and that branch matches only next.dj's own block tags, so one of them may span several lines.
+Every other tag keeps its stock behaviour, a newline inside it still ends it, and ``{{ ... }}`` and ``{# ... #}`` are untouched, so an existing template needs no adjustment before adopting next.dj.
+:doc:`/content/ref/template-tags` states the rule.
 
 The nouns *page*, *layout*, *component*, *action*, and *context function* carry a specific meaning throughout this manual, and :doc:`/content/misc/glossary` defines each one.
+:doc:`from-django` maps each Django idiom this page describes onto the shape that replaces it.
+
+What the model costs
+--------------------
+
+Each of the seven mechanisms above trades something away, and the trade lands on the same few places.
+
+The filesystem rule makes a rename a behaviour change, because moving a directory moves the URL, the URL name, and the layout chain at once, and no static check finds a ``{% url %}`` call left behind.
+Resolution by name makes a context key a contract no tool checks, and a published context key shadows a captured URL segment carrying the same name.
+Registration on import makes a form action live the moment its module is imported, reachable by any visitor until the class declares a guard.
+Composition by substitution gives a layout one placeholder and no override across the chain, so there is no ``{% block %}`` and no ``{{ block.super }}``.
+
+:doc:`/content/misc/design-philosophy` states the rejected alternative and the cost beside every principle, and :doc:`limitations` lists the boundaries the model does not cross.
 
 A minimal project
 -----------------
@@ -106,16 +106,9 @@ It also needs the ``NEXT_FRAMEWORK`` block in ``config/settings.py`` and a one-l
 :doc:`install` shows the full three-file shape with each block spelled out.
 Every new directory under ``pages/`` then adds another page without touching the URL configuration.
 
-When to read the tutorial
--------------------------
-
-If you have used Django before and want to feel the framework, jump to :doc:`tutorial01`.
-The six tutorial parts build a small Notes application that exercises every core subsystem.
-The first four parts wire up routing, layouts, components, and forms.
-The fifth adds tests and the development workflow, and the sixth makes the Notes index update in place with partial rendering.
-
 .. seealso::
 
+   :doc:`from-django` for the Django idiom behind each mechanism above.
    :doc:`install` for environment setup.
    :doc:`whatsnext` for topic hubs after the tutorial.
    :doc:`/content/topics/index` for in-depth topic guides.

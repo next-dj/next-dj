@@ -1,5 +1,6 @@
 """Manager for form action backends and routing."""
 
+import itertools
 import types
 from typing import TYPE_CHECKING, override
 
@@ -10,7 +11,8 @@ from next.backends import BackendListManager, backend_entries, load_backends
 from .backends import FormActionBackend
 from .dispatch.build import _form_action_context_callable
 from .errors import FormActionNotFoundError
-from .origin import _url_kwargs_for_request
+from .origin import url_kwargs_for_request
+from .signals import form_backend_loaded
 
 
 if TYPE_CHECKING:
@@ -26,21 +28,29 @@ type ActionsSnapshot = tuple[tuple[FormActionBackend, object], ...]
 """Per-backend opaque tokens, each paired with the backend that minted it."""
 
 
+_version_counter = itertools.count(1)
+"""Process-wide source of form-action versions, so no two managers share one."""
+
+
 class FormActionManager(BackendListManager[FormActionBackend]):
     """Holds one or more backends and yields their URL patterns."""
 
-    version: int = 0
-    """Cache token for the lazy urlpatterns concat. Registrations that
-    bypass the manager and hit a backend directly are not tracked, as
-    they were never supported.
-
-    Read it to key a cache of your own on the registered actions. It is a
-    plain attribute rather than a property because the lazy urlpatterns
-    concat reads it on every resolve."""
-
     def __init__(self, backends: "list[FormActionBackend] | None" = None) -> None:
         """Initialise with explicit backends or defer loading to settings."""
+        self._version = next(_version_counter)
         super().__init__(backends)
+
+    @property
+    def version(self) -> int:
+        """Cache token for the lazy urlpatterns concat, moved by every registration.
+
+        Registrations that bypass the manager and hit a backend directly are not
+        tracked, and the token is drawn process-wide so no two managers share one.
+        """
+        return self._version
+
+    def _bump(self) -> None:
+        self._version = next(_version_counter)
 
     @override
     def __repr__(self) -> str:
@@ -61,9 +71,11 @@ class FormActionManager(BackendListManager[FormActionBackend]):
         `FORM_ACTION_BACKENDS` live must let the forms register again.
         """
         configs = backend_entries("FORM_ACTION_BACKENDS")
-        self.version += 1
+        self._bump()
         # No default, an entry without BACKEND is a next.E044 misconfiguration.
-        self._backends = load_backends(configs, base=FormActionBackend)
+        self._backends = load_backends(
+            configs, base=FormActionBackend, signal=form_backend_loaded
+        )
         # An empty load is a broken config, not a result, so the next access
         # rereads settings. A settings_reloaded receiver cannot do that instead,
         # because dropping the backends drops their actions.
@@ -97,11 +109,11 @@ class FormActionManager(BackendListManager[FormActionBackend]):
     def register_action(self, registration: "ActionRegistration") -> None:
         """Forward registration to the first backend."""
         self._first_backend().register_action(registration)
-        self.version += 1
+        self._bump()
 
     def clear_registries(self) -> None:
         """Clear the action storage of every backend. For test isolation."""
-        self.version += 1
+        self._bump()
         for backend in self._backends:
             backend.clear_registry()
 
@@ -122,7 +134,7 @@ class FormActionManager(BackendListManager[FormActionBackend]):
         """
         for backend, state in snapshot:
             backend.restore(state)
-        self.version += 1
+        self._bump()
 
     def get_action_url(self, action_name: str, *, page_path: str | None = None) -> str:
         """Return the reverse URL from the first backend that knows `action_name`.
@@ -226,7 +238,7 @@ def _build_form_namespace_from_meta(
     """Build the form namespace for already-resolved action meta."""
     wizard_class = meta.get("wizard_class")
     if wizard_class is not None:
-        url_kwargs = _url_kwargs_for_request(request)
+        url_kwargs = url_kwargs_for_request(request)
         wizard = wizard_class(request=request, url_kwargs=url_kwargs)
         return wizard.template_namespace()
     fc = meta.get("form_class")

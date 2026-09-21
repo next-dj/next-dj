@@ -6,10 +6,29 @@ import pytest
 from django.dispatch import Signal
 
 from next import signals as framework_signals
+from next.components import signals as component_signals
+from next.forms import signals as form_signals
+from next.partial import signals as partial_signals
+from next.static import signals as static_signals
 from next.static.assets import StaticAsset
 from next.static.manager import default_manager
 from next.static.signals import asset_registered
 from next.testing import capture_signals
+from next.urls import signals as url_signals
+
+
+_SIGNAL_AREAS = (
+    component_signals,
+    form_signals,
+    partial_signals,
+    static_signals,
+    url_signals,
+)
+
+
+def _area_signals(name: str):
+    """Return the area module that owns the signal the aggregate re-exports."""
+    return next(area for area in _SIGNAL_AREAS if hasattr(area, name))
 
 
 UNCACHED_SIGNALS = frozenset(
@@ -22,6 +41,18 @@ UNCACHED_SIGNALS = frozenset(
 )
 
 CACHED_SIGNALS = frozenset(framework_signals.__all__) - UNCACHED_SIGNALS
+
+# One per settings-driven backend family, all sent from `next.backends`.
+BACKEND_LOADED_SIGNALS = frozenset(
+    {
+        "component_backend_loaded",
+        "form_backend_loaded",
+        "partial_backend_loaded",
+        "router_backend_loaded",
+        "static_backend_loaded",
+        "wizard_backend_loaded",
+    }
+)
 
 
 def _signal(name: str) -> Signal:
@@ -66,6 +97,42 @@ class TestFrameworkSignalCaching:
 
     def test_every_exported_signal_is_classified(self) -> None:
         assert frozenset(framework_signals.__all__) == CACHED_SIGNALS | UNCACHED_SIGNALS
+
+
+class TestEveryBackendFamilyAnnouncesItsLoad:
+    """One `*_backend_loaded` signal per settings-driven family, all aggregated here.
+
+    A family added without one leaves a listener blind to half the loaded backends.
+    """
+
+    def test_the_aggregate_exports_one_signal_per_family(self) -> None:
+        assert frozenset(framework_signals.__all__) >= BACKEND_LOADED_SIGNALS
+
+    def test_the_aggregate_names_no_other_backend_signal(self) -> None:
+        exported = {
+            name
+            for name in framework_signals.__all__
+            if name.endswith("_backend_loaded")
+        }
+        assert exported == BACKEND_LOADED_SIGNALS
+
+    @pytest.mark.parametrize("name", sorted(BACKEND_LOADED_SIGNALS))
+    def test_the_aggregate_re_exports_the_signal_its_area_owns(self, name: str) -> None:
+        assert _signal(name) is getattr(_area_signals(name), name)
+
+    @pytest.mark.parametrize("name", sorted(BACKEND_LOADED_SIGNALS))
+    def test_a_load_signal_carries_the_class_the_config_and_the_instance(
+        self, name: str
+    ) -> None:
+        """Every family sends the same three, so one receiver serves them all."""
+        signal = _signal(name)
+        config = {"BACKEND": "myapp.Backend"}
+        with capture_signals(signal) as recorder:
+            signal.send(sender=StaticAsset, config=config, instance=None)
+
+        event = recorder.first_for(signal)
+        assert event.sender is StaticAsset
+        assert event.kwargs == {"config": config, "instance": None}
 
 
 class TestAssetRegisteredStaysUncached:

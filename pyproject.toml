@@ -153,11 +153,11 @@ omit = [
     # core
     "*/next/checks/*",
     "*/next/conf/checks.py",
-    "*/next/pages/checks.py",
+    "*/next/pages/checks/*",
     "*/next/urls/checks.py",
     "*/next/components/checks.py",
-    "*/next/forms/checks.py",
-    "*/next/partial/checks.py",
+    "*/next/forms/checks/*",
+    "*/next/partial/checks/*",
     "*/next/apps/checks.py",
 ]
 

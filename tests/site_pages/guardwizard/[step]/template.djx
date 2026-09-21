@@ -1,0 +1,4 @@
+<h1>guard wizard page</h1>
+{% zone "sealed-zone" %}
+{% form "sealed_wizard" zone="sealed-zone" %}<div>{{ seal_note }}{{ form.name }}{{ form.seal }}</div>{% endform %}
+{% endzone %}

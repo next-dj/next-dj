@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from next.caches import LruCache
+from next.caches import BoundedCache, LruCache
 
 from .signals import component_registered, components_registered
 
@@ -66,8 +66,13 @@ class ComponentRegistry:
         return tuple(self._ordered)
 
     def mark_as_root(self, path: Path) -> None:
-        """Mark `path` as globally visible across the tree."""
+        """Mark `path` as globally visible across the tree, either spelling.
+
+        The resolved form goes in beside the given one, so a backend naming a root
+        through a symlink still answers `is_root` for the path a scan resolved.
+        """
         self._root_roots.add(path)
+        self._root_roots.add(path.resolve())
 
     def is_root(self, path: Path) -> bool:
         """Return True when `path` was marked as a global root."""
@@ -110,7 +115,7 @@ class ComponentVisibilityResolver:
         ] = {}
         self._scope_index_registry_version = -1
         self._cached_registry_version = -1
-        self._resolved_path_cache: dict[Path, Path] = {}
+        self._resolved_path_cache: BoundedCache[Path, Path] = BoundedCache()
 
     def _ensure_scope_index(self) -> None:
         if self._scope_index_registry_version == self._registry.version:
@@ -145,31 +150,31 @@ class ComponentVisibilityResolver:
         return out
 
     def resolve_visible(self, template_path: Path) -> Mapping[str, ComponentInfo]:
-        """Return a mapping of visible component names for `template_path`."""
-        cached_resolved = self._resolved_path_cache.get(template_path)
-        if cached_resolved is None:
-            cached_resolved = template_path.resolve()
-            self._resolved_path_cache[template_path] = cached_resolved
-        template_path = cached_resolved
+        """Return a mapping of visible component names for `template_path`.
 
+        The path memo is keyed by the spelling the caller passed, so a render
+        repeating one unresolved path keeps hitting it after an invalidation.
+        """
         if self._cached_registry_version != self._registry.version:
             self._result_cache.clear()
             self._path_cache.clear()
             self._resolved_path_cache.clear()
-            self._resolved_path_cache[template_path] = template_path
             self._scope_index_registry_version = -1
             self._cached_registry_version = self._registry.version
 
+        resolved = self._resolved_path_cache.get(template_path)
+        if resolved is None:
+            resolved = template_path.resolve()
+            self._resolved_path_cache[template_path] = resolved
+
         try:
-            return self._result_cache[template_path]
+            return self._result_cache[resolved]
         except KeyError:
             pass
 
         candidates: list[tuple[int, int, str, int, ComponentInfo]] = []
-        for position, dirs_origin, component in self._candidate_components(
-            template_path
-        ):
-            score = self._calculate_visibility_score(component, template_path)
+        for position, dirs_origin, component in self._candidate_components(resolved):
+            score = self._calculate_visibility_score(component, resolved)
             if score is not None:
                 candidates.append(
                     (score, dirs_origin, component.name, position, component)
@@ -186,13 +191,13 @@ class ComponentVisibilityResolver:
                 result[name] = info
                 seen.add(name)
 
-        self._result_cache[template_path] = result
+        self._result_cache[resolved] = result
         return result
 
     def _calculate_visibility_score(
         self, component: ComponentInfo, template_path: Path
     ) -> int | None:
-        scope_root = component.scope_root
+        scope_root = component.resolved_scope_root
         scope_rel = component.scope_relative or ""
 
         if self._registry.is_root(scope_root) and not scope_rel:

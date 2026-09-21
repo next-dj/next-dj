@@ -20,6 +20,7 @@ from tests.support import (
     DummyComponentsBackend,
     next_framework_settings_stand_in as _stand_in,
 )
+from tests.support.races import LockWonByAnotherThread
 
 
 def _install(manager: ComponentsManager, *backends: object) -> None:
@@ -314,6 +315,24 @@ class TestFileComponentsBackend:
     def test_a_backend_without_modules_inherits_the_no_op_import_hook(self) -> None:
         """The contract default reports no modules rather than failing."""
         assert DummyComponentsBackend({}).import_component_modules() == ()
+
+    def test_a_thread_that_lost_the_race_registers_the_tree_no_second_time(
+        self, tmp_path: Path, min_component_config: dict
+    ) -> None:
+        """The scan registers every `ComponentInfo`, so a repeat doubles the registry."""
+        (tmp_path / "header.djx").write_text("<header/>")
+        backend = FileComponentsBackend(
+            {**min_component_config, "DIRS": [str(tmp_path)]}
+        )
+        backend._ensure_loaded()
+        lock = LockWonByAnotherThread(backend, "_loaded")
+        backend._lock = lock
+        backend._loaded = False
+
+        backend._ensure_loaded()
+
+        assert lock.entered == 1
+        assert len(backend._registry) == 1
 
 
 class TestWalkedFolderHook:

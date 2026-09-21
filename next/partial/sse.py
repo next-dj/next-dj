@@ -210,7 +210,7 @@ def _sse_interval(option: str, default: float) -> float:
     """
     sse = partial_backend_manager.get().options.get(_SSE_OPTION)
     value = sse.get(option, default) if isinstance(sse, dict) else default
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
+    if isinstance(value, int | float) and not isinstance(value, bool):
         return float(value)
     return default
 

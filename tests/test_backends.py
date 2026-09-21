@@ -40,6 +40,7 @@ from tests.support.backends import (
     CountingBackend,
     FakeBackend,
 )
+from tests.support.races import LockWonByAnotherThread
 
 
 _DICT_SETTING = "FORM_WIZARD_BACKEND"
@@ -464,6 +465,92 @@ class TestFrozenMergedValuesAreReadUnchanged:
                 config["OPTIONS"]["flag"] = False
 
 
+class TestSingleBackendManagerSignal:
+    """The one-backend families announce their load the way the list ones do."""
+
+    def test_the_signal_fires_on_the_build_rather_than_on_the_binding(self) -> None:
+        signal = Signal()
+        recorder = _Recorder()
+        signal.connect(recorder, weak=False)
+        entry = {"BACKEND": ALPHA, "OPTIONS": {"a": 1}}
+
+        with override_settings(NEXT_FRAMEWORK={_DICT_SETTING: entry}):
+            manager = SingleBackendManager(
+                _DICT_SETTING, base=FakeBackend, signal=signal
+            )
+            assert recorder.calls == []
+            backend = manager.get()
+
+        assert recorder.calls == [(AlphaBackend, entry, backend)]
+
+    def test_a_cached_backend_announces_itself_once(self) -> None:
+        signal = Signal()
+        recorder = _Recorder()
+        signal.connect(recorder, weak=False)
+
+        with override_settings(NEXT_FRAMEWORK={_DICT_SETTING: {"BACKEND": ALPHA}}):
+            manager = SingleBackendManager(
+                _DICT_SETTING, base=FakeBackend, signal=signal
+            )
+            manager.get()
+            manager.get()
+
+        assert len(recorder.calls) == 1
+
+    def test_a_rebuild_after_a_reset_announces_the_new_backend(self) -> None:
+        signal = Signal()
+        recorder = _Recorder()
+        signal.connect(recorder, weak=False)
+
+        with override_settings(NEXT_FRAMEWORK={_DICT_SETTING: {"BACKEND": ALPHA}}):
+            manager = SingleBackendManager(
+                _DICT_SETTING, base=FakeBackend, signal=signal
+            )
+            first = manager.get()
+            manager.reset()
+            second = manager.get()
+
+        assert [call[2] for call in recorder.calls] == [first, second]
+
+    def test_the_signal_carries_a_config_copy(self) -> None:
+        """A receiver that edits what it was handed may not reach the backend."""
+        signal = Signal()
+        recorder = _Recorder()
+        signal.connect(recorder, weak=False)
+
+        with override_settings(NEXT_FRAMEWORK={_DICT_SETTING: {"BACKEND": ALPHA}}):
+            manager = SingleBackendManager(
+                _DICT_SETTING, base=FakeBackend, signal=signal
+            )
+            backend = manager.get()
+
+        assert recorder.calls[0][1] == {"BACKEND": ALPHA}
+        assert recorder.calls[0][1] is not backend.config
+
+    def test_a_family_without_a_signal_announces_nothing(self) -> None:
+        signal = Signal()
+        recorder = _Recorder()
+        signal.connect(recorder, weak=False)
+
+        with override_settings(NEXT_FRAMEWORK={_DICT_SETTING: {"BACKEND": ALPHA}}):
+            _manager().get()
+
+        assert recorder.calls == []
+
+    def test_a_misconfigured_entry_announces_nothing(self) -> None:
+        signal = Signal()
+        recorder = _Recorder()
+        signal.connect(recorder, weak=False)
+
+        with (
+            override_settings(NEXT_FRAMEWORK={_DICT_SETTING: {"BACKEND": MISSING}}),
+            pytest.raises(BackendImportError),
+        ):
+            SingleBackendManager(_DICT_SETTING, base=FakeBackend, signal=signal).get()
+
+        assert recorder.calls == []
+
+
 class _CountingListManager(BackendListManager[FakeBackend]):
     """Family manager over one list-valued key, counting its loads."""
 
@@ -523,6 +610,18 @@ class TestBackendListManager:
             manager._ensure_backends()
 
         assert manager.loads == 1
+
+    def test_a_thread_that_lost_the_race_reads_the_list_the_winner_loaded(self) -> None:
+        """The check under the lock is what keeps two threads from both loading."""
+        manager = _CountingListManager()
+        lock = LockWonByAnotherThread(manager, "_loaded")
+        manager._lock = lock
+
+        with override_settings(NEXT_FRAMEWORK={_LIST_SETTING: [{"BACKEND": ALPHA}]}):
+            manager._ensure_backends()
+
+        assert lock.entered == 1
+        assert manager.loads == 0
 
 
 def _resolve_url_resolver_setting() -> type[URLResolver]:

@@ -13,7 +13,7 @@ from next.pages.watch import (
     page_root_paths_for_watch,
 )
 
-from .info import _paths_from_component_info
+from .info import paths_from_component_info
 from .manager import components_manager
 from .scanner import ComponentScanner
 
@@ -70,7 +70,7 @@ def _collect_paths_for_one_pages_root(
                 continue
             scope_relative = "/".join(rel_parent.parts) if rel_parent.parts else ""
             for info in scanner.scan_directory(path, root, scope_relative):
-                result |= _paths_from_component_info(info)
+                result |= paths_from_component_info(info)
     except OSError as e:
         logger.debug("Cannot scan %s for component dirs %s: %s", root, comp_name, e)
     return result
@@ -98,7 +98,7 @@ def _collect_component_paths_from_backend_dirs() -> set[Path]:
     for root in component_watch_roots():
         try:
             for info in scanner.scan_directory(root, root, ""):
-                result |= _paths_from_component_info(info)
+                result |= paths_from_component_info(info)
         except OSError as e:
             logger.debug("Cannot scan component root %s: %s", root, e)
     return result

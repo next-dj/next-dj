@@ -44,11 +44,12 @@ A compound name such as ``dispatch_build.py`` is not used, so a split turns the 
 The single exception is ``next/templatetags/next_static.py``, whose name Django dictates.
 
 The recurring per-area module names are fixed, so a reader finds the same concern under the same name in every area.
-``registry.py`` holds the ordered registrations, ``manager.py`` the façade over the backends, ``backends.py`` the settings-driven contract, ``markers.py`` the frozen dataclasses, ``providers.py`` the dependency providers, ``signals.py`` the area signals, ``checks.py`` the system checks, ``dispatch.py`` the action pipeline, and ``errors.py`` the area's public exceptions.
+``registry.py`` holds the ordered registrations, ``manager.py`` the façade over the backends, ``backends.py`` the settings-driven contract, ``markers.py`` the frozen dataclasses, ``providers.py`` the dependency providers, ``signals.py`` the area signals, ``checks.py`` the system checks, ``dispatch.py`` the action pipeline, ``ports.py`` the area's implementation of the cross-area protocols, and ``errors.py`` the area's public exceptions.
 
 Machinery shared across areas lives in a flat module at the root of ``next/`` rather than in a package, and never in a package whose name starts with an underscore.
-``backends.py``, ``errors.py``, ``ports.py``, ``signals.py``, and ``utils.py`` are the five such modules.
+``backends.py``, ``caches.py``, ``diagnostics.py``, ``discovery.py``, ``errors.py``, ``introspect.py``, ``ports.py``, ``seeding.py``, ``signals.py``, and ``utils.py`` are those modules.
 ``next/ports.py`` holds the narrow Protocol ports that let one area call another without importing it, each one reached through a slot that ``AppConfig.ready()`` binds once at startup.
+The protocol and the slot live there, the implementation lives in the ``ports.py`` of the area that owns it, so ``next/partial/ports.py`` supplies the partial shaper and ``next/urls/ports.py`` the router access.
 
 Annotations
 ~~~~~~~~~~~
@@ -71,9 +72,15 @@ System checks
 Every check lives next to the subsystem it validates.
 The codes follow ``next.E<NNN>`` for errors and ``next.W<NNN>`` for warnings.
 A new check registers through ``next.checks.register_all``.
-A new check function lands in the area's ``checks.py`` and is added to ``_LAZY_SOURCES_BY_MODULE`` in ``next/checks/__init__.py`` so it resolves off ``next.checks``.
-A check in a new area also adds that area's ``checks`` module to the tuple ``register_all`` imports, otherwise the check never runs.
-Every ``checks.py`` file is omitted from the coverage gate, so do not chase coverage there.
+A new check function lands in the area's checks and is added to ``_LAZY_SOURCES_BY_MODULE`` in ``next/checks/__init__.py`` so it resolves off ``next.checks``.
+That map is also what ``register_all`` walks, so a check in a new area reaches the registry by joining it and by nothing else.
+The area's checks are one module while one file holds them, and a package of one-word submodules once it does not, as in ``next/pages/checks/``, ``next/forms/checks/``, and ``next/partial/checks/``, the largest of the three.
+Every checks module is omitted from the coverage gate, so do not chase coverage there.
+
+That map binds a core check alone.
+A third-party package registers its checks the ordinary Django way, by decorating them with ``django.core.checks.register`` from a module its ``AppConfig.ready`` imports, and the framework neither knows nor needs to know about them.
+Decorating with ``@register(NEXT)`` from ``next.checks`` puts a third-party check under the ``next`` tag, so ``manage.py check --tag next`` reaches it beside the framework ones, which is the only coupling on offer.
+The difference is what ``_LAZY_SOURCES_BY_MODULE`` buys, a lazy re-export off ``next.checks`` and a place in the import walk, and neither is available or needed outside ``next/``.
 
 Signals
 ~~~~~~~

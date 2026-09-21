@@ -463,8 +463,8 @@ class AssetDiscovery:
     def _module_assets(self, lists: dict[str, list[str]]) -> tuple[StaticAsset, ...]:
         """Turn every reference the module lists name into a resolved asset.
 
-        Resolved with the plan rather than per render, because `resolve_url` answers
-        for a file space the plan's own URL generation already tracks.
+        Resolved with the plan rather than per render, because `forget_backend_urls`
+        drops the whole discovery, and every plan in it, when the storage is rebuilt.
         """
         assets: list[StaticAsset] = []
         for slot_name, urls in lists.items():

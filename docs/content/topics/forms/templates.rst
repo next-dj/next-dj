@@ -30,7 +30,7 @@ Optional ``key="value"`` arguments after the name render as HTML attributes on t
 
 The tag does the following.
 
-1. Looks up the action name against the nearest anchor, the enclosing ``component.py`` first when the template is a component's own, then the current page's ``page.py``, then the shared registry.
+1. Looks up the action name against the nearest anchor, the enclosing ``component.py`` first when the template is a component's own, then the anchor the enclosing ``{% form %}`` tag resolved for its own action, then the current page's ``page.py``, then the shared registry.
 2. Resolves the stable dispatch URL for that action.
 3. Emits ``<form action="..." method="post" data-next-action="...">``, then the compiled partial ``data-next-*`` attributes, then an automatic ``enctype="multipart/form-data"`` for a multipart form, then the remaining attributes passed to the tag.
 4. Emits a hidden ``csrfmiddlewaretoken`` input.
@@ -113,7 +113,7 @@ Scope resolution
 ----------------
 
 The tag resolves a name against the nearest anchor first.
-Inside a component's own template the chain is the component's ``component.py``, then the enclosing page's ``page.py``, then the shared registry.
+Inside a component's own template the chain has four steps, the component's ``component.py``, then the anchor the enclosing ``{% form %}`` tag resolved for its own action, then the enclosing page's ``page.py``, then the shared registry.
 In a page or layout template the chain is the page's ``page.py``, then the shared registry.
 An anchor match only counts when the registration carries page scope, so a shared registration answers a lookup that no anchor claims.
 This means a page-local ``NoteForm`` takes precedence over a shared ``NoteForm`` with the same derived name.

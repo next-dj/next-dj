@@ -11,6 +11,7 @@ from django.shortcuts import resolve_url
 
 from next.forms.signals import form_access_denied
 from next.forms.uid import ORIGIN_FIELD_NAME, validated_origin_path
+from next.pages import page
 
 from .build import _resolve_and_call
 
@@ -20,10 +21,11 @@ if TYPE_CHECKING:
     from typing import Protocol
 
     from django import forms as django_forms
-    from django.http import HttpRequest
+    from django.http import HttpRequest, HttpResponseBase
 
     from next.forms.backends import ActionGuard
     from next.forms.base import PermissionOutcome
+    from next.forms.origin import OriginMatch
 
     from . import _DispatchState
 
@@ -63,11 +65,38 @@ def _check_access(
     """
     user = getattr(request, "user", None)
     if user is None or not user.is_authenticated:
-        origin = validated_origin_path(request.POST.get(ORIGIN_FIELD_NAME))
+        origin = validated_origin_path(
+            request.POST.get(ORIGIN_FIELD_NAME), request=request
+        )
         return _redirect_to_login(origin or "/")
     if guard.permissions and not user.has_perms(guard.permissions):
         raise PermissionDenied
     return None
+
+
+def _check_page_access(
+    request: "HttpRequest",
+    origin_match: "OriginMatch | None",
+    *,
+    action_name: str,
+    uid: str | None,
+    sender: type,
+) -> "HttpResponseBase | None":
+    """Return the origin page's own short-circuit for this action POST, or None.
+
+    The action endpoint is not the page URL, so the page view never runs and this is
+    the only place a guarded page refuses a submission it would refuse a visit.
+    """
+    if origin_match is None or origin_match.page_path is None:
+        return None
+    denial, _dynamic = page.authorization_outcome(
+        origin_match.page_path, request, origin_match.origin, origin_match.url_kwargs
+    )
+    if denial is not None:
+        _emit_form_access_denied(
+            request, action_name, uid, layer="page", reason="response", sender=sender
+        )
+    return denial
 
 
 def _normalize_permission(raw: object) -> "HttpResponse | None":
@@ -91,7 +120,7 @@ def _emit_form_access_denied(
     action_name: str,
     uid: str | None,
     *,
-    layer: Literal["view", "object"],
+    layer: Literal["page", "view", "object"],
     reason: Literal["raised", "denied", "response"],
     sender: type,
 ) -> None:

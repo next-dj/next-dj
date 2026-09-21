@@ -3,7 +3,6 @@ import sys
 from pathlib import Path
 
 from config.storages import MANIFEST_STORAGES
-from next.conf import extend_default_backend
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -112,9 +111,4 @@ NEXT_FRAMEWORK = {
         }
     ],
     "JS_CONTEXT_SERIALIZER": "obs.serializers.PydanticJsContextSerializer",
-    # Without the manifest profile assets are served from disk, so no hashed manifest
-    # exists to derive an asset version from and the sentinel leaves the guard silent.
-    "PARTIAL_BACKENDS": extend_default_backend(
-        "PARTIAL_BACKENDS", OPTIONS={"VERSION": "v1"}
-    ),
 }

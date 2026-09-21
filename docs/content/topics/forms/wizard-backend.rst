@@ -169,7 +169,11 @@ Switch to the cache backend to point drafts at a dedicated cache alias and short
        },
    }
 
-The ``next.E051`` system check fires when the dict is malformed, names a backend that cannot be imported, or names a class that is not a ``FormWizardBackend`` subclass.
+Four system checks read the key, one per condition.
+``next.E051`` fires when the value is not a dict.
+``next.E069`` fires when ``BACKEND`` is not a string.
+``next.E070`` fires when the dotted path cannot be imported.
+``next.E071`` fires when the imported class is no ``FormWizardBackend``.
 
 Writing a custom backend
 ------------------------
@@ -225,6 +229,11 @@ Point ``FORM_WIZARD_BACKEND["BACKEND"]`` at the class to use it.
 The framework reads ``FORM_WIZARD_BACKEND`` on first use, caches the instance for the process, and resets the cache when settings reload, so the constructor runs once.
 The test isolation helper :func:`next.testing.reset_form_registration_state` resets it between cases.
 A signed-cookie store or an external draft service follows the same shape, reading its own options from ``OPTIONS``.
+
+Building the instance sends ``wizard_backend_loaded``.
+The sender is the resolved backend class, and the payload carries ``config``, a copy of the settings entry, and ``instance``, the backend the loader built from it.
+It fires on first use and again after a settings reload drops the cache and the next access rebuilds the instance, so a receiver observes every backend the process ever serves with.
+See :ref:`topics-forms-signals-wizard-backend-loaded` for the receiver contract.
 
 .. note::
 

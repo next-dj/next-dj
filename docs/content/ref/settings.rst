@@ -39,7 +39,7 @@ Defining :doc:`STORAGES <django:ref/settings>` overrides the default configurati
 Filling in what a single entry leaves out belongs to the code that consumes the entry, the same place Django fills a ``DATABASES`` alias with ``ATOMIC_REQUESTS`` or a ``TEMPLATES`` entry with ``APP_DIRS``.
 
 A single backend dict follows the rule like any other key.
-``FORM_WIZARD_BACKEND`` set to ``{"OPTIONS": {...}}`` alone carries no ``BACKEND``, which ``manage.py check`` reports as ``next.E051`` and the wizard manager answers with :exc:`~django.core.exceptions.ImproperlyConfigured` on first use.
+``FORM_WIZARD_BACKEND`` set to ``{"OPTIONS": {...}}`` alone carries no ``BACKEND``, which ``manage.py check`` reports as ``next.E069`` and the wizard manager answers with :exc:`~django.core.exceptions.ImproperlyConfigured` on first use.
 Write the whole entry, ``BACKEND`` included.
 
 Each key accepts one shape, and a value of any other type is dropped in favour of the default rather than merged into it.
@@ -188,6 +188,7 @@ It reads two keys from ``OPTIONS``.
 ``CACHE_ALIAS`` names the cache to use, defaulting to ``"default"``, and ``TIMEOUT`` sets the draft expiry in seconds, defaulting to ``SESSION_COOKIE_AGE``.
 Set ``BACKEND`` to a dotted path that subclasses ``FormWizardBackend`` to swap the persistence layer.
 A project value replaces the default dict whole, as :ref:`ref-settings-merge` describes, so the key names its ``BACKEND`` even when the point of setting it is ``OPTIONS``.
+``manage.py check`` reports a value that is no dict as ``next.E051``, a missing or non-string ``BACKEND`` as ``next.E069``, a path that does not import as ``next.E070``, and a class outside the family as ``next.E071``.
 See :doc:`/content/topics/forms/wizard-backend` for the contract, the codec, and a custom backend.
 
 PARTIAL_BACKENDS
@@ -207,7 +208,7 @@ Default value.
        {
            "BACKEND": "next.partial.JsonPartialProtocolBackend",
            "OPTIONS": {
-               "VERSION": "manifest",
+               "VERSION": None,
                "PUSH_WIZARD_STEPS": False,
                "SSE": {
                    "HEARTBEAT_SECONDS": 25,
@@ -218,10 +219,12 @@ Default value.
    ]
 
 The ``OPTIONS`` keys tune the active backend.
-``VERSION`` is the source of the ``X-Next-Version`` stamp.
-The sentinel ``"manifest"`` hashes the staticfiles manifest when the active storage hashes its files, and an explicit string pins the version by hand.
+``VERSION`` is the source of the ``X-Next-Version`` stamp and has three modes.
+``None`` derives the version from the staticfiles manifest when the active storage hashes its files, and falls back to the stable string ``"0"`` when it does not, so a project needs no setting to get a hash out of a manifest storage.
+The sentinel ``"manifest"`` takes the same runtime path and adds a declared requirement, which ``manage.py check`` enforces by reporting ``next.W069`` when the storage writes no manifest.
+Any other string pins a release tag by hand.
 The resolved string is memoised for the life of the configuration, so a manifest replaced under a running process keeps serving the version resolved before it until a settings reload or a restart.
-Without a manifest storage the version guard stays silent at runtime, and ``manage.py check`` reports ``next.W069``.
+A version that never changes leaves the version guard silent at runtime, so a deploy of new assets cannot ask a connected client to reload.
 ``PUSH_WIZARD_STEPS`` is the global default for pushing wizard steps to browser history, which a wizard's ``Meta.push_steps`` overrides per wizard.
 ``SSE.HEARTBEAT_SECONDS`` is the keepalive period in seconds for an async stream source, and ``SSE.RETRY_MS`` is the ``EventSource`` reconnect hint in milliseconds sent in the leading stream frame.
 
@@ -323,7 +326,7 @@ The class is instantiated with no arguments and its ``dumps`` method encodes eve
 Default value ``None``, which selects the built-in ``JsonJsContextSerializer``.
 
 ``resolve_serializer`` reads this setting on every call, so ``override_settings`` takes effect without a restart.
-A value that does not resolve to a usable serializer triggers the ``next.W042`` warning during ``manage.py check``.
+``manage.py check`` reports a value that is no dotted-path string as ``next.W042``, a path that does not import as ``next.W079``, a path naming something other than a class as ``next.W080``, a class that refuses to instantiate with no arguments as ``next.W081``, and an instance without a ``dumps`` method as ``next.W082``.
 At render time such a value raises ``ImportError`` or ``TypeError`` on first use, so fix the dotted path rather than rely on a fallback.
 The built-in ``JsonJsContextSerializer`` steps in only when the setting is unset.
 
@@ -469,7 +472,10 @@ A value of any type other than a string or ``None`` is dropped in favour of the 
 Read the value from the environment or from a build artefact so every worker of a deployment renders the same URL.
 
 A project on :doc:`ManifestStaticFilesStorage <django:ref/contrib/staticfiles>` leaves the key unset, because the manifest already versions each file by its content.
-See :doc:`/content/deployment/static-files` for the trade-off and :doc:`/content/topics/static-assets/template-tags` for the per-URL ``version`` argument of ``{% asset %}``.
+
+The key is also the deploy stamp the partial asset version derives from, so one value moves both the asset URLs and the ``X-Next-Version`` guard that asks an open client to reload.
+A project that wants the two to differ pins ``VERSION`` in its ``PARTIAL_BACKENDS`` entry, which wins over this key, and a project that names neither while running no manifest earns ``next.W083`` on ``manage.py check --deploy``.
+See :doc:`/content/deployment/static-files` for the trade-off, :doc:`/content/topics/partial-rendering/reference` for the ``VERSION`` option, and :doc:`/content/topics/static-assets/template-tags` for the per-URL ``version`` argument of ``{% asset %}``.
 
 Patching defaults
 -----------------

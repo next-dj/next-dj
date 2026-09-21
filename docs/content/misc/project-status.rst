@@ -4,7 +4,7 @@ Project status
 ==============
 
 This page states what a project can rely on when it depends on next.dj.
-It covers the public API surface, the ``NEXT_FRAMEWORK`` settings contract, the supported Python and Django releases, the licence, and where a change reaches the reader.
+It covers the public API surface, the ``NEXT_FRAMEWORK`` settings contract, the supported Python and Django releases, what has to settle before the project leaves its current maturity classifier, who maintains it, the licence, and where a change reaches the reader.
 
 .. contents::
    :local:
@@ -13,9 +13,40 @@ It covers the public API surface, the ``NEXT_FRAMEWORK`` settings contract, the 
 Maturity
 --------
 
-The framework is under active development, and the repository README asks a project to treat a release as evolving until it validates the behaviour that project depends on.
+The framework is under active development, and the distribution carries the Alpha development-status classifier to say so.
 A deployment therefore pins an exact release and re-reads this page before it upgrades.
 Run ``uv run python manage.py check`` after an upgrade, because the framework reports a configuration mistake with a code and a hint, as :doc:`/content/ref/system-checks` describes.
+
+What that classifier does not describe is how the code is held, which is the part a reader evaluating the project can verify.
+Every merge carries 100 percent line and branch coverage over ``next/``, the same threshold on every project under ``examples/``, and the same on the TypeScript client runtime.
+Mypy runs strict over the whole package, Ruff runs with every rule selected, and a benchmark job fails a pull request whose median regresses past the gate it sets.
+The client bundle has a hard budget of 14 KB gzipped, checked on every run, because it ships on every page.
+:doc:`/content/contributing/quality-gates` states what each gate measures and which command reproduces it.
+
+Road to 1.0
+-----------
+
+Three things have to settle before the classifier moves past Alpha.
+The public API has to freeze, which means the curated top-level ``next.*`` exports and the reference pages' ``automodule`` surface stop changing shape between releases.
+The ``NEXT_FRAMEWORK`` key set has to freeze with it, so an upgrade adds keys and renames none.
+The extension contracts have to freeze last, the backend base classes of every family and the ports in :doc:`/content/ref/ports`, because an extension written against them outlives the release it was written on.
+
+Three subsystems are still moving.
+Partial rendering carries the largest surface and the most open questions, and its own :doc:`/content/topics/partial-rendering/limitations` page states what the current model does not cover.
+The client runtime moves with it, since the two halves of the protocol change together.
+The static pipeline is the third, where asset name resolution and the rules a custom backend inherits are the parts a project extending it reads from the reference page rather than from a recipe.
+Routing, pages, layouts, context, and form dispatch are the settled half of the tree.
+
+The criterion for leaving Alpha is therefore not a feature count.
+It is a run of releases in which none of the three contracts above breaks, which is what lets a project take an upgrade on the strength of the release alone rather than on the pull requests behind it.
+
+Who maintains next.dj
+---------------------
+
+The project is maintained through the repository by its contributors, and it carries no company backing and no funded support contract.
+Issues, pull requests, and security advisories are read, and the time to a first response depends on maintainer availability rather than on a service level the project promises, which :repo:`CONTRIBUTING.md <blob/main/CONTRIBUTING.md>` states in the same terms.
+A report that carries a reproducible case is answered soonest, because triage is the step availability constrains most.
+A deployment that needs a guaranteed response time plans for reading the code itself, which the MIT licence permits without restriction.
 
 What counts as public API
 -------------------------

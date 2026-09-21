@@ -8,7 +8,7 @@ from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.utils.http import url_has_allowed_host_and_scheme
 
 from next.forms.origin import resolve_origin, resolve_url_to_page
-from next.pages import page
+from next.pages import page as page_manager
 from next.seeding import JS_CONTEXT_KEY
 from next.static.assets import default_kinds
 from next.static.manager import default_manager
@@ -59,6 +59,11 @@ _RESERVED_EVENT_PREFIXES: tuple[str, ...] = ("partial:", "next:")
 DedupeMode = Literal["key", "id"]
 _DEDUPE_MODES: frozenset[str] = frozenset({"key", "id"})
 
+_FOREIGN_ZONE_UNUSED: tuple[str, ...] = ("target", "html", "form", "overrides")
+_ZONE_UNUSED: tuple[str, ...] = ("target", "html", "form", "url_kwargs")
+_FORM_UNUSED: tuple[str, ...] = ("target", "overrides", "page", "url_kwargs")
+_TARGET_UNUSED: tuple[str, ...] = ("overrides", "page", "url_kwargs")
+
 
 def _is_reserved_event(name: str) -> bool:
     """Return True when the name belongs to the framework client-bus channel."""
@@ -93,6 +98,7 @@ class Patches:
         self._request_id: str | None = echo_of
         self._origin: OriginMatch | None = None
         self._origin_resolved = False
+        self._origin_authorized = False
         self._render_context: dict[str, object] | None = None
 
     @classmethod
@@ -152,31 +158,29 @@ class Patches:
         another route raises here rather than being silently dropped.
         """
         if zone is not None and page is not None:
-            self._refuse(target=target, html=html, form=form, overrides=overrides)
+            self._refuse(_FOREIGN_ZONE_UNUSED, target, html, form, overrides)
             return self.morph_foreign_zone(zone, page, url_kwargs=url_kwargs)
         if zone is not None:
-            self._refuse(target=target, html=html, form=form, url_kwargs=url_kwargs)
+            self._refuse(_ZONE_UNUSED, target, html, form, url_kwargs)
             return self.morph_zone(zone, overrides=overrides)
         if form is not None:
-            self._refuse(
-                target=target, overrides=overrides, page=page, url_kwargs=url_kwargs
-            )
+            self._refuse(_FORM_UNUSED, target, overrides, page, url_kwargs)
             return self.morph_form(form, html or "")
-        self._refuse(overrides=overrides, page=page, url_kwargs=url_kwargs)
+        self._refuse(_TARGET_UNUSED, overrides, page, url_kwargs)
         if not target:
             msg = "morph() needs a target mapping, or a zone or form selector."
             raise TypeError(msg)
         return self._append_morph(target, html or "", extract=False)
 
     @staticmethod
-    def _refuse(**unused: object) -> None:
+    def _refuse(names: tuple[str, ...], *unused: object) -> None:
         """Raise when a morph route is passed a keyword another route owns.
 
         The empty case is every morph's hot path, so it returns before naming anything.
         """
-        if not any(unused.values()):
+        if not any(unused):
             return
-        named = sorted(name for name, value in unused.items() if value)
+        named = sorted(name for name, value in zip(names, unused, strict=True) if value)
         msg = f"morph() got {named}, which the selected route does not accept."
         raise TypeError(msg)
 
@@ -193,7 +197,12 @@ class Patches:
     def morph_zone(
         self, zone: str, *, overrides: "Mapping[str, Any] | None" = None
     ) -> "Patches":
-        """Render the named zone of the origin page and morph it in place."""
+        """Render the named zone of the origin page and morph it in place.
+
+        The origin is a posted value and its view never ran, so the page it names
+        authorizes the request first, exactly as a foreign page does.
+        """
+        self._authorize_origin()
         result = self._render_zone(zone, overrides)
         self._collect_zone_assets(result)
         return self._append_morph({keys.ZONE: zone}, result.html[zone], extract=False)
@@ -213,7 +222,10 @@ class Patches:
         request = self._require_request()
         foreign_path = self._foreign_page_path(page)
         kwargs = dict(url_kwargs or {})
-        denial, dynamic = self._foreign_authorization(foreign_path, request, kwargs)
+        visit_url = page if isinstance(page, str) else None
+        denial, dynamic = self._foreign_authorization(
+            foreign_path, request, kwargs, visit_url
+        )
         if denial is not None:
             raise ForeignPageNotAuthorizedError(foreign_path, denial.status_code)
         if dynamic:
@@ -237,14 +249,21 @@ class Patches:
         return resolve_url_to_page(url, self._require_request())
 
     def _foreign_authorization(
-        self, foreign_path: "Path", request: HttpRequest, url_kwargs: dict[str, Any]
+        self,
+        foreign_path: "Path",
+        request: HttpRequest,
+        url_kwargs: dict[str, Any],
+        visit_url: str | None,
     ) -> "tuple[HttpResponseBase | None, bool]":
         """Re-run the foreign page's body resolution once for guard and kind.
 
-        The short-circuit response and the dynamic-body flag come from one
-        resolution so the foreign page's `render()` runs exactly once.
+        The short-circuit response and the dynamic-body flag come from one resolution,
+        so the foreign `render()` runs exactly once. A page named by URL is authorized
+        against a visit of it, a page named by file path carries no URL to present.
         """
-        return page.authorization_outcome(foreign_path, request, **url_kwargs)
+        return page_manager.authorization_outcome(
+            foreign_path, request, visit_url, url_kwargs
+        )
 
     def _render_foreign_zone(
         self,
@@ -532,6 +551,25 @@ class Patches:
             raise RuntimeError(msg)
         return match.page_path
 
+    def _authorize_origin(self) -> None:
+        """Re-run the origin page's authorization once per builder.
+
+        Memoised, so several origin-zone morphs in one envelope re-run no page render.
+        """
+        if self._origin_authorized:
+            return
+        page_path = self._resolve_page_path()
+        match = self._origin_match()
+        denial, _dynamic = page_manager.authorization_outcome(
+            page_path,
+            self._require_request(),
+            match.origin if match is not None else None,
+            self._origin_url_kwargs(),
+        )
+        if denial is not None:
+            raise ForeignPageNotAuthorizedError(page_path, denial.status_code)
+        self._origin_authorized = True
+
     def _origin_url_kwargs(self) -> dict[str, object]:
         """Return the URL kwargs of the origin page for a zone or component render."""
         match = self._origin_match()
@@ -545,7 +583,7 @@ class Patches:
         """
         if self._render_context is None:
             # Pinned so mypy does not read the url kwarg splat as the zone batch.
-            self._render_context = page.build_render_context(
+            self._render_context = page_manager.build_render_context(
                 self._resolve_page_path(),
                 self._require_request(),
                 _requested_zones=None,

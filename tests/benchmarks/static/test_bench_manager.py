@@ -68,14 +68,14 @@ def _warmed_manager(
 class TestBenchEnsureBackends:
     """`_ensure_backends` guards every discovery and injection entry point."""
 
-    @pytest.mark.benchmark(group="static.manager.load")
+    @pytest.mark.benchmark(group="static.manager")
     def test_ensure_backends_warm(self, benchmark) -> None:
         """Backends are already loaded, so the call touches no settings."""
         manager = StaticManager()
         manager._ensure_backends()
         benchmark(manager._ensure_backends)
 
-    @pytest.mark.benchmark(group="static.manager.load")
+    @pytest.mark.benchmark(group="static.manager")
     def test_reload_cold(self, benchmark) -> None:
         """A reload rereads settings and rebuilds every configured backend."""
         manager = StaticManager()
@@ -103,7 +103,7 @@ class TestBenchReservedPayload:
     # Both cases inject without a request, so minting a CSRF token does not
     # swamp the reserved-key branch this pair is meant to expose.
 
-    @pytest.mark.benchmark(group="static.manager.debug")
+    @pytest.mark.benchmark(group="static.manager")
     def test_inject_debug_on(self, benchmark) -> None:
         html = _page_html(1)
         collector = _typical_collector()
@@ -111,7 +111,7 @@ class TestBenchReservedPayload:
             manager = _warmed_manager(html, collector, None)
             benchmark(manager.inject, html, collector, request=None)
 
-    @pytest.mark.benchmark(group="static.manager.debug")
+    @pytest.mark.benchmark(group="static.manager")
     def test_inject_debug_off(self, benchmark) -> None:
         html = _page_html(1)
         collector = _typical_collector()

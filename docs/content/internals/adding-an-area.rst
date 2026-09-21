@@ -43,8 +43,13 @@ An area adds a module when it owns the concern, not to complete a template.
    The area's public exceptions, each re-exported from the area's ``__init__.py`` so callers never import the module directly.
    Present in ``deps``, ``forms``, ``pages``, ``partial``, and ``urls``.
 
+``ports.py``
+   The area's implementation of a ``next.ports`` protocol, which ``AppConfig.ready()`` binds into the matching slot.
+   Present in ``pages``, ``partial``, ``static``, and ``urls``, the four areas another area has to reach without importing.
+
 ``dispatch.py``, ``markers.py``, ``providers.py``, ``signals.py``, ``checks.py``
    Appear when the area dispatches actions, declares frozen dataclass markers, provides dependencies, emits signals, or validates configuration.
+   ``checks.py`` becomes a package of one-word submodules once one file stops holding the area's checks, as it has in ``pages``, ``forms``, and ``partial``.
 
 The number of submodules varies from four in ``server`` to seventeen in ``partial``, so no area serves as a size template for another.
 

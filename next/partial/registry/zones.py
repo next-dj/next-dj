@@ -1,12 +1,12 @@
-"""Registries for patch verbs and the zones of a compiled page template."""
+"""Registry of the zones one compiled page template declares."""
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 from weakref import WeakKeyDictionary
 
-from .headers import partial_intent
-from .signals import patch_op_registered, zone_registered
-from .zone import ZoneNode
+from next.partial.headers import partial_intent
+from next.partial.signals import zone_registered
+from next.partial.zone import ZoneNode
 
 
 if TYPE_CHECKING:
@@ -15,63 +15,7 @@ if TYPE_CHECKING:
     from django.http import HttpRequest
     from django.template.base import Template
 
-    from .zone import ZoneOptions, ZonePartial
-
-
-BUILTIN_OPS: frozenset[str] = frozenset(
-    {
-        "morph",
-        "replace",
-        "inner",
-        "append",
-        "prepend",
-        "remove",
-        "refresh",
-        "context",
-        "event",
-        "toast",
-        "layer.open",
-        "layer.close",
-        "url",
-        "visit",
-    }
-)
-
-
-class PatchOpRegistry:
-    """Registry of patch verbs known to the builder.
-
-    Registering a verb clears the `next.E066` check and unlocks the `op()` channel.
-    """
-
-    def __init__(self) -> None:
-        """Start with no custom verb on record, the built-ins seed the reads."""
-        self._custom: set[str] = set()
-
-    def register(self, name: str) -> None:
-        """Register a custom verb and announce it to subscribers.
-
-        The name is recorded whatever it is, so a registration shadowing a
-        built-in verb stays visible to the check that reports it.
-        """
-        self._custom.add(name)
-        patch_op_registered.send(sender=type(self), name=name)
-
-    def __contains__(self, name: object) -> bool:
-        """Return True when the verb is built in or registered by a project."""
-        return name in BUILTIN_OPS or name in self._custom
-
-    def custom_names(self) -> frozenset[str]:
-        """Return every verb name a project registered itself."""
-        return frozenset(self._custom)
-
-
-patch_op_registry = PatchOpRegistry()
-
-
-def register_patch_op(name: str) -> None:
-    """Register a custom patch verb with the builder side of the protocol."""
-    patch_op_registry.register(name)
+    from next.partial.zone import ZoneOptions, ZonePartial
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,12 +102,4 @@ def zone_requested(request: "HttpRequest", name: str) -> bool:
     return name in partial_intent(request).zones
 
 
-__all__ = [
-    "BUILTIN_OPS",
-    "PatchOpRegistry",
-    "ZoneInfo",
-    "patch_op_registry",
-    "register_patch_op",
-    "zone_requested",
-    "zones_of",
-]
+__all__ = ["ZoneInfo", "zone_requested", "zones_of"]

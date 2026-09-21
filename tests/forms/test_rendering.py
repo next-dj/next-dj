@@ -19,9 +19,10 @@ from next.forms import (
     RegistryFormActionBackend,
 )
 from next.forms.manager import form_action_manager
-from next.forms.rendering import _ErrorRenderParams, render_form_page_with_errors
+from next.forms.nodes import FormNode
+from next.forms.rendering import ErrorRenderParams, render_form_page_with_errors
 from next.forms.wizard import FormWizard
-from next.templatetags.forms import FORM_KEY_ATTR, FORM_ZONE_ATTR, FormNode
+from next.partial.keys import FORM_KEY_ATTR, FORM_ZONE_ATTR
 from tests.forms.actions import SimpleForm
 
 
@@ -110,7 +111,7 @@ class TestRenderInvalidPage:
         html = render_form_page_with_errors(
             backend,
             request,
-            _ErrorRenderParams(
+            ErrorRenderParams(
                 action_name="unknown_action_xyz", form=form, url_kwargs={}
             ),
             PAGE_MODULE_FOR_FORM_TESTS,
@@ -124,7 +125,7 @@ class TestRenderInvalidPage:
         html = render_form_page_with_errors(
             backend,
             request,
-            _ErrorRenderParams(
+            ErrorRenderParams(
                 action_name="unknown_action_xyz", form=None, url_kwargs={}
             ),
             PAGE_MODULE_FOR_FORM_TESTS,

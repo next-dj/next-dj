@@ -26,8 +26,8 @@ page_reverse
 ------------
 
 The helper takes a path template that mirrors the directory tree.
-Bracket parameters drop their type prefix.
-Captured values are passed as keyword arguments.
+A bracket segment is written exactly as the directory spells it, converter prefix included, because the URL name is computed from the raw segment text.
+The keyword argument that carries the captured value is named after the parameter alone, so ``[int:post_id]`` in the template pairs with ``post_id=7`` in the call.
 
 .. code-block:: python
    :caption: examples
@@ -46,8 +46,8 @@ Captured values are passed as keyword arguments.
    # routes/posts/[int:post_id]/page.py
    page_reverse("posts/[int:post_id]", post_id=7)  # "/posts/7/"
 
-The template is normalised through the same parser the router uses for URL name generation.
-The template must repeat the same bracket text the directory uses, including any converter prefix, because the URL name is computed from the raw segment text.
+The template is normalised through the same parser the router uses for URL name generation, which collapses the slashes, brackets, colons, and hyphens into underscores and leaves everything between them alone.
+A template that drops the converter prefix therefore computes a different name and raises ``NoReverseMatch``.
 
 The resulting segment string is fed into ``URL_NAME_TEMPLATE`` before the lookup.
 The default ``page_{name}`` yields ``next:page_posts_slug``.

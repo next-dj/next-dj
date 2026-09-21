@@ -26,6 +26,23 @@ class RootPagesRouter(RouterBackend):
         return [PageRoot(path=tree, label="Root") for tree in self._root_trees]
 
 
+class AppRootRouter(RouterBackend):
+    """Backend reporting one application tree, the shape ``APP_DIRS`` produces."""
+
+    def __init__(self, path: Path, label: str = "App 'app'") -> None:
+        """Store the tree this backend reports and the label it carries."""
+        self._path = path
+        self._label = label
+
+    def generate_urls(self) -> list:
+        """Contribute no patterns, the checks read the reported tree instead."""
+        return []
+
+    def page_roots(self) -> list[PageRoot]:
+        """Return the single application tree under its label."""
+        return [PageRoot(path=self._path, label=self._label)]
+
+
 class EntryRouter(RouterBackend):
     """Third-party backend built from the ``PAGE_BACKENDS`` entry that names it."""
 

@@ -267,6 +267,41 @@ class PrefixingStaticBackend(StaticFilesBackend):
 PREFIXING_STATIC_BACKEND = f"{__name__}.PrefixingStaticBackend"
 PREFIXED_BACKENDS = {"STATIC_BACKENDS": [{"BACKEND": PREFIXING_STATIC_BACKEND}]}
 
+
+class RequestRecordingStaticBackend(StaticFilesBackend):
+    """Backend whose rendered tags name the request they were rendered under.
+
+    A per-request scheme lives behind these hooks, so the injected HTML is where a
+    caller reads whether the request arrived, rather than the spelling of the seam.
+    """
+
+    NO_REQUEST: ClassVar[str] = "none"
+
+    def _mark(self, request: HttpRequest | None) -> str:
+        """Return what the tag reports for `request`."""
+        return self.NO_REQUEST if request is None else request.path
+
+    def render_link_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
+        """Return a link tag naming the URL and the request behind it."""
+        return f'<link href="{url}" data-request="{self._mark(request)}">'
+
+    def render_script_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
+        """Return a script tag naming the URL and the request behind it."""
+        return f'<script src="{url}" data-request="{self._mark(request)}"></script>'
+
+    def render_module_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
+        """Return a module tag naming the URL and the request behind it."""
+        return (
+            f'<script type="module" src="{url}" '
+            f'data-request="{self._mark(request)}"></script>'
+        )
+
+
+REQUEST_RECORDING_STATIC_BACKEND = f"{__name__}.RequestRecordingStaticBackend"
+REQUEST_RECORDING_BACKENDS = {
+    "STATIC_BACKENDS": [{"BACKEND": REQUEST_RECORDING_STATIC_BACKEND}]
+}
+
 BUILD_MANIFEST: Mapping[str, str] = {"css/app.css": "/build/css/app.4f2a1b.css"}
 
 

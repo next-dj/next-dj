@@ -21,13 +21,17 @@ Reverse a static page
 ~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
-   :caption: notes/pages/page.py
+   :caption: static page URLs
 
    from next.urls import page_reverse
 
    url = page_reverse()             # "/"
    url = page_reverse("blog")       # "/blog/"
    url = page_reverse("about/team") # "/about/team/"
+
+Call the helper from inside a request, not at the top level of a ``page.py``.
+A page module executes while the router builds the URL patterns, so a module-level ``page_reverse()`` runs before the URLconf is complete and raises ``NoReverseMatch``.
+Put the call in a ``@context`` callable, an action handler, or a ``render`` function, or reach for ``page_reverse_lazy`` when the value has to sit in a class body.
 
 Reverse a captured page
 ~~~~~~~~~~~~~~~~~~~~~~~

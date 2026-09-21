@@ -34,6 +34,7 @@ _CURATED = frozenset(
         "Patches",
         "UnknownZoneError",
         "ZoneRenderResult",
+        "checks",
         "is_partial_request",
         "partial_intent",
         "register_patch_op",

@@ -31,6 +31,7 @@ REBUILT = {"next/a.css": "/static/next/a.9f1.css", "a.css": "/static/a.4b2.css"}
 CSS_URL = "https://cdn.example.com/site.css"
 JS_URL = "https://cdn.example.com/site.js"
 MJS_URL = "https://cdn.example.com/site.mjs"
+BREAKOUT_URL = '/static/a.css"><script>alert(1)</script>'
 
 
 class _CollectingBackend(StaticBackend):
@@ -74,11 +75,11 @@ class TestAssetUrlHook:
 
     def test_base_class_ignores_the_request(self, mock_http_request) -> None:
         backend = _CollectingBackend()
-        assert backend.asset_url(CSS_URL, request=mock_http_request) == CSS_URL
+        assert backend.asset_url(CSS_URL, request=mock_http_request()) == CSS_URL
 
     def test_default_backend_returns_the_url_unchanged(self, mock_http_request) -> None:
         backend = StaticFilesBackend()
-        assert backend.asset_url(JS_URL, request=mock_http_request) == JS_URL
+        assert backend.asset_url(JS_URL, request=mock_http_request()) == JS_URL
 
 
 class TestStaticFilesBackendDefaults:
@@ -146,16 +147,16 @@ class TestStaticFilesBackendOptions:
             f'<script type="module" src="{MJS_URL}"></script>'
         )
 
-    def test_default_backend_ignores_request(self) -> None:
+    def test_default_backend_ignores_request(self, mock_http_request) -> None:
         backend = StaticFilesBackend()
-        sentinel = object()
-        assert backend.render_link_tag(CSS_URL, request=sentinel) == (  # type: ignore[arg-type]
+        request = mock_http_request()
+        assert backend.render_link_tag(CSS_URL, request=request) == (
             f'<link rel="stylesheet" href="{CSS_URL}">'
         )
-        assert backend.render_script_tag(JS_URL, request=sentinel) == (  # type: ignore[arg-type]
+        assert backend.render_script_tag(JS_URL, request=request) == (
             f'<script src="{JS_URL}"></script>'
         )
-        assert backend.render_module_tag(MJS_URL, request=sentinel) == (  # type: ignore[arg-type]
+        assert backend.render_module_tag(MJS_URL, request=request) == (
             f'<script type="module" src="{MJS_URL}"></script>'
         )
 
@@ -408,3 +409,51 @@ class TestStaticBackendReexport:
 
     def test_factory_is_gone_from_the_public_surface(self) -> None:
         assert not hasattr(next.static, "StaticsFactory")
+
+
+class TestTagTemplatesEscapeTheUrl:
+    """A tag is spliced into the page past the engine, so its URL is escaped here."""
+
+    @pytest.mark.parametrize(
+        "renderer", ["render_link_tag", "render_script_tag", "render_module_tag"]
+    )
+    def test_a_url_closing_the_attribute_cannot_open_an_element(self, renderer) -> None:
+        backend = StaticFilesBackend()
+
+        rendered = getattr(backend, renderer)(BREAKOUT_URL)
+
+        assert "<script>alert(1)</script>" not in rendered
+        assert "&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;" in rendered
+
+    @pytest.mark.parametrize(
+        ("renderer", "expected"),
+        [
+            (
+                "render_link_tag",
+                '<link rel="stylesheet" href="/static/a.css?v=1&amp;x=2">',
+            ),
+            ("render_script_tag", '<script src="/static/a.js?v=1&amp;x=2"></script>'),
+            (
+                "render_module_tag",
+                '<script type="module" src="/static/a.mjs?v=1&amp;x=2"></script>',
+            ),
+        ],
+    )
+    def test_a_query_ampersand_renders_as_an_entity(self, renderer, expected) -> None:
+        backend = StaticFilesBackend()
+        suffix = {"render_link_tag": "css", "render_script_tag": "js"}.get(
+            renderer, "mjs"
+        )
+
+        assert getattr(backend, renderer)(f"/static/a.{suffix}?v=1&x=2") == expected
+
+    def test_a_custom_tag_template_escapes_the_url_too(self) -> None:
+        """The escape sits in the renderer, so a project template inherits it."""
+        backend = StaticFilesBackend(
+            {"OPTIONS": {"css_tag": '<link rel="stylesheet" crossorigin href="{url}">'}}
+        )
+
+        rendered = backend.render_link_tag(BREAKOUT_URL)
+
+        assert "<script>alert(1)</script>" not in rendered
+        assert rendered.startswith('<link rel="stylesheet" crossorigin href="')

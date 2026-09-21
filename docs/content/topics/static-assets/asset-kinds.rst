@@ -115,11 +115,15 @@ A custom kind reuses one of these methods, or a custom backend can add a new met
 .. code-block:: python
    :caption: notes/backends.py
 
+   from django.utils.html import escape
+
    from next.static import StaticFilesBackend
 
    class BabelBackend(StaticFilesBackend):
        def render_babel_tag(self, url: str, *, request=None) -> str:
-           return f'<script type="text/babel" src="{url}"></script>'
+           return f'<script type="text/babel" src="{escape(url)}"></script>'
+
+A renderer method builds markup the template engine never sees, so an override escapes the URL itself rather than relying on the engine to do it.
 
 .. code-block:: python
    :caption: notes/apps.py
@@ -235,8 +239,9 @@ The two renders agree on that split, because the client drops an inline entry th
 System checks
 -------------
 
-The static system checks ``next.W030``, ``next.W031``, and ``next.E036`` through ``next.E038`` validate the backend configuration.
-The ``next.W042`` check validates the ``JS_CONTEXT_SERIALIZER`` setting.
+The static system checks ``next.W030``, ``next.W031``, ``next.E036`` through ``next.E038``, ``next.E092``, and ``next.E093`` validate the backend configuration.
+The ``next.W042`` check and ``next.W079`` through ``next.W082`` validate the ``JS_CONTEXT_SERIALIZER`` setting, one condition per id.
+The ``next.E083`` check refuses a ``STATICFILES_FINDERS`` entry that walks application static directories without skipping the framework's own package.
 
 The ``next.W074`` check walks the registered kinds and warns about each one whose renderer carries no client insertion verb.
 The ``next.W076`` check walks the same kinds and warns about each one whose ``inline_tag`` is not the element its renderer's verb builds, so its URL form travels in a patch envelope while its inline bodies do not.

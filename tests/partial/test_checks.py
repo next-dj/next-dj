@@ -4,13 +4,19 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from django.core.checks.registry import registry as check_registry
 from django.test import override_settings
 
 from next.components import ComponentInfo, FileComponentsBackend
 from next.forms.backends import FormActionBackend, RegistryFormActionBackend
 from next.partial import checks
-from next.partial.registry import patch_op_registry, register_patch_op
-from tests.support import RootPagesRouter, patch_checks_router_manager_with_routers
+from next.partial.registry import register_patch_op
+from tests.support import (
+    PARTIAL_ROUTER_MANAGER_TARGETS,
+    RootPagesRouter,
+    patch_checks_router_manager_with_routers,
+    patched_router_manager,
+)
 
 
 @contextmanager
@@ -19,7 +25,7 @@ def _scanned_root(root: Path) -> Iterator[None]:
     manager = MagicMock()
     manager.backends = (MagicMock(),)
     with (
-        patch("next.partial.checks.get_router_manager", return_value=(manager, [])),
+        patched_router_manager(*PARTIAL_ROUTER_MANAGER_TARGETS, manager=manager),
         patch("next.discovery.get_pages_directories", return_value=[root]),
     ):
         yield
@@ -195,6 +201,19 @@ class TestComposedTemplateCompileCheck:
         assert messages[0].obj == str(broken)
 
 
+class TestComposedTemplateCompileIsDeployOnly:
+    """`next.E072` compiles the whole tree, so only `check --deploy` runs it."""
+
+    def test_absent_from_the_default_registry(self) -> None:
+        assert (
+            checks.check_composed_templates_compile not in check_registry.get_checks()
+        )
+
+    def test_present_once_deployment_checks_are_asked_for(self) -> None:
+        registered = check_registry.get_checks(include_deployment_checks=True)
+        assert checks.check_composed_templates_compile in registered
+
+
 class TestWithOverZoneCheck:
     """`next.W067` warns when a `{% with %}` wraps a zone directly."""
 
@@ -356,8 +375,8 @@ def _component(template_path: Path | None) -> Generator[None, None, None]:
         {"BACKEND": "next.components.FileComponentsBackend"}
     ]
     with (
-        patch("next.partial.checks.next_framework_settings", settings_ns),
-        patch("next.partial.checks.get_components_manager", return_value=manager),
+        patch("next.partial.checks.zones.next_framework_settings", settings_ns),
+        patch("next.partial.checks.zones.get_components_manager", return_value=manager),
     ):
         yield
 
@@ -381,21 +400,13 @@ class TestZoneInComponentCheck:
     def test_no_component_backends_is_silent(self) -> None:
         settings_ns = MagicMock()
         settings_ns.COMPONENT_BACKENDS = []
-        with patch("next.partial.checks.next_framework_settings", settings_ns):
+        with patch("next.partial.checks.zones.next_framework_settings", settings_ns):
             assert checks.check_no_zone_in_component() == []
 
 
-@pytest.fixture()
-def restore_op_registry():
-    """Snapshot and restore the patch-op registry around a test."""
-    custom = set(patch_op_registry._custom)
-    yield
-    patch_op_registry._custom = custom
-
-
-@pytest.mark.usefixtures("restore_op_registry")
-class TestUnregisteredOpCheck:
-    """`next.E066` fires on a custom verb that shadows or is malformed."""
+@pytest.mark.usefixtures("restored_op_registry")
+class TestCustomPatchOpCheck:
+    """A custom verb that shadows a built-in or is malformed is reported."""
 
     def test_default_registry_is_silent(self) -> None:
         assert checks.check_custom_patch_ops_well_formed() == []
@@ -407,13 +418,20 @@ class TestUnregisteredOpCheck:
     def test_shadowing_a_builtin_verb_errors(self) -> None:
         # a custom op named after a built-in verb never runs, the built-in wins
         register_patch_op("morph")
-        ids = [m.id for m in checks.check_custom_patch_ops_well_formed()]
-        assert ids == [checks.E_UNREGISTERED_OP]
+        messages = checks.check_custom_patch_ops_well_formed()
+        assert [m.id for m in messages] == [checks.E_OP_SHADOWS_BUILTIN]
+        assert "shadows a built-in verb" in messages[0].msg
 
     def test_malformed_verb_token_errors(self) -> None:
         register_patch_op("not a token")
-        ids = [m.id for m in checks.check_custom_patch_ops_well_formed()]
-        assert ids == [checks.E_UNREGISTERED_OP]
+        messages = checks.check_custom_patch_ops_well_formed()
+        assert [m.id for m in messages] == [checks.E_OP_BAD_NAME]
+        assert "is not a valid verb token" in messages[0].msg
+
+    def test_a_shadowed_builtin_is_not_also_reported_as_malformed(self) -> None:
+        # "morph" is a valid token, so the shadow branch has to end the verdict
+        register_patch_op("morph")
+        assert len(checks.check_custom_patch_ops_well_formed()) == 1
 
 
 class _PartialUnawareBackend(RegistryFormActionBackend):
@@ -437,8 +455,8 @@ def _form_backends(*backends, partial_active: bool) -> Iterator[None]:
         else []
     )
     with (
-        patch("next.partial.checks.form_action_manager", manager),
-        patch("next.partial.checks.next_framework_settings", settings_ns),
+        patch("next.partial.checks.forms.form_action_manager", manager),
+        patch("next.partial.checks.backends.next_framework_settings", settings_ns),
     ):
         yield
 
@@ -475,19 +493,15 @@ _PLAIN_STORAGE = "django.contrib.staticfiles.storage.StaticFilesStorage"
 
 
 @contextmanager
-def _partial_version(version: object) -> Iterator[None]:
-    """Point the W069 check at a partial backend with the given VERSION option.
-
-    A version of None omits the key, so the check sees the implicit manifest sentinel.
-    """
-    options: dict[str, object] = {}
-    if version is not None:
-        options["VERSION"] = version
-    settings_ns = MagicMock()
-    settings_ns.PARTIAL_BACKENDS = [
-        {"BACKEND": "next.partial.JsonPartialProtocolBackend", "OPTIONS": options}
-    ]
-    with patch("next.partial.checks.next_framework_settings", settings_ns):
+def _partial_options(
+    options: object, *, storage: str = _PLAIN_STORAGE
+) -> Iterator[None]:
+    """Run the W069 check against one backend entry and a staticfiles storage."""
+    config = {"BACKEND": "next.partial.JsonPartialProtocolBackend", "OPTIONS": options}
+    with override_settings(
+        NEXT_FRAMEWORK={"PARTIAL_BACKENDS": [config]},
+        STORAGES={"staticfiles": {"BACKEND": storage}},
+    ):
         yield
 
 
@@ -495,46 +509,100 @@ class TestManifestVersionStorageCheck:
     """`next.W069` fires when manifest versioning has no manifest storage."""
 
     def test_sentinel_without_manifest_storage_warns(self) -> None:
-        with (
-            _partial_version("manifest"),
-            override_settings(STORAGES={"staticfiles": {"BACKEND": _PLAIN_STORAGE}}),
-        ):
-            ids = [m.id for m in checks.check_manifest_version_has_manifest_storage()]
-        assert ids == [checks.W_MANIFEST_VERSION_NO_STORAGE]
-
-    def test_implicit_sentinel_without_manifest_storage_warns(self) -> None:
-        # an OPTIONS mapping with no VERSION key defaults to the manifest sentinel
-        with (
-            _partial_version(None),
-            override_settings(STORAGES={"staticfiles": {"BACKEND": _PLAIN_STORAGE}}),
-        ):
+        with _partial_options({"VERSION": "manifest"}):
             ids = [m.id for m in checks.check_manifest_version_has_manifest_storage()]
         assert ids == [checks.W_MANIFEST_VERSION_NO_STORAGE]
 
     def test_manifest_storage_is_silent(self) -> None:
-        with (
-            _partial_version("manifest"),
-            override_settings(STORAGES={"staticfiles": {"BACKEND": _MANIFEST_STORAGE}}),
+        with _partial_options({"VERSION": "manifest"}, storage=_MANIFEST_STORAGE):
+            assert checks.check_manifest_version_has_manifest_storage() == []
+
+    def test_stock_project_is_silent(self) -> None:
+        # a project on the framework defaults never asked for the manifest, so the
+        # plain storage of a fresh startproject contradicts nothing
+        with override_settings(
+            NEXT_FRAMEWORK={}, STORAGES={"staticfiles": {"BACKEND": _PLAIN_STORAGE}}
         ):
             assert checks.check_manifest_version_has_manifest_storage() == []
 
-    def test_explicit_version_string_is_silent(self) -> None:
-        # pinning VERSION to a literal string opts out of the manifest sentinel,
-        # so the guard is live by other means and the warning never fires
-        with (
-            _partial_version("release-7"),
-            override_settings(STORAGES={"staticfiles": {"BACKEND": _PLAIN_STORAGE}}),
+    @pytest.mark.parametrize(
+        "options",
+        [{}, {"VERSION": None}, {"VERSION": "release-7"}, "not-a-mapping"],
+        ids=["no_version_key", "derived_version", "pinned_version", "bad_options"],
+    )
+    def test_without_the_sentinel_is_silent(self, options: object) -> None:
+        with _partial_options(options):
+            assert checks.check_manifest_version_has_manifest_storage() == []
+
+    @pytest.mark.parametrize(
+        "configs", [[], ["not-a-mapping"]], ids=["no_entries", "non_dict_entry"]
+    )
+    def test_silent_without_a_usable_backend_entry(self, configs: object) -> None:
+        with override_settings(
+            NEXT_FRAMEWORK={"PARTIAL_BACKENDS": configs},
+            STORAGES={"staticfiles": {"BACKEND": _PLAIN_STORAGE}},
         ):
             assert checks.check_manifest_version_has_manifest_storage() == []
 
-    def test_silent_when_no_partial_backends(self) -> None:
-        settings_ns = MagicMock()
-        settings_ns.PARTIAL_BACKENDS = []
-        with (
-            patch("next.partial.checks.next_framework_settings", settings_ns),
-            override_settings(STORAGES={"staticfiles": {"BACKEND": _PLAIN_STORAGE}}),
+
+class TestAssetVersionMovesBetweenDeploysCheck:
+    """`next.W083` fires when nothing can move the derived asset version."""
+
+    def test_derived_version_without_a_source_warns(self) -> None:
+        with _partial_options({"VERSION": None}):
+            ids = [m.id for m in checks.check_asset_version_moves_between_deploys()]
+        assert ids == [checks.W_ASSET_VERSION_FROZEN]
+
+    def test_stock_defaults_warn(self) -> None:
+        with override_settings(
+            NEXT_FRAMEWORK={}, STORAGES={"staticfiles": {"BACKEND": _PLAIN_STORAGE}}
         ):
-            assert checks.check_manifest_version_has_manifest_storage() == []
+            ids = [m.id for m in checks.check_asset_version_moves_between_deploys()]
+        assert ids == [checks.W_ASSET_VERSION_FROZEN]
+
+    def test_project_static_version_is_silent(self) -> None:
+        with override_settings(
+            NEXT_FRAMEWORK={"STATIC_VERSION": "build-42"},
+            STORAGES={"staticfiles": {"BACKEND": _PLAIN_STORAGE}},
+        ):
+            assert checks.check_asset_version_moves_between_deploys() == []
+
+    def test_manifest_storage_is_silent(self) -> None:
+        with _partial_options({"VERSION": None}, storage=_MANIFEST_STORAGE):
+            assert checks.check_asset_version_moves_between_deploys() == []
+
+    @pytest.mark.parametrize(
+        "options",
+        [{"VERSION": "release-7"}, {"VERSION": "manifest"}],
+        ids=["pinned_tag", "manifest_sentinel"],
+    )
+    def test_a_named_version_is_silent(self, options: dict[str, object]) -> None:
+        # a pinned tag moves by hand and the sentinel answers to next.W069, so
+        # neither case earns a second warning about the same decision
+        with _partial_options(options):
+            assert checks.check_asset_version_moves_between_deploys() == []
+
+    @pytest.mark.parametrize(
+        "configs", [[], ["not-a-mapping"]], ids=["no_entries", "non_dict_entry"]
+    )
+    def test_silent_without_a_usable_backend_entry(self, configs: object) -> None:
+        with override_settings(
+            NEXT_FRAMEWORK={"PARTIAL_BACKENDS": configs},
+            STORAGES={"staticfiles": {"BACKEND": _PLAIN_STORAGE}},
+        ):
+            assert checks.check_asset_version_moves_between_deploys() == []
+
+
+class TestAssetVersionCheckIsDeployOnly:
+    """`next.W083` describes a development checkout, so only `--deploy` runs it."""
+
+    def test_absent_from_the_default_registry(self) -> None:
+        registered = check_registry.get_checks()
+        assert checks.check_asset_version_moves_between_deploys not in registered
+
+    def test_present_once_deployment_checks_are_asked_for(self) -> None:
+        registered = check_registry.get_checks(include_deployment_checks=True)
+        assert checks.check_asset_version_moves_between_deploys in registered
 
 
 @contextmanager
@@ -542,7 +610,7 @@ def _partial_backends(configs: object) -> Iterator[None]:
     """Point the W071 check at the given PARTIAL_BACKENDS config value."""
     settings_ns = MagicMock()
     settings_ns.PARTIAL_BACKENDS = configs
-    with patch("next.partial.checks.next_framework_settings", settings_ns):
+    with patch("next.partial.checks.backends.next_framework_settings", settings_ns):
         yield
 
 
@@ -674,14 +742,14 @@ _ZONE_CHECKS = (
 @contextmanager
 def _counting_collect() -> Iterator[list[int]]:
     """Count calls to the composed-page collector, delegating to the real one."""
-    real = checks._collect_composed_pages
+    real = checks.pages._collect_composed_pages
     calls = [0]
 
     def counting(manager: object) -> Iterator[tuple[Path, object]]:
         calls[0] += 1
         return real(manager)
 
-    with patch.object(checks, "_collect_composed_pages", side_effect=counting):
+    with patch.object(checks.pages, "_collect_composed_pages", side_effect=counting):
         yield calls
 
 

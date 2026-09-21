@@ -53,6 +53,7 @@ next.E017 on a page.py that fails to import
 A ``page.py`` raised while importing, so the framework loads it as nothing.
 Its ``render``, ``template``, and ``@context`` declarations never take effect, and a sibling ``template.djx`` can otherwise hide the failure.
 The report names the exception type and message, so fix the named error and the module loads.
+The check imports every routed ``page.py``, so it runs under ``manage.py check --deploy`` rather than on a plain ``manage.py check``.
 At request time the same failure raises under ``DEBUG`` or ``STRICT_LOADING``, see :doc:`/content/ref/pages`.
 
 Page answers 404 although its files exist
@@ -61,7 +62,7 @@ Page answers 404 although its files exist
 The ``page.py`` behind the URL raised while importing.
 With ``DEBUG`` and ``STRICT_LOADING`` both off the framework answers 404 for the broken page while ``logger.exception`` records the traceback.
 Read the server log for the ``Could not import page module`` record, or turn on ``DEBUG`` or ``NEXT_FRAMEWORK["STRICT_LOADING"]`` so the request raises with the real cause.
-``uv run python manage.py check`` reports the same failure as :ref:`next.E017 <ref-system-checks>`, naming the exception type and message.
+``uv run python manage.py check --deploy`` reports the same failure as :ref:`next.E017 <ref-system-checks>`, naming the exception type and message.
 See :doc:`/content/ref/pages` for the full import-failure contract.
 
 next.E018 on multiple keyless context functions
@@ -108,7 +109,8 @@ See :ref:`topics-forms-actions-guards`.
 Form POST redirects to the login page
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The action declares ``Meta.login_required`` or ``login_required=True`` on ``@action``, and the submission came from an anonymous session.
+The action declares a guard through ``Meta.login_required`` or ``Meta.permission_required``, or the matching ``login_required`` and ``permission_required`` keywords on ``@action``, and the submission came from an anonymous session.
+Either key builds the guard, so an action that declares only ``permission_required`` redirects an anonymous caller exactly like one that declares ``login_required``.
 The dispatcher answers with a 302 to ``LOGIN_URL`` carrying ``next`` set to the origin page, before any POST data reaches the handler.
 This is the declared behaviour, not an error.
 Sign in, or hide the form from anonymous visitors in the template, since the guard protects the mutation and not the markup.
@@ -172,6 +174,15 @@ The name passed to ``{% component %}`` did not resolve from the rendering templa
 Turn on ``NEXT_FRAMEWORK["STRICT_LOADING"]`` to raise ``TemplateSyntaxError`` with a did-you-mean hint, or ``DEBUG`` to render a visible HTML comment in place of the component.
 See :doc:`/content/ref/template-tags` for the three outcomes.
 
+next.E084 on a component.py that fails to import
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A ``component.py`` raised while importing, so the framework loads it as nothing.
+The component still renders, because its template is a separate file, and only the ``@component.context`` values of that module vanish from the body.
+The report names the exception type and message, so fix the named error and the module loads.
+The check imports every discovered ``component.py``, so it runs under ``manage.py check --deploy`` rather than on a plain ``manage.py check``.
+See :doc:`/content/topics/components` for the degraded render.
+
 Component prop does not resolve
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -229,11 +240,51 @@ next.E038 duplicate BACKEND entries
 Two identical ``BACKEND`` dotted paths appear in ``STATIC_BACKENDS``.
 Remove or rename one entry so each backend class appears once.
 
-next.W042 unusable JS_CONTEXT_SERIALIZER
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+next.W042 JS_CONTEXT_SERIALIZER is not a string
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``JS_CONTEXT_SERIALIZER`` is set but does not resolve to a class that implements the ``JsContextSerializer`` protocol (a ``dumps`` method).
-Fix the dotted path or install optional dependencies such as ``pydantic`` when using ``PydanticJsContextSerializer``.
+``JS_CONTEXT_SERIALIZER`` holds a class object, a list, or any other non-string value.
+The key takes a dotted path string, so write the path rather than the imported object.
+
+next.W079 JS_CONTEXT_SERIALIZER does not import
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The dotted path is a string, but importing it raises ``ImportError`` and the report carries the message.
+Fix the path, or install the optional dependency the module needs, such as ``pydantic`` for ``PydanticJsContextSerializer``.
+
+next.W080 JS_CONTEXT_SERIALIZER is not a class
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The dotted path imports, but it names a function, a module attribute, or an instance rather than a class.
+Point the path at the serializer class itself.
+
+next.W081 JS_CONTEXT_SERIALIZER does not instantiate
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The class imports, but calling it with no arguments raises ``TypeError`` or ``ImportError``.
+The framework builds the serializer without arguments, so give every constructor parameter a default.
+
+next.W082 JS_CONTEXT_SERIALIZER has no dumps
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The instance does not implement the ``JsContextSerializer`` protocol, which needs a ``dumps(value) -> str`` method.
+Add the method, or subclass one of the bundled serializers.
+
+next.W069 manifest version without manifest storage
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A partial backend sets ``VERSION`` to ``"manifest"`` explicitly while the staticfiles storage does not hash files into a manifest.
+The sentinel asks for a version stamp derived from a hashed manifest, so without one the asset-version guard stays silent and a deploy of new assets cannot ask an open client to reload.
+Switch the storage to a ``ManifestStaticFilesStorage``, or pin ``VERSION`` to an explicit string you bump on a deploy.
+An entry that never names ``VERSION`` draws no warning here, because the default derives the stamp from ``STATIC_VERSION`` and from whatever the configured storage offers, and reports the case where neither answers as ``next.W083``.
+
+next.W083 the asset version cannot move between deploys
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+No ``PARTIAL_BACKENDS`` entry names a ``VERSION``, ``STATIC_VERSION`` is unset, and the staticfiles storage hashes nothing into a manifest, so the asset version every partial response stamps is the same constant on every deploy.
+The guard then cannot ask an open client to reload, and a tab left open across a release patches new HTML into a page running the previous bundle.
+Set ``STATIC_VERSION`` to the build id the deploy carries, or switch the storage to a ``ManifestStaticFilesStorage``.
+The check carries ``deploy=True``, so a development checkout never sees it and ``manage.py check --deploy`` does.
 
 Partial rendering
 -----------------
@@ -279,8 +330,8 @@ Dependency injection
 DependencyCycleError
 ~~~~~~~~~~~~~~~~~~~~
 
-The resolver raises ``DependencyCycleError`` when two providers depend on each other.
-Read the chain printed on the exception, remove one ``Depends`` edge, or merge providers.
+The resolver raises ``DependencyCycleError`` when two dependencies depend on each other, whether they are registered names or the factories a callable ``Depends(factory)`` names.
+Read the chain printed on the exception, remove one ``Depends`` edge, or merge the two callables.
 See :doc:`/content/topics/dependency-injection` for request-cache interactions during form re-renders.
 
 UnknownDependencyError
@@ -416,7 +467,7 @@ If the template engine reports ``Invalid block tag`` on one of these names, conf
 The dev watcher restarts the process when Python entrypoints such as ``page.py`` change.
 Editing only ``template.djx`` or other DJX files refreshes rendered output without a full restart.
 The composed template cache is invalidated by file mtime under ``DEBUG``.
-With ``DEBUG`` off the cache stats nothing and holds the composition for the life of the process, so a DJX edit on a running server needs a restart or a ``Page.clear_template_caches`` call.
+With ``DEBUG`` off the cache stats nothing and holds the composition for the life of the process, so a DJX edit on a running server needs a restart or a ``page.clear_template_caches()`` call on the page manager.
 
 Settings behaviour
 ------------------
@@ -461,3 +512,4 @@ See also
 
    :doc:`/content/ref/system-checks` for the full check catalog.
    :doc:`/content/topics/index` for in depth guides.
+   :doc:`/content/security/overview` for the checks that report a security-relevant misconfiguration.

@@ -21,7 +21,7 @@ Write the backend.
 .. code-block:: python
    :caption: notes/backends.py
 
-   from django.http import HttpRequest, HttpResponse
+   from django.http import HttpRequest, HttpResponseBase
    from notes.models import AuditEntry
 
    from next.forms import RegistryFormActionBackend
@@ -29,7 +29,7 @@ Write the backend.
    class AuditedFormActionBackend(RegistryFormActionBackend):
        """Registry backend that writes an audit row per dispatch."""
 
-       def dispatch(self, request: HttpRequest, uid: str) -> HttpResponse:
+       def dispatch(self, request: HttpRequest, uid: str) -> HttpResponseBase:
            names = {meta["uid"]: meta["name"] for meta in self.iter_actions()}
            action_name = names.get(uid)
            if action_name is None:
@@ -42,6 +42,7 @@ Write the backend.
            return response
 
 The override calls ``super().dispatch`` to run the standard validation and handler pipeline.
+The return type is ``HttpResponseBase`` rather than ``HttpResponse``, because a guarded origin page can answer the submission with a streaming response of its own.
 ``iter_actions()`` is the public hook that yields one ``ActionMeta`` per stored action, so indexing its ``uid`` key gives the bare action name without reaching into the backend's private maps.
 An unknown UID raises ``Http404`` from the parent dispatch, so the override skips the audit row for it.
 
@@ -66,12 +67,12 @@ Return an ``HttpResponse`` before calling ``super().dispatch`` to short circuit.
 .. code-block:: python
    :caption: notes/backends.py
 
-   from django.http import HttpResponse
+   from django.http import HttpResponse, HttpResponseBase
 
    from next.forms import RegistryFormActionBackend
 
    class RateLimitedBackend(RegistryFormActionBackend):
-       def dispatch(self, request, uid) -> HttpResponse:
+       def dispatch(self, request, uid) -> HttpResponseBase:
            if self._over_limit(request):
                return HttpResponse(status=429)
            return super().dispatch(request, uid)
@@ -185,8 +186,10 @@ Run the system checks.
 
    uv run python manage.py check
 
-A misconfigured ``FORM_ACTION_BACKENDS`` entry fires ``next.E044``.
-A backend class that does not subclass ``FormActionBackend`` fires ``next.E045``.
+A ``FORM_ACTION_BACKENDS`` value that is not a list fires ``next.E044``.
+An entry that is not a dict fires ``next.E058``, and an entry whose ``BACKEND`` is not a string fires ``next.E059``.
+A dotted path that cannot be imported fires ``next.E068``.
+A backend class outside the ``FormActionBackend`` family fires ``next.E045``.
 
 See also
 --------

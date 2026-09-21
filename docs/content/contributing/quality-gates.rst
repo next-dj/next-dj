@@ -73,7 +73,7 @@ The gate is identical locally and in continuous integration, which runs the suit
 A ``[tool.coverage.paths]`` mapping collapses ``next/`` and ``*/site-packages/next/`` so the two runs report the same numbers.
 
 Most system check modules are excluded from that gate.
-The ``omit`` list in ``pyproject.toml`` names ``next/checks/`` together with the per-area ``checks.py`` modules of ``apps``, ``components``, ``conf``, ``forms``, ``pages``, ``partial``, and ``urls``.
+The ``omit`` list in ``pyproject.toml`` names ``next/checks/``, the ``checks.py`` of ``apps``, ``components``, ``conf``, and ``urls``, and the whole ``checks/`` package of ``forms``, ``pages``, and ``partial``.
 ``next/static/checks.py`` is not in that list and stays inside the gate, so a static check still carries its own tests.
 The generic ``*/settings.py`` entry lifts ``next/conf/settings.py`` out of the gate as well, which is why new configuration logic belongs in another module of the ``conf`` area.
 
@@ -133,7 +133,7 @@ A dedicated ``build`` job produces the wheel and the source distribution once, a
 Each matrix job then pins its Django with ``uv pip install "django==<version>"`` after the wheel is installed, which is deliberate and not a broken lockfile.
 The matrix covers every combination the *Requirements* list in :doc:`/content/intro/install` names.
 
-A separate ``test-compat`` job runs ``pytest tests/compat`` with the ``compat`` dependency group, which pins django-crispy-forms, crispy-bootstrap5, django-widget-tweaks, django-htmx, and django-allauth.
+A separate ``test-compat`` job runs ``pytest tests/compat`` with the ``compat`` dependency group, which declares a minimum for django-crispy-forms, crispy-bootstrap5, django-widget-tweaks, django-htmx, and django-allauth.
 That job checks the framework against the ecosystem packages a project is likely to have installed already.
 
 Client runtime

@@ -33,12 +33,13 @@ The module also ships ``envelope_of`` and ``PartialEnvelope`` for decoding patch
 .. automodule:: next.testing.client
    :members:
 
-Signals
-~~~~~~~
+Signal capture
+~~~~~~~~~~~~~~
 
 ``SignalRecorder`` and the ``capture_signals`` wrappers capture framework signal payloads inside a context manager.
+They live in ``next.testing.capture``, which leaves the name ``signals`` to the framework signal modules the recorder connects to.
 
-.. automodule:: next.testing.signals
+.. automodule:: next.testing.capture
    :members:
 
 Isolation

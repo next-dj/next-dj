@@ -79,7 +79,9 @@ def _static_view(page: Page, file_path: Path) -> Callable[..., HttpResponseBase]
             return shaper.zone_response(
                 file_path, request, intent, dynamic_body=False, url_kwargs=dict(kwargs)
             )
-        return HttpResponse(page.render(file_path, request, **kwargs))
+        response = HttpResponse(page.render(file_path, request, **kwargs))
+        shaper.set_vary(response)
+        return response
 
     return view
 
@@ -128,7 +130,11 @@ def _resolving_view(
                 url_kwargs=dict(kwargs),
             )
         body = resolution.body if resolution.body is not None else ""
-        return HttpResponse(page._render_composed(file_path, body, request, **kwargs))
+        response = HttpResponse(
+            page._render_composed(file_path, body, request, **kwargs)
+        )
+        shaper.set_vary(response)
+        return response
 
     return view
 

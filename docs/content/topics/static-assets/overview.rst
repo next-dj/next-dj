@@ -11,6 +11,14 @@ This page covers the four moving pieces of the pipeline and traces a single asse
    :local:
    :depth: 2
 
+What it replaces
+----------------
+
+Without the pipeline a stylesheet that belongs to one page is three separate decisions.
+The file goes somewhere under a static directory, a ``<link>`` tag goes into every template that needs it, and somebody has to remember to take the tag out when the page stops using the file.
+The pipeline collapses the three into one, a file named after the template it belongs to and living in the same directory.
+The page owns the asset from there, so rendering the page collects it and a page that stops rendering collects nothing.
+
 The pipeline
 ------------
 
@@ -86,11 +94,6 @@ The stem registry is ``default_stems``, which lives at ``next.static.discovery``
 Projects register extra stems through ``default_stems.register``.
 See :doc:`custom-stems`.
 
-Where assets live
------------------
-
-:doc:`co-located-files` shows the directory layout where co-located assets sit next to pages, layouts, and components.
-
 Hot reload
 ----------
 
@@ -104,9 +107,11 @@ Production build
 ----------------
 
 In production, ``collectstatic`` copies every registered asset into ``STATIC_ROOT`` under the ``next/`` namespace.
-The framework hooks into the staticfiles finders through ``NextStaticFilesFinder`` so Django sees co-located assets.
+Two finders of its own reach ``STATICFILES_FINDERS`` for that, both installed automatically.
+``NextStaticFilesFinder`` is appended, and it is what makes Django see a co-located asset at all.
+``NextAppDirectoriesFinder`` replaces a listed ``AppDirectoriesFinder`` entry, because ``next/static`` is the ``next.static`` Python package as well as a directory, and the stock finder would have ``collectstatic`` publish the framework's own modules into ``STATIC_ROOT``.
 
-See :doc:`/content/deployment/static-files` for production guidance.
+See :ref:`ref-static` for the finder contract and :doc:`/content/deployment/static-files` for production guidance.
 
 See also
 --------

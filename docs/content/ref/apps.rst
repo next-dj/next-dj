@@ -9,13 +9,14 @@ Module summary
 ``next.apps`` contains the Django ``AppConfig`` and the helpers that the framework runs at application startup.
 
 ``NextFrameworkConfig.ready()`` first runs ``next.checks.register_all()`` to register the framework system checks.
-It then runs ten startup steps in a fixed order.
+It then runs eleven startup steps in a fixed order.
 
 #. ``router_reloaded.connect()`` for the four cache-forgetting receivers
 #. ``apply_resolver_setting()``
+#. ``page_scan_slot.set(PageScanImpl())``
 #. ``partial_shaper_slot.set(PartialShaperImpl())``
 #. ``router_access_slot.set(RouterAccessImpl())``
-#. ``static_assets_slot.set(default_manager)``
+#. ``static_assets_slot.set(StaticAssetsImpl())``
 #. ``autoreload.install()``
 #. ``templates.install()``
 #. ``staticfiles.install()``
@@ -32,9 +33,9 @@ It runs ahead of every install because the two discovery steps import user modul
 ``autodiscover_forms()`` imports the ``forms`` submodule of every installed app so shared forms register before the first request arrives.
 It respects the ``FORM_AUTODISCOVER`` setting and is a no-op when that setting is ``False``.
 
-Steps three to five bind the three :doc:`next.ports <ports>` slots, ahead of every step that imports user code so that a module touching a framework path at import time never reads an unbound slot.
+Steps three to six bind the four :doc:`next.ports <ports>` slots, ahead of every step that imports user code so that a module touching a framework path at import time never reads an unbound slot.
 They also run ahead of the discovery steps so a discovery failure leaves no process behind with a slot still empty.
-Binding the static handle stores the lazy object rather than reading through it, so the static manager is still built on first use.
+Each implementation resolves its manager when a method is called rather than when the slot is bound, so the static manager is still built on first use.
 
 Public API
 ----------
@@ -52,9 +53,9 @@ Template tag registration
 .. automodule:: next.apps.templates
    :members:
 
-``templates.install()`` also widens the block-tag branch of Django's template lexing pattern, so a ``{% ... %}`` tag may span several lines and a component tag can carry its arguments over more than one.
-Only that branch changes, leaving variable and comment lexing as Django spells them.
-See :doc:`template-tags` for the tags this enables.
+``templates.install()`` also prepends a line-spanning branch to Django's template lexing pattern, so a component tag can carry its arguments over more than one line.
+The branch matches thirteen literal framework tag names and nothing else, and Django's own block-tag branch stays behind it, so a stock tag, a third-party tag, a variable, and a comment all lex as Django lexes them.
+See :doc:`template-tags` for the tags this enables and the exact set.
 A Django release that spells the block-tag branch differently raises ``RuntimeError`` out of ``ready``, because a pattern left unwidened would turn every multi-line tag into template text at render time.
 
 The module also connects a ``setting_changed`` receiver, so an override that hands the engines a new ``TEMPLATES`` value gets the framework builtins installed again and the engines built without them dropped.

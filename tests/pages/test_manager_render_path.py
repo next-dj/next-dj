@@ -10,6 +10,7 @@ from django.test import override_settings
 from next.caches import BoundedCache
 from next.pages import Page
 from next.pages.loaders import _load_python_module_memo
+from next.partial.headers import VARY_HEADERS
 from next.testing import envelope_of
 from next.utils import stat_mtime_ns
 from tests.support import (
@@ -774,3 +775,27 @@ class TestTemplateRegistryBound:
 
         assert reads == []
         assert template.source == source
+
+
+class TestFullPageResponseDeclaresItsNegotiation:
+    """A full page answers under the request headers the partial layer reads."""
+
+    def test_the_static_branch_varies_on_every_partial_header(
+        self, page_instance, tmp_path
+    ) -> None:
+        page_file = build_nested_page(tmp_path)
+
+        response = unified_view(page_instance, page_file)(build_page_request())
+
+        varied = {value.strip() for value in response.headers["Vary"].split(",")}
+        assert set(VARY_HEADERS) <= varied
+
+    def test_the_render_branch_varies_on_every_partial_header(
+        self, page_instance, tmp_path
+    ) -> None:
+        page_file = _build_dynamic_page(tmp_path / "dynamic")
+
+        response = unified_view(page_instance, page_file)(build_page_request())
+
+        varied = {value.strip() for value in response.headers["Vary"].split(",")}
+        assert set(VARY_HEADERS) <= varied

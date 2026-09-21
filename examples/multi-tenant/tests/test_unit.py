@@ -364,6 +364,14 @@ class TestTenantPrefixStaticBackend:
             '<link rel="stylesheet" href="/x.css">'
         )
 
+    def test_rendered_tag_escapes_the_url(
+        self, tenant_request: Callable[..., HttpRequest]
+    ) -> None:
+        """A rewritten URL is escaped into the tag the pipeline splices in."""
+        backend = TenantPrefixStaticBackend()
+        tag = backend.render_script_tag('/x.js?a=1&b="2"', request=tenant_request())
+        assert tag == '<script src="/x.js?a=1&amp;b=&quot;2&quot;"></script>'
+
 
 class TestNoteCardComponent:
     """`note_card` derives an excerpt and an edit URL for the listing."""

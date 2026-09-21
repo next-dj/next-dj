@@ -45,6 +45,10 @@ The middleware lets the login page and static assets through, and redirects ever
 
 Place the middleware after :class:`~django.contrib.auth.middleware.AuthenticationMiddleware` so ``request.user`` is populated when the guard runs.
 
+The guard above covers every path, which is what makes it complete.
+A middleware narrowed to the page prefix, such as one that returns early unless ``request.path`` starts with ``/notes/``, silently loses the dispatch endpoint at ``/_next/form/<uid>/``, which is where a form POST lands and which sits outside the page URL space entirely, so a narrowed guard leaves every action reachable by an anonymous POST.
+Keep the guard path-wide, or add ``/_next/`` to whatever prefix set it matches, and declare the requirement on the action as well.
+
 Use :func:`~next.urls.reverse.page_reverse` instead of a hard-coded path when redirecting to a file-routed login page.
 See :doc:`/content/topics/url-reversing` for the full reversing surface.
 
@@ -128,6 +132,7 @@ Form actions dispatch at ``/_next/form/<uid>/``, outside the page URL space.
 The global middleware above still covers them because it gates every request path.
 A project that protects pages selectively declares the requirement on the action itself.
 Use ``Meta.login_required`` and ``Meta.permission_required`` on the form class, or the same keywords on ``@action``.
+The page the submission names authorizes the request as well, so a ``render()`` that redirects an anonymous visitor redirects the POST with the same response, see :doc:`/content/topics/pages`.
 
 .. code-block:: python
    :caption: notes/pages/admin-notes/page.py

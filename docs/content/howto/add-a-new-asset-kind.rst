@@ -62,11 +62,15 @@ When the new kind needs a tag shape that the bundled methods do not produce, add
 .. code-block:: python
    :caption: notes/backends.py
 
+   from django.utils.html import escape
+
    from next.static import StaticFilesBackend
 
    class BabelBackend(StaticFilesBackend):
        def render_babel_tag(self, url: str, *, request=None) -> str:
-           return f'<script type="text/babel" src="{url}"></script>'
+           return f'<script type="text/babel" src="{escape(url)}"></script>'
+
+A renderer method builds markup the template engine never sees, so an override escapes the URL itself rather than relying on the engine to do it.
 
 Register the kind against the new method and register the backend.
 Replace the ``ready`` registration from the walkthrough with this one, keeping a single registration per kind.

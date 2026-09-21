@@ -1,8 +1,10 @@
 """Dispatch-URL reversing, origin-path validation, and origin redirects."""
 
+from django.core.exceptions import DisallowedHost
 from django.http import HttpRequest, HttpResponseRedirect
 from django.urls import reverse
 from django.urls.exceptions import NoReverseMatch
+from django.utils.http import url_has_allowed_host_and_scheme
 
 
 URL_NAME_FORM_ACTION = "form_action"
@@ -26,8 +28,6 @@ ORIGIN_FIELD_NAME = "_next_form_origin"
 # rendered form's _next_form_origin, instead of mutating a request attribute.
 FORM_ORIGIN_OVERRIDE_KEY = "form_origin_override"
 
-# Code points a browser removes from a URL before resolving it, per the WHATWG
-# URL parser. Left in place they would hide a protocol-relative target.
 _URL_DROPPED_CHARS = frozenset("\t\n\r")
 
 
@@ -47,21 +47,45 @@ def current_origin_path(request: HttpRequest) -> str | None:
     return f"{path}?{query}" if query else str(path)
 
 
-def validated_origin_path(raw: object) -> str | None:
+def _allowed_hosts(request: HttpRequest) -> set[str] | None:
+    """Return the single host a same-site target may name, if the request has one.
+
+    A request built in code carries no host and a refused one must not become an
+    allowance, so `None` answers for it, which lets no absolute target through.
+    """
+    try:
+        return {request.get_host()}
+    except (KeyError, DisallowedHost):
+        return None
+
+
+def _is_path_only(candidate: str) -> bool:
+    """Whether a browser resolves `candidate` against the current origin as a path.
+
+    A backslash or a dropped code point would hide a protocol-relative target.
+    """
+    if _URL_DROPPED_CHARS.intersection(candidate):
+        return False
+    collapsed = candidate.replace("\\", "/")
+    return candidate.startswith("/") and not collapsed.startswith("//")
+
+
+def validated_origin_path(raw: object, *, request: HttpRequest) -> str | None:
     """Return `raw` as a same-site path or `None`.
 
-    A tab or a newline is refused because a browser drops those before resolving a URL,
-    which would turn a same-site value into a protocol-relative jump off site.
+    Django's helper rules on host and scheme first, so an open-redirect fix lands here
+    too, and the path-only policy on top refuses even an absolute URL naming this host.
     """
     if not isinstance(raw, str):
         return None
-    raw = raw.strip()
-    if _URL_DROPPED_CHARS.intersection(raw):
+    candidate = raw.strip()
+    if not url_has_allowed_host_and_scheme(
+        candidate,
+        allowed_hosts=_allowed_hosts(request),
+        require_https=request.is_secure(),
+    ):
         return None
-    collapsed = raw.replace("\\", "/")
-    if not raw.startswith("/") or collapsed.startswith("//"):
-        return None
-    return raw
+    return candidate if _is_path_only(candidate) else None
 
 
 def redirect_to_origin(
@@ -70,7 +94,9 @@ def redirect_to_origin(
     """Redirect back to the page that rendered the form."""
     origin: str | None = None
     if hasattr(request, "POST"):
-        origin = validated_origin_path(request.POST.get(ORIGIN_FIELD_NAME))
+        origin = validated_origin_path(
+            request.POST.get(ORIGIN_FIELD_NAME), request=request
+        )
     return HttpResponseRedirect(origin or fallback)
 
 

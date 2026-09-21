@@ -1,10 +1,11 @@
 from unittest.mock import MagicMock
 
 import pytest
+from django.http import HttpRequest
 from django.test import RequestFactory
 
 from next.forms import redirect_to_origin
-from next.forms.uid import current_origin_path
+from next.forms.uid import current_origin_path, validated_origin_path
 
 
 class TestRedirectToOrigin:
@@ -107,3 +108,73 @@ class TestCurrentOriginPath:
     ) -> None:
         request = mock_http_request(method="GET", path="/items/")
         assert current_origin_path(request) == "/items/"
+
+
+class TestValidatedOriginPath:
+    """`validated_origin_path` keeps a same-site path and refuses everything else."""
+
+    def test_relative_path_survives(self) -> None:
+        request = RequestFactory().post("/items/7/")
+        assert validated_origin_path("/items/9/?q=x", request=request) == (
+            "/items/9/?q=x"
+        )
+
+    def test_secure_request_keeps_a_relative_path(self) -> None:
+        request = RequestFactory().post("/items/7/", secure=True)
+        assert request.is_secure()
+        assert validated_origin_path("/items/9/", request=request) == "/items/9/"
+
+    @pytest.mark.parametrize(
+        "target",
+        [
+            pytest.param("https://attacker.example.com/x/", id="offsite-https"),
+            pytest.param("http://attacker.example.com/x/", id="offsite-http"),
+            pytest.param("//attacker.example.com/x/", id="protocol-relative"),
+            pytest.param("http://testserver/x/", id="same-host-absolute"),
+            pytest.param("//testserver/x/", id="same-host-protocol-relative"),
+        ],
+    )
+    def test_absolute_target_is_refused(self, target: str) -> None:
+        """Only a path comes back, so no absolute URL survives, own host included."""
+        request = RequestFactory().post("/items/7/")
+        assert validated_origin_path(target, request=request) is None
+
+    @pytest.mark.parametrize(
+        "target",
+        [
+            pytest.param("/\\attacker.example.com/x/", id="offsite-backslash"),
+            pytest.param("/\\testserver/x/", id="same-host-backslash"),
+            pytest.param("/\t/attacker.example.com/x/", id="tab"),
+            pytest.param("/\n/attacker.example.com/x/", id="newline"),
+            pytest.param("/\r/testserver/x/", id="carriage-return-same-host"),
+        ],
+    )
+    def test_disguised_absolute_target_is_refused(self, target: str) -> None:
+        """A browser drops the backslash and the control character, so both refuse."""
+        request = RequestFactory().post("/items/7/")
+        assert validated_origin_path(target, request=request) is None
+
+    def test_a_path_carrying_a_dropped_code_point_is_refused(self) -> None:
+        request = RequestFactory().post("/items/7/")
+        assert validated_origin_path("/items/?q=x\ty", request=request) is None
+
+    def test_request_without_a_host_still_takes_a_relative_path(self) -> None:
+        """A request built in code names no host, which no relative target needs."""
+        request = HttpRequest()
+        request.method = "POST"
+        assert validated_origin_path("/items/9/", request=request) == "/items/9/"
+
+    @pytest.mark.parametrize(
+        "target",
+        [
+            pytest.param("https://testserver/x/", id="https"),
+            pytest.param("//testserver/x/", id="protocol-relative"),
+            pytest.param("/\\testserver/x/", id="backslash"),
+        ],
+    )
+    def test_request_without_a_host_refuses_an_absolute_target(
+        self, target: str
+    ) -> None:
+        request = HttpRequest()
+        request.method = "POST"
+        assert validated_origin_path(target, request=request) is None

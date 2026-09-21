@@ -1,8 +1,7 @@
 """System checks for next-dj template engine wiring.
 
-The next-dj tags install only into a `DjangoTemplates` backend and only
-through the explicit builtin tuple. A project missing either one gets a
-warning here instead of a missing-tag error at render time.
+The ids are `next.W062` for a project with no `DjangoTemplates` backend and
+`next.W063` for a tag library left out of the builtin tuple.
 """
 
 from __future__ import annotations

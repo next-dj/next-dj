@@ -10,11 +10,18 @@ from next.checks import register_all as _register_checks
 from next.deps.resolver import apply_resolver_setting, forget_dep_caches
 from next.forms.autodiscover import autodiscover_forms
 from next.pages.loaders import forget_page_roots
+from next.pages.ports import PageScanImpl
 from next.pages.watch import forget_watch_state
-from next.partial.shaper import PartialShaperImpl
-from next.ports import partial_shaper_slot, router_access_slot, static_assets_slot
-from next.static.manager import default_manager, forget_manager_page_roots
-from next.urls.access import RouterAccessImpl
+from next.partial.ports import PartialShaperImpl
+from next.ports import (
+    page_scan_slot,
+    partial_shaper_slot,
+    router_access_slot,
+    static_assets_slot,
+)
+from next.static.manager import forget_manager_page_roots
+from next.static.ports import StaticAssetsImpl
+from next.urls.ports import RouterAccessImpl
 from next.urls.signals import router_reloaded
 
 from . import autoreload, components, staticfiles, templates
@@ -43,9 +50,10 @@ class NextFrameworkConfig(AppConfig):
         # For the same reason, and so a discovery failure leaves no process behind
         # with an unbound port. The static handle stays lazy, because binding it
         # stores the handle rather than reading through it.
+        page_scan_slot.set(PageScanImpl())
         partial_shaper_slot.set(PartialShaperImpl())
         router_access_slot.set(RouterAccessImpl())
-        static_assets_slot.set(default_manager)
+        static_assets_slot.set(StaticAssetsImpl())
         autoreload.install()
         templates.install()
         staticfiles.install()

@@ -229,7 +229,7 @@ setting_changed.connect(_on_setting_changed)
 def _read_string_list(module: types.ModuleType, attr: str) -> list[str]:
     """Return a module-level string-sequence attribute or an empty list."""
     value = getattr(module, attr, None)
-    if not isinstance(value, (list, tuple)):
+    if not isinstance(value, list | tuple):
         return []
     return [str(item) for item in value if isinstance(item, str) and item]
 
@@ -407,9 +407,8 @@ class LayoutTemplateLoader:
             for root in _page_roots()
             if resolved.is_relative_to(root)
         ]
-        if not depths:
-            return MAX_ANCESTOR_WALK_DEPTH
-        return min(*depths, MAX_ANCESTOR_WALK_DEPTH)
+        depths.append(MAX_ANCESTOR_WALK_DEPTH)
+        return min(depths)
 
     def _find_layout_files(self, file_path: Path) -> list[Path]:
         """Return `layout.djx` paths from near to far plus global layouts.

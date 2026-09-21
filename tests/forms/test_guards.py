@@ -1085,7 +1085,6 @@ class TestDepCacheReuse:
     def test_provider_resolves_once_across_hook_and_on_valid(
         self, mock_http_request
     ) -> None:
-        GuardedTenantForm.resolutions.clear()
         seen: dict[str, object] = {}
 
         def receiver(**kwargs) -> None:

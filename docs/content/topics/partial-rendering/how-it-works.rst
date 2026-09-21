@@ -42,8 +42,8 @@ A form submit, an auto-submitting filter, a paginating link, a lazy zone enterin
    Accept: application/vnd.next.patches+json, text/html;q=0.9
    X-Next-Zone: catalog-results
 
-``X-Next-Request`` is the switch the server reads to choose a partial response over the full page.
-The other ``X-Next-*`` headers name the zone, the origin page, and the asset version.
+``X-Next-Request`` is the switch the server reads to choose a partial response over the full page, and ``X-Next-Zone`` names the zones to render, comma-joined for a batch.
+The rest of the namespace carries the field names of a validate-only pass, the merge intent of a paginating request, the asset version the client holds, the request id a stream echo is matched against, and the page that hosts a layer.
 
 The envelope
 ------------
@@ -64,6 +64,7 @@ The server renders the named zone alone and serializes the result through the co
    }
 
 Every operation and every address is authored by the server, so the client is never asked to do anything the server did not name.
+``version`` is the asset version the envelope was built under, which the client compares against the version it already holds and answers with one full reload when the two disagree, see :doc:`reference`.
 :doc:`reference` lists the verbs, the addresses, the manifest fields, and the headers in tables.
 
 The view branches into that zone response before the page renders, so the layout chain is never rendered and no markup is produced only to be dropped.
@@ -86,4 +87,5 @@ See also
 .. seealso::
 
    :doc:`scenarios` for the same flow shown as seven concrete tasks.
-   :doc:`reference` for the verbs, headers, attributes, and client runtime surface in tables.
+   :doc:`reference` for the verbs, headers, and attributes in tables.
+   :doc:`/content/ref/client` for the ``window.Next`` runtime that applies the envelope.

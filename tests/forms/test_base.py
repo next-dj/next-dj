@@ -31,8 +31,8 @@ from next.forms.base import (
     _record_invalid_meta_scope,
     _to_snake_case,
 )
-from next.forms.diagnostics import registration_diagnostics
 from next.forms.manager import form_action_manager
+from next.forms.registration import registration_diagnostics
 from next.introspect import defining_file
 from next.pages.loaders import _load_python_module
 from tests.support import importable_dir
@@ -832,7 +832,7 @@ class TestIsForeignFile:
     def test_decision_is_memoised(self, tmp_path) -> None:
         """The second call answers from the cache instead of resolving the path."""
         user_path = str(tmp_path / "myapp" / "forms.py")
-        forms_base._foreign_file_cache.pop(user_path, None)
+        forms_base._foreign_file_cache.pop(user_path)
 
         assert forms_base._is_foreign_file(user_path) is False
         assert forms_base._foreign_file_cache[user_path] is False

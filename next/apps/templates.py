@@ -21,12 +21,26 @@ _BUILTIN_MODULES = (
 
 _DJANGO_BACKEND = "django.template.backends.django.DjangoTemplates"
 
-# Django lexes every template with ``({%.*?%}|{{.*?}}|{#.*?#})``. Component tags
-# wrap across lines, so only the block-tag branch is widened, through an inline
-# group. A ``re.DOTALL`` flag over the whole pattern would also let ``{{ }}`` and
-# ``{# #}`` swallow newlines, in every engine of the process.
 _BLOCK_TAG_BRANCH = "{%.*?%}"
-_MULTILINE_BLOCK_TAG_BRANCH = f"(?s:{_BLOCK_TAG_BRANCH})"
+
+_NEXT_TAG_NAMES = (
+    "action_url",
+    "asset",
+    "collect_scripts",
+    "collect_styles",
+    "component",
+    "form",
+    "set_slot",
+    "slot",
+    "template",
+    "use_module",
+    "use_script",
+    "use_style",
+    "zone",
+)
+_NEXT_TAG_ALTERNATION = "|".join(_NEXT_TAG_NAMES)
+_NEXT_BLOCK_TAG_BRANCH = rf"{{%\s*#?(?:{_NEXT_TAG_ALTERNATION})\b(?s:.*?)%}}"
+_MULTILINE_BLOCK_TAG_BRANCH = f"(?:{_NEXT_BLOCK_TAG_BRANCH}|{_BLOCK_TAG_BRANCH})"
 
 _UNKNOWN_TAG_PATTERN = (
     "Django's template tag pattern no longer spells its block-tag branch "
@@ -35,10 +49,10 @@ _UNKNOWN_TAG_PATTERN = (
 
 
 def _multiline_tag_pattern(pattern: str) -> str:
-    """Return *pattern* with dot-matches-newline scoped to its block-tag branch.
+    """Return *pattern* with a line-spanning branch for next-dj's own block tags.
 
-    Raises when the branch is not found, because a silently unwidened pattern
-    would turn every multi-line tag into template text at render time.
+    Raises when Django's branch is not found, and every tag outside the next-dj
+    set keeps that branch, so a stray `{%` elsewhere swallows no extra text.
     """
     if _MULTILINE_BLOCK_TAG_BRANCH in pattern:
         return pattern
@@ -48,10 +62,10 @@ def _multiline_tag_pattern(pattern: str) -> str:
 
 
 def _install_lexer() -> None:
-    """Let a block tag span lines, leaving variables and comments as Django lexes them.
+    """Let a next-dj block tag span lines, leaving every other tag as Django lexes it.
 
-    Both `Lexer.tokenize` and `DebugLexer` read the pattern as a module global,
-    so the rebind reaches every lexing path and repeats as a no-op.
+    Both `Lexer.tokenize` and `DebugLexer` read the pattern as a module global, so the
+    widened branch reaches every lexing path and the install repeats as a no-op.
     """
     pattern = _multiline_tag_pattern(template_base.tag_re.pattern)
     if pattern != template_base.tag_re.pattern:

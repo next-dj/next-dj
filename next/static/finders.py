@@ -90,7 +90,7 @@ def discover_colocated_static_assets() -> dict[str, Path]:
         )
 
     seen_component_dirs: set[Path] = set()
-    for component_source in get_component_paths_for_watch():  # pragma: no cover
+    for component_source in get_component_paths_for_watch():
         component_dir = component_source.parent.resolve()
         if component_dir in seen_component_dirs:
             continue

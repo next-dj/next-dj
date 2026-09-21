@@ -13,8 +13,8 @@ from django.utils.safestring import SafeString
 from next.components.facade import get_component, render_component
 from next.components.manager import components_manager
 from next.components.renderers import COMPONENT_PROPS_CONTEXT_KEY
+from next.ports import static_assets_slot
 from next.seeding import EMPTY_FRAME, RenderFrame, current_ambient_frame
-from next.static import StaticCollector, collect_component_assets
 from next.utils import resolve_base_dir
 
 from .errors import UnregisteredComponentError
@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from django.forms.utils import ErrorList
 
     from next.components.info import ComponentInfo
+    from next.static import StaticCollector
 
 
 # Per-request component lookup cache attached to the request object, mirroring
@@ -110,7 +111,7 @@ class ComponentWidget(django_forms.Widget):
                 anchor,
                 components_manager.collect_visible_components(Path(anchor)),
             )
-        collect_component_assets(info, frame.collector)
+        static_assets_slot.get().collect_component_assets(info, frame.collector)
         merged = self.build_attrs(self.attrs, attrs or {})
         # Hyphenated keys such as aria-invalid cannot be read as template vars,
         # so they alias to an underscore form unless that name is already taken.
@@ -145,7 +146,7 @@ def bind_component_widgets(
     *,
     template_path: str | Path | None,
     request: HttpRequest | None = None,
-    collector: StaticCollector | None = None,
+    collector: "StaticCollector | None" = None,
     page_module_path: str | Path | None = None,
     action_anchor: str | Path | None = None,
     with_errors: bool = False,

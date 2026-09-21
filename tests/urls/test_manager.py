@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
+from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.test import RequestFactory, override_settings
 from django.urls import Resolver404, URLResolver, include, path
@@ -33,6 +34,7 @@ from tests.support import (
     EntryRouter,
     file_router,
     file_router_config_entry,
+    importable_dir,
     named_temp_py,
 )
 
@@ -286,12 +288,23 @@ class TestRouterManager:
         ):
             manager.reload()
 
-    def test_reload_bumps_version(self, manager) -> None:
-        """Every reload increments the urlpatterns cache token."""
+    def test_reload_moves_the_version_forward(self, manager) -> None:
+        """Every reload leaves the token past the one the reload before it carried."""
         before = manager.version
         manager.reload()
+        once = manager.version
         manager.reload()
-        assert manager.version == before + 2
+
+        assert once > before
+        assert manager.version > once
+
+    def test_two_managers_never_share_a_version(self) -> None:
+        """The counter is process-wide, so one manager's token never reads as another's."""
+        first, second = RouterManager(), RouterManager()
+        first.reload()
+        second.reload()
+
+        assert first.version != second.version
 
     def test_a_quiet_reload_keeps_the_url_caches_and_the_signal(self, manager) -> None:
         """A manager nobody serves from flushes no resolver cache and tells nobody."""
@@ -325,6 +338,62 @@ class TestRouterManager:
             result = manager._get_next_pages_config()
             assert len(result) == 1
             assert result[0]["BACKEND"] == "next.urls.FileRouterBackend"
+
+
+class TestInstalledAppsMovesTheRouters:
+    """`INSTALLED_APPS` moving under an `APP_DIRS` router changes what it routes."""
+
+    def _write_app(self, root: Path, name: str, route: str) -> None:
+        """Write an importable application package carrying one routed page."""
+        (root / name).mkdir(parents=True)
+        (root / name / "__init__.py").write_text("")
+        page_dir = root / name / "pages" / route
+        page_dir.mkdir(parents=True)
+        (page_dir / "page.py").write_text('template = "ok"\n')
+
+    def _routed_names(self) -> set[str]:
+        """Return the reverse name of every pattern the served urlconf carries.
+
+        Read through the lazy concat rather than the manager, because that is the
+        sequence a stale version token would keep answering from.
+        """
+        return {getattr(pattern, "name", None) for pattern in lazy_urlpatterns}
+
+    def test_installing_an_app_brings_its_pages_into_the_patterns(
+        self, tmp_path
+    ) -> None:
+        self._write_app(tmp_path, "catalogue_app", "catalogue")
+        app_dirs_entry = {
+            "BACKEND": "next.urls.FileRouterBackend",
+            "PAGES_DIR": "pages",
+            "APP_DIRS": True,
+            "DIRS": [],
+            "OPTIONS": {},
+        }
+
+        with (
+            importable_dir(tmp_path),
+            override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [app_dirs_entry]}),
+        ):
+            before = self._routed_names()
+            with override_settings(
+                INSTALLED_APPS=[*settings.INSTALLED_APPS, "catalogue_app"]
+            ):
+                installed = self._routed_names()
+            after = self._routed_names()
+
+        assert "page_catalogue" not in before
+        assert "page_catalogue" in installed
+        assert "page_catalogue" not in after
+
+    def test_an_unrelated_setting_leaves_the_routers_where_they_are(self) -> None:
+        """Only the app list rebuilds, so a stray setting costs no scan of the trees."""
+        before = router_manager.version
+
+        with override_settings(SECRET_KEY="another-secret"):
+            assert router_manager.version == before
+
+        assert router_manager.version == before
 
 
 class TestGlobalInstances:

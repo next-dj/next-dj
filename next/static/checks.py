@@ -1,6 +1,9 @@
 """System checks for the static subsystem.
 
-All identifiers live in the `next.*` namespace, away from Django's core checks.
+The ids are `next.E036` to `next.E038`, `next.E092`, `next.E093` and `next.W030`,
+`next.W031` for `STATIC_BACKENDS`, `next.W042` and `next.W079` to `next.W082` for the
+JS context serializer, `next.E083` for a finder that publishes the framework package,
+and `next.W074` to `next.W076` for asset kinds and context keys.
 """
 
 from __future__ import annotations
@@ -68,7 +71,7 @@ def _check_single_backend(
                 f"STATIC_BACKENDS[{index}]['BACKEND'] must be a dotted "
                 f"string, got {type(backend_path).__name__!r}.",
                 obj=settings,
-                id="next.E037",
+                id="next.E092",
             )
         )
         return messages
@@ -100,7 +103,7 @@ def _check_single_backend(
             Error(
                 f"Static backend {backend_path!r} is not a StaticBackend subclass.",
                 obj=settings,
-                id="next.E037",
+                id="next.E093",
             )
         )
         return messages
@@ -119,13 +122,7 @@ def _check_single_backend(
 def check_static_backends(**kwargs) -> list[CheckMessage]:
     """Validate the structure of `NEXT_FRAMEWORK['STATIC_BACKENDS']`."""
     messages: list[CheckMessage] = []
-    try:
-        configs = next_framework_settings.STATIC_BACKENDS
-    except (AttributeError, ImportError) as e:  # pragma: no cover
-        return [
-            Error(f"Unable to read STATIC_BACKENDS: {e}", obj=settings, id="next.E036")
-        ]
-
+    configs = next_framework_settings.STATIC_BACKENDS
     if not isinstance(configs, list) or len(configs) == 0:
         messages.append(
             DjangoWarning(
@@ -199,9 +196,10 @@ def _reserved_key_warning(origin: str, source_path: Path, key: str) -> CheckMess
     """Return the `next.W075` warning for one reserved-key collision."""
     return DjangoWarning(
         f"{origin} context key {key!r} in {source_path} is reserved for the "
-        f"next.min.js init payload. The framework owns {key} on every render, "
-        "so the registered value never reaches window.Next.context and no "
-        "context patch can update it. Rename the key.",
+        f"next.min.js init payload. The framework owns {key} on every render, so "
+        "the automatically injected payload drops the registered value before it "
+        "reaches window.Next.context and no context patch can update it. "
+        "Rename the key.",
         obj=str(source_path),
         id="next.W075",
     )
@@ -225,9 +223,9 @@ def check_reserved_js_context_keys(*args, **kwargs) -> list[CheckMessage]:
     ]
 
 
-def _w042(message: str) -> CheckMessage:
-    """Return a next.W042 warning tied to settings as the object."""
-    return DjangoWarning(message, obj=settings, id="next.W042")
+def _serializer_warning(message: str, code: str) -> CheckMessage:
+    """Return a JS_CONTEXT_SERIALIZER warning tied to settings as the object."""
+    return DjangoWarning(message, obj=settings, id=code)
 
 
 @register(NEXT)
@@ -250,9 +248,10 @@ def _js_context_serializer_message() -> CheckMessage | None:
     if path is None or path == "":
         return None
     if not isinstance(path, str):
-        return _w042(
+        return _serializer_warning(
             f"NEXT_FRAMEWORK['JS_CONTEXT_SERIALIZER'] must be a dotted path "
-            f"string, got {type(path).__name__!r}."
+            f"string, got {type(path).__name__!r}.",
+            "next.W042",
         )
     return _js_context_serializer_instance_message(path)
 
@@ -262,17 +261,24 @@ def _js_context_serializer_instance_message(path: str) -> CheckMessage | None:
     try:
         cls: Any = import_class_cached(path)
     except ImportError as e:
-        return _w042(f"Cannot import JS_CONTEXT_SERIALIZER {path!r}: {e}")
+        return _serializer_warning(
+            f"Cannot import JS_CONTEXT_SERIALIZER {path!r}: {e}", "next.W079"
+        )
     if not isinstance(cls, type):
-        return _w042(f"JS_CONTEXT_SERIALIZER {path!r} is not a class.")
+        return _serializer_warning(
+            f"JS_CONTEXT_SERIALIZER {path!r} is not a class.", "next.W080"
+        )
     try:
         instance = cls()
     except (TypeError, ImportError) as e:
-        return _w042(f"JS_CONTEXT_SERIALIZER {path!r} cannot be instantiated: {e}")
+        return _serializer_warning(
+            f"JS_CONTEXT_SERIALIZER {path!r} cannot be instantiated: {e}", "next.W081"
+        )
     if not isinstance(instance, JsContextSerializer):
-        return _w042(
+        return _serializer_warning(
             f"JS_CONTEXT_SERIALIZER {path!r} does not implement the "
-            "JsContextSerializer protocol (needs a `dumps(value) -> str` method)."
+            "JsContextSerializer protocol (needs a `dumps(value) -> str` method).",
+            "next.W082",
         )
     return None
 

@@ -12,7 +12,7 @@ This page covers how the dependency resolver inspects a callable, picks provider
 Overview
 --------
 
-The resolver is the ``DependencyResolver`` singleton in ``next.deps``.
+The resolver is the ``DependencyResolver`` the shared ``resolver`` holder of ``next.deps`` stands for.
 It compiles each callable once into an injection plan and replays that plan on every call.
 Every page context function, every page render, and every component context function is invoked through the resolver.
 The form dispatch adds its own call sites.
@@ -44,15 +44,23 @@ Modules
 -------
 
 ``next.deps.resolver``.
-   ``DependencyResolver`` and the singleton ``resolver`` instance.
+   ``DependencyResolver``, the ``resolver`` holder every reference points at, and the ``current_resolver`` accessor.
    Exposes ``resolve``, ``resolve_dependencies``, and ``resolve_with_template_context`` to run a callable with resolved parameters.
-   The singleton is built at import time and never replaced, so every reference to it stays valid.
+   ``resolver`` is a Django ``SimpleLazyObject`` holding nothing at import time, and the first read builds the class ``DEPENDENCY_RESOLVER`` names.
+   ``apply_resolver_setting`` puts a fresh instance of the configured class behind that holder on every ``settings_reloaded``, and it returns early when the object already behind it has the configured class, so an unrelated reload keeps the resolver in force.
+   A reference taken before a swap therefore reads the object that replaced it rather than going stale, which is what lets a framework module, a provider, and a test helper all import ``resolver`` once.
+   ``current_resolver`` returns the object behind the holder, building it on first read, for a caller on a render path where each attribute taken off the holder is a forwarded call.
    ``resolve_with_template_context`` is the component entry point.
    It hands the template context over as it is, without copying it, and the reserved names stay invisible to the providers that read the context by name.
    A context key called ``request`` or ``form`` therefore cannot shadow the dedicated provider, on the component path and on the page path alike.
 
 ``next.deps.linear``.
    ``LinearDependencyResolver``, the plan-free reference resolver the compiled path is checked against, selectable through ``DEPENDENCY_RESOLVER``.
+
+``next.deps.introspect``.
+   The per-callable memos ``cached_signature``, ``cached_type_hints``, and ``cached_accepts_var_keyword``, the ``introspect_key`` that keys them, and ``forget_introspection_caches`` that empties all three.
+   ``prepared_parameter`` sits here too, so the plan compiler and the plan-free resolver fill a parameter from one shared preparation and differ only in the provider they pick.
+   Both resolvers and the compiler import this module rather than each keeping a memo of its own.
 
 ``next.deps.providers``.
    The ``ParameterProvider`` protocol and the ``RegisteredParameterProvider`` base class.
@@ -165,7 +173,8 @@ Cache
 Two caches with different lifetimes sit behind a resolve.
 The introspection memos live for the process, and the ``DependencyCache`` lives for one resolution pass.
 
-``cached_signature`` and ``cached_type_hints`` in ``next.deps.resolver`` hold the inspected signature and the resolved type hints of a callable, and a third memo of the same shape holds whether it declares ``**kwargs``.
+``cached_signature`` and ``cached_type_hints`` in ``next.deps.introspect`` hold the inspected signature and the resolved type hints of a callable, and ``cached_accepts_var_keyword`` of the same shape holds whether it declares ``**kwargs``.
+``next.deps.resolver`` imports the three rather than defining them, which is why the plan-free resolver reads the same memos the compiled path fills.
 A callable is inspected once per process rather than once per call, so neither the plan compile nor anything the replay asks later reads its annotations again.
 The memo key is the callable itself, or its underlying ``__func__`` paired with a bound flag when it is a method, because a bound method object is recreated on every attribute access and would otherwise miss the memo each time.
 
@@ -194,8 +203,10 @@ Shared across the dispatch.
 Cycle detection
 ---------------
 
-``DependencyCycleError`` is raised when a named dependency re-enters a name already being resolved, directly or through a longer ``Depends`` chain.
-The error message lists the chain of named dependencies that closed the loop, read left to right.
+``DependencyCycleError`` is raised when a dependency re-enters a key already being resolved, directly or through a longer ``Depends`` chain.
+The named form ``Depends("name")`` is tracked under its registered name, and the callable form ``Depends(factory)`` under the dotted ``module.qualname`` of the factory, which is how a pair of mutually referencing factories raises the same error as a pair of mutually referencing names.
+Both forms push their key onto the resolution stack and mark the cache entry in progress, so the guard catches a re-entry through either door.
+The error message lists the chain of keys that closed the loop, read left to right.
 
 Unknown names
 -------------

@@ -28,6 +28,7 @@ from next.pages.paths import clear_page_path_info, forget_page_path_info, page_p
 from next.pages.processors import _get_context_processors
 from next.pages.registry import PageContextRegistry
 from next.pages.signals import page_rendered, template_loaded
+from next.pages.visits import visit_request
 from next.ports import static_assets_slot
 from next.seeding import (
     JS_CONTEXT_KEY,
@@ -44,7 +45,7 @@ from .views import create_url_pattern, unified_view
 
 if TYPE_CHECKING:
     import types
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     from django.http import HttpRequest
     from django.urls import URLPattern
@@ -187,7 +188,7 @@ class Page:
             context_data[REQUEST_KEY] = request
 
         context_processors = _get_context_processors()
-        if request and context_processors:
+        if request is not None and context_processors:
             strict = next_framework_settings.STRICT_CONTEXT
             for processor in context_processors:
                 try:
@@ -370,12 +371,19 @@ class Page:
         return self._render_template_str(file_path, template, start, request, **kwargs)
 
     def authorization_outcome(
-        self, file_path: Path, request: HttpRequest, **kwargs
+        self,
+        file_path: Path,
+        request: HttpRequest,
+        visit_url: str | None,
+        url_kwargs: Mapping[str, object] | None = None,
     ) -> tuple[HttpResponseBase | None, bool]:
         """Resolve a page body once, reporting its short-circuit and its kind.
 
-        `render()` runs under the same injection as the unified view, so guards and
-        redirects fire as on the page's own request, and a zone morph resolves once.
+        `render()` runs under the same injection as the unified view, against a request
+        presenting a GET visit of `visit_url`, so a guard keyed on the shape of the
+        request answers as it would on a visit. A caller that knows no URL for the page
+        passes `None` and leaves the live path in place. A page without a `render()`
+        authorizes every caller, exactly as its own static view does, and loads no body.
         """
         module = _load_python_module_memo(file_path)
         error = last_load_error(file_path)
@@ -383,7 +391,15 @@ class Page:
             # Not Http404. A 404 would answer the caller's own URL instead of
             # the morph, and falling through would skip the page's guards.
             raise error
-        resolution = self._resolve_page_body(file_path, module, request, **kwargs)
+        render_func = getattr(module, "render", None) if module is not None else None
+        if not callable(render_func):
+            return None, False
+        resolution = self._call_render_function(
+            render_func,
+            file_path,
+            visit_request(request, visit_url),
+            **dict(url_kwargs or {}),
+        )
         return resolution.http_response, resolution.dynamic
 
     def has_template(

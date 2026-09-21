@@ -12,8 +12,8 @@ from next.forms.origin import (
     _ORIGIN_MATCH_ATTR,
     OriginMatch,
     _page_path_from_view,
-    _url_kwargs_for_request,
     resolve_origin,
+    url_kwargs_for_request,
 )
 
 
@@ -173,7 +173,7 @@ class TestPagePathFromView:
 
 
 class TestUrlKwargsForRequest:
-    """`_url_kwargs_for_request` picks resolver kwargs or the origin match."""
+    """`url_kwargs_for_request` picks resolver kwargs or the origin match."""
 
     def test_dispatch_route_match_resolves_origin(self, mock_http_request) -> None:
         match = MagicMock()
@@ -182,7 +182,7 @@ class TestUrlKwargsForRequest:
         req = mock_http_request(
             method="POST", POST=_origin_post("/items/5/"), resolver_match=match
         )
-        assert _url_kwargs_for_request(req) == {"id": 5}
+        assert url_kwargs_for_request(req) == {"id": 5}
 
     def test_dispatch_route_match_without_origin_yields_empty(
         self, mock_http_request
@@ -191,14 +191,14 @@ class TestUrlKwargsForRequest:
         match.url_name = "form_action"
         match.kwargs = {"uid": "abcdef1234567890"}
         req = mock_http_request(method="POST", POST=QueryDict(), resolver_match=match)
-        assert _url_kwargs_for_request(req) == {}
+        assert url_kwargs_for_request(req) == {}
 
     def test_page_resolver_kwargs_pass_through(self, mock_http_request) -> None:
         match = MagicMock()
         match.url_name = "items_int_id"
         match.kwargs = {"slug": "tea"}
         req = mock_http_request(method="GET", resolver_match=match)
-        assert _url_kwargs_for_request(req) == {"slug": "tea"}
+        assert url_kwargs_for_request(req) == {"slug": "tea"}
 
     def test_reserved_keys_are_filtered_from_resolver_kwargs(
         self, mock_http_request
@@ -207,21 +207,21 @@ class TestUrlKwargsForRequest:
         match.url_name = "page"
         match.kwargs = {"slug": "tea", "request": "spoof"}
         req = mock_http_request(method="GET", resolver_match=match)
-        assert _url_kwargs_for_request(req) == {"slug": "tea"}
+        assert url_kwargs_for_request(req) == {"slug": "tea"}
 
     def test_post_without_resolver_match_uses_origin(self, mock_http_request) -> None:
         req = mock_http_request(
             method="POST", POST=_origin_post("/items/9/"), resolver_match=None
         )
-        assert _url_kwargs_for_request(req) == {"id": 9}
+        assert url_kwargs_for_request(req) == {"id": 9}
 
     def test_post_without_origin_yields_empty(self, mock_http_request) -> None:
         req = mock_http_request(method="POST", POST=QueryDict(), resolver_match=None)
-        assert _url_kwargs_for_request(req) == {}
+        assert url_kwargs_for_request(req) == {}
 
     def test_get_without_match_yields_empty(self, mock_http_request) -> None:
         req = mock_http_request(method="GET", resolver_match=None)
-        assert _url_kwargs_for_request(req) == {}
+        assert url_kwargs_for_request(req) == {}
 
 
 class TestOriginMatchValue:

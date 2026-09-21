@@ -67,12 +67,8 @@ Modules
 ``next.components.backends``.
    ``ComponentsBackend`` contract.
    ``FileComponentsBackend`` default implementation.
-   ``discover`` is the eager pass the app-ready hook calls on every backend, a no-op for one that resolves names on demand.
-   ``import_component_modules`` is the separate capability of executing those components' Python modules, which is why ``LAZY_COMPONENT_MODULES`` can populate the registry without running a single ``component.py``.
-   It returns the paths it imported, and a backend whose components carry no module returns an empty tuple.
-   ``register_walked_folder`` is the ownership hook the page-tree walk calls, and ``iter_components`` with ``global_component_roots`` is the enumeration the system checks read.
-   ``watch_roots`` names the trees the development watcher observes, and a backend that computes its roots outside its configuration entry reaches autoreload no other way.
-   Each of the six has a default that declines, so a backend that resolves names on demand implements only the two abstract render methods.
+   Two abstract methods answer names, and six optional hooks with declining defaults carry everything else, which :doc:`/content/topics/components` covers one by one.
+   ``discover`` and ``import_component_modules`` are two hooks rather than one because ``LAZY_COMPONENT_MODULES`` populates the registry without executing a single ``component.py``.
 
 ``next.components.manager``.
    ``ComponentsManager`` orchestrates the backends, shares one render pipeline between them, and builds the list with the shared ``load_backends`` helper.
@@ -128,6 +124,7 @@ An unkeyed callable's dict is checked before the merge, so a key naming a prop o
 When a component's ``component.py`` fails to import, the renderer falls back to plain template rendering and the ``@component.context`` callables in that module do not run.
 On the template render path the resolver shares the request-scoped dependency cache through ``get_request_dep_cache``.
 Named ``Depends("name")`` values resolved earlier in the dispatch are reused inside the component callables.
+Only a form dispatch puts that cache on the request, so an ordinary GET leaves each component render building a ``DependencyCache`` of its own and two components asking for one name each pay for it.
 Provider-resolved parameters are recomputed per call.
 Page context values reach the component through the template scope, not through the DI cache.
 A component whose ``component.py`` defines a ``render`` function uses a fresh ``DependencyCache`` for that call instead of the shared request cache.
@@ -159,6 +156,8 @@ Extension points
 ----------------
 
 - Subclass ``ComponentsBackend`` to serve components from another source.
+- Name a ``ComponentTemplateLoader`` subclass under ``COMPONENT_TEMPLATE_LOADER`` to decide where a component body is read from and how long a compiled template is reused.
+  The manager builds one instance of it around the shared module loader, so the loader is the seam between a backend's records and the template engine.
 - Define a ``render`` function in ``component.py`` for a non standard render path, for example a JSX bridge.
 - Subscribe to ``components_registered`` to keep caches in sync with the registry.
 

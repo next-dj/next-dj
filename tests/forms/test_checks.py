@@ -24,8 +24,8 @@ from next.forms.checks import (
     check_wizard_url_param_route,
 )
 from next.forms.decorators import action
-from next.forms.diagnostics import registration_diagnostics
 from next.forms.manager import form_action_manager
+from next.forms.registration import registration_diagnostics
 from next.forms.signals import action_registered
 
 
@@ -43,7 +43,7 @@ def _reset_collision_cache():
 
 @pytest.fixture(autouse=True)
 def _no_page_discovery():
-    with patch("next.forms.checks.discover_page_registrations"):
+    with patch("next.forms.checks.sources.discover_page_registrations"):
         yield
 
 
@@ -231,26 +231,26 @@ class TestFormActionBackendsConfigurationCheck:
         assert len(errors) == 1
         assert errors[0].id == "next.E044"
 
-    def test_non_dict_entry_is_e044(self, settings) -> None:
+    def test_non_dict_entry_is_e058(self, settings) -> None:
         """Each entry must be a dict."""
         settings.NEXT_FRAMEWORK = {"FORM_ACTION_BACKENDS": ["nope"]}
         errors = check_form_action_backends_configuration()
-        assert any(e.id == "next.E044" for e in errors)
+        assert any(e.id == "next.E058" for e in errors)
 
-    def test_non_string_backend_is_e044(self, settings) -> None:
+    def test_non_string_backend_is_e059(self, settings) -> None:
         """`BACKEND` must be a string."""
         settings.NEXT_FRAMEWORK = {"FORM_ACTION_BACKENDS": [{"BACKEND": 7}]}
         errors = check_form_action_backends_configuration()
-        assert any(e.id == "next.E044" for e in errors)
+        assert any(e.id == "next.E059" for e in errors)
 
-    def test_unimportable_backend_is_e044(self, settings) -> None:
+    def test_unimportable_backend_is_e068(self, settings) -> None:
         """A path that fails to import surfaces the original error."""
         settings.NEXT_FRAMEWORK = {
             "FORM_ACTION_BACKENDS": [{"BACKEND": "no.such.Module"}]
         }
         errors = check_form_action_backends_configuration()
         assert any(
-            e.id == "next.E044" and "cannot be imported" in e.msg for e in errors
+            e.id == "next.E068" and "cannot be imported" in e.msg for e in errors
         )
 
     def test_wrong_type_backend_is_e045(self, settings) -> None:
@@ -304,7 +304,7 @@ class TestCheckFormsOutsideBaseDir:
 
 
 class TestCheckInvalidFormMetaScope:
-    """E047 fires when Meta.scope carries an invalid value."""
+    """E047 fires for a form Meta.scope and E085 for an @action scope."""
 
     def test_no_invalid_classes_returns_empty(self) -> None:
         """No errors when all forms have valid Meta.scope."""
@@ -323,14 +323,14 @@ class TestCheckInvalidFormMetaScope:
         registration_diagnostics.invalid_meta_scope.clear()
 
     def test_invalid_action_scope_triggers_error(self) -> None:
-        """An @action with an invalid scope produces an E047 error."""
+        """An @action with an invalid scope produces an E085 error."""
         registration_diagnostics.invalid_action_scope.clear()
         registration_diagnostics.invalid_action_scope.append(
             ("bad_scope_handler", "global")
         )
         errors = check_invalid_form_meta_scope()
         assert len(errors) == 1
-        assert errors[0].id == "next.E047"
+        assert errors[0].id == "next.E085"
         assert "Action 'bad_scope_handler'" in errors[0].msg
         assert "global" in errors[0].msg
         registration_diagnostics.invalid_action_scope.clear()
@@ -390,7 +390,7 @@ class TestCheckFormWizardSteps:
 
 
 class TestCheckFormWizardBackend:
-    """E051 fires for a malformed FORM_WIZARD_BACKEND."""
+    """E051 and E069 to E071 fire for a malformed FORM_WIZARD_BACKEND."""
 
     def test_no_setting_yields_no_errors(self, settings) -> None:
         """An absent key returns an empty list."""
@@ -422,19 +422,19 @@ class TestCheckFormWizardBackend:
         assert errors[0].id == "next.E051"
 
     @override_settings(NEXT_FRAMEWORK={"FORM_WIZARD_BACKEND": {"BACKEND": 7}})
-    def test_non_string_backend_is_e051(self) -> None:
+    def test_non_string_backend_is_e069(self) -> None:
         """`BACKEND` must be a string."""
         errors = check_form_wizard_backend()
-        assert any(e.id == "next.E051" for e in errors)
+        assert any(e.id == "next.E069" for e in errors)
 
     @override_settings(
         NEXT_FRAMEWORK={"FORM_WIZARD_BACKEND": {"BACKEND": "no.such.Module"}}
     )
-    def test_unimportable_backend_is_e051(self) -> None:
-        """A path that fails to import surfaces an E051 error."""
+    def test_unimportable_backend_is_e070(self) -> None:
+        """A path that fails to import surfaces an E070 error."""
         errors = check_form_wizard_backend()
         assert any(
-            e.id == "next.E051" and "cannot be imported" in e.msg for e in errors
+            e.id == "next.E070" and "cannot be imported" in e.msg for e in errors
         )
 
     @override_settings(
@@ -442,11 +442,11 @@ class TestCheckFormWizardBackend:
             "FORM_WIZARD_BACKEND": {"BACKEND": "next.forms.RegistryFormActionBackend"}
         }
     )
-    def test_non_wizard_backend_class_is_e051(self) -> None:
-        """A real class that is not a FormWizardBackend triggers E051."""
+    def test_non_wizard_backend_class_is_e071(self) -> None:
+        """A real class that is not a FormWizardBackend triggers E071."""
         errors = check_form_wizard_backend()
         assert len(errors) == 1
-        assert errors[0].id == "next.E051"
+        assert errors[0].id == "next.E071"
         assert "FormWizardBackend" in errors[0].msg
 
 
@@ -927,7 +927,7 @@ class TestCheckWizardUrlParamRoute:
 
 
 class TestCheckFormAnchorFiles:
-    """E052 fires for a malformed FORM_ANCHOR_FILES setting."""
+    """E052 and E086 fire for a malformed FORM_ANCHOR_FILES setting."""
 
     def test_settings_not_dict_yields_no_errors(self, settings) -> None:
         """`NEXT_FRAMEWORK` not being a dict short-circuits cleanly."""
@@ -967,9 +967,9 @@ class TestCheckFormAnchorFiles:
         assert "list of strings" in errors[0].msg
 
     @override_settings(NEXT_FRAMEWORK={"FORM_ANCHOR_FILES": ["page.py", 7]})
-    def test_non_string_member_is_e052(self) -> None:
+    def test_non_string_member_is_e086(self) -> None:
         """A collection with a non-string member is rejected."""
         errors = check_form_anchor_files()
         assert len(errors) == 1
-        assert errors[0].id == "next.E052"
+        assert errors[0].id == "next.E086"
         assert "only strings" in errors[0].msg

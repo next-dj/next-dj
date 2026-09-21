@@ -24,6 +24,8 @@ from next.pages.loaders import (
 from next.pages.registry import PageContextRegistry
 from next.static import default_manager as static_default_manager
 from tests.support import (
+    PAGE_RENDER_CASES,
+    PageRenderCase,
     attribution,
     build_page_request,
     handler_declared_here,
@@ -157,82 +159,16 @@ class TestPage:
         assert entry.inherit_context is True
         assert entry.serialize is False
 
-    @pytest.mark.parametrize(
-        ("test_case", "template_str", "context_setup", "render_kwargs", "expected"),
-        [
-            (
-                "template_only",
-                "Hello {{ name }}!",
-                {},
-                {"name": "World"},
-                "Hello World!",
-            ),
-            (
-                "context_with_keys",
-                "Hello {{ user_name }}! You have {{ item_count }} items.",
-                {"user_name": lambda: "Alice", "item_count": lambda: 5},
-                {},
-                "Hello Alice! You have 5 items.",
-            ),
-            (
-                "context_without_keys",
-                "Hello {{ name }}! Status: {{ status }}",
-                {None: lambda: {"name": "Bob", "status": "active"}},
-                {},
-                "Hello Bob! Status: active",
-            ),
-            (
-                "mixed_context",
-                "Hello {{ name }}! Role: {{ role }}. Items: {{ count }}",
-                {
-                    None: lambda: {"name": "Charlie", "role": "admin"},
-                    "count": lambda: 10,
-                },
-                {},
-                "Hello Charlie! Role: admin. Items: 10",
-            ),
-            (
-                "template_override",
-                "Hello {{ name }}! Count: {{ count }}",
-                {None: lambda *args, **kwargs: {"name": "ContextName", "count": 5}},
-                {"name": "OverrideName", "count": 20},
-                "Hello ContextName! Count: 5",
-            ),
-            ("no_context", "Hello {{ name }}!", {}, {"name": "Test"}, "Hello Test!"),
-            ("empty_context", "Static content", {}, {}, "Static content"),
-        ],
-        ids=[
-            "template_only",
-            "context_with_keys",
-            "context_without_keys",
-            "mixed_context",
-            "template_override",
-            "no_context",
-            "empty_context",
-        ],
-    )
+    @pytest.mark.parametrize("case", PAGE_RENDER_CASES, ids=lambda case: case.id)
     def test_render_scenarios(
-        self,
-        page_instance,
-        test_file_path,
-        test_case,
-        template_str,
-        context_setup,
-        render_kwargs,
-        expected,
+        self, page_instance, test_file_path, case: PageRenderCase
     ) -> None:
         """``render`` merges registered context functions with the caller keyword arguments."""
-        page_instance.register_template(test_file_path, template_str)
+        page_instance.register_template(test_file_path, case.template)
+        for key, func in case.context.items():
+            page_instance._context_manager.register_context(test_file_path, key, func)
 
-        if context_setup:
-            for key, func in context_setup.items():
-                page_instance._context_manager.register_context(
-                    test_file_path, key, func
-                )
-
-        result = page_instance.render(test_file_path, **render_kwargs)
-
-        assert result == expected
+        assert page_instance.render(test_file_path, **case.kwargs) == case.expected
 
     def test_render_with_multiple_files(self, page_instance) -> None:
         """Two page paths keep separate templates and context, with no cross-talk."""
@@ -1106,7 +1042,9 @@ class TestAuthorizationOutcomeBrokenPage:
     def test_raises_under_debug(self, page_instance, tmp_path) -> None:
         page_file = self._broken_file(tmp_path)
         with override_settings(DEBUG=True), pytest.raises(PageModuleImportError):
-            page_instance.authorization_outcome(page_file, build_page_request())
+            page_instance.authorization_outcome(
+                page_file, build_page_request(), "/sub/"
+            )
 
     def test_raises_under_strict_loading(self, page_instance, tmp_path) -> None:
         page_file = self._broken_file(tmp_path)
@@ -1114,12 +1052,16 @@ class TestAuthorizationOutcomeBrokenPage:
             override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}),
             pytest.raises(PageModuleImportError),
         ):
-            page_instance.authorization_outcome(page_file, build_page_request())
+            page_instance.authorization_outcome(
+                page_file, build_page_request(), "/sub/"
+            )
 
     def test_raises_in_prod_instead_of_404(self, page_instance, tmp_path) -> None:
         page_file = self._broken_file(tmp_path)
         with pytest.raises(PageModuleImportError):
-            page_instance.authorization_outcome(page_file, build_page_request())
+            page_instance.authorization_outcome(
+                page_file, build_page_request(), "/sub/"
+            )
 
 
 class TestAuthorizationOutcomeVirtualPage:
@@ -1132,11 +1074,59 @@ class TestAuthorizationOutcomeVirtualPage:
         (tmp_path / "template.djx").write_text("<p>virtual</p>")
 
         response, dynamic = page_instance.authorization_outcome(
-            tmp_path / "page.py", build_page_request()
+            tmp_path / "page.py", build_page_request(), "/virtual/"
         )
 
         assert response is None
         assert dynamic is False
+
+    def test_a_page_without_render_never_loads_its_body(
+        self, page_instance, tmp_path, monkeypatch
+    ) -> None:
+        """A page with no guard of its own pays no body load to authorize."""
+        (tmp_path / "template.djx").write_text("<p>virtual</p>")
+        calls: list[Path] = []
+
+        def _record(file_path: Path, module: object) -> str:
+            calls.append(file_path)
+            return ""
+
+        monkeypatch.setattr(page_instance, "_load_static_body", _record)
+
+        page_instance.authorization_outcome(
+            tmp_path / "page.py", build_page_request(), "/virtual/"
+        )
+
+        assert calls == []
+
+
+class TestResolvePageBodyWithoutRender:
+    """`_resolve_page_body` falls to the static body for a module with no render."""
+
+    def test_module_without_render_resolves_its_static_body(
+        self, page_instance, tmp_path
+    ) -> None:
+        """A page.py carrying only a template attribute has no per-request body."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text('template = "<p>static</p>"')
+
+        module = _load_python_module_memo(page_file)
+        resolution = page_instance._resolve_page_body(page_file, module)
+
+        assert resolution.body == "<p>static</p>"
+        assert resolution.http_response is None
+        assert resolution.dynamic is False
+
+    def test_a_page_without_a_module_resolves_its_loader_body(
+        self, page_instance, tmp_path
+    ) -> None:
+        """A `template.djx`-only page has no module to carry a `render()`."""
+        (tmp_path / "template.djx").write_text("<p>virtual</p>")
+
+        resolution = page_instance._resolve_page_body(tmp_path / "page.py", None)
+
+        assert resolution.body == "<p>virtual</p>"
+        assert resolution.dynamic is False
 
 
 class TestLoadStaticBodyEdgeCases:

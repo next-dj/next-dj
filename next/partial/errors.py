@@ -1,4 +1,4 @@
-"""Exceptions the patch builder raises when a caller breaks a wire contract."""
+"""Exceptions the partial pipeline raises when a caller breaks a wire contract."""
 
 from typing import TYPE_CHECKING
 
@@ -29,8 +29,7 @@ class UnknownZoneError(LookupError):
 class UnknownPatchOpError(LookupError):
     """Raised when the builder is asked to emit an unregistered verb.
 
-    The runtime guard pairs with the `next.E066` check, so an unknown
-    verb fails fast in `op()` rather than reaching the client.
+    A verb named only at runtime escapes every check, so this guard is the last one.
     """
 
     def __init__(self, name: str) -> None:
@@ -93,10 +92,10 @@ class ReservedEventNameError(ValueError):
 
 
 class ForeignPageNotAuthorizedError(PermissionError):
-    """Raised when an OOB morph names a foreign page that denies the request.
+    """Raised when a zone morph names a page that denies the request.
 
-    The zone of a foreign page renders only after that page's own body resolution
-    authorizes the request, so the denial is surfaced rather than swallowed.
+    A page whose own view never ran, whether named by the handler or by the posted
+    origin, renders a zone only once its body resolution authorizes the request.
     """
 
     def __init__(self, page_path: "Path", status_code: int) -> None:
@@ -104,10 +103,10 @@ class ForeignPageNotAuthorizedError(PermissionError):
         self.page_path = page_path
         self.status_code = status_code
         super().__init__(
-            f"Page {page_path} did not authorize an out-of-band zone morph, "
-            f"its body resolution short-circuited with status {status_code}. "
-            "The zone of a foreign page is rendered only when that page would "
-            "have served the request."
+            f"Page {page_path} did not authorize a zone morph, its body "
+            f"resolution short-circuited with status {status_code}. The zone "
+            "of a page whose view never ran is rendered only when that page "
+            "would have served the request."
         )
 
 
@@ -225,4 +224,5 @@ __all__ = [
     "UnknownContextNameError",
     "UnknownDedupeError",
     "UnknownPatchOpError",
+    "UnknownZoneError",
 ]

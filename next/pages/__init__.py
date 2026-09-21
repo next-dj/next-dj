@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from . import checks, signals
 from .context import Context, ContextResult
-from .errors import PageModuleImportError
+from .errors import PageContextShapeError, PageModuleImportError
 from .manager import Page, context, page
 
 
@@ -16,6 +16,7 @@ __all__ = [
     "Context",
     "ContextResult",
     "Page",
+    "PageContextShapeError",
     "PageModuleImportError",
     "checks",
     "context",

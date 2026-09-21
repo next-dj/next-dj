@@ -30,7 +30,16 @@ from next.pages.loaders import (
 )
 from next.pages.processors import _get_context_processors, _import_context_processor
 from next.utils import MAX_ANCESTOR_WALK_DEPTH
-from tests.support import default_page_router_config, file_router_config_entry
+from tests.support import (
+    LAYOUT_CONFIG_CASES,
+    PAGES_DIRS_CONFIG_CASES,
+    TEMPLATE_PRIORITY_CASES,
+    LayoutConfigCase,
+    PagesDirsConfigCase,
+    TemplatePriorityCase,
+    default_page_router_config,
+    file_router_config_entry,
+)
 
 
 class TestPythonTemplateLoader:
@@ -99,54 +108,24 @@ class TestDjxTemplateLoader:
 
         assert result == expected_result
 
-    @pytest.mark.parametrize(
-        ("test_case", "page_content", "create_djx", "djx_content", "expected_template"),
-        [
-            (
-                "djx_template_only",
-                'print("test")',
-                True,
-                "<h1>{{ title }}</h1><p>Hello {{ name }}!</p>",
-                "<h1>{{ title }}</h1><p>Hello {{ name }}!</p>",
-            ),
-            (
-                "template_priority",
-                'template = "Python template: {{ name }}"',
-                True,
-                "<h1>DJX template: {{ name }}</h1>",
-                "Python template: {{ name }}",
-            ),
-        ],
-        ids=["djx_template_only", "template_priority"],
-    )
+    @pytest.mark.parametrize("case", TEMPLATE_PRIORITY_CASES, ids=lambda case: case.id)
     def test_create_url_pattern_template_scenarios(
-        self,
-        page_instance,
-        tmp_path,
-        url_parser,
-        test_case,
-        page_content,
-        create_djx,
-        djx_content,
-        expected_template,
+        self, page_instance, tmp_path, url_parser, case: TemplatePriorityCase
     ) -> None:
         """A ``template`` attribute wins over a sibling ``template.djx`` at render time."""
         page_file = tmp_path / "page.py"
-        page_file.write_text(page_content)
+        page_file.write_text(case.page_content)
+        (tmp_path / "template.djx").write_text(case.template_djx)
 
-        if create_djx:
-            djx_file = tmp_path / "template.djx"
-            djx_file.write_text(djx_content)
+        assert page_instance.create_url_pattern("test", page_file, url_parser)
 
-        pattern = page_instance.create_url_pattern("test", page_file, url_parser)
+        # The template is read at the first render, not at pattern creation.
+        rendered = page_instance.render(page_file, title="Title", name="World")
 
-        assert pattern is not None
-        # Template is loaded lazily at first render, not at create_url_pattern
-        result = page_instance.render(page_file, title="Title", name="World")
-        expected_rendered = expected_template.replace("{{ title }}", "Title").replace(
+        expected = case.template.replace("{{ title }}", "Title").replace(
             "{{ name }}", "World"
         )
-        assert expected_rendered in result
+        assert expected in rendered
 
     def test_render_djx_template_with_context(self, page_instance, tmp_path) -> None:
         """A ``template.djx`` body interpolates the keyword arguments passed to render."""
@@ -303,57 +282,28 @@ class TestLayoutTemplateLoader:
         with patch("next.pages.loaders.next_framework_settings", mock_nf):
             assert loader._get_additional_layout_files() == ()
 
-    @pytest.mark.parametrize(
-        ("test_case", "config", "expected_result"),
-        [
-            (
-                "invalid_config",
-                [
-                    "invalid_config",
-                    file_router_config_entry(pages_dir="/nonexistent/path"),
-                ],
-                (),
-            ),
-            ("app_dirs_true", [file_router_config_entry(app_dirs=True)], ()),
-        ],
-        ids=["invalid_config", "app_dirs_true"],
-    )
+    @pytest.mark.parametrize("case", LAYOUT_CONFIG_CASES, ids=lambda case: case.id)
     def test_get_additional_layout_files_scenarios(
-        self, tmp_path, test_case, config, expected_result
+        self, case: LayoutConfigCase
     ) -> None:
         """A malformed entry or a missing directory contributes no layout files."""
         loader = LayoutTemplateLoader()
 
-        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": config}):
-            result = loader._get_additional_layout_files()
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": list(case.config)}):
+            assert loader._get_additional_layout_files() == ()
 
-        assert result == expected_result
-
-    @pytest.mark.parametrize(
-        ("test_case", "config", "expected_list"),
-        [
-            (
-                "with_pages_dir",
-                file_router_config_entry(pages_dir="test_dir"),
-                ["test_dir"],
-            ),
-            ("with_app_dirs", file_router_config_entry(app_dirs=True), []),
-            ("no_options", file_router_config_entry(), []),
-        ],
-        ids=["with_pages_dir", "with_app_dirs", "no_options"],
-    )
+    @pytest.mark.parametrize("case", PAGES_DIRS_CONFIG_CASES, ids=lambda case: case.id)
     def test_get_pages_dirs_for_config_scenarios(
-        self, tmp_path, test_case, config, expected_list
+        self, tmp_path, case: PagesDirsConfigCase
     ) -> None:
         """Only existing ``DIRS`` paths become page roots, ``APP_DIRS`` alone yields none."""
-        loader = LayoutTemplateLoader()
+        config = file_router_config_entry(
+            app_dirs=case.app_dirs,
+            dirs=[str(tmp_path)] if case.roots_the_tree else None,
+        )
+        expected = [tmp_path.resolve()] if case.roots_the_tree else []
 
-        if test_case == "with_pages_dir":
-            config["DIRS"] = [str(tmp_path)]
-            expected_list = [Path(tmp_path).resolve()]
-
-        result = loader._get_pages_dirs_for_config(config)
-        assert result == expected_list
+        assert LayoutTemplateLoader()._get_pages_dirs_for_config(config) == expected
 
     def test_get_pages_dirs_for_config_empty_when_dirs_missing(self, tmp_path) -> None:
         """Missing ``DIRS`` behaves like an empty list."""

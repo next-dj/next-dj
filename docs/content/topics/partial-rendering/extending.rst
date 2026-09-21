@@ -18,7 +18,8 @@ A custom verb
 A verb beyond the built-in set is registered on both sides.
 The server registers the name and the client supplies the handler.
 A registered name earns the generic ``op()`` channel on the builder, so the typed methods stay the only authors of the built-in verbs.
-The ``next.E066`` check validates the registered names at ``manage.py check``, and an unregistered verb fails at runtime with ``UnknownPatchOpError``.
+``manage.py check`` reads the registered names, reporting ``next.E066`` for a name that shadows a built-in verb and ``next.E090`` for a name that is not a valid verb token.
+An unregistered verb fails at runtime with ``UnknownPatchOpError``.
 
 Register the name once on the server.
 
@@ -181,13 +182,52 @@ Consume it with a delegated document listener or the ``Next.on`` bus.
 The ``toast`` verb is sugar over ``event`` with a built-in container, so a project that wants its own notification surface listens for ``next:toast`` and renders the toast itself.
 The item still lands in the built-in ``[data-next-toasts]`` tray, so such a project also hides the tray with CSS.
 
-One active backend
-------------------
+Replacing the wire format
+-------------------------
 
 The three seams above extend the envelope from inside.
-The wire format itself is replaced rather than extended, and the replacement lives in the protocol backend.
-``PARTIAL_BACKENDS`` activates its first entry and ignores the rest, so multi-backend selection is not a supported seam, see :doc:`reference`.
-An application that needs a different envelope shape subclasses ``PartialProtocolBackend`` or the shipped ``JsonPartialProtocolBackend``, serializes its own wire format, and makes the subclass the single entry of ``PARTIAL_BACKENDS``.
+The wire format itself is replaced rather than extended, and the replacement is a protocol backend.
+Subclass ``PartialProtocolBackend`` for a format of its own, or the shipped ``JsonPartialProtocolBackend`` to keep its serialization and change one part of it, then install the subclass as the single entry of ``PARTIAL_BACKENDS``, see :doc:`reference` for that settings rule.
+
+The example below keeps compact JSON and wraps it in an object of its own, which is the smallest change a format can make.
+
+.. code-block:: python
+   :caption: wire/backends.py
+
+   import json
+
+   from next.partial import Envelope, JsonPartialProtocolBackend
+
+   class WrappedJsonBackend(JsonPartialProtocolBackend):
+       """Carry every envelope inside a versioned wrapper object."""
+
+       content_type = "application/vnd.example.patches+json"
+
+       def serialize_envelope(self, envelope: Envelope) -> bytes:
+           payload = {"wire": 1, "envelope": envelope.as_dict()}
+           return json.dumps(payload, separators=(",", ":")).encode("utf-8")
+
+       def deserialize_envelope(self, body: bytes) -> Envelope:
+           return Envelope.from_dict(json.loads(body.decode("utf-8"))["envelope"])
+
+       def sse_event(self, envelope: Envelope) -> str:
+           data = self.serialize_envelope(envelope).decode("utf-8")
+           return f"event: next-patches\ndata: {data}\n\n"
+
+.. code-block:: python
+   :caption: settings.py
+
+   NEXT_FRAMEWORK = {
+       "PARTIAL_BACKENDS": [
+           {"BACKEND": "wire.backends.WrappedJsonBackend", "OPTIONS": {}},
+       ],
+   }
+
+Those four members are the whole contract.
+``content_type`` is stamped on every patch response and is the marker the runtime keys on, so the client learns the new type through a ``Next.partial.parseHook`` registered for it, see :doc:`/content/ref/client`.
+``serialize_envelope`` and ``deserialize_envelope`` are inverses, because a reader such as the test-client helper parses a response through the backend that wrote it.
+``sse_event`` frames one envelope for the stream and keeps the ``next-patches`` event name, which is the name the runtime's ``EventSource`` listens for, while the data line carries whatever the serializer writes.
+The constructor receives the whole ``PARTIAL_BACKENDS`` entry and exposes its ``OPTIONS`` mapping through ``self.options``, so a format of its own reads its own keys there.
 See :doc:`/content/ref/partial` for the ``PartialProtocolBackend`` API.
 
 See also
@@ -195,7 +235,8 @@ See also
 
 .. seealso::
 
-   :doc:`reference` for the verbs, the lifecycle events, and the client runtime surface.
+   :doc:`reference` for the verbs, the lifecycle events, and the backend settings.
+   :doc:`/content/ref/client` for the runtime surface the client half of a seam is written against.
    :doc:`co-located-js` for keeping the handler alive across a morph.
    :doc:`sse` for why a stream pushes ``refresh`` rather than ``context``.
    :doc:`/content/ref/partial` for the Python API of ``register_patch_op`` and ``Patches``.

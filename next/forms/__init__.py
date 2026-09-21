@@ -14,7 +14,7 @@ from django.forms import (
     modelformset_factory,
 )
 
-from . import signals
+from . import checks, signals
 from .autodiscover import autodiscover_forms
 from .backends import (
     ActionGuard,
@@ -199,6 +199,7 @@ __all__ = [
     "Widget",
     "action",
     "autodiscover_forms",
+    "checks",
     "cleanup_extra_initial",
     "field_spec",
     "form_spec",

@@ -7,8 +7,8 @@ tests that verify registry behaviour or reload backends after swapping settings.
 from __future__ import annotations
 
 from next.components.manager import components_manager
-from next.forms.diagnostics import registration_diagnostics
 from next.forms.manager import form_action_manager
+from next.forms.registration import registration_diagnostics
 from next.forms.wizard import wizard_backend_manager
 from next.pages.manager import page
 
@@ -37,8 +37,7 @@ def reset_form_registration_state() -> None:
 def reset_registries() -> None:
     """Reset form and component registries in one call.
 
-    Opt-in helper. Invoke when a test deliberately changes `NEXT_FRAMEWORK` settings or
-    registers conflicting fixtures.
+    Opt-in, for a test that changes `NEXT_FRAMEWORK` or registers conflicting fixtures.
     """
     reset_form_actions()
     reset_components()

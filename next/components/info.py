@@ -32,7 +32,7 @@ class ComponentInfo:
         object.__setattr__(self, "resolved_scope_root", resolved)
 
 
-def _paths_from_component_info(info: ComponentInfo) -> set[Path]:
+def paths_from_component_info(info: ComponentInfo) -> set[Path]:
     """Return resolved filesystem paths that define one component."""
     out: set[Path] = set()
     if info.template_path is not None:

@@ -3,66 +3,69 @@
 Repository examples
 ===================
 
-The ``examples/`` tree in the next.dj repository holds self-contained Django projects.
-Each runs on SQLite and in-process ``LocMemCache``.
-No Docker, Node, or external services are required beyond what the :repo:`examples README <blob/main/examples/README.md>` lists for a given folder.
-Every example renames ``PAGES_DIR`` and ``COMPONENTS_DIR`` on purpose and registers a project-level ``DIRS`` root in ``PAGE_BACKENDS``, so the settings show that neither directory name is fixed.
+The ``examples/`` tree in the next.dj repository holds self-contained Django projects, each one a small finished product with its own README and its own end-to-end tests.
+Each runs on SQLite and in-process ``LocMemCache``, with no Docker and no external service.
+Tailwind loads from the Play CDN through a shared component every root layout calls, so a machine with no network renders the pages unstyled.
 The ``kanban`` and ``live-polls`` folders add a Vite toolchain on top of that and need Node installed.
+Every example renames ``PAGES_DIR`` and ``COMPONENTS_DIR`` on purpose and registers a project-level ``DIRS`` root in ``PAGE_BACKENDS``, so the settings show that neither directory name is fixed.
+The :repo:`examples README <blob/main/examples/README.md>` carries the run commands and the conventions every folder follows.
 
 Catalog
 -------
 
-Every row links to the folder on GitHub and summarises the focus in one line.
-The **Primary docs** column points to the sections of this manual where the techniques appear.
+Read ``shortener`` first, because it is written as a tour of the surface used most and the later examples build on it rather than repeat it.
+The table runs roughly in order of how much it assumes.
 
 .. list-table::
    :header-rows: 1
-   :widths: 18 42 40
+   :widths: 16 46 38
 
    * - Folder
-     - Focus
+     - What it builds
      - Primary docs
    * - :repo:`shortener <tree/main/examples/shortener>`
-     - File router, DI providers, LocMemCache, ``{% zone %}`` lists patched through ``Patches`` envelopes, management command
+     - Shortens a URL, lists the results, and prepends a new row into the live list without a reload.
+       Reads request values through custom DI providers, caches lookups in ``LocMemCache``, declares the post-submit redirect and flash message on the form itself, and seeds data from a management command.
      - :doc:`/content/topics/file-router`, :doc:`/content/topics/dependency-injection`, :doc:`/content/topics/partial-rendering/index`
    * - :repo:`markdown-blog <tree/main/examples/markdown-blog>`
-     - Markdown posts, nested layouts, ``@context(serialize=True)``, context processor, co-located ``component.js``
+     - Publishes Markdown posts through nested layouts, hands serialised values to the browser, feeds a site-wide value through a context processor, and runs a co-located ``component.js`` beside the component that needs it.
      - :doc:`/content/topics/layouts`, :doc:`/content/topics/context`, :doc:`/content/topics/static-assets/js-context`
    * - :repo:`feature-flags <tree/main/examples/feature-flags>`
-     - Composite ``feature_guard``, signal receivers, cache invalidation
+     - Turns features on and off behind a composite guard component, and invalidates the flag cache from signal receivers rather than from the views that read it.
      - :doc:`/content/topics/components`, :doc:`/content/topics/signals`
    * - :repo:`audit-forms <tree/main/examples/audit-forms>`
-     - Custom ``FormActionBackend``, ``action_dispatched`` / ``form_validation_failed`` signals, dual audit channels, ``FormWizard`` in a modal layer, lazy audit-table zone
+     - Records an audit trail of every submission through two independent channels, a custom form action backend and receivers on ``action_dispatched`` and ``form_validation_failed``.
+       Runs a multi-step wizard inside a modal layer above a lazily loaded audit table.
      - :doc:`/content/topics/forms/wizard`, :doc:`/content/topics/forms/backends`, :doc:`/content/topics/forms/signals`, :doc:`/content/topics/partial-rendering/index`
    * - :repo:`search-catalog <tree/main/examples/search-catalog>`
-     - ``DQuery[T]``, faceted filters, nested layouts, ``inherit_context=True``, cached search
+     - Filters a catalog from the query string with faceted filters that submit themselves and a list that extends as the visitor scrolls, across three levels of nested layouts sharing inherited context and a cached search.
      - :doc:`/content/topics/dependency-injection`, :doc:`/content/topics/context`
    * - :repo:`wiki <tree/main/examples/wiki>`
-     - ``HybridRouterBackend``, ``router_manager.reload()`` on signal, DI, live search zone, forms with live Markdown preview
+     - Serves articles out of the database through a hybrid router that rebuilds its routes on a signal, with a search zone that answers as the visitor types and an editor that previews Markdown live.
      - :doc:`/content/topics/file-router`, :doc:`/content/howto/write-a-router-backend`, :doc:`/content/topics/partial-rendering/index`
    * - :repo:`multi-tenant <tree/main/examples/multi-tenant>`
-     - Tenant middleware, request-scoped static URLs, shared blocks via ``COMPONENT_BACKENDS`` ``DIRS``
+     - Resolves a tenant from a request header in middleware, rewrites every co-located asset URL per tenant on top of the staticfiles names it inherits, stamps a deploy build id into those URLs, and shares a header and footer across page roots.
      - :doc:`/content/howto/scope-requests-per-tenant`, :doc:`/content/topics/static-assets/backends`
    * - :repo:`kanban <tree/main/examples/kanban>`
-     - Custom ``StaticBackend``, ``.jsx`` kind, ``DeepMergePolicy``, ``HashContentDedup``, composite components
+     - Drives a board of React cards, teaching the pipeline a ``.jsx`` asset kind through a custom static backend, deep-merging serialised context across levels, and deduplicating co-located CSS by content hash.
      - :doc:`/content/topics/static-assets/asset-kinds`, :doc:`/content/topics/static-assets/deduplication`, :doc:`/content/topics/partial-rendering/framework-islands`
    * - :repo:`live-polls <tree/main/examples/live-polls>`
-     - Framework SSE bridge, ``refresh`` patches, request-id echo, ``action_dispatched`` fan-out, Vue SFC asset kind
+     - Streams poll results to every open browser over server-sent events, fanning out from a signal receiver that reads the bound form, with a locally bundled Vue single-file component subscribing through ``EventSource`` and a custom ``.vue`` asset kind.
      - :doc:`/content/topics/partial-rendering/sse`, :doc:`/content/howto/stream-live-updates-with-sse`, :doc:`/content/topics/extending`, :doc:`/content/topics/partial-rendering/framework-islands`
    * - :repo:`observability <tree/main/examples/observability>`
-     - Signal groups, custom ``ComponentsBackend``, ``DedupStrategy``, polling and lazy zones, custom patch verb, per-key ``JsContextSerializer``
+     - Watches a running project through one receiver per signal group, refreshing a dashboard from polling and lazy zones and a patch verb of its own, with a custom components backend, a custom deduplication strategy, a serializer swapped both globally and per decorator, and an opt-in hashed-manifest profile.
      - :doc:`/content/topics/signals`, :doc:`/content/topics/extending`, :doc:`/content/topics/partial-rendering/index`
    * - :repo:`admin <tree/main/examples/admin>`
-     - Django admin UI rebuilt on next.dj, request-aware form factories, server-opened modal layers, two page roots, middleware guard
+     - Rebuilds the Django admin on next.dj over the stock ``ModelAdmin`` hooks, with request-aware form factories, guards on every mutating action, server-opened modal layers, keyed inline row forms, two page roots, and a middleware guard over the whole tree.
      - :doc:`/content/howto/integrate-django-admin`, :doc:`/content/topics/multi-project`, :doc:`/content/topics/partial-rendering/index`
 
 Shared assets
 -------------
 
 * :repo:`_shared <tree/main/examples/_shared>`.
-  A shared component palette consumed through ``COMPONENT_BACKENDS`` ``DIRS``.
+  A shadcn-inspired component palette every example consumes through ``COMPONENT_BACKENDS`` ``DIRS``, with its design tokens in one stylesheet.
 * :repo:`_template <tree/main/examples/_template>`.
-  An empty scaffold to copy when starting a new example-shaped project.
+  The skeleton every example is copied from, which runs and passes its test while demonstrating nothing on its own.
 
 See also
 --------

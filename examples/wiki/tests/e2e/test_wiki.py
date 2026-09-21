@@ -64,7 +64,7 @@ def test_runtime_boots_and_serves_its_bundle(
     bundle = [
         response
         for response in next_probe.responses
-        if response.url.endswith("/static/next/next.min.js")
+        if response.url.partition("?")[0].endswith("/static/next/next.min.js")
     ]
     assert [response.status for response in bundle] == [200]
     assert page.evaluate("() => typeof window.Next") == "function"

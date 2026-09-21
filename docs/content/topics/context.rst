@@ -221,7 +221,7 @@ The factory takes its own dependency-injected arguments, so it can ask for the r
 The framework resolves ``load_note`` with its own ``note_id`` argument from the URL, then passes the resulting ``Note`` into ``word_count`` as the ``note`` parameter.
 
 ``Depends(...)`` default.
-   Reads a callable registered through ``next.deps.resolver.dependency`` rather than the request context.
+   Reads a callable registered through ``resolver.dependency`` after ``from next.deps import resolver`` rather than the request context.
    Use it for values produced by shared dependency callables.
    See :doc:`dependency-injection`.
 
@@ -396,20 +396,63 @@ Combine a context function with the ``DQuery[T]`` marker to read filters from th
 Shared dependency
 ~~~~~~~~~~~~~~~~~
 
-When two context functions need the same expensive value, factor the dependency into a custom DI provider or use the unkeyed dict shape.
+When two context functions need the same expensive value, register the callable that produces it under a name and read it through ``Depends("name")``.
+
+.. code-block:: python
+   :caption: notes/deps.py
+
+   from django.http import HttpRequest
+   from notes.models import Tenant
+
+   from next.deps import resolver
+
+   @resolver.dependency("active_tenant")
+   def active_tenant(request: HttpRequest) -> Tenant:
+       return Tenant.objects.get(pk=request.session["tenant_id"])
+
+.. code-block:: python
+   :caption: notes/pages/dashboard/page.py
+
+   from notes.models import Tenant
+
+   from next import Depends, context
+
+   @context("tenant_name")
+   def tenant_name(tenant: Tenant = Depends("active_tenant")) -> str:
+       return tenant.name
+
+   @context("tenant_seats")
+   def tenant_seats(tenant: Tenant = Depends("active_tenant")) -> int:
+       return tenant.seats
+
+Import ``notes/deps.py`` from ``AppConfig.ready`` so the registration runs before the first request.
+
+The resolution cache memoises a ``Depends("name")`` value by its registered name and shares the store across every ``@context`` callable of one page render, so the first callable to ask pays the query and the rest read the result.
+The unkeyed dict shape is the other answer, and it fits when the two values belong in one merge anyway.
+
+A custom DI provider is the wrong tool here.
+Provider results are never cached, so a provider claiming the same parameter in two callables runs twice, and sharing the value takes a request-scoped store the provider writes and reads itself.
+See :doc:`dependency-injection` under *Resolution cache* for the scope of the shared store and :doc:`/content/internals/di-resolver` for what the resolver memoises.
 
 System checks
 -------------
 
-The framework validates context functions through ``check_context_functions``.
-A keyless ``@context`` callable with a non-dict return annotation reports ``next.E029`` during ``uv run python manage.py check``.
-A keyless callable with no return annotation is accepted by the check and raises ``TypeError`` at render time if the value is not a mapping.
+The checks below cover the ``@context`` surface this page describes, and they run through ``uv run python manage.py check``.
+
+``check_context_functions`` reports ``next.E029`` for a keyless ``@context`` callable whose return annotation is not a mapping type.
+A keyless callable with no return annotation is accepted by the check, and a non-mapping return then raises ``next.pages.PageContextShapeError`` at render time, a :class:`TypeError` subclass carrying the name of the callable and the path of the page it was building.
 Functions decorated with a key may return any value.
 
-A ``page.py`` holds one keyless slot.
-Registering a second bare ``@context`` replaces the first, and ``next.E018`` reports the shadowed callable.
+``check_single_keyless_context`` reports ``next.E018`` for a second bare ``@context`` on the same ``page.py``.
+A ``page.py`` holds one keyless slot, so registering a second one replaces the first.
 The slot holds one callable whatever its ``zone=``, so a second bare ``@context`` bound to another zone still displaces the first.
 Give each function a key or merge them.
+
+``check_context_registration_files`` reports ``next.E074`` for a registration no page render ever collects.
+``@context`` keys on the file that declares the callable, so an imported helper decorated in place binds to its own module and a callable imported from a sibling ``page.py`` binds to that other page, as *Reusing a shared helper* above describes.
+
+``check_context_reads_foreign_zone`` reports ``next.W077`` for a callable that reads the key of a provider bound to a zone it does not share.
+A zone GET that does not name the bound zone skips the provider while the reader still runs and receives ``None``.
 
 ``check_context_processor_signature`` reports ``next.E040`` when a processor listed under ``OPTIONS.context_processors`` does not accept a ``request`` parameter.
 The check covers ``PAGE_BACKENDS`` entries only, not the Django ``TEMPLATES`` list.

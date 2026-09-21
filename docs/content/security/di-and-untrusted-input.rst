@@ -178,6 +178,7 @@ Browsers read a leading double slash as a protocol relative URL and treat ``//ev
 Django ships ``url_has_allowed_host_and_scheme`` in ``django.utils.http`` for this task.
 
 A ``DQuery`` marker reads ``request.GET``, which is empty on the POST that ``{% form %}`` sends to the dispatch endpoint rather than to the page URL, the same rule :doc:`/content/faq/usage` states for reconstructing a redirect's query string from ``cleaned_data``.
+The one call that does read the origin's query string is the ``render()`` the dispatcher runs to authorize the origin page, because that call asks the page as a GET of the origin URL, see :doc:`/content/topics/pages`.
 A login page needs the destination to survive that hop, so forward it as a hidden form field populated from the page's own query string, or read it from the origin page's query string through the already-resolved origin ``next.forms.resolve_origin`` returns, instead of relying on ``DQuery`` directly.
 The field below is the hidden-field form, rendered by the login page as ``{{ form.next_url }}`` with its initial value read from ``request.GET.get("next", "/")``.
 

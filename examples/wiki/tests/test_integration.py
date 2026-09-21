@@ -398,7 +398,7 @@ class TestNestedFieldComponent:
         self, next_client: NextClient
     ) -> None:
         body = next_client.get(reverse("next:page_articles_new")).content.decode()
-        assert 'href="/static/next/components/markdown_preview.css"' in body
+        assert 'href="/static/next/components/markdown_preview.css?v=v1"' in body
 
     def test_preview_renders_the_bound_body_on_first_paint(
         self, next_client: NextClient, routing_doc: Article

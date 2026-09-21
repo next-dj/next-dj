@@ -3,9 +3,6 @@
 Contributing
 ============
 
-This section covers contributions to next.dj, code and documentation alike.
-It states the gates a change passes before it merges and points at the conventions each kind of change follows.
-
 Code contributions start with :repo:`CONTRIBUTING.md <blob/main/CONTRIBUTING.md>` in the repository root, which covers environment setup, the project layout, the test commands, and the pull request process.
 :doc:`quality-gates` states what continuous integration measures on every pull request, so a contributor knows what has to pass before a review starts.
 For **internal framework conventions** (module layout, naming, signal and system-check rules) read :doc:`/content/internals/contributing-notes`.

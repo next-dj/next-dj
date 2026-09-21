@@ -12,6 +12,42 @@ Plain functions register through the ``@action`` decorator.
    :local:
    :depth: 2
 
+Your first form
+---------------
+
+Three steps put a working form on a page.
+Declare a form class in the ``page.py`` of that page, write ``on_valid`` for what a valid submission does, and render the form with ``{% form %}`` in the page template.
+
+.. code-block:: python
+   :caption: notes/pages/note/page.py
+
+   from django.http import HttpRequest
+   from notes.models import Note
+
+   import next.forms
+   from next.forms import redirect_to_origin
+
+   class NoteForm(next.forms.ModelForm):
+       class Meta:
+           model = Note
+           fields = ["title", "body"]
+
+       def on_valid(self, request: HttpRequest):
+           self.save()
+           return redirect_to_origin(request)
+
+.. code-block:: jinja
+   :caption: notes/pages/note/page.djx
+
+   {% form "note_form" %}
+     {{ form.title }}
+     {{ form.body }}
+     <button type="submit">Save</button>
+   {% endform %}
+
+The class registers itself, the action name ``note_form`` follows from the class name, and the tag reverses the dispatch URL at render time.
+The rest of this page is the detail behind those three steps.
+
 Class-bound forms
 -----------------
 
@@ -94,41 +130,12 @@ A list replaces that set outright rather than extending it, so keep ``page.py`` 
 
 Lookup order in templates.
    ``{% form %}`` and ``{% action_url %}`` resolve a name against the nearest anchor first.
-   Inside a component's own template the chain is the component's ``component.py``, then the enclosing page's ``page.py``, then the shared registry.
+   Inside a component's own template the chain has four steps, the component's ``component.py``, then the anchor the enclosing ``{% form %}`` tag resolved for its own action, then the enclosing page's ``page.py``, then the shared registry.
    In a page or layout template the chain is the page's ``page.py``, then the shared registry.
    Slot bodies and free children passed to a component render in the page context, so they resolve against the page anchor.
 
 The file is the one the ``class`` statement is written in, not the file that imports the class.
 A class built by a factory such as ``next.forms.modelform_factory`` is attributed to the module that calls the factory, not to the module that runs the underlying ``type()`` call.
-
-.. _topics-forms-actions-uid:
-
-UID stability
--------------
-
-Each action gets a stable URL at ``/_next/form/<uid>/``.
-The UID is the first 16 hex characters of ``SHA-256("next:form:{scope_key}:{name}")``, where ``name`` is the derived action name and ``scope_key`` depends on the scope.
-
-Page scope.
-   ``scope_key`` is the absolute filesystem path of the declaring ``page.py`` or ``component.py``.
-   The UID is therefore stable only as long as the file stays where it is.
-
-Shared scope.
-   ``scope_key`` is the dotted module name, walked up from the file while an ``__init__.py`` exists.
-   The UID is stable as long as the module path stays the same.
-
-This has one practical consequence.
-
-.. warning::
-
-   Moving a page-scoped form's file or renaming its class changes the UID, and so changes the POST URL.
-   A bookmarked or cached ``/_next/form/<uid>/`` URL from the old location stops resolving.
-   The same holds for a shared form when its module moves.
-   Treat a file move or a class rename as a URL change and expect old action URLs to 404.
-
-The UID is derived, never stored in a template by hand.
-A ``{% form "name" %}`` tag reverses the current UID at render time, so a freshly rendered page always posts to the right URL.
-Only out-of-band references to a stale UID break.
 
 The ``on_valid`` method
 -----------------------
@@ -212,7 +219,7 @@ The scope of a form-less action follows the same anchor-file rule.
 ``page.py`` and ``component.py`` produce page-scoped actions.
 All other files produce shared actions.
 Pass ``scope="page"`` or ``scope="shared"`` to override the file-derived scope, the same override ``Meta.scope`` provides for a form class.
-Any other value triggers ``next.E047`` and the action is not registered.
+Any other value triggers ``next.E085`` and the action is not registered.
 The ``login_required`` and ``permission_required`` keywords guard the endpoint, see `Access guards`_.
 
 Applying ``@action`` to a class registers no action.
@@ -283,7 +290,7 @@ Mark such a class abstract, or move the handler logic into its ``on_valid``.
 A handler that returns a bare string sends it as the response body, so a redirect must come back as a response object.
 The marker only types the parameter.
 The framework still injects the same bound form a parameter named ``form`` would receive.
-See :doc:`/content/ref/decorators` for ``DForm`` and ``FormProvider``.
+See :doc:`/content/ref/decorators` for ``DForm`` and :doc:`/content/ref/forms` for ``FormProvider``.
 
 Dynamic form classes
 --------------------
@@ -355,8 +362,9 @@ The same ``Meta.abstract`` flag works on a ``FormWizard`` base class.
 Access guards
 -------------
 
-The dispatch endpoint of an action lives at ``/_next/form/<uid>/``, outside the page URL space, so page-level protection does not cover it.
-Declare the access requirements on the action itself.
+The dispatch endpoint of an action lives at ``/_next/form/<uid>/``, outside the page URL space, so a middleware scoped to a URL prefix does not cover it.
+The page the submission names does authorize it, through its own ``render()``, so a page that refuses a visitor refuses that visitor's submissions as well, see :doc:`/content/topics/pages`.
+Declare the access requirements on the action itself for a check that stands on its own.
 ``Meta.login_required`` and ``Meta.permission_required`` guard a class-bound form, and the same names are keyword arguments on ``@action``.
 
 .. code-block:: python
@@ -511,11 +519,7 @@ This differs from a validation failure, which re-renders the origin with field e
 The hooks share the per-request dependency cache with ``get_initial`` and ``on_valid``.
 A provider resolved inside a hook is not resolved again downstream in the same dispatch, so a tenant or permission lookup runs once across the hook and the rest of the pipeline.
 
-The ``form_access_denied`` signal fires only on a dynamic-hook denial, never on the static guard path.
-Its sender is ``FormActionDispatch`` and its keyword arguments are ``action_name``, ``uid``, ``request``, ``layer``, and ``reason``.
-``layer`` is ``"view"`` for a ``check_permissions`` denial or ``"object"`` for a ``has_object_permission`` denial.
-``reason`` is ``"raised"``, ``"denied"``, or ``"response"``.
-See :doc:`signals` for the payload and the receiver rules.
+The ``form_access_denied`` signal fires on an origin-page or dynamic-hook denial, never on the static guard path, see :ref:`topics-forms-signals-form-access-denied` for its sender, payload, and receiver rules.
 
 On a ``FormWizard`` the ``check_permissions`` classmethod runs per step POST, before the step form binds, so a denied step writes no storage.
 The wizard class has no object-level hook of its own.
@@ -526,6 +530,38 @@ A wizard step binds from posted data and ``get_form_kwargs`` and never runs ``ge
 
    The dynamic hooks are not statically inspectable, so the ``next.W060`` check covers only the static ``permission_required`` declaration.
    A hook that calls ``request.user`` without an upstream login requirement is the author's responsibility, the same boundary the static guard draws.
+
+.. _topics-forms-actions-uid:
+
+UID stability
+-------------
+
+Each action gets a stable URL at ``/_next/form/<uid>/``.
+The UID is the first 16 hex characters of ``SHA-256("next:form:{scope_key}:{name}")``, where ``name`` is the derived action name and ``scope_key`` depends on the scope.
+
+Page scope.
+   ``scope_key`` is the absolute filesystem path of the declaring ``page.py`` or ``component.py``.
+   The UID is therefore stable only as long as the file stays where it is.
+
+Shared scope.
+   ``scope_key`` is the dotted module name, walked up from the file while an ``__init__.py`` exists.
+   The UID is stable as long as the module path stays the same.
+
+The UID addresses an action, it does not authorise one, so a caller who knows a UID still meets the guards described above.
+See :doc:`/content/security/overview` for the boundary the dispatch endpoint draws.
+
+This has one practical consequence.
+
+.. warning::
+
+   Moving a page-scoped form's file or renaming its class changes the UID, and so changes the POST URL.
+   A bookmarked or cached ``/_next/form/<uid>/`` URL from the old location stops resolving.
+   The same holds for a shared form when its module moves.
+   Treat a file move or a class rename as a URL change and expect old action URLs to 404.
+
+The UID is derived, never stored in a template by hand.
+A ``{% form "name" %}`` tag reverses the current UID at render time, so a freshly rendered page always posts to the right URL.
+Only out-of-band references to a stale UID break.
 
 .. _topics-forms-actions-success:
 
@@ -628,8 +664,12 @@ The registration and scope checks are listed here, the wizard checks on :doc:`wi
    The class is not registered automatically.
 
 ``next.E047``
-   A form class ``Meta.scope`` or an ``@action`` ``scope`` keyword is set to a value other than ``"page"`` or ``"shared"``.
-   The class or action is not registered.
+   A form class ``Meta.scope`` is set to a value other than ``"page"`` or ``"shared"``.
+   The class is not registered.
+
+``next.E085``
+   An ``@action`` ``scope`` keyword is set to a value other than ``"page"`` or ``"shared"``.
+   The action is not registered.
 
 ``next.E048``
    ``Meta.instance_from_url`` references a field name that does not exist on the model.
@@ -638,8 +678,11 @@ The registration and scope checks are listed here, the wizard checks on :doc:`wi
    ``Meta.instance_from_url`` is set on a class that does not subclass ``next.forms.ModelForm``.
 
 ``next.E052``
-   ``FORM_ANCHOR_FILES`` is not None or a list of strings.
+   ``FORM_ANCHOR_FILES`` is neither ``None`` nor a list.
    Only a list round-trips through the settings merge, so a tuple or set is rejected instead of silently falling back to the defaults.
+
+``next.E086``
+   ``FORM_ANCHOR_FILES`` is a list holding a value that is not a string.
 
 ``next.E053``
    ``@action`` was applied to a class.

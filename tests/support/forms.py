@@ -9,8 +9,8 @@ from django.http import HttpRequest, HttpResponseRedirect, QueryDict
 from next.deps import Depends
 from next.forms import Form, PermissionOutcome
 from next.forms.backends import ActionRegistration
-from next.forms.diagnostics import registration_diagnostics
 from next.forms.manager import form_action_manager
+from next.forms.registration import registration_diagnostics
 from next.forms.uid import ORIGIN_FIELD_NAME
 from next.forms.wizard import wizard_backend_manager
 

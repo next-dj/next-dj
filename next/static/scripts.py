@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Final
 from django.conf import settings
 from django.http.request import HttpHeaders
 from django.middleware.csrf import get_token
+from django.utils.html import escape
 
 from .serializers import resolve_serializer
 
@@ -32,8 +33,6 @@ CSRF_PAYLOAD_KEY: Final = "$csrf"
 # Present in the init payload only under `DEBUG`, so production carries no dev bytes.
 DEV_PAYLOAD_KEY: Final = "$dev"
 
-# The init-payload keys the framework owns. A colliding js-context key never
-# reaches the payload, so the key means one thing in every environment.
 RESERVED_PAYLOAD_KEYS: Final[frozenset[str]] = frozenset(
     {CSRF_PAYLOAD_KEY, DEV_PAYLOAD_KEY}
 )
@@ -133,7 +132,7 @@ class NextScriptBuilder:
         The optional `url` overrides the resolved runtime URL, which lets the
         static manager pass the answer of a request-aware backend.
         """
-        return self._preload_template.format(url=url or self._url)
+        return self._preload_template.format(url=escape(url or self._url))
 
     def script_tag(self, url: str | None = None) -> str:
         """Return the blocking script tag that executes `next.min.js`.
@@ -141,7 +140,7 @@ class NextScriptBuilder:
         The optional `url` overrides the resolved runtime URL, which lets the
         static manager pass the answer of a request-aware backend.
         """
-        return self._script_tag_template.format(url=url or self._url)
+        return self._script_tag_template.format(url=escape(url or self._url))
 
     def init_script(
         self,

@@ -128,18 +128,19 @@ The server re-renders only the ``note-list`` zone and answers with a single morp
    :caption: response body
 
    {
-     "version": "9f3c2e1b",
+     "version": "0",
      "ops": [
        {"op": "morph", "target": {"zone": "note-list"},
         "html": "<ul data-next-zone=\"note-list\">…matching notes…</ul>"}
      ],
      "assets": [
-       {"kind": "css", "url": "…/note_card/component.css", "load": "link"},
-       {"kind": "js", "url": "…/note_card/component.js", "load": "script"}
+       {"kind": "css", "url": "/static/next/components/note_card.css", "load": "link"},
+       {"kind": "js", "url": "/static/next/components/note_card.js", "load": "script"}
      ],
      "form": null
    }
 
+The ``version`` field is the asset version the client compares against its own, and it stays ``"0"`` until the project runs a manifest staticfiles storage or pins a literal ``VERSION`` in the partial backend options, see :doc:`/content/ref/settings`.
 The envelope also ships the co-located assets of the zone body, here the ``note_card`` styles and script.
 A page that publishes values to ``window.Next.context`` gets a ``context`` op alongside the morph, see :doc:`/content/topics/static-assets/js-context`.
 The runtime syncs the address bar with ``history.replaceState``, so ``/?q=gro`` stays shareable.
@@ -153,16 +154,19 @@ Create a note in place
 
 The create form from :doc:`tutorial04` already posts through a registered action.
 Teach its handler to answer a :term:`partial request` with a patch instead of a redirect.
-Update the ``CreateNoteForm`` class in ``notes/forms.py`` and merge the new imports, keeping ``DeleteNoteForm`` and its imports in place.
+``CreateNoteForm`` gains an ``on_valid``, the module gains the ``HttpResponse`` and ``next.partial`` imports that branch needs, and ``DeleteNoteForm`` is unchanged from :doc:`tutorial04`.
 
 .. code-block:: python
-   :caption: notes/forms.py, the create form
+   :caption: notes/forms.py, complete file
 
-   from django.http import HttpRequest, HttpResponse
+   from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
+   from django.shortcuts import get_object_or_404
+   from django.urls import reverse
    from notes.models import Note
 
-   from next.forms import ModelForm
+   from next.forms import BooleanField, Form, ModelForm
    from next.partial import Patches, is_partial_request
+   from next.urls import DUrl
 
    class CreateNoteForm(ModelForm):
        class Meta:
@@ -175,39 +179,25 @@ Update the ``CreateNoteForm`` class in ``notes/forms.py`` and merge the new impo
                return Patches(request).morph(zone="note-list").response()
            return super().on_valid(request)
 
+   class DeleteNoteForm(Form):
+       confirm = BooleanField(required=True)
+
+       class Meta:
+           login_required = True
+
+       def on_valid(self, request: HttpRequest, note_id: DUrl["id", int]) -> HttpResponseRedirect:
+           get_object_or_404(Note, pk=note_id).delete()
+           return HttpResponseRedirect(reverse("next:page_"))
+
 ``is_partial_request`` is ``True`` only when the runtime made the submission.
 On that path the handler saves the note and returns a morph of the ``note-list`` zone, which re-renders the list from the ``notes`` context with the new note included.
 On the no-JavaScript path ``super().on_valid`` keeps the inherited behaviour.
-It saves and redirects to origin, and the reload shows the new note.
+It saves and answers with a 302 ``HttpResponseRedirect`` to the origin, and the reload shows the new note.
 
-``Patches(...).response()`` already answers a submission made without the runtime with a 303 to the posted origin, so the branch is not what keeps that path working.
-The branch stays explicit so the inherited ``Meta.success_url`` handling survives.
+``Patches(...).response()`` would keep that path working on its own, because without the partial switch it falls back to a 303 to the posted origin.
+The branch stays explicit so the inherited ``Meta.success_url`` handling survives, and the status of the no-JavaScript answer stays the 302 :doc:`tutorial05` asserts.
 
-The form tag itself does not change.
-
-.. code-block:: jinja
-   :caption: notes/pages/template.djx, the create form unchanged
-
-   <section class="note-create">
-     {% form "create_note_form" %}
-       <label>
-         Title
-         {{ form.title }}
-       </label>
-       <label>
-         Body
-         {{ form.body }}
-       </label>
-       {% if form.errors %}
-         <ul class="errors">
-           {% for field, errors in form.errors.items %}
-             {% for error in errors %}<li>{{ field }} {{ error }}</li>{% endfor %}
-           {% endfor %}
-         </ul>
-       {% endif %}
-       <button type="submit">Create</button>
-     {% endform %}
-   </section>
+The ``{% form "create_note_form" %}`` block in ``notes/pages/template.djx`` does not change at all, and the checkpoint below prints the template it sits in.
 
 The form carries no ``zone=`` argument, so a validation failure still re-renders the form in place with its errors, the default re-render from :doc:`tutorial04`.
 The handler drives the list update explicitly, only on success and only for a partial request.
@@ -250,7 +240,7 @@ Both partial paths are reachable from the test client of :doc:`tutorial05`.
        assert Note.objects.filter(title="From test").exists()
 
 ``envelope_of`` refuses a response that is not a patch envelope, so a test that loses the partial switch fails on the decode rather than on a weaker assertion.
-Drop ``partial=True`` from the second call and the same submission answers with the 303 the no-JavaScript path takes.
+Drop ``partial=True`` from the second call and the same submission takes the ``super().on_valid`` branch, which answers with a 302 to the origin, the status :doc:`tutorial05` asserts for the same form.
 
 How it degrades
 ~~~~~~~~~~~~~~~
@@ -317,6 +307,15 @@ The index template carries the create form, the search box, and the zone togethe
 
 No new models, no new URLs, and no client code.
 The behaviour rides the action dispatch and the file router the application already had.
+
+What the six parts built
+------------------------
+
+The finished Notes application is four pages, eight page context callables, one component with its own context and assets, and three form actions.
+
+In plain Django each page is a view plus a ``path()`` entry in a URL configuration, each context callable is a branch of a ``get_context_data`` on the view that owns it, and each form action is a further view with its own URL entry and its own redirect on success.
+Here a page is a directory holding a ``page.py`` and a ``template.djx``, a context callable is a decorated function beside them, and a form action is a class declaration that registers itself under a name derived from the class.
+The root URL configuration gained the ``include("next.urls")`` line in :doc:`install` and the login entry in :doc:`tutorial04`, and nothing else across the six parts.
 
 Common pitfalls
 ---------------

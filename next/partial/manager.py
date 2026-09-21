@@ -10,9 +10,11 @@ from django.core.exceptions import ImproperlyConfigured
 from django.core.signals import setting_changed
 
 from next.backends import SingleBackendManager
+from next.conf import next_framework_settings
 from next.conf.signals import settings_reloaded
 
 from .backends import PartialProtocolBackend
+from .signals import partial_backend_loaded
 
 
 if TYPE_CHECKING:
@@ -32,7 +34,10 @@ _STORAGE_SETTINGS = frozenset({"STORAGES", "STATIC_ROOT"})
 
 # PARTIAL_BACKENDS is a list, but one protocol is active (next.W071).
 partial_backend_manager = SingleBackendManager(
-    PARTIAL_BACKENDS_KEY, base=PartialProtocolBackend, default=_DEFAULT_BACKEND_PATH
+    PARTIAL_BACKENDS_KEY,
+    base=PartialProtocolBackend,
+    default=_DEFAULT_BACKEND_PATH,
+    signal=partial_backend_loaded,
 )
 
 
@@ -47,27 +52,37 @@ def asset_version() -> str:
 
 
 def pinned_version(options: "Mapping[str, Any]") -> str | None:
-    """Return the release tag the options pin, or None when they ask the manifest.
+    """Return the release tag the options pin, or None when the version is derived.
 
-    The runtime and the `next.W069` check read one predicate, so a renamed option
-    cannot leave the check silently agreeing with nothing.
+    Only a string other than the `"manifest"` sentinel pins a tag, so an unset option
+    and the sentinel alike resolve through the staticfiles manifest.
     """
-    configured = options.get(VERSION_OPTION, MANIFEST_VERSION)
+    configured = options.get(VERSION_OPTION)
     if isinstance(configured, str) and configured != MANIFEST_VERSION:
         return configured
     return None
 
 
 def _resolve_asset_version() -> str:
-    """Resolve the asset version from the backend options and the manifest.
+    """Resolve the asset version from the options, the project stamp, and the manifest.
 
-    An explicit `VERSION` option pins a release tag, and the `"manifest"` sentinel
-    hashes the staticfiles manifest, falling back to a stable default without one.
+    An explicit `VERSION` pins a release tag and the `"manifest"` sentinel demands the
+    manifest hash, while the derived default reads the deploy stamp a project already
+    sets as `STATIC_VERSION` before it asks the staticfiles manifest.
     """
-    pinned = pinned_version(partial_backend_manager.get().options)
+    options = partial_backend_manager.get().options
+    pinned = pinned_version(options)
     if pinned is not None:
         return pinned
-    return _manifest_version()
+    if options.get(VERSION_OPTION) == MANIFEST_VERSION:
+        return _manifest_version()
+    return _project_version() or _manifest_version()
+
+
+def _project_version() -> str | None:
+    """Return the `STATIC_VERSION` deploy stamp, or None when the project sets none."""
+    version = next_framework_settings.STATIC_VERSION
+    return str(version) if version else None
 
 
 def _manifest_version() -> str:

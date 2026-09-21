@@ -1,3 +1,4 @@
+import pytest
 from django.template import Context
 from django.template.base import Template
 from django.test import RequestFactory
@@ -12,6 +13,7 @@ from next.partial.registry import (
 )
 from next.partial.signals import patch_op_registered, zone_registered
 from next.partial.zone import ZoneOptions
+from next.testing import capture_signals
 
 
 class TestBuiltinOps:
@@ -44,27 +46,19 @@ class TestRegisterPatchOp:
         assert "confetti" in registry
 
     def test_register_emits_signal(self) -> None:
-        seen: list[dict[str, object]] = []
-
-        def receiver(sender: object, **kwargs) -> None:
-            seen.append({"sender": sender, **kwargs})
-
-        patch_op_registered.connect(receiver)
-        try:
-            registry = PatchOpRegistry()
-            registry.register("confetti")
-        finally:
-            patch_op_registered.disconnect(receiver)
-
-        assert len(seen) == 1
-        assert seen[0]["sender"] is PatchOpRegistry
-        assert seen[0]["name"] == "confetti"
+        with capture_signals(patch_op_registered) as recorded:
+            PatchOpRegistry().register("confetti")
+        assert len(recorded) == 1
+        event = recorded.first_for(patch_op_registered)
+        assert event.sender is PatchOpRegistry
+        assert event.kwargs["name"] == "confetti"
 
     def test_register_records_the_name_with_no_receiver_connected(self) -> None:
         registry = PatchOpRegistry()
         registry.register("quiet")
         assert "quiet" in registry
 
+    @pytest.mark.usefixtures("restored_op_registry")
     def test_facade_register_uses_global_registry(self) -> None:
         register_patch_op("spark")
         assert "spark" in patch_op_registry
@@ -80,6 +74,51 @@ class TestRegisterPatchOp:
         registry = PatchOpRegistry()
         registry.register("morph")
         assert registry.custom_names() == frozenset({"morph"})
+
+
+class TestRegistryRecords:
+    """The registry keeps a name index and a version behind the names it reports."""
+
+    def test_a_fresh_registry_holds_nothing_at_version_zero(self) -> None:
+        registry = PatchOpRegistry()
+        assert registry.custom_names() == frozenset()
+        assert registry.version == 0
+
+    def test_custom_names_stays_an_unordered_frozenset(self) -> None:
+        registry = PatchOpRegistry()
+        registry.register("zeta")
+        registry.register("alpha")
+        assert registry.custom_names() == frozenset({"zeta", "alpha"})
+
+    def test_a_new_verb_bumps_the_version(self) -> None:
+        registry = PatchOpRegistry()
+        registry.register("confetti")
+        assert registry.version == 1
+        registry.register("sparkle")
+        assert registry.version == 2
+
+    def test_re_registering_a_held_verb_leaves_the_version_alone(self) -> None:
+        # a reload re-runs every register() call, and a bumped version there would
+        # invalidate every consumer cache keyed on it for no change at all
+        registry = PatchOpRegistry()
+        registry.register("confetti")
+        registry.register("confetti")
+        assert registry.version == 1
+
+    def test_re_registering_a_held_verb_does_not_duplicate_it(self) -> None:
+        registry = PatchOpRegistry()
+        registry.register("confetti")
+        registry.register("confetti")
+        assert registry.custom_names() == frozenset({"confetti"})
+
+    def test_re_registering_a_held_verb_still_announces_it(self) -> None:
+        # the signal is how a late subscriber learns the verb exists, so it fires
+        # on the repeat call even though the records do not change
+        registry = PatchOpRegistry()
+        registry.register("confetti")
+        with capture_signals(patch_op_registered) as recorded:
+            registry.register("confetti")
+        assert [event.kwargs["name"] for event in recorded] == ["confetti"]
 
 
 def _zoned_template() -> Template:
@@ -198,38 +237,21 @@ class TestZoneRegisteredSignal:
     """`zone_registered` fires once per source on the first read."""
 
     def test_fires_once_per_object(self) -> None:
-        seen: list[dict[str, object]] = []
-
-        def receiver(sender: object, **kwargs) -> None:
-            seen.append({"sender": sender, **kwargs})
-
-        zone_registered.connect(receiver)
-        try:
-            template = _zoned_template()
+        template = _zoned_template()
+        with capture_signals(zone_registered) as recorded:
             zones_of(template)
             zones_of(template)
-        finally:
-            zone_registered.disconnect(receiver)
-
-        names = sorted(str(entry["zone_name"]) for entry in seen)
+        names = sorted(str(event.kwargs["zone_name"]) for event in recorded)
         assert names == ["first", "second"]
 
     def test_sends_lazy_and_poll_kwargs(self) -> None:
-        seen: list[dict[str, object]] = []
-
-        def receiver(sender: object, **kwargs) -> None:
-            seen.append({"sender": sender, **kwargs})
-
-        zone_registered.connect(receiver)
-        try:
+        with capture_signals(zone_registered) as recorded:
             zones_of(Template('{% zone "z" poll="5s" %}b{% endzone %}'))
-        finally:
-            zone_registered.disconnect(receiver)
-
-        assert len(seen) == 1
-        assert seen[0]["zone_name"] == "z"
-        assert seen[0]["lazy"] is None
-        assert seen[0]["poll"] == 5000
+        assert len(recorded) == 1
+        event = recorded.first_for(zone_registered)
+        assert event.kwargs["zone_name"] == "z"
+        assert event.kwargs["lazy"] is None
+        assert event.kwargs["poll"] == 5000
 
     def test_quiet_without_receivers(self) -> None:
         assert zones_of(_zoned_template())

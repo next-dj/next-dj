@@ -21,6 +21,9 @@ The static pipeline discovers co-located CSS, JS, and module files, deduplicates
 :doc:`name-resolution`
    When an asset reference is a staticfiles name and when it is a finished URL.
 
+:ref:`Named assets via module lists <topics-static-module-lists>`
+   Declaring further assets from ``page.py`` and ``component.py``.
+
 :doc:`js-context`
    Exposing context to the browser through the ``Next`` object.
 

@@ -71,6 +71,30 @@ A file named ``component.mjs`` is therefore picked up as a ``module`` asset.
 Custom kinds extend the set through :doc:`asset-kinds`.
 Custom stems extend the recognised filenames through :doc:`custom-stems`.
 
+.. _topics-static-module-lists:
+
+Named assets via module lists
+-----------------------------
+
+Declare ``styles`` and ``scripts`` at module level in ``page.py`` or ``component.py`` to register further assets alongside co-located files.
+
+.. code-block:: python
+   :caption: notes/pages/_components/note_card/component.py
+
+   styles = ["site/reset.css"]
+   scripts = ["https://cdn.example.com/vendor.js", "site/widget.mjs"]
+
+Each variable is a list of strings.
+An entry is read the same way a template tag argument is, as a staticfiles name when it has the shape of one and as a finished URL otherwise, see :doc:`name-resolution`.
+The slot is picked from the registered placeholder name, ``styles`` or ``scripts``.
+Every registered placeholder slot works the same way, because discovery reads a module-level variable named after each slot.
+A project that registers a ``preload`` slot may declare a module-level ``preload`` list next to it.
+
+The kind is inferred through the kind registry from the extension of the authored entry, before any resolution happens, so a manifest hash in the final filename never changes the kind.
+Entries with an unknown extension are dropped with a debug log.
+An entry whose kind belongs to a different slot than the list name is also dropped with a debug log, so a stylesheet in ``scripts`` never renders.
+A name that staticfiles cannot resolve raises out of the render, the same way a missing co-located file does.
+
 How discovery pairs a file
 --------------------------
 
@@ -90,7 +114,6 @@ Under ``DEBUG`` it re-checks those directories on every render, so a file added 
 - A ``template.css``, ``layout.js``, or ``component.css`` added next to its owner is picked up by the next request.
 - Deleting one of those files removes it from the next request.
 - A ``layout.djx`` created in a directory between the page and the page root starts wrapping the page, and its co-located assets join on the same request.
-
 - A stem or a kind registered after the first render joins the probe on the next one, because every plan carries the generation of the registries it read.
 
 Module-level ``styles`` and ``scripts`` lists live in ``page.py`` and ``component.py``.
@@ -140,30 +163,6 @@ A ``layout.css`` at the root applies to every page under that layout because lay
 A ``layout.css`` at an inner layout scopes the styles to pages below that layout only.
 :doc:`/content/howto/ship-a-site-wide-stylesheet` walks through the site-wide case and the two spellings that join it.
 Use ``component.js`` for plain behaviour and ``component.mjs`` when the script depends on ECMAScript module imports.
-
-.. _topics-static-module-lists:
-
-Named assets via module lists
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Declare ``styles`` and ``scripts`` at module level in ``page.py`` or ``component.py`` to register further assets alongside co-located files.
-
-.. code-block:: python
-   :caption: notes/pages/_components/note_card/component.py
-
-   styles = ["site/reset.css"]
-   scripts = ["https://cdn.example.com/vendor.js", "site/widget.mjs"]
-
-Each variable is a list of strings.
-An entry is read the same way a template tag argument is, as a staticfiles name when it has the shape of one and as a finished URL otherwise, see :doc:`name-resolution`.
-The slot is picked from the registered placeholder name, ``styles`` or ``scripts``.
-Every registered placeholder slot works the same way, because discovery reads a module-level variable named after each slot.
-A project that registers a ``preload`` slot may declare a module-level ``preload`` list next to it.
-
-The kind is inferred through the kind registry from the extension of the authored entry, before any resolution happens, so a manifest hash in the final filename never changes the kind.
-Entries with an unknown extension are dropped with a debug log.
-An entry whose kind belongs to a different slot than the list name is also dropped with a debug log, so a stylesheet in ``scripts`` never renders.
-A name that staticfiles cannot resolve raises out of the render, the same way a missing co-located file does.
 
 See also
 --------

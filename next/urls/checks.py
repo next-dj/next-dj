@@ -1,4 +1,9 @@
-"""System checks for the URL routing subsystem."""
+"""System checks for the URL routing subsystem.
+
+The ids are `next.E002` to `next.E006`, `next.E022`, `next.E024` to `next.E028`,
+`next.E039`, `next.E081`, `next.E082`, and `next.E094` to `next.E097` for the
+`OPTIONS` shapes, plus `next.E014` to `next.E016` for the pattern walk itself.
+"""
 
 from __future__ import annotations
 
@@ -156,7 +161,7 @@ def _validate_options_field(config: dict[str, Any], prefix: str) -> list[CheckMe
     if not isinstance(config["OPTIONS"], dict):
         return [
             Error(
-                f"{prefix}.OPTIONS must be a dictionary.", obj=settings, id="next.E006"
+                f"{prefix}.OPTIONS must be a dictionary.", obj=settings, id="next.E094"
             )
         ]
     opts = config["OPTIONS"]
@@ -175,7 +180,7 @@ def _validate_context_processors(
             Error(
                 f"{prefix}.OPTIONS['context_processors'] must be a list.",
                 obj=settings,
-                id="next.E006",
+                id="next.E095",
             )
         ]
     if isinstance(cp, list) and any(not isinstance(item, str) for item in cp):
@@ -183,7 +188,7 @@ def _validate_context_processors(
             Error(
                 f"{prefix}.OPTIONS['context_processors'] must contain only strings.",
                 obj=settings,
-                id="next.E006",
+                id="next.E096",
             )
         ]
     return []
@@ -202,7 +207,7 @@ def _validate_options_unknown_keys(
             "OPTIONS only supports context_processors. "
             "Use top-level DIRS for extra page roots.",
             obj=settings,
-            id="next.E006",
+            id="next.E097",
         )
     ]
 
@@ -244,9 +249,7 @@ def _validate_config_fields(config: dict[str, Any], index: int) -> list[CheckMes
 def check_next_pages_configuration(*args, **kwargs) -> list[CheckMessage]:
     """Validate `PAGE_BACKENDS` inside merged `NEXT_FRAMEWORK`.
 
-    A non-dict `NEXT_FRAMEWORK` is reported once as `next.E077` elsewhere, so the merged
-    value falls back to the defaults here and the page checks run against a shape they
-    can read.
+    A non-dict `NEXT_FRAMEWORK` is `next.E077` elsewhere, so the defaults are read here.
     """
     next_pages = next_framework_settings.PAGE_BACKENDS
     if not isinstance(next_pages, list):

@@ -7,10 +7,6 @@ This page covers how to report a security vulnerability in next.dj.
 The disclosure process is private and the maintainers acknowledge every report.
 The canonical policy is :repo:`SECURITY.md <blob/main/SECURITY.md>` in the repository, and this page restates it for the manual.
 
-.. contents::
-   :local:
-   :depth: 2
-
 Where to report
 ---------------
 
@@ -33,12 +29,23 @@ A complete report contains the following.
 
 A reproducible test case shortens the triage time considerably.
 
+Safe harbour
+------------
+
+Research conducted in good faith under this policy draws no legal action from the maintainers.
+Good faith means three things, that the research avoids privacy violations, that it destroys no data, and that it does not interrupt service for anyone else.
+Research that stays inside those three conditions and follows the reporting route above is covered, and research that steps outside them is not.
+
 What happens next
 -----------------
 
 The maintainers acknowledge receipt within a few business days and follow up with an initial assessment.
 A fix is prepared and released once the assessment confirms the issue.
 A coordinated public disclosure happens after the fix is available.
+The maintainers may ask follow-up questions or ask the reporter to retest a proposed fix.
+
+Fixes land on the latest release line, and an older line is best effort only.
+A deployment that needs the fix backported to an older line opens a repository issue so the maintainers can discuss feasibility there.
 
 Out of scope
 ------------

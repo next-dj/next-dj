@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import copy
 import sys
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
@@ -11,6 +11,7 @@ from django.contrib.staticfiles.storage import StaticFilesStorage
 from next.deps import provider_registry, resolver
 from next.static import default_kinds, default_placeholders
 from next.static.discovery import default_stems
+from tests.support.components import write_colocated_component_assets
 from tests.support.helpers import next_framework_settings_stand_in
 
 
@@ -107,8 +108,10 @@ def patched_watch_sources(
 ) -> Generator[None, None, None]:
     """Answer the four watch seams `next.static.finders` reads from one call.
 
-    Leaving one seam unpatched leaks the real project tree into the caller's assertions.
+    Leaving one seam unpatched leaks the real project tree into the caller's assertions,
+    and a named component folder is written because no page-tree fixture builds one.
     """
+    write_colocated_component_assets(components)
     with (
         patch(
             "next.static.finders.get_pages_directories_for_watch",
@@ -143,6 +146,32 @@ def importable_dir(directory: Path) -> Generator[None, None, None]:
             del sys.modules[name]
 
 
+# Every checks submodule that binds `get_router_manager` at import time. The name is
+# read through the module that imported it, so patching the package misses all of them.
+PAGES_ROUTER_MANAGER_TARGETS: tuple[str, ...] = (
+    "next.pages.checks.contexts.get_router_manager",
+    "next.pages.checks.layouts.get_router_manager",
+    "next.pages.checks.modules.get_router_manager",
+    "next.pages.checks.structure.get_router_manager",
+)
+PARTIAL_ROUTER_MANAGER_TARGETS: tuple[str, ...] = (
+    "next.partial.checks.pages.get_router_manager",
+    "next.partial.checks.templates.get_router_manager",
+)
+URLS_ROUTER_MANAGER_TARGETS: tuple[str, ...] = ("next.urls.checks.get_router_manager",)
+
+
+@contextmanager
+def patched_router_manager(
+    *targets: str, manager: MagicMock
+) -> Generator[None, None, None]:
+    """Answer `get_router_manager` with `manager` at each named binding."""
+    with ExitStack() as stack:
+        for target in targets:
+            stack.enter_context(patch(target, return_value=(manager, [])))
+        yield
+
+
 @contextmanager
 def patch_checks_router_manager(
     *, pages_directory: Path
@@ -153,8 +182,11 @@ def patch_checks_router_manager(
     mock_mgr.backends = (mock_router,)
     mock_router.components_folder_name.return_value = None
     with (
-        patch("next.pages.checks.get_router_manager", return_value=(mock_mgr, [])),
-        patch("next.urls.checks.get_router_manager", return_value=(mock_mgr, [])),
+        patched_router_manager(
+            *PAGES_ROUTER_MANAGER_TARGETS,
+            *URLS_ROUTER_MANAGER_TARGETS,
+            manager=mock_mgr,
+        ),
         patch(
             "next.discovery.get_pages_directories", return_value=[pages_directory]
         ) as mock_get_pages_dirs,
@@ -169,10 +201,11 @@ def patch_checks_router_manager_with_routers(
     """Patch `get_router_manager` so the manager exposes the given routers list."""
     mock_mgr = MagicMock()
     mock_mgr.backends = tuple(routers)
-    with (
-        patch("next.pages.checks.get_router_manager", return_value=(mock_mgr, [])),
-        patch("next.partial.checks.get_router_manager", return_value=(mock_mgr, [])),
-        patch("next.urls.checks.get_router_manager", return_value=(mock_mgr, [])),
+    with patched_router_manager(
+        *PAGES_ROUTER_MANAGER_TARGETS,
+        *PARTIAL_ROUTER_MANAGER_TARGETS,
+        *URLS_ROUTER_MANAGER_TARGETS,
+        manager=mock_mgr,
     ):
         yield mock_mgr
 

@@ -35,8 +35,8 @@ Write the test.
    from notes.models import Note
 
    from next.forms.signals import action_dispatched
+   from next.testing.capture import SignalRecorder
    from next.testing.client import NextClient
-   from next.testing.signals import SignalRecorder
 
    def test_create_flow(db) -> None:
        client = NextClient()
@@ -89,7 +89,7 @@ Without a resolvable origin the invalid branch cannot re-render and answers HTTP
 Test the guard, not the happy path
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A form action is unauthenticated until something guards it, and the dispatch endpoint lives outside the page URL space, so page-level protection does not reach it.
+A form action is unauthenticated until something guards it, and the dispatch endpoint lives outside the page URL space, so a middleware scoped to a URL prefix does not reach it.
 A guard dropped in a refactor breaks no test that posts as a signed-in owner.
 The test that catches the loss is the one that asserts a denial, and each layer answers with its own status, so assert the status the layer produces rather than a generic failure.
 

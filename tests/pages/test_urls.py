@@ -2,7 +2,7 @@ import pytest
 
 from next.pages.manager import views as views_module
 from next.urls import URLPatternParser
-from tests.support import file_router
+from tests.support import URL_PATTERN_CASES, UrlPatternCase, file_router
 
 
 class TestURLPatternParser:
@@ -174,102 +174,27 @@ class TestURLPatternParser:
 class TestCreateUrlPatternScenarios:
     """``create_url_pattern`` across the body sources a page can have."""
 
-    @pytest.mark.parametrize(
-        (
-            "test_case",
-            "page_content",
-            "create_djx",
-            "djx_content",
-            "url_pattern",
-            "expected_pattern_name",
-            "expected_template",
-        ),
-        [
-            (
-                "render_function_only",
-                """
-from django.http import HttpResponse
-
-def render(request, **kwargs):
-    return HttpResponse("Hello from render function!")
-                """,
-                False,
-                None,
-                "test",
-                "page_test",
-                None,
-            ),
-            (
-                "template_priority",
-                'template = "Python template: {{ name }}"',
-                True,
-                "<h1>DJX template: {{ name }}</h1>",
-                "test",
-                "page_test",
-                "Python template: {{ name }}",
-            ),
-            (
-                "virtual_view_djx",
-                None,
-                True,
-                "<h1>Virtual view: {{ title }}</h1><p>{{ content }}</p>",
-                "test",
-                "page_test",
-                "<h1>Virtual view: {{ title }}</h1><p>{{ content }}</p>",
-            ),
-            ("virtual_view_no_djx", None, False, None, "test", None, None),
-            (
-                "virtual_view_with_params",
-                None,
-                True,
-                "<h1>User: {{ user_id }}</h1><p>Post: {{ post_id }}</p>",
-                "user/[int:user_id]/post/[int:post_id]",
-                "page_user_int_user_id_post_int_post_id",
-                "<h1>User: {{ user_id }}</h1><p>Post: {{ post_id }}</p>",
-            ),
-        ],
-        ids=[
-            "render_function_only",
-            "template_priority",
-            "virtual_view_djx",
-            "virtual_view_no_djx",
-            "virtual_view_with_params",
-        ],
-    )
+    @pytest.mark.parametrize("case", URL_PATTERN_CASES, ids=lambda case: case.id)
     def test_create_url_pattern_scenarios(
-        self,
-        page_instance,
-        tmp_path,
-        url_parser,
-        test_case,
-        page_content,
-        create_djx,
-        djx_content,
-        url_pattern,
-        expected_pattern_name,
-        expected_template,
+        self, page_instance, tmp_path, url_parser, case: UrlPatternCase
     ) -> None:
         """A page yields a named pattern whenever any body source can serve it."""
         page_file = tmp_path / "page.py"
+        if case.page_content is not None:
+            page_file.write_text(case.page_content)
+        if case.template_djx is not None:
+            (tmp_path / "template.djx").write_text(case.template_djx)
 
-        if page_content:
-            page_file.write_text(page_content)
+        pattern = page_instance.create_url_pattern(case.route, page_file, url_parser)
 
-        if create_djx:
-            djx_file = tmp_path / "template.djx"
-            djx_file.write_text(djx_content)
-
-        pattern = page_instance.create_url_pattern(url_pattern, page_file, url_parser)
-
-        if expected_pattern_name:
-            assert pattern is not None
-            assert pattern.name == expected_pattern_name
-            if expected_template:
-                page_instance.render(page_file)
-                assert page_file in page_instance._templates.composed
-                assert page_instance._templates.composed[page_file] == expected_template
-        else:
+        if case.pattern_name is None:
             assert pattern is None
+            return
+        assert pattern is not None
+        assert pattern.name == case.pattern_name
+        if case.composed is not None:
+            page_instance.render(page_file)
+            assert page_instance._templates.composed[page_file] == case.composed
 
     def test_create_url_pattern_render_function_fallback(
         self, page_instance, tmp_path, url_parser

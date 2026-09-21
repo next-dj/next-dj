@@ -101,9 +101,7 @@ def _build_page_backends_for_watch() -> tuple[list[RouterBackend], bool]:
 def _page_backends_for_watch() -> list[RouterBackend]:
     """Return the routers the watcher reads, building them when it has to.
 
-    Held until the configuration changes, but rebuilt when incomplete since an
-    entry can fail for a reason gone by the next read, and dev-server watch mode
-    caches nothing.
+    Held until the configuration changes, but an incomplete build is rebuilt per read.
     """
     if template_edits_watched():
         return _build_page_backends_for_watch()[0]

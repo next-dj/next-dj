@@ -13,6 +13,11 @@ Components live in folders under a configured components root and the framework 
 Overview
 --------
 
+Django already has both halves of this feature, and a component is the two of them under one name.
+``{% include "_card.html" %}`` maps to ``{% component "card" %}``, which resolves the name against the tree the calling template sits in rather than against a template path.
+:meth:`@register.inclusion_tag <django.template.Library.inclusion_tag>` maps to a composite component, where a ``component.py`` next to the template computes the values the markup renders.
+What a component adds on top is slots, co-located CSS and JS, and dependency-injected context.
+
 Components compose freely.
 A page template can call a component, a component template can call another component, and a layout can call any component that is in scope.
 The :ref:`components-folder-discovery` section below covers how the default ``FileComponentsBackend`` finds them.
@@ -193,13 +198,14 @@ Multiline tags
 ~~~~~~~~~~~~~~
 
 Both the void form and the block form accept line breaks inside the tag body, which is useful when a component takes many props.
-The framework widens the ``{% ... %}`` alternative of Django's tag pattern at startup, so a block tag body wraps across lines in every template type.
+The framework adds one line-spanning branch to Django's tag pattern at startup, and that branch matches only a tag whose name is one of next.dj's own.
+The widened set is ``action_url``, ``asset``, ``collect_scripts``, ``collect_styles``, ``component``, ``form``, ``set_slot``, ``slot``, ``template``, ``use_module``, ``use_script``, ``use_style``, and ``zone``, in the void form and in the ``{% #name %}`` opening form alike.
 
-.. warning::
+.. note::
 
-   The wider block-tag rule reaches **every** template the process loads, not only DJX files.
-   If you rely on Django's stock behaviour where a newline inside ``{% ... %}`` ends the tag, adjust those templates before adopting next.dj.
-   Variables and comments are left alone, and the rebind happens once during ``AppConfig.ready`` and is one-way, so the stock Django pattern does not come back while the process runs.
+   Every other block tag lexes exactly as stock Django lexes it, in a DJX file and in a plain Django template alike.
+   A newline inside ``{% if x %}`` still ends the tag, and a stray ``{%`` inside inline JavaScript or CSS still swallows no more text than it does without next.dj installed.
+   Variables and comments are left alone, and the rebind happens once during ``AppConfig.ready`` and is one-way, so the pattern does not narrow again while the process runs.
 
 .. code-block:: jinja
    :caption: multiline void tag
@@ -372,7 +378,7 @@ The framework resolves parameters from the surrounding template scope, from URL 
 .. note::
 
    Registration raises ``ValueError`` for one of the six keys reserved for dependency injection, ``request``, ``form``, ``cleaned_data``, ``_cache``, ``_stack``, and ``_context_data``.
-   These are a different set from the eight render-time reserved keys listed below, and :doc:`/content/ref/deps` documents them as ``RESERVED_KEYS``.
+   These are a different set from the nine render-time reserved keys listed under :ref:`components-merge-guard`, and :doc:`/content/ref/deps` documents them as ``RESERVED_KEYS``.
    It also raises ``ValueError`` for a duplicate registration of two different functions under the same key, or of two different unkeyed callables, in one ``component.py``.
    Re-registering the same function under the same key replaces the stored entry rather than raising.
    These are the registration failures, and the unkeyed form raises one more ``ValueError`` at render time, described below.
@@ -384,23 +390,8 @@ See :doc:`static-assets/js-context` for the serialization options and :ref:`Seri
 An unkeyed ``@component.context`` returning a dict serializes each key of that dict separately.
 A ``serializer=`` on such an unkeyed callable applies to every key of the returned dict.
 A keyed ``@component.context`` serializes its return value under the given key.
-An unkeyed callable that returns anything other than a ``dict`` is silently dropped from the template scope.
-A custom mapping type has to be converted to a ``dict`` before it is returned.
 
-An unkeyed ``@component.context`` merges its dict into the component scope, so the framework guards the names that merge would quietly take over.
-The render raises ``ValueError`` when the returned dict carries a prop passed by the ``{% component %}`` tag being rendered, a reserved render key, or any key that starts with ``slot_``.
-The reserved render keys are ``children``, ``request``, ``csrf_token``, ``current_template_path``, ``current_page_module_path``, ``current_component_module_path``, ``_static_collector``, and ``_component_props``.
-The whole ``slot_`` prefix is reserved, so a returned ``slot_count`` raises even when the component declares no ``count`` slot.
-Register the value under an explicit ``@component.context("key")`` instead, which is the deliberate override and is never guarded.
-
-An ordinary page context key that reaches the component through the surrounding scope stays outside the guard, so an unkeyed dict may still shadow it for the component body.
-
-Every render path that has a call site publishes its prop names, so the guard knows them.
-The ``{% component %}`` tag publishes the props of its own call, ``ComponentWidget`` publishes the names it fills for its field, and ``render_component_by_name`` publishes the keys of its ``props`` mapping while leaving its ``context`` mapping ambient.
-``ComponentWidget`` and ``render_component_by_name`` seed the ambient render keys beside those props, and the reserved set already covers those keys, so an unkeyed ``@component.context`` cannot take one over.
-A bare ``render_component`` has no call site, so it guards the reserved keys alone.
-The same component code therefore raises under ``{% component "note_card" preview=text %}`` and merges quietly under ``{% component "note_card" %}``.
-This failure leaves the render rather than degrading to an empty string, so ``STRICT_LOADING`` and ``DEBUG`` do not change it.
+An unkeyed callable merges its dict into the component scope, and the names that merge may not take over are covered under :ref:`components-merge-guard`.
 
 Co-located static assets
 ------------------------
@@ -425,6 +416,28 @@ The static collector picks up each asset by stem.
 The collector emits each asset exactly once per request, even when multiple components reference the same file.
 See :doc:`static-assets/deduplication` for the dedup rules.
 
+.. _components-merge-guard:
+
+The unkeyed context merge guard
+-------------------------------
+
+An unkeyed ``@component.context`` merges its dict into the component scope, so the framework guards the names that merge would quietly take over.
+An unkeyed callable that returns anything other than a ``dict`` is silently dropped from the template scope, and a custom mapping type has to be converted to a ``dict`` before it is returned.
+
+The render raises ``ValueError`` when the returned dict carries a prop passed by the ``{% component %}`` tag being rendered, a reserved render key, or any key that starts with ``slot_``.
+The nine reserved render keys are ``children``, ``request``, ``csrf_token``, ``current_template_path``, ``current_page_module_path``, ``current_component_module_path``, ``current_action_anchor``, ``_static_collector``, and ``_component_props``.
+The whole ``slot_`` prefix is reserved, so a returned ``slot_count`` raises even when the component declares no ``count`` slot.
+Register the value under an explicit ``@component.context("key")`` instead, which is the deliberate override and is never guarded.
+
+An ordinary page context key that reaches the component through the surrounding scope stays outside the guard, so an unkeyed dict may still shadow it for the component body.
+
+Every render path that has a call site publishes its prop names, so the guard knows them.
+The ``{% component %}`` tag publishes the props of its own call, ``ComponentWidget`` publishes the names it fills for its field, and ``render_component_by_name`` publishes the keys of its ``props`` mapping while leaving its ``context`` mapping ambient.
+``ComponentWidget`` and ``render_component_by_name`` seed the ambient render keys beside those props, and the reserved set already covers those keys, so an unkeyed ``@component.context`` cannot take one over.
+A bare ``render_component`` has no call site, so it guards the reserved keys alone.
+The same component code therefore raises under ``{% component "note_card" preview=text %}`` and merges quietly under ``{% component "note_card" %}``.
+This failure leaves the render rather than degrading to an empty string, so ``STRICT_LOADING`` and ``DEBUG`` do not change it.
+
 Lookup performance
 ------------------
 
@@ -445,6 +458,11 @@ Page-tree ``component.py`` modules follow a different path.
 The URL router walks each page tree and ``register_components_folder_from_router_walk`` imports every ``component.py`` it registers inline.
 They are available regardless of ``LAZY_COMPONENT_MODULES``.
 
+A ``component.py`` whose body raises while it imports does not fail the render.
+The loader logs the traceback, holds the exception under that file path, and hands the renderer nothing, which degrades the component to its bare ``component.djx`` template.
+Every ``@component.context`` of that module therefore stays out of the body, and a template rendering a key one of them published prints the empty string instead.
+The held error is what ``next.E084`` reports, so a broken module that nobody noticed in a rendered page is still named by ``manage.py check --deploy``.
+
 The ``LAZY_COMPONENT_MODULES`` flag gates the ``DIRS`` bulk import only.
 When the flag is set the framework skips that step and imports a ``component.py`` on first resolve instead.
 A composite component whose template body lives in the module-level ``component`` string is still imported during discovery, because the scanner must read that attribute.
@@ -456,6 +474,8 @@ See :ref:`ref-settings` for the exact behaviour.
    NEXT_FRAMEWORK = {
        "LAZY_COMPONENT_MODULES": True,
    }
+
+.. _components-render-function:
 
 The render function
 -------------------
@@ -680,6 +700,9 @@ The components subsystem contributes Django system checks.
   Drop the extra key and read the backend configuration from ``DIRS``.
 - ``next.E075`` reports a ``@component.context`` registration bound to a file no component render collects.
   Decorate callables defined in the ``component.py`` itself.
+- ``next.E084`` reports a ``component.py`` that raised while importing, naming the exception type and its message.
+  It is a deployment check and runs under ``manage.py check --deploy`` alone, because it imports every user module a backend holds.
+  Fix whatever the module body raised, since the components of that module render without their Python context until it imports.
 
 Run them with ``uv run python manage.py check``.
 The full catalog lives in :doc:`/content/ref/system-checks`.

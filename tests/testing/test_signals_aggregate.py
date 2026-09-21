@@ -1,41 +1,60 @@
+import importlib
+import importlib.util
+import pkgutil
+from types import ModuleType
+
+import pytest
+from django.dispatch import Signal
+
+import next as next_package
 from next import signals as aggregate_signals
+
+
+def _area_signal_modules() -> dict[str, ModuleType]:
+    """Import the `signals` module of every framework area that has one."""
+    modules: dict[str, ModuleType] = {}
+    for info in pkgutil.iter_modules(next_package.__path__):
+        if not info.ispkg:
+            continue
+        name = f"next.{info.name}.signals"
+        if importlib.util.find_spec(name) is None:
+            continue
+        modules[name] = importlib.import_module(name)
+    return modules
+
+
+def _signal_names(module: ModuleType) -> list[str]:
+    """Return the names the module binds to a Signal, in declaration order."""
+    return [name for name, value in vars(module).items() if isinstance(value, Signal)]
+
+
+_AREA_MODULES = _area_signal_modules()
+
+_AREA_SIGNALS = [
+    pytest.param(name, module_name, id=f"{module_name}.{name}")
+    for module_name, module in _AREA_MODULES.items()
+    for name in _signal_names(module)
+]
 
 
 class TestAggregateSignalsModule:
     """next.signals re-exports every signal from the subsystems."""
 
-    def test_exports_every_signal(self) -> None:
-        expected = {
-            "action_dispatched",
-            "action_registered",
-            "asset_registered",
-            "backend_loaded",
-            "collector_finalized",
-            "component_backend_loaded",
-            "component_registered",
-            "component_rendered",
-            "components_registered",
-            "context_registered",
-            "field_validated",
-            "form_access_denied",
-            "form_validation_failed",
-            "html_injected",
-            "page_rendered",
-            "patch_op_registered",
-            "provider_registered",
-            "route_registered",
-            "router_reloaded",
-            "settings_reloaded",
-            "sse_stream_closed",
-            "sse_stream_opened",
-            "template_loaded",
-            "watch_specs_ready",
-            "wizard_completed",
-            "wizard_step_submitted",
-            "zone_registered",
-            "zone_rendered",
+    def test_area_signal_modules_are_discovered(self) -> None:
+        assert {"next.forms.signals", "next.partial.signals"} <= set(_AREA_MODULES)
+
+    @pytest.mark.parametrize(("name", "module_name"), _AREA_SIGNALS)
+    def test_area_signal_is_reexported(self, name: str, module_name: str) -> None:
+        assert name in aggregate_signals.__all__
+        owner = _AREA_MODULES[module_name]
+        assert getattr(aggregate_signals, name) is getattr(owner, name)
+
+    def test_exports_nothing_beyond_the_area_signals(self) -> None:
+        owned = {
+            name for module in _AREA_MODULES.values() for name in _signal_names(module)
         }
-        exported = set(aggregate_signals.__all__)
-        assert expected == exported
-        for name in expected:
-            assert hasattr(aggregate_signals, name)
+        assert set(aggregate_signals.__all__) == owned
+
+    def test_every_export_is_a_signal(self) -> None:
+        for name in aggregate_signals.__all__:
+            assert isinstance(getattr(aggregate_signals, name), Signal)

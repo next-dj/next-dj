@@ -39,18 +39,25 @@ A widget that relied on an inline initialiser in its markup has to move to a co-
 With the runtime's dev mode on, that is with Django ``DEBUG``, the runtime prints a ``console.warn`` for every script it neutralises.
 An inline initialiser that stopped working is therefore visible rather than silent.
 
+What the applier does not remove
+--------------------------------
+
+The removal covers ``<script>`` elements and nothing else.
+An event-handler attribute such as ``onclick``, an ``<iframe srcdoc>`` carrying a document of its own, and a ``javascript:`` href all reach the live document exactly as the server wrote them, because each one is an attribute rather than an element the applier can cut out.
+
+A project running under a nonce policy without ``'unsafe-inline'`` already has its defence, since the browser refuses all three.
+A project running without a CSP has one defence left, the template's own auto escaping, which is what keeps an untrusted value from becoming an attribute in the first place.
+The rule follows from that: never build patch HTML by string concatenation around a request value, and never ``mark_safe`` a value the request supplied, see :doc:`di-and-untrusted-input`.
+A patch rendered through a zone or a component template carries the same escaping a full page render does.
+
 strict-dynamic as a recommendation
 -----------------------------------
 
 ``'strict-dynamic'`` lets a script already trusted by a nonce load further scripts without each one needing its own nonce in the policy.
 It pairs well with the runtime, because the nonced bootstrap script loads the asset scripts and ``'strict-dynamic'`` propagates that trust to them.
 
-This is a recommendation, not a guarantee the framework can make for your deployment.
-A CSP is your policy.
-The framework carries the nonce and refuses to run inline patch scripts, which removes the two mechanisms a partial update could otherwise use to bypass a policy.
-A nonce policy without ``'unsafe-inline'`` also blocks an event-handler attribute a patch carries, which the applier does not remove.
-It does not author your policy, validate your directives, or promise that any particular policy is correct for your site.
-Treat ``'strict-dynamic'`` as a sensible default for a nonce-based policy and verify the resulting headers against your own threat model.
+The framework carries the nonce and refuses to run inline patch scripts, and everything past that is your policy to author and verify against your own threat model.
+Treat ``'strict-dynamic'`` as a sensible default for a nonce-based policy rather than as a setting the framework validates.
 
 A worked policy
 ---------------

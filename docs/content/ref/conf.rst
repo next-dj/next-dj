@@ -62,6 +62,11 @@ Signals
 
 See :doc:`signals` for the ``settings_reloaded`` signal.
 
+``settings_reloaded`` is the one framework signal sent robustly, and its contract is that every receiver runs whatever any other one does.
+A receiver that raises never stops the fan-out, because each of the others still has caches of its own to drop and a half-reloaded process is worse than a loud one.
+The first exception is re-raised once the send finishes, and every later one is logged through ``next.conf.signals`` with the receiver named and its traceback attached.
+That invariant is what makes ``override_settings`` safe in a suite, since the enter and the exit both leave every registry consistent with the settings in force even when one receiver is broken.
+
 See also
 --------
 

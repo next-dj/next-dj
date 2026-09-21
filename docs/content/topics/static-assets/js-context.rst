@@ -66,19 +66,28 @@ Set ``NEXT_FRAMEWORK["JS_CONTEXT_SERIALIZER"]`` to the dotted path of a serializ
 ``resolve_serializer`` reads the setting on every call.
 When the key is absent or set to an empty string the framework uses ``JsonJsContextSerializer``.
 
-System check
-~~~~~~~~~~~~
+System checks
+~~~~~~~~~~~~~
 
-The ``next.W042`` system check validates ``JS_CONTEXT_SERIALIZER`` at startup.
-It warns under any of five conditions.
+Five warnings cover ``JS_CONTEXT_SERIALIZER`` at startup, one condition per id.
 
-- The value is not a string.
-- The dotted path cannot be imported.
-- The resolved attribute is not a class.
-- The class cannot be instantiated.
-- The instance does not implement the ``JsContextSerializer`` protocol, a ``dumps(value) -> str`` method.
+``next.W042``.
+   The value is not a dotted-path string.
 
-The check is skipped when the key is absent or set to an empty string.
+``next.W079``.
+   The dotted path cannot be imported.
+
+``next.W080``.
+   The path imports into something that is not a class.
+
+``next.W081``.
+   The class refuses to instantiate with no arguments.
+   ``PydanticJsContextSerializer`` reports here when the optional pydantic package is absent, because its constructor raises ``ImportError``.
+
+``next.W082``.
+   The instance does not implement the ``JsContextSerializer`` protocol, a ``dumps(value) -> str`` method.
+
+Every one of them is skipped when the key is absent or set to an empty string.
 
 Per-key serializer
 ------------------
@@ -184,7 +193,8 @@ The framework owns two ``$``-prefixed keys of the init payload, ``$csrf`` and ``
 A project key of either name is dropped from the collected context on every automatically injected payload, whichever way the project registered it, together with the pre-encoded fragment and the per-key serializer that key recorded.
 The framework then writes its own value where it has one, ``$csrf`` on a payload whose request can mint a CSRF token and ``$dev`` on a payload built while ``DEBUG`` is on.
 The runtime reads ``$csrf`` at bootstrap and seeds the header it stamps on every unsafe request, so a programmatic ``Next.partial.fetch`` carries a token without a form field.
-A render with no value to write leaves the key out of the payload altogether, so a production page carries no ``$dev`` key at all and the registered value reaches ``window.Next.context`` in no environment.
+A render with no value to write leaves the key out of the payload altogether, so a production page carries no ``$dev`` key at all and an automatically injected payload carries the registered value in no environment.
+A payload the project assembles itself under the ``MANUAL`` policy answers for its own filtering, see `Manual injection`_.
 
 A partial render honours the same ownership.
 ``Patches.context()`` refuses ``$csrf`` and ``$dev`` with ``ReservedContextKeyError``, and the js-context delta of a zone render drops them before it becomes a ``context`` patch, so no patch updates either key.
@@ -391,6 +401,8 @@ Pass its ``js_context()``, ``js_context_serializers()``, and ``js_context_encode
        )
 
 A payload built this way carries no framework ``$csrf`` or ``$dev`` entry, because the static manager both claims and writes those keys only under ``AUTO``.
+It does carry a project key named ``$csrf`` or ``$dev``, because ``js_context()`` is the unfiltered store and the reserved-key drop lives in the automatic path alone.
+Pass ``RESERVED_PAYLOAD_KEYS`` from ``next.static.scripts`` to ``collector.js_context_payload`` instead, which returns the values, the encoded fragments, and the per-key serializers with every reserved name already dropped.
 
 Runtime script templates
 ------------------------

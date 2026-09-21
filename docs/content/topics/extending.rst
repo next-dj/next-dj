@@ -3,15 +3,15 @@
 Extending
 =========
 
-next.dj exposes five extension mechanisms.
+next.dj exposes six extension mechanisms.
 Each section below states what its mechanism replaces and where to register it.
 
 .. contents::
    :local:
    :depth: 2
 
-The five mechanisms
--------------------
+The six mechanisms
+------------------
 
 Backend.
    Replace or augment a complete subsystem.
@@ -34,6 +34,10 @@ Signal.
    Observe a lifecycle event without changing it.
    Used for audit, observability, cache invalidation, and cross-app coordination.
 
+Port.
+   Replace the implementation one subsystem calls another through.
+   Used for the page-tree scan, the partial response shaping, the router access seam, and the static asset surface a render reaches.
+
 Backends
 --------
 
@@ -49,22 +53,25 @@ Subclass the base class listed for its family and register the dotted path in ``
      - Base class
    * - URL routing
      - ``PAGE_BACKENDS``
-     - ``next.urls.backends.RouterBackend``
+     - ``next.urls.RouterBackend``
    * - Components
      - ``COMPONENT_BACKENDS``
-     - ``next.components.backends.ComponentsBackend``
+     - ``next.components.ComponentsBackend``
    * - Forms dispatch
      - ``FORM_ACTION_BACKENDS``
-     - ``next.forms.backends.FormActionBackend``
+     - ``next.forms.FormActionBackend``
    * - Static pipeline
      - ``STATIC_BACKENDS``
-     - ``next.static.backends.StaticBackend``
+     - ``next.static.StaticBackend``
    * - Partial protocol
      - ``PARTIAL_BACKENDS``
      - ``next.partial.PartialProtocolBackend``
    * - Form wizard drafts
      - ``FORM_WIZARD_BACKEND``
      - ``next.forms.FormWizardBackend``
+
+Each base is spelled through the curated package path, which is the import a project writes.
+The class also lives at a deeper module path, and that path carries no stability promise.
 
 A backend always implements the full contract.
 Every family checks the configured class against the base named above, so a class that does not subclass it is rejected with :class:`~django.core.exceptions.ImproperlyConfigured`.
@@ -83,13 +90,8 @@ The settings merge overlays a user dict on the default dict key by key, so an en
 
 Beyond the abstract methods, a base class carries optional hooks whose defaults decline.
 
-``ComponentsBackend`` carries the widest set of optional hooks.
-``discover`` populates the registry and ``import_component_modules`` executes each discovered module.
-``register_walked_folder`` claims a components folder the page-tree walk found.
-``iter_components`` and ``global_component_roots`` let the system checks enumerate what the backend holds.
-``watch_roots`` names the trees the development reloader and the staticfiles finder observe, and it is how a backend that computes its roots outside its config entry reaches autoreload.
-Leaving a hook alone is a supported answer, and it keeps the backend out of the diagnostics that hook feeds.
-The full recipe with a worked backend is in :doc:`components`.
+``ComponentsBackend`` carries the widest set, six hooks beside its two abstract methods, and leaving one alone keeps the backend out of the diagnostics that hook feeds.
+:doc:`components` states what each of the six answers and works through a backend that opts into three.
 
 .. code-block:: python
    :caption: registering a custom backend
@@ -295,11 +297,67 @@ Connect a receiver to react to a framework event.
 The signal catalog lives in :doc:`signals`.
 The patterns are uniform across the framework.
 
+Ports
+-----
+
+A port is the narrow surface one subsystem calls another through.
+``next.ports`` declares each as a ``Protocol`` beside a slot object that holds the one implementation, and the caller imports the slot rather than the subsystem behind it, so the two areas stay decoupled while the call still lands on real code.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 34 42
+
+   * - Slot
+     - Shipped implementation
+     - What it answers
+   * - ``page_scan_slot``
+     - ``next.pages.ports.PageScanImpl``
+     - Executes every routed ``page.py`` and answers the ones that loaded.
+   * - ``partial_shaper_slot``
+     - ``next.partial.ports.PartialShaperImpl``
+     - Reads the partial intent off a request and shapes page and form responses into envelopes.
+   * - ``router_access_slot``
+     - ``next.urls.ports.RouterAccessImpl``
+     - Builds router backends and managers and answers the URL pattern parser.
+   * - ``static_assets_slot``
+     - ``next.static.ports.StaticAssetsImpl``
+     - Creates a collector, discovers page and component assets, and injects the placeholder tags.
+
+``NextFrameworkConfig.ready()`` binds all four, ahead of every step that imports user code.
+Replace one by subclassing the shipped implementation and calling ``set`` on its slot from the ``ready()`` of an application listed after ``next`` in ``INSTALLED_APPS``, since a slot holds one implementation and the last binding wins.
+
+.. code-block:: python
+   :caption: notes/apps.py
+
+   from django.apps import AppConfig
+   from notes.audit import record_injection
+
+   from next.ports import static_assets_slot
+   from next.static.ports import StaticAssetsImpl
+
+   class AuditedAssets(StaticAssetsImpl):
+       def inject(self, html: str, collector, *, page_path, request) -> str:
+           rendered = super().inject(
+               html, collector, page_path=page_path, request=request
+           )
+           record_injection(page_path, len(rendered) - len(html))
+           return rendered
+
+   class NotesConfig(AppConfig):
+       name = "notes"
+
+       def ready(self) -> None:
+           static_assets_slot.set(AuditedAssets())
+
+Subclass the shipped implementation rather than the ``Protocol``, so a method the subclass leaves alone keeps doing what the framework expects of it.
+
+A port differs from a backend in who reads it.
+A backend family is configured in ``NEXT_FRAMEWORK`` and reloads itself when the settings change, while a slot is bound once at startup and nothing rebinds it, which is why replacing one is a startup decision rather than a configuration key.
+Reach for a port only when no backend, strategy, or protocol covers the seam, because the protocols are narrower than the subsystems behind them and a replacement takes on whatever the shipped implementation was doing for every caller.
+See :doc:`/content/ref/ports` for the method contract of each.
+
 Choosing between mechanisms
 ---------------------------
-
-Picking the right mechanism saves work.
-Use the entries below as a quick map.
 
 - **Add a new URL pattern source.** Subclass ``RouterBackend`` and register it under ``PAGE_BACKENDS``.
 - **Change how a path is matched against the built patterns.** Name a ``URLResolver`` subclass under ``URL_RESOLVER``.
@@ -319,6 +377,56 @@ Use the entries below as a quick map.
 - **Inspect every rendered page.** Subscribe to the ``page_rendered`` signal.
 - **Watch extra directories during development.** Call ``register_autoreload_watch_spec``.
   See *Autoreload watch specs* above.
+- **Change what one subsystem hands another.** Subclass the shipped port implementation and ``set`` it on its slot from ``AppConfig.ready``.
+  See *Ports* above.
+
+Packaging an extension
+----------------------
+
+A reusable extension ships as an ordinary Django application, and its ``AppConfig`` is where the registration runs.
+
+.. code-block:: python
+   :caption: next_audit/apps.py
+
+   from django.apps import AppConfig
+
+   class NextAuditConfig(AppConfig):
+       name = "next_audit"
+
+       def ready(self) -> None:
+           from next_audit import providers, receivers  # noqa: F401
+
+Register through ``ready`` rather than at module import, because the app registry is not populated when the module body runs.
+Everything a package registers imperatively goes there, the provider and named-dependency registrations, the asset kinds and stems, the patch verbs, the autoreload watch specs, the signal receivers, and a port replacement.
+What a package cannot register for its adopter is a backend or a strategy, since both are named by a dotted path in ``NEXT_FRAMEWORK``, so the package documents the path and the adopter adds the entry.
+
+Position the app relative to ``next`` in ``INSTALLED_APPS`` by what it registers.
+
+.. code-block:: python
+   :caption: config/settings.py
+
+   INSTALLED_APPS = [
+       "next",
+       "next_audit",
+   ]
+
+For every registry on this page the position does not change the outcome, as *App order in* ``INSTALLED_APPS`` above explains.
+A port replacement is the case that does, because ``NextFrameworkConfig.ready()`` binds all four slots and the last binding wins, so a package that replaces a port has to be listed after ``next``.
+A package that reuses an existing kind or placeholder name with different parameters fails at startup either way, and its position only decides which ``ready`` call raises.
+
+Declare the dependency on next.dj under its distribution name, and constrain it from below only.
+
+.. code-block:: toml
+   :caption: pyproject.toml
+
+   [project]
+   name = "next-audit"
+   dependencies = ["next.dj"]
+
+The lower bound names the release the extension was developed against, which is what keeps an adopter from installing it beside a framework that has none of the names it imports.
+The framework is the host application's choice, so a ceiling on it strands the adopter on an old release for as long as the extension goes unmaintained.
+Add one only for an extension built on a deep module path or another surface outside the curated package ``__all__``, since those move without notice.
+An extension that stays on the curated package paths, the backend base classes, and the signal catalog needs no ceiling at all.
 
 Worked examples
 ---------------

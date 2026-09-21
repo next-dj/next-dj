@@ -142,7 +142,7 @@ next.dj resolves the page body in this order:
 2. A `template = "..."` module attribute on the page.
 3. The first registered `TemplateLoader` whose `can_load(page)` returns `True`.
 
-Only step 3 is used here, and both loaders take part. `MarkdownTemplateLoader` backs the two posts, `DjxTemplateLoader` backs the index (`screens/page.py` beside `screens/template.djx`) and the virtual `/about/` page. The highest-priority present source wins, and a page declaring more than one gets [`next.W043`](../../docs/content/ref/system-checks.rst) at `manage.py check` time naming the winner. A `TEMPLATE_LOADERS` entry that is not a string surfaces as `next.E042`, one that cannot be imported or is not a `TemplateLoader` subclass as `next.E043`.
+Only step 3 is used here, and both loaders take part. `MarkdownTemplateLoader` backs the two posts, `DjxTemplateLoader` backs the index (`screens/page.py` beside `screens/template.djx`) and the virtual `/about/` page. The highest-priority present source wins, and a page declaring more than one gets [`next.W043`](../../docs/content/ref/system-checks.rst) at `manage.py check` time naming the winner. A `TEMPLATE_LOADERS` entry that is not a string surfaces as `next.E042`, one that cannot be imported as `next.E043`, and one that resolves to a class that is no `TemplateLoader` as `next.E089`.
 
 ### 7. Tracing which loader won through `template_loaded`
 
@@ -207,9 +207,9 @@ Hyphens in folder names become underscores in the name, so `hello-world` routes 
 
 The header calls the shared [`nav_link`](../_shared/_components/nav_link/component.py) component with `variant="bar"`, and its `is_active` callable compares `request.resolver_match.view_name` with the `url_name` prop. This blog only needs the exact match. The `active_when` prop for a substring match is exercised by [`examples/shortener`](../shortener/).
 
-### The asset-version guard needs an explicit version
+### The asset-version guard needs a deploy stamp
 
-The example pins an explicit asset `VERSION` in `PARTIAL_BACKENDS`, the shared convention explained in the [examples README](../README.md#conventions-every-example-follows).
+The example sets `STATIC_VERSION` and the partial asset version derives from it, the shared convention explained in the [examples README](../README.md#conventions-every-example-follows).
 
 ### Loader output is a template body, not a variable
 
@@ -218,9 +218,9 @@ The example pins an explicit asset `VERSION` in `PARTIAL_BACKENDS`, the shared c
 ## Further reading
 
 - [`next/pages/loaders.py`](../../next/pages/loaders.py) — the `TemplateLoader` ABC, `build_registered_loaders`, `compose_body`, and layout discovery.
-- [`next/pages/manager.py`](../../next/pages/manager.py) — `_resolve_page_body` and the layout composition entry point.
+- [`next/pages/manager/__init__.py`](../../next/pages/manager/__init__.py) — `_resolve_page_body` and the layout composition entry point.
 - [`next/pages/signals.py`](../../next/pages/signals.py) — the `template_loaded` payload contract used in section 7.
 - [`next/pages/processors.py`](../../next/pages/processors.py) — context-processor discovery across the router and Django `TEMPLATES`.
 - [`next/static/serializers.py`](../../next/static/serializers.py) — how `@context(serialize=True)` values reach `window.Next.context`.
 - [`docs/content/topics/pages.rst`](../../docs/content/topics/pages.rst) — the "Custom template loaders" section this example anchors.
-- [`docs/content/ref/system-checks.rst`](../../docs/content/ref/system-checks.rst) — `next.E012`, `next.E040`, `next.E042`, `next.E043`, `next.W043`, and `next.W069`.
+- [`docs/content/ref/system-checks.rst`](../../docs/content/ref/system-checks.rst) — `next.E012`, `next.E040`, `next.E042`, `next.E043`, `next.E089`, and `next.W043`.

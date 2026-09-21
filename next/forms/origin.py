@@ -38,7 +38,7 @@ class OriginMatch:
         return self.origin.partition("?")[0]
 
 
-def _filter_reserved_url_kwargs(url_kwargs: dict[str, object]) -> dict[str, object]:
+def filter_reserved_url_kwargs(url_kwargs: dict[str, object]) -> dict[str, object]:
     """Drop keys that collide with DI names used by `resolve_dependencies`."""
     return {k: v for k, v in url_kwargs.items() if k not in RESERVED_KEYS}
 
@@ -73,7 +73,7 @@ def resolve_url_to_match(
     kwargs = dict(match.kwargs)
     return OriginMatch(
         page_path=_page_path_from_view(match.func),
-        url_kwargs=_filter_reserved_url_kwargs(kwargs) if filter_reserved else kwargs,
+        url_kwargs=filter_reserved_url_kwargs(kwargs) if filter_reserved else kwargs,
         origin=url,
     )
 
@@ -90,7 +90,7 @@ def resolve_url_to_page(url: str, request: "HttpRequest") -> "Path | None":
 def _resolve_origin_match(request: "HttpRequest") -> "OriginMatch | None":
     """Resolve the posted origin field against the URLconf."""
     raw = request.POST.get(ORIGIN_FIELD_NAME) if hasattr(request, "POST") else None
-    origin = validated_origin_path(raw)
+    origin = validated_origin_path(raw, request=request)
     if origin is None:
         return None
     return resolve_url_to_match(origin, request)
@@ -106,14 +106,14 @@ def resolve_origin(request: "HttpRequest") -> "OriginMatch | None":
     return match
 
 
-def _url_kwargs_for_request(request: "HttpRequest") -> dict[str, object]:
+def url_kwargs_for_request(request: "HttpRequest") -> dict[str, object]:
     """Return the URL kwargs of the page the request renders or re-renders."""
     match = getattr(request, "resolver_match", None)
     if match is not None and getattr(match, "url_name", None) == URL_NAME_FORM_ACTION:
         origin_match = resolve_origin(request)
         return dict(origin_match.url_kwargs) if origin_match is not None else {}
     if match is not None and getattr(match, "kwargs", None):
-        return _filter_reserved_url_kwargs(dict(match.kwargs))
+        return filter_reserved_url_kwargs(dict(match.kwargs))
     if getattr(request, "method", None) == "POST":
         origin_match = resolve_origin(request)
         if origin_match is not None:
@@ -123,8 +123,9 @@ def _url_kwargs_for_request(request: "HttpRequest") -> dict[str, object]:
 
 __all__ = [
     "OriginMatch",
-    "_url_kwargs_for_request",
+    "filter_reserved_url_kwargs",
     "resolve_origin",
     "resolve_url_to_match",
     "resolve_url_to_page",
+    "url_kwargs_for_request",
 ]

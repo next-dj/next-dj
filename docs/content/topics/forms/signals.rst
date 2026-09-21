@@ -3,8 +3,8 @@
 Form signals
 ============
 
-The forms subsystem emits ``action_registered``, ``action_dispatched``, ``form_validation_failed``, ``wizard_step_submitted``, ``wizard_completed``, and ``form_access_denied`` from ``next.forms.signals``.
-All six import equivalently from the owning module or from the aggregator ``next.signals``.
+The forms subsystem emits ``action_registered``, ``action_dispatched``, ``form_validation_failed``, ``wizard_step_submitted``, ``wizard_completed``, ``form_access_denied``, ``form_backend_loaded``, and ``wizard_backend_loaded`` from ``next.forms.signals``.
+All eight import equivalently from the owning module or from the aggregator ``next.signals``.
 Register receiver imports from ``AppConfig.ready`` so receivers exist before the first request.
 
 Every dispatch-time signal (``action_dispatched``, ``form_validation_failed``, ``wizard_step_submitted``, ``wizard_completed``, ``form_access_denied``) carries two shared keyword arguments.
@@ -234,13 +234,14 @@ An error response from ``done``, status 400 or above, skips the signal and keeps
 form_access_denied
 ------------------
 
-Fires only when a dynamic permission hook denies a request, never on the static ``ActionGuard`` path.
+Fires when the origin page or a dynamic permission hook denies a request, never on the static ``ActionGuard`` path.
 The sender is ``FormActionDispatch``.
-See :ref:`topics-forms-actions-dynamic-guards` for the hooks themselves.
+See :ref:`topics-forms-actions-dynamic-guards` for the hooks themselves and :doc:`/content/topics/pages` for the page-level check.
 
 The payload carries ``action_name``, ``uid``, ``request``, ``layer``, and ``reason``.
-``layer`` is ``"view"`` for a ``check_permissions`` denial or ``"object"`` for a ``has_object_permission`` denial.
-``reason`` is ``"raised"`` when the hook raised :exc:`~django.core.exceptions.PermissionDenied`, ``"denied"`` when it returned ``False``, or ``"response"`` when it returned an ``HttpResponse`` short-circuit.
+``layer`` is ``"page"`` when the ``render()`` of the origin page answered the submission with a response, ``"view"`` for a ``check_permissions`` denial, or ``"object"`` for a ``has_object_permission`` denial.
+``reason`` is ``"raised"`` when a hook raised :exc:`~django.core.exceptions.PermissionDenied`, ``"denied"`` when it returned ``False``, or ``"response"`` when it returned an ``HttpResponse`` short-circuit.
+A ``"page"`` denial is always ``"response"``, because a page refuses by returning one.
 
 The dispatcher builds the payload and sends the signal only when at least one receiver is connected, so an audit receiver adds no cost to an allowed request.
 
@@ -267,6 +268,64 @@ The dispatcher builds the payload and sends the signal only when at least one re
 
 A receiver runs inside the dispatch, so keep it cheap.
 ``uid`` and ``request`` follow the shared contract described at the top of this page.
+
+.. _topics-forms-signals-form-backend-loaded:
+
+form_backend_loaded
+-------------------
+
+Fires once for every ``FORM_ACTION_BACKENDS`` entry the loader builds into a backend instance.
+An entry the loader skips, because its path does not import or its constructor answers ``ImproperlyConfigured``, sends nothing.
+The sender is the resolved backend class, so a receiver connected with ``sender=RegistryFormActionBackend`` observes that family only.
+
+The payload carries ``config`` and ``instance``.
+``config`` is a copy of the settings entry, ``BACKEND`` and any ``OPTIONS`` included.
+``instance`` is the backend the loader built from it.
+The signal fires at load time, outside any request, so it carries neither ``uid`` nor ``request``.
+
+.. code-block:: python
+   :caption: notes/receivers.py
+
+   import logging
+
+   from django.dispatch import receiver
+
+   from next.forms.signals import form_backend_loaded
+
+   logger = logging.getLogger("notes.backends")
+
+   @receiver(form_backend_loaded)
+   def record_backend(sender, *, config, instance, **kwargs) -> None:
+       logger.info("loaded form action backend %s from %s", sender.__name__, config)
+
+The manager loads its backends lazily and reloads them when the settings change, so a receiver connected from ``AppConfig.ready`` sees the first load as well as every rebuild.
+See :doc:`backends` for the loader itself.
+
+.. _topics-forms-signals-wizard-backend-loaded:
+
+wizard_backend_loaded
+---------------------
+
+Fires when the single backend named by ``FORM_WIZARD_BACKEND`` is built.
+The sender is the resolved backend class, so a receiver connected with ``sender=SessionFormWizardBackend`` observes that backend only.
+
+The payload carries ``config``, a copy of the settings entry, and ``instance``, the backend built from it.
+It fires on first use and again after a settings reload drops the cached instance and the next access rebuilds it.
+The signal fires at load time, outside any request, so it carries neither ``uid`` nor ``request``.
+
+.. code-block:: python
+   :caption: access/receivers.py
+
+   from django.dispatch import receiver
+
+   from next.forms.signals import wizard_backend_loaded
+
+   @receiver(wizard_backend_loaded)
+   def record_wizard_store(sender, *, config, **kwargs) -> None:
+       logger.info("wizard drafts stored by %s", sender.__name__)
+
+A misconfigured ``FORM_WIZARD_BACKEND`` raises out of the loader instead of being skipped, so a missing signal means the family never built at all.
+See :doc:`wizard-backend` for the configuration and the draft contract.
 
 See also
 --------

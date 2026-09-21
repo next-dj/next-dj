@@ -142,14 +142,15 @@ One missed component inside an otherwise healthy page degrades to a comment in d
 Multiline tag bodies
 ~~~~~~~~~~~~~~~~~~~~
 
-The framework rebinds Django's template tag pattern during ``AppConfig.ready`` so that a dot matches a newline inside the ``{% ... %}`` alternative, and a single block tag may therefore span several lines.
-That allows readable block components and slots when the inner markup is long.
-The widening is scoped to that one alternative, so ``{{ ... }}`` and ``{# ... #}`` lex exactly as Django lexes them and a newline still ends a variable or a comment.
+The framework adds one line-spanning branch to Django's template tag pattern during ``AppConfig.ready``, so a framework block tag may carry its arguments over several lines.
+That allows readable block components and slots when the argument list is long.
 
-.. warning::
+The added branch matches thirteen literal tag names, ``action_url``, ``asset``, ``collect_scripts``, ``collect_styles``, ``component``, ``form``, ``set_slot``, ``slot``, ``template``, ``use_module``, ``use_script``, ``use_style``, and ``zone``, in the void form and in the ``{% #name %}`` opening form alike.
+Django's own block-tag branch stays behind it untouched, so every other tag lexes exactly as stock Django lexes it, in a DJX file and in a plain Django template alike.
+A newline inside ``{% if x %}`` still ends the tag, a third-party tag keeps its stock lexing, and a stray ``{%`` inside inline JavaScript swallows no more text than it does without next.dj installed.
+``{{ ... }}`` and ``{# ... #}`` are outside the rebind entirely, so a newline still ends a variable or a comment.
 
-   The wider block-tag rule reaches **every** template the process loads, not only DJX files, because the Django lexer reads the pattern from a module global that the rebind replaces.
-   If you rely on Django's stock behaviour where a newline inside ``{% ... %}`` ends the tag, adjust those templates before adopting next.dj.
+The closing forms and ``{% placeholder %}`` are outside the widened set, so ``{% /component %}``, ``{% endform %}``, and ``{% endzone %}`` stay single-line, which costs nothing because none of them takes an argument.
 
 Static pipeline
 ---------------
@@ -234,7 +235,7 @@ Partial rendering
 .. describe:: {% placeholder %}
 
    Opens the placeholder branch of a lazy ``{% zone %}``, shown until the deferred body arrives.
-   It is valid only between a ``{% zone %}`` and its ``{% endzone %}``, and a lazy zone without it raises ``next.E064``.
+   It is valid only between a ``{% zone %}`` and its ``{% endzone %}``, and a lazy zone without it is reported as ``next.E064``.
    The branch belongs to lazy zones only, so a zone without ``lazy=`` rejects it with ``TemplateSyntaxError`` when the template compiles.
 
 A zone belongs to a page or layout, not a component, and may not sit inside a ``{% for %}`` or an ``{% if %}``.

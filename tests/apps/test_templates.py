@@ -16,12 +16,29 @@ _JINJA_BACKEND = "django.template.backends.jinja2.Jinja2"
 _DJANGO_BACKEND = "django.template.backends.django.DjangoTemplates"
 
 _DJANGO_TAG_PATTERN = r"({%.*?%}|{{.*?}}|{#.*?#})"
-_WIDENED_TAG_PATTERN = r"((?s:{%.*?%})|{{.*?}}|{#.*?#})"
+_NEXT_TAG_ALTERNATION = (
+    "action_url|asset|collect_scripts|collect_styles|component|form|set_slot|slot|"
+    "template|use_module|use_script|use_style|zone"
+)
+_WIDENED_TAG_PATTERN = (
+    rf"((?:{{%\s*#?(?:{_NEXT_TAG_ALTERNATION})\b(?s:.*?)%}}|{{%.*?%}})"
+    r"|{{.*?}}|{#.*?#})"
+)
 
 _MULTILINE_BLOCK_TAG = '{% component\n    "card"\n%}'
 
 # Django lexes neither across lines, and widening the block-tag branch keeps it so.
 _UNLEXED_SOURCE = "A {# note\nstill note #} B\nC {{ x\n}} D"
+
+# A stray `{%` in inline JS used to swallow every line up to the next `%}`.
+_STRAY_BRACE_SOURCE = "<script>\nconst a = {%\nconst b = 1 %};\n</script>"
+
+_MULTILINE_STOCK_TAG = "{% if x\n%}yes{% endif %}"
+
+
+def _token_types(source: str) -> list[TokenType]:
+    """Tokenize with the pattern currently installed on the lexer module."""
+    return [token.token_type for token in Lexer(source).tokenize()]
 
 
 def _django_engine() -> dict[str, object]:
@@ -113,6 +130,32 @@ class TestBlockTagLexingSpansLines:
 
     def test_unlexed_source_renders_verbatim(self) -> None:
         assert Template(_UNLEXED_SOURCE).render(Context({"x": 1})) == _UNLEXED_SOURCE
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            pytest.param(_MULTILINE_STOCK_TAG, id="stock-block-tag"),
+            pytest.param(_STRAY_BRACE_SOURCE, id="stray-brace-in-script"),
+            pytest.param(_UNLEXED_SOURCE, id="comment-and-variable"),
+        ],
+    )
+    def test_a_source_outside_the_next_tags_lexes_as_stock_django_lexes_it(
+        self, source: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The widening is scoped, so everything else keeps Django's own token run."""
+        installed = _token_types(source)
+        monkeypatch.setattr(template_base, "tag_re", re.compile(_DJANGO_TAG_PATTERN))
+
+        assert installed == _token_types(source)
+
+    def test_inline_script_with_a_stray_brace_renders_verbatim(self) -> None:
+        """A `{%` in inline JS used to swallow every line up to the next `%}`."""
+        assert Template(_STRAY_BRACE_SOURCE).render(Context({})) == _STRAY_BRACE_SOURCE
+
+    def test_a_next_tag_still_spans_lines_beside_a_stray_brace(self) -> None:
+        """Both branches in one source, so neither change hides the other."""
+        source = f"{_STRAY_BRACE_SOURCE}\n{_MULTILINE_BLOCK_TAG}"
+        assert _token_types(source) == [TokenType.TEXT, TokenType.BLOCK]
 
 
 class TestLexerInstall:

@@ -74,6 +74,9 @@ Every signal the framework emits is listed below with the subsystem that emits i
    * - ``router_reloaded``
      - URLs
      - After the router manager rebuilds its pattern set.
+   * - ``router_backend_loaded``
+     - URLs
+     - After a router backend is created from its configuration entry.
    * - ``action_registered``
      - Forms
      - After the backend stores an action target for a name.
@@ -91,7 +94,13 @@ Every signal the framework emits is listed below with the subsystem that emits i
      - After the wizard ``done`` method returns a response below HTTP 400 for the final step.
    * - ``form_access_denied``
      - Forms
-     - When a dynamic permission hook denies a request, never on the static guard path.
+     - When the origin page or a dynamic permission hook denies a request, never on the static guard path.
+   * - ``form_backend_loaded``
+     - Forms
+     - After a form action backend is created from its configuration entry.
+   * - ``wizard_backend_loaded``
+     - Forms
+     - After the wizard storage backend is created from its configuration entry.
    * - ``asset_registered``
      - Static
      - After a file is registered with a backend and added to the collector.
@@ -101,7 +110,7 @@ Every signal the framework emits is listed below with the subsystem that emits i
    * - ``html_injected``
      - Static
      - After placeholder replacement completes.
-   * - ``backend_loaded``
+   * - ``static_backend_loaded``
      - Static
      - After the static factory instantiates a backend.
    * - ``zone_registered``
@@ -122,12 +131,17 @@ Every signal the framework emits is listed below with the subsystem that emits i
    * - ``sse_stream_closed``
      - Partial
      - When a patch event stream ends.
+   * - ``partial_backend_loaded``
+     - Partial
+     - After the partial protocol backend is created from its configuration entry.
    * - ``watch_specs_ready``
      - Server
      - After the reloader resolves the full list of watch specs.
    * - ``settings_reloaded``
      - Configuration
      - After the settings layer drops its caches.
+
+Every settings-driven backend family announces its load through a ``*_backend_loaded`` signal carrying the configuration entry and the instance built from it, so a receiver sees what each entry produced.
 
 The forms and static signals have dedicated topic pages with worked receiver examples, see :doc:`/content/topics/forms/signals` and :doc:`/content/topics/static-assets/signals`.
 The partial-rendering stream signals appear in context in :doc:`/content/topics/partial-rendering/sse`.
@@ -169,6 +183,40 @@ Use ``django.dispatch.receiver`` to connect a callable to a signal.
 
 Several receivers can connect to one signal and they run in connection order.
 
+Failure contract
+~~~~~~~~~~~~~~~~
+
+A receiver that raises takes the sender down with it.
+Every signal in the catalog above but one is sent with ``Signal.send``, which offers a raising receiver no isolation, so the exception leaves the send and reaches whatever the framework was doing.
+An exception from a ``page_rendered`` receiver therefore surfaces as a failed page render, one from an ``action_dispatched`` receiver as a failed form dispatch, and one from a ``component_rendered`` receiver as a failed component.
+Django runs receivers in connection order and stops at the first failure, so a receiver that raises also keeps every receiver behind it from running.
+
+Guard the receiver body against this.
+A receiver is an observation point, and its failure should cost an observation rather than a response, so wrap the work in ``try`` and log what it raised instead of letting it out.
+
+.. code-block:: python
+   :caption: notes/receivers.py
+
+   import logging
+
+   from django.dispatch import receiver
+   from notes.metrics import record_timing
+
+   from next.signals import page_rendered
+
+   logger = logging.getLogger(__name__)
+
+   @receiver(page_rendered)
+   def record_render(sender, **kwargs) -> None:
+       try:
+           record_timing("pages.render", kwargs["duration_ms"])
+       except (KeyError, OSError):
+           logger.exception("page_rendered receiver failed")
+
+``settings_reloaded`` is the single exception.
+It is sent with ``Signal.send_robust``, so every receiver runs even after one raises, and the framework re-raises the first error once the chain is done.
+A settings reload has to reach every manager that cached something from ``NEXT_FRAMEWORK``, and leaving the managers behind a failed receiver holding stale state would be worse than the error itself.
+
 Disconnecting
 ~~~~~~~~~~~~~
 
@@ -198,20 +246,20 @@ The teardown lives wherever the receiver should stop firing, such as a test fixt
 
    action_dispatched.disconnect(dispatch_uid="notes.log_dispatch")
 
-The ``SignalRecorder`` from ``next.testing.signals`` disconnects its receivers on context-manager exit, or when ``stop()`` is called explicitly.
+The ``SignalRecorder`` from ``next.testing.capture`` disconnects its receivers on context-manager exit, or when ``stop()`` is called explicitly.
 
 Test helpers
 ------------
 
-The ``SignalRecorder`` from ``next.testing.signals`` captures events for assertions.
+The ``SignalRecorder`` from ``next.testing.capture`` captures events for assertions.
 Each captured event is a ``SignalEvent`` with ``signal``, ``sender``, and ``kwargs`` attributes.
 
 .. code-block:: python
    :caption: test using a recorder
 
    from next.signals import action_dispatched
+   from next.testing.capture import SignalRecorder
    from next.testing.client import NextClient
-   from next.testing.signals import SignalRecorder
 
    def test_emits_action(db) -> None:
        with SignalRecorder(action_dispatched) as recorder:

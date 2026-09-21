@@ -53,9 +53,11 @@ Framework machinery.
    The ``wizard_backend_manager`` instance lives in ``next.forms.wizard``.
    ``FormProvider`` and ``CleanedDataProvider`` live in ``next.forms.markers``.
    ``bind_component_widgets`` lives in ``next.forms.widgets``.
-   ``render_form_page_with_errors`` lives in ``next.forms.rendering``.
-   ``RegistrationDiagnostics`` and the ``registration_diagnostics`` instance live in ``next.forms.diagnostics``.
-   The forms system checks live in ``next.forms.checks``, which the framework application config imports at startup and which the package does not re-export.
+   ``render_form_page_with_errors`` and the ``ErrorRenderParams`` bundle it takes live in ``next.forms.rendering``.
+   ``FormNode``, the node ``{% form %}`` compiles to, and ``anchor_lookup_from_context`` live in ``next.forms.nodes``, which is where the partial checks reach the node without importing the tag library.
+   ``RegistrationDiagnostics`` and the ``registration_diagnostics`` instance live in ``next.forms.registration``.
+   The forms system checks live in ``next.forms.checks``, a package of one-word submodules, ``actions``, ``config``, ``widgets``, and ``wizards`` for the checks themselves and ``sources`` for the registration readers they share.
+   The framework application config imports the package at startup, and the forms package re-exports it, so ``next.forms.checks`` names the same package either way.
    ``FormActionNotFoundError``, ``UnstorableWizardValueError``, and ``UnregisteredComponentError`` live in ``next.forms.errors`` and are re-exported at the package level.
    The UID helpers ``FORM_ACTION_REVERSE_NAME``, ``URL_NAME_FORM_ACTION``, ``ORIGIN_FIELD_NAME``, ``FORM_ORIGIN_OVERRIDE_KEY``, ``reverse_form_action``, ``current_origin_path``, and ``validated_origin_path`` live in ``next.forms.uid``.
    The test isolation helper ``reset_form_registration_state`` belongs to ``next.testing``, documented under :doc:`/content/ref/testing`.
@@ -195,7 +197,8 @@ Dispatch
 ~~~~~~~~
 
 ``FormActionDispatch`` is the only public member of ``next.forms.dispatch`` and is imported from that package directly.
-It runs the POST pipeline and is the sender every dispatch-time signal carries, while the pipeline bodies live in the four submodules of the package.
+It runs the POST pipeline and is the sender of ``action_dispatched``, ``form_validation_failed``, and ``form_access_denied``, while the pipeline bodies live in the four submodules of the package.
+``wizard_step_submitted`` and ``wizard_completed`` carry the wizard class instead, which is the identity their receivers filter on.
 ``ActionOutcome`` and ``ActionOutcomeKind`` are the public members of ``next.forms.dispatch.responses`` and are re-exported from ``next.forms``.
 ``ActionOutcome`` is the frozen keyword-only dataclass a backend's ``shape_response`` hook receives, with ``ActionOutcomeKind`` as its ``kind`` discriminator.
 On ``INVALID`` outcomes the ``page_path`` and ``origin`` fields carry the resolved identity of the origin page.
@@ -237,12 +240,11 @@ Setting it rebinds the name to this registration, which is what a test override 
 ``ActionGuard`` is the frozen access-requirement record built from ``Meta.login_required`` and ``Meta.permission_required`` or the matching ``@action`` keywords.
 It is stored under the ``guard`` key of ``ActionMeta`` and enforced by the dispatch pipeline before the form is built, so custom backends see the declared requirements without extra wiring.
 ``iter_actions`` yields every stored ``ActionMeta``, including its ``name`` key, which is how the forms system checks inspect any configured backend.
-``ActionMeta`` and ``file_to_dotted_module`` import from ``next.forms.backends`` directly.
 ``FormActionManager`` instantiates one backend per ``FORM_ACTION_BACKENDS`` entry, passing the whole config dict to the backend constructor.
 ``scope_key_for`` derives the registry scope key from a declaration file path and a scope, the same key that partitions actions and wizard storage.
 ``build_action_guard`` builds an ``ActionGuard`` from the declared ``login_required`` and ``permission_required`` values, or ``None`` when both are unset.
 ``record_possible_collision`` files a name collision into the registration diagnostics when a name is re-registered with a distinct handler, feeding the ``next.E041`` check.
-All three import from ``next.forms.backends`` directly.
+``ActionMeta``, ``file_to_dotted_module``, ``scope_key_for``, ``build_action_guard``, and ``record_possible_collision`` all import from ``next.forms.backends`` directly.
 
 .. automodule:: next.forms.backends
    :members:
@@ -253,19 +255,20 @@ Rendering
 ``render_form_page_with_errors`` re-renders the origin page template with a bound form in context.
 It is the body of ``FormActionBackend.render_invalid_page`` in the bundled backend and imports from ``next.forms.rendering`` directly.
 The rendered HTML flows through the static-assets pipeline, so co-located CSS and JS land in the response.
+``ErrorRenderParams`` is the frozen bundle it takes for the failed submission, carrying the ``action_name``, the bound ``form`` or formset, the ``url_kwargs`` of the origin page, and the optional context ``overrides``.
 
 .. automodule:: next.forms.rendering
-   :members: render_form_page_with_errors
+   :members:
 
 Registration diagnostics
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``RegistrationDiagnostics`` buffers registration problems for the forms system checks, exposed as the module-level ``registration_diagnostics`` instance.
 The registration paths write into it and ``next.forms.checks`` reads it when ``manage.py check`` runs.
-Both import from ``next.forms.diagnostics`` directly.
+Both import from ``next.forms.registration`` directly.
 The test isolation helper :func:`next.testing.reset_form_registration_state` clears the buffers between cases.
 
-.. automodule:: next.forms.diagnostics
+.. automodule:: next.forms.registration
    :members:
 
 Action URL helpers
@@ -275,7 +278,10 @@ Action URL helpers
 It lives in ``next.forms.uid`` and is not re-exported at the package level.
 ``ORIGIN_FIELD_NAME`` is the wire name of the hidden origin field every rendered form carries, ``"_next_form_origin"``.
 ``current_origin_path`` names the URL a rendering request should return to, its query string included.
-``validated_origin_path`` accepts a posted origin value only as a same-site path, and refuses it when the stripped value still carries a tab or a newline, because a browser drops those code points before resolving a URL.
+``validated_origin_path`` takes the posted value and the live request as a keyword argument, and answers the value only when it is a same-site path.
+Host and scheme are settled by Django's :func:`~django.utils.http.url_has_allowed_host_and_scheme`, given the one host the request names and ``require_https`` taken from ``request.is_secure()``, so a request that names no host lets no absolute target through at all.
+A path-only policy runs on top of that answer and refuses even an absolute URL naming this host, along with a value carrying a tab, a newline, or a carriage return, and a value whose backslashes collapse into a protocol-relative ``//`` prefix.
+A browser drops those code points and folds a backslash into a slash before resolving a URL, so leaving either in place would hide a protocol-relative target behind a value that reads as a path.
 ``redirect_to_origin`` builds the success redirect back to the page named by the posted origin field, falling back to ``fallback`` when the field is absent or off-site.
 It is re-exported from ``next.forms``.
 ``FORM_ORIGIN_OVERRIDE_KEY`` names the render-context key whose value overrides the origin of a rendered form, which the partial shaping layer sets to the next step URL on a wizard advance.
@@ -291,9 +297,12 @@ Origin resolution
 ``resolve_url_to_match`` resolves any same-site URL against the URLconf, and passing ``filter_reserved=False`` keeps the captured URL kwargs raw instead of dropping the names the dependency resolver reserves.
 ``resolve_url_to_page`` returns only the page path of the resolved view, or ``None`` when the URL does not name a routed page.
 The ``origin`` field of an ``OriginMatch`` holds the posted URL as submitted, while its ``path`` property drops the query string for a caller that treats the origin as a page address.
+``url_kwargs_for_request`` answers the URL kwargs of the page a request renders or re-renders, reading the resolver match on a page URL and falling back to the resolved origin on a dispatch URL or any other POST.
+``filter_reserved_url_kwargs`` drops the captured names the dependency resolver reserves, which a caller holding raw kwargs applies before handing them to a guard or a provider.
+Both sit in ``next.forms.origin`` and are not re-exported at the package level.
 
 .. automodule:: next.forms.origin
-   :members: OriginMatch, resolve_origin, resolve_url_to_match, resolve_url_to_page
+   :members: OriginMatch, filter_reserved_url_kwargs, resolve_origin, resolve_url_to_match, resolve_url_to_page, url_kwargs_for_request
 
 Formset helpers
 ~~~~~~~~~~~~~~~
@@ -313,7 +322,7 @@ Frozen specs
 Signals
 -------
 
-See :doc:`signals` and :doc:`/content/topics/forms/signals` for the form signals (``action_registered``, ``action_dispatched``, ``form_validation_failed``, ``wizard_step_submitted``, ``wizard_completed``, ``form_access_denied``).
+See :doc:`signals` and :doc:`/content/topics/forms/signals` for the form signals (``action_registered``, ``action_dispatched``, ``form_validation_failed``, ``wizard_step_submitted``, ``wizard_completed``, ``form_access_denied``, ``form_backend_loaded``, ``wizard_backend_loaded``).
 
 See also
 --------

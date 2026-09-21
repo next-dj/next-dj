@@ -6,7 +6,6 @@ through a port to dodge a `next.urls`/`next.pages` import cycle.
 
 from __future__ import annotations
 
-import importlib
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -17,7 +16,7 @@ from django.core.checks import CheckMessage, Error
 from django.core.exceptions import ImproperlyConfigured
 
 from next.conf.signals import settings_reloaded
-from next.ports import router_access_slot
+from next.ports import page_scan_slot, router_access_slot
 from next.utils import page_roots_shape_error, walk_page_tree
 
 
@@ -113,11 +112,7 @@ def discover_page_registrations(
         router_manager, _errors = get_router_manager()
     if router_manager is None:
         return []
-    # Imported here because `next.pages.scan` reads the router manager from here,
-    # so a top-level import either way would close the loop.
-    scan = importlib.import_module("next.pages.scan")
-    loaded: list[tuple[str, Path]] = scan.load_scanned_page_modules(router_manager)
-    return loaded
+    return page_scan_slot.get().load_scanned_page_modules(router_manager)
 
 
 def reset_router_manager_cache(**kwargs) -> None:

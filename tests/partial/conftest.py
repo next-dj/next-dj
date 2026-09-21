@@ -3,10 +3,10 @@ from pathlib import Path
 
 import pytest
 
-from next.forms.wizard import SessionFormWizardBackend, wizard_backend_manager
 from next.pages.loaders import _load_python_module
+from next.partial.registry import PatchOpRegistry, patch_op_registry, register_patch_op
 from next.testing import NextClient
-from tests.support import CountingWizardBackend, isolated_form_registries
+from tests.support import isolated_form_registries
 
 
 _PARTIAL_DIR = Path(__file__).resolve().parent
@@ -55,9 +55,25 @@ def next_client() -> NextClient:
 
 
 @pytest.fixture()
-def counting_wizard_backend() -> Generator[CountingWizardBackend, None, None]:
-    """Install a counting wizard backend for the duration of the test."""
-    counting = CountingWizardBackend(SessionFormWizardBackend({}))
-    wizard_backend_manager._backend = counting
-    yield counting
-    wizard_backend_manager.reset()
+def restored_op_registry() -> Generator[PatchOpRegistry, None, None]:
+    """Yield the process-global patch-op registry and put its records back after.
+
+    Order, index, and version are restored together so a verb registered here cannot
+    reach a later test through whichever of the three that test happens to read.
+    """
+    ordered = list(patch_op_registry._ordered)
+    by_name = dict(patch_op_registry._by_name)
+    version = patch_op_registry.version
+    try:
+        yield patch_op_registry
+    finally:
+        patch_op_registry._ordered = ordered
+        patch_op_registry._by_name = by_name
+        patch_op_registry._version = version
+
+
+@pytest.fixture()
+def custom_op(restored_op_registry: PatchOpRegistry) -> str:
+    """Register a custom patch verb, dropped again when the registry is restored."""
+    register_patch_op("confetti")
+    return "confetti"

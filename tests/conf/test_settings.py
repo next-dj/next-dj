@@ -6,7 +6,6 @@ from typing import Any
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 from django.test import override_settings
-from pytest_lazy_fixtures import lf
 
 from next.checks import (
     check_next_components_configuration,
@@ -15,15 +14,6 @@ from next.checks import (
 )
 from next.conf import NextFrameworkSettings, next_framework_settings
 from next.conf.merge import merge_user_settings
-
-
-class TestLazyFixtureWiring:
-    """Lazy fixture references resolve shared fixtures from tests.fixtures."""
-
-    @pytest.mark.parametrize("settings_obj", [lf("fresh_next_framework_settings")])
-    def test_parametrize_uses_lazy_fixture_reference(self, settings_obj) -> None:
-        """Parametrize can reference fixtures by name without extra imports."""
-        assert isinstance(settings_obj, NextFrameworkSettings)
 
 
 class TestNextFrameworkSettingsDjangoIntegration:
@@ -147,10 +137,10 @@ class TestFlatNextFrameworkBehavior:
     def test_setattr_allows_internal_attributes(self) -> None:
         """Attributes outside DEFAULTS keys may be set for tests or hooks."""
         try:
-            next_framework_settings._coverage_probe = 1
-            assert next_framework_settings._coverage_probe == 1
+            next_framework_settings._test_hook_marker = 1
+            assert next_framework_settings._test_hook_marker == 1
         finally:
-            del next_framework_settings._coverage_probe
+            del next_framework_settings._test_hook_marker
 
 
 class TestUrlResolverSetting:
@@ -467,7 +457,7 @@ class TestPartialBackendsDefault:
 
     def test_default_options(self) -> None:
         options = NextFrameworkSettings.DEFAULTS["PARTIAL_BACKENDS"][0]["OPTIONS"]
-        assert options["VERSION"] == "manifest"
+        assert options["VERSION"] is None
         assert options["PUSH_WIZARD_STEPS"] is False
 
     def test_default_sse_options(self) -> None:

@@ -11,8 +11,8 @@ from next.components import (
 from next.components.manager import components_manager
 from next.forms import ActionRegistration, RegistryFormActionBackend
 from next.forms.backends import FormActionBackend
-from next.forms.diagnostics import registration_diagnostics
 from next.forms.manager import form_action_manager
+from next.forms.registration import registration_diagnostics
 from next.pages.manager import page
 from next.testing import (
     reset_component_templates,

@@ -3,7 +3,7 @@
 Static signals
 ==============
 
-The static pipeline emits ``asset_registered``, ``collector_finalized``, ``html_injected``, and ``backend_loaded`` from ``next.static.signals``.
+The static pipeline emits ``asset_registered``, ``collector_finalized``, ``html_injected``, and ``static_backend_loaded`` from ``next.static.signals``.
 
 Import either from ``next.static.signals`` or from the aggregator ``next.signals``.
 Import receiver modules from ``AppConfig.ready`` so receivers exist before the first request.
@@ -18,10 +18,14 @@ Signals and payloads
 asset_registered
 ~~~~~~~~~~~~~~~~
 
-Fires after a file asset lands in the collector, once per asset per collector.
+Fires after a co-located file the backend registered lands in the collector, once per asset per collector.
 An asset the collector deduplicates away, such as the second mount of the same component on one page, emits no signal.
 The sender is the asset instance.
 The payload carries ``collector`` and ``backend``.
+
+The signal covers that one door.
+A module-level ``styles`` or ``scripts`` list, the ``{% use_style %}``, ``{% use_script %}``, and ``{% use_module %}`` tags, and both inline block forms call ``collector.add`` directly and emit nothing, so a receiver counting assets sees the co-located files alone.
+Those paths still resolve their reference through the backend first, so the collector holds a public URL whichever door an asset came through.
 
 Registration with the backend is per render.
 Discovery asks ``register_file`` for the URL of every discovered file on every render, so a backend free to resolve the same file to a different URL per request is asked every time, and ``asset_registered`` carries the asset that registration produced.
@@ -49,7 +53,8 @@ Discovery asks ``register_file`` for the URL of every discovered file on every r
 collector_finalized
 ~~~~~~~~~~~~~~~~~~~
 
-Fires when the static manager begins injection, after template rendering has completed and the collector is sealed.
+Fires as the first statement of injection, after template rendering has completed and before any slot is rendered.
+Nothing seals the collector at that point, so ``add`` stays callable and an asset a receiver registers still reaches the slot loop that runs next.
 The sender is the collector.
 The payload carries ``page_path``, the file path of the rendered page, and ``request``, the active ``HttpRequest`` or ``None`` for renders outside a request lifecycle.
 A standalone zone render never fires this signal because its assets travel in the patch envelope instead of through injection.
@@ -80,7 +85,7 @@ The sender is the static manager.
    The HTML string after every slot token was replaced.
 
 ``collector``
-   The sealed ``StaticCollector`` used for this render.
+   The ``StaticCollector`` this render accumulated into.
 
 ``placeholders_replaced``
    A tuple of slot names whose token appeared in ``html_before``.
@@ -94,8 +99,8 @@ The sender is the static manager.
 ``request``
    The active ``HttpRequest`` or ``None``.
 
-backend_loaded
-~~~~~~~~~~~~~~
+static_backend_loaded
+~~~~~~~~~~~~~~~~~~~~~
 
 Fires after the static manager instantiates a configured backend.
 The sender is the backend class.
@@ -103,7 +108,7 @@ The payload carries ``config`` and ``instance``.
 
 .. note::
 
-   ``backend_loaded`` re-fires whenever the static manager rebuilds its backend chain.
+   ``static_backend_loaded`` re-fires whenever the static manager rebuilds its backend chain.
    Tests that toggle ``STATIC_BACKENDS`` through ``override_settings`` or call ``reset_default_manager`` trigger the signal again on the next access.
    Make receivers idempotent.
 

@@ -29,7 +29,7 @@ Forbidden in running prose.
    En dash ``–``
 
 Allowed everywhere.
-   These characters belong in code, paths, RST role syntax, headings, frontmatter, and inside list items that name two parallel items.
+   These characters belong in code, paths, RST role syntax, directive options such as a ``:caption:``, headings, and inside list items that name two parallel items.
 
 ASCII art and pipes
 -------------------
@@ -130,13 +130,13 @@ Templates apply consistently inside each section.
 Pull request checklist
 ----------------------
 
-A documentation pull request lands when.
+A documentation pull request lands under these conditions.
 
 - ``make docs`` is green.
 - ``uv run doc8 docs/content`` is green.
 - ``make docs-lint`` reports no semantic newline violation.
 - Every new section follows its template.
-- Every page under ``content/internals/`` includes a ``.. mermaid::`` diagram.
+- Every page under ``content/internals/`` includes a ``.. mermaid::`` diagram, the section index excepted.
 - Cross references resolve.
 - Runnable excerpts follow the Notes tutorial paths or name another reference project.
 - Blurbs for ``examples/`` stay aligned with ``examples/README.md``.

@@ -94,7 +94,7 @@ The settings entry is one backend:
 ],
 ```
 
-The `next.static` collector caches deduplicated URLs once. The `asset_url` hook lets you decorate URLs at injection time without forking that cache.
+The `next.static` collector caches deduplicated URLs once. The `asset_url` hook lets you decorate URLs at injection time without forking that cache. Whatever the hook returns is HTML-escaped into the `<link>` or `<script>` tag, so a rewrite that folds request-derived text into a URL cannot break out of the attribute — the finished tag is spliced past the template engine and never sees its autoescape.
 
 Overriding `asset_url` alone leaves `resolve_url` inherited, and the two hooks run at different moments. `resolve_url` turns an authored reference into a public URL while the asset is registered, and `asset_url` decorates that URL for the request being rendered. The root layout registers the shared sheet by name, and a sheet the active tenant's theme key names after it:
 
@@ -117,7 +117,7 @@ The prefix has to resolve to a file for the demo to render, so [`config/urls.py`
 "STATIC_VERSION": ASSET_BUILD_ID,
 ```
 
-`STATIC_VERSION` reads `ASSET_BUILD_ID` from [`config/settings.py`](config/settings.py), which takes `NOTES_BUILD_ID` out of the environment and falls back to a literal for a checkout nobody deployed. A build id has to arrive from the deploy rather than be computed at import time, otherwise every process in a fleet stamps a different one and a shared cache never settles. The stamp lands on every URL the pipeline emits, so the vendor script of the shared markdown preview renders as `https://cdn.jsdelivr.net/npm/marked/marked.min.js?v=2026.09.1` too. This example serves its assets straight off disk, so the query parameter is the only thing that changes when a file changes. A project on `ManifestStaticFilesStorage` gets that from the filename instead and wants neither setting, which is what [`observability`](../observability/) shows.
+`STATIC_VERSION` reads `ASSET_BUILD_ID` from [`config/settings.py`](config/settings.py), which takes `NOTES_BUILD_ID` out of the environment and falls back to a literal for a checkout nobody deployed. A build id has to arrive from the deploy rather than be computed at import time, otherwise every process in a fleet stamps a different one and a shared cache never settles. The stamp lands on every URL the pipeline emits, so the vendor script of the shared markdown preview renders as `https://cdn.jsdelivr.net/npm/marked/marked.min.js?v=2026.09.1` too. This example serves its assets straight off disk, so the query parameter is the only thing that changes when a file changes. A project on `ManifestStaticFilesStorage` gets that from the filename instead and wants no such setting, which is what [`observability`](../observability/) shows.
 
 ### 4. Shared root layout via `DIRS`
 
@@ -187,7 +187,7 @@ class NoteEditForm(ModelForm):
         return not self.instance.locked
 ```
 
-`check_permissions` is the view-level gate. The dispatcher resolves its parameters the same way it resolves `get_initial`, so the hook receives the active `Tenant` through the `DTenant` provider and declares nothing else. It runs after the static `ActionGuard` and before `get_initial`, so a suspended tenant (`is_active=False`) is refused before any note is loaded. The middleware resolves a suspended tenant exactly like an active one, and the ownership `404` would still let a suspended tenant reach its own notes, so this rule exists only at the hook layer. Returning `False` denies with `403`.
+`check_permissions` is the view-level gate. The dispatcher resolves its parameters the same way it resolves `get_initial`, so the hook receives the active `Tenant` through the `DTenant` provider and declares nothing else. It runs after the static `ActionGuard` and after the origin page has authorized the submission, and before `get_initial`, so a suspended tenant (`is_active=False`) is refused before any note is loaded. The middleware resolves a suspended tenant exactly like an active one, and the ownership `404` would still let a suspended tenant reach its own notes, so this rule exists only at the hook layer. Returning `False` denies with `403`.
 
 `has_object_permission` is the object-level gate. It runs after binding, so `self.instance` is the loaded note. A `locked` note belongs to its tenant and loads without a `404`, yet must stay read-only, so the hook returns `False` to deny with a bare `403` and no re-render. Returning `True` allows the edit through to `is_valid`.
 
@@ -216,9 +216,9 @@ def _on_form_access_denied(action_name, layer, reason, request, **kwargs):
 
 ## Gotchas
 
-### The asset-version guard needs an explicit version
+### The asset-version guard reads the same build id
 
-The example pins an explicit asset `VERSION` in `PARTIAL_BACKENDS`, the shared convention explained in the [examples README](../README.md#conventions-every-example-follows). Here the pin is the same `ASSET_BUILD_ID` that feeds `STATIC_VERSION`, so one deploy value stamps both the asset URLs and the guard that tells an open tab its JavaScript is stale.
+`STATIC_VERSION` stamps the asset URLs, and the asset version of a partial response derives from it, so one deploy value also drives the guard that tells an open tab its JavaScript is stale. Assets here are served straight off disk, so the build id is the only thing that moves the stamp between deploys. The shared convention is explained in the [examples README](../README.md#conventions-every-example-follows).
 
 ## Further reading
 
@@ -233,4 +233,4 @@ The example pins an explicit asset `VERSION` in `PARTIAL_BACKENDS`, the shared c
 - [`docs/content/topics/dependency-injection.rst`](../../docs/content/topics/dependency-injection.rst) — the request-scoped provider pattern.
 - [`docs/content/howto/enforce-object-level-permissions.rst`](../../docs/content/howto/enforce-object-level-permissions.rst) — the `check_permissions` and `has_object_permission` hooks used in section 7.
 - [`docs/content/topics/forms/signals.rst`](../../docs/content/topics/forms/signals.rst) — the `form_access_denied` payload contract.
-- [`docs/content/ref/system-checks.rst`](../../docs/content/ref/system-checks.rst) — `next.W054` for `ComponentWidget` and `next.W069` for the asset-version guard.
+- [`docs/content/ref/system-checks.rst`](../../docs/content/ref/system-checks.rst) — `next.W054` for `ComponentWidget`.

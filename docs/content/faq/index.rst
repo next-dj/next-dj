@@ -3,8 +3,6 @@
 Frequently asked questions
 ==========================
 
-The FAQ section answers common questions in three buckets.
-
 :doc:`general`
    High level questions about the framework, the philosophy, and the project status.
 

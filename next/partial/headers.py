@@ -67,7 +67,7 @@ def _split_names(raw: str | None) -> tuple[str, ...]:
     """Split a comma-separated header value into trimmed non-empty names."""
     if not raw:
         return ()
-    return tuple(name.strip() for name in raw.split(",") if name.strip())
+    return tuple(stripped for name in raw.split(",") if (stripped := name.strip()))
 
 
 def _parse_merge(raw: str | None) -> "MergeMode | None":

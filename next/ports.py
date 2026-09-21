@@ -13,12 +13,13 @@ if TYPE_CHECKING:
     from django.forms import BaseForm, BaseFormSet
     from django.http import HttpRequest, HttpResponse
 
+    from next.components.info import ComponentInfo
     from next.forms.backends import FormActionBackend
     from next.forms.dispatch.responses import ActionOutcome
     from next.forms.wizard import FormWizard
     from next.partial.headers import PartialIntent
     from next.static import StaticCollector
-    from next.urls import RouterBackend, RouterManager
+    from next.urls import RouterBackend, RouterManager, URLPatternParser
 
 
 class PortSlot[T]:
@@ -96,13 +97,33 @@ class PartialShaper(Protocol):
         """Return the form morph envelope of a validate-only pass."""
         ...
 
+    def set_vary(self, response: HttpResponse) -> None:
+        """Declare the partial request headers `response` was negotiated on.
+
+        A full page and a zone envelope answer the same URL, so a shared cache
+        needs the same `Vary` set on both or it serves one where the other belongs.
+        """
+        ...
+
+
+class PageScan(Protocol):
+    """The page-tree scan the checks and the discovery helpers run.
+
+    `next.pages.scan` reads the router manager from `next.discovery`, so the scan
+    is reached through the port rather than through an import that closes the loop.
+    """
+
+    def load_scanned_page_modules(
+        self, router_manager: RouterManager
+    ) -> list[tuple[str, Path]]:
+        """Execute every routed `page.py`, answering the ones that loaded."""
+        ...
+
 
 class RouterAccess(Protocol):
     """The import seam `next.urls` opens for an area that cannot import it.
 
-    Both methods answer the concrete classes of that area rather than a routing
-    abstraction, since `next.urls` imports `next.pages` and the watcher and checks
-    reach back the other way.
+    `next.urls` imports `next.pages`, so the watcher and checks reach back through this.
     """
 
     def create_backend(self, config: dict[str, Any]) -> RouterBackend:
@@ -113,12 +134,15 @@ class RouterAccess(Protocol):
         """Return a fresh manager over every configured router."""
         ...
 
+    def url_parser(self) -> URLPatternParser:
+        """Return the parser the file router routes bracket segments through."""
+        ...
+
 
 class StaticAssets(Protocol):
     """The static-manager surface one page render calls.
 
-    `next.static` reads page trees and page modules and so imports `next.pages`, which
-    leaves the render path reaching back the other way.
+    `next.static` imports `next.pages`, so the render path reaches back through this.
     """
 
     def create_collector(self) -> StaticCollector:
@@ -127,6 +151,12 @@ class StaticAssets(Protocol):
 
     def discover_page_assets(self, file_path: Path, collector: StaticCollector) -> None:
         """Collect the assets co-located with one page."""
+        ...
+
+    def collect_component_assets(
+        self, info: ComponentInfo, collector: StaticCollector | None
+    ) -> None:
+        """Collect the assets co-located with one composite component."""
         ...
 
     def inject(
@@ -141,16 +171,19 @@ class StaticAssets(Protocol):
         ...
 
 
+page_scan_slot = PortSlot["PageScan"]("page scan port")
 partial_shaper_slot = PortSlot["PartialShaper"]("partial shaper")
 router_access_slot = PortSlot["RouterAccess"]("router access port")
 static_assets_slot = PortSlot["StaticAssets"]("static assets port")
 
 
 __all__ = [
+    "PageScan",
     "PartialShaper",
     "PortSlot",
     "RouterAccess",
     "StaticAssets",
+    "page_scan_slot",
     "partial_shaper_slot",
     "router_access_slot",
     "static_assets_slot",

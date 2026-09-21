@@ -5,29 +5,29 @@ import pytest
 from django.http import HttpRequest
 from django.middleware.csrf import get_token
 from django.template.engine import Engine
-from django.test import Client, override_settings
+from django.test import override_settings
 
 from next.checks import reset_check_caches
 from next.conf import NextFrameworkSettings, next_framework_settings
+from next.forms.wizard import SessionFormWizardBackend, wizard_backend_manager
 from next.pages import Page
 from next.pages.loaders import DjxTemplateLoader, PythonTemplateLoader
 from next.pages.registry import PageContextRegistry
 from next.ports import partial_shaper_slot
 from next.server import NextStatReloader
 from next.urls import URLPatternParser
-from tests.support import IntentOnlyShaper, build_mock_http_request, tick_scenario
+from tests.support import (
+    CountingWizardBackend,
+    IntentOnlyShaper,
+    build_mock_http_request,
+    tick_scenario,
+)
 
 
 @pytest.fixture()
 def mock_http_request():
     """Return the ``build_mock_http_request`` callable for injecting mock requests."""
     return build_mock_http_request
-
-
-@pytest.fixture()
-def client():
-    """Django test client for HTTP requests."""
-    return Client()
 
 
 @pytest.fixture(autouse=True)
@@ -145,3 +145,23 @@ def intent_only_shaper():
         yield shaper
     finally:
         partial_shaper_slot.set(bound)
+
+
+@pytest.fixture()
+def counting_wizard_backend() -> Generator[CountingWizardBackend, None, None]:
+    """Count wizard backend round-trips, putting the cached backend back after.
+
+    The manager caches its backend in the instance dict, so the entry found on entry
+    is restored rather than dropped by a `reset()` the next test would pay for.
+    """
+    cached = wizard_backend_manager.__dict__.get("_backend")
+    had_backend = "_backend" in wizard_backend_manager.__dict__
+    counting = CountingWizardBackend(SessionFormWizardBackend({}))
+    wizard_backend_manager._backend = counting
+    try:
+        yield counting
+    finally:
+        if had_backend:
+            wizard_backend_manager._backend = cached
+        else:
+            wizard_backend_manager.reset()

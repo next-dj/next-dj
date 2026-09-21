@@ -68,6 +68,7 @@ if TYPE_CHECKING:
         check_unrouted_working_directory_pages,
     )
     from next.partial.checks import (
+        check_asset_version_moves_between_deploys,
         check_composed_templates_compile,
         check_context_zone_names_exist,
         check_custom_patch_ops_well_formed,
@@ -154,6 +155,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_unrouted_working_directory_pages",
     ),
     "next.partial.checks": (
+        "check_asset_version_moves_between_deploys",
         "check_composed_templates_compile",
         "check_context_zone_names_exist",
         "check_custom_patch_ops_well_formed",
@@ -197,6 +199,7 @@ __all__ = [
     "check_action_guard_permissions",
     "check_app_directories_finder",
     "check_asset_kinds_are_loadable",
+    "check_asset_version_moves_between_deploys",
     "check_builtin_tag_libraries_complete",
     "check_component_context_registration_files",
     "check_component_module_imports",
@@ -268,8 +271,7 @@ __all__ = [
 def register_all() -> None:
     """Import each subpackage's `checks` module to register its hooks.
 
-    The map already lists every area, so a new entry registers its checks simply
-    by appearing there, not by a second listing here.
+    The map already lists every area, so an entry there registers its checks.
     """
     for module_name in _LAZY_SOURCES_BY_MODULE:
         importlib.import_module(module_name)

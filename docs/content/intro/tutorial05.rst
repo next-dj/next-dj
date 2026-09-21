@@ -130,7 +130,7 @@ A validation failure fires ``form_validation_failed`` instead and never reaches 
    :caption: tests/test_notes_signals.py
 
    from next.signals import action_dispatched
-   from next.testing.signals import SignalRecorder
+   from next.testing.capture import SignalRecorder
 
    def test_create_emits_action_dispatched(next_client, db) -> None:
        with SignalRecorder(action_dispatched) as recorder:
@@ -232,8 +232,9 @@ Common pitfalls
 
 ``post_action`` raises ``FormActionNotFoundError``.
    A form class registers only when its module is imported.
-   Check that ``next_pages`` covers the page root so every form and handler registers before the first dispatch.
-   For forms in ``forms.py``, also import that module explicitly or rely on ``autodiscover_forms()``.
+   An app-level ``forms.py`` is imported by ``autodiscover_forms()``, which the ``next`` application calls from ``AppConfig.ready()``, so ``notes/forms.py`` needs no wiring at all.
+   A form or an ``@action`` handler declared inside the page tree registers with the ``page.py`` that holds it, so check that ``next_pages`` names the page root.
+   The one case that needs a manual import is a project that sets ``FORM_AUTODISCOVER`` to ``False``, which turns the ``forms.py`` sweep off for every installed application.
 
 Tests that rewrite page files on disk see stale handlers.
    The page loader memoises each directory it has already imported.

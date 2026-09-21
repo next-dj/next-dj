@@ -10,9 +10,9 @@ from django.http import HttpRequest, HttpResponseRedirect
 from next.forms import BaseModelForm, Form, ModelForm
 from next.forms.base import _is_self_registered
 from next.forms.decorators import action as action_decorator
-from next.forms.diagnostics import registration_diagnostics
 from next.forms.dispatch.build import _form_action_context_callable
 from next.forms.manager import build_form_namespace_for_action, form_action_manager
+from next.forms.registration import registration_diagnostics
 from tests.support import attribution, handler_declared_here
 
 

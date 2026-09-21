@@ -16,6 +16,10 @@ Every signal below is a Django ``Signal``.
 The ``sender`` column lists the value passed to ``Signal.send``.
 Receivers connected with a matching ``sender`` only fire for that sender.
 
+Every signal but ``settings_reloaded`` is sent with ``Signal.send``, so an exception from a receiver leaves the send and reaches the render, the dispatch, or the startup step that was under way, and the receivers connected behind it never run.
+``settings_reloaded`` alone is sent with ``Signal.send_robust``, which runs the whole chain and re-raises the first error afterwards.
+A receiver body therefore guards itself, see :ref:`topics-signals` for the pattern.
+
 Most of the catalog is built with ``use_caching=True``, which makes Django key the receiver lookup on a weak reference to the sender.
 Code that sends one of those signals itself has to pass a weak-referenceable sender, so ``None``, a string, and an instance of a slots class without ``__weakref__`` all raise ``TypeError``.
 Four signals stay uncached and accept any sender.
@@ -24,6 +28,11 @@ Four signals stay uncached and accept any sender.
 The dispatch-time form signals (``action_dispatched``, ``form_validation_failed``, ``wizard_step_submitted``, ``wizard_completed``, ``form_access_denied``) share two keyword arguments.
 ``uid`` is the registry identity of the action, the value the dispatch URL and the ``data-next-action`` markup attribute carry, or ``None`` when a custom backend stores no uid in its meta.
 ``request`` is the live ``HttpRequest`` being dispatched and must not be retained past the receiver call.
+
+Six signals announce a backend the shared loader built, one per settings-driven family.
+``component_backend_loaded``, ``form_backend_loaded``, ``partial_backend_loaded``, ``router_backend_loaded``, ``static_backend_loaded``, and ``wizard_backend_loaded`` all send the resolved backend class as the sender and carry ``config``, a copy of the settings entry, and ``instance``, the object the loader built from it.
+Each family owns its own signal rather than sharing one, so a receiver connected with ``sender=`` does not have to sort one family's classes out of another's.
+``router_backend_loaded`` and ``component_backend_loaded`` are skipped on a reload that asks not to notify, which is what a caller reloading from inside a receiver passes.
 
 .. list-table::
    :header-rows: 1
@@ -50,10 +59,6 @@ The dispatch-time form signals (``action_dispatched``, ``form_validation_failed`
      - The ``StaticAsset`` instance
      - ``collector``, ``backend``
      - After a file is registered with a backend and added to the collector.
-   * - ``backend_loaded``
-     - The static backend class
-     - ``config``, ``instance``
-     - After the static factory instantiates a backend.
    * - ``collector_finalized``
      - The static collector
      - ``page_path``, ``request``
@@ -64,7 +69,8 @@ The dispatch-time form signals (``action_dispatched``, ``form_validation_failed`
    * - ``component_backend_loaded``
      - The component backend class
      - ``config``, ``instance``
-     - After a component backend is created from its configuration entry.
+     - After a component backend is created from its ``COMPONENT_BACKENDS`` entry.
+       A ``reload(notify=False)`` builds the backends without sending it.
    * - ``component_registered``
      - ``ComponentRegistry``
      - ``info``
@@ -93,9 +99,13 @@ The dispatch-time form signals (``action_dispatched``, ``form_validation_failed`
    * - ``form_access_denied``
      - ``FormActionDispatch``
      - ``action_name``, ``uid``, ``request``, ``layer``, ``reason``
-     - When a dynamic permission hook denies a request, never on the static guard path.
-       ``layer`` is ``"view"`` or ``"object"``.
-       ``reason`` is ``"raised"``, ``"denied"``, or ``"response"``.
+     - When the origin page or a dynamic permission hook denies a request, never on the static guard path.
+       ``layer`` is ``"page"``, ``"view"``, or ``"object"``.
+       ``reason`` is ``"raised"``, ``"denied"``, or ``"response"``, and a ``"page"`` denial is always ``"response"``.
+   * - ``form_backend_loaded``
+     - The form action backend class
+     - ``config``, ``instance``
+     - After one ``FORM_ACTION_BACKENDS`` entry is instantiated, once per entry on every manager reload.
    * - ``form_validation_failed``
      - ``FormActionDispatch``
      - ``action_name``, ``uid``, ``request``, ``error_count``, ``field_names``
@@ -113,6 +123,10 @@ The dispatch-time form signals (``action_dispatched``, ``form_validation_failed`
        ``duration_ms`` times the render.
        ``context_keys`` is the tuple of context keys.
        Fired only when a receiver for ``Page`` is connected, and the ``duration_ms`` timer runs under the same gate.
+   * - ``partial_backend_loaded``
+     - The partial protocol backend class
+     - ``config``, ``instance``
+     - After the single configured protocol backend is built, on the first read of it and again after a settings reload drops the cached one.
    * - ``patch_op_registered``
      - ``PatchOpRegistry``
      - ``name``
@@ -125,6 +139,11 @@ The dispatch-time form signals (``action_dispatched``, ``form_validation_failed`
      - ``FileRouterBackend``
      - ``url_path``, ``file_path``
      - After a URL pattern is created for a discovered page.
+   * - ``router_backend_loaded``
+     - The router backend class
+     - ``config``, ``instance``
+     - After one ``PAGE_BACKENDS`` entry is instantiated, once per entry on every manager reload.
+       A ``reload(notify=False)`` builds the backends without sending it.
    * - ``router_reloaded``
      - The router manager class
      - none
@@ -144,6 +163,11 @@ The dispatch-time form signals (``action_dispatched``, ``form_validation_failed`
      - ``PatchEventStream``
      - ``request``
      - When a patch event stream starts.
+   * - ``static_backend_loaded``
+     - The static backend class
+     - ``config``, ``instance``
+     - After one ``STATIC_BACKENDS`` entry is instantiated.
+       An empty setting falls back to one default entry, which is announced the same way.
    * - ``template_loaded``
      - ``Page``
      - ``file_path``
@@ -152,6 +176,10 @@ The dispatch-time form signals (``action_dispatched``, ``form_validation_failed`
      - ``iter_all_autoreload_watch_specs``
      - ``specs``
      - After the reloader resolves the full list of watch specs.
+   * - ``wizard_backend_loaded``
+     - The wizard backend class
+     - ``config``, ``instance``
+     - After the single ``FORM_WIZARD_BACKEND`` entry is built, on the first read of it and again after a settings reload drops the cached one.
    * - ``wizard_completed``
      - The wizard class
      - ``cleaned_data``, ``uid``, ``request``

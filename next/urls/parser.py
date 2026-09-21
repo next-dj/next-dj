@@ -42,7 +42,12 @@ _COERCERS: dict[type, Callable[[str], object]] = {
 
 
 def _coerce_url_value(value: object, hint: object) -> object:
-    """Coerce `value` to `hint`, passing it through on failure or unsupported hint."""
+    """Coerce `value` to `hint`, passing it through on failure or unsupported hint.
+
+    The annotation is a hint and not a gate. A typed directory such as `[int:id]`
+    refuses a malformed segment with a 404 and a query string passes no converter at
+    all, so raising here would answer a bad parameter with a 500.
+    """
     if not isinstance(hint, type):
         return value
     if isinstance(value, hint):

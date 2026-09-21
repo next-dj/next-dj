@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from django.forms import BaseForm, BaseFormSet
-    from django.http import HttpRequest
+    from django.http import HttpRequest, HttpResponse
 
     from next.forms.wizard import FormWizard
     from next.partial.headers import PartialIntent
@@ -72,3 +72,11 @@ class IntentOnlyShaper:
         """Fail because a submission naming no validate field must never reach here."""
         del backend, request, form, intent, action_name, uid, wizard
         _shaping_refused("shape_validate")
+
+    def set_vary(self, response: HttpResponse) -> None:
+        """Count the call and leave the headers alone.
+
+        Declaring `Vary` is not shaping, so refusing would fail every page response.
+        """
+        del response
+        self.calls["set_vary"] += 1

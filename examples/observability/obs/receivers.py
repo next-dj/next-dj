@@ -14,19 +14,32 @@ from next.deps.signals import provider_registered
 from next.forms.signals import (
     action_dispatched,
     action_registered,
+    form_backend_loaded,
     form_validation_failed,
+    wizard_backend_loaded,
 )
 from next.pages.signals import context_registered, page_rendered, template_loaded
+from next.partial.signals import partial_backend_loaded
 from next.server.signals import watch_specs_ready
 from next.static.signals import (
     asset_registered,
-    backend_loaded,
     collector_finalized,
     html_injected,
+    static_backend_loaded,
 )
-from next.urls.signals import route_registered, router_reloaded
+from next.urls.signals import route_registered, router_backend_loaded, router_reloaded
 
 from .metrics import incr
+
+
+BACKEND_LOADED_SIGNALS = (
+    component_backend_loaded,
+    form_backend_loaded,
+    partial_backend_loaded,
+    router_backend_loaded,
+    static_backend_loaded,
+    wizard_backend_loaded,
+)
 
 
 def page_key(file_path: object) -> str:
@@ -103,12 +116,6 @@ def on_components_registered(infos: tuple[object, ...] = (), **kwargs) -> None:
         incr("components.registered", str(name))
 
 
-@receiver(component_backend_loaded)
-def on_component_backend_loaded(**kwargs) -> None:
-    """Components group: count built component backends."""
-    incr("components", "backend_loaded")
-
-
 @receiver(component_rendered)
 def on_component_rendered(info: object = None, **kwargs) -> None:
     """Components group: count component render passes by name."""
@@ -154,13 +161,16 @@ def on_html_injected(injected_bytes: int | None = None, **kwargs) -> None:
         incr("static", "injected_bytes_total", by=int(injected_bytes))
 
 
-@receiver(backend_loaded)
-def on_static_backend_loaded(**kwargs) -> None:
-    """Record one entry per built static backend."""
-    incr("static", "backend_loaded")
-
-
 @receiver(watch_specs_ready)
 def on_watch_specs_ready(**kwargs) -> None:
     """Server group: count watcher reload spec resolutions."""
     incr("server", "watch_specs_ready")
+
+
+@receiver(BACKEND_LOADED_SIGNALS)
+def on_backend_loaded(instance: object = None, **kwargs) -> None:
+    """Count every built backend under the `backends` kind, keyed by its class.
+
+    Six settings-driven families share one `config` and `instance` payload.
+    """
+    incr("backends", type(instance).__name__)

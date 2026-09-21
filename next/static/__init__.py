@@ -6,7 +6,7 @@ script. `ScriptInjectionPolicy.DISABLED` or `MANUAL` opts out.
 
 from __future__ import annotations
 
-from . import signals
+from . import checks, signals
 from .assets import KindRegistry, StaticAsset, default_kinds, static_name
 from .backends import StaticBackend, StaticFilesBackend
 from .collector import (
@@ -54,6 +54,7 @@ __all__ = [
     "StaticCollector",
     "StaticFilesBackend",
     "StaticManager",
+    "checks",
     "collect_component_assets",
     "default_kinds",
     "default_manager",

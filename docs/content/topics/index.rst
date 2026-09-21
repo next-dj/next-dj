@@ -3,7 +3,6 @@
 Topic guides
 ============
 
-Topic guides cover one subsystem at a time.
 Read the topic that matches the part you are touching, then jump to the reference for the exact API.
 
 .. rubric:: Routing
@@ -51,7 +50,7 @@ Read the topic that matches the part you are touching, then jump to the referenc
    ``NextClient``, ``SignalRecorder``, registry isolation.
 
 :doc:`extending`
-   Five extension mechanisms across the framework.
+   Six extension mechanisms across the framework.
 
 .. rubric:: Project layout
 
@@ -80,3 +79,7 @@ Read the topic that matches the part you are touching, then jump to the referenc
    extending
    project-layout
    multi-project
+
+.. seealso::
+
+   :doc:`/content/security/index` for the guard model, the trust boundary, and the obligations a custom backend takes on.
