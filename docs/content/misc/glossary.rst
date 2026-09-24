@@ -46,6 +46,10 @@ Terms used throughout the next.dj documentation.
       A form widget that renders a field through a registered next.dj component instead of a Django widget template.
       One field maps to one component, and the component owns the markup.
 
+   ComponentFileWidget
+      A ``ComponentWidget`` for a ``FileField`` or ``ImageField`` that reads its value from the uploaded files and makes the form multipart.
+      A stored file reaches the component as ``value``, and an in-flight upload never does.
+
    context function
       A Python callable decorated with ``@context("key")`` that publishes a value to the template scope.
       Also written ``@context`` callable.

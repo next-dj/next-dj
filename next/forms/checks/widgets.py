@@ -1,6 +1,6 @@
 """System checks for the `ComponentWidget` a form field carries.
 
-The ids are `next.W054` for an unknown component and `next.W055` for a bad field type.
+The ids are `next.W054` for an unknown component and `next.W055` for a field pairing.
 """
 
 from pathlib import Path
@@ -51,7 +51,7 @@ def check_component_widget_components(*args, **kwargs) -> list[CheckMessage]:
 
 @register(NEXT)
 def check_component_widget_field_types(*args, **kwargs) -> list[CheckMessage]:
-    """Warn when a ComponentWidget is attached to an unsupported field type."""
+    """Warn when a ComponentWidget mispairs with a file field or a MultiValueField."""
     messages: list[CheckMessage] = []
     for meta in iter_registered_actions():
         form_class = meta.get("form_class")
@@ -61,18 +61,21 @@ def check_component_widget_field_types(*args, **kwargs) -> list[CheckMessage]:
         if base_fields is None:
             continue
         for field_name, field in base_fields.items():
-            if not isinstance(field.widget, ComponentWidget):
+            widget = field.widget
+            if not isinstance(widget, ComponentWidget):
                 continue
-            if not isinstance(field, FileField | MultiValueField):
+            if widget.needs_multipart_form == isinstance(
+                field, FileField
+            ) and not isinstance(field, MultiValueField):
                 continue
             field_label = f"{form_class.__name__}.{field_name}"
             field_type = type(field).__name__
             messages.append(
                 DjangoWarning(
-                    f"ComponentWidget is attached to {field_label} which is a "
-                    f"{field_type}. ComponentWidget supports single-value "
-                    "text-like fields only. FileField and MultiValueField are "
-                    "not supported.",
+                    f"{type(widget).__name__} is attached to {field_label} which "
+                    f"is a {field_type}. ComponentWidget supports single-value "
+                    "text-like fields, a FileField takes ComponentFileWidget, "
+                    "and MultiValueField is not supported.",
                     id="next.W055",
                 )
             )

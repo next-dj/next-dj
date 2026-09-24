@@ -6,8 +6,10 @@ from unittest import mock
 import pytest
 from django import forms as django_forms
 from django.core.checks import Warning as DjangoWarning
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.forms import formset_factory
 from django.http import HttpRequest, HttpResponse
+from django.utils.datastructures import MultiValueDict
 from django.utils.safestring import SafeString
 
 from next.components.facade import get_component
@@ -18,8 +20,10 @@ from next.forms.checks import (
 )
 from next.forms.errors import UnregisteredComponentError
 from next.forms.manager import form_action_manager
+from next.forms.serializers import field_spec
 from next.forms.widgets import (
     COMPONENT_LOOKUP_CACHE_ATTR,
+    ComponentFileWidget,
     ComponentWidget,
     _project_anchor,
     bind_component_widgets,
@@ -70,6 +74,29 @@ def echo_box_component(tmp_path: Path) -> Generator[Path, None, None]:
 
     with override_component_backends(components_config(root)):
         yield tmp_path / "page.djx"
+
+
+class _StoredFile:
+    url = "/media/doc.txt"
+
+    def __str__(self) -> str:
+        return "doc.txt"
+
+
+class _ComponentUploadForm(django_forms.Form):
+    doc = django_forms.FileField(widget=ComponentFileWidget("echo"))
+
+
+def _upload(name: str = "doc.txt") -> SimpleUploadedFile:
+    return SimpleUploadedFile(name, b"hello")
+
+
+class _ClearableComponentFileWidget(ComponentWidget, django_forms.ClearableFileInput):
+    pass
+
+
+class _MultipleComponentFileWidget(ComponentFileWidget):
+    allow_multiple_selected = True
 
 
 class TestComponentWidgetInit:
@@ -375,6 +402,99 @@ class TestComponentWidgetFormatValue:
         assert "value=None" in html
 
 
+class TestComponentFileWidget:
+    """`ComponentFileWidget` reads uploads from files and shows only stored ones."""
+
+    def test_needs_multipart_form(self) -> None:
+        assert ComponentFileWidget("echo").needs_multipart_form is True
+        assert _ComponentUploadForm().is_multipart() is True
+
+    def test_input_type_is_file(self) -> None:
+        assert ComponentFileWidget("echo").input_type == "file"
+        assert field_spec(_ComponentUploadForm()["doc"]).input_type == "file"
+
+    def test_image_field_adds_accept_attr(self) -> None:
+        field = django_forms.ImageField(widget=ComponentFileWidget("echo"))
+        assert field.widget.attrs == {"accept": "image/*"}
+
+    def test_multiple_attr_raises_without_opt_in(self) -> None:
+        with pytest.raises(ValueError, match="multiple files"):
+            ComponentFileWidget("echo", attrs={"multiple": True})
+
+    def test_multiple_opt_in_reads_every_upload(self) -> None:
+        widget = _MultipleComponentFileWidget("echo")
+        uploads = [_upload("a.txt"), _upload("b.txt")]
+        files = MultiValueDict({"doc": uploads})
+        assert widget.attrs == {"multiple": True}
+        assert widget.value_from_datadict({}, files, "doc") == uploads
+
+    def test_bound_form_takes_upload_from_files(self) -> None:
+        upload = _upload()
+        form = _ComponentUploadForm(
+            data={"doc": "posted-name.txt"}, files=MultiValueDict({"doc": [upload]})
+        )
+        assert form.is_valid()
+        assert form.cleaned_data["doc"] is upload
+
+    def test_value_from_datadict_ignores_posted_data(self) -> None:
+        widget = ComponentFileWidget("echo")
+        assert (
+            widget.value_from_datadict({"doc": "posted"}, MultiValueDict(), "doc")
+            is None
+        )
+
+    def test_value_omitted_when_name_absent_from_files(self) -> None:
+        widget = ComponentFileWidget("echo")
+        assert widget.value_omitted_from_data(
+            {"doc": "posted"}, MultiValueDict(), "doc"
+        )
+
+    def test_value_present_when_name_in_files(self) -> None:
+        widget = ComponentFileWidget("echo")
+        files = MultiValueDict({"doc": [_upload()]})
+        assert widget.value_omitted_from_data({}, files, "doc") is False
+
+    def test_format_value_passes_stored_file_through(self) -> None:
+        stored = _StoredFile()
+        assert ComponentFileWidget("echo").format_value(stored) is stored
+
+    def test_format_value_drops_in_flight_upload(self) -> None:
+        assert ComponentFileWidget("echo").format_value(_upload()) is None
+
+    @pytest.mark.parametrize("value", [None, ""])
+    def test_format_value_drops_empty_values(self, value: object) -> None:
+        assert ComponentFileWidget("echo").format_value(value) is None
+
+    def test_use_required_attribute_without_stored_file(self) -> None:
+        assert ComponentFileWidget("echo").use_required_attribute(None) is True
+
+    def test_use_required_attribute_with_stored_file(self) -> None:
+        assert (
+            ComponentFileWidget("echo").use_required_attribute(_StoredFile()) is False
+        )
+
+    def test_bound_field_drops_required_once_stored(self) -> None:
+        empty = _ComponentUploadForm()
+        stored = _ComponentUploadForm(initial={"doc": _StoredFile()})
+        assert empty["doc"].build_widget_attrs({}) == {"required": True}
+        assert stored["doc"].build_widget_attrs({}) == {}
+
+    def test_render_passes_stored_file_as_value(self, echo_component: Path) -> None:
+        widget = ComponentFileWidget("echo")
+        widget._frame = RenderFrame(template_path=echo_component)
+        html = widget.render("doc", _StoredFile(), attrs={"id": "id_doc"})
+        assert isinstance(html, SafeString)
+        assert "name=doc" in html
+        assert "value=doc.txt" in html
+        assert "id=id_doc" in html
+
+    def test_render_drops_in_flight_upload(self, echo_component: Path) -> None:
+        widget = ComponentFileWidget("echo")
+        widget._frame = RenderFrame(template_path=echo_component)
+        html = widget.render("doc", _upload(), attrs={})
+        assert "value=None" in html
+
+
 class TestComponentWidgetAssetCollection:
     """`render` discovers co-located component assets when a collector is bound."""
 
@@ -567,7 +687,7 @@ class TestCheckComponentWidgetComponents:
 
 
 class TestCheckComponentWidgetFieldTypes:
-    """`check_component_widget_field_types` emits W055 for unsupported field types."""
+    """`check_component_widget_field_types` emits W055 for a mispaired widget."""
 
     def test_file_field_yields_w055(self, echo_component: Path) -> None:
         class _FileForm(django_forms.Form):
@@ -578,7 +698,84 @@ class TestCheckComponentWidgetFieldTypes:
         assert len(warnings) == 1
         assert isinstance(warnings[0], DjangoWarning)
         assert warnings[0].id == "next.W055"
-        assert "FileField" in warnings[0].msg
+        assert warnings[0].msg.startswith(
+            "ComponentWidget is attached to _FileForm.upload which is a FileField."
+        )
+        assert "ComponentFileWidget" in warnings[0].msg
+
+    def test_file_field_with_file_widget_yields_no_warning(
+        self, echo_component: Path
+    ) -> None:
+        class _FileForm(django_forms.Form):
+            upload = django_forms.FileField(widget=ComponentFileWidget("echo"))
+
+        register_page_action("file_widget_form", _FileForm, str(echo_component))
+        assert check_component_widget_field_types() == []
+
+    def test_image_field_with_file_widget_yields_no_warning(
+        self, echo_component: Path
+    ) -> None:
+        class _ImageForm(django_forms.Form):
+            picture = django_forms.ImageField(widget=ComponentFileWidget("echo"))
+
+        register_page_action("image_widget_form", _ImageForm, str(echo_component))
+        assert check_component_widget_field_types() == []
+
+    def test_char_field_with_file_widget_yields_w055(
+        self, echo_component: Path
+    ) -> None:
+        class _CharForm(django_forms.Form):
+            slug = django_forms.CharField(widget=ComponentFileWidget("echo"))
+
+        register_page_action("char_file_widget_form", _CharForm, str(echo_component))
+        warnings = check_component_widget_field_types()
+        assert len(warnings) == 1
+        assert warnings[0].id == "next.W055"
+        assert warnings[0].msg.startswith(
+            "ComponentFileWidget is attached to _CharForm.slug which is a CharField."
+        )
+
+    def test_multi_value_field_with_file_widget_yields_w055(
+        self, echo_component: Path
+    ) -> None:
+        class _MultiForm(django_forms.Form):
+            combo = django_forms.MultiValueField(
+                fields=(django_forms.CharField(), django_forms.CharField()),
+                widget=ComponentFileWidget("echo"),
+                require_all_fields=False,
+            )
+
+        register_page_action("multi_file_widget_form", _MultiForm, str(echo_component))
+        warnings = check_component_widget_field_types()
+        assert len(warnings) == 1
+        assert warnings[0].id == "next.W055"
+        assert warnings[0].msg.startswith(
+            "ComponentFileWidget is attached to _MultiForm.combo which is a "
+            "MultiValueField."
+        )
+
+    def test_file_input_mixin_on_file_field_yields_no_warning(
+        self, echo_component: Path
+    ) -> None:
+        class _MixinForm(django_forms.Form):
+            doc = django_forms.FileField(widget=_ClearableComponentFileWidget("echo"))
+
+        register_page_action("mixin_file_form", _MixinForm, str(echo_component))
+        assert check_component_widget_field_types() == []
+
+    def test_file_input_mixin_on_char_field_yields_w055(
+        self, echo_component: Path
+    ) -> None:
+        class _MixinForm(django_forms.Form):
+            slug = django_forms.CharField(widget=_ClearableComponentFileWidget("echo"))
+
+        register_page_action("mixin_char_form", _MixinForm, str(echo_component))
+        warnings = check_component_widget_field_types()
+        assert len(warnings) == 1
+        assert warnings[0].msg.startswith(
+            "_ClearableComponentFileWidget is attached to _MixinForm.slug which is a "
+            "CharField."
+        )
 
     def test_multi_value_field_yields_w055(self, echo_component: Path) -> None:
         class _MultiForm(django_forms.Form):

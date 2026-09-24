@@ -93,7 +93,13 @@ class TestWidgetsModuleMirror:
 
     def test_own_names_stay_first(self) -> None:
         assert next_widgets.ComponentWidget.__module__ == "next.forms.widgets"
+        assert next_widgets.ComponentFileWidget.__module__ == "next.forms.widgets"
         assert callable(next_widgets.bind_component_widgets)
+
+    def test_component_file_widget_is_exported_from_forms(self) -> None:
+        assert "ComponentFileWidget" in next_forms.__all__
+        assert next_forms.ComponentFileWidget is next_widgets.ComponentFileWidget
+        assert "ComponentFileWidget" in dir(next_forms)
 
     def test_unknown_name_raises_attribute_error(self) -> None:
         with pytest.raises(AttributeError, match="no attribute 'NotAWidget'"):
@@ -108,6 +114,7 @@ class TestWidgetsModuleMirror:
         django_public = {n for n in dir(django_widgets) if not n.startswith("_")}
         assert django_public <= listed
         assert "ComponentWidget" in listed
+        assert "ComponentFileWidget" in listed
 
 
 class TestFormsetsModuleMirror:

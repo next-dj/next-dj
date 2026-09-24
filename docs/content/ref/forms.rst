@@ -41,7 +41,7 @@ Advanced.
       * - Wizard storage
         - ``FormWizardBackend``, ``SessionFormWizardBackend``, ``CacheFormWizardBackend``
       * - Rendering and formsets
-        - ``ComponentWidget``, ``cleanup_extra_initial``
+        - ``ComponentWidget``, ``ComponentFileWidget``, ``cleanup_extra_initial``
       * - Permissions and signals
         - ``PermissionOutcome`` for the dynamic permission hooks, and the ``signals`` submodule
 
@@ -172,6 +172,14 @@ The submodules ``next.forms.widgets`` and ``next.forms.formsets`` carry the same
 See :doc:`/content/topics/forms/field-components` for the topic guide.
 
 .. autoclass:: next.forms.ComponentWidget
+   :members:
+
+``ComponentFileWidget`` is the ``ComponentWidget`` of a :class:`~django.forms.FileField` or :class:`~django.forms.ImageField`.
+It reads its value from the uploaded files and sets ``needs_multipart_form``, so the ``{% form %}`` tag emits the multipart enctype on its own.
+A stored file reaches the component as ``value``, and the ``required`` attribute is dropped once one is stored.
+See :ref:`topics-forms-field-components-files` for the component contract.
+
+.. autoclass:: next.forms.ComponentFileWidget
    :members:
 
 ``bind_component_widgets`` puts one render frame on every ``ComponentWidget`` of a form before rendering, holding the template path of the page, the path of its page module, the live request, and the static collector, plus the field errors when they are asked for.

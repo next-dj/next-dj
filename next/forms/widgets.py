@@ -141,6 +141,18 @@ class ComponentWidget(django_forms.Widget):
         return SafeString(html)
 
 
+class ComponentFileWidget(ComponentWidget, django_forms.FileInput):
+    """A `ComponentWidget` for a `FileField`, with the binding of a Django `FileInput`.
+
+    A file control cannot show an in-flight upload, so only a stored file is `value`.
+    """
+
+    @override
+    def format_value(self, value: Any) -> Any:
+        """Return the stored file when there is one and drop everything else."""
+        return value if value and hasattr(type(value), "url") else None
+
+
 def bind_component_widgets(
     form: "django_forms.BaseForm | django_forms.BaseFormSet",
     *,
@@ -210,4 +222,4 @@ def __dir__() -> list[str]:
     return sorted(set(__all__) | django_public)
 
 
-__all__ = ["ComponentWidget", "bind_component_widgets"]
+__all__ = ["ComponentFileWidget", "ComponentWidget", "bind_component_widgets"]

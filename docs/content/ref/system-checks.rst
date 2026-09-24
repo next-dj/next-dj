@@ -529,7 +529,7 @@ Warnings
      - A ``ComponentWidget`` names a component that does not resolve.
      - ``next.forms.checks.widgets``
    * - ``next.W055``
-     - A ``ComponentWidget`` is attached to a ``FileField`` or ``MultiValueField``, which it does not support.
+     - A ``ComponentWidget`` without multipart binding is attached to a ``FileField``, one with it such as ``ComponentFileWidget`` to a field that is not one, or any ``ComponentWidget`` to a ``MultiValueField``.
      - ``next.forms.checks.widgets``
    * - ``next.W056``
      - Wizards are registered and the configured wizard backend needs Django sessions to store steps, but ``django.contrib.sessions`` is not installed.

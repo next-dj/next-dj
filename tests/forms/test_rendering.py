@@ -13,6 +13,7 @@ from django.template import Context, TemplateSyntaxError
 
 from next.forms import (
     ActionRegistration,
+    ComponentFileWidget,
     Form,
     FormActionBackend,
     FormActionNotFoundError,
@@ -954,6 +955,21 @@ class TestFormTagMarkupIdentity:
         """A multipart form gains enctype="multipart/form-data" automatically."""
         html = self._render(
             form_engine, csrf_request, '{% form "upload_enctype_form" %}x{% endform %}'
+        )
+        assert 'enctype="multipart/form-data">' in html
+
+    def test_auto_enctype_for_component_file_widget_form(
+        self, form_engine, csrf_request
+    ) -> None:
+        """A form whose only file field uses ComponentFileWidget is multipart too."""
+
+        class ComponentUploadForm(Form):
+            doc = django_forms.FileField(widget=ComponentFileWidget("echo"))
+
+        html = self._render(
+            form_engine,
+            csrf_request,
+            '{% form "component_upload_form" %}x{% endform %}',
         )
         assert 'enctype="multipart/form-data">' in html
 

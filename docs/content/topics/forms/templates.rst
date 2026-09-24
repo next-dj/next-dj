@@ -46,7 +46,7 @@ The tag emits it when the action meta is available, which makes the form address
 A backend whose meta stores no ``uid`` renders the form without the attribute.
 
 A multipart form gets ``enctype="multipart/form-data"`` automatically.
-The tag asks the form instance through ``is_multipart()``, so a ``FileField`` rendered with a stock widget needs no extra argument.
+The tag asks the form instance through ``is_multipart()``, so a ``FileField`` rendered with a stock widget or with ``ComponentFileWidget`` needs no extra argument.
 
 A name that is not in the registry raises ``FormActionNotFoundError`` at render time.
 

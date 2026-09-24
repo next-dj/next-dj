@@ -98,7 +98,7 @@ from .serializers import (
     formset_spec,
 )
 from .uid import redirect_to_origin
-from .widgets import ComponentWidget
+from .widgets import ComponentFileWidget, ComponentWidget
 from .wizard import (
     CacheFormWizardBackend,
     FormWizard,
@@ -141,6 +141,7 @@ __all__ = [
     "CheckboxSelectMultiple",
     "ChoiceField",
     "ClearableFileInput",
+    "ComponentFileWidget",
     "ComponentWidget",
     "DForm",
     "DateField",

@@ -67,11 +67,12 @@ The ``{% form %}`` tag detects that ``form.file`` makes the form multipart and e
 An explicit ``enctype="..."`` argument on the tag overrides the automatic value, and no upload form needs that.
 The tag also emits the CSRF token and the hidden ``_next_form_origin`` field on its own, so the template adds nothing else.
 
-.. warning::
+.. note::
 
-   Render the file input through the plain Django widget, ``{{ form.file }}``, or a hand-written ``<input type="file" name="file">``.
-   ``ComponentWidget`` does not support ``FileField``, and the ``next.W055`` system check warns about that pairing at startup.
-   See :doc:`/content/topics/forms/field-components` for the widget limitations.
+   The walkthrough renders the file input through the plain Django widget, ``{{ form.file }}``.
+   To render the file control through a component, give the field ``ComponentFileWidget`` rather than ``ComponentWidget``, a pairing the ``next.W055`` system check warns about at startup.
+   The file widget makes the form multipart on its own, so the ``{% form %}`` tag still needs no ``enctype`` argument.
+   See :ref:`topics-forms-field-components-files` for the widget and its component contract.
 
 .. note::
 
