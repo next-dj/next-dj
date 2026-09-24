@@ -603,19 +603,19 @@ class TestLoadPythonModule:
     """Loading a ``page.py`` module from a filesystem path."""
 
     def test_load_python_module_invalid_file(self, tmp_path) -> None:
-        """A file that fails to parse yields ``None`` rather than raising."""
+        """A file that fails to parse raises, and the memo is what records it."""
         invalid_file = tmp_path / "invalid.py"
         invalid_file.write_text("invalid python syntax {")
 
-        result = _load_python_module(invalid_file)
-        assert result is None
+        with pytest.raises(SyntaxError):
+            _load_python_module(invalid_file)
 
     def test_load_python_module_nonexistent_file(self, tmp_path) -> None:
-        """A path that does not exist yields ``None``."""
+        """A path that does not exist raises, since the memo never hands it over."""
         nonexistent_file = tmp_path / "nonexistent.py"
 
-        result = _load_python_module(nonexistent_file)
-        assert result is None
+        with pytest.raises(FileNotFoundError):
+            _load_python_module(nonexistent_file)
 
     def test_load_python_module_no_spec_returns_none(self, tmp_path) -> None:
         """A path importlib cannot build a spec for yields ``None``."""

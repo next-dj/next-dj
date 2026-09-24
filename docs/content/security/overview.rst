@@ -77,7 +77,7 @@ File uploads.
 
 Origin spoofing.
    The only page identity a form submission carries is the ``_next_form_origin`` URL path, which the dispatcher resolves through the URLconf with :func:`django.urls.resolve`.
-   Before it resolves anything a path-only rule refuses every absolute URL, this host's own included, and the path that remains goes through :func:`django.utils.http.url_has_allowed_host_and_scheme`, the same helper Django's own login ``next`` handling uses.
+   Before it resolves anything a path-only rule refuses every absolute URL, this host's own included, along with a protocol-relative value such as ``//evil.example`` or ``/\evil.example`` and any value carrying a tab, a newline, or a carriage return, see :doc:`csrf-and-forms`.
    The client never supplies a filesystem path, so an error re-render can target only pages that are reachable through the routing table anyway.
    A value that does not resolve returns HTTP 400 on the paths that need the origin page, a validation failure, a wizard step, and a handler that returns ``None`` and so re-renders the origin in place.
    Every POST reads the field all the same, because the page it names authorizes the request, and a handler that answers with a response of its own needs nothing further from it.
@@ -110,7 +110,8 @@ Server-authored redirects
 -------------------------
 
 A partial response can drive a full client navigation with the ``visit`` verb.
-The default ``redirect(href)`` tests the href with :func:`django.utils.http.url_has_allowed_host_and_scheme` against the host and scheme of the request in flight, so it cannot leave the site and raises ``CrossSiteHrefError`` when it would.
+The default ``redirect(href)`` admits a path the origin rule accepts and tests any other href with :func:`django.utils.http.url_has_allowed_host_and_scheme` against the host and scheme of the request in flight, so it cannot leave the site and raises ``CrossSiteHrefError`` when it would.
+The origin rule comes first so a same-site path longer than Django's 2048-character URL cap still passes, up to the 16384-character origin cap.
 The ``external=True`` flag promotes the navigation to a full visit and bypasses that same-host check, which is what an OAuth or a payment-gateway handoff needs.
 
 The flag trusts the caller to author the href.
@@ -159,7 +160,7 @@ Replacing a backend replaces the code that enforces a guarantee, so each family 
 - A ``FormActionBackend`` whose ``dispatch`` drives the pipeline by hand rather than delegating to ``FormActionDispatch.dispatch`` runs no ``ActionGuard`` check, so ``Meta.login_required`` and ``Meta.permission_required`` stop applying to every action it serves, and ``check_permissions`` and ``has_object_permission`` stop running with them.
 - The same hand-rolled ``dispatch`` also skips the authorization of the resolved origin page, so a guard living in a page's ``render()`` stops covering the submissions that backend serves.
 - A ``FormWizardBackend`` keeps each draft reachable only by the requester that wrote it, which both bundled backends get by keying on the session, so a store keyed on anything a client supplies hands one visitor another's partially entered data.
-- A ``StaticBackend`` that overrides a tag renderer takes on the URL escaping, because the finished tag is spliced past the template engine and the bundled renderers escape through :func:`django.utils.html.escape`, see :doc:`static-assets`.
+- A ``StaticBackend`` that overrides a tag renderer takes on the URL escaping, because the finished tag is spliced past the template engine and the bundled renderers escape ``str(url)`` through :func:`html.escape`, see :doc:`static-assets`.
 - A router backend that contributes patterns of its own sends requests to views the file router never built, so those views carry no page guard of the framework's and their authorization lives in the view itself or in middleware.
 - A partial protocol backend serialises the envelope a page already produced, so it inherits the access decisions above and adds one of its own only when it reads values the shaper did not put there.
 - A port implementation rebound in ``AppConfig.ready`` replaces framework code rather than wrapping it, so an implementation behind ``partial_shaper_slot`` owns the ``Vary`` stamp described under `Common threats`_ and the foreign-page authorization chain, see :doc:`/content/ref/ports`.

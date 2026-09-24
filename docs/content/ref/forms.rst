@@ -59,7 +59,7 @@ Framework machinery.
    The forms system checks live in ``next.forms.checks``, a package of one-word submodules, ``actions``, ``config``, ``widgets``, and ``wizards`` for the checks themselves and ``sources`` for the registration readers they share.
    The framework application config imports the package at startup, and the forms package re-exports it, so ``next.forms.checks`` names the same package either way.
    ``FormActionNotFoundError``, ``UnstorableWizardValueError``, and ``UnregisteredComponentError`` live in ``next.forms.errors`` and are re-exported at the package level.
-   The UID helpers ``FORM_ACTION_REVERSE_NAME``, ``URL_NAME_FORM_ACTION``, ``ORIGIN_FIELD_NAME``, ``FORM_ORIGIN_OVERRIDE_KEY``, ``reverse_form_action``, ``current_origin_path``, and ``validated_origin_path`` live in ``next.forms.uid``.
+   The UID helpers ``FORM_ACTION_REVERSE_NAME``, ``URL_NAME_FORM_ACTION``, ``ORIGIN_FIELD_NAME``, ``FORM_ORIGIN_OVERRIDE_KEY``, ``MAX_ORIGIN_LENGTH``, ``reverse_form_action``, ``current_origin_path``, ``is_path_only``, ``validated_origin_path``, ``posted_origin_path``, and ``redirect_or_fallback`` live in ``next.forms.uid``.
    The test isolation helper ``reset_form_registration_state`` belongs to ``next.testing``, documented under :doc:`/content/ref/testing`.
 
 Internal hooks.
@@ -278,11 +278,17 @@ Action URL helpers
 It lives in ``next.forms.uid`` and is not re-exported at the package level.
 ``ORIGIN_FIELD_NAME`` is the wire name of the hidden origin field every rendered form carries, ``"_next_form_origin"``.
 ``current_origin_path`` names the URL a rendering request should return to, its query string included.
+Its path is percent-encoded the way ``request.get_full_path()`` encodes it, so a ``?`` or a non-ASCII character inside a segment survives the round trip, and resolution decodes it back the way Django builds ``request.path``.
 ``validated_origin_path`` takes the posted value and answers it only when it is a same-site path.
-A path-only policy refuses any absolute URL, this host's own included, along with a value carrying a tab, a newline, or a carriage return, and a value whose backslashes collapse into a protocol-relative ``//`` prefix.
-A value that passes then goes through Django's :func:`~django.utils.http.url_has_allowed_host_and_scheme` with no allowed host, since a path names none, so a fix Django lands in that helper applies here too.
-A browser drops those code points and folds a backslash into a slash before resolving a URL, so leaving either in place would hide a protocol-relative target behind a value that reads as a path.
-``redirect_to_origin`` builds the success redirect back to the page named by the posted origin field, falling back to ``fallback`` when the field is absent or off-site.
+A value longer than ``MAX_ORIGIN_LENGTH``, 16384 characters and the redirect ``Location`` cap of current Django, is refused before it is stripped, so an oversized value costs no scan.
+The stripped value then passes ``is_path_only``, which holds when it starts with a single ``/`` followed by neither a second slash nor a backslash, and when it carries no tab, newline, or carriage return anywhere.
+A browser drops those code points and folds a backslash into a slash before resolving a URL, so leaving either in place would hide a protocol-relative target such as ``/\evil.example`` behind a value that reads as a path.
+The rule is path-only, so it refuses any absolute URL, this host's own included, and it reads no request, host, or scheme.
+The cap sits far above Django's 2048-character URL cap, because a long page URL that ``current_origin_path`` rendered has to come back.
+``posted_origin_path`` answers the validated origin field of a POST and ``None`` for any other method.
+``redirect_to_origin`` builds the success redirect back to the page named by the posted origin field.
+It falls back to ``fallback`` when the request is not a POST, when the field is absent or off-site, and when the origin exceeds the length Django allows in a redirect ``Location``, which a non-ASCII origin under the cap can still do once encoded.
+``redirect_or_fallback`` is the helper behind that last case, and the login redirect and the no-runtime ``Patches.response`` share it, answering ``fallback`` whenever Django refuses the target as a ``Location``.
 It is re-exported from ``next.forms``.
 ``FORM_ORIGIN_OVERRIDE_KEY`` names the render-context key whose value overrides the origin of a rendered form, which the partial shaping layer sets to the next step URL on a wizard advance.
 
@@ -294,7 +300,7 @@ Origin resolution
 
 ``OriginMatch``, ``resolve_origin``, ``resolve_url_to_match``, and ``resolve_url_to_page`` are re-exported from ``next.forms``.
 ``resolve_origin`` resolves the posted ``_next_form_origin`` field into an ``OriginMatch`` and memoises the result on the request, so the dispatcher and every ``{% form %}`` tag on a re-rendered page share one resolution.
-``resolve_url_to_match`` resolves any same-site URL against the URLconf, and passing ``filter_reserved=False`` keeps the captured URL kwargs raw instead of dropping the names the dependency resolver reserves.
+``resolve_url_to_match`` resolves any same-site URL against the URLconf, decoding its path like ``request.path`` once the query is split off and refusing a path that decoding turns protocol-relative, such as ``/%2F/evil.example/``, and passing ``filter_reserved=False`` keeps the captured URL kwargs raw instead of dropping the names the dependency resolver reserves.
 ``resolve_url_to_page`` returns only the page path of the resolved view, or ``None`` when the URL does not name a routed page.
 The ``origin`` field of an ``OriginMatch`` holds the posted URL as submitted, while its ``path`` property drops the query string for a caller that treats the origin as a page address.
 ``url_kwargs_for_request`` answers the URL kwargs of the page a request renders or re-renders, reading the resolver match on a page URL and falling back to the resolved origin on a dispatch URL or any other POST.

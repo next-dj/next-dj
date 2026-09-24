@@ -166,11 +166,10 @@ The ``redirect_to_origin`` helper sends the user back to whichever page rendered
 
 ``redirect_to_origin(request, fallback="/")`` reads the hidden ``_next_form_origin`` field that the ``{% form %}`` tag sets to the rendering URL with its query string, so the redirect lands back on the same filtered view.
 It accepts the value only when it is a string, and it strips the surrounding whitespace before any other test.
-Host and scheme are settled first by Django's :func:`~django.utils.http.url_has_allowed_host_and_scheme`, given the one host the request names and ``require_https`` taken from ``request.is_secure()``, so a request that names no host lets no absolute target through at all.
-The path-only policy runs on top of that verdict and refuses even an absolute URL naming this very host.
-A tab, a newline, or a carriage return inside the stripped value refuses it there, because a browser drops those code points before it resolves a URL and a value the check read as same-site would become a jump off site.
-Every backslash is then read as a forward slash, so the value passes only when it starts with a single ``/`` and ``/\evil.example`` is refused as protocol-relative.
-When the field is absent or fails validation the helper redirects to ``fallback`` instead.
+The policy is path-only and reads no host or scheme, so it refuses even an absolute URL naming this very host.
+The value passes only when it starts with a single ``/`` followed by neither a second slash nor a backslash, so ``/\evil.example`` is refused as protocol-relative.
+A tab, a newline, or a carriage return inside the stripped value refuses it too, because a browser drops those code points before it resolves a URL and a value the check read as same-site would become a jump off site.
+When the request is not a POST, when the field is absent or fails validation, or when the origin is longer than Django allows in a redirect ``Location``, the helper redirects to ``fallback`` instead.
 
 One field, two roles
 ~~~~~~~~~~~~~~~~~~~~

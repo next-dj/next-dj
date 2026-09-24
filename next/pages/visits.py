@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING
 from django.http import QueryDict
 from django.urls import get_script_prefix
 
+from next.utils import decode_url_path
+
 
 if TYPE_CHECKING:
     from django.http import HttpRequest
@@ -26,6 +28,7 @@ def visit_request(request: "HttpRequest", url: str | None) -> "HttpRequest":
     visit.POST = QueryDict()
     visit.resolver_match = None
     if path:
+        path = decode_url_path(path)
         info = _path_info(path)
         meta["PATH_INFO"] = info
         visit.path = path

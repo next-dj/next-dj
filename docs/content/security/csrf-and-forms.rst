@@ -33,21 +33,18 @@ A value that fails the checks yields no origin match, which blocks nothing by it
 
 The value passes the same-site test only when all of the following hold.
 
-- The posted value is a string.
+- The posted value is a string of at most 16384 characters, counted before the strip, so an oversized value is refused without a scan.
 - Its surrounding whitespace is stripped before any other test runs.
-- :func:`django.utils.http.url_has_allowed_host_and_scheme` accepts it against the host of the request in flight, with ``require_https`` following ``request.is_secure()``.
-  Django owns the host and scheme rule, so a fix there reaches the origin field with no framework change.
-  A request that carries no host, such as one built in code, allows no host at all rather than allowing every one.
+- It starts with a single ``/`` followed by neither a second slash nor a backslash, so ``//evil.example`` and ``/\evil.example`` are refused as protocol-relative.
+  The rule is path-only and reads no host or scheme, so even an absolute URL naming this host is refused.
 - It contains no tab, no line feed, and no carriage return, because a browser drops those three code points before it resolves a URL and a value the check read as same-site would become a jump off site.
-- It starts with a single ``/`` once every backslash is read as a forward slash, so ``/\evil.example`` is refused as protocol-relative.
-  The path-only rule sits on top of Django's helper, so even an absolute URL naming this host is refused.
 
-The value must then resolve against the URLconf through :func:`django.urls.resolve`, and the resolved view must carry the ``next_page_path`` attribute the file router sets on every routed page.
+The value must then resolve against the URLconf through :func:`django.urls.resolve`, its path decoded the way Django builds ``request.path`` and refused again when decoding turns it protocol-relative, and the resolved view must carry the ``next_page_path`` attribute the file router sets on every routed page.
 The client therefore never names a file, and a re-render can target only pages that are already reachable through the routing table.
 A re-render whose field fails these checks returns HTTP 400.
 
 On the success path the same field feeds ``redirect_to_origin`` without URLconf resolution.
-A missing or off-site value never blocks a successful dispatch, ``redirect_to_origin`` falls back to ``/``.
+A missing or off-site value never blocks a successful dispatch, ``redirect_to_origin`` falls back to ``/``, and so does an origin longer than Django allows in a redirect ``Location``.
 Handlers can call ``redirect_to_origin`` from ``next.forms`` to redirect back to the page that rendered the form.
 
 Manual forms

@@ -202,6 +202,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
   function wireDeps(adapters?: PartialAdapters) {
     return {
       ...opt("fetch", adapters?.fetch),
+      ...opt("document", adapters?.document),
       ...opt("navigate", adapters?.navigate),
       // The same reload-once store the asset guard uses.
       ...opt("session", adapters?.session),

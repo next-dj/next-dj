@@ -4,10 +4,11 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, overload
 
-from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
+from django.http import HttpRequest, HttpResponse
 from django.utils.http import url_has_allowed_host_and_scheme
 
 from next.forms.origin import resolve_origin, resolve_url_to_page
+from next.forms.uid import redirect_or_fallback, validated_origin_path
 from next.pages import page as page_manager
 from next.seeding import JS_CONTEXT_KEY
 from next.static.assets import default_kinds
@@ -496,7 +497,7 @@ class Patches:
     def response(self, fallback: str | None = None) -> "PatchResponse | HttpResponse":
         """Assemble the response for the current request.
 
-        Without the partial switch, falls back to a 303 to the origin or to `fallback`.
+        Without the partial switch, 303s to the origin or `fallback`, to `/` if refused.
         """
         request = self._request
         if request is not None and is_partial_request(request):
@@ -506,7 +507,7 @@ class Patches:
                 body, content_type=backend.content_type, version=self._version
             )
         target = self._fallback_target(fallback)
-        return HttpResponseRedirect(target, status=_SEE_OTHER)
+        return redirect_or_fallback(target, "/", status=_SEE_OTHER)
 
     def _fallback_target(self, fallback: str | None) -> str:
         """Return the validated no-runtime redirect target.
@@ -638,8 +639,13 @@ class Patches:
         return self
 
     def _is_same_site(self, href: str) -> bool:
-        """Return True when `href` targets the bound request's host and scheme."""
+        """Return True when `href` targets the bound request's host and scheme.
+
+        A path the origin rule admits is same-site past Django's 2048-character URL cap.
+        """
         request = self._require_request()
+        if validated_origin_path(href) is not None:
+            return True
         allowed = {request.get_host()}
         return url_has_allowed_host_and_scheme(
             href, allowed_hosts=allowed, require_https=request.is_secure()

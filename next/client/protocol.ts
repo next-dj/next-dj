@@ -26,7 +26,7 @@ export const ATTR_KEY = "data-next-key";
 
 /** A partial:error, a discriminated union so a listener branches on kind. */
 export type PartialError =
-  | { kind: "network"; error: unknown }
+  | { kind: "network"; url?: string; error: unknown }
   | { kind: "http"; status: number; body: string }
   | { kind: "parse"; body: string; error: unknown }
   | { kind: "op"; op: string; target?: string; error: unknown }
@@ -65,6 +65,18 @@ export function cssEscape(value: string): string {
 /** The URL the page is on, pathname plus search, so a query survives a re-GET. */
 export function currentUrl(doc: Document): string {
   return doc.location.pathname + doc.location.search;
+}
+
+/** Resolve `url` on the page's origin, a leading `//` read as a path, or undefined off it. */
+export function sameOrigin(url: string, doc: Document): string | undefined {
+  const origin = doc.location.origin;
+  let target: URL;
+  try {
+    target = url.startsWith("/") ? new URL(origin + url) : new URL(url, doc.baseURI);
+  } catch {
+    return undefined;
+  }
+  return target.origin === origin ? target.href : undefined;
 }
 
 /** Match a selector across a subtree, folding in the root when it matches too. */

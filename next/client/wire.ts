@@ -9,6 +9,7 @@ import {
   HEADER_VERSION,
   HEADER_ZONE,
   REQUEST_FLAG,
+  sameOrigin,
 } from "./protocol";
 import type { PartialError } from "./protocol";
 import { defaultFetch, defaultNavigate, defaultSession } from "./adapters";
@@ -78,6 +79,7 @@ export type ParseHook = (response: Response, body: string) => unknown;
 /** Injected collaborators for a Wire, all defaulted for the browser. */
 export interface WireDeps {
   fetch?: FetchAdapter;
+  document?: Document;
   navigate?: Navigate;
   // The navigate-once store of the non-envelope fallback. Absent, the default
   // wraps sessionStorage, the same store the version guard writes to.
@@ -114,6 +116,7 @@ function newRequestId(): string {
 /** Shapes requests, classifies responses, and queues them per target. */
 export class Wire {
   readonly #fetch: FetchAdapter;
+  readonly #document: Document;
   readonly #navigate: Navigate;
   readonly #session: SessionStore;
   readonly #dispatch: (event: string, detail: Record<string, unknown>) => void;
@@ -130,6 +133,7 @@ export class Wire {
 
   constructor(deps: WireDeps) {
     this.#fetch = deps.fetch ?? defaultFetch();
+    this.#document = deps.document ?? document;
     this.#navigate = deps.navigate ?? defaultNavigate();
     this.#session = deps.session ?? defaultSession();
     this.#dispatch = deps.dispatch;
@@ -175,6 +179,15 @@ export class Wire {
 
   /** Shape, queue or lock, send, and classify a single request. */
   async fetch(request: WireRequest): Promise<void> {
+    const target = sameOrigin(request.url, this.#document);
+    if (target === undefined) {
+      this.#dispatch("partial:error", {
+        kind: "network",
+        url: request.url,
+        error: new Error("cross-origin request refused"),
+      } satisfies PartialError);
+      return;
+    }
     const method = (request.method ?? "GET").toUpperCase();
     const safe = SAFE_METHODS.has(method);
     const uid = request.uid;
@@ -188,7 +201,7 @@ export class Wire {
     const queueKey = this.#queueKey(request, safe);
     const entry = queueKey !== undefined ? this.#enqueue(queueKey) : undefined;
     try {
-      await this.#run(request, method, queueKey, entry);
+      await this.#run(request, target, method, queueKey, entry);
     } finally {
       if (locked) {
         this.#busy.delete(uid);
@@ -224,12 +237,13 @@ export class Wire {
 
   async #run(
     request: WireRequest,
+    target: string,
     method: string,
     queueKey: string | undefined,
     entry: QueueEntry | undefined,
   ): Promise<void> {
     const headers = this.#headers(request, method);
-    const init: RequestInit = { method, headers };
+    const init: RequestInit = { method, headers, mode: "same-origin" };
     if (request.body !== undefined) init.body = request.body;
     if (entry !== undefined) init.signal = entry.controller.signal;
     // Snapshot the dirty counter before the request leaves: a field touched
@@ -242,7 +256,7 @@ export class Wire {
     });
     let response: Response;
     try {
-      response = await this.#fetch(request.url, init);
+      response = await this.#fetch(target, init);
     } catch (error) {
       // AbortError is never an error: the user moved on, no toast, no event.
       if (isAbortError(error)) return;
@@ -260,11 +274,12 @@ export class Wire {
     ) {
       return;
     }
-    await this.#classify(request, method, response, snapshot);
+    await this.#classify(request, target, method, response, snapshot);
   }
 
   async #classify(
     request: WireRequest,
+    target: string,
     method: string,
     response: Response,
     snapshot: number,
@@ -272,7 +287,7 @@ export class Wire {
     // 409 on a safe method means an asset version mismatch with an empty body:
     // the runtime does a full visit of the current URL, nothing else.
     if (response.status === 409 && SAFE_METHODS.has(method)) {
-      this.#navigate(response.url || request.url);
+      this.#navigate(response.url || target);
       return;
     }
     if (response.status >= 500) {
@@ -299,7 +314,7 @@ export class Wire {
     // mutation the URL is the action endpoint, so navigating there would 405.
     if (baseType !== CONTENT_TYPE || response.redirected) {
       if (response.redirected || SAFE_METHODS.has(method)) {
-        this.#fallbackNavigate(response.url || request.url);
+        this.#fallbackNavigate(response.url || target);
         return;
       }
       const body = await this.#text(response);

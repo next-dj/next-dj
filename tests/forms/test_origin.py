@@ -53,6 +53,15 @@ class TestResolveOrigin:
         assert match.origin == "/items/7/?q=x"
         assert match.url_kwargs == {"id": 7}
 
+    def test_encoded_question_mark_stays_in_its_segment(
+        self, mock_http_request
+    ) -> None:
+        req = mock_http_request(method="POST", POST=_origin_post("/groups/a%3Fb/?q=x"))
+        match = resolve_origin(req)
+        assert match is not None
+        assert match.url_kwargs == {"name": "a?b"}
+        assert match.origin == "/groups/a%3Fb/?q=x"
+
     def test_missing_post_attribute_yields_none(self) -> None:
         class NoPost:
             pass

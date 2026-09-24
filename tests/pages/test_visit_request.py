@@ -37,6 +37,11 @@ class TestVisitRequestPresentsTheOriginUrl:
         visit = visit_request(dispatch_post, "/notes/?page=2")
         assert (visit.path, visit.path_info) == ("/notes/", "/notes/")
 
+    def test_encoded_path_decodes_like_request_path(self, dispatch_post) -> None:
+        visit = visit_request(dispatch_post, "/groups/a%3Fb/?q=1")
+        assert (visit.path, visit.path_info) == ("/groups/a?b/", "/groups/a?b/")
+        assert visit.GET.dict() == {"q": "1"}
+
     def test_full_path_reassembles_the_url(self, dispatch_post) -> None:
         visit = visit_request(dispatch_post, "/notes/?page=2")
         assert visit.get_full_path() == "/notes/?page=2"

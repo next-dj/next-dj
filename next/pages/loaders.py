@@ -9,7 +9,9 @@ import contextlib
 import functools
 import importlib.util
 import logging
+import threading
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, override
 
 from django.core.signals import setting_changed
@@ -43,126 +45,134 @@ logger = logging.getLogger(__name__)
 _BODY_SLOT = "\x00next-page-body\x00"
 
 
-_LAST_LOAD_ERROR: dict[Path, tuple[float, Exception]] = {}
+@dataclass(frozen=True, slots=True)
+class _PageLoad:
+    """One execution of a `page.py`, pinned to the nanosecond mtime it ran against.
+
+    The module and the failure share one entry, so no racing load can pair them apart.
+    """
+
+    mtime_ns: int
+    module: types.ModuleType | None
+    error: Exception | None
+
+
+_MODULE_MEMO: BoundedCache[Path, _PageLoad] = BoundedCache()
+_FAILED_PATHS: set[Path] = set()
+_MEMO_WRITE_LOCK = threading.Lock()
 
 
 def has_load_errors() -> bool:
-    """Whether any `page.py` import failure is on record.
+    """Whether the latest load of any `page.py` failed.
 
-    The per-request fail-loud probe asks this first, so a healthy deployment
-    pays one dict read instead of a `stat` per request.
+    Asked first by the per-request fail-loud probe, so a healthy site pays no `stat`.
     """
-    return bool(_LAST_LOAD_ERROR)
-
-
-def _record_load_error(file_path: Path, exc: Exception, mtime: float | None) -> None:
-    """Remember the import failure keyed by the mtime taken before exec.
-
-    A `None` mtime means the file vanished before executing, so any stale record is
-    dropped instead of binding the failure to a file that no longer exists.
-    """
-    if mtime is None:
-        _LAST_LOAD_ERROR.pop(file_path, None)
-        return
-    _LAST_LOAD_ERROR[file_path] = (mtime, exc)
+    return bool(_FAILED_PATHS)
 
 
 def last_load_error(file_path: Path) -> PageModuleImportError | None:
-    """Return the recorded import failure while `file_path` is unchanged on disk.
+    """Return the import failure of the `page.py` at `file_path`, loading it when stale.
 
-    Wraps the stored cause in a fresh `PageModuleImportError` each call, since
-    re-raising one instance would grow its traceback per request.
+    Wrapped afresh per call, since a re-raised instance grows its traceback per request.
     """
-    entry = _LAST_LOAD_ERROR.get(file_path)
-    if entry is None:
-        return None
-    try:
-        mtime = file_path.stat().st_mtime
-    except OSError:
-        # The file is gone, so nothing can import it again to clear this.
-        _LAST_LOAD_ERROR.pop(file_path, None)
-        return None
-    if mtime != entry[0]:
-        # A rewrite the memo has not executed yet, and the record belongs to
-        # the source that failed, not to what sits there now.
-        _LAST_LOAD_ERROR.pop(file_path, None)
-        return None
+    return load_page_module(file_path)[1]
+
+
+def load_page_module(
+    file_path: Path,
+) -> tuple[types.ModuleType | None, PageModuleImportError | None]:
+    """Return the module now at `file_path` and its import failure from one load.
+
+    A guard reading both in two calls could pair a failure with a later fixed module.
+    """
+    load = _page_load(file_path)
+    if load is None or load.error is None:
+        return (None if load is None else load.module), None
     error = PageModuleImportError(file_path)
-    error.__cause__ = entry[1]
-    return error
+    error.__cause__ = load.error
+    return None, error
 
 
 def _load_python_module(file_path: Path) -> types.ModuleType | None:
-    """Load `file_path` as a module or return `None` on failure.
+    """Execute `file_path` as a fresh module, raising whatever its body raises.
 
-    Whatever the module body raises is recorded through `_record_load_error`, so callers
-    tell a broken `page.py` from an absent one via `last_load_error`.
+    `None` means importlib knows no loader for the suffix of `file_path`.
     """
-    try:
-        spec = importlib.util.spec_from_file_location("page_module", file_path)
-        if not spec or not spec.loader:
-            return None
-        module = importlib.util.module_from_spec(spec)
-    except OSError as e:
-        logger.debug("Could not load module %s: %s", file_path, e)
+    spec = importlib.util.spec_from_file_location("page_module", file_path)
+    if spec is None or spec.loader is None:
         return None
-    # The mtime is taken before exec so a failure is recorded against the
-    # file that actually executed, not a rewrite landing mid-import.
-    try:
-        mtime: float | None = file_path.stat().st_mtime
-    except OSError:
-        mtime = None
-    try:
-        spec.loader.exec_module(module)
-    except Exception as exc:
-        if mtime is None:
-            # An unstatable file raises from exec too, and that is the
-            # legitimately absent case, not a broken module body.
-            logger.debug("Could not load module %s: %s", file_path, exc)
-        else:
-            logger.exception("Could not import page module %s", file_path)
-        _record_load_error(file_path, exc, mtime)
-        return None
-    else:
-        _LAST_LOAD_ERROR.pop(file_path, None)
-        return module
-
-
-_MODULE_MEMO: BoundedCache[Path, tuple[int, types.ModuleType | None]] = BoundedCache()
-
-
-def _load_python_module_memo(file_path: Path) -> types.ModuleType | None:
-    """Return `_load_python_module(file_path)` memoised by nanosecond mtime.
-
-    The absent `page.py` of a template-only page does not stat and answers `None` as is.
-    """
-    mtime = stat_mtime_ns(file_path)
-    if mtime is None:
-        _MODULE_MEMO.pop(file_path)
-        _LAST_LOAD_ERROR.pop(file_path, None)
-        return None
-
-    cached = _MODULE_MEMO.get(file_path)
-    if cached is not None and cached[0] == mtime:
-        # Left where it sits, because this answers up to three times per URL
-        # dispatch and the bound is there to cap memory, not to rank pages.
-        return cached[1]
-
-    module = _load_python_module(file_path)
-    _MODULE_MEMO[file_path] = (mtime, module)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
     return module
 
 
-def reset_module_memo() -> None:
-    """Drop every memoised module so the next load re-executes from disk.
+def _remember(file_path: Path, load: _PageLoad) -> None:
+    """Store `load` and keep the failure index in step with it.
 
-    The memo keys by mtime, so a rewrite landing on the same tick would otherwise return
-    a stale module. Recorded import failures share that lifecycle and go with it.
+    Ordered so a lock-free read never finds a memoised failure missing from the index.
     """
-    # Errors go first, so a load racing this reset can at worst leave a fresh
-    # memo entry behind, never a memoised failure without its recorded error.
-    _LAST_LOAD_ERROR.clear()
-    _MODULE_MEMO.clear()
+    with _MEMO_WRITE_LOCK:
+        if load.error is None:
+            _MODULE_MEMO[file_path] = load
+            _FAILED_PATHS.discard(file_path)
+        else:
+            _FAILED_PATHS.add(file_path)
+            _MODULE_MEMO[file_path] = load
+
+
+def _forget(file_path: Path) -> None:
+    """Drop the entry of `file_path` and its place in the failure index together."""
+    with _MEMO_WRITE_LOCK:
+        _MODULE_MEMO.pop(file_path)
+        _FAILED_PATHS.discard(file_path)
+
+
+def _page_load(file_path: Path) -> _PageLoad | None:
+    """Return the load of `file_path` for its current mtime, executing it on a miss.
+
+    `None` stands for a file that does not stat, like the `page.py` of a template page.
+    """
+    mtime_ns = stat_mtime_ns(file_path)
+    if mtime_ns is None:
+        if file_path in _MODULE_MEMO or file_path in _FAILED_PATHS:
+            _forget(file_path)
+        return None
+
+    cached = _MODULE_MEMO.get(file_path)
+    if cached is not None and cached.mtime_ns == mtime_ns:
+        # Left where it sits, because this answers up to three times per URL
+        # dispatch and the bound is there to cap memory, not to rank pages.
+        return cached
+
+    try:
+        module = _load_python_module(file_path)
+    except Exception as exc:
+        if stat_mtime_ns(file_path) is None:
+            # Removed between the stat and the exec, so absent rather than broken.
+            _forget(file_path)
+            return None
+        logger.exception("Could not import page module %s", file_path)
+        load = _PageLoad(mtime_ns, None, exc)
+    else:
+        load = _PageLoad(mtime_ns, module, None)
+    _remember(file_path, load)
+    return load
+
+
+def _load_python_module_memo(file_path: Path) -> types.ModuleType | None:
+    """Return the module now at `file_path`, or `None` when it is absent or broken."""
+    load = _page_load(file_path)
+    return None if load is None else load.module
+
+
+def reset_module_memo() -> None:
+    """Drop every memoised load so the next one re-executes from disk.
+
+    A rewrite landing on the same mtime tick would otherwise return the stale module.
+    """
+    with _MEMO_WRITE_LOCK:
+        _MODULE_MEMO.clear()
+        _FAILED_PATHS.clear()
 
 
 def _pages_dirs_for_config(config: dict) -> list[Path]:

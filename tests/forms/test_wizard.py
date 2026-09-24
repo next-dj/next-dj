@@ -725,6 +725,11 @@ class TestWizardDoneContract:
         wizard = DemoWizard(request)
         assert wizard.base_path == "/wizard/identity/"
 
+    def test_default_base_path_is_percent_encoded(self) -> None:
+        """A `?` in a segment stays encoded, so a step URL keeps it in the path."""
+        wizard = DemoWizard(_request(path="/wizard/a%3Fb/identity/"))
+        assert wizard.base_path == "/wizard/a%3Fb/identity/"
+
 
 class TestEnsureSessionKey:
     """`_ensure_session_key` covers missing sessions, lazy create, bare requests."""

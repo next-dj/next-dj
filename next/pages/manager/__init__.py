@@ -22,7 +22,7 @@ from next.pages.loaders import (
     LayoutTemplateLoader,
     _load_python_module_memo,
     build_registered_loaders,
-    last_load_error,
+    load_page_module,
 )
 from next.pages.paths import clear_page_path_info, forget_page_path_info, page_path_info
 from next.pages.processors import _get_context_processors
@@ -385,8 +385,7 @@ class Page:
         passes `None` and leaves the live path in place. A page without a `render()`
         authorizes every caller, exactly as its own static view does, and loads no body.
         """
-        module = _load_python_module_memo(file_path)
-        error = last_load_error(file_path)
+        module, error = load_page_module(file_path)
         if error is not None:
             # Not Http404. A 404 would answer the caller's own URL instead of
             # the morph, and falling through would skip the page's guards.

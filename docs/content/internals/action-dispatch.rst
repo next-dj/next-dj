@@ -111,7 +111,7 @@ Modules
    A package of one-word submodules, ``actions``, ``config``, ``sources``, ``widgets``, and ``wizards``, holding the system checks that read the registration diagnostics and walk every configured backend.
 
 ``next.forms.uid``.
-   ``redirect_to_origin``, ``reverse_form_action``, and ``validated_origin_path`` helpers for the origin page round trip, plus the ``ORIGIN_FIELD_NAME`` wire constant and the ``FORM_ORIGIN_OVERRIDE_KEY`` render-context key the partial shaping layer sets on a wizard advance.
+   ``redirect_to_origin``, ``redirect_or_fallback``, ``reverse_form_action``, ``current_origin_path``, ``is_path_only``, ``validated_origin_path``, and ``posted_origin_path`` helpers for the origin page round trip, plus the ``MAX_ORIGIN_LENGTH`` cap, the ``ORIGIN_FIELD_NAME`` wire constant, and the ``FORM_ORIGIN_OVERRIDE_KEY`` render-context key the partial shaping layer sets on a wizard advance.
 
 ``next.forms.origin``.
    Resolution of the posted origin path into the page module and the typed URL kwargs, memoised per request.

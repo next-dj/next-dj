@@ -208,6 +208,8 @@ Request headers
 
 Client to server.
 All values are ASCII, and zone names are ASCII slugs.
+Every request goes to an absolute URL on the page's own origin with ``mode: "same-origin"``, so these headers never leave the site.
+A target off that origin is refused before any request leaves, with a ``partial:error`` of kind ``network``.
 
 .. list-table::
    :header-rows: 1
@@ -242,6 +244,8 @@ All values are ASCII, and zone names are ASCII slugs.
    * - ``X-Next-Origin``
      - Every layer request, the open GET, the accept re-GET, and a mutation submitted from a form inside the layer.
      - The path and query string of the page that hosts a layer, for a server-side morph of its zones.
+       The server validates the value as sent as a same-site path, then splits off the query and decodes the path as Django decodes ``request.path``.
+       A header that does not resolve to a page falls back to the posted form origin.
    * - CSRF header
      - Every unsafe method once the runtime holds a token
      - The name comes from ``CSRF_HEADER_NAME``, the token from the ``$csrf`` init payload and from any later rotation meta, the cookie is never read.
@@ -421,7 +425,7 @@ Lifecycle events
 The runtime fires events on three channels, the element, the document, and the ``Next.on`` bus.
 The ``next:*`` node events fire on the element as a bubbling ``CustomEvent`` caught with ``addEventListener``.
 The apply-stage ``partial:*`` events and ``next:toast`` fire on the document and the ``Next.on`` bus.
-A ``partial:error`` of kind ``asset``, raised when a co-located stylesheet fails to load or when the asset version still mismatches after the reload, reaches only the bus.
+A ``partial:error`` of kind ``asset``, raised when a co-located stylesheet fails to load, when the asset version still mismatches after the reload, or when the reload target sits off the page's origin, reaches only the bus.
 ``ready``, ``context-updated``, ``partial:before-request``, and the fetch-stage ``partial:error`` reach only the bus.
 The ``next:mounted``, ``next:removed``, and ``next:morph-*`` node events live only on ``document.addEventListener`` and never reach the bus, so ``Next.on("next:mounted")`` is a silent no-op.
 
@@ -456,11 +460,11 @@ The ``next:mounted``, ``next:removed``, and ``next:morph-*`` node events live on
    * - ``partial:error``
      - No
      - A discriminated union on ``kind``, where each cause carries only its own fields.
-       ``{kind: "network", error}`` is a fetch reject, a dropped stream connection, or a zone that still answers a non-envelope after the navigate-once fallback already navigated, with no status or body to report.
+       ``{kind: "network", error, url?}`` is a fetch reject, a dropped stream connection, a zone that still answers a non-envelope after the navigate-once fallback already navigated, or a target off the page's origin refused unsent, where ``url`` is present only on that refusal.
        ``{kind: "http", status, body}`` is a 5xx or a mutating reply that is not an envelope.
        ``{kind: "parse", body, error}`` is a malformed JSON body.
        ``{kind: "op", op, error, target?}`` is a thrown or unknown verb mid-apply, where ``op`` names the verb and ``target`` is the human-readable address of the patch, present only when the op carried a recognised target.
-       ``{kind: "asset", error, url?}`` is a stylesheet that failed to load or a version mismatch surviving a reload, where ``url`` is present only on a version mismatch.
+       ``{kind: "asset", error, url?}`` is a stylesheet that failed to load, a version mismatch surviving a reload, or a reload target off the page's origin, where ``url`` is present only on the last two.
        The ``status`` and ``body`` fields belong to ``http`` alone, and ``body`` also to ``parse``, so a listener branches on ``kind`` before reading them.
        An ``AbortError`` never reaches this event.
    * - ``partial:layer-opened``

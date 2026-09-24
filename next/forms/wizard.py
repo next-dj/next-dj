@@ -15,6 +15,7 @@ from django.core.cache import caches
 from django.core.exceptions import ImproperlyConfigured
 from django.db.models import Model
 from django.http import HttpRequest, HttpResponse
+from django.utils.encoding import escape_uri_path
 
 from next.backends import SingleBackendManager
 from next.conf.signals import settings_reloaded
@@ -352,7 +353,7 @@ class FormWizard:
         if base_path is not None:
             self.base_path = base_path
         else:
-            self.base_path = getattr(request, "path", "") or ""
+            self.base_path = escape_uri_path(getattr(request, "path", "") or "")
         self.wizard_id = _to_snake_case(type(self).__name__)
         # Read the class's own namespace so an unregistered subclass never
         # borrows the storage bucket of a registered ancestor.

@@ -7,8 +7,9 @@ from typing import TYPE_CHECKING, cast
 from django.urls import Resolver404, get_script_prefix, resolve
 
 from next.deps import RESERVED_KEYS
+from next.utils import decode_url_path
 
-from .uid import ORIGIN_FIELD_NAME, URL_NAME_FORM_ACTION, validated_origin_path
+from .uid import URL_NAME_FORM_ACTION, is_path_only, posted_origin_path
 
 
 if TYPE_CHECKING:
@@ -58,11 +59,11 @@ def resolve_url_to_match(
 ) -> "OriginMatch | None":
     """Resolve a same-site URL against the URLconf to a page identity.
 
-    The URL travels through the same URLconf the request uses, with the script prefix
-    stripped. Set `filter_reserved` to keep the captured URL kwargs raw when the caller
-    needs every captured parameter rather than only the DI-safe ones.
+    The path decodes like `request.path`, refused when it decodes protocol-relative.
     """
-    path = url.partition("?")[0]
+    path = decode_url_path(url.partition("?")[0])
+    if not is_path_only(path):
+        return None
     prefix = get_script_prefix()
     if prefix != "/" and path.startswith(prefix):
         path = "/" + path.removeprefix(prefix)
@@ -89,8 +90,7 @@ def resolve_url_to_page(url: str, request: "HttpRequest") -> "Path | None":
 
 def _resolve_origin_match(request: "HttpRequest") -> "OriginMatch | None":
     """Resolve the posted origin field against the URLconf."""
-    raw = request.POST.get(ORIGIN_FIELD_NAME) if hasattr(request, "POST") else None
-    origin = validated_origin_path(raw)
+    origin = posted_origin_path(request)
     if origin is None:
         return None
     return resolve_url_to_match(origin, request)

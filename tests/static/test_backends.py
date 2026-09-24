@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 from unittest import mock
 
@@ -32,6 +33,16 @@ CSS_URL = "https://cdn.example.com/site.css"
 JS_URL = "https://cdn.example.com/site.js"
 MJS_URL = "https://cdn.example.com/site.mjs"
 BREAKOUT_URL = '/static/a.css"><script>alert(1)</script>'
+
+
+class _UrlObject:
+    """A URL value a custom backend may answer with instead of a str."""
+
+    def __init__(self, url: str) -> None:
+        self._url = url
+
+    def __str__(self) -> str:
+        return self._url
 
 
 class _CollectingBackend(StaticBackend):
@@ -446,6 +457,19 @@ class TestTagTemplatesEscapeTheUrl:
         )
 
         assert getattr(backend, renderer)(f"/static/a.{suffix}?v=1&x=2") == expected
+
+    @pytest.mark.parametrize(
+        "url", [_UrlObject("/static/a.css?v=1&x=2"), PurePosixPath("/static/a.css")]
+    )
+    @pytest.mark.parametrize(
+        "renderer", ["render_link_tag", "render_script_tag", "render_module_tag"]
+    )
+    def test_a_non_str_url_renders_as_its_str(self, renderer, url) -> None:
+        backend = StaticFilesBackend()
+
+        rendered = getattr(backend, renderer)(url)
+
+        assert str(url).replace("&", "&amp;") in rendered
 
     def test_a_custom_tag_template_escapes_the_url_too(self) -> None:
         """The escape sits in the renderer, so a project template inherits it."""

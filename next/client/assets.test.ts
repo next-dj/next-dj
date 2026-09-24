@@ -791,7 +791,7 @@ describe("version safeguard and reload-once", () => {
     }
     made.versionMismatch("v1", "/here/");
     expect(made.versionMismatch("v2", "/here/")).toBe(true);
-    expect(navigate).toHaveBeenCalledWith("/here/");
+    expect(navigate).toHaveBeenCalledWith(`${location.origin}/here/`);
 
     const second = makeAssets({ navigate, session });
     second.assets.versionMismatch("v1", "/here/");
@@ -800,6 +800,26 @@ describe("version safeguard and reload-once", () => {
     expect(err!.detail.kind).toBe("asset");
     expect(err!.detail.url).toBe("/here/");
     expect(navigate).toHaveBeenCalledTimes(1);
+  });
+
+  it("reloads a double-slash page on its own origin", () => {
+    const navigate = vi.fn();
+    const { assets } = makeAssets({ navigate, session: memorySession() });
+    assets.versionMismatch("v1", "//attacker.example/x/");
+    expect(assets.versionMismatch("v2", "//attacker.example/x/")).toBe(true);
+    expect(navigate).toHaveBeenCalledWith(`${location.origin}//attacker.example/x/`);
+  });
+
+  it("refuses a reload that would leave the page's origin", () => {
+    const navigate = vi.fn();
+    const session = memorySession();
+    const made = makeAssets({ navigate, session });
+    made.assets.versionMismatch("v1", "/here/");
+    expect(made.assets.versionMismatch("v2", "https://attacker.example/")).toBe(true);
+    expect(navigate).not.toHaveBeenCalled();
+    const err = made.dispatched.find((d) => d.event === "partial:error");
+    expect(err!.detail.kind).toBe("asset");
+    expect(err!.detail.url).toBe("https://attacker.example/");
   });
 
   it("ignores an empty version on accept, keeping the known one", () => {

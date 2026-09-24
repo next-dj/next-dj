@@ -332,7 +332,7 @@ class AssetDiscovery:
         page_root = self._resolver.find_page_root(resolved)
         # Imported before the walk stats anything, because the import writes
         # `__pycache__` into the very directory the walk is about to snapshot.
-        lists = self._module_lists(resolved) if resolved.exists() else {}
+        lists = self._module_lists(resolved)
         walk = self._walk_layouts(resolved, page_root)
         files: list[FoundAsset] = []
         for layout_dir in walk.layouts:
@@ -422,11 +422,7 @@ class AssetDiscovery:
         registries = self._registry_generation()
         # Imported before the mtimes are taken, because the import writes
         # `__pycache__` into the folder the snapshot is about to read.
-        lists = (
-            self._module_lists(module_path)
-            if module_path is not None and module_path.exists()
-            else {}
-        )
+        lists = {} if module_path is None else self._module_lists(module_path)
         directories = [component_dir]
         module_dir = None if module_path is None else _resolved_parent(module_path)
         if module_dir is not None and module_dir != component_dir:

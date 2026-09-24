@@ -70,7 +70,8 @@ A redirect, a login bounce, or a denial the page already performs therefore stan
 
 A zone rendered for a page whose own view did not run carries the same check by another route.
 ``Patches.morph_zone`` re-runs the body resolution of the page the origin names, and ``Patches.morph_foreign_zone`` does the same for the page the handler names, both raising ``ForeignPageNotAuthorizedError`` when the requester may not render it, before the zone renders.
-The ``X-Next-Origin`` header is validated same-site before it is trusted, so a denial surfaces as that exception rather than a silent morph.
+The ``X-Next-Origin`` header is validated same-site before it is trusted and resolved with its path decoded like ``request.path``, so a denial surfaces as that exception rather than a silent morph.
+A header that names no page falls back to the posted form origin.
 
 htmx and Turbo place the same responsibility on the view the request reaches, which is the ordinary Django position and is neither better nor worse in itself.
 The difference is that the region to update is chosen in the template rather than derived from the page the server has already authorized.

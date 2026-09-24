@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import pytest
 from django.test import RequestFactory
 
+from next.forms.uid import MAX_ORIGIN_LENGTH
 from next.partial import Patches, PatchResponse, UnknownZoneError
 from next.partial.errors import (
     BuiltinPatchOpError,
@@ -19,6 +20,9 @@ from next.partial.errors import (
 from next.partial.headers import CONTENT_TYPE
 from next.static.scripts import CSRF_PAYLOAD_KEY, DEV_PAYLOAD_KEY
 from tests.support import partial_request, plain_request
+
+
+_OVERSIZE_GROUP_ORIGIN = "/groups/" + "\u044f" * 3000 + "/"
 
 
 class TestMorphZone:
@@ -301,6 +305,19 @@ class TestStandaloneVerbs:
             "href": "/next/",
         }
 
+    def test_push_url_admits_a_path_past_the_url_length_cap(self) -> None:
+        href = "/items/" + "a" * 2100 + "/"
+        envelope = Patches(partial_request()).push_url(href).envelope()
+        assert envelope.ops[0].as_dict()["href"] == href
+
+    def test_push_url_admits_an_absolute_same_host_href(self) -> None:
+        envelope = Patches(partial_request()).push_url("//testserver/items/").envelope()
+        assert envelope.ops[0].as_dict()["href"] == "//testserver/items/"
+
+    def test_push_url_refuses_a_path_past_the_origin_cap(self) -> None:
+        with pytest.raises(CrossSiteHrefError):
+            Patches(partial_request()).push_url("/" + "a" * MAX_ORIGIN_LENGTH)
+
     def test_push_url_raises_on_a_cross_site_host(self) -> None:
         with pytest.raises(CrossSiteHrefError) as exc:
             Patches(partial_request()).push_url("https://evil.example.com/x")
@@ -457,6 +474,24 @@ class TestResponse:
         request = RequestFactory().post("/loose/", data={})
         response = Patches(request).response()
         assert response["Location"] == "/loose/"
+
+    @pytest.mark.usefixtures("cap_redirects")
+    def test_origin_past_the_redirect_cap_falls_back_to_root(self) -> None:
+        response = Patches(plain_request(_OVERSIZE_GROUP_ORIGIN)).response()
+        assert response.status_code == 303
+        assert response["Location"] == "/"
+
+    @pytest.mark.usefixtures("cap_redirects")
+    def test_refused_origin_skips_an_offsite_fallback_for_root(self) -> None:
+        request = plain_request(_OVERSIZE_GROUP_ORIGIN)
+        response = Patches(request).response(fallback="//evil.example.com/")
+        assert response["Location"] == "/"
+
+    @pytest.mark.usefixtures("cap_redirects")
+    def test_fallback_past_the_redirect_cap_falls_back_to_root(self) -> None:
+        response = Patches(plain_request()).response(fallback=_OVERSIZE_GROUP_ORIGIN)
+        assert response.status_code == 303
+        assert response["Location"] == "/"
 
 
 class TestVersionBuilderCompatibility:

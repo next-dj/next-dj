@@ -132,7 +132,7 @@ class NextScriptBuilder:
         The optional `url` overrides the resolved runtime URL, which lets the
         static manager pass the answer of a request-aware backend.
         """
-        return self._preload_template.format(url=escape(url or self._url))
+        return self._preload_template.format(url=escape(str(url or self._url)))
 
     def script_tag(self, url: str | None = None) -> str:
         """Return the blocking script tag that executes `next.min.js`.
@@ -140,7 +140,7 @@ class NextScriptBuilder:
         The optional `url` overrides the resolved runtime URL, which lets the
         static manager pass the answer of a request-aware backend.
         """
-        return self._script_tag_template.format(url=escape(url or self._url))
+        return self._script_tag_template.format(url=escape(str(url or self._url)))
 
     def init_script(
         self,

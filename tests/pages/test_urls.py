@@ -281,7 +281,7 @@ class TestPageCreateUrlPattern:
         page_file = tmp_path / "page.py"
         page_file.write_text("template = 'body'")
         monkeypatch.setattr(
-            views_module, "_load_python_module_memo", lambda _path: None
+            views_module, "load_page_module", lambda _path: (None, None)
         )
 
         result = page_instance.create_url_pattern("test", page_file, URLPatternParser())

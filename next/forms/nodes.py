@@ -20,7 +20,7 @@ from next.forms.uid import (
     FORM_ORIGIN_OVERRIDE_KEY,
     ORIGIN_FIELD_NAME,
     current_origin_path,
-    validated_origin_path,
+    posted_origin_path,
 )
 from next.forms.widgets import bind_component_widgets
 from next.seeding import (
@@ -144,11 +144,7 @@ class FormNode(template.Node):
         override = context.get(FORM_ORIGIN_OVERRIDE_KEY)
         if override is not None:
             return str(override)
-        if getattr(request, "method", None) == "POST":
-            posted = validated_origin_path(request.POST.get(ORIGIN_FIELD_NAME))
-            if posted is not None:
-                return posted
-        return current_origin_path(request)
+        return posted_origin_path(request) or current_origin_path(request)
 
     def _opening_tag(
         self,

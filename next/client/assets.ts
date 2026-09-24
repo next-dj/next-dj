@@ -6,6 +6,7 @@
 import { defaultClock, defaultNavigate, defaultSession } from "./adapters";
 import { assetLoad, isAsset } from "./apply";
 import type { Asset, AssetLoad } from "./apply";
+import { sameOrigin } from "./protocol";
 import type { PartialError } from "./protocol";
 import type { Clock, Navigate } from "./wire";
 
@@ -292,6 +293,15 @@ export function createAssets(deps: AssetsDeps): Assets {
       knownVersion = envelopeVersion;
       return false;
     }
+    const target = sameOrigin(url, doc);
+    if (target === undefined) {
+      deps.dispatch("partial:error", {
+        kind: "asset",
+        url,
+        error: new Error("cross-origin reload refused"),
+      } satisfies PartialError);
+      return true;
+    }
     if (readFlag()) {
       // A reload already happened and the version still mismatches, so a stale
       // CDN is serving the old bundle. Degrade to plain navigation, no loop.
@@ -304,7 +314,7 @@ export function createAssets(deps: AssetsDeps): Assets {
       return true;
     }
     setFlag();
-    navigate(url);
+    navigate(target);
     return true;
   }
 

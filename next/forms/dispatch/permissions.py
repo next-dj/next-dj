@@ -10,7 +10,7 @@ from django.http import HttpResponse, HttpResponseRedirect, QueryDict
 from django.shortcuts import resolve_url
 
 from next.forms.signals import form_access_denied
-from next.forms.uid import ORIGIN_FIELD_NAME, validated_origin_path
+from next.forms.uid import posted_origin_path, redirect_or_fallback
 from next.pages import page
 
 from .build import _resolve_and_call
@@ -42,17 +42,16 @@ if TYPE_CHECKING:
 
 
 def _redirect_to_login(next_url: str) -> HttpResponseRedirect:
-    """Build the LOGIN_URL redirect carrying `next_url`.
+    """Build the LOGIN_URL redirect with `next_url`, dropped past the redirect cap.
 
-    Mirrors `django.contrib.auth.views.redirect_to_login` without importing that module,
-    whose `get_user_model()` call requires `django.contrib.auth` installed.
+    Mirrors Django's `redirect_to_login`, whose module needs `contrib.auth` installed.
     """
-    scheme, netloc, path, query, fragment = urlsplit(resolve_url(settings.LOGIN_URL))
+    login_url = resolve_url(settings.LOGIN_URL)
+    scheme, netloc, path, query, fragment = urlsplit(login_url)
     querystring = QueryDict(query, mutable=True)
     querystring[REDIRECT_FIELD_NAME] = next_url
-    return HttpResponseRedirect(
-        urlunsplit((scheme, netloc, path, querystring.urlencode(safe="/"), fragment))
-    )
+    target = (scheme, netloc, path, querystring.urlencode(safe="/"), fragment)
+    return redirect_or_fallback(urlunsplit(target), login_url)
 
 
 def _check_access(
@@ -65,8 +64,7 @@ def _check_access(
     """
     user = getattr(request, "user", None)
     if user is None or not user.is_authenticated:
-        origin = validated_origin_path(request.POST.get(ORIGIN_FIELD_NAME))
-        return _redirect_to_login(origin or "/")
+        return _redirect_to_login(posted_origin_path(request) or "/")
     if guard.permissions and not user.has_perms(guard.permissions):
         raise PermissionDenied
     return None

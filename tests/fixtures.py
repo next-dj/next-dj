@@ -2,13 +2,16 @@ from collections.abc import Generator
 from pathlib import Path
 
 import pytest
-from django.http import HttpRequest
+from django.core.exceptions import DisallowedRedirect
+from django.http import HttpRequest, HttpResponseRedirect
 from django.middleware.csrf import get_token
 from django.template.engine import Engine
 from django.test import override_settings
+from django.utils.encoding import iri_to_uri
 
 from next.checks import reset_check_caches
 from next.conf import NextFrameworkSettings, next_framework_settings
+from next.forms import uid
 from next.forms.wizard import SessionFormWizardBackend, wizard_backend_manager
 from next.pages import Page
 from next.pages.loaders import DjxTemplateLoader, PythonTemplateLoader
@@ -22,6 +25,25 @@ from tests.support import (
     build_mock_http_request,
     tick_scenario,
 )
+
+
+_REDIRECT_CAP = 16384
+
+
+class _CappedRedirect(HttpResponseRedirect):
+    """Refuse an encoded Location past the cap, as Django 5.2.9 and later do."""
+
+    def __init__(self, redirect_to: str, **kwargs: object) -> None:
+        if len(iri_to_uri(redirect_to)) > _REDIRECT_CAP:
+            msg = f"Unsafe redirect exceeding {_REDIRECT_CAP} characters"
+            raise DisallowedRedirect(msg)
+        super().__init__(redirect_to, **kwargs)
+
+
+@pytest.fixture()
+def cap_redirects(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give the shared redirect helper Django's Location cap on every version."""
+    monkeypatch.setattr(uid, "HttpResponseRedirect", _CappedRedirect)
 
 
 @pytest.fixture()
@@ -41,8 +63,7 @@ def _reload_next_framework_settings_after_test() -> Generator[None, None, None]:
 def _reset_check_caches() -> Generator[None, None, None]:
     """Drop the per-run check caches and the page module memo around each test.
 
-    A leaked ``_LAST_LOAD_ERROR`` would keep the unified view's fast-path
-    guard wrongly engaged for every test that runs after the one that set it.
+    A leaked ``_FAILED_PATHS`` would arm the fail-loud probe of every later test.
     """
     reset_check_caches()
     yield

@@ -15,6 +15,7 @@ from next.forms.origin import (
     filter_reserved_url_kwargs,
     resolve_origin,
 )
+from next.forms.uid import validated_origin_path
 from tests.support.helpers import build_mock_http_request
 
 
@@ -78,6 +79,17 @@ class TestBenchDispatchHelpers:
         first = resolve_origin(request)
         match = benchmark(resolve_origin, request)
         assert match is first
+
+
+class TestBenchOriginValidation:
+    @pytest.mark.benchmark(group="forms.origin")
+    def test_validated_origin_path(self, benchmark) -> None:
+        assert benchmark(validated_origin_path, "/items/42/?q=x") == "/items/42/?q=x"
+
+    @pytest.mark.benchmark(group="forms.origin")
+    def test_oversize_protocol_relative_value_refuses(self, benchmark) -> None:
+        """Refused on its length alone, so a megabyte value costs no scan."""
+        assert benchmark(validated_origin_path, "//" + "a" * 2_400_000) is None
 
 
 class _BenchForm(Form):

@@ -404,7 +404,7 @@ describe("trigger delegation", () => {
     document
       .querySelector("input")!
       .dispatchEvent(new Event("input", { bubbles: true }));
-    expect(replaceState).toHaveBeenCalledWith(null, "", "/c/?q=x");
+    expect(replaceState).toHaveBeenCalledWith(null, "", `${location.origin}/c/?q=x`);
     expect(pushState).not.toHaveBeenCalled();
     replaceState.mockRestore();
     pushState.mockRestore();

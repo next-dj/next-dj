@@ -12,8 +12,10 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import unquote_to_bytes
 
 from django.conf import settings
+from django.utils.encoding import repercent_broken_unicode
 
 from next.caches import DEFAULT_CACHE_SIZE
 from next.errors import InvalidDirsError
@@ -37,6 +39,14 @@ def normalise_route_name(raw_name: str) -> str:
     and the directory check both read the name through this one rule.
     """
     return raw_name.replace("-", "_")
+
+
+def decode_url_path(path: str) -> str:
+    """Return a percent-encoded URL path decoded the way Django builds `request.path`.
+
+    Decoded only once split from its query, so an encoded `?` stays in its segment.
+    """
+    return repercent_broken_unicode(unquote_to_bytes(path)).decode()
 
 
 @functools.lru_cache(maxsize=DEFAULT_CACHE_SIZE)

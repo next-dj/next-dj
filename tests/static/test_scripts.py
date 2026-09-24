@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from decimal import Decimal
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -155,6 +156,14 @@ class TestRuntimeTagsEscapeTheUrl:
         builder = NextScriptBuilder(BREAKOUT_URL)
 
         assert "<script>alert(1)</script>" not in getattr(builder, builder_tag)()
+
+    @pytest.mark.parametrize("builder_tag", ["preload_link", "script_tag"])
+    def test_a_non_str_url_renders_as_its_str(self, builder_tag) -> None:
+        builder = NextScriptBuilder(URL)
+
+        rendered = getattr(builder, builder_tag)(PurePosixPath("/pfx/next.min.js"))
+
+        assert '"/pfx/next.min.js"' in rendered
 
     def test_a_query_ampersand_renders_as_an_entity(self) -> None:
         builder = NextScriptBuilder(URL)

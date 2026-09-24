@@ -18,13 +18,13 @@ from next.pages.loaders import (
     PageModuleImportError,
     PythonTemplateLoader,
     TemplateLoader,
-    _load_python_module,
     _load_python_module_memo,
     _page_roots,
     build_registered_loaders,
     forget_page_roots,
     has_load_errors,
     last_load_error,
+    load_page_module,
     read_module_string_lists,
     reset_module_memo,
 )
@@ -1309,7 +1309,7 @@ def _loader_records(caplog, level: int) -> list[logging.LogRecord]:
 
 
 class TestPageModuleImportErrors:
-    """`_load_python_module` records broken imports for `last_load_error`."""
+    """The module memo records broken imports for `last_load_error`."""
 
     def test_syntax_error_records_error_and_logs_exception(
         self, tmp_path, caplog
@@ -1318,7 +1318,7 @@ class TestPageModuleImportErrors:
         page_file.write_text("def render( invalid syntax {\n")
 
         with caplog.at_level(logging.DEBUG, logger="next.pages.loaders"):
-            result = _load_python_module(page_file)
+            result = _load_python_module_memo(page_file)
 
         assert result is None
         assert len(_loader_records(caplog, logging.ERROR)) == 1
@@ -1332,7 +1332,7 @@ class TestPageModuleImportErrors:
         page_file = tmp_path / "page.py"
         page_file.write_text("import missing_dep_xyz\n")
 
-        assert _load_python_module(page_file) is None
+        assert _load_python_module_memo(page_file) is None
         error = last_load_error(page_file)
         assert isinstance(error, PageModuleImportError)
         assert type(error.__cause__) is ModuleNotFoundError
@@ -1342,7 +1342,7 @@ class TestPageModuleImportErrors:
         page_file = tmp_path / "page.py"
         page_file.write_text("import os\nos.definitely_missing_attribute\n")
 
-        assert _load_python_module(page_file) is None
+        assert _load_python_module_memo(page_file) is None
         error = last_load_error(page_file)
         assert isinstance(error, PageModuleImportError)
         assert isinstance(error.__cause__, AttributeError)
@@ -1364,43 +1364,57 @@ class TestPageModuleImportErrors:
         page_file = tmp_path / "page.py"
         page_file.write_text(source)
 
-        assert _load_python_module(page_file) is None
+        assert _load_python_module_memo(page_file) is None
         error = last_load_error(page_file)
         assert isinstance(error, PageModuleImportError)
         assert isinstance(error.__cause__, cause_type)
 
-    def test_spec_creation_oserror_stays_quiet_on_debug_level(
-        self, tmp_path, monkeypatch, caplog
-    ) -> None:
-        page_file = tmp_path / "page.py"
-        page_file.write_text("x = 1\n")
+    def test_an_absent_file_is_never_executed(self, tmp_path, monkeypatch) -> None:
+        """A file that does not stat answers `None` without reaching the loader."""
+        missing = tmp_path / "page.py"
+        executed: list[Path] = []
+        monkeypatch.setattr(loaders_module, "_load_python_module", executed.append)
 
-        def raising(name: str, location: object) -> Never:
-            raise OSError(name)
+        assert _load_python_module_memo(missing) is None
+        assert last_load_error(missing) is None
+        assert executed == []
 
-        monkeypatch.setattr(
-            loaders_module.importlib.util, "spec_from_file_location", raising
-        )
-        with caplog.at_level(logging.DEBUG, logger="next.pages.loaders"):
-            result = _load_python_module(page_file)
-
-        assert result is None
-        assert last_load_error(page_file) is None
-        assert _loader_records(caplog, logging.ERROR) == []
-        assert len(_loader_records(caplog, logging.DEBUG)) == 1
-
-    def test_nonexistent_file_stays_quiet_on_debug_level(
-        self, tmp_path, caplog
-    ) -> None:
+    def test_an_absent_file_logs_nothing(self, tmp_path, caplog) -> None:
         missing = tmp_path / "page.py"
 
         with caplog.at_level(logging.DEBUG, logger="next.pages.loaders"):
-            result = _load_python_module(missing)
+            assert _load_python_module_memo(missing) is None
 
-        assert result is None
-        assert last_load_error(missing) is None
         assert _loader_records(caplog, logging.ERROR) == []
-        assert len(_loader_records(caplog, logging.DEBUG)) == 1
+        assert _loader_records(caplog, logging.DEBUG) == []
+
+    def test_a_file_removed_before_exec_reads_as_absent(
+        self, tmp_path, monkeypatch, caplog
+    ) -> None:
+        reset_module_memo()
+        page_file = tmp_path / "page.py"
+        page_file.write_text("x = 1\n")
+
+        def vanish(path: Path) -> Never:
+            path.unlink()
+            raise FileNotFoundError(path)
+
+        monkeypatch.setattr(loaders_module, "_load_python_module", vanish)
+        with caplog.at_level(logging.DEBUG, logger="next.pages.loaders"):
+            assert load_page_module(page_file) == (None, None)
+
+        assert has_load_errors() is False
+        assert _loader_records(caplog, logging.ERROR) == []
+
+    def test_a_body_raising_file_not_found_stays_broken(self, tmp_path) -> None:
+        reset_module_memo()
+        page_file = tmp_path / "page.py"
+        page_file.write_text("open('/nonexistent-next-dj-probe/page.txt')\n")
+
+        error = last_load_error(page_file)
+
+        assert error is not None
+        assert isinstance(error.__cause__, FileNotFoundError)
 
     def test_successful_reload_after_fix_clears_error(self, tmp_path) -> None:
         page_file = tmp_path / "page.py"
@@ -1416,7 +1430,7 @@ class TestPageModuleImportErrors:
         assert module is not None
         assert module.template == "fixed"
         assert last_load_error(page_file) is None
-        assert page_file not in loaders_module._LAST_LOAD_ERROR
+        assert page_file not in loaders_module._FAILED_PATHS
 
     def test_memo_does_not_reexec_broken_module(
         self, tmp_path, monkeypatch, caplog
@@ -1436,10 +1450,10 @@ class TestPageModuleImportErrors:
         with caplog.at_level(logging.ERROR, logger="next.pages.loaders"):
             assert _load_python_module_memo(page_file) is None
             assert _load_python_module_memo(page_file) is None
+            assert last_load_error(page_file) is not None
 
         assert calls == [page_file]
         assert len(_loader_records(caplog, logging.ERROR)) == 1
-        assert last_load_error(page_file) is not None
 
     def test_memo_reexecutes_on_mtime_change_and_updates_error(self, tmp_path) -> None:
         page_file = tmp_path / "page.py"
@@ -1456,23 +1470,36 @@ class TestPageModuleImportErrors:
         second = last_load_error(page_file)
         assert type(second.__cause__) is ModuleNotFoundError
 
-    def test_last_load_error_stale_mtime_returns_none(self, tmp_path) -> None:
+    def test_last_load_error_answers_for_the_file_now_on_disk(self, tmp_path) -> None:
+        """A rewrite the memo has not seen is loaded, not judged by the old entry."""
         page_file = tmp_path / "page.py"
         page_file.write_text("def render( invalid syntax {\n")
-        assert _load_python_module(page_file) is None
+        assert _load_python_module_memo(page_file) is None
         assert last_load_error(page_file) is not None
 
-        # The file is fixed on disk but the memo has not re-read it yet.
         stamp = page_file.stat().st_mtime + 10
         page_file.write_text('template = "fixed"\n')
         os.utime(page_file, (stamp, stamp))
+
+        assert last_load_error(page_file) is None
+        assert has_load_errors() is False
+
+    def test_an_edit_inside_one_float_tick_is_seen(self, tmp_path) -> None:
+        """A nanosecond key sees a rewrite that a float mtime would round away."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text("def render( invalid syntax {\n")
+        assert _load_python_module_memo(page_file) is None
+        stamp_ns = page_file.stat().st_mtime_ns
+
+        page_file.write_text('template = "fixed"\n')
+        os.utime(page_file, ns=(stamp_ns + 1, stamp_ns + 1))
 
         assert last_load_error(page_file) is None
 
     def test_last_load_error_missing_file_returns_none(self, tmp_path) -> None:
         page_file = tmp_path / "page.py"
         page_file.write_text("def render( invalid syntax {\n")
-        assert _load_python_module(page_file) is None
+        assert _load_python_module_memo(page_file) is None
         assert last_load_error(page_file) is not None
 
         page_file.unlink()
@@ -1484,41 +1511,129 @@ class TestPageModuleImportErrors:
         reset_module_memo()
         page_file = tmp_path / "page.py"
         page_file.write_text("def render( invalid syntax {\n")
-        assert _load_python_module(page_file) is None
+        assert _load_python_module_memo(page_file) is None
         assert has_load_errors() is True
 
         page_file.unlink()
         assert last_load_error(page_file) is None
         assert has_load_errors() is False
 
-    def test_record_load_error_without_mtime_drops_entry(self, tmp_path) -> None:
+    def test_an_unlinked_broken_page_disarms_the_probe_through_the_memo(
+        self, tmp_path
+    ) -> None:
+        """The memo meeting the vanished file drops its failure along with its entry."""
+        reset_module_memo()
         page_file = tmp_path / "page.py"
         page_file.write_text("def render( invalid syntax {\n")
-        assert _load_python_module(page_file) is None
-        assert page_file in loaders_module._LAST_LOAD_ERROR
+        assert _load_python_module_memo(page_file) is None
+        assert has_load_errors() is True
 
-        # A file gone before the pre-exec stat has no mtime to key an entry by.
-        loaders_module._record_load_error(page_file, ValueError("boom"), None)
-        assert page_file not in loaders_module._LAST_LOAD_ERROR
+        page_file.unlink()
+        assert _load_python_module_memo(page_file) is None
+        assert has_load_errors() is False
+        assert page_file not in loaders_module._MODULE_MEMO
+
+    def test_an_evicted_failure_still_answers_for_its_file(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """A path the bound evicted is loaded again rather than read as healthy."""
+        monkeypatch.setattr(loaders_module, "_MODULE_MEMO", BoundedCache(1))
+        reset_module_memo()
+        broken = tmp_path / "broken.py"
+        broken.write_text("def render( invalid syntax {\n")
+        healthy = tmp_path / "healthy.py"
+        healthy.write_text("x = 1\n")
+        assert _load_python_module_memo(broken) is None
+        assert _load_python_module_memo(healthy) is not None
+        assert broken not in loaders_module._MODULE_MEMO
+
+        assert has_load_errors() is True
+        assert last_load_error(broken) is not None
+        assert _load_python_module_memo(healthy) is not None
+
+        broken.unlink()
+        assert _load_python_module_memo(broken) is None
+        assert has_load_errors() is False
+
+    def test_a_stale_absent_stat_cannot_split_a_failure_from_its_module(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """A load landing between a stale absent stat and its drop stays reported.
+
+        The broken load runs inside the patched stat, the way two threads interleave.
+        """
+        reset_module_memo()
+        page_file = tmp_path / "page.py"
+        page_file.write_text("def render( invalid syntax {\n")
+        real_stat = loaders_module.stat_mtime_ns
+
+        def stale_absent(path: Path) -> None:
+            monkeypatch.setattr(loaders_module, "stat_mtime_ns", real_stat)
+            assert _load_python_module_memo(path) is None
+            assert has_load_errors() is True
+
+        monkeypatch.setattr(loaders_module, "stat_mtime_ns", stale_absent)
+        assert _load_python_module_memo(page_file) is None
+
+        error = last_load_error(page_file)
+        assert isinstance(error, PageModuleImportError)
+        assert isinstance(error.__cause__, SyntaxError)
+        assert has_load_errors() is True
+
+    def test_load_page_module_pairs_module_and_error_from_one_load(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """A rewrite between two reads cannot pair a failure with a later module."""
+        reset_module_memo()
+        page_file = tmp_path / "page.py"
+        page_file.write_text("def render( invalid syntax {\n")
+        calls: list[Path] = []
+        real_page_load = loaders_module._page_load
+
+        def counting(path: Path) -> object:
+            calls.append(path)
+            return real_page_load(path)
+
+        monkeypatch.setattr(loaders_module, "_page_load", counting)
+        module, error = load_page_module(page_file)
+
+        assert module is None
+        assert isinstance(error, PageModuleImportError)
+        assert calls == [page_file]
+
+    def test_load_page_module_returns_a_healthy_module(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("template = 'body'\n")
+
+        module, error = load_page_module(page_file)
+
+        assert module is not None
+        assert module.template == "body"
+        assert error is None
+
+    def test_load_page_module_answers_nothing_for_an_absent_file(
+        self, tmp_path
+    ) -> None:
+        assert load_page_module(tmp_path / "page.py") == (None, None)
 
     def test_reset_module_memo_clears_recorded_errors(self, tmp_path) -> None:
         page_file = tmp_path / "page.py"
         page_file.write_text("def render( invalid syntax {\n")
         assert _load_python_module_memo(page_file) is None
-        assert last_load_error(page_file) is not None
+        assert has_load_errors() is True
 
         reset_module_memo()
 
-        assert loaders_module._LAST_LOAD_ERROR == {}
+        assert not loaders_module._FAILED_PATHS
         assert page_file not in loaders_module._MODULE_MEMO
-        assert last_load_error(page_file) is None
+        assert has_load_errors() is False
 
     def test_last_load_error_returns_fresh_instance_per_call(self, tmp_path) -> None:
         # A shared instance would grow its traceback on every re-raise, so
         # each call must wrap the one recorded cause in a new error object.
         page_file = tmp_path / "page.py"
         page_file.write_text("def render( invalid syntax {\n")
-        assert _load_python_module(page_file) is None
+        assert _load_python_module_memo(page_file) is None
 
         first = last_load_error(page_file)
         second = last_load_error(page_file)
@@ -1579,7 +1694,7 @@ class TestTheModuleMemoIsBounded:
         assert list(loaders_module._MODULE_MEMO) == [first, second]
 
     def test_a_file_that_does_not_stat_leaves_no_entry(self, tmp_path) -> None:
-        """A page that vanished is loaded from disk again rather than memoised."""
+        """A page that vanished answers `None` and drops the entry it left behind."""
         reset_module_memo()
         page_file = tmp_path / "page.py"
         page_file.write_text('template = "gone soon"\n')

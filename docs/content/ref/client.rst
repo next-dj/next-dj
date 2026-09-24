@@ -217,6 +217,7 @@ The partial surface
      - ``Promise<void>``
      - Send one partial request through the queues and the per-uid lock.
        Network, HTTP, and parse failures surface as ``partial:error`` rather than as a rejection.
+       The request goes to an absolute URL on the page's own origin with ``mode: "same-origin"``, and a URL off that origin is refused unsent with a ``partial:error`` of kind ``network``.
    * - ``defineOp(name: string, handler: OpHandler)``
      - ``void``
      - Register the client handler of a custom verb.

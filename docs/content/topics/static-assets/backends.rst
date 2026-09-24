@@ -126,7 +126,7 @@ The backend ships three renderer methods.
 Each method takes the URL and an optional ``request`` keyword.
 The default backend ignores ``request`` in every renderer and in ``asset_url``.
 
-All three escape the URL through :func:`django.utils.html.escape` before formatting it into their tag template.
+All three escape ``str(url)`` through the standard library :func:`html.escape` before formatting it into their tag template.
 A finished ``<link>`` or ``<script>`` is spliced into the document past the template engine, so the engine never gets the chance to escape what the tag carries and the escaping has to live in the renderer.
 An override takes that obligation on with the method, so a renderer building its own markup runs every interpolated value through :func:`django.utils.html.escape` itself.
 

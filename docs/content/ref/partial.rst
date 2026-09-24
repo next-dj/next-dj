@@ -179,6 +179,8 @@ Origin and authorization
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``resolve_partial_origin`` is a thin helper that reads the host page that owns a zone out of the same-site ``X-Next-Origin`` header, falling back to the posted form origin, so a ``done`` step can hand the path to ``morph(zone=, page=)`` for a server out-of-band swap.
+The header is validated as sent, percent-encoded like the form origin, and its path is decoded the way Django builds ``request.path`` only once split from the query, so an encoded ``?`` stays in its segment.
+A header that is absent, invalid, or names no page yields to the form origin.
 It stays importable from ``next.partial`` but sits in the Advanced tier, the canonical done choreography addresses the foreign zone through ``morph(zone=, page=, url_kwargs=)``.
 ``OriginSource``, which discriminates the two sources, lives in ``next.partial.origin``.
 
