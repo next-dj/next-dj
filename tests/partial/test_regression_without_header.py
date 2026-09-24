@@ -5,6 +5,7 @@ from django.test import Client, override_settings
 
 from next.conf.signals import settings_reloaded
 from next.partial import is_partial_request
+from next.partial.headers import VARY_HEADERS
 from next.testing import NextClient
 
 
@@ -35,11 +36,21 @@ class TestPageGetWithoutPartialSwitch:
         response = Client().get("/")
         assert is_partial_request(response.wsgi_request) is False
 
-    def test_content_type_and_vary_unchanged(self) -> None:
+    def test_content_type_unchanged(self) -> None:
         response = Client().get("/")
         assert response["Content-Type"] == "text/html; charset=utf-8"
-        assert response["Vary"] == "Cookie"
-        assert "X-Next-Request" not in response.get("Vary", "")
+
+    def test_vary_names_every_partial_negotiation_header(self) -> None:
+        # the full page and a later patch envelope share this URL, so a shared cache
+        # that ignored the switch would answer the partial request with the page
+        response = Client().get("/")
+        varied = {name.strip().lower() for name in response["Vary"].split(",")}
+        assert {name.lower() for name in VARY_HEADERS} <= varied
+
+    def test_vary_still_names_cookie(self) -> None:
+        response = Client().get("/")
+        varied = {name.strip().lower() for name in response["Vary"].split(",")}
+        assert "cookie" in varied
 
     def test_no_partial_response_headers_leak(self) -> None:
         response = Client().get("/")

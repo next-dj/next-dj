@@ -7,10 +7,6 @@ next.dj keeps Django underneath and replaces the wiring layer above it.
 This page maps the Django concepts a reader already knows onto their next.dj counterparts.
 Each row links to the page that owns the detail, so this page stays a lookup table rather than a second explanation.
 
-.. contents::
-   :local:
-   :depth: 2
-
 What next.dj replaces
 ---------------------
 
@@ -60,7 +56,7 @@ The left column names the Django idiom, the middle column names the shape that t
      - ``{% component "card" %}``, a folder carrying its own template, Python, CSS, and JS
      - :doc:`/content/topics/components`
    * - ``reverse("notes:detail", args=[note.id])``
-     - ``page_reverse("notes/[id]", id=note.id)``, with the generated ``next:page_...`` name still available to ``reverse``, though the tutorial keeps plain ``reverse``/``{% url %}`` for readers coming from Django
+     - ``page_reverse("notes/[int:id]", id=note.id)``
      - :doc:`/content/topics/url-reversing`
    * - ``django.test.Client``
      - ``NextClient``, a subclass that adds action and zone helpers
@@ -72,6 +68,9 @@ The left column names the Django idiom, the middle column names the shape that t
 The table maps shapes, not a mechanical rewrite.
 A ``FormView`` carries a URL, a view class, and a redirect target, and the next.dj replacement folds all three into one class declaration.
 :doc:`/content/topics/forms/overview` has a class-based-view mapping of its own that covers the remaining hooks.
+
+Every file-routed page also gets a generated ``next:page_...`` name that plain ``reverse`` and ``{% url %}`` accept, which is what the tutorial uses throughout.
+``page_reverse`` names the directory shape instead of the generated name, so a caller never spells the normalisation rule out by hand.
 
 What next.dj extends
 --------------------
@@ -85,7 +84,7 @@ Template context processors.
 
 Static files.
    ``django.contrib.staticfiles``, ``STATICFILES_DIRS``, ``{% static %}``, and ``collectstatic`` behave as in any Django project.
-   next.dj registers an extra finder that also serves the CSS and JS files sitting next to a page or a component, and injects their tags into the ``{% collect_styles %}`` and ``{% collect_scripts %}`` slots.
+   next.dj registers an extra finder that also serves the CSS and JS files sitting next to a page or a component, and injects their tags into the ``{% collect_styles %}`` and ``{% collect_scripts %}`` collector slots.
    See :doc:`/content/topics/static-assets/overview`.
 
 .. _intro-from-django-unchanged:

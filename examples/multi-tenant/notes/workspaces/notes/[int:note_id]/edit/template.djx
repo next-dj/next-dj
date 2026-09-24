@@ -24,9 +24,5 @@
         </button>
       </div>
     </div>
-
-    <aside class="space-y-2">
-      {% component "markdown_preview" rendered_html=preview_html label="Preview" %}
-    </aside>
   {% endform %}
 </div>

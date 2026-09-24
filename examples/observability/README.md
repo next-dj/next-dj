@@ -165,6 +165,8 @@ The environment variable puts `STORAGES["staticfiles"]` on `ManifestStaticFilesS
 
 The name picked up a content hash, the vendor URL did not, and the widget's co-located file picked one up too, because `next.static.NextStaticFilesFinder` exposes co-located assets to `collectstatic` under the same `next/` namespace the pipeline resolves them through. Writing `/static/dashboards/js/chart_theme.js` by hand in the same list produces that exact string instead. `collectstatic` copies the unhashed file next to the hashed one, so nothing breaks loudly. It is simply a URL that stays the same while the file behind it changes, which is the failure mode a long cache header turns into a support ticket. A name is what buys the hash, and the hash is what makes an asset URL safe to cache for a year.
 
+That manifest is also where the asset version of a partial response comes from, so this is the one example in the catalog that names no version anywhere. Under the profile the stamp follows the manifest hash and a `collectstatic` moves it, off the profile it falls back to a constant. The other examples serve their assets straight off disk with no manifest to read, so they name a release tag by hand.
+
 `TestManifestStorage` in [`tests/test_integration.py`](tests/test_integration.py) runs `collectstatic` into a temporary root under that profile and asserts the rendered page against it, so the hashing path is exercised by `make test-examples` rather than described here and left to rot. It also asserts that the collected tree holds no Python module, which is what lets the command above run without ignore flags.
 
 ### 5. The pluggable JS context serializer at three levels
@@ -203,7 +205,7 @@ The same `Next._init(...)` payload carries the keys the framework owns outright.
 
 ### 6. The receivers and the counter keys
 
-[obs/receivers.py](obs/receivers.py) wires the framework signals of eight subsystems. Every receiver delegates to `metrics.incr(kind, key)`, which bumps both the cumulative counter and the current minute bucket. The handlers stay thin because the example is a map between signal names and metric keys.
+[obs/receivers.py](obs/receivers.py) wires the framework signals of nine groups. Every receiver delegates to `metrics.incr(kind, key)`, which bumps both the cumulative counter and the current minute bucket. The handlers stay thin because the example is a map between signal names and metric keys.
 
 A counter is addressed by a `kind` and a `key`. When the interesting part of an event is its subject, the kind names the family and the key carries the subject — a page path, a component name, an action name. When the event is a bare occurrence, the kind is the group and the key is the signal name.
 
@@ -215,16 +217,18 @@ A counter is addressed by a `kind` and a `key`. When the interesting part of an 
 | urls | `route_registered` | `urls.route` | URL path |
 | urls | `router_reloaded` | `urls` | `router_reloaded` |
 | components | `component_registered`, `components_registered`, `component_rendered` | `components.registered`, `components.rendered` | component name |
-| components | `component_backend_loaded` | `components` | `backend_loaded` |
 | forms | `action_registered`, `action_dispatched`, `form_validation_failed` | `forms.action_registered`, `forms.action_dispatched`, `forms.validation_failed` | action name |
-| static | `asset_registered`, `backend_loaded`, `collector_finalized`, `html_injected` | `static` | `asset_registered`, `backend_loaded`, `collector_finalized`, `html_injected`, `injected_bytes_total` |
+| static | `asset_registered`, `collector_finalized`, `html_injected` | `static` | `asset_registered`, `collector_finalized`, `html_injected`, `injected_bytes_total` |
 | server | `watch_specs_ready` | `server` | `watch_specs_ready` |
+| backends | `component_backend_loaded`, `form_backend_loaded`, `partial_backend_loaded`, `router_backend_loaded`, `static_backend_loaded`, `wizard_backend_loaded` | `backends` | backend class name |
 
 The page signals carry an absolute path, so `page_key` in [obs/receivers.py](obs/receivers.py) rewrites it relative to `BASE_DIR` before it becomes a counter key. Without that step `/stats/pages/` would publish the machine's home directory in every row.
 
 `components_registered` is the bulk twin of `component_registered`, so its receiver loops over the payload and reuses the same kind. `page_rendered` feeds two counters: one render count and one accumulated `duration_ms_total`, floored to at least 1 so a sub-millisecond render still moves the total.
 
-Every group has at least one receiver. `TestSignalGroupsCovered` proves it by walking the dashboard and asserting that every signal in the table fires at least once. Three of them never fire on a plain render, so the test provokes a settings reload, a provider definition, and a watch-spec resolution inside the recorder window.
+The `backends` group is one receiver for six signals. Every settings-driven backend family — components, form actions, the form wizard, the file router, static assets, and partial rendering — announces a built backend through the same `config` and `instance` payload, so `on_backend_loaded` takes the tuple of all six and keys the counter by `type(instance).__name__`. Nothing in the handler knows which family sent it, which is the point: a new backend family joins the dashboard by being added to `BACKEND_LOADED_SIGNALS`.
+
+Every group has at least one receiver. `TestSignalGroupsCovered` proves it by walking the dashboard and asserting that every group in the table increments at least once. Three signals never fire on a plain render, so the test provokes a settings reload, a provider definition, and a watch-spec resolution inside the recorder window. The settings reload is also what re-arms the `backends` group: a manager builds its backends once and caches them until the settings version moves.
 
 ### 7. The filter form, time-bucketing, and `action_dispatched`
 
@@ -236,7 +240,7 @@ The form component lives under [`_widgets/filter_window/`](obs/dashboards/_widge
 
 ### 8. A project-defined patch verb, `metric-pulse`
 
-The live page on `/stats/` wraps its totals in a `{% zone "live-totals" %}` and passes the index-only `live_zone` context to the filter form, so the form there carries `data-next-target="live-totals"` and applies as a partial. `ObsConfig.ready` calls `register_patch_op("metric-pulse")`, which clears the `next.E066` check and earns the generic `op()` channel on the builder. A partial apply returns
+The live page on `/stats/` wraps its totals in a `{% zone "live-totals" %}` and passes the index-only `live_zone` context to the filter form, so the form there carries `data-next-target="live-totals"` and applies as a partial. `ObsConfig.ready` calls `register_patch_op("metric-pulse")`, which earns the generic `op()` channel on the builder — an unregistered verb is refused at build time with `UnknownPatchOpError`. Two system checks guard the registration itself: `next.E066` when a custom verb shadows a built-in, so the built-in would win on the wire and the custom handler would never run, and `next.E090` when the name is no valid verb token. A partial apply returns
 
 ```python
 Patches(request).morph(zone="live-totals").morph(zone="stats-window").op(

@@ -1,4 +1,8 @@
-"""System checks for the components subsystem."""
+"""System checks for the components subsystem.
+
+The ids are `next.E020`, `next.E021`, `next.E023`, `next.E031` to `next.E034`,
+`next.E055` to `next.E057`, `next.E075`, `next.E079`, `next.E080` and `next.E084`.
+"""
 
 from __future__ import annotations
 
@@ -21,6 +25,7 @@ from next.conf import next_framework_settings
 
 from .backends import ComponentsBackend
 from .context import component
+from .loading import last_load_error
 from .sources import get_components_manager
 
 
@@ -62,7 +67,7 @@ def _backend_class_errors(dotted: str, prefix: str) -> list[CheckMessage]:
             Error(
                 f"{prefix}.BACKEND is not a ComponentsBackend subclass.",
                 obj=settings,
-                id="next.E032",
+                id="next.E055",
             )
         ]
     return []
@@ -83,13 +88,13 @@ def _validate_single_component_backend(
     backend_path = config["BACKEND"]
     if not isinstance(backend_path, str):
         errors.append(
-            Error(f"{prefix}.BACKEND must be a string.", obj=settings, id="next.E032")
+            Error(f"{prefix}.BACKEND must be a string.", obj=settings, id="next.E056")
         )
     else:
         errors.extend(_backend_class_errors(backend_path, prefix))
     if not isinstance(config["DIRS"], list):
         errors.append(
-            Error(f"{prefix}.DIRS must be a list.", obj=settings, id="next.E032")
+            Error(f"{prefix}.DIRS must be a list.", obj=settings, id="next.E057")
         )
     if not isinstance(config["COMPONENTS_DIR"], str):
         errors.append(
@@ -222,9 +227,8 @@ def _root_scope_entries(
 def _resolution_is_ordering(first: _RootScopeEntry, second: _RootScopeEntry) -> bool:
     """Whether only registration order decides between two same-named components.
 
-    A `COMPONENT_BACKENDS` root and a page tree score alike, but the page tree wins as
-    a project-local override rather than by order, so only two roots of the same kind
-    with reachable scopes fall back to order.
+    A page tree beats a `COMPONENT_BACKENDS` root as a project-local override, so only
+    two roots of one kind with reachable scopes come down to order.
     """
     if first.everywhere != second.everywhere:
         return False
@@ -339,6 +343,36 @@ def check_component_py_no_pages_context(*args, **kwargs) -> list[CheckMessage]:
     return errors
 
 
+@register(NEXT, deploy=True)
+def check_component_module_imports(*args, **kwargs) -> list[CheckMessage]:
+    """Report a `component.py` that raises while importing (`next.E084`).
+
+    Importing every user module costs a full tree walk, so the check is a deployment
+    one and runs under `manage.py check --deploy` instead of on every command.
+    """
+    configs = next_framework_settings.COMPONENT_BACKENDS
+    if not isinstance(configs, list) or not configs:
+        return []
+
+    errors: list[CheckMessage] = []
+    for backend in _checked_backends():
+        for module_path in backend.import_component_modules():
+            error = last_load_error(module_path)
+            if error is None:
+                continue
+            errors.append(
+                Error(
+                    f"component.py at {module_path} failed to import "
+                    f"({type(error).__name__}: {error}). The render falls back "
+                    "to the template alone, so every @component.context of that "
+                    "module stays out of the body.",
+                    obj=str(module_path),
+                    id="next.E084",
+                )
+            )
+    return errors
+
+
 @register(NEXT)
 def check_component_context_registration_files(*args, **kwargs) -> list[CheckMessage]:
     """Flag a `@component.context` no component render collects (`next.E075`).
@@ -364,6 +398,7 @@ def check_component_context_registration_files(*args, **kwargs) -> list[CheckMes
 
 __all__ = [
     "check_component_context_registration_files",
+    "check_component_module_imports",
     "check_component_py_no_pages_context",
     "check_cross_root_component_name_conflicts",
     "check_duplicate_component_names",

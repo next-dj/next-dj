@@ -83,10 +83,10 @@ class TestBadEntries:
         assert _ids(messages) == ["next.E037"]
         assert isinstance(messages[0], Error)
 
-    def test_non_string_backend_emits_e037(self) -> None:
+    def test_non_string_backend_emits_e092(self) -> None:
         with override_settings(NEXT_FRAMEWORK={"STATIC_BACKENDS": [{"BACKEND": 123}]}):
             messages = check_static_backends(app_configs=None)
-        assert _ids(messages) == ["next.E037"]
+        assert _ids(messages) == ["next.E092"]
 
     def test_missing_module_emits_e036(self) -> None:
         with override_settings(
@@ -95,12 +95,12 @@ class TestBadEntries:
             messages = check_static_backends(app_configs=None)
         assert _ids(messages) == ["next.E036"]
 
-    def test_not_subclass_emits_e037(self) -> None:
+    def test_not_subclass_emits_e093(self) -> None:
         with override_settings(
             NEXT_FRAMEWORK={"STATIC_BACKENDS": [{"BACKEND": "builtins.dict"}]}
         ):
             messages = check_static_backends(app_configs=None)
-        assert _ids(messages) == ["next.E037"]
+        assert _ids(messages) == ["next.E093"]
 
     def test_duplicate_backend_emits_e038(self) -> None:
         with override_settings(
@@ -247,7 +247,7 @@ class TestJsContextSerializerCheck:
         ):
             messages = check_js_context_serializer()
         assert len(messages) == 1
-        assert messages[0].id == "next.W042"
+        assert messages[0].id == "next.W079"
         assert "Cannot import" in messages[0].msg
 
     def test_warns_when_target_is_not_a_class(self) -> None:
@@ -259,7 +259,7 @@ class TestJsContextSerializerCheck:
         ):
             messages = check_js_context_serializer()
         assert len(messages) == 1
-        assert messages[0].id == "next.W042"
+        assert messages[0].id == "next.W080"
         assert "not a class" in messages[0].msg
 
     def test_warns_when_instance_fails_protocol(self) -> None:
@@ -271,7 +271,7 @@ class TestJsContextSerializerCheck:
         ):
             messages = check_js_context_serializer()
         assert len(messages) == 1
-        assert messages[0].id == "next.W042"
+        assert messages[0].id == "next.W082"
         assert "JsContextSerializer protocol" in messages[0].msg
 
     def test_warns_when_instance_cannot_be_constructed(self) -> None:
@@ -281,12 +281,12 @@ class TestJsContextSerializerCheck:
         ):
             messages = check_js_context_serializer()
         assert len(messages) == 1
-        assert messages[0].id == "next.W042"
+        assert messages[0].id == "next.W081"
         assert "cannot be instantiated" in messages[0].msg
 
 
 class _Boom:
-    """Class whose constructor raises, used by the W042 test."""
+    """Class whose constructor raises, used by the instantiation-failure test."""
 
     def __init__(self) -> None:
         msg = "boom"
@@ -418,7 +418,7 @@ class TestReservedJsContextKeyCheck:
         assert "Rename the key." in messages[0].msg
 
     @pytest.mark.parametrize("key", ["$dev", "$csrf"])
-    def test_message_promises_no_environment_where_the_value_survives(
+    def test_message_scopes_the_loss_to_the_automatic_payload(
         self, tmp_path, key
     ) -> None:
         page_file = tmp_path / "page.py"
@@ -434,7 +434,11 @@ class TestReservedJsContextKeyCheck:
         assert _ids(messages) == ["next.W075"]
         assert f"'{key}'" in messages[0].msg
         assert f"The framework owns {key} on every render" in messages[0].msg
-        assert "never reaches window.Next.context" in messages[0].msg
+        assert (
+            "the automatically injected payload drops the registered value"
+            in messages[0].msg
+        )
+        assert "reaches window.Next.context" in messages[0].msg
         assert "DEBUG" not in messages[0].msg
 
     def test_component_registering_a_reserved_key_emits_w075(self, tmp_path) -> None:

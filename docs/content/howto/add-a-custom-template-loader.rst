@@ -90,7 +90,7 @@ Entries the framework cannot use are skipped at build time with a debug-level lo
 - A class already present in the chain is dropped, because the chain deduplicates by class and the same dotted path listed twice yields one instance.
 
 A skipped entry leaves the chain shorter than the list suggests and pages fall through to the next loader or to an empty body.
-``manage.py check`` is the loud report for the same misconfigurations, ``next.E042`` for a non-string entry and ``next.E043`` for a path that cannot be imported or a class that is not a ``TemplateLoader`` subclass.
+``manage.py check`` is the loud report for the same misconfigurations, ``next.E042`` for a non-string entry, ``next.E043`` for a dotted path that cannot be imported, and ``next.E089`` for a path that imports to something other than a ``TemplateLoader`` subclass.
 A duplicate entry is not reported by a check, so read the list itself when a loader you registered never runs.
 
 Verification

@@ -13,15 +13,17 @@ from django.template import Context, TemplateSyntaxError
 
 from next.forms import (
     ActionRegistration,
+    ComponentFileWidget,
     Form,
     FormActionBackend,
     FormActionNotFoundError,
     RegistryFormActionBackend,
 )
 from next.forms.manager import form_action_manager
-from next.forms.rendering import _ErrorRenderParams, render_form_page_with_errors
+from next.forms.nodes import FormNode
+from next.forms.rendering import ErrorRenderParams, render_form_page_with_errors
 from next.forms.wizard import FormWizard
-from next.templatetags.forms import FORM_KEY_ATTR, FORM_ZONE_ATTR, FormNode
+from next.partial.keys import FORM_KEY_ATTR, FORM_ZONE_ATTR
 from tests.forms.actions import SimpleForm
 
 
@@ -110,7 +112,7 @@ class TestRenderInvalidPage:
         html = render_form_page_with_errors(
             backend,
             request,
-            _ErrorRenderParams(
+            ErrorRenderParams(
                 action_name="unknown_action_xyz", form=form, url_kwargs={}
             ),
             PAGE_MODULE_FOR_FORM_TESTS,
@@ -124,7 +126,7 @@ class TestRenderInvalidPage:
         html = render_form_page_with_errors(
             backend,
             request,
-            _ErrorRenderParams(
+            ErrorRenderParams(
                 action_name="unknown_action_xyz", form=None, url_kwargs={}
             ),
             PAGE_MODULE_FOR_FORM_TESTS,
@@ -953,6 +955,21 @@ class TestFormTagMarkupIdentity:
         """A multipart form gains enctype="multipart/form-data" automatically."""
         html = self._render(
             form_engine, csrf_request, '{% form "upload_enctype_form" %}x{% endform %}'
+        )
+        assert 'enctype="multipart/form-data">' in html
+
+    def test_auto_enctype_for_component_file_widget_form(
+        self, form_engine, csrf_request
+    ) -> None:
+        """A form whose only file field uses ComponentFileWidget is multipart too."""
+
+        class ComponentUploadForm(Form):
+            doc = django_forms.FileField(widget=ComponentFileWidget("echo"))
+
+        html = self._render(
+            form_engine,
+            csrf_request,
+            '{% form "component_upload_form" %}x{% endform %}',
         )
         assert 'enctype="multipart/form-data">' in html
 

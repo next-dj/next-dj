@@ -17,6 +17,8 @@ Zones render synchronously
 A zone renders standalone over the full page context in one synchronous pass.
 There is no server-side suspense flush, so a slow zone holds the response rather than streaming a placeholder and a later patch.
 A ``lazy=`` zone defers its first render behind a placeholder, but the deferral is a separate client-driven round trip, not a server-held stream.
+That round trip is the runtime's, so a page without it shows the placeholder and nothing more.
+A lazy zone is the one zone mode with no server-rendered fallback, and content that has to reach a reader without JavaScript renders inline instead.
 
 Real time is server-sent events only
 ------------------------------------
@@ -24,20 +26,22 @@ Real time is server-sent events only
 The streaming transport is Server-Sent Events, one direction from server to client, see :doc:`sse`.
 There is no WebSocket transport, so client-to-server push over a persistent socket is outside the current model.
 A client that needs to send state changes uses the same forms and actions every page already has.
+The bridge that opens the stream is the runtime, so a page without it never subscribes and sees whatever its last full render carried.
 
 Polling zones are client-timed
 ------------------------------
 
 ``poll=`` is a client timer, not a server push.
 The runtime re-GETs the zone on the interval while the tab is visible, a hidden tab holds no timers, and the floor is one second.
+A page without the runtime renders the body once and never ticks, so a poll adds freshness rather than delivering the value.
 A change the server wants to announce the moment it happens is a stream's job, not a poll's.
 See the poll section of :doc:`zones`.
 
 One active backend
 ------------------
 
-``PARTIAL_BACKENDS`` activates its first entry and ignores the rest, so multi-backend selection is outside the model, see :doc:`reference`.
-A different wire format is a subclass of ``PartialProtocolBackend`` installed as the single entry, see :doc:`extending`.
+The wire format is a single project-wide choice rather than a per-request negotiation, so two protocol backends cannot serve one site.
+:doc:`reference` states the rule and the warning that reports a longer list, and :doc:`extending` shows the subclass that replaces the format.
 
 Scripts in patch HTML never run
 -------------------------------

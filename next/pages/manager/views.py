@@ -9,10 +9,10 @@ from django.urls import path
 
 from next.conf import fail_loudly, next_framework_settings
 from next.pages.loaders import (
-    _load_python_module_memo,
     build_registered_loaders,
     has_load_errors,
     last_load_error,
+    load_page_module,
 )
 from next.ports import partial_shaper_slot
 
@@ -79,7 +79,9 @@ def _static_view(page: Page, file_path: Path) -> Callable[..., HttpResponseBase]
             return shaper.zone_response(
                 file_path, request, intent, dynamic_body=False, url_kwargs=dict(kwargs)
             )
-        return HttpResponse(page.render(file_path, request, **kwargs))
+        response = HttpResponse(page.render(file_path, request, **kwargs))
+        shaper.set_vary(response)
+        return response
 
     return view
 
@@ -101,8 +103,7 @@ def _resolving_view(
         active_module = module
         if broken_at_build:
             # The memo re-reads by mtime and drops the error once the file imports.
-            active_module = _load_python_module_memo(file_path)
-            error = last_load_error(file_path)
+            active_module, error = load_page_module(file_path)
             if error is not None:
                 if fail_loudly():
                     raise error
@@ -128,7 +129,11 @@ def _resolving_view(
                 url_kwargs=dict(kwargs),
             )
         body = resolution.body if resolution.body is not None else ""
-        return HttpResponse(page._render_composed(file_path, body, request, **kwargs))
+        response = HttpResponse(
+            page._render_composed(file_path, body, request, **kwargs)
+        )
+        shaper.set_vary(response)
+        return response
 
     return view
 
@@ -157,9 +162,9 @@ def _page_view(page: Page, file_path: Path) -> Callable[..., HttpResponseBase] |
         if not _has_body_source(page, file_path, module=None):
             return None
         return unified_view(page, file_path, None)
-    module = _load_python_module_memo(file_path)
+    module, error = load_page_module(file_path)
     if module is None:
-        if last_load_error(file_path) is None:
+        if error is None:
             return None
         return unified_view(page, file_path, None, broken_at_build=True)
     if not _has_body_source(page, file_path, module):

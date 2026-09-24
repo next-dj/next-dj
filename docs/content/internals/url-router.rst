@@ -110,16 +110,24 @@ The resolver is rebuilt on settings reload, so the swap takes effect without a r
 Reload mechanics
 ----------------
 
-``router_manager.reload()`` does four things in order.
+``router_manager.reload()`` does five things in order.
 
 1. Bumps the version counter that invalidates the cached pattern concat and the resolver's route index.
-2. Rebuilds the backend list from ``PAGE_BACKENDS``.
-3. Clears the Django URL resolver cache.
-4. Emits the ``router_reloaded`` signal.
+2. Rebuilds the backend list from ``PAGE_BACKENDS``, sending ``router_backend_loaded`` once per entry the shared loader instantiates.
+3. Publishes the new list in one assignment, so a read racing the build never sees a partial one.
+4. Clears the Django URL resolver cache.
+5. Emits the ``router_reloaded`` signal.
 
-Steps three and four are skipped when the caller passes ``notify=False``, which is what a receiver of ``router_reloaded`` uses to reload the backends without re-entering its own signal.
+``notify=False`` suppresses three of those effects, the per-entry ``router_backend_loaded``, the URL-cache clear, and ``router_reloaded``.
+The version bump and the rebuild itself always happen, which is what lets a receiver of ``router_reloaded`` reload the backends without re-entering its own signal.
 The next request observes the new patterns without a process restart.
 Long lived processes such as websocket subscribers listen for the signal to refresh cached URL references.
+
+The manager also reloads on two signals of its own accord.
+A ``settings_reloaded`` receiver rebuilds the routers and drops the built URL resolver, so a new ``URL_RESOLVER`` or a new ``PAGE_BACKENDS`` list takes effect without a restart.
+A :data:`~django.test.signals.setting_changed` receiver rebuilds them whenever ``INSTALLED_APPS`` moves, because a file router memoises its per-application pattern lists under the application name alone and would otherwise serve the routes of the previous list.
+That second receiver is what makes :func:`~django.test.override_settings` over ``INSTALLED_APPS`` produce the routes of the swapped list.
+Both receivers call the notifying form, so each of them fires ``router_backend_loaded`` and ``router_reloaded`` as an explicit ``reload()`` does.
 
 Multiple backends
 -----------------
@@ -151,9 +159,18 @@ Extension points
 
 - Subclass ``RouterBackend`` to feed the resolver from a different source, or subclass ``FileRouterBackend`` to add patterns or augment naming on the file-based backend.
 - Reference a custom backend through its dotted path under ``PAGE_BACKENDS``, and take the entry as the single constructor argument.
+- Name a resolver class in ``NEXT_FRAMEWORK["URL_RESOLVER"]`` to replace the trie dispatch.
+  The value is a dotted path to a Django ``URLResolver`` subclass, which the manager instantiates with an empty route pattern and the lazy pattern sequence.
+  ``"django.urls.resolvers.URLResolver"`` restores the plain linear scan, and a subclass of ``TrieURLResolver`` keeps the index while changing the candidate order.
 - Subscribe to ``route_registered`` to observe each new pattern.
   It fires once per discovered pattern with ``sender=FileRouterBackend`` and the ``url_path`` and ``file_path`` keyword arguments.
-  See :doc:`/content/ref/signals`.
+- Subscribe to ``router_backend_loaded`` to observe each backend the manager builds.
+  It fires once per instantiated ``PAGE_BACKENDS`` entry with the resolved router class as sender and the ``config`` copy and the built ``instance`` as keyword arguments, so a receiver connected with ``sender=`` hears one backend family alone.
+  ``reload(notify=False)`` builds the backends without sending it.
+- Subscribe to ``router_reloaded`` to observe the rebuild itself, sent by the ``RouterManager`` class with no keyword arguments.
+
+The three signals above are the whole signal surface of the URL area.
+See :doc:`/content/ref/signals` for their payloads and :doc:`/content/topics/signals` for the wider catalog.
 
 See also
 --------

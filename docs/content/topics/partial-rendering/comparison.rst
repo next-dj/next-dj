@@ -68,9 +68,10 @@ The axis that separates them is how much of that enforcement comes for free.
 In next.dj a zone request is the same URL as the page, and the unified page view resolves the page body before it hands the request to the zone branch.
 A redirect, a login bounce, or a denial the page already performs therefore stands before any zone renders, without a second guard written for the partial path.
 
-Rendering a zone of a different page is the one case that leaves that path, and it carries its own check.
-``Patches.morph_foreign_zone`` re-runs the foreign page's body resolution and raises ``ForeignPageNotAuthorizedError`` when the requester may not render it, before the zone renders.
-The ``X-Next-Origin`` header is validated same-site before it is trusted, and the page it names is re-authorized through its own body resolution before its zone renders, so a denial surfaces as ``ForeignPageNotAuthorizedError`` rather than a silent morph.
+A zone rendered for a page whose own view did not run carries the same check by another route.
+``Patches.morph_zone`` re-runs the body resolution of the page the origin names, and ``Patches.morph_foreign_zone`` does the same for the page the handler names, both raising ``ForeignPageNotAuthorizedError`` when the requester may not render it, before the zone renders.
+The ``X-Next-Origin`` header is validated same-site before it is trusted and resolved with its path decoded like ``request.path``, so a denial surfaces as that exception rather than a silent morph.
+A header that names no page falls back to the posted form origin.
 
 htmx and Turbo place the same responsibility on the view the request reaches, which is the ordinary Django position and is neither better nor worse in itself.
 The difference is that the region to update is chosen in the template rather than derived from the page the server has already authorized.
@@ -81,7 +82,8 @@ Where the selector lives
 
 This is the axis where the models genuinely disagree.
 In next.dj a template declares an address with ``{% zone "name" %}``, the client sends zone names in ``X-Next-Zone``, and the server writes every target of every patch.
-A request naming a zone the page does not declare is a 400 before any render, and a verb no registry holds fails with ``UnknownPatchOpError`` rather than reaching the browser.
+A batch renders every declared name it carries and drops the rest, and only a batch in which no name is declared is a 400 before any render.
+A verb no registry holds fails with ``UnknownPatchOpError`` rather than reaching the browser.
 The single raw CSS selector a patch may carry is written by the server as an escape hatch, so no selector travels from the browser to the server at any point.
 The cost is that a new update surface is a template edit plus a handler, not an attribute.
 

@@ -15,89 +15,46 @@ Pytest lives alone in the opt-in ``next.testing.plugin`` module, which a project
 Choose the right helper
 -----------------------
 
-``next.testing`` groups its helpers into focused submodules.
-The table below maps each testing goal to the helper and the submodule that owns it.
+``next.testing`` groups its helpers into focused submodules, one per testing job.
 Every helper is importable from the ``next.testing`` package as well as from its own submodule, except the plugin options and fixtures, which pytest supplies once the plugin is loaded.
 
 .. list-table::
    :header-rows: 1
-   :widths: 40 40 20
+   :widths: 15 45 40
 
-   * - Goal
-     - Use
-     - Submodule
-   * - Load pages and clear the cache from ``pytest.ini``
-     - ``next_pages``, ``next_components``, ``next_clear_cache``
-     - ``plugin``
-   * - Take a ``NextClient`` as a pytest fixture
-     - ``next_client``
-     - ``plugin``
-   * - HTTP request to a page or action
-     - ``NextClient``
-     - ``client``
-   * - POST to a registered action by name
-     - ``NextClient.post_action``
-     - ``client``
-   * - Resolve an action name to its dispatch URL without posting
-     - ``NextClient.get_action_url``
-     - ``client``
-   * - GET a URL as a partial zone request
-     - ``NextClient.get_zones``
-     - ``client``
-   * - Decode a partial response for structural assertions
-     - ``envelope_of``
-     - ``client``
-   * - Inspect ops, targets, and assets of a patch envelope
-     - ``PartialEnvelope``
-     - ``client``
-   * - Render a page body without HTTP
-     - ``render_page``
-     - ``rendering``
-   * - Render a component in isolation
-     - ``render_component_by_name``
-     - ``rendering``
-   * - Assert on rendered HTML structure
-     - ``find_anchor``, ``assert_has_class``, ``assert_missing_class``
-     - ``html``
-   * - Read a form's target, fields, and bootstrap payload
-     - ``find_form``, ``form_action``, ``form_fields``, ``hidden_fields``, ``init_payload``
-     - ``html``
-   * - Capture one or more signals explicitly
-     - ``SignalRecorder`` or ``capture_signals``
-     - ``signals``
-   * - Capture every framework signal at once
-     - ``capture_framework_signals``
-     - ``signals``
-   * - Inspect a captured signal payload
-     - ``SignalEvent``
-     - ``signals``
-   * - Validate a form without HTTP
+   * - Submodule
+     - Helpers
+     - Use it for
+   * - ``client``
+     - ``NextClient``, ``envelope_of``, ``PartialEnvelope``
+     - HTTP against a page or an action, partial zone requests, and structural assertions on a patch envelope.
+   * - ``rendering``
+     - ``render_page``, ``render_component_by_name``
+     - Rendering a page body or a single component without an HTTP round trip.
+   * - ``html``
+     - ``find_anchor``, ``find_form``, ``form_action``, ``form_fields``, ``hidden_fields``, ``init_payload``, ``assert_has_class``, ``assert_missing_class``
+     - Asserting on rendered markup, on a form's target and fields, and on the bootstrap payload.
+   * - ``capture``
+     - ``SignalRecorder``, ``capture_signals``, ``capture_framework_signals``, ``SignalEvent``
+     - Recording signal emissions and reading their payloads.
+   * - ``actions``
      - ``build_form_for``, ``resolve_action_url``
-     - ``actions``
-   * - Temporarily override ``NEXT_FRAMEWORK`` or framework wiring
-     - ``override_next_settings``, ``override_dependency``, ``override_provider``, ``override_form_action``, ``override_component_backends``, ``patch_static_collector``
-     - ``patching``
-   * - Read the collector a patched block built
-     - ``StaticCollectorProxy``
-     - ``patching``
-   * - Unit-test a custom provider or resolver path
+     - Validating a form or resolving a dispatch URL without posting.
+   * - ``patching``
+     - ``override_next_settings``, ``override_dependency``, ``override_provider``, ``override_form_action``, ``override_component_backends``, ``patch_static_collector``, ``StaticCollectorProxy``
+     - Swapping settings, a dependency, a provider, an action, the component backends, or the static collector for one block.
+   * - ``deps``
      - ``resolve_call``, ``make_resolution_context``
-     - ``deps``
-   * - Force-import pages or components in tests
-     - ``eager_load_components``, ``eager_load_pages``, ``clear_loaded_dirs``
-     - ``loaders``
-   * - Reload backends after mutating settings or registries
-     - ``reset_registries`` (opt-in), or narrower ``reset_components`` / ``reset_form_actions``
-     - ``isolation``
-   * - Drop the page template cache after rewriting template files on disk
-     - ``reset_page_cache``
-     - ``isolation``
-   * - Drop the compiled component templates after rewriting a component on disk
-     - ``reset_component_templates``
-     - ``isolation``
-   * - Clear the form registries, diagnostics, and wizard backend
-     - ``reset_form_registration_state``
-     - ``isolation``
+     - Unit-testing a custom provider or resolver path.
+   * - ``loaders``
+     - ``eager_load_pages``, ``eager_load_components``, ``clear_loaded_dirs``
+     - Force-importing pages and components in a suite that skips the request cycle.
+   * - ``isolation``
+     - ``reset_registries``, ``reset_components``, ``reset_form_actions``, ``reset_form_registration_state``, ``reset_page_cache``, ``reset_component_templates``
+     - Reloading backends and dropping caches after mutating settings, registries, or files on disk.
+   * - ``plugin``
+     - ``next_pages``, ``next_components``, ``next_clear_cache``, ``next_client``
+     - The pytest ini options and the client fixture, once the plugin is loaded.
 
 See :doc:`/content/ref/testing` for generated signatures.
 
@@ -206,6 +163,7 @@ The page import happens in a session-scoped autouse fixture, which runs the ``@c
 The loader memoises each absolute directory, so listing the same root twice imports it once.
 
 ``next_components`` matters for a suite that renders components without going through HTTP, and for a project that sets ``LAZY_COMPONENT_MODULES = True`` in ``NEXT_FRAMEWORK``.
+It also registers the components folders the configured page trees carry, which a live registry otherwise holds only once a request has made the router walk that tree, so a component beside a page resolves in a test that renders it before any request.
 See :ref:`ref-settings` for the description of that flag.
 
 ``next_clear_cache`` drops the default cache in an autouse fixture that runs before every test.
@@ -266,7 +224,8 @@ Either route runs the ``@context`` and ``@action`` decorators before the first t
    Set ``next_components = true`` in ``pytest.ini``, or call ``eager_load_components()`` from ``next.testing.loaders`` once per session, to import every registered ``component.py`` regardless of the flag.
 
 With the default ``LAZY_COMPONENT_MODULES = False``, the configured component roots are imported during ``AppConfig.ready``.
-Components that live inside a page tree register during the URL router walk instead, so a suite that renders them without any HTTP request triggers the walk first, for example by reversing one route with ``page_reverse()``.
+Components that live inside a page tree register during the URL router walk instead, which a suite rendering them before the first request never triggers.
+``eager_load_components()`` registers those folders itself, so the call covers both roots and page trees and no router walk has to be staged by hand.
 See :doc:`/content/howto/test-a-component-in-isolation` for the full recipe.
 See :ref:`ref-settings` for the full description of ``LAZY_COMPONENT_MODULES``.
 
@@ -463,8 +422,8 @@ Capture signals
    :caption: test with recorder
 
    from next.signals import action_dispatched
+   from next.testing.capture import SignalRecorder
    from next.testing.client import NextClient
-   from next.testing.signals import SignalRecorder
 
    def test_emits(db) -> None:
        with SignalRecorder(action_dispatched) as recorder:
@@ -475,32 +434,11 @@ Capture signals
 
 The recorder holds a list of ``SignalEvent`` instances with ``signal``, ``sender``, and ``kwargs`` attributes.
 ``SignalRecorder`` accepts one or more signals and raises ``ValueError`` when constructed with none.
-It exposes these public members.
+``events`` carries every capture in emission order, ``events_for``, ``first_for``, and ``last_for`` narrow that list to one signal, ``clear`` empties it without disconnecting, and the recorder is iterable and supports ``len()``.
+See :doc:`/content/ref/testing` for the signatures.
 
-``events``.
-   The full list of captured ``SignalEvent`` instances in emission order.
-
-``start()``.
-   Connects receivers for every tracked signal and returns the recorder.
-   Called automatically on context entry.
-
-``stop()``.
-   Disconnects receivers for every tracked signal.
-   Called automatically on context exit.
-
-``events_for(signal)``.
-   Returns the list of captured events emitted by that signal.
-
-``first_for(signal)``.
-   Returns the first captured event for that signal, or raises ``LookupError`` when none was captured.
-
-``last_for(signal)``.
-   Returns the last captured event for that signal, or raises ``LookupError`` when none was captured.
-
-``clear()``.
-   Drops every captured event without disconnecting.
-
-The recorder is also iterable and supports ``len()`` over the captured events.
+``start()`` connects its receivers without a weak reference, and ``stop()`` is what disconnects them, so a recorder driven by hand rather than by a ``with`` statement needs its ``stop()`` call.
+That holds for a plain ``SignalRecorder`` and for both wrappers below, and a recorder left running keeps appending events for the rest of the session.
 
 Two convenience wrappers cover the common multi-signal cases.
 
@@ -510,8 +448,8 @@ Two convenience wrappers cover the common multi-signal cases.
    :caption: test with capture_signals
 
    from next.signals import action_dispatched, page_rendered
+   from next.testing.capture import capture_signals
    from next.testing.client import NextClient
-   from next.testing.signals import capture_signals
 
    def test_dispatch_and_render(db) -> None:
        with capture_signals(action_dispatched, page_rendered) as recorder:
@@ -521,15 +459,14 @@ Two convenience wrappers cover the common multi-signal cases.
        assert dispatch.kwargs["action_name"] == "create_note"
 
 ``capture_framework_signals()`` attaches to every name in ``next.signals.__all__``, which helps integration tests assert ordering without listing signals by hand.
-It returns an already started recorder, and its receivers are connected without a weak reference, so a test either uses it in a ``with`` statement or calls ``stop()`` on it when the capture ends.
-A recorder left running keeps appending events for the rest of the session.
+It returns an already started recorder.
 
 .. code-block:: python
    :caption: asserting emission order
 
    from next.signals import form_validation_failed, page_rendered
+   from next.testing.capture import capture_framework_signals
    from next.testing.client import NextClient
-   from next.testing.signals import capture_framework_signals
 
    def test_failure_signals_before_rerender(db) -> None:
        with capture_framework_signals() as recorder:
@@ -556,11 +493,55 @@ Both raise ``FormActionNotFoundError`` from ``next.forms`` for an unknown action
        form = build_form_for("create_note", {"title": "Direct", "body": ""})
        assert form.is_valid()
 
+Testing a guard
+---------------
+
+``login_required`` and ``permission_required`` are enforced by the dispatcher rather than by the page that rendered the form, so the assertion belongs on a POST to the dispatch endpoint.
+An untested guard is an absent guard, and the two refusals differ enough that each one earns its own test.
+
+An anonymous caller is redirected to ``settings.LOGIN_URL`` with the validated posted origin in the ``next`` parameter.
+
+.. code-block:: python
+   :caption: tests/test_guards.py
+
+   from django.conf import settings
+
+   from next.testing.client import NextClient
+
+   def test_anonymous_is_redirected_to_login(db) -> None:
+       response = NextClient().post_action("delete_note", {"id": "1"}, origin="/notes/")
+       assert response.status_code == 302
+       assert response["Location"].startswith(settings.LOGIN_URL)
+       assert "next=/notes/" in response["Location"]
+
+An authenticated caller missing one of the declared permissions raises ``PermissionDenied``, which Django renders as a 403.
+
+.. code-block:: python
+   :caption: authenticated without the permission
+
+   from django.contrib.auth import get_user_model
+
+   from next.testing.client import NextClient
+
+   def test_permission_is_enforced(db) -> None:
+       user = get_user_model().objects.create_user("reader", password="secret")
+       client = NextClient()
+       client.force_login(user)
+       response = client.post_action("delete_note", {"id": "1"}, origin="/notes/")
+       assert response.status_code == 403
+
+Granting that permission to the same user and asserting the handler runs is the third case, which is what proves the guard admits as well as refuses.
+The ``check_permissions`` and ``has_object_permission`` hooks are enforced on the same endpoint and are tested the same way, except that a hook returning an ``HttpResponse`` surfaces as that response instead of a 403.
+A wizard guard is enforced on every step submission, so the same two tests apply to each step URL.
+See :doc:`/content/topics/forms/actions` for the declarations themselves.
+
 HTML utilities
 --------------
 
 ``next.testing.html`` provides assertions for inspecting rendered HTML fragments.
 ``render_component_by_name`` takes ``at``, the template path the component is referenced from, which is what drives which components are visible.
+The same path is seeded as the ambient template path of the body, so a nested ``{% component %}`` resolves from it too, and a ``context`` entry naming that key wins over the seed.
+Pass ``collector=`` a ``StaticCollector`` to capture the co-located assets of the component and of anything it nests.
 
 .. code-block:: python
    :caption: html assertions
@@ -806,6 +787,21 @@ Pytest can run ``manage.py check`` as part of the suite.
 
 ``call_command("check")`` on its own raises only when a check reports an error, so a framework warning such as a shadowed component name passes silently.
 A suite that wants the warnings gated too passes ``fail_level="WARNING"``.
+
+Three framework checks are registered with ``deploy=True`` and stay out of that run, because each one imports or compiles the whole page tree.
+A test suite is the cheapest place to pay that cost, so a second call turns them on.
+
+.. code-block:: python
+   :caption: deployment check test
+
+   from django.core.management import call_command
+
+   def test_deploy_checks_pass() -> None:
+       call_command("check", deploy=True, fail_level="WARNING", verbosity=0)
+
+That run adds ``next.E017`` for a ``page.py`` that raises on import, ``next.E084`` for a ``component.py`` that does, and ``next.E072`` for a composed page template that does not compile.
+All three are failures a request would otherwise surface as a 404, a stripped body, or a 500.
+See :ref:`ref-system-checks` for the full catalog.
 
 See also
 --------

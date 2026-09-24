@@ -42,7 +42,9 @@ Manager
 ~~~~~~~
 
 ``backends`` is the configured list in consultation order, and ``reload`` rebuilds it from the current ``NEXT_FRAMEWORK``.
-Framework settings changes rebuild the manager on their own, so ``reload`` is for a caller that swaps ``COMPONENT_BACKENDS`` some other way, which is what ``next.testing.reset_components`` does.
+A framework settings reload does not rebuild the manager, it drops the cached backends along with the render pipeline and the router-walk claims, and the next access rebuilds them.
+``reload`` is therefore for a caller that swaps ``COMPONENT_BACKENDS`` some other way and wants the list rebuilt on the spot, which is what ``next.testing.reset_components`` does.
+``reload(notify=False)`` builds the same list without sending ``component_backend_loaded`` for any of the instances, which is what a caller reloading from inside a receiver of that signal passes to avoid re-entering it.
 
 .. autoclass:: next.components.ComponentsManager
    :members:
@@ -61,9 +63,8 @@ Backends
 ~~~~~~~~
 
 ``ComponentsBackend.get_component`` and ``ComponentsBackend.collect_visible_components`` are the two abstract methods every backend implements, and the module-level helpers of the same name above delegate to them through the manager.
-The rest of the contract has defaults that decline, so a backend implements only what its source can answer.
-``discover`` is the eager population pass, ``import_component_modules`` executes the components' Python modules, and ``register_walked_folder`` claims one components folder found during the page-tree walk.
-``iter_components`` with ``global_component_roots`` lets the system checks enumerate what the backend holds, and ``watch_roots`` names the trees the development watcher, the link tooling, and the staticfiles finder observe.
+The remaining six methods carry defaults that decline, and the ``autoclass`` below renders the contract of each.
+:ref:`topics-components` covers what leaving one alone costs a backend.
 
 .. autoclass:: next.components.ComponentsBackend
    :members:
@@ -167,9 +168,10 @@ System checks
 ``next.components.checks`` registers the Django system checks for the components subsystem.
 They run through ``uv run python manage.py check``.
 
-The module exports five check callables.
+The module exports six check callables.
 
 - ``check_component_context_registration_files``.
+- ``check_component_module_imports``, registered with ``deploy=True`` so it runs under ``manage.py check --deploy`` alone.
 - ``check_component_py_no_pages_context``.
 - ``check_cross_root_component_name_conflicts``.
 - ``check_duplicate_component_names``.

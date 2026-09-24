@@ -8,7 +8,7 @@ from next.forms.signals import (
     wizard_step_submitted,
 )
 from next.testing import SignalEvent, SignalRecorder
-from next.testing.signals import capture_framework_signals, capture_signals
+from next.testing.capture import capture_framework_signals, capture_signals
 from tests.support import SignalSender
 
 

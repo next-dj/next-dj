@@ -14,7 +14,7 @@ from django.forms import (
     modelformset_factory,
 )
 
-from . import signals
+from . import checks, signals
 from .autodiscover import autodiscover_forms
 from .backends import (
     ActionGuard,
@@ -98,7 +98,7 @@ from .serializers import (
     formset_spec,
 )
 from .uid import redirect_to_origin
-from .widgets import ComponentWidget
+from .widgets import ComponentFileWidget, ComponentWidget
 from .wizard import (
     CacheFormWizardBackend,
     FormWizard,
@@ -141,6 +141,7 @@ __all__ = [
     "CheckboxSelectMultiple",
     "ChoiceField",
     "ClearableFileInput",
+    "ComponentFileWidget",
     "ComponentWidget",
     "DForm",
     "DateField",
@@ -199,6 +200,7 @@ __all__ = [
     "Widget",
     "action",
     "autodiscover_forms",
+    "checks",
     "cleanup_extra_initial",
     "field_spec",
     "form_spec",

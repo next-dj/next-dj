@@ -409,7 +409,47 @@ describe("createPartial surface", () => {
     calls.length = 0;
     clock.tick();
     await Promise.resolve();
-    expect(calls).toEqual(["/host/"]);
+    expect(calls).toEqual([`${location.origin}/host/`]);
+    partial.layers._reset();
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("keeps every zone GET of a double-slash page on its own origin", async () => {
+    window.history.replaceState(null, "", `${location.origin}//attacker.example/x/`);
+    document.body.innerHTML =
+      '<div data-next-zone="late" data-next-lazy="load"></div>' +
+      '<div data-next-zone="tick" data-next-poll="5000"></div>' +
+      '<button data-next-accepted="tick">open</button>';
+    const clock = manualPollClock();
+    const calls: { url: string; init: RequestInit }[] = [];
+    partial._configure({
+      document,
+      clock,
+      dialog: mockDialog(),
+      fetch: async (url, init) => {
+        calls.push({ url, init });
+        return patchesResponse();
+      },
+      navigate: () => {},
+    });
+    partial.ready();
+    clock.tick();
+    await partial.layers.open(document.querySelector("button"), "/modal/", "m");
+    partial.layers.close({ result: null });
+    await Promise.resolve();
+    const page = `${location.origin}//attacker.example/x/`;
+    expect(calls.map((call) => call.url)).toEqual([
+      page,
+      page,
+      `${location.origin}/modal/`,
+      page,
+    ]);
+    for (const call of calls) {
+      expect(new URL(call.url).origin).toBe(location.origin);
+      expect(call.init.mode).toBe("same-origin");
+    }
+    const origin = new Headers(calls[3]!.init.headers).get("X-Next-Origin");
+    expect(origin).toBe("//attacker.example/x/");
     partial.layers._reset();
     window.history.replaceState(null, "", "/");
   });
@@ -422,7 +462,7 @@ describe("createPartial surface", () => {
       dialog: mockDialog(),
       fetch: async (url) => {
         const html =
-          url === "/host/"
+          url === `${location.origin}/host/`
             ? '<div data-next-zone="dup" id="base">host</div>'
             : '<div data-next-zone="dup">modal</div>';
         return patchesResponse(
@@ -458,7 +498,7 @@ describe("createPartial surface", () => {
       navigate: () => {},
     });
     await partial.layers.open(null, "/wizard/", "access");
-    expect(calls).toContain("/wizard/");
+    expect(calls).toContain(`${location.origin}/wizard/`);
   });
 
   it("a delegated filter trigger fetches through the wire", async () => {
@@ -479,7 +519,7 @@ describe("createPartial surface", () => {
       .querySelector("input")!
       .dispatchEvent(new Event("input", { bubbles: true }));
     await Promise.resolve();
-    expect(calls).toEqual(["/c/?q=x"]);
+    expect(calls).toEqual([`${location.origin}/c/?q=x`]);
   });
 
   it("a form submit aborts its own in-flight validation through the wire", async () => {
@@ -729,7 +769,8 @@ describe("createPartial surface", () => {
     });
     await Promise.resolve();
     expect(calls).toHaveLength(1);
-    expect(calls[0]!.url).toBe(document.location.pathname + document.location.search);
+    const { origin, pathname, search } = document.location;
+    expect(calls[0]!.url).toBe(origin + pathname + search);
   });
 });
 

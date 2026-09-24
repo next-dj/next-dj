@@ -8,10 +8,31 @@ from django.http import HttpRequest, HttpResponseRedirect, QueryDict
 
 from next.deps import Depends
 from next.forms import Form, PermissionOutcome
-from next.forms.diagnostics import registration_diagnostics
+from next.forms.backends import ActionRegistration
 from next.forms.manager import form_action_manager
+from next.forms.registration import registration_diagnostics
 from next.forms.uid import ORIGIN_FIELD_NAME
 from next.forms.wizard import wizard_backend_manager
+
+
+def echo_form(widget: django_forms.Widget) -> type[django_forms.Form]:
+    """Build a one-field plain Django form whose field uses `widget`."""
+
+    class _EchoForm(django_forms.Form):
+        field = django_forms.CharField(widget=widget, required=True)
+
+    return _EchoForm
+
+
+def register_page_action(
+    name: str, form_class: type[django_forms.Form], file_path: str
+) -> None:
+    """Register a page-scoped form action through the default backend."""
+    form_action_manager.default_backend.register_action(
+        ActionRegistration(
+            name=name, file_path=file_path, scope="page", form_class=form_class
+        )
+    )
 
 
 @contextmanager

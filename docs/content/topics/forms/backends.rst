@@ -51,6 +51,11 @@ When every entry fails, the manager keeps rereading the setting instead of cachi
 Asking such a manager for a backend raises ``ImproperlyConfigured`` naming how many entries were tried, and the ``next.backends`` logger holds the reason each one was skipped.
 The action lookups ``get_action_url``, ``get_action_meta``, and ``require_action_meta`` raise the same error rather than reporting an unknown action, so a load failure never reads as a missing ``@action`` import.
 
+Every entry that builds sends ``form_backend_loaded``, the one observable hook in the loader.
+The sender is the resolved backend class, and the payload carries ``config``, a copy of the settings entry, and ``instance``, the object the loader built from it.
+A skipped entry sends nothing, so a receiver counting the signal counts the backends the site actually serves.
+See :ref:`topics-forms-signals-form-backend-loaded` for the receiver contract.
+
 The constructor therefore receives the full entry, not only ``OPTIONS``.
 ``RegistryFormActionBackend.__init__`` accepts the config and ignores it, which is why a subclass that reads no options needs no constructor at all.
 A backend that reads an option declares a constructor and pulls ``OPTIONS`` out of the passed dict.
@@ -202,7 +207,7 @@ The four abstract methods must all be present.
 
    from typing import Any
 
-   from django.http import HttpRequest, HttpResponse, HttpResponseNotFound
+   from django.http import HttpRequest, HttpResponseBase, HttpResponseNotFound
    from django.urls import path, reverse
    from django.views.decorators.http import require_http_methods
 
@@ -230,7 +235,7 @@ The four abstract methods must all be present.
            view = require_http_methods(["GET", "POST"])(self.dispatch)
            return [path("_next/custom/<str:uid>/", view, name="custom_form_action")]
 
-       def dispatch(self, request: HttpRequest, uid: str) -> HttpResponse:
+       def dispatch(self, request: HttpRequest, uid: str) -> HttpResponseBase:
            meta = self._actions.get(uid)
            if meta is None:
                return HttpResponseNotFound()
@@ -243,6 +248,8 @@ The bundled backend wraps its dispatch view in ``require_http_methods(["GET", "P
 ``dispatch`` answers an unknown UID with a 404, either by returning ``HttpResponseNotFound`` or by raising :exc:`~django.http.Http404` with a message.
 The bundled backend raises ``Http404`` explaining that the page which rendered the form may be stale after a rename or restart.
 Delegate the validation pipeline to ``FormActionDispatch.dispatch``, which takes the action name and its stored ``ActionMeta``, to reuse form binding, handler invocation, and error re-render.
+Delegating also keeps the authorization of the origin page, which the pipeline performs before any handler runs, so a backend that drives the pipeline by hand answers submissions no page ever approved.
+The declared return type is ``HttpResponseBase``, because a page that refuses the submission answers with its own response, which may be a streaming one.
 
 RegistryFormActionBackend
 -------------------------
@@ -263,7 +270,7 @@ The most common customisation overrides ``dispatch`` to wrap the standard dispat
 .. code-block:: python
    :caption: notes/backends.py
 
-   from django.http import HttpRequest, HttpResponse
+   from django.http import HttpRequest, HttpResponseBase
    from notes.models import AuditEntry
 
    from next.forms import RegistryFormActionBackend
@@ -271,7 +278,7 @@ The most common customisation overrides ``dispatch`` to wrap the standard dispat
    class AuditedFormActionBackend(RegistryFormActionBackend):
        """Registry backend that writes an audit row per dispatch."""
 
-       def dispatch(self, request: HttpRequest, uid: str) -> HttpResponse:
+       def dispatch(self, request: HttpRequest, uid: str) -> HttpResponseBase:
            response = super().dispatch(request, uid)
            AuditEntry.objects.create(
                action_uid=uid,
@@ -306,7 +313,7 @@ FormActionDispatch
 ------------------
 
 The validation pipeline lives in ``next.forms.dispatch.FormActionDispatch``.
-``RegistryFormActionBackend.dispatch`` calls into it to bind the form, run ``is_valid``, invoke the handler, and emit the signals.
+``RegistryFormActionBackend.dispatch`` calls into it to authorize the origin page, bind the form, run ``is_valid``, invoke the handler, and emit the signals.
 A custom backend that overrides ``dispatch`` reuses this pipeline through ``super().dispatch``.
 
 Override the validation pipeline itself only when subclassing ``RegistryFormActionBackend`` is not enough, which is rare.
@@ -362,8 +369,11 @@ System checks
 
 The framework validates the backend configuration at startup.
 
-- ``next.E044`` reports a malformed or non-importable ``FORM_ACTION_BACKENDS`` entry, including a non-string ``BACKEND`` path.
-- ``next.E045`` reports a backend that does not subclass ``FormActionBackend``.
+- ``next.E044`` reports a ``FORM_ACTION_BACKENDS`` value that is not a list.
+- ``next.E058`` reports an entry that is not a dict.
+- ``next.E059`` reports an entry whose ``BACKEND`` is not a string.
+- ``next.E068`` reports a ``BACKEND`` dotted path that cannot be imported.
+- ``next.E045`` reports a backend class outside the ``FormActionBackend`` family.
 
 Run ``uv run python manage.py check`` after editing the backend list.
 

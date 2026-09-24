@@ -64,7 +64,7 @@ def test_runtime_boots_and_serves_its_bundle(
     bundle = [
         response
         for response in next_probe.responses
-        if response.url.endswith("/static/next/next.min.js")
+        if response.url.partition("?")[0].endswith("/static/next/next.min.js")
     ]
     assert [response.status for response in bundle] == [200]
     assert page.evaluate("() => typeof window.Next") == "function"
@@ -130,6 +130,18 @@ def test_typing_markdown_repaints_the_preview_with_real_markup(
     assert int(weight) > 400
     expect(page.locator(PREVIEW)).not_to_contain_text("**")
     expect_no_partial_request(page, next_probe, seen)
+
+
+def test_the_textarea_widget_nests_the_preview_next_to_its_control(
+    page: Page, base_url: str
+) -> None:
+    open_create_form(page, base_url)
+
+    expect(page.locator(f"{BODY_FIELD} + [data-markdown-preview]")).to_have_count(1)
+
+    page.fill(BODY_FIELD, "```\nnested asset\n```")
+
+    expect(page.locator(f"{PREVIEW} pre")).to_contain_text("nested asset")
 
 
 def test_the_preview_neutralises_a_javascript_link(page: Page, base_url: str) -> None:

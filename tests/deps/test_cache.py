@@ -34,6 +34,31 @@ class TestDependencyCache:
         assert len(cache) == 1
         assert "x" in cache
 
+    def test_a_key_nothing_stored_reads_as_a_miss(self) -> None:
+        assert DependencyCache().get("absent") is _CACHE_MISS
+
+    @pytest.mark.parametrize(
+        "value",
+        [None, False, 0, "", []],
+        ids=["none", "false", "zero", "empty", "list"],
+    )
+    def test_a_falsy_stored_value_reads_as_a_hit(self, value: object) -> None:
+        """A `None`-valued dependency is a result, so the miss needs a sentinel."""
+        cache = DependencyCache()
+        cache.set("dep", value)
+
+        assert cache.get("dep") == value
+        assert cache.get("dep") is not _CACHE_MISS
+
+    def test_an_externally_owned_dict_is_the_backing_store(self) -> None:
+        """A dispatch attaches its own dict so a re-render rejoins the same cache."""
+        backing: dict[str, object] = {"dep": "warm"}
+        cache = DependencyCache(backing)
+
+        assert cache.get("dep") == "warm"
+        cache.set("other", 1)
+        assert backing["other"] == 1
+
 
 class TestCallableDependencyCache:
     """Tests for request-scoped caching of dependency callable results."""

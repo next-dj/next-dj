@@ -29,12 +29,12 @@ from next.forms.backends import (
     file_to_dotted_module,
     scope_key_for,
 )
-from next.forms.diagnostics import registration_diagnostics
 from next.forms.manager import (
     FormActionManager,
     form_action_manager,
     resolve_component_anchor,
 )
+from next.forms.registration import registration_diagnostics
 
 
 _FAKE_FILE = "/fake/myapp/forms.py"
@@ -1162,10 +1162,14 @@ class TestManagerClearRegistries:
 
 
 class TestFormActionManagerVersion:
-    """The `version` cache token bumps on every registry mutation."""
+    """The `version` cache token moves on every registry mutation.
+
+    The counter behind it is process-wide, so a test pins that the token moved
+    rather than what it landed on.
+    """
 
     def test_register_action_bumps_version(self) -> None:
-        """register_action increments the version after forwarding."""
+        """register_action moves the version after forwarding."""
         manager = FormActionManager(backends=[RegistryFormActionBackend()])
         before = manager.version
         manager.register_action(
@@ -1176,14 +1180,14 @@ class TestFormActionManagerVersion:
                 handler=lambda: None,
             )
         )
-        assert manager.version == before + 1
+        assert manager.version != before
 
     def test_clear_registries_bumps_version(self) -> None:
-        """clear_registries increments the version."""
+        """clear_registries moves the version."""
         manager = FormActionManager(backends=[RegistryFormActionBackend()])
         before = manager.version
         manager.clear_registries()
-        assert manager.version == before + 1
+        assert manager.version != before
 
     def test_restore_actions_bumps_version(self) -> None:
         """A rollback changes what is registered, so the token has to move."""
@@ -1193,7 +1197,7 @@ class TestFormActionManagerVersion:
 
         manager.restore_actions(saved)
 
-        assert manager.version == before + 1
+        assert manager.version != before
 
     def test_snapshot_actions_covers_every_backend(self) -> None:
         """The rollback reaches the backends behind the first one too."""
@@ -1209,7 +1213,7 @@ class TestFormActionManagerVersion:
         assert second.get_meta("late") is None
 
     def test_reload_bumps_version(self, settings) -> None:
-        """Reloading increments the version alongside the backend rebuild."""
+        """Reloading moves the version alongside the backend rebuild."""
         settings.NEXT_FRAMEWORK = {
             "FORM_ACTION_BACKENDS": [
                 {"BACKEND": "next.forms.RegistryFormActionBackend"}
@@ -1218,7 +1222,7 @@ class TestFormActionManagerVersion:
         manager = FormActionManager()
         before = manager.version
         manager.reload()
-        assert manager.version == before + 1
+        assert manager.version != before
 
     def test_reload_rebuilds_from_the_current_settings(self, settings) -> None:
         """The public entry point swaps the backends for the configured ones."""

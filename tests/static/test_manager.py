@@ -32,6 +32,7 @@ from next.static.scripts import CSRF_PAYLOAD_KEY, DEV_PAYLOAD_KEY, NextScriptBui
 from tests.support import (
     PREFIXED_BACKENDS,
     PREFIXING_STATIC_BACKEND,
+    REQUEST_RECORDING_BACKENDS,
     PrefixingStaticBackend,
     component_info,
     page_naming_one_style,
@@ -802,57 +803,42 @@ class TestInjectMissingPlaceholders:
 
 
 class TestInjectForwardsRequest:
-    """`inject` forwards the active request to backend tag renderers."""
+    """`inject` forwards the active request to the backend rendering each tag."""
 
-    def test_request_passed_to_render_link_tag(
-        self, fresh_manager: StaticManager
-    ) -> None:
+    def _inject(self, html: str, collector: StaticCollector, request) -> str:
+        """Inject through a manager whose backend names the request in its tags."""
+        with override_settings(NEXT_FRAMEWORK=REQUEST_RECORDING_BACKENDS):
+            return StaticManager().inject(html, collector, request=request)
+
+    def test_a_style_tag_is_rendered_under_the_active_request(self) -> None:
         collector = StaticCollector()
         collector.add(StaticAsset(url=CSS_URL, kind="css"))
-        sentinel = RequestFactory().get("/")
-        with mock.patch.object(
-            fresh_manager.default_backend, "render_link_tag", return_value="<link/>"
-        ) as render:
-            fresh_manager.inject(
-                f"<head>{STYLES_PLACEHOLDER}</head>", collector, request=sentinel
-            )
-        render.assert_called_once_with(CSS_URL, request=sentinel)
+        request = RequestFactory().get("/dashboard/")
 
-    def test_request_passed_to_render_script_tag(
-        self, fresh_manager: StaticManager
-    ) -> None:
+        out = self._inject(f"<head>{STYLES_PLACEHOLDER}</head>", collector, request)
+
+        assert f'<link href="{CSS_URL}" data-request="/dashboard/">' in out
+
+    def test_a_script_tag_is_rendered_under_the_active_request(self) -> None:
         collector = StaticCollector()
         collector.add(StaticAsset(url=JS_URL, kind="js"))
-        sentinel = object()
-        with (
-            mock.patch.object(
-                fresh_manager,
-                "script_builder",
-                return_value=NextScriptBuilder(
-                    "/static/next/next.min.js", policy=ScriptInjectionPolicy.DISABLED
-                ),
-            ),
-            mock.patch.object(
-                fresh_manager.default_backend,
-                "render_script_tag",
-                return_value="<script/>",
-            ) as render,
-        ):
-            fresh_manager.inject(
-                f"<body>{SCRIPTS_PLACEHOLDER}</body>",
-                collector,
-                request=sentinel,  # type: ignore[arg-type]
-            )
-        render.assert_called_once_with(JS_URL, request=sentinel)
+        request = RequestFactory().get("/dashboard/")
 
-    def test_request_defaults_to_none(self, fresh_manager: StaticManager) -> None:
+        out = self._inject(f"<body>{SCRIPTS_PLACEHOLDER}</body>", collector, request)
+
+        assert f'<script src="{JS_URL}" data-request="/dashboard/"></script>' in out
+
+    def test_a_render_without_a_request_says_so(self) -> None:
+        """No request in scope is the caller's default, not a missing keyword."""
         collector = StaticCollector()
         collector.add(StaticAsset(url=CSS_URL, kind="css"))
-        with mock.patch.object(
-            fresh_manager.default_backend, "render_link_tag", return_value="<link/>"
-        ) as render:
-            fresh_manager.inject(f"<head>{STYLES_PLACEHOLDER}</head>", collector)
-        render.assert_called_once_with(CSS_URL, request=None)
+
+        with override_settings(NEXT_FRAMEWORK=REQUEST_RECORDING_BACKENDS):
+            out = StaticManager().inject(
+                f"<head>{STYLES_PLACEHOLDER}</head>", collector
+            )
+
+        assert f'<link href="{CSS_URL}" data-request="none">' in out
 
 
 class TestBackendRewritesEveryAssetUrl:

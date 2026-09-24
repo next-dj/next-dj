@@ -9,7 +9,7 @@ from django.dispatch import Signal
 from next.conf import next_framework_settings
 from next.testing import SignalRecorder, capture_signals
 from next.urls import FileRouterBackend, RouterManager, router_manager
-from next.urls.signals import route_registered, router_reloaded
+from next.urls.signals import route_registered, router_backend_loaded, router_reloaded
 from tests.support import SignalSender, file_router
 
 
@@ -24,6 +24,13 @@ def capture_route_registered() -> Generator[SignalRecorder, None, None]:
 def capture_router_reloaded() -> Generator[SignalRecorder, None, None]:
     """Record ``router_reloaded`` emissions."""
     with capture_signals(router_reloaded) as recorder:
+        yield recorder
+
+
+@pytest.fixture()
+def capture_router_backend_loaded() -> Generator[SignalRecorder, None, None]:
+    """Record ``router_backend_loaded`` emissions."""
+    with capture_signals(router_backend_loaded) as recorder:
         yield recorder
 
 
@@ -213,3 +220,36 @@ class TestRouterManagerReloadIntegration:
         router_manager.reload()
         router_manager.reload()
         assert len(capture_router_reloaded) >= 2
+
+
+class TestRouterBackendLoadedSignal:
+    """`router_backend_loaded` announces each backend a loud reload builds."""
+
+    def test_a_loud_reload_announces_every_configured_backend(
+        self, capture_router_backend_loaded: SignalRecorder
+    ) -> None:
+        RouterManager().reload()
+
+        assert [event.sender for event in capture_router_backend_loaded] == [
+            FileRouterBackend
+        ]
+
+    def test_the_event_carries_the_instance_and_its_entry(
+        self, capture_router_backend_loaded: SignalRecorder
+    ) -> None:
+        manager = RouterManager()
+        manager.reload()
+
+        event = capture_router_backend_loaded.events[0]
+        assert event.kwargs["instance"] is manager.backends[0]
+        assert event.kwargs["config"]["BACKEND"] == "next.urls.FileRouterBackend"
+
+    def test_a_quiet_reload_announces_nothing(
+        self, capture_router_backend_loaded: SignalRecorder
+    ) -> None:
+        """`notify=False` withholds the per-backend announcement too, not just the reload."""
+        manager = RouterManager()
+        manager.reload(notify=False)
+
+        assert list(capture_router_backend_loaded) == []
+        assert manager.backends

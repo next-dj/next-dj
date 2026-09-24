@@ -1,4 +1,5 @@
 import re
+import threading
 
 import markdown
 from django.utils.html import escape, format_html
@@ -11,6 +12,16 @@ EMPTY_PREVIEW = format_html(
 UNSAFE_HREF = re.compile(
     r'href="\s*(?:javascript|data|vbscript):[^"]*"', flags=re.IGNORECASE
 )
+_LOCAL = threading.local()
+
+
+def _renderer() -> markdown.Markdown:
+    """Return this thread's renderer, since building one costs more than a render."""
+    renderer = getattr(_LOCAL, "renderer", None)
+    if renderer is None:
+        renderer = markdown.Markdown(extensions=["fenced_code", "tables"])
+        _LOCAL.renderer = renderer
+    return renderer
 
 
 def render_markdown(text: str) -> SafeString:
@@ -22,6 +33,5 @@ def render_markdown(text: str) -> SafeString:
     body = text or ""
     if not body.strip():
         return EMPTY_PREVIEW
-    renderer = markdown.Markdown(extensions=["fenced_code", "tables"])
-    rendered = renderer.convert(escape(body))
+    rendered = _renderer().reset().convert(escape(body))
     return SafeString(UNSAFE_HREF.sub('href="#"', rendered))

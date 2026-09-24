@@ -370,3 +370,124 @@ class TestComponentVisibilityResolver:
         outside.write_text("x")
         resolved = ComponentVisibilityResolver(reg).resolve_visible(outside)
         assert resolved["button"].scope_root == dirs_root
+
+
+class TestRootsAreMarkedUnderBothSpellings:
+    """A root named through a symlink still answers for the path a scan resolved."""
+
+    def test_the_resolved_spelling_of_a_marked_root_is_a_root(
+        self, tmp_path: Path
+    ) -> None:
+        real = tmp_path / "real"
+        real.mkdir()
+        linked = tmp_path / "linked"
+        linked.symlink_to(real, target_is_directory=True)
+        reg = ComponentRegistry()
+
+        reg.mark_as_root(linked)
+
+        assert reg.is_root(linked)
+        assert reg.is_root(real.resolve())
+
+    def test_both_spellings_reach_the_global_root_set(self, tmp_path: Path) -> None:
+        real = tmp_path / "real"
+        real.mkdir()
+        linked = tmp_path / "linked"
+        linked.symlink_to(real, target_is_directory=True)
+        reg = ComponentRegistry()
+
+        reg.mark_as_root(linked)
+
+        assert {linked, real.resolve()} <= reg.global_roots()
+
+    def test_a_component_registered_under_the_link_resolves_everywhere(
+        self, tmp_path: Path
+    ) -> None:
+        """The score reads the resolved root, which only the second mark makes a root."""
+        real = tmp_path / "real"
+        real.mkdir()
+        (real / "card.djx").write_text("<p>c</p>")
+        linked = tmp_path / "linked"
+        linked.symlink_to(real, target_is_directory=True)
+        reg = ComponentRegistry()
+        reg.mark_as_root(linked)
+        reg.register(ComponentInfo("card", linked, "", linked / "card.djx", None, True))
+        outsider = tmp_path / "elsewhere" / "page.djx"
+        outsider.parent.mkdir()
+        outsider.write_text("x")
+
+        assert set(ComponentVisibilityResolver(reg).resolve_visible(outsider)) == {
+            "card"
+        }
+
+    def test_a_root_that_was_never_marked_scopes_its_components_to_its_tree(
+        self, tmp_path: Path
+    ) -> None:
+        """An unmarked root is a page tree, so its components stay below it."""
+        tree = (tmp_path / "pages").resolve()
+        tree.mkdir()
+        (tree / "card.djx").write_text("<p>c</p>")
+        reg = ComponentRegistry()
+        reg.register(ComponentInfo("card", tree, "", tree / "card.djx", None, True))
+        res = ComponentVisibilityResolver(reg)
+        inside = tree / "home.djx"
+        inside.write_text("x")
+        outside = tmp_path / "elsewhere" / "page.djx"
+        outside.parent.mkdir()
+        outside.write_text("x")
+
+        assert set(res.resolve_visible(inside)) == {"card"}
+        assert res.resolve_visible(outside) == {}
+
+
+class TestTheResolvedPathMemoKeysOnTheCallerSpelling:
+    """A render repeating one unresolved path keeps hitting the memo it seeded.
+
+    Keying the memo on the resolved path left the caller's own spelling missing
+    forever, so every render paid the `resolve()` again.
+    """
+
+    def _tree_behind_a_link(self, tmp_path: Path) -> tuple[ComponentRegistry, Path]:
+        real = tmp_path / "real"
+        real.mkdir()
+        (real / "card.djx").write_text("<p>c</p>")
+        linked = tmp_path / "linked"
+        linked.symlink_to(real, target_is_directory=True)
+        reg = ComponentRegistry()
+        reg.register(
+            ComponentInfo("card", real.resolve(), "", real / "card.djx", None, True)
+        )
+        return reg, linked
+
+    def test_a_repeat_of_one_spelling_answers_without_resolving_again(
+        self, tmp_path: Path
+    ) -> None:
+        # The link goes between the two calls, so a second `resolve()` would land
+        # somewhere else and the memo is the only thing that can answer the same.
+        reg, linked = self._tree_behind_a_link(tmp_path)
+        res = ComponentVisibilityResolver(reg)
+        template = linked / "home.djx"
+        template.write_text("x")
+
+        first = res.resolve_visible(template)
+        (tmp_path / "linked").unlink()
+        second = res.resolve_visible(template)
+
+        assert set(first) == {"card"}
+        assert second is first
+
+    def test_a_registration_drops_the_memo_along_with_the_results(
+        self, tmp_path: Path
+    ) -> None:
+        """A version bump clears every memo, so a new component is never hidden."""
+        reg, linked = self._tree_behind_a_link(tmp_path)
+        res = ComponentVisibilityResolver(reg)
+        template = linked / "home.djx"
+        template.write_text("x")
+        assert set(res.resolve_visible(template)) == {"card"}
+
+        real = (tmp_path / "real").resolve()
+        (real / "badge.djx").write_text("<p>b</p>")
+        reg.register(ComponentInfo("badge", real, "", real / "badge.djx", None, True))
+
+        assert set(res.resolve_visible(template)) == {"badge", "card"}

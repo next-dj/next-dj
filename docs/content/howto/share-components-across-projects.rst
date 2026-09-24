@@ -66,6 +66,23 @@ Add the shared directory to each project.
 Repeat the same block in ``projects/site/config/settings.py``.
 Each project now sees ``button``, ``card``, and every other component in the shared folder.
 
+``COMPONENTS_DIR`` names the folder the URL router treats as a component namespace and skips instead of turning into a URL segment.
+The key is required in every ``COMPONENT_BACKENDS`` entry, and ``next.E031`` reports an entry that omits it, while only the value of the first entry takes effect.
+It is unrelated to ``DIRS``, which is where this recipe puts the shared kit, so the value above is the name each project uses inside its own page tree.
+
+Every ``component.py`` under a ``DIRS`` root is imported during component backend setup rather than on first use.
+That is what makes a ``@component.context`` visible from the first request, and it is the real cost of a shared UI kit, since each project pays the import of the whole kit at startup whether it renders one component or all of them.
+Set ``LAZY_COMPONENT_MODULES`` to defer that bulk import to the first resolve of each component.
+
+.. code-block:: python
+   :caption: projects/admin/config/settings.py
+
+   NEXT_FRAMEWORK = {
+       "LAZY_COMPONENT_MODULES": True,
+   }
+
+A component whose template body lives in a module-level ``component`` string is still imported during discovery under the flag, because the scanner has to read that attribute.
+
 Use the components
 ~~~~~~~~~~~~~~~~~~
 

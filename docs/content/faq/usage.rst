@@ -9,57 +9,22 @@ This page answers questions that come up while building a project with next.dj.
    :local:
    :depth: 2
 
-How do I add a page
--------------------
+Where the step by step recipes live
+-----------------------------------
 
-Create a directory under the page root and add a ``page.py`` plus a ``template.djx`` inside it.
-See :doc:`/content/howto/add-a-page` for a recipe.
-
-How do I pass data to the template
-----------------------------------
-
-Use ``@context("key")`` inside ``page.py`` to publish a value.
-The template renders the value as ``{{ key }}``.
-See :doc:`/content/topics/context`.
-
-How do I share data across pages
---------------------------------
-
-Declare the context in a ``page.py`` that sits in a directory above the consuming page, and pass ``inherit_context=True`` to the decorator.
-See :doc:`/content/howto/share-context-across-pages`.
-
-How do I capture URL parameters
--------------------------------
-
-Name the directory ``[param]`` for a string or ``[type:param]`` for a typed value.
-Inside the page module annotate the parameter with ``DUrl[T]``.
-See :doc:`/content/topics/file-router`.
-
-How do I render a form
-----------------------
-
-Subclass ``next.forms.Form`` or ``next.forms.ModelForm`` and render the form with ``{% form "name" %}``.
-The action name is derived automatically from the class name in ``snake_case``.
-See :doc:`/content/intro/tutorial04`.
+:doc:`/content/howto/index` groups the recipes by task, and each one states a problem, gives one minimal solution, and shows how to verify it.
+Adding a page, publishing context to a template, sharing context across a page tree, reading query parameters, customising the rendered asset tags, rendering a form, testing a page that posts to an action, and splitting a page tree across applications each have a guide there.
+:doc:`/content/topics/index` carries the concept behind every recipe.
+The entries on this page answer what no guide covers on its own.
 
 How do I update part of a page without a reload
 -----------------------------------------------
 
-Wrap the slice in ``{% zone "name" %}`` and point a form or a link at it with ``data-next-target="name"``.
+Wrap the slice in ``{% zone "name" %}`` and name the zone through the ``zone`` argument of the form tag, written ``{% form "action_name" zone="name" %}``.
+The tag compiles that argument into the ``data-next-target`` attribute itself and reserves every ``data-next-`` name, so passing ``data-next-target`` to the tag raises ``TemplateSyntaxError`` while the template is parsed.
+A hand-written link carries ``data-next-target="name"`` as a plain HTML attribute, because no tag stands between it and the document.
 The server re-renders only that zone and the client runtime swaps it in place.
-See :doc:`/content/intro/tutorial06` for the walkthrough and :doc:`/content/topics/partial-rendering/index` for the full model.
-
-How do I customise the static output
-------------------------------------
-
-Subclass a static backend, register its dotted path in ``STATIC_BACKENDS``, and override how tags or asset URLs are produced.
-See :doc:`/content/howto/write-a-static-backend`.
-
-How do I test a page
---------------------
-
-Use ``NextClient`` from ``next.testing``.
-See :doc:`/content/topics/testing`.
+See :doc:`/content/topics/forms/templates` for the tag arguments, :doc:`/content/intro/tutorial06` for the walkthrough, and :doc:`/content/topics/partial-rendering/index` for the full model.
 
 How do I run the development server
 -----------------------------------
@@ -72,12 +37,6 @@ How do I deploy in production
 
 Serve the project through a WSGI or ASGI server and collect static files the same way as any Django project.
 See :doc:`/content/deployment/index` for the framework-specific checklist.
-
-How do I integrate Django admin
--------------------------------
-
-Mount ``admin.site.urls`` above ``include("next.urls")`` in ``config/urls.py``.
-See :doc:`/content/howto/integrate-django-admin`.
 
 Can I run Django REST Framework alongside next.dj
 --------------------------------------------------
@@ -104,19 +63,6 @@ The framework renders HTML for a browser, and it offers no serializer layer, no 
 A ``render`` function may return a :class:`~django.http.JsonResponse` for a small internal endpoint, described under *Common patterns* in :doc:`/content/topics/pages`, but that is a convenience rather than an API framework.
 
 See :doc:`/content/howto/integrate-django-admin` for the same mounting pattern applied to the admin, and *Coexisting with plain Django views* in :doc:`/content/topics/pages` for the general boundary.
-
-How do I split routes across applications
------------------------------------------
-
-Use ``APP_DIRS=True`` so every application contributes its own page tree.
-Use ``DIRS`` to add project level page roots.
-See :doc:`/content/topics/file-router`.
-
-How do I share components across projects
------------------------------------------
-
-Place the shared components in one folder and add it to the ``DIRS`` list of a ``COMPONENT_BACKENDS`` entry.
-See :doc:`/content/howto/share-components-across-projects`.
 
 How do I add context processors to pages
 ----------------------------------------
@@ -196,3 +142,4 @@ See also
 
    :doc:`/content/howto/index` for recipes.
    :doc:`/content/topics/index` for in depth guides.
+   :doc:`/content/security/overview` for the guard model behind the form, zone, and stream surfaces.

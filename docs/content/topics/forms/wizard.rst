@@ -42,6 +42,11 @@ See :ref:`topics-forms-actions-dynamic-guards` for the hook contract.
 
 The hook resolves its parameters through the injector, so a per-request gate reads the request or any registered dependency, and a denial leaves the step draft untouched.
 
+The step pages carry their own authorization alongside both guards.
+A step POST authorizes the page its origin names before the wizard binds anything, and a partial step transition authorizes the next step's page before rendering that step's zone.
+A next step that denies the transition is answered with the plain step redirect a client without the runtime follows anyway, so the browser lands on the step URL and meets that page's own response there.
+Declare a requirement shared by every step on the wizard action, through ``Meta.login_required`` and ``Meta.permission_required`` or through ``check_permissions``, and keep a requirement specific to one step in that step page's ``render()``.
+
 Declaring steps
 ---------------
 
@@ -104,6 +109,8 @@ The ``next.W058`` check flags a file field in a static step, collect the upload 
 
 ``Meta.url_param`` names the URL kwarg that carries the active step.
 It defaults to ``"step"``, so a route segment of ``[step]`` works with no further configuration.
+
+``Meta.push_steps`` decides whether an advance under partial rendering pushes the next step's URL onto browser history, overriding the project-wide ``PUSH_WIZARD_STEPS`` option for this one wizard, see :doc:`/content/topics/partial-rendering/reference`.
 
 Per-step drafts persist through the configured ``FORM_WIZARD_BACKEND``, which the project sets once for every wizard.
 See :doc:`wizard-backend` for the backend contract and its options.
@@ -404,7 +411,7 @@ See :doc:`signals` for the payloads and the receiver-wiring pattern.
 System checks
 -------------
 
-The ``next.E050`` and ``next.E051`` checks guard the steps declaration and the wizard backend configuration.
+``next.E050`` guards the steps declaration, and ``next.E051`` with ``next.E069`` through ``next.E071`` guard the wizard backend configuration.
 ``next.E054`` errors when a page-scoped wizard's page path has no ``[url_param]`` directory, so the route never captures the step kwarg and the wizard cannot advance past its first step.
 Add a ``[step]`` route segment or point ``Meta.url_param`` at the captured kwarg.
 ``next.W056`` warns when wizards are registered and the configured backend needs Django sessions while ``django.contrib.sessions`` is not installed.

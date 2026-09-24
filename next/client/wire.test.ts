@@ -1,7 +1,13 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Wire } from "./wire";
 import type { SessionStore } from "./assets";
-import { ACCEPT, CONTENT_TYPE, HEADER_REQUEST_ID, REQUEST_FLAG } from "./protocol";
+import {
+  ACCEPT,
+  CONTENT_TYPE,
+  HEADER_REQUEST_ID,
+  REQUEST_FLAG,
+  currentUrl,
+} from "./protocol";
 
 // Isolated per harness so the navigate-once flag never leaks through jsdom storage.
 function memorySession(): SessionStore {
@@ -169,7 +175,7 @@ describe("Wire classification", () => {
       envelopeResponse("", { status: 409, type: "text/plain", url: "" }),
     );
     await h.wire.fetch({ url: "/here/", zone: "z" });
-    expect(h.navigated).toEqual(["/here/"]);
+    expect(h.navigated).toEqual([`${location.origin}/here/`]);
   });
 
   it("falls back to the request url on a non-envelope with an empty response url", async () => {
@@ -177,7 +183,7 @@ describe("Wire classification", () => {
       envelopeResponse("<html></html>", { type: "text/html", url: "" }),
     );
     await h.wire.fetch({ url: "/list/", zone: "z" });
-    expect(h.navigated).toEqual(["/list/"]);
+    expect(h.navigated).toEqual([`${location.origin}/list/`]);
   });
 
   it("treats a response with no content-type header as a navigation", async () => {
@@ -698,5 +704,90 @@ describe("Wire reset", () => {
     const h2 = makeWire(async () => envelopeResponse(ENVELOPE));
     await h2.wire.fetch({ url: "/p2/", zone: "list" });
     expect(h2.envelopes).toHaveLength(1);
+  });
+});
+
+describe("Wire same-origin targets", () => {
+  afterEach(() => {
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("GETs a page served under a double-slash path on its own origin", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      `${location.origin}//attacker.example/x/?q=1`,
+    );
+    const h = makeWire(async () => envelopeResponse(ENVELOPE));
+    const page = currentUrl(document);
+    expect(page).toBe("//attacker.example/x/?q=1");
+    await h.wire.fetch({ url: page, zone: "lazy" });
+    expect(h.calls).toHaveLength(1);
+    expect(h.calls[0]!.url).toBe(`${location.origin}//attacker.example/x/?q=1`);
+    expect(new URL(h.calls[0]!.url).origin).toBe(location.origin);
+    expect(h.calls[0]!.init.mode).toBe("same-origin");
+    expect(h.pages).toEqual(["//attacker.example/x/?q=1"]);
+  });
+
+  it("navigates a double-slash page on its own origin when the response url is empty", async () => {
+    window.history.replaceState(null, "", `${location.origin}//attacker.example/x/`);
+    const h = makeWire(async () =>
+      envelopeResponse("<html></html>", { type: "text/html", url: "" }),
+    );
+    await h.wire.fetch({ url: currentUrl(document), zone: "z" });
+    expect(h.navigated).toEqual([`${location.origin}//attacker.example/x/`]);
+  });
+
+  it("sends a mutation same-origin too", async () => {
+    const h = makeWire(async () => envelopeResponse(ENVELOPE));
+    await h.wire.fetch({ url: "/_next/form/u/", method: "POST", uid: "u" });
+    expect(h.calls[0]!.url).toBe(`${location.origin}/_next/form/u/`);
+    expect(h.calls[0]!.init.mode).toBe("same-origin");
+  });
+
+  it("resolves a relative url against the document base", async () => {
+    window.history.replaceState(null, "", `${location.origin}//attacker.example/x/`);
+    const h = makeWire(async () => envelopeResponse(ENVELOPE));
+    await h.wire.fetch({ url: "?page=2", zone: "list" });
+    expect(h.calls[0]!.url).toBe(`${location.origin}//attacker.example/x/?page=2`);
+  });
+
+  it("keeps a backslash path on the page's origin", async () => {
+    const h = makeWire(async () => envelopeResponse(ENVELOPE));
+    await h.wire.fetch({ url: "/\\attacker.example/x/", zone: "z" });
+    expect(new URL(h.calls[0]!.url).origin).toBe(location.origin);
+  });
+
+  it.each([
+    "https://attacker.example/x/",
+    "\\\\attacker.example/x/",
+    " //attacker.example/x/",
+    "http://[",
+  ])("refuses %j without a request", async (url) => {
+    const h = makeWire(async () => envelopeResponse(ENVELOPE));
+    await h.wire.fetch({ url, method: "POST", uid: "u", zone: "z" });
+    expect(h.calls).toHaveLength(0);
+    expect(h.envelopes).toHaveLength(0);
+    const err = h.dispatched.find((d) => d.event === "partial:error");
+    expect(err!.detail.kind).toBe("network");
+    expect(err!.detail.url).toBe(url);
+    expect(h.dispatched.some((d) => d.event === "partial:before-request")).toBe(false);
+  });
+
+  it("leaves the in-flight GET of a queue alive when a refused one names it", async () => {
+    let release: (response: Response) => void = () => undefined;
+    const h = makeWire(
+      () =>
+        new Promise<Response>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const first = h.wire.fetch({ url: "/list/", zone: "list" });
+    await h.wire.fetch({ url: "https://attacker.example/list/", zone: "list" });
+    release(envelopeResponse(ENVELOPE));
+    await first;
+    expect(h.calls).toHaveLength(1);
+    expect(h.calls[0]!.init.signal!.aborted).toBe(false);
+    expect(h.envelopes).toHaveLength(1);
   });
 });

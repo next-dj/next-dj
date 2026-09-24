@@ -119,11 +119,37 @@ The error subclasses Django's ``SuspiciousFileOperation``, itself a :exc:`~djang
 It is exported as ``next.static.StaticAssetTraversalError``, and it carries the offending reference as written on its ``reference`` attribute.
 A reference built from stored or user-supplied data is therefore refused at the door rather than rendered, see :doc:`/content/security/static-assets`.
 
+The name a co-located file gets
+-------------------------------
+
+A co-located file arrives from the other direction, with the framework choosing its public name instead of the project writing one.
+Discovery and the staticfiles finder share one ``PathResolver``, so both sides settle on the same name, and every name lands under the ``next/`` staticfiles namespace.
+
+``template`` role.
+   The directory of the template relative to its page root, and ``index`` for the page root itself.
+   A ``template.css`` in ``notes/pages/archive/`` is published as ``next/archive.css``, and one beside the root ``template.djx`` as ``next/index.css``.
+
+``layout`` role.
+   The directory of the layout relative to its page root with ``/layout`` appended, and ``layout`` alone for the page root itself.
+   A ``layout.css`` in ``notes/pages/archive/`` is published as ``next/archive/layout.css``.
+
+``component`` role.
+   ``components/<name>``, where the name is the component directory name.
+   A ``component.css`` in ``_components/note_card/`` is published as ``next/components/note_card.css``.
+
+The stem is no part of the name, so two stems of one role in one directory compete for a single path, see :doc:`/content/howto/add-a-custom-stem`.
+
+.. warning::
+
+   A component name is its directory name and nothing else, so the page tree above it does not scope it.
+   Two ``_components/card/`` folders under different page trees therefore both resolve to ``next/components/card.css``, the finder keeps whichever it walked first, and the other file never reaches ``STATIC_ROOT`` or the browser.
+   Give component directories names that are unique across the project.
+
 Resolution and caching
 ----------------------
 
 A name is resolved when the asset is registered, not when the tag is injected, so the collector, the dedup strategy, and a partial patch envelope all see the public URL.
-The default backend memoises each resolved reference for the life of the process, alongside the memo it keeps for co-located files.
+The default backend memoises each resolved reference in the bounded cache it also keeps for co-located files, which evicts its stalest entry once full rather than holding every answer for the life of the process.
 A ``STATIC_ROOT``, ``STATIC_URL``, or ``STORAGES`` change drops both through ``forget_urls``, so a test that swaps storage through ``override_settings`` sees fresh URLs on the next render.
 
 Asset discovery caches the plan it built for a page or a component, and the assets a module list contributes are resolved once with that plan rather than once per render.

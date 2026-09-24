@@ -2,6 +2,7 @@
 
 import inspect
 import logging
+import threading
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable, Mapping
 from functools import cached_property
@@ -133,15 +134,23 @@ class BackendListManager[T](ABC):
         """Take an explicit list, or leave the settings read to the first access."""
         self._backends: list[T] = list(backends) if backends is not None else []
         self._loaded: bool = bool(self._backends)
+        self._lock = threading.RLock()
 
     @abstractmethod
     def reload(self) -> None:
         """Rebuild the backend list from the current `NEXT_FRAMEWORK` settings."""
 
     def _ensure_backends(self) -> None:
-        """Load the backends once, on the first access after a reset."""
-        if not self._loaded:
-            self.reload()
+        """Load the backends once, on the first access after a reset.
+
+        A settings reload drops the flag at runtime, so the load is double-checked
+        under a lock rather than left as a check-then-act two threads both win.
+        """
+        if self._loaded:
+            return
+        with self._lock:
+            if not self._loaded:
+                self.reload()
 
     def _mark_loaded(self, *, retry_when_empty: bool = False) -> None:
         """Record the load, leaving the flag down where an empty list is no result.
@@ -160,12 +169,18 @@ class SingleBackendManager[T]:
     """
 
     def __init__(
-        self, setting: str, *, base: BackendRoot[T], default: str | None = None
+        self,
+        setting: str,
+        *,
+        base: BackendRoot[T],
+        default: str | None = None,
+        signal: Signal | None = None,
     ) -> None:
         """Bind the manager to a settings key without reading it."""
         self._setting = setting
         self._base = base
         self._default = default
+        self._signal = signal
 
     def _select_config(self) -> Mapping[str, Any]:
         raw = getattr(next_framework_settings, self._setting, None)
@@ -184,7 +199,10 @@ class SingleBackendManager[T]:
             )
         except ImportError as exc:
             raise BackendImportError(self._setting, exc) from exc
-        return instantiate_backend(klass, config)
+        instance = instantiate_backend(klass, config)
+        if self._signal is not None:
+            self._signal.send(sender=klass, config=dict(config), instance=instance)
+        return instance
 
     def get(self) -> T:
         """Return the configured backend, building it on first use."""

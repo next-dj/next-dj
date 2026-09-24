@@ -6,7 +6,7 @@ Pages reference
 Module summary
 --------------
 
-``next.pages`` exposes the ``Page`` coordinator and its ``page`` singleton, the ``@context`` decorator, the ``Context`` and ``ContextResult`` value objects, the ``PageModuleImportError`` raised by a broken ``page.py``, and the ``checks`` and ``signals`` submodules.
+``next.pages`` exposes the ``Page`` coordinator and its ``page`` singleton, the ``@context`` decorator, the ``Context`` and ``ContextResult`` value objects, the ``PageModuleImportError`` raised by a broken ``page.py`` and the ``PageContextShapeError`` raised by a keyless ``@context`` answering no mapping, and the ``checks`` and ``signals`` submodules.
 
 Public API
 ----------
@@ -40,14 +40,20 @@ Nine ``Page`` methods carry no leading underscore because other framework areas 
 ``next.forms`` and ``next.partial`` read the first six, ``next.urls`` builds every page pattern through ``create_url_pattern``, and ``next.testing`` calls ``render`` and ``clear_template_caches`` from its rendering and isolation helpers.
 They follow the underscore rule of :doc:`/content/faq/general`, so they are safe from removal without notice.
 They do not carry the application-facing stability of a Stable tier, and their signatures may drift as partial rendering evolves.
-``register_template`` has no framework caller at all and serves application code seeding a composed body under the same underscore rule, again without the Stable tier's signature guarantee.
+``register_template`` is called by ``composed_template_for`` on every cache miss and by no other area, so it serves application code seeding a composed body under the same underscore rule, again without the Stable tier's signature guarantee.
 
 Manager
 ~~~~~~~
 
+``next.pages.manager`` is a package.
+Its ``__init__`` holds ``Page`` and the ``page`` singleton, ``templates`` holds the per-page template cache, and ``views`` holds the routed views and the ``URLPattern`` factory the file router mounts them under.
+
 .. automodule:: next.pages.manager
    :members:
    :exclude-members: page, context, resolver
+
+.. automodule:: next.pages.manager.templates
+   :members:
 
 Registry
 ~~~~~~~~
@@ -87,6 +93,16 @@ It is no ``TemplateLoader``, because the chain supplies a body and this wraps on
 ``LayoutTemplateLoader`` keeps no cache of its own, and composition results live on ``Page``, where ``composed_template_for`` stores the composed source alongside the compiled ``Template``.
 ``Page.clear_template_caches`` drops every layer together, and :doc:`/content/internals/page-discovery` describes how ``DEBUG`` decides when the composition is revalidated.
 
+Placeholder
+~~~~~~~~~~~
+
+``next.pages.placeholder`` owns the layout placeholder grammar that :doc:`/content/topics/layouts` teaches.
+``PLACEHOLDER`` is the canonical ``{% template %}`` spelling, and ``PLACEHOLDER_OPEN`` and ``PLACEHOLDER_CLOSE`` are the paired ``{% #template %}`` and ``{% /template %}`` form that carries a fallback body.
+Composition and the ``check_layout_templates`` check read the same scan from here, so ``next.W001`` and ``next.W078`` count exactly the placeholders composition would fill.
+
+.. automodule:: next.pages.placeholder
+   :members:
+
 Module reads
 ~~~~~~~~~~~~
 
@@ -118,6 +134,23 @@ See *Broken page modules* in :doc:`/content/topics/pages` for the loudness table
 .. autoclass:: next.pages.PageModuleImportError
    :members:
 
+Context shape
+~~~~~~~~~~~~~
+
+A keyless ``@context`` contributes its whole return value to the page context, which the merge reads as a mapping.
+A callable that answers something else raises ``PageContextShapeError``, a ``TypeError`` subclass carrying the ``context_name`` of the callable and the ``file_path`` of the page it was building.
+Without it the merge would fail inside ``dict.update`` and name neither.
+The ``next.E029`` check reports the same mistake statically, from the return annotation, so a callable annotated ``-> dict`` and answering otherwise is what reaches the runtime error.
+
+.. autoclass:: next.pages.PageContextShapeError
+   :members:
+
+Ports
+~~~~~
+
+``next.pages.ports`` holds ``PageScanImpl``, which binds the page-tree scan to the ``PageScan`` port of :doc:`ports`.
+The scan reads the router manager from ``next.discovery``, so discovery reaches the scan back through the port rather than through an import that would close the cycle.
+
 Processors
 ~~~~~~~~~~
 
@@ -125,13 +158,22 @@ Context-processor discovery has no public callable of its own.
 The merged list comes from ``OPTIONS.context_processors`` on each ``PAGE_BACKENDS`` entry followed by ``OPTIONS.context_processors`` on the first ``TEMPLATES`` entry, deduplicated by dotted path with the first occurrence kept, and it is memoised until either source setting changes.
 See *Resolution order* in :doc:`/content/topics/context` for where the merged list sits among the other context sources.
 
+Visits
+~~~~~~
+
+``next.pages.visits`` holds ``visit_request``, which copies a live request and restates it as a GET of one page URL.
+``authorization_outcome`` asks a page through that copy, so a ``render()`` reading the method, the path, or the query string answers an out-of-band caller as it answers a visit.
+The live request is never modified, and the user, the session, and every other attribute a middleware attached come through untouched.
+See *Render paths and what each one runs* in :doc:`/content/internals/request-lifecycle` for the callers.
+
 System checks
 ~~~~~~~~~~~~~
 
 ``next.pages.checks`` registers the Django system checks for the pages subsystem.
-They run through ``uv run python manage.py check``.
+They run through ``uv run python manage.py check``, except ``check_page_module_imports``, which is a deployment check and runs under ``manage.py check --deploy``.
+The package splits by subject into ``contexts``, ``layouts``, ``loaders``, ``modules``, ``processors``, ``structure``, and ``zones``, and importing the package registers every one of them.
 
-The module exports twelve check callables.
+The package exports twelve check callables.
 
 - ``check_context_functions``.
 - ``check_context_processor_signature``.

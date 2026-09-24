@@ -1,10 +1,12 @@
 from pathlib import Path
+from urllib.parse import quote
 
 import pytest
 
 from next.partial import ForeignPageNotAuthorizedError, Patches, resolve_partial_origin
 from next.partial.errors import DynamicForeignPageError
 from next.partial.origin import OriginSource
+from tests.partial.urls_origin import CAFE_PAGE
 from tests.support import partial_request
 
 
@@ -12,6 +14,7 @@ _PAGES_ROOT = Path(__file__).resolve().parent.parent / "site_pages"
 _ZONED_PAGE = _PAGES_ROOT / "zoned" / "page.py"
 _REDIRECTING_PAGE = _PAGES_ROOT / "redirecting" / "page.py"
 _DYNAMIC_PAGE = _PAGES_ROOT / "dynamic" / "page.py"
+_GROUP_PAGE = _PAGES_ROOT / "groups" / "[name]" / "page.py"
 
 
 class TestForeignZoneByPath:
@@ -135,6 +138,74 @@ class TestResolvePartialOrigin:
             .envelope()
         )
         assert envelope.ops[0].target == {"zone": "beta"}
+
+
+class TestEncodedOriginHeader:
+    """The header path decodes the way Django decodes `request.path`."""
+
+    def test_encoded_kwarg_resolves_decoded(self) -> None:
+        request = partial_request(origin="/counted/", host="/groups/a%20b/")
+        origin = resolve_partial_origin(request)
+        assert origin is not None
+        assert origin.page_path == _GROUP_PAGE
+        assert origin.url_kwargs == {"name": "a b"}
+        assert origin.origin == "/groups/a%20b/"
+        assert origin.source is OriginSource.HEADER
+
+    def test_encoded_question_mark_stays_in_its_segment(self) -> None:
+        request = partial_request(origin=None, host="/groups/a%3Fb/?q=1")
+        origin = resolve_partial_origin(request)
+        assert origin is not None
+        assert origin.page_path == _GROUP_PAGE
+        assert origin.url_kwargs == {"name": "a?b"}
+        assert origin.origin == "/groups/a%3Fb/?q=1"
+        assert origin.source is OriginSource.HEADER
+
+    def test_non_ascii_static_route_resolves(self) -> None:
+        request = partial_request(origin=None, host=quote("/café/"))
+        request.urlconf = "tests.partial.urls_origin"
+        origin = resolve_partial_origin(request)
+        assert origin is not None
+        assert origin.page_path == CAFE_PAGE
+        assert origin.origin == quote("/café/")
+        assert origin.source is OriginSource.HEADER
+
+    def test_query_stays_encoded(self) -> None:
+        origin = resolve_partial_origin(partial_request(host="/zoned/?q=a%20b"))
+        assert origin is not None
+        assert origin.origin == "/zoned/?q=a%20b"
+        assert origin.source is OriginSource.HEADER
+
+    @pytest.mark.parametrize(
+        "host",
+        ["/%2F/evil.example.com/", "/%5C/evil.example.com/", "/%09/evil.example.com/"],
+    )
+    def test_encoded_offsite_trick_falls_back_to_the_form(self, host: str) -> None:
+        origin = resolve_partial_origin(partial_request(origin="/zoned/", host=host))
+        assert origin is not None
+        assert origin.page_path == _ZONED_PAGE
+        assert origin.source is OriginSource.FORM
+
+    def test_invalid_utf8_falls_back_to_the_form(self) -> None:
+        origin = resolve_partial_origin(partial_request(origin="/zoned/", host="/%FF/"))
+        assert origin is not None
+        assert origin.source is OriginSource.FORM
+
+
+class TestNonPageHeaderOrigin:
+    """A header naming a view that is not a page leaves the form origin to win."""
+
+    def test_non_page_view_falls_back_to_the_form(self) -> None:
+        request = partial_request(origin="/zoned/", host="/_next/form/x/")
+        origin = resolve_partial_origin(request)
+        assert origin is not None
+        assert origin.page_path == _ZONED_PAGE
+        assert origin.url_kwargs == {}
+        assert origin.source is OriginSource.FORM
+
+    def test_non_page_view_without_form_origin_returns_none(self) -> None:
+        request = partial_request(origin=None, host="/_next/form/x/")
+        assert resolve_partial_origin(request) is None
 
 
 class TestLayerOriginMorphsTheHostNotTheStep:

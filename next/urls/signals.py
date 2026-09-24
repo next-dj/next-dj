@@ -5,6 +5,7 @@ from django.dispatch import Signal
 
 route_registered: Signal = Signal(use_caching=True)
 router_reloaded: Signal = Signal(use_caching=True)
+router_backend_loaded: Signal = Signal(use_caching=True)
 
 
-__all__ = ["route_registered", "router_reloaded"]
+__all__ = ["route_registered", "router_backend_loaded", "router_reloaded"]

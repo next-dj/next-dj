@@ -2,8 +2,6 @@ from typing import ClassVar
 
 from django.http import HttpRequest, HttpResponseRedirect
 from django.shortcuts import get_object_or_404
-from django.utils.safestring import SafeString
-from markup import render_markdown
 from notes.access import get_active_tenant
 from notes.models import Note
 from notes.providers import DTenant
@@ -28,7 +26,7 @@ class NoteEditForm(ModelForm):
         fields: ClassVar = ["title", "body"]
         widgets: ClassVar = {
             "title": ComponentWidget("input"),
-            "body": ComponentWidget("textarea", rows=8),
+            "body": ComponentWidget("markdown_textarea", rows=8),
         }
 
     @classmethod
@@ -57,9 +55,3 @@ class NoteEditForm(ModelForm):
 def note(active_tenant: DTenant, note_id: int) -> Note:
     """Return the note iff it belongs to the active tenant."""
     return get_owned_note(active_tenant, note_id)
-
-
-@context("preview_html")
-def preview_html(note: Note) -> SafeString:
-    """Render the note body so the preview pane matches it on first paint."""
-    return render_markdown(note.body)

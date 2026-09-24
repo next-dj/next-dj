@@ -6,19 +6,26 @@ import pytest
 from django import forms as django_forms
 from django.dispatch import Signal
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, QueryDict
+from django.test import override_settings
 
 from next.forms import ActionRegistration, Form, RegistryFormActionBackend
 from next.forms.dispatch import FormActionDispatch
-from next.forms.manager import form_action_manager
+from next.forms.manager import FormActionManager, form_action_manager
 from next.forms.signals import (
     action_dispatched,
     action_registered,
     form_access_denied,
+    form_backend_loaded,
     form_validation_failed,
+    wizard_backend_loaded,
     wizard_completed,
     wizard_step_submitted,
 )
-from next.forms.wizard import FormWizard
+from next.forms.wizard import (
+    FormWizard,
+    SessionFormWizardBackend,
+    wizard_backend_manager,
+)
 from next.testing import SignalRecorder, capture_signals
 from tests.support import SignalSender
 
@@ -90,6 +97,20 @@ def capture_wizard_completed() -> Generator[SignalRecorder, None, None]:
 def capture_form_access_denied() -> Generator[SignalRecorder, None, None]:
     """Record ``form_access_denied`` emissions."""
     with capture_signals(form_access_denied) as recorder:
+        yield recorder
+
+
+@pytest.fixture()
+def capture_form_backend_loaded() -> Generator[SignalRecorder, None, None]:
+    """Record ``form_backend_loaded`` emissions."""
+    with capture_signals(form_backend_loaded) as recorder:
+        yield recorder
+
+
+@pytest.fixture()
+def capture_wizard_backend_loaded() -> Generator[SignalRecorder, None, None]:
+    """Record ``wizard_backend_loaded`` emissions."""
+    with capture_signals(wizard_backend_loaded) as recorder:
         yield recorder
 
 
@@ -676,3 +697,74 @@ class TestDispatchSignalSender:
         assert events[0]["sender"] is FormActionDispatch
         assert events[0]["layer"] == "view"
         assert events[0]["reason"] == "response"
+
+
+class TestFormBackendLoadedSignal:
+    """``form_backend_loaded`` announces every backend the manager builds."""
+
+    def test_every_configured_backend_is_announced(
+        self, capture_form_backend_loaded: SignalRecorder
+    ) -> None:
+        config = {"BACKEND": "next.forms.RegistryFormActionBackend", "OPTIONS": {}}
+        with override_settings(
+            NEXT_FRAMEWORK={"FORM_ACTION_BACKENDS": [config, config]}
+        ):
+            backends = FormActionManager().backends
+
+        assert len(capture_form_backend_loaded) == 2
+        events = capture_form_backend_loaded.events
+        assert [event.sender for event in events] == [RegistryFormActionBackend] * 2
+        assert [event.kwargs["instance"] for event in events] == list(backends)
+        assert events[0].kwargs["config"] == config
+
+    def test_config_kwarg_is_a_copy_of_the_entry(
+        self, capture_form_backend_loaded: SignalRecorder
+    ) -> None:
+        """A receiver mutating the kwarg cannot reach the settings entry."""
+        config = {"BACKEND": "next.forms.RegistryFormActionBackend", "OPTIONS": {}}
+        with override_settings(NEXT_FRAMEWORK={"FORM_ACTION_BACKENDS": [config]}):
+            assert FormActionManager().backends
+            received = capture_form_backend_loaded.events[0].kwargs["config"]
+            received["BACKEND"] = "mutated"
+            rebuilt = FormActionManager().backends
+
+        assert [type(backend) for backend in rebuilt] == [RegistryFormActionBackend]
+
+    def test_unloadable_entry_is_not_announced(
+        self, capture_form_backend_loaded: SignalRecorder
+    ) -> None:
+        with override_settings(
+            NEXT_FRAMEWORK={"FORM_ACTION_BACKENDS": [{"BACKEND": "next.forms.NoSuch"}]}
+        ):
+            assert FormActionManager().backends == ()
+
+        assert list(capture_form_backend_loaded) == []
+
+
+class TestWizardBackendLoadedSignal:
+    """``wizard_backend_loaded`` announces the single wizard backend it builds."""
+
+    def test_first_use_announces_the_backend(
+        self, capture_wizard_backend_loaded: SignalRecorder
+    ) -> None:
+        config = {"BACKEND": "next.forms.SessionFormWizardBackend", "OPTIONS": {}}
+        with override_settings(NEXT_FRAMEWORK={"FORM_WIZARD_BACKEND": config}):
+            backend = wizard_backend_manager.get()
+
+        assert len(capture_wizard_backend_loaded) == 1
+        event = capture_wizard_backend_loaded.events[0]
+        assert event.sender is SessionFormWizardBackend
+        assert event.kwargs["instance"] is backend
+        assert event.kwargs["config"] == config
+
+    def test_cached_backend_is_announced_once(
+        self, capture_wizard_backend_loaded: SignalRecorder
+    ) -> None:
+        """The build happens once, so a second reader sees no second emission."""
+        config = {"BACKEND": "next.forms.SessionFormWizardBackend", "OPTIONS": {}}
+        with override_settings(NEXT_FRAMEWORK={"FORM_WIZARD_BACKEND": config}):
+            first = wizard_backend_manager.get()
+            second = wizard_backend_manager.get()
+
+        assert second is first
+        assert len(capture_wizard_backend_loaded) == 1

@@ -21,9 +21,5 @@
         {% component "button" type="submit" text="Save changes" variant="default" %}
       </div>
     </div>
-
-    <aside>
-      {% component "markdown_preview" rendered_html=preview_html %}
-    </aside>
   {% endform %}
 </div>

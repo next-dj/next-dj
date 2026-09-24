@@ -51,9 +51,7 @@ def _class_filename(cls: type) -> str | None:
 def defining_file(obj: object) -> Path:
     """Return the file where ``obj`` was declared, for decorator registration.
 
-    A class built by ``type()`` in foreign code keeps no link to its caller's file,
-    so a code object from the object's own body answers when ``sys.modules`` names
-    none.
+    A class built by ``type()`` names no file, so a code object from its body answers.
     """
     if isinstance(obj, functools.partial):
         return defining_file(obj.func)

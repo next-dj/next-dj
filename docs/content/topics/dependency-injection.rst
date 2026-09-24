@@ -20,6 +20,43 @@ The form dispatch resolves the form-class factory, ``get_initial``, ``@action`` 
 Every call site shares one provider list and one set of markers.
 Custom providers and tests can import ``resolver`` from ``next.deps`` and call ``resolver.resolve_dependencies``.
 
+Django has no counterpart to this, so everything on this page is new rather than a rename of something a Django view already does.
+A Django view receives ``request`` as its first positional argument and reads everything else off it, while here a callable declares what it wants and the resolver supplies it.
+
+Two examples first
+------------------
+
+A parameter annotated :class:`~django.http.HttpRequest` receives the request being served.
+
+.. code-block:: python
+   :caption: notes/pages/page.py
+
+   from django.http import HttpRequest
+
+   from next import context
+
+   @context("greeting")
+   def greeting(request: HttpRequest) -> str:
+       return f"Hello from {request.path}."
+
+The annotation is what claims the parameter, so a bare ``request`` with no annotation is filled with ``None`` instead.
+
+A parameter annotated ``DUrl[int]`` receives the URL segment of the same name, coerced to :class:`int`.
+
+.. code-block:: python
+   :caption: notes/pages/notes/[int:note_id]/page.py
+
+   from notes.models import Note
+
+   from next import context
+   from next.urls import DUrl
+
+   @context("note")
+   def note(note_id: DUrl[int]) -> Note:
+       return Note.objects.get(pk=note_id)
+
+Both callables run through the same pipeline, and the list below is how it decides which one fills which parameter.
+
 Built-in providers
 ------------------
 
@@ -103,6 +140,8 @@ In the simplest form ``DUrl[T]`` matches the captured segment whose name equals 
 A value that already satisfies ``T`` passes through untouched.
 A Django converter that pre-coerced the segment, such as ``[uuid:id]`` producing a :class:`~uuid.UUID`, reaches the handler in that shape.
 A failed parse falls back to the raw captured value rather than raising.
+The annotation is a hint and not a gate, because the value reached the callable through whatever the route already accepted.
+A typed directory such as ``[int:id]`` is what refuses a malformed segment, with a 404 before any callable runs, see :ref:`Converter segments <topics-di-converter-segments>`.
 
 A segment the route never captured resolves to ``None``, not to the parameter default, because the marker claims the parameter on its annotation alone.
 This differs from ``DQuery``, which falls back to the default when the key is absent.
@@ -209,6 +248,7 @@ The provider returns the parameter default when the key is absent.
 
 ``DQuery`` accepts the same scalar set as ``DUrl``, namely ``str``, ``int``, ``bool``, ``float``, ``UUID``, ``Decimal``, ``date``, and ``datetime``, plus ``list[T]`` for any of those scalars.
 A value that fails to parse falls back to the raw query string rather than raising.
+A query string passes no converter, so nothing upstream can reject a bad value and the check belongs in the callable, see :doc:`/content/security/di-and-untrusted-input`.
 
 Context markers
 ---------------
@@ -298,6 +338,7 @@ When two of them ask for each other, directly or through a longer chain, resolut
 
 The resolver records each name on a stack as it enters the dependency and marks the cache entry in progress.
 Re-entering a name that is already on the stack raises ``DependencyCycleError``.
+The callable form ``Depends(some_factory)`` runs under the same guard, with the dotted ``module.qualname`` of the factory standing in for the registered name on the stack, so two factories that ask for each other raise the same error rather than exhausting the stack.
 
 .. code-block:: text
    :caption: the error
@@ -426,8 +467,13 @@ A second context function in the same page render that asks for the same ``Depen
 To share one value across several context functions in the same render, register it with ``resolver.dependency("active_tenant")`` and ask for it through ``Depends("active_tenant")`` in each callable that needs it.
 The first callable to ask pays the resolution, and every later callable in the same pass reads the value the cache already holds.
 
+That store covers the ``page.py`` context merge, and a component render is a pass of its own.
+On an ordinary GET every ``@component.context`` callable of one component resolves against a cache built for that component, so a ``Depends("name")`` two components both ask for is resolved once per component rather than once per page.
+A ``render`` function in a ``component.py`` is further apart still and always gets a fresh cache, on a GET and inside a form dispatch alike, so a value it shares with the page around it is computed again for the call.
+Keep a dependency cheap when several components ask for it, or have it read a store of its own scoped to the request.
+
 The cache lives for one form dispatch.
-Every stage of that POST, from ``get_initial`` through the validation-failure re-render, shares it.
+Every stage of that POST, from ``get_initial`` through the validation-failure re-render, shares it, and the ``@component.context`` callables of the re-rendered page join it too rather than each building their own.
 ``FormActionDispatch`` attaches its dependency cache to the request, and ``get_request_dep_cache`` reads it back.
 The function returns ``None`` outside a form dispatch, so callers handle the missing case.
 
@@ -492,5 +538,6 @@ See also
    :doc:`testing` for the ``override_dependency`` and ``override_provider`` test helpers.
    :doc:`/content/faq/troubleshooting` for concrete resolver and dispatch errors.
    :doc:`/content/howto/share-context-across-pages` for the inherited context pattern.
+   :doc:`/content/security/di-and-untrusted-input` for treating an injected URL or query value as untrusted.
    :doc:`/content/internals/di-resolver` for the resolver internals.
    :doc:`/content/ref/deps` for the public API and cache contract.

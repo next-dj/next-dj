@@ -30,6 +30,12 @@ The first tag emits ``/static/site/tokens.css`` under a plain ``STATIC_URL`` and
 The second emits the URL it was given.
 :doc:`name-resolution` states the rule in full, lists every shape that passes through, and covers what happens when a name resolves to nothing.
 
+.. warning::
+
+   A reference that is not a staticfiles name reaches the document byte for byte, and the tags read a context variable exactly as they read a literal.
+   A ``{% use_style %}`` or ``{% use_script %}`` fed from a database column or from a request value therefore loads whatever origin that value names, which makes it a script injection sink.
+   Constrain such a value to a set of references the project ships and map the stored key to that set, see :doc:`/content/security/static-assets`.
+
 collect_styles
 --------------
 
@@ -109,12 +115,13 @@ The optional ``kind`` argument defaults to ``js``, which renders a classic ``<sc
 Any other registered kind works too, and the registry decides both the slot the asset lands in and the backend renderer that builds its tag.
 
 .. code-block:: jinja
-   :caption: notes/pages/template.djx
+   :caption: notes/pages/template.djx, in a project that registered a font kind
 
    {% use_script "site/vendor.mjs" kind="module" %}
    {% use_script "https://cdn.example.com/inter.woff2" kind="font" %}
 
-A custom kind registered through ``KindRegistry.register`` therefore needs no template tag of its own, see :doc:`asset-kinds`.
+The framework ships ``module`` and ships no ``font``, so the second line needs a project registration first, see :doc:`asset-kinds`.
+A custom kind registered through ``KindRegistry.register`` then needs no template tag of its own.
 A kind that was never registered raises ``KeyError`` out of the render, so a typo surfaces on the first request instead of dropping the asset.
 
 use_module
@@ -189,9 +196,7 @@ The tag runs the same resolution the registration tags run and then the per-requ
 It registers nothing on the collector, so it also works in a render that has none, such as a template rendered through ``render_to_string`` in a plain view.
 
 ``{% asset %}`` is the recommended spelling for an asset URL in a next.dj template.
-A paired benchmark on one machine measures it at roughly 1.9 times cheaper than Django's ``{% static %}`` for the same name, because the backend answers a repeat from its memo while the Django tag asks storage on every render.
-Resolving a reference that is already a URL costs about 125 nanoseconds per tag on the same run.
-Both numbers are indicative rather than contractual, and the pair they come from is ``tests/benchmarks/static/test_bench_resolve.py``.
+It answers a repeated name from the backend memo where Django's ``{% static %}`` asks storage on every render.
 
 Django's ``{% static %}`` keeps working and is the better choice where the value must be identical for every request.
 ``{% asset %}`` output can vary per request, because ``asset_url`` receives the request, and a value that varies must not be baked into a ``{% cache %}`` fragment keyed on something else.
@@ -251,36 +256,13 @@ The framework loads the static template tags as Django builtins through ``next.a
 Templates do not need a ``{% load %}`` statement.
 The same applies to ``{% form %}`` and ``{% component %}``.
 
-Common patterns
----------------
-
-Vendor CSS before component styles
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Use ``{% use_style %}`` for a vendor stylesheet, a name for a file the project ships and a URL for one a third party hosts.
-The prepend behaviour guarantees the vendor file loads before any co-located ``component.css``.
-
-Site-wide stylesheet
-~~~~~~~~~~~~~~~~~~~~
-
-Write ``{% use_style %}`` once in the root ``layout.djx``, which every page below it inherits, see :doc:`/content/howto/ship-a-site-wide-stylesheet`.
-
-Critical inline CSS
-~~~~~~~~~~~~~~~~~~~
-
-Use the inline block form of ``{% #use_style %}`` for a small critical stylesheet that should ship in the document.
-
-Per-page script
-~~~~~~~~~~~~~~~
-
-Use the inline block form of ``{% #use_script %}`` for a one off script that interpolates page context.
-
 See also
 --------
 
 .. seealso::
 
    :doc:`co-located-files` for what becomes an asset.
+   :doc:`/content/howto/ship-a-site-wide-stylesheet` for one ``{% use_style %}`` that covers the whole tree.
    :doc:`name-resolution` for the rule that decides a name from a URL.
    :doc:`deduplication` for how duplicates are avoided.
    :doc:`backends` for the rendered tag output.

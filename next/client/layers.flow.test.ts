@@ -108,7 +108,7 @@ describe("layer flow through the partial surface", () => {
     )!;
     expect(container).not.toBeNull();
     expect(container.textContent).toBe("step");
-    expect(calls[0]!.url).toBe("/request/identity/");
+    expect(calls[0]!.url).toBe(`${location.origin}/request/identity/`);
     expect(headerOf(calls[0]!, "X-Next-Zone")).toBe("access-wizard");
   });
 

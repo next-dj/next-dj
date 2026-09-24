@@ -119,17 +119,23 @@ Each annotation drives its own coercion.
 
 List elements follow the same three wire formats described above under *Type coercion*.
 
-Build a typed snapshot with a provider
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Build a typed snapshot once
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-When several callables need the same filter set, parse it once into a frozen dataclass.
+When several callables need the same filter set, parse it once into a frozen dataclass and register the parser as a named dependency.
 ``get_multi_values`` reads a multi-value parameter through the same three wire formats as ``DQuery[list[T]]``.
 
+Annotate the ``request`` parameter with :class:`~django.http.HttpRequest`.
+The resolver injects the request by annotation and never by parameter name, so a bare ``def parse_filters(request)`` receives ``None`` and fails on its first attribute read.
+
 .. code-block:: python
-   :caption: catalog/providers.py
+   :caption: catalog/filters.py
 
    from dataclasses import dataclass
 
+   from django.http import HttpRequest
+
+   from next.deps import resolver
    from next.urls import get_multi_values
 
    @dataclass(frozen=True, slots=True)
@@ -139,7 +145,8 @@ When several callables need the same filter set, parse it once into a frozen dat
        in_stock: bool = False
        sort: str = "newest"
 
-   def parse_filters(request):
+   @resolver.dependency("filters")
+   def parse_filters(request: HttpRequest) -> Filters:
        g = request.GET
        return Filters(
            q=g.get("q", "").strip(),
@@ -147,6 +154,34 @@ When several callables need the same filter set, parse it once into a frozen dat
            in_stock=g.get("in_stock", "").lower() in {"1", "true", "yes"},
            sort=g.get("sort") or "newest",
        )
+
+Import ``catalog/filters.py`` from ``AppConfig.ready`` so the registration runs before the first request.
+
+Each callable that needs the snapshot takes it through ``Depends("filters")``.
+The resolution cache memoises the value by its registered name for the rest of the pass, so the query string is parsed once however many callables ask for it.
+
+.. code-block:: python
+   :caption: storefront/catalog/page.py
+
+   from catalog.filters import Filters
+   from catalog.models import Product
+
+   from next import Depends, context
+
+   @context("current_filters")
+   def current_filters(filters: Filters = Depends("filters")) -> Filters:
+       return filters
+
+   @context("filtered_products")
+   def filtered_products(filters: Filters = Depends("filters")) -> list[Product]:
+       products = Product.objects.all()
+       if filters.q:
+           products = products.filter(title__icontains=filters.q)
+       if filters.brands:
+           products = products.filter(brand__in=filters.brands)
+       return list(products)
+
+The template then reads ``{{ current_filters.q }}`` and iterates ``filtered_products``.
 
 Render the form
 ~~~~~~~~~~~~~~~~
@@ -156,7 +191,7 @@ A bookmarked URL reproduces the same listing.
 Reserve ``@action`` for POST side effects such as creating or deleting rows.
 
 .. code-block:: jinja
-   :caption: storefront/catalog/_cards/filter_panel/component.djx
+   :caption: storefront/catalog/_components/filter_panel/component.djx
 
    <form method="get" action="{{ submit_url }}" data-filter-form>
      <input name="q" type="search" value="{{ current_filters.q }}"/>

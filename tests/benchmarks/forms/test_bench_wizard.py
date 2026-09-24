@@ -92,7 +92,7 @@ class TestBenchWizardNavigation:
 class TestBenchWizardDispatch:
     """End-to-end wizard step submit through `FormActionDispatch.dispatch`."""
 
-    @pytest.mark.benchmark(group="forms.wizard.dispatch")
+    @pytest.mark.benchmark(group="forms.wizard")
     def test_dispatch_wizard_step_submit(self, benchmark) -> None:
         backend = form_action_manager.default_backend
         meta = backend.get_meta("bench_dispatch_wizard")

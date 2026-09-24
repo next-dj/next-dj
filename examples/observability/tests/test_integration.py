@@ -20,20 +20,23 @@ from next.deps.signals import provider_registered
 from next.forms.signals import (
     action_dispatched,
     action_registered,
+    form_backend_loaded,
     form_validation_failed,
+    wizard_backend_loaded,
 )
 from next.pages.signals import context_registered, page_rendered, template_loaded
+from next.partial.signals import partial_backend_loaded
 from next.server import iter_all_autoreload_watch_specs
 from next.server.signals import watch_specs_ready
 from next.static import get_static_manager
 from next.static.signals import (
     asset_registered,
-    backend_loaded,
     collector_finalized,
     html_injected,
+    static_backend_loaded,
 )
 from next.testing import SignalRecorder, envelope_of, init_payload
-from next.urls.signals import route_registered, router_reloaded
+from next.urls.signals import route_registered, router_backend_loaded, router_reloaded
 
 
 GROUP_SAMPLES: dict[str, list] = {
@@ -41,15 +44,18 @@ GROUP_SAMPLES: dict[str, list] = {
     "deps": [provider_registered],
     "pages": [template_loaded, context_registered, page_rendered],
     "urls": [route_registered, router_reloaded],
-    "components": [
-        component_registered,
-        components_registered,
-        component_backend_loaded,
-        component_rendered,
-    ],
+    "components": [component_registered, components_registered, component_rendered],
     "forms": [action_registered, action_dispatched, form_validation_failed],
-    "static": [asset_registered, backend_loaded, collector_finalized, html_injected],
+    "static": [asset_registered, collector_finalized, html_injected],
     "server": [watch_specs_ready],
+    "backends": [
+        component_backend_loaded,
+        form_backend_loaded,
+        partial_backend_loaded,
+        router_backend_loaded,
+        static_backend_loaded,
+        wizard_backend_loaded,
+    ],
 }
 
 

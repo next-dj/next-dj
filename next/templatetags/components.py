@@ -28,7 +28,7 @@ from django.utils.safestring import SafeString
 from next.components import collect_visible_components, get_component, render_component
 from next.components.renderers import COMPONENT_PROPS_CONTEXT_KEY, SLOT_KEY_PREFIX
 from next.conf import fail_loudly, next_framework_settings
-from next.seeding import COLLECTOR_KEY
+from next.seeding import COLLECTOR_KEY, REQUEST_KEY, TEMPLATE_PATH_KEY
 from next.static import collect_component_assets
 from next.utils import on_forget_resolved_trees
 
@@ -230,7 +230,7 @@ class ComponentNode(Node):
 
     def _template_path_from_context(self, context: template.Context) -> Path | None:
         """Return a resolved path from ``current_template_path``, or ``None``."""
-        raw = context.get("current_template_path")
+        raw = context.get(TEMPLATE_PATH_KEY)
         # A ``Path`` under this key was written by a render that already
         # resolved it, so only the ``str`` spelling reaches the filesystem.
         if isinstance(raw, Path):
@@ -320,7 +320,7 @@ class ComponentNode(Node):
         for key in _INTERNAL_CONTEXT_KEYS:
             render_ctx.pop(key, None)
         render_ctx.update(self._resolved_props(context))
-        render_ctx["current_template_path"] = path
+        render_ctx[TEMPLATE_PATH_KEY] = path
         # Children arrive as finished markup, spliced in as written the way slot
         # content is. Escaping inside them is the calling template's business.
         render_ctx["children"] = children
@@ -331,9 +331,9 @@ class ComponentNode(Node):
             # unprefixed key would shadow a prop that shares the slot's name.
             render_ctx[f"{SLOT_KEY_PREFIX}{slot_name}"] = content
 
-        request = render_ctx.get("request")
+        request = render_ctx.get(REQUEST_KEY)
         if request is None:
-            request = context.get("request")
+            request = context.get(REQUEST_KEY)
         return render_component(info, render_ctx, request=request)
 
 

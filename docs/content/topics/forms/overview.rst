@@ -26,6 +26,7 @@ The framework also records which file the class was declared in and uses that to
 .. code-block:: python
    :caption: page.py — auto-registered as ``article_edit_form``
 
+   from articles.models import Article
    from django.http import HttpRequest
 
    import next.forms
@@ -39,6 +40,8 @@ The framework also records which file the class was declared in and uses that to
        def on_valid(self, request: HttpRequest):
            self.save()
            return redirect_to_origin(request)
+
+The two import spellings are equivalent, so ``import next.forms`` with ``next.forms.ModelForm`` and ``from next.forms import ModelForm`` name the same class and the examples across the manual use both.
 
 ``next.forms.Form`` and ``next.forms.ModelForm`` also pin their own ``default_renderer``, so ``{{ form }}`` always renders through Django's ``div`` form template and every widget through its stock Django template.
 A project-level ``FORM_RENDERER`` setting therefore never reaches a next.dj form.
@@ -59,6 +62,7 @@ A form declared in any other file is shared, carries a project-wide name, and is
 .. code-block:: python
    :caption: app/forms.py — auto-registered as ``contact_form`` (shared)
 
+   from django.core.mail import send_mail
    from django.http import HttpRequest
 
    import next.forms
@@ -68,7 +72,7 @@ A form declared in any other file is shared, carries a project-wide name, and is
        email = next.forms.EmailField()
 
        def on_valid(self, request: HttpRequest):
-           send_email(self.cleaned_data["email"])
+           send_mail("Thanks", "We got your message.", None, [self.cleaned_data["email"]])
            return redirect_to_origin(request)
 
 Set ``Meta.scope`` to ``"page"`` or ``"shared"`` to pin the scope regardless of file name.

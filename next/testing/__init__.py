@@ -8,6 +8,12 @@ pytest, which lives alone in the opt-in `next.testing.plugin` module.
 from __future__ import annotations
 
 from .actions import build_form_for, resolve_action_url
+from .capture import (
+    SignalEvent,
+    SignalRecorder,
+    capture_framework_signals,
+    capture_signals,
+)
 from .client import NextClient, PartialEnvelope, envelope_of
 from .deps import make_resolution_context, resolve_call
 from .html import (
@@ -39,12 +45,6 @@ from .patching import (
     patch_static_collector,
 )
 from .rendering import render_component_by_name, render_page
-from .signals import (
-    SignalEvent,
-    SignalRecorder,
-    capture_framework_signals,
-    capture_signals,
-)
 
 
 __all__ = [

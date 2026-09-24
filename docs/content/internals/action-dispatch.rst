@@ -14,9 +14,10 @@ Overview
 --------
 
 The dispatcher runs at ``/_next/form/<uid>/`` where the UID is the first 16 hex characters of a SHA-256 digest of the scope key and the action name.
-The dispatcher loads the action handler, enforces the declared access guard, builds the form, runs the validation chain, and either calls the handler or re-renders the origin page.
+The dispatcher loads the action handler, enforces the declared access guard and the authorization of the origin page, builds the form, runs the validation chain, and either calls the handler or re-renders the origin page.
 A verb outside GET and POST is refused with HTTP 405 before the UID is looked up.
 A GET reaches the lookup, so an unknown UID answers HTTP 404 and a registered one answers HTTP 405.
+The UID is an address rather than a secret, derived from public inputs and rendered into every page that carries the form, so knowing one grants nothing and the guards described below are the whole access boundary, see :doc:`/content/security/overview`.
 
 Pipeline
 --------
@@ -32,9 +33,11 @@ Pipeline
        Lookup -- "found, POST" --> Guard{"Static access guard"}
        Guard -- anonymous --> LoginRedirect["HTTP 302 to LOGIN_URL"]
        Guard -- "missing permission" --> Forbidden["HTTP 403"]
-       Guard -- "pass, no form_class" --> HandlerOnly["Run handler only"]
-       Guard -- "pass, form_class" --> ViewHook{"check_permissions hook"}
-       Guard -- "pass, wizard_class" --> WizardOrigin{"Origin resolves"}
+       Guard -- pass --> PageAuth{"Origin page authorizes"}
+       PageAuth -- denies --> PageDenied["Origin page short-circuit response"]
+       PageAuth -- "allows, no form_class" --> HandlerOnly["Run handler only"]
+       PageAuth -- "allows, form_class" --> ViewHook{"check_permissions hook"}
+       PageAuth -- "allows, wizard_class" --> WizardOrigin{"Origin resolves"}
        WizardOrigin -- no --> BadRequest["HTTP 400"]
        WizardOrigin -- yes --> ViewHook
        ViewHook -- "deny" --> HookDenied["HTTP 403 or response"]
@@ -105,10 +108,10 @@ Modules
    The form base classes, the ``__init_subclass__`` auto-registration gate, and the permission-hook presence flags the dispatcher reads.
 
 ``next.forms.checks``.
-   The system checks that read the registration diagnostics and walk every configured backend.
+   A package of one-word submodules, ``actions``, ``config``, ``sources``, ``widgets``, and ``wizards``, holding the system checks that read the registration diagnostics and walk every configured backend.
 
 ``next.forms.uid``.
-   ``redirect_to_origin``, ``reverse_form_action``, and ``validated_origin_path`` helpers for the origin page round trip, plus the ``ORIGIN_FIELD_NAME`` wire constant and the ``FORM_ORIGIN_OVERRIDE_KEY`` render-context key the partial shaping layer sets on a wizard advance.
+   ``redirect_to_origin``, ``redirect_or_fallback``, ``reverse_form_action``, ``current_origin_path``, ``is_path_only``, ``validated_origin_path``, and ``posted_origin_path`` helpers for the origin page round trip, plus the ``MAX_ORIGIN_LENGTH`` cap, the ``ORIGIN_FIELD_NAME`` wire constant, and the ``FORM_ORIGIN_OVERRIDE_KEY`` render-context key the partial shaping layer sets on a wizard advance.
 
 ``next.forms.origin``.
    Resolution of the posted origin path into the page module and the typed URL kwargs, memoised per request.
@@ -122,7 +125,10 @@ Modules
 ``next.forms.markers``.
    ``DForm`` annotation plus the ``FormProvider`` and ``CleanedDataProvider`` classes.
 
-``next.forms.diagnostics``.
+``next.forms.nodes``.
+   ``FormNode``, the template node the ``{% form %}`` tag compiles to, which lives beside the forms area so the partial checks can walk it without importing a tag library.
+
+``next.forms.registration``.
    ``RegistrationDiagnostics`` buffers that the registration paths fill and the system checks read.
 
 ``next.forms.serializers``.
@@ -130,6 +136,9 @@ Modules
 
 ``next.forms.formsets``.
    ``cleanup_extra_initial`` helper for blank extra rows.
+
+``next.partial.shaping``.
+   The package behind the bound shaper, which turns a dispatch outcome into a patch envelope for a partial request, see `Partial shaping`_.
 
 ``next.ports``.
    The ``PartialShaper`` protocol and the ``partial_shaper_slot`` the app config binds at startup.
@@ -139,9 +148,29 @@ Access guard
 ------------
 
 An action that declares ``login_required`` or ``permission_required`` carries an ``ActionGuard`` in its registry metadata under the ``guard`` key.
-The shared pipeline enforces this static guard right after the method check, ahead of origin resolution, ``get_initial``, and form binding, so no application code or database access runs for a request the static guard denies.
+The shared pipeline enforces this static guard right after origin resolution and ahead of the page authorization, ``get_initial``, and form binding, so no application code or database access runs for a request the static guard denies.
 An anonymous user receives a redirect to ``LOGIN_URL`` whose ``next`` is the validated posted origin, and an authenticated user missing a permission raises ``PermissionDenied``.
 Every backend that delegates to ``FormActionDispatch.dispatch`` inherits the enforcement.
+
+Origin page authorization
+-------------------------
+
+The action endpoint is not the page URL, so the origin page's own view never runs on a submission and the pipeline asks that page directly instead.
+Immediately after ``resolve_origin``, and before a handler, a form, or a permission hook runs, the dispatcher calls ``authorization_outcome`` on the resolved page path with the posted origin URL and the typed URL kwargs of the origin.
+The call runs the page's ``render()`` under the same injection the routed view uses, so a response it returns becomes the answer to the POST verbatim, while the body it returns is discarded because every render site behind the boundary composes from ``composed_template_for``.
+A page with no ``render()`` authorizes every submission, exactly as its own view serves every visitor.
+
+One call at the boundary covers every render site behind it, and two authorizations live outside it.
+A wizard step advance authorizes the page of the next step before rendering that step's zone, and ``Patches.morph_zone`` carries its own check because it is public API a handler reaches with a posted origin behind it.
+A backend whose ``dispatch`` drives the pipeline by hand rather than delegating to ``FormActionDispatch.dispatch`` runs none of this.
+
+The ``render()`` under this call does not see the POST to ``/_next/form/<uid>/``.
+``next.pages.visits.visit_request`` copies the live request and restates it as a GET of the URL being authorized, rewriting ``method``, ``path``, ``path_info``, ``GET``, ``POST``, ``META`` and ``resolver_match`` while carrying over everything a middleware attached, the user and the session included.
+The copy leaves the live request untouched, so the dispatcher reads its own POST afterwards as it always did.
+A page that short-circuits on the request method, on a query parameter, or on a canonical-URL comparison therefore answers a submission exactly as it answers a visit.
+
+Each of the four authorization sites names the URL it asks about, the posted origin for a submission and for ``Patches.morph_zone``, the next step's URL for a wizard advance.
+``Patches.morph(zone=..., page=...)`` names one only when the caller addressed the foreign page by URL, and a caller addressing it by file path passes ``None``, which still asks as a GET but leaves the live path in place.
 
 Dynamic permission hooks
 ------------------------
@@ -194,10 +223,68 @@ Each backend is a full implementation of the ``FormActionBackend`` contract, not
 A backend owns the registry, the URL generation, and the dispatch for every action it registers.
 
 The default value registers ``RegistryFormActionBackend``.
-Its ``dispatch`` method resolves the UID to an action and forwards the request to ``FormActionDispatch``, which builds the form, runs the validation chain, and resolves the posted origin when re-rendering.
+Its ``dispatch`` method resolves the UID to an action and forwards the request to ``FormActionDispatch``, which resolves the posted origin, has that page authorize the request, builds the form, and runs the validation chain.
 
 A project customises dispatch by subclassing ``RegistryFormActionBackend`` and overriding ``dispatch``.
 The override calls ``super().dispatch`` to keep the standard pipeline.
+
+.. _internals-action-dispatch-shaping:
+
+Partial shaping
+---------------
+
+``next.partial.shaping`` is what the last step of dispatch becomes when the request is a partial one.
+The base ``shape_response`` asks ``partial_shaper_slot`` about the request and hands a partial outcome to the bound shaper, which composes a patch envelope instead of a full page.
+The package splits into one-word submodules, ``outcomes`` for the routing of an outcome to its envelope, ``validate`` for the validate-only pass, ``scrub`` for error cleaning, ``targets`` for origin and zone resolution, ``csrf`` for the rotation marker, and ``responses`` for the serialisation.
+
+Outcome taxonomy
+~~~~~~~~~~~~~~~~
+
+Four shapes cover every partial answer, the three ``ActionOutcomeKind`` members plus the validate-only pass that short-circuits ahead of them.
+
+``INVALID``.
+   The failed form comes back as a morph.
+   A zone the request names and the origin page declares re-renders with the bound form in the overrides, and without such a zone the envelope morphs the form by uid and asks the client to trim it out of the rendered page.
+   The response carries ``X-Next-Form: invalid`` and ``X-Next-Action: <uid>`` alongside the envelope, and the machine-readable form meta rides in the patches.
+
+``WIZARD_ADVANCE``.
+   A step advance is a master-zone morph, never a redirect.
+   An outcome with no target answers HTTP 204, and a wizard the shaper cannot resolve to a page falls back to a plain redirect, as does a next step whose page refuses to serve the request.
+   The resolved case renders the next step's zone directly, overriding the hidden origin field with the next step URL, and pushes that URL to history only when the wizard opts in.
+
+``RESULT``.
+   A handler response that is already a patch envelope passes through untouched.
+   A redirect becomes a ``visit`` patch, marked for full navigation when the target is not same-host.
+   A ``None`` result runs the success funnel, which morphs the form or its zone in place and drains the pending ``contrib.messages`` into toast patches.
+   Anything else falls back to the default full-page envelope.
+
+Validate-only.
+   The pass binds and validates the form, scrubs the errors, morphs the same target the invalid branch would, attaches the form meta, and sends ``field_validated``.
+   No handler runs and no wizard storage is touched.
+
+Error scrubbing
+~~~~~~~~~~~~~~~
+
+A validate pass answers for the fields it named and nothing else.
+The scrubber keeps only the errors of the requested fields and deletes the rest off the bound form, so a blur on one field never surfaces an error the visitor has not reached yet.
+Non-field errors follow the submit rather than the blur, so a ``clean()`` result is dropped from a validate pass, and a formset loses the non-form errors a cross-member clean produced.
+File fields drop out of the requested set before the walk, because a multipart upload is never replayed on a blur, so naming one from the client cannot make the server answer for it.
+A formset is scrubbed member by member, and every error name travels under the prefix of its row, the same wire name the client reads.
+
+CSRF rotation
+~~~~~~~~~~~~~
+
+The rotation marker Django sets on ``request.META`` is read before any re-render runs.
+A login on submit rotates the token, and reading the marker after a render would flag every response instead of the one that rotated.
+When the marker is up, the fresh CSRF payload is stamped into the envelope, so the client runtime replaces the token it holds without a full navigation.
+
+Target resolution
+~~~~~~~~~~~~~~~~~
+
+The origin target is the page path and URL kwargs of the resolved posted origin, shared by the validate pass and the success funnel so both work off one resolution.
+The zone is the first name the partial intent asks for that the origin page actually declares, and a request naming no such zone falls through to the form-by-uid morph.
+A wizard step target resolves the next step URL through the same URLconf without running that page's view, keeping the captured kwargs unfiltered so the step renders every parameter it declares.
+The step page authorizes the advance before its zone renders, with the guard reading the DI-safe subset of those kwargs, and a denial answers with the plain step redirect a client without the runtime follows anyway, see :doc:`/content/topics/forms/wizard`.
 
 Shared dependency cache
 -----------------------
@@ -218,8 +305,8 @@ The page manager caches the composed template source and its compiled ``Template
 Signals
 -------
 
-Six signals fire.
-``action_registered`` fires at import time and the other five fire per request.
+Eight signals fire.
+``action_registered`` fires at import time, five fire per request, and the two backend-load signals fire when the settings-driven backends are built.
 
 - ``action_registered`` fires at import time, once per registration when the registry stores the action target.
   The target is a handler, a form class, or a wizard class.
@@ -229,11 +316,15 @@ Six signals fire.
 - ``wizard_step_submitted`` fires at request time after a wizard step validates, with the wizard class as the sender and the step name plus a copy of its cleaned data in the payload.
 - ``wizard_completed`` fires at request time after the wizard ``done`` method returns a response below HTTP 400, with the wizard class as the sender and the merged cleaned data in the payload.
   An error response from ``done`` skips the signal and keeps the saved drafts.
-- ``form_access_denied`` fires at request time only when a dynamic permission hook denies a request, never on the static guard path, with the action name, the action uid, the live request, the ``layer`` (``"view"`` or ``"object"``), and the ``reason`` (``"raised"``, ``"denied"``, or ``"response"``) in the payload.
+- ``form_access_denied`` fires at request time when the origin page or a dynamic permission hook denies a request, never on the static guard path, with the action name, the action uid, the live request, the ``layer`` (``"page"``, ``"view"``, or ``"object"``), and the ``reason`` (``"raised"``, ``"denied"``, or ``"response"``) in the payload.
+  A ``"page"`` denial always reports ``"response"``, because a page refuses by returning one.
+- ``form_backend_loaded`` fires once per ``FORM_ACTION_BACKENDS`` entry the loader turns into an instance, and a skipped entry sends nothing.
+- ``wizard_backend_loaded`` fires when the single ``FORM_WIZARD_BACKEND`` instance is built, on first use and again after a settings reload rebuilds it.
 
 All five request-time signals carry ``uid`` and ``request``.
 ``uid`` is the registry identity also stamped on the ``data-next-action`` markup attribute, ``None`` for a backend whose meta stores no uid.
 ``request`` is the live ``HttpRequest`` and receivers must not retain it past the call.
+The two load-time signals carry neither, sending the resolved backend class as the sender with ``config``, a copy of the settings entry, and ``instance`` in the payload.
 
 Extension points
 ----------------

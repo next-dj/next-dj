@@ -1,10 +1,6 @@
 """Patch Django's autoreload to use next-dj's reloader and watch specs.
 
-Django does not expose a setting for overriding the reloader class, so this module still
-swaps `autoreload.StatReloader`. The swap is kept idempotent and records the class it
-replaces so tests (or other packages) can restore it. A warning is logged if another
-library has replaced `StatReloader` with a class that is not a `StatReloader` subclass,
-which suggests an incompatible override and makes our patch unsafe to apply.
+Django exposes no setting for the reloader class, so the swap patches `StatReloader`.
 """
 
 from __future__ import annotations

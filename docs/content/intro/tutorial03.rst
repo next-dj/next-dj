@@ -25,7 +25,8 @@ Create the component folder
 The :term:`component` backend looks for component folders under the configured root.
 :doc:`install` set ``COMPONENTS_DIR`` to ``_components``, so a component named ``note_card`` lives at ``notes/pages/_components/note_card/``.
 The folder sits inside the page tree because the file router registers each ``_components/`` folder it walks past during page discovery.
-A ``_components/`` folder placed beside ``pages/`` rather than inside it is never discovered, and the ``{% component %}`` tag then renders nothing.
+A ``_components/`` folder placed beside ``pages/`` rather than inside it is never discovered, and the ``{% component %}`` tag then reports the name it could not resolve.
+Under ``DEBUG`` the tag emits an HTML comment such as ``<!-- next: component 'note_card' not found (not-found) -->`` in place of the component, carrying a did-you-mean hint when a near name exists.
 The framework treats the folder name as the component name.
 
 Create the directory and a starter template.
@@ -35,7 +36,7 @@ Create the directory and a starter template.
 
    <article class="note-card">
      <header>
-       <a href="{% url 'next:page_notes_id' id=note.id %}">{{ note.title }}</a>
+       <a href="{% url 'next:page_notes_int_id' id=note.id %}">{{ note.title }}</a>
        <time datetime="{{ note.created_at|date:'c' }}">{{ note.created_at|date:'Y-m-d H:i' }}</time>
      </header>
      {% if note.body %}<p>{{ note.body }}</p>{% endif %}
@@ -95,8 +96,11 @@ Place a CSS file next to ``component.djx`` and the :doc:`static pipeline </conte
    }
 
 The framework finds ``component.css`` by :term:`stem`, the filename without its extension.
-When a page renders a component that has co-located styles, the static collector adds the file to the current request slot.
+When a page renders a component that has co-located styles, the static collector adds the file to the styles :term:`collector slot` of the current request.
 See :doc:`/content/topics/components` for the full component model.
+
+Reloading the page now changes nothing, and that is expected.
+Nothing in the layout emits the collected slot yet, which is what the next section adds.
 
 Wire the collector into the layout
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -128,7 +132,9 @@ The ``{% collect_styles %}`` tag emits one ``<link>`` per discovered stylesheet.
 ``{% collect_scripts %}`` does the same for JavaScript.
 Each asset is deduplicated by its URL, so the same file referenced from two components is emitted once.
 
-Reload ``/`` and confirm that the served HTML now contains a ``<link>`` to ``note_card/component.css``.
+Reload ``/`` and confirm that the served HTML now contains ``<link rel="stylesheet" href="/static/next/components/note_card.css">``.
+The served name comes from the component rather than from the filename on disk.
+The file is ``component.css`` inside the ``note_card`` folder, and the pipeline publishes it under the logical name ``components/note_card`` in the ``next/`` staticfiles namespace.
 
 Add co-located JavaScript
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -183,7 +189,7 @@ Refer to the new value in the component template.
 
    <article class="note-card">
      <header>
-       <a href="{% url 'next:page_notes_id' id=note.id %}">{{ note.title }}</a>
+       <a href="{% url 'next:page_notes_int_id' id=note.id %}">{{ note.title }}</a>
        <time datetime="{{ note.created_at|date:'c' }}">{{ note.created_at|date:'Y-m-d H:i' }}</time>
      </header>
      {% if preview %}<p>{{ preview }}</p>{% endif %}
@@ -214,7 +220,7 @@ Your project tree now looks like this.
            component.js
        notes/
          layout.djx
-         [id]/
+         [int:id]/
            page.py
            template.djx
 
@@ -225,11 +231,12 @@ The layout pulls both ``{% collect_styles %}`` and ``{% collect_scripts %}`` fro
 Common pitfalls
 ---------------
 
-Component renders nothing or is not found.
-   Confirm that the folder name and the string argument to ``{% component %}`` match exactly.
-   The component name comes from the directory, not from any Python identifier.
-   Confirm too that the ``_components/`` folder sits inside the ``pages/`` tree.
-   The file router only registers component folders it walks past during page discovery, so a ``_components/`` folder beside ``pages/`` is never found and the tag renders empty output without raising.
+Component is not found.
+   Search the served HTML for ``next: component``.
+   Under ``DEBUG`` the tag replaces the component with an HTML comment naming it, plus a did-you-mean hint when a near name exists, so the comment usually names the typo outright.
+   Confirm that the folder name and the string argument to ``{% component %}`` match exactly, because the component name comes from the directory and not from any Python identifier.
+   Confirm too that the ``_components/`` folder sits inside the ``pages/`` tree, since the file router only registers component folders it walks past during page discovery.
+   With ``DEBUG`` off and ``STRICT_LOADING`` left at its default the tag logs a warning and renders empty output instead, and with ``STRICT_LOADING`` set to ``True`` it raises ``TemplateSyntaxError`` on either setting of ``DEBUG``.
 
 CSS does not load.
    Make sure ``{% collect_styles %}`` sits inside ``<head>`` and that the file is named ``component.css`` next to ``component.djx``.

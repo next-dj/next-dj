@@ -17,40 +17,6 @@ The wheel excludes ``next/client/`` outright, so a project never imports the Typ
 The script builder publishes the bundle under the static path ``next/next.min.js``, which the active staticfiles storage fingerprints like any other asset.
 ``next/static`` is the ``next.static`` Python package rather than an application static directory, so ``NextAppDirectoriesFinder`` keeps the framework app out of the app-directories scan and ``NextStaticFilesFinder`` is the finder that serves the bundle, see :doc:`static`.
 
-One module graph sits behind the facade, and the table below names the piece each concern lives in.
-None of these modules is reachable from application code, so the names serve reading a stack trace rather than writing against them.
-
-.. list-table::
-   :header-rows: 1
-   :widths: 22 78
-
-   * - Module
-     - Concern
-   * - ``next.ts``
-     - The ``Next`` facade, the context store, the event bus, the plugin hook, and the bundle entry point.
-   * - ``partial.ts``
-     - Assembly of the ``Next.partial`` surface over the other modules and their injectable platform seams.
-   * - ``apply.ts``
-     - Envelope parsing, the built-in patch verbs, the custom-verb registry, and script neutralisation before insertion.
-   * - ``wire.ts``
-     - Request shaping, intent and CSRF headers, response classification, the per-target GET queues, and the per-uid mutation lock.
-   * - ``morph.ts``
-     - The morph engine that reuses live nodes so focus, caret, typed values, and scroll survive a patch.
-   * - ``layers.ts``
-     - Modal layers over the native ``<dialog>``, top-down target resolution, and the toast tray.
-   * - ``triggers.ts``
-     - The delegated ``data-next-*`` handlers, lazy zone activation, the pollers, and inline validation.
-   * - ``sse.ts``
-     - The Server-Sent Events bridge, its echo ring of own request ids, and the pause and resume on tab visibility.
-   * - ``assets.ts``
-     - The asset loader, the registry of URLs already on the page, and the asset version safeguard.
-   * - ``dirty.ts``
-     - The touched-element tracker whose snapshots keep a response from overwriting what the user typed.
-   * - ``adapters.ts``
-     - Default platform adapters over the browser globals a test harness replaces.
-   * - ``protocol.ts``
-     - The wire vocabulary shared with the server, the content type, the headers, and the ``PartialError`` union.
-
 API tiers
 ---------
 
@@ -246,10 +212,12 @@ The partial surface
      - ``Envelope``
      - Parse and apply one wire envelope, the entry a parse hook or a test feeds.
        The return is the parsed envelope rather than a completion signal, because a stylesheet in the manifest gates the ops into a continuation.
+       A body that is not an object, or one carrying no ``version``, raises a ``TypeError``.
    * - ``fetch(request: WireRequest)``
      - ``Promise<void>``
      - Send one partial request through the queues and the per-uid lock.
        Network, HTTP, and parse failures surface as ``partial:error`` rather than as a rejection.
+       The request goes to an absolute URL on the page's own origin with ``mode: "same-origin"``, and a URL off that origin is refused unsent with a ``partial:error`` of kind ``network``.
    * - ``defineOp(name: string, handler: OpHandler)``
      - ``void``
      - Register the client handler of a custom verb.
@@ -312,8 +280,9 @@ The attribute contract
 ~~~~~~~~~~~~~~~~~~~~~~
 
 The runtime reads one attribute namespace, ``data-next-*``, and nineteen names make up the whole contract.
-They fall into three authorship groups, and a reader needs the split to know which are theirs to write.
-The server writes nine of them from ``{% zone %}`` and ``{% form %}`` parameters, the runtime writes four of them as styling and state hooks, and six are hand-authored on plain markup.
+They fall into authorship groups, and a reader needs the split to know which are theirs to write.
+The server writes five of them from ``{% zone %}`` and ``{% form %}`` parameters alone, the runtime writes four as styling and state hooks, and six are hand-authored on plain markup.
+The remaining four carry both authors, written by a ``{% form %}`` parameter on a form and by hand on the link or control that drives the same behaviour without one.
 ``{% form %}`` reserves the ``data-next-`` prefix and raises a template syntax error on a hand-written one, so a hand-authored attribute goes on a wrapper, a link, or a submit control rather than on the tag.
 
 .. list-table::
@@ -388,7 +357,7 @@ The server writes nine of them from ``{% zone %}`` and ``{% form %}`` parameters
        It marks one toast item and its value is the variant.
 
 :doc:`/content/topics/partial-rendering/reference` records the accepted values, the closed value sets, and the dev warnings each attribute earns.
-:doc:`template-tags` records the ``{% zone %}`` and ``{% form %}`` parameters that compile to the nine server-written names.
+:doc:`template-tags` records the ``{% zone %}`` and ``{% form %}`` parameters that compile to the nine names a tag can write.
 
 Exported types
 ~~~~~~~~~~~~~~
@@ -428,6 +397,43 @@ A page written in TypeScript reaches them through the bundle's declaration outpu
 The plugin shape ``Next.use`` accepts stays module-local and carries no export.
 It is ``(next: typeof Next) => T``, a single function of the facade returning whatever the plugin wants to hand back.
 A plugin therefore needs no type import to be written, and its result type flows out of ``Next.use`` unchanged.
+
+The module graph
+----------------
+
+One module graph sits behind the facade, and the table below names the piece each concern lives in.
+None of these modules is reachable from application code, so the names serve reading a stack trace rather than writing against them.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 78
+
+   * - Module
+     - Concern
+   * - ``next.ts``
+     - The ``Next`` facade, the context store, the event bus, the plugin hook, and the bundle entry point.
+   * - ``partial.ts``
+     - Assembly of the ``Next.partial`` surface over the other modules and their injectable platform seams.
+   * - ``apply.ts``
+     - Envelope parsing, the built-in patch verbs, the custom-verb registry, and script neutralisation before insertion.
+   * - ``wire.ts``
+     - Request shaping, intent and CSRF headers, response classification, the per-target GET queues, and the per-uid mutation lock.
+   * - ``morph.ts``
+     - The morph engine that reuses live nodes so focus, caret, typed values, and scroll survive a patch.
+   * - ``layers.ts``
+     - Modal layers over the native ``<dialog>``, top-down target resolution, and the toast tray.
+   * - ``triggers.ts``
+     - The delegated ``data-next-*`` handlers, lazy zone activation, the pollers, and inline validation.
+   * - ``sse.ts``
+     - The Server-Sent Events bridge, its echo ring of own request ids, and the pause and resume on tab visibility.
+   * - ``assets.ts``
+     - The asset loader, the registry of URLs already on the page, and the asset version safeguard.
+   * - ``dirty.ts``
+     - The touched-element tracker whose snapshots keep a response from overwriting what the user typed.
+   * - ``adapters.ts``
+     - Default platform adapters over the browser globals a test harness replaces.
+   * - ``protocol.ts``
+     - The wire vocabulary shared with the server, the content type, the headers, and the ``PartialError`` union.
 
 Configuration
 -------------

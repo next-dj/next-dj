@@ -105,6 +105,9 @@ It sets a ``v`` query parameter on every URL the pipeline renders, co-located fi
 The key defaults to ``None``, which leaves every URL untouched.
 A global version invalidates every asset at once, including a vendor bundle nobody changed, so the two mechanisms are redundant together and a project on the manifest leaves the key unset.
 
+Either mechanism also feeds the asset version a partial response stamps, so a deploy that moves the URLs moves the guard that asks an open tab to reload with them.
+A project that runs neither stamps the same version on every deploy, and ``manage.py check --deploy`` reports that as ``next.W083``.
+
 .. warning::
 
    The version value comes from outside the process, a build identifier or a commit hash, and is never generated at startup.
@@ -154,7 +157,10 @@ System checks
 -------------
 
 Run ``uv run python manage.py check --deploy`` before shipping.
-The Django deployment checks cover ``STATIC_ROOT`` and ``STATIC_URL``, and the framework static checks validate that the static backend chain is well formed.
+
+The framework static checks validate the backend chain, the registered asset kinds, the inline asset bodies, the JS context serializer, and the finder wiring.
+None of them is a deployment check, so they already run on every ``manage.py check`` and the build catches a malformed backend long before the deploy step.
+What ``--deploy`` adds is Django's own hardening pass over ``STATIC_ROOT`` and ``STATIC_URL``, plus the three framework deployment checks that import or compile the whole page tree, see :doc:`checklist`.
 
 See also
 --------

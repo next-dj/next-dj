@@ -1,6 +1,24 @@
+from collections.abc import Iterable
 from pathlib import Path
 
 from next.components import ComponentContextManager, ComponentInfo
+
+
+def components_config(root: Path) -> dict[str, object]:
+    """Build a `FileComponentsBackend` config rooted at `root`."""
+    return {"DIRS": [str(root)], "COMPONENTS_DIR": "_components"}
+
+
+def write_colocated_component_assets(sources: Iterable[Path]) -> None:
+    """Write a `component.css` beside each component source the caller names.
+
+    A page-tree fixture builds template and layout assets only, so the folder a watch
+    case points at has to exist on disk before a finder scan can report anything.
+    """
+    for source in sources:
+        folder = source.parent
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "component.css").write_text("")
 
 
 def component_info(

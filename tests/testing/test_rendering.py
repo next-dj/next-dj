@@ -6,7 +6,11 @@ from django.test import RequestFactory
 
 from next.components import ComponentInfo, FileComponentsBackend, components_manager
 from next.pages.manager import page
+from next.seeding import TEMPLATE_PATH_KEY
+from next.static import StaticCollector
+from next.testing import override_component_backends
 from next.testing.rendering import render_component_by_name, render_page
+from tests.support.components import components_config
 
 
 class TestRenderPage:
@@ -156,3 +160,96 @@ class TestRenderComponentByNamePropGuard:
             )
         assert "title=from caller" in html
         assert "hint=merged" in html
+
+
+_COMPOSING_TEMPLATE = '{% load components %}<div>{% component "inner" %}</div>'
+
+
+class TestRenderComponentByNameFrame:
+    """`render_component_by_name` seeds the ambient frame it searched from."""
+
+    def test_a_nested_component_resolves_from_the_anchor(self, tmp_path: Path) -> None:
+        root = tmp_path / "_components"
+        root.mkdir()
+        (root / "inner.djx").write_text("<span>inner</span>")
+        (root / "outer.djx").write_text(_COMPOSING_TEMPLATE)
+
+        with override_component_backends(components_config(root)):
+            html = render_component_by_name("outer", at=tmp_path / "page.djx")
+
+        assert "<span>inner</span>" in html
+
+    def test_an_explicit_anchor_in_context_wins(self, tmp_path: Path) -> None:
+        root = tmp_path / "_components"
+        root.mkdir()
+        (root / "echo_path.djx").write_text("<i>{{ current_template_path }}</i>")
+
+        with override_component_backends(components_config(root)):
+            html = render_component_by_name(
+                "echo_path",
+                at=tmp_path / "page.djx",
+                context={TEMPLATE_PATH_KEY: tmp_path / "other.djx"},
+            )
+
+        assert "other.djx</i>" in html
+
+    def test_a_bound_collector_catches_the_nested_assets(self, tmp_path: Path) -> None:
+        root = tmp_path / "_components"
+        inner = root / "inner"
+        inner.mkdir(parents=True)
+        (inner / "component.djx").write_text("<span>inner</span>")
+        (inner / "component.css").write_text(".inner {}")
+        (root / "outer.djx").write_text(_COMPOSING_TEMPLATE)
+        collector = StaticCollector()
+
+        with (
+            override_component_backends(components_config(root)),
+            patch(
+                "next.static.backends.staticfiles_storage.url",
+                return_value="/static/next/components/inner.css",
+            ),
+        ):
+            render_component_by_name(
+                "outer", at=tmp_path / "page.djx", collector=collector
+            )
+
+        style_urls = [a.url for a in collector.assets_in_slot("styles")]
+        assert "/static/next/components/inner.css" in style_urls
+
+    def test_a_bound_collector_catches_the_assets_of_the_component_itself(
+        self, tmp_path: Path
+    ) -> None:
+        root = tmp_path / "_components"
+        card = root / "card"
+        card.mkdir(parents=True)
+        (card / "component.djx").write_text("<span>card</span>")
+        (card / "component.css").write_text(".card {}")
+        collector = StaticCollector()
+
+        with (
+            override_component_backends(components_config(root)),
+            patch(
+                "next.static.backends.staticfiles_storage.url",
+                return_value="/static/next/components/card.css",
+            ),
+        ):
+            render_component_by_name(
+                "card", at=tmp_path / "page.djx", collector=collector
+            )
+
+        style_urls = [a.url for a in collector.assets_in_slot("styles")]
+        assert "/static/next/components/card.css" in style_urls
+
+    def test_the_page_anchor_reaches_a_page_scoped_action(self, tmp_path: Path) -> None:
+        """A body holding `{% action_url %}` needs the page module, not a raw key."""
+        root = tmp_path / "_components"
+        root.mkdir()
+        (root / "anchor.djx").write_text("<i>{{ current_page_module_path }}</i>")
+        page_module = tmp_path / "page.py"
+
+        with override_component_backends(components_config(root)):
+            html = render_component_by_name(
+                "anchor", at=tmp_path / "page.djx", page_module_path=page_module
+            )
+
+        assert f"<i>{page_module}</i>" in html

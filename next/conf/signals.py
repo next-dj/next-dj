@@ -1,7 +1,6 @@
 """Django signals emitted by the configuration layer.
 
-Nothing here reads the merged settings, so the module the reload lives in imports
-this one and not the other way round.
+Nothing here reads the merged settings, so the reload module imports this one.
 """
 
 import logging

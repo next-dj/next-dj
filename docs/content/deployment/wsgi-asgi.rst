@@ -25,6 +25,12 @@ ASGI is the right choice when the project uses any of these features.
 Both servers run the same next.dj pipeline.
 The difference lies in how Django dispatches the request.
 
+For a patch stream the server kind is a contract rather than a preference, and it binds in both directions.
+``PatchEventStream`` inspects the request and refuses a mismatched pair in its constructor, because Django buffers a mismatched iterator fully before the first byte and an infinite stream would hang instead of flushing.
+An async source under a WSGI request raises :class:`~django.core.exceptions.ImproperlyConfigured`, and so does a sync source under an ASGI request.
+A sync source therefore belongs on WSGI and an async one on ASGI, and only the async path interleaves heartbeats, since a blocked ``next()`` has nothing to interrupt it without a thread.
+See :doc:`/content/topics/partial-rendering/sse` for the source contract.
+
 WSGI configuration
 ------------------
 
@@ -97,7 +103,13 @@ Reverse proxy
 
 Place a reverse proxy in front of either server for TLS termination and connection handling.
 The most common choice is ``nginx`` or ``caddy``.
-The next.dj pipeline does not require any special configuration on the proxy beyond standard Django requirements.
+An ordinary next.dj response asks nothing of the proxy that a Django response does not.
+
+A patch stream asks the proxy to stay out of the way, and ``PatchEventStream`` states that in the response itself.
+It sets ``Cache-Control: no-cache, no-transform`` so no intermediary caches an event frame or recompresses the body, and ``X-Accel-Buffering: no`` so nginx forwards each frame rather than filling a buffer first.
+What the headers cannot state is the connection lifetime, so raise the proxy read and send timeouts above the expected stream duration and turn response buffering off for the streaming route on any proxy that ignores the hint.
+The async stream sends a comment heartbeat every ``SSE.HEARTBEAT_SECONDS`` to keep a quiet connection from being reaped, and the sync stream sends none, so a sync source behind an idle timeout supplies its own keepalive.
+See :doc:`/content/topics/partial-rendering/sse`.
 
 Health checks
 -------------

@@ -12,12 +12,17 @@ This page covers the security properties of the static pipeline including origin
 Origin control
 --------------
 
-The static pipeline only serves files that the discovery scanner registered.
-Random URLs that match the ``STATIC_URL`` prefix but do not match a registered asset return ``404``.
+The framework edits ``STATICFILES_FINDERS`` at startup rather than owning it.
+It appends ``NextStaticFilesFinder``, which publishes co-located assets under the ``next/`` namespace, and it rewrites a listed ``AppDirectoriesFinder`` entry to ``NextAppDirectoriesFinder``, which drops the framework's own application from the app-directories scan.
 
-A custom backend can refuse to serve files that originate outside trusted directories.
-Add the directory whitelist to the backend and reject every path that falls outside.
+That rewrite is the control the pipeline actually owns, because ``next/static`` is the ``next.static`` Python package and a stock app-directories finder reads it as an application static directory, which would let ``collectstatic`` copy the framework's own modules and their bytecode cache into a directory the web server hands out.
+``manage.py check`` reports ``next.E083`` for a project finder that extends Django's ``AppDirectoriesFinder`` without extending ``NextAppDirectoriesFinder``, and it is an error rather than a warning so the publication cannot happen behind a warning nobody reads.
 
+Every other finder in the list keeps serving what it served.
+Each application ``static/`` directory and each ``STATICFILES_DIRS`` entry is published on Django's own terms, and in production the web server answers the ``STATIC_URL`` prefix without consulting Django at all.
+Treat those directories as published space and keep out of them anything the project does not intend to hand out, see :doc:`/content/deployment/static-files`.
+
+A static backend decides the URL a tag carries and sits in no serving path, so a backend that refuses a reference drops a tag from the HTML while the file behind it stays reachable at its own URL.
 An empty ``STATIC_BACKENDS`` falls back to the bundled ``StaticFilesBackend``, and ``manage.py check`` reports ``next.W030`` so the missing chain stays visible.
 
 An asset reference that is no staticfiles name passes through to the rendered tag byte for byte, so a database column or a request value that reaches ``{% use_script %}`` or ``{% use_module %}`` loads whatever origin it names and is a script injection sink.
@@ -25,6 +30,15 @@ Constrain such a value to a known set of references the project ships, and map t
 
 A reference shaped like a staticfiles name is confined to the staticfiles root, and one that climbs above it with ``..`` raises ``StaticAssetTraversalError`` rather than resolving.
 The error subclasses Django's ``SuspiciousFileOperation``, itself a :exc:`~django.core.exceptions.SuspiciousOperation`, so the request answers HTTP 400 and the attempt is logged under ``django.security``, see :doc:`/content/topics/static-assets/name-resolution`.
+
+Escaping the rendered tag
+-------------------------
+
+A finished ``<link>`` or ``<script>`` tag is spliced into the document past the template engine, so the engine never gets the chance to escape what the tag carries.
+``StaticFilesBackend`` therefore escapes the URL itself before formatting it into the ``css_tag``, ``js_tag``, and ``module_tag`` templates, and a reference carrying ``"`` or ``>`` renders as text inside the attribute instead of closing it.
+
+The escaping belongs to the renderer method, so a backend that overrides ``render_link_tag``, ``render_script_tag``, or ``render_module_tag`` takes the job on with it.
+Run an interpolated value through :func:`django.utils.html.escape` when the override builds its own markup, and keep that in mind for the SRI and nonce recipes below, whose short f-strings are written for readability rather than as a complete tag builder.
 
 Content hash
 ------------

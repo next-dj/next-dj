@@ -37,6 +37,11 @@ A directory that has only a ``template.djx`` and no ``page.py`` is a virtual rou
 The router stamps the synthesised ``page.py`` location on the virtual route's view as well, so its origin resolves like any other page.
 On validation failure the re-render composes the body from the template loader exactly as the initial render did, with no page module involved.
 
+That holds for an ordinary routed page too, and it carries an authorization consequence.
+The dispatcher runs the origin page's own ``render()`` before anything re-renders, for its authorization alone, and still composes the body from the page template and the ``@context`` callables.
+A guard that lives in ``render()`` therefore does fire on this path, and the response it returns answers the submission verbatim instead of the re-rendered page.
+A page with no ``render()`` has no check of its own here and authorizes every submission, exactly as its own view serves every visitor.
+
 The render pipeline
 -------------------
 
@@ -44,15 +49,17 @@ A request to ``/_next/form/<uid>/`` follows a fixed pipeline.
 
 1. The dispatcher resolves the action UID to its handler and form class.
 2. The static ``ActionGuard`` runs, so a denied request never reaches application code, see :ref:`topics-forms-actions-guards`.
-3. The posted origin resolves to its page module and typed URL kwargs, and the shared dependency cache is installed on the request.
-4. The form class resolves through the dependency resolver and ``check_permissions`` runs on it, see :ref:`topics-forms-actions-dynamic-guards`.
-5. The form is constructed with POST data, uploaded files, and the initial data that ``get_initial`` returns.
-6. ``has_object_permission`` runs on the bound form.
-7. A request that names validate fields short circuits here.
+3. The posted origin resolves to its page module and typed URL kwargs.
+4. That page authorizes the request through its own ``render()``, and a response it returns is sent as the answer to the submission.
+5. The shared dependency cache is installed on the request.
+6. The form class resolves through the dependency resolver and ``check_permissions`` runs on it, see :ref:`topics-forms-actions-dynamic-guards`.
+7. The form is constructed with POST data, uploaded files, and the initial data that ``get_initial`` returns.
+8. ``has_object_permission`` runs on the bound form.
+9. A request that names validate fields short circuits here.
    The form validates, the response carries only the errors of the named fields, and the handler never runs.
-8. ``form.is_valid()`` runs.
-   On a valid form the handler is called with the dependency-resolved parameters and its return value goes to the client.
-   On an invalid form the dispatcher loads the origin page, reattaches the cached dependencies, and re-renders the template with ``form`` set to the bound failing form.
+10. ``form.is_valid()`` runs.
+    On a valid form the handler is called with the dependency-resolved parameters and its return value goes to the client.
+    On an invalid form the dispatcher loads the origin page, reattaches the cached dependencies, and re-renders the template with ``form`` set to the bound failing form.
 
 The pipeline stays inside the same request.
 A failing form does not redirect, the user stays on the same URL.
@@ -159,9 +166,10 @@ The ``redirect_to_origin`` helper sends the user back to whichever page rendered
 
 ``redirect_to_origin(request, fallback="/")`` reads the hidden ``_next_form_origin`` field that the ``{% form %}`` tag sets to the rendering URL with its query string, so the redirect lands back on the same filtered view.
 It accepts the value only when it is a string, and it strips the surrounding whitespace before any other test.
-A tab or a newline inside the stripped value refuses it, because a browser drops those code points before it resolves a URL and a value the check read as same-site would become a jump off site.
-Every backslash is then read as a forward slash, so the value passes only when it starts with a single ``/`` and ``/\evil.example`` is refused as protocol-relative.
-When the field is absent or fails validation the helper redirects to ``fallback`` instead.
+The policy is path-only and reads no host or scheme, so it refuses even an absolute URL naming this very host.
+The value passes only when it starts with a single ``/`` followed by neither a second slash nor a backslash, so ``/\evil.example`` is refused as protocol-relative.
+A tab, a newline, or a carriage return inside the stripped value refuses it too, because a browser drops those code points before it resolves a URL and a value the check read as same-site would become a jump off site.
+When the request is not a POST, when the field is absent or fails validation, or when the origin is longer than Django allows in a redirect ``Location``, the helper redirects to ``fallback`` instead.
 
 One field, two roles
 ~~~~~~~~~~~~~~~~~~~~

@@ -8,7 +8,7 @@ from django.forms.models import BaseModelForm as DjangoBaseModelForm
 
 from next.deps.introspect import cached_accepts_var_keyword
 from next.deps.resolver import current_resolver
-from next.forms.origin import _url_kwargs_for_request
+from next.forms.origin import url_kwargs_for_request
 
 
 if TYPE_CHECKING:
@@ -176,7 +176,7 @@ def _form_action_context_callable(
     """Return a callable building the unbound form namespace for page rendering."""
 
     def context_func(request: "HttpRequest") -> types.SimpleNamespace:
-        url_kwargs = _url_kwargs_for_request(request)
+        url_kwargs = url_kwargs_for_request(request)
         dep_cache: dict[str, Any] = {}
         dep_stack: list[str] = []
         resolved_form_class, init_kwargs = _resolve_form_class(

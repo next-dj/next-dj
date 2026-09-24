@@ -8,7 +8,9 @@ from django.utils.http import url_has_allowed_host_and_scheme
 
 from next.forms.dispatch import FormActionDispatch
 from next.forms.dispatch.responses import ActionOutcome, ActionOutcomeKind
+from next.forms.origin import filter_reserved_url_kwargs
 from next.forms.uid import FORM_ORIGIN_OVERRIDE_KEY
+from next.pages import page as page_manager
 from next.partial import keys
 from next.partial.headers import RESPONSE_ACTION, RESPONSE_FORM, set_partial_vary
 from next.partial.patches import Patches, PatchResponse
@@ -113,8 +115,8 @@ def _shape_advance(
 ) -> HttpResponse:
     """Shape a wizard step advance as a master-zone morph, never a redirect.
 
-    The next step's page view never runs, so wizard authorization lives entirely in
-    the action guard. A history `url.push` rides along only when the wizard opts in.
+    The next step's page authorizes the request before its zone renders, and a denial
+    falls back to the plain redirect a runtime-free client would have followed.
     """
     wizard = outcome.wizard
     redirect_to = outcome.redirect_to
@@ -123,15 +125,13 @@ def _shape_advance(
         set_partial_vary(response)
         return response
     if wizard is None:
-        response = HttpResponseRedirect(redirect_to)
-        set_partial_vary(response)
-        return response
+        return _step_redirect(redirect_to)
     target = _resolve_step_target(request, redirect_to)
     if target is None:
-        response = HttpResponseRedirect(redirect_to)
-        set_partial_vary(response)
-        return response
+        return _step_redirect(redirect_to)
     page_path, url_kwargs = target
+    if _step_denies(request, page_path, url_kwargs, redirect_to):
+        return _step_redirect(redirect_to)
     next_wizard = type(wizard)(
         request=request, url_kwargs=url_kwargs, base_path=redirect_to
     )
@@ -157,6 +157,30 @@ def _shape_advance(
     if _should_push_steps(wizard):
         patches.push_url(redirect_to)
     return _envelope_response(patches, request=request, rotated=rotated)
+
+
+def _step_redirect(redirect_to: str) -> HttpResponse:
+    """Return the plain step redirect a client without the runtime follows."""
+    response = HttpResponseRedirect(redirect_to)
+    set_partial_vary(response)
+    return response
+
+
+def _step_denies(
+    request: "HttpRequest",
+    page_path: "Path",
+    url_kwargs: dict[str, object],
+    step_url: str,
+) -> bool:
+    """Return True when the next step's page refuses to serve a visit of `step_url`.
+
+    The step page keeps every captured parameter for its render, so the guard sees
+    only the DI-safe subset, the same one the page's own view would be injected with.
+    """
+    denial, _dynamic = page_manager.authorization_outcome(
+        page_path, request, step_url, filter_reserved_url_kwargs(url_kwargs)
+    )
+    return denial is not None
 
 
 def _advance_zone(

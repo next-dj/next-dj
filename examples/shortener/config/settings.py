@@ -1,8 +1,6 @@
 import sys
 from pathlib import Path
 
-from next.conf import extend_default_backend
-
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -95,9 +93,5 @@ NEXT_FRAMEWORK = {
             "COMPONENTS_DIR": "_widgets",
         }
     ],
-    # Assets are served from disk, so no hashed manifest exists to derive an
-    # asset version from and the default sentinel would leave the guard silent.
-    "PARTIAL_BACKENDS": extend_default_backend(
-        "PARTIAL_BACKENDS", OPTIONS={"VERSION": "v1"}
-    ),
+    "STATIC_VERSION": "v1",
 }

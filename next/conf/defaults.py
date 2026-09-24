@@ -42,7 +42,7 @@ DEFAULTS: dict[str, Any] = {
         {
             "BACKEND": "next.partial.JsonPartialProtocolBackend",
             "OPTIONS": {
-                "VERSION": "manifest",
+                "VERSION": None,
                 "PUSH_WIZARD_STEPS": False,
                 "SSE": {"HEARTBEAT_SECONDS": 25, "RETRY_MS": 3000},
             },

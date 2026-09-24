@@ -9,6 +9,7 @@ import type { Move } from "./morph";
 import type { EventSourceAdapter, VisibilityAdapter } from "./sse";
 import type { ConfirmAdapter, IntersectionAdapter } from "./triggers";
 import type { Clock, FetchAdapter, Navigate } from "./wire";
+import { sameOrigin } from "./protocol";
 
 /** The fetch seam, a real fetch would hit the network in tests. */
 export function defaultFetch(): FetchAdapter {
@@ -33,8 +34,10 @@ export function defaultNavigate(): Navigate {
 /** The history seam for the url verb, push and replace map onto the History global. */
 export function defaultHistory(): HistoryAdapter {
   return {
-    push: (href) => globalThis.history.pushState(null, "", href),
-    replace: (href) => globalThis.history.replaceState(null, "", href),
+    push: (href) =>
+      globalThis.history.pushState(null, "", sameOrigin(href, document) ?? href),
+    replace: (href) =>
+      globalThis.history.replaceState(null, "", sameOrigin(href, document) ?? href),
   };
 }
 

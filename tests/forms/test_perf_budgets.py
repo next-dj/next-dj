@@ -9,18 +9,9 @@ from next.deps import resolver
 from next.forms import ActionRegistration, Form, RegistryFormActionBackend
 from next.forms.dispatch import FormActionDispatch
 from next.forms.manager import form_action_manager
-from next.forms.wizard import (
-    FormWizard,
-    SessionFormWizardBackend,
-    wizard_backend_manager,
-)
+from next.forms.wizard import FormWizard
 from tests.forms.actions import SimpleForm
-from tests.support import (
-    CountingWizardBackend,
-    GuardedTenantForm,
-    bound_dependency,
-    build_post_request,
-)
+from tests.support import GuardedTenantForm, bound_dependency, build_post_request
 
 
 class BudgetIdentityStep(Form):
@@ -74,15 +65,6 @@ class ConditionalBudgetWizard(FormWizard):
         return HttpResponseRedirect("/thanks/")
 
 
-@pytest.fixture()
-def counting_backend():
-    """Install a counting wizard backend for the duration of the test."""
-    counting = CountingWizardBackend(SessionFormWizardBackend({}))
-    wizard_backend_manager._backend = counting
-    yield counting
-    wizard_backend_manager.reset()
-
-
 def _post_step(client, action: str, step: str, data: dict):
     url = form_action_manager.get_action_url(action)
     payload = {"_next_form_origin": f"/request/{step}/", **data}
@@ -97,41 +79,45 @@ class TestWizardStorageRoundTripBudgets:
     raise a budget only for a feature that needs the extra operation.
     """
 
-    def test_mid_step_submit_budget(self, client_no_csrf, counting_backend) -> None:
+    def test_mid_step_submit_budget(
+        self, client_no_csrf, counting_wizard_backend
+    ) -> None:
         """A valid mid-wizard step pays one save and reads nothing."""
         resp = _post_step(client_no_csrf, "budget_wizard", "identity", {"name": "Ada"})
         assert resp.status_code == 302
         assert resp.url == "/request/scope/"
-        assert counting_backend.saves == 1
-        assert counting_backend.loads == 0
-        assert counting_backend.clears == 0
+        assert counting_wizard_backend.saves == 1
+        assert counting_wizard_backend.loads == 0
+        assert counting_wizard_backend.clears == 0
 
-    def test_final_step_submit_budget(self, client_no_csrf, counting_backend) -> None:
+    def test_final_step_submit_budget(
+        self, client_no_csrf, counting_wizard_backend
+    ) -> None:
         """Finalisation pays one save, one load, and one clear."""
         _post_step(client_no_csrf, "budget_wizard", "identity", {"name": "Ada"})
-        counting_backend.reset_counts()
+        counting_wizard_backend.reset_counts()
         resp = _post_step(client_no_csrf, "budget_wizard", "scope", {"scope": "ops"})
         assert resp.status_code == 302
         assert resp.url == "/thanks/"
-        assert counting_backend.saves == 1
+        assert counting_wizard_backend.saves == 1
         # Exact count today: 1, the completion gate and the merged
         # cleaned data share a single load through the request memo.
-        assert counting_backend.loads == 1
-        assert counting_backend.clears == 1
+        assert counting_wizard_backend.loads == 1
+        assert counting_wizard_backend.clears == 1
 
     def test_invalid_step_rerender_budget(
-        self, client_no_csrf, counting_backend
+        self, client_no_csrf, counting_wizard_backend
     ) -> None:
         """An invalid step re-renders without touching wizard storage."""
         resp = _post_step(client_no_csrf, "budget_wizard", "identity", {"name": ""})
         assert resp.status_code == 200
         assert resp["X-Next-Form"] == "invalid"
-        assert counting_backend.saves == 0
-        assert counting_backend.loads == 0
-        assert counting_backend.clears == 0
+        assert counting_wizard_backend.saves == 0
+        assert counting_wizard_backend.loads == 0
+        assert counting_wizard_backend.clears == 0
 
     def test_conditional_steps_submit_budget(
-        self, client_no_csrf, counting_backend
+        self, client_no_csrf, counting_wizard_backend
     ) -> None:
         """A get_steps override that reads storage still pays a single load."""
         resp = _post_step(
@@ -139,11 +125,11 @@ class TestWizardStorageRoundTripBudgets:
         )
         assert resp.status_code == 302
         assert resp.url == "/request/scope/"
-        assert counting_backend.saves == 1
+        assert counting_wizard_backend.saves == 1
         # Exact count today: 1, the write-through after save keeps the
         # post-save get_steps re-evaluation off the backend.
-        assert counting_backend.loads == 1
-        assert counting_backend.clears == 0
+        assert counting_wizard_backend.loads == 1
+        assert counting_wizard_backend.clears == 0
 
 
 class TestErrorRerenderFileReadBudget:
@@ -187,8 +173,8 @@ class TestErrorRerenderFileReadBudget:
             request, "budget_rerender_action", form, page_file_path=page_file
         )
         assert "<main>" in html
-        # Exact count today: 2, the template.djx body and one layout.djx.
-        assert 1 <= reads["count"] <= 2
+        # The template.djx body and one layout.djx.
+        assert reads["count"] == 2
 
         reads["count"] = 0
         backend.render_invalid_page(
@@ -256,7 +242,6 @@ class TestPermissionHookResolveBudgets:
         self, mock_http_request, monkeypatch
     ) -> None:
         """The view hook adds one resolve, the shared provider runs once."""
-        GuardedTenantForm.resolutions.clear()
 
         def tenant_provider() -> str:
             GuardedTenantForm.resolutions.append("tenant")

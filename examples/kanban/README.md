@@ -53,7 +53,7 @@ The origin decides the mode on its own rather than following the presence of a b
 
 The backend reads `dist/.vite/manifest.json` and delegates URL resolution to Django staticfiles. If the manifest file is missing, the backend logs a single warning and falls back to staticfiles so dev workflows stay unblocked.
 
-The Vite output is served through plain staticfiles rather than a hashed manifest storage, so the asset-version guard has nothing to derive a stamp from and the example pins `VERSION` by hand. The [examples README](../README.md#conventions-every-example-follows) covers that convention and the `next.W069` check behind it.
+The Vite output is served through plain staticfiles rather than a hashed manifest storage, so the asset-version guard has nothing to derive a stamp from and the example names a release tag by hand. Bumping it after a rebuild is what tells an open tab its bundle is stale. The [examples README](../README.md#conventions-every-example-follows) covers the convention.
 
 The React side has its own suite. `npm test` runs Vitest over the three co-located `*.test.jsx` files next to the sources they cover, under jsdom with `@testing-library/react`.
 
@@ -202,6 +202,10 @@ Modules that use these markers never start with `from __future__ import annotati
 
 ## Gotchas
 
+### The asset-version guard needs an explicit version
+
+Vite hashes the filenames it builds, so the asset URLs need no `v` parameter and the example sets no `STATIC_VERSION`. The partial guard still wants a stamp that moves, and with no `STATIC_VERSION` to derive from and no hashed manifest storage behind staticfiles it would resolve to a constant, so the example pins a release tag in `PARTIAL_BACKENDS` instead. Bumping it after a rebuild is what tells an open tab its bundle is stale. The [examples README](../README.md#conventions-every-example-follows) covers the convention.
+
 ### Sibling-form input is not preserved on a failed submit
 
 The settings page hosts three independent `<form>` blocks. Each one posts to its own action URL, so a submit sends only that form's fields. If a user starts typing into "Add column", then submits "Rename board" and rename fails validation, the re-rendered page shows the rename errors but the "Add column" text is gone. The browser never transmitted the unsubmitted form's input, so the server has nothing to restore. This is inherent to the server-side post-and-rerender model and is best addressed client-side. Submitting a single form at a time is unaffected.
@@ -221,4 +225,4 @@ The settings page hosts three independent `<form>` blocks. Each one posts to its
 - [`next/components/context.py`](../../next/components/context.py) — `@component.context` and the `serialize=True` flag.
 - [`next/forms/manager.py`](../../next/forms/manager.py) — `form_action_manager.get_action_url(...)` used by the page to lift the move and create endpoint URLs into the React layer.
 - [`next/deps/providers.py`](../../next/deps/providers.py) — `RegisteredParameterProvider` ABC used by `BoardProvider`/`CardProvider`.
-- [`docs/content/ref/system-checks.rst`](../../docs/content/ref/system-checks.rst) — `next.E048` / `next.E049` for `Meta.instance_from_url` and `next.W069` for the asset-version guard.
+- [`docs/content/ref/system-checks.rst`](../../docs/content/ref/system-checks.rst) — `next.E048` / `next.E049` for `Meta.instance_from_url`.

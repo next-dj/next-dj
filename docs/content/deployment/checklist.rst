@@ -15,8 +15,18 @@ Django settings
 - ``DEBUG`` is ``False``.
 - ``ALLOWED_HOSTS`` lists every host the project answers on.
 - ``SECRET_KEY`` is unique to the environment and not committed.
-- ``CSRF_TRUSTED_ORIGINS`` includes every public origin.
 - ``DATABASES`` uses a production engine and a managed credential store.
+
+The transport and cookie settings below are the hardening set a next.dj project ships with, and :doc:`/content/security/overview` explains what each one defends against.
+
+- ``SECURE_SSL_REDIRECT = True`` redirects every HTTP request to HTTPS.
+- ``SECURE_CONTENT_TYPE_NOSNIFF = True`` blocks MIME-type sniffing.
+- ``SECURE_HSTS_SECONDS = 31536000`` sends a one-year HSTS header.
+- ``SECURE_HSTS_INCLUDE_SUBDOMAINS = True`` extends HSTS to every subdomain.
+- ``SECURE_HSTS_PRELOAD = True`` allows submission to the HSTS preload list.
+- ``SESSION_COOKIE_SECURE = True`` sends the session cookie only over HTTPS.
+- ``CSRF_COOKIE_SECURE = True`` sends the CSRF cookie only over HTTPS.
+- ``CSRF_TRUSTED_ORIGINS`` lists every public origin a form may be submitted from.
 
 Run the standard :doc:`Django deployment check <django:howto/deployment/checklist>`.
 
@@ -62,15 +72,16 @@ Review these when the project serves partial responses.
 
 - Run ``collectstatic`` before the first worker of the new release accepts traffic, so the version a response stamps names assets the browser can already fetch.
 - Plan for the window in a rolling deploy where a client that loaded its page from the old release asks the new one for a zone.
-- Pin the ``VERSION`` option of the ``PARTIAL_BACKENDS`` entry to an explicit per-release string when no hashing staticfiles storage is configured.
+- Set ``STATIC_VERSION`` to a per-release string when no hashing staticfiles storage is configured, or pin the ``VERSION`` option of the ``PARTIAL_BACKENDS`` entry when the partial stamp has to differ from the one the asset URLs carry.
+- Confirm the version a deployed response stamps changes between releases, because a version that never moves leaves the guard silent.
 
 Every partial response carries the asset version in its ``X-Next-Version`` header.
 A safe-method zone request that asserts a different version answers HTTP 409 with an empty body, and the runtime turns that one answer into a single full visit of the page that owns the zone.
 A client spanning two versions therefore pays one full page load and then runs on the new assets, rather than patching new HTML into a page whose scripts and styles come from the release before.
 
-The default ``VERSION`` value is the sentinel ``"manifest"``, which hashes the staticfiles manifest and so needs a storage that hashes its files into one.
-Without such a storage the sentinel resolves to a stable string that never changes, the guard never fires, and ``manage.py check`` reports ``next.W069``.
-Configure a manifest storage, or pin ``VERSION`` to a string the release process sets.
+The ``VERSION`` option is unset by default, and an unset option reads ``STATIC_VERSION`` before it hashes the staticfiles manifest the configured storage writes.
+A deployment that offers neither resolves a stable string that never changes and a guard that never fires, which ``manage.py check --deploy`` reports as ``next.W083``.
+An entry that names the sentinel ``"manifest"`` states the manifest as a requirement, and ``manage.py check`` reports ``next.W069`` when the storage cannot meet it.
 
 See :doc:`/content/topics/partial-rendering/reference` for the header and the status codes.
 
@@ -106,9 +117,15 @@ Run the framework system checks as part of CI and as part of the deployment scri
 .. code-block:: bash
    :caption: shell
 
-   uv run python manage.py check
+   uv run python manage.py check --deploy
 
 A clean exit is required for the deployment to proceed.
+
+The ``--deploy`` flag is what matters here, because three framework checks are registered as deployment checks and a plain ``check`` never runs them.
+They report ``next.E017`` for a ``page.py`` that raises on import, ``next.E084`` for a ``component.py`` that does, and ``next.E072`` for a composed page template that does not compile.
+Each one costs a full walk of the page tree, which is why it is paid once per deploy rather than on every management command, and each one names a failure a visitor would otherwise meet as a 404, a silently stripped body, or a 500.
+
+See :ref:`ref-system-checks` for the full catalog.
 
 Access control tests
 --------------------

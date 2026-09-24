@@ -13,13 +13,14 @@ from django.http import Http404
 from django.urls import get_script_prefix, path
 from django.views.decorators.http import require_http_methods
 
+from next.caches import BoundedCache
 from next.ports import partial_shaper_slot
 
-from .diagnostics import registration_diagnostics
 from .dispatch import FormActionDispatch
 from .dispatch.responses import ActionOutcome
 from .errors import FormActionNotFoundError
-from .rendering import _ErrorRenderParams, render_form_page_with_errors
+from .registration import registration_diagnostics
+from .rendering import ErrorRenderParams, render_form_page_with_errors
 from .signals import action_registered
 from .uid import URL_NAME_FORM_ACTION, reverse_form_action
 
@@ -29,7 +30,7 @@ if TYPE_CHECKING:
 
     from django import forms as django_forms
     from django.forms import BaseForm, BaseFormSet
-    from django.http import HttpRequest, HttpResponse
+    from django.http import HttpRequest, HttpResponse, HttpResponseBase
     from django.urls import URLPattern
 
     from .wizard import FormWizard
@@ -37,8 +38,8 @@ if TYPE_CHECKING:
 
 # Memoised by raw path, because both hit a syscall on every registration and
 # scoped lookup, and a process-stable resolve() needs no invalidation.
-_resolved_path_cache: dict[str, str] = {}
-_dotted_module_cache: dict[str, str] = {}
+_resolved_path_cache: BoundedCache[str, str] = BoundedCache()
+_dotted_module_cache: BoundedCache[str, str] = BoundedCache()
 
 
 def _resolved_path_str(file_path: str) -> str:
@@ -195,8 +196,12 @@ class FormActionBackend(ABC):
         """Return URLconf entries for this backend."""
 
     @abstractmethod
-    def dispatch(self, request: "HttpRequest", uid: str) -> "HttpResponse":
-        """Run the handler for `uid`."""
+    def dispatch(self, request: "HttpRequest", uid: str) -> "HttpResponseBase":
+        """Run the handler for `uid`.
+
+        The return widens to `HttpResponseBase`, because a guarded origin page may
+        short-circuit this POST with whatever response its own `render()` would serve.
+        """
 
     def get_meta(
         self, action_name: str, page_path: str | None = None
@@ -306,8 +311,7 @@ class RegistryFormActionBackend(FormActionBackend):
     def snapshot(self) -> "RegistryBackendSnapshot":
         """Capture the registered actions so a later `restore` rolls them back.
 
-        Lets a test register extra actions and restore afterwards without reaching
-        into the backend's private maps.
+        Lets a test restore the registry without reaching into its private maps.
         """
         return RegistryBackendSnapshot(
             registry=dict(self._registry),
@@ -460,7 +464,7 @@ class RegistryFormActionBackend(FormActionBackend):
         return [path("_next/form/<str:uid>/", view, name=URL_NAME_FORM_ACTION)]
 
     @override
-    def dispatch(self, request: "HttpRequest", uid: str) -> "HttpResponse":
+    def dispatch(self, request: "HttpRequest", uid: str) -> "HttpResponseBase":
         """Forward a POST request to `FormActionDispatch.dispatch`."""
         key = self._uid_to_name.get(uid)
         if key is None or key not in self._registry:
@@ -503,7 +507,7 @@ class RegistryFormActionBackend(FormActionBackend):
         """Render validation-error HTML for a page module path."""
         if page_file_path is None:
             return ""
-        params = _ErrorRenderParams(
+        params = ErrorRenderParams(
             action_name=action_name,
             form=form,
             url_kwargs=url_kwargs if url_kwargs is not None else {},

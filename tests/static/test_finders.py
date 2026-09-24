@@ -26,6 +26,7 @@ from next.static.finders import (
 )
 from next.static.scripts import NEXT_JS_STATIC_PATH
 from tests.support import (
+    TEMPLATE_AND_COMPONENT_SOURCES,
     MalformedRootsRouter,
     WatchSourcesCase,
     patched_watch_sources,
@@ -43,6 +44,10 @@ _TEMPLATE_AND_LAYOUT = WatchSourcesCase(
 _TEMPLATE_ONLY = WatchSourcesCase(templates=("about/template.djx",))
 _NOTHING_WATCHED = WatchSourcesCase()
 _UNROOTED_TEMPLATE = WatchSourcesCase(rooted=False, templates=("about/template.djx",))
+# Two sources of one component folder, which is what makes the walk skip the second.
+_ONE_COMPONENT_FOLDER_TWICE = WatchSourcesCase(
+    components=("_components/widget/component.py", "_components/widget/component.djx")
+)
 
 
 @pytest.fixture()
@@ -105,6 +110,36 @@ class TestDiscoverColocatedAssets:
     def test_missing_page_root_is_skipped(self, watched_tree: Path) -> None:
         assert (watched_tree / "about" / "template.css").exists()
         assert discover_colocated_static_assets() == {}
+
+    @pytest.mark.parametrize(
+        "watched_tree", [TEMPLATE_AND_COMPONENT_SOURCES], indirect=["watched_tree"]
+    )
+    def test_a_component_folder_contributes_its_colocated_assets(
+        self, watched_tree: Path
+    ) -> None:
+        """The logical name is the folder, while the probed stem stays `component`."""
+        mapping = discover_colocated_static_assets()
+
+        assert mapping["next/components/widget.css"] == (
+            (watched_tree / "_components" / "widget" / "component.css").resolve()
+        )
+        assert "next/about.css" in mapping
+
+    @pytest.mark.parametrize(
+        "watched_tree", [_ONE_COMPONENT_FOLDER_TWICE], indirect=["watched_tree"]
+    )
+    def test_a_component_folder_named_twice_is_scanned_once(
+        self, watched_tree: Path
+    ) -> None:
+        """Two sources of one folder answer one logical name, not a duplicate scan."""
+        mapping = discover_colocated_static_assets()
+
+        assert [name for name in mapping if name.startswith("next/components/")] == [
+            "next/components/widget.css"
+        ]
+        assert mapping["next/components/widget.css"] == (
+            (watched_tree / "_components" / "widget" / "component.css").resolve()
+        )
 
 
 class TestNextStaticFilesFinderFind:

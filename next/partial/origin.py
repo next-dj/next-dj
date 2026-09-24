@@ -43,7 +43,7 @@ def resolve_partial_origin(request: "HttpRequest") -> "PartialOrigin | None":
     header = validated_origin_path(intent.origin)
     if header is not None:
         match = resolve_url_to_match(header, request)
-        if match is not None:
+        if match is not None and match.page_path is not None:
             return PartialOrigin(
                 page_path=match.page_path,
                 url_kwargs=match.url_kwargs,

@@ -772,7 +772,7 @@ class TestComponentRenderers:
             assert r._render_with_template(info, {}, None) == ""
 
     def test_fallback_template_none_returns_empty(self, tmp_path: Path) -> None:
-        """When module load fails and template loader returns None, fallback is empty."""
+        """When module load fails and template loader returns None, render is empty."""
         d = tmp_path / "nf"
         d.mkdir()
         (d / "component.py").write_text("syntax error (\n")
@@ -780,7 +780,7 @@ class TestComponentRenderers:
         r = CompositeComponentRenderer(
             ModuleLoader(), ComponentTemplateLoader(ModuleLoader())
         )
-        assert r._fallback_to_template(info, {}) == ""
+        assert r.render(info, {}, None) == ""
 
     def test_simple_renderer_passes_request_and_csrf_for_forms(
         self, tmp_path: Path

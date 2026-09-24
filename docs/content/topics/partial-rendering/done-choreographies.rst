@@ -88,8 +88,8 @@ The last step answers with all three operations in one envelope.
      ]
    }
 
-A ``morph(page=…)`` re-runs the foreign page's body resolution before rendering its zone.
-The page's guards and redirects are honoured, so the list never travels in the response when the page would have denied the caller on its own request.
+A ``morph(page=…)`` re-runs the foreign page's body resolution before rendering its zone, and a ``morph(zone=…)`` against the posted origin re-runs the body resolution of that page the same way.
+The page's guards and redirects are honoured either way, so the list never travels in the response when the page would have denied the caller on its own request.
 A denial surfaces as ``ForeignPageNotAuthorizedError`` rather than an empty morph.
 
 This is the cycle of an out-of-band swap.

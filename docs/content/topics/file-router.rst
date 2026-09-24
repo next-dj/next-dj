@@ -23,6 +23,19 @@ Adding a directory adds a URL.
 Renaming a directory renames the URL and its computed URL name.
 Removing a directory removes the URL.
 
+The name of the page root itself is the ``PAGES_DIR`` value of the backend entry, so it is whatever a project sets it to.
+The examples on this page use ``routes`` while the tutorial and the shipped default use ``pages``, and nothing below depends on which name a project picks.
+
+When to use the file router
+---------------------------
+
+Use it when the URL tree and the directory tree should be the same tree.
+A reader learns the shape of the site from the page root alone, a new URL costs one directory, and the layout chain of a page is its ancestor directories.
+
+The cost is that a rename is a behaviour change.
+Moving a directory changes the URL, the URL name, and the layout chain at the same time, and no static check finds a ``{% url %}`` call left behind.
+Reach for a hand-written Django view when a URL must stay stable across a refactor of the tree that serves it, and see :ref:`topics-pages-plain-django-views` for how the two coexist in one project.
+
 Route shapes
 ------------
 
@@ -104,7 +117,8 @@ Captured values reach Python through markers.
 Hyphens in directory names are normalised to underscores in the generated URL parameter and URL name.
 A ``routes/[my-id]/page.py`` route becomes the Django parameter ``<str:my_id>``, the resolver provides it as ``my_id``, and the URL name registers as ``next:page_my_id``.
 Name your directories without hyphens when you want the parameter name and the directory name to match exactly.
-A directory name that is no Python identifier after that normalisation, such as ``[2fa]`` or ``[user.id]``, raises ``InvalidURLParameterError`` at router build and reports :ref:`next.E008 <ref-system-checks>` at check time.
+A directory name that is no Python identifier after that normalisation, such as ``[2fa]`` or ``[user.id]``, raises ``InvalidURLParameterError`` at router build.
+``manage.py check`` reports it twice, as :ref:`next.E008 <ref-system-checks>` from the structural walk that reads the directory name and as :ref:`next.E082 <ref-system-checks>` from the pattern walk that tries to turn the route into a Django path.
 Both that refusal and ``DuplicateURLParameterError`` name the offending ``page.py`` alongside the route.
 
 .. code-block:: python
@@ -379,8 +393,14 @@ Hot reload
 
 A backend that reads from a database or other dynamic source needs to rebuild its pattern list when the data changes.
 ``router_manager.reload()`` rebuilds every backend and clears the Django URL resolver cache, and the call is idempotent.
-Each invocation emits a ``router_reloaded`` signal with the manager class as sender, so long lived processes can listen for it to refresh cached URL references.
-A receiver of that signal that rebuilds again calls ``router_manager.reload(notify=False)``, which skips the URL-cache clear and the signal so the receiver does not re-enter itself.
+The rebuild emits ``router_backend_loaded`` once per instantiated ``PAGE_BACKENDS`` entry, with the resolved router class as sender and the entry copy and the built instance as payload.
+Each invocation then emits a ``router_reloaded`` signal with the manager class as sender, so long lived processes can listen for it to refresh cached URL references.
+A receiver of that signal that rebuilds again calls ``router_manager.reload(notify=False)``, which skips ``router_backend_loaded``, the URL-cache clear, and ``router_reloaded``, so the receiver does not re-enter itself.
+
+A reload also happens without an explicit call.
+The framework holds a :data:`~django.test.signals.setting_changed` receiver that reloads every router when ``INSTALLED_APPS`` moves, because a file router caches its patterns per application name.
+A test that swaps the application list with :func:`~django.test.override_settings` therefore gets the routes of the swapped list rather than the ones built before it.
+See :doc:`/content/internals/url-router` for the full reload order and :doc:`/content/ref/signals` for the signal payloads.
 
 Rebuilding drops the cached patterns, so the next request walks every page tree configured in ``PAGE_BACKENDS`` again.
 A burst of model writes that each triggers a reload can dominate that request.

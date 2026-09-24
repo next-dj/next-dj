@@ -1,0 +1,3 @@
+<h1>guarded</h1>
+<p>{{ secret }}</p>
+{% zone "guarded-zone" %}{% form "guarded_note_form" zone="guarded-zone" %}<div>{{ form.note }}{{ form.note.errors }}</div>{% endform %}{% endzone %}

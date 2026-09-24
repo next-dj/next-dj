@@ -24,7 +24,7 @@ from obs.receivers import (
     on_action_dispatched,
     on_action_registered,
     on_asset_registered,
-    on_component_backend_loaded,
+    on_backend_loaded,
     on_component_registered,
     on_component_rendered,
     on_components_registered,
@@ -36,7 +36,6 @@ from obs.receivers import (
     on_route_registered,
     on_router_reloaded,
     on_settings_reloaded,
-    on_static_backend_loaded,
     on_template_loaded,
     on_watch_specs_ready,
     page_key,
@@ -309,10 +308,6 @@ RECEIVER_CASES = (
         id="urls_router_reloaded",
     ),
     pytest.param(
-        ReceiverCase(on_component_backend_loaded, "components", "backend_loaded"),
-        id="components_backend_loaded",
-    ),
-    pytest.param(
         ReceiverCase(
             on_action_registered,
             "forms.action_registered",
@@ -344,8 +339,13 @@ RECEIVER_CASES = (
         id="static_asset_registered",
     ),
     pytest.param(
-        ReceiverCase(on_static_backend_loaded, "static", "backend_loaded"),
-        id="static_backend_loaded",
+        ReceiverCase(
+            on_backend_loaded,
+            "backends",
+            "FileComponentsBackend",
+            {"instance": FileComponentsBackend.__new__(FileComponentsBackend)},
+        ),
+        id="backends_backend_loaded",
     ),
     pytest.param(
         ReceiverCase(

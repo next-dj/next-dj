@@ -1,7 +1,7 @@
 """Shared helpers used by per-subpackage system-check modules.
 
 The discovery names travel on from `next.discovery`, so one import serves a check
-module while the production readers of that walk stay out of this package.
+module, and the shared unknown-key probe here owns `next.E035`.
 """
 
 from __future__ import annotations

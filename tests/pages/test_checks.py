@@ -19,18 +19,23 @@ from next.checks import (
 from next.conf import next_framework_settings as s
 from next.deps import RegisteredParameterProvider
 from next.pages.checks import (
-    _has_template_or_djx,
     check_context_processor_signature,
     check_context_reads_foreign_zone,
     check_context_registration_files,
     check_template_loaders,
     check_unrouted_working_directory_pages,
 )
+from next.pages.checks.modules import _has_template_or_djx
 from next.pages.manager import page
 from next.pages.registry import PageContextRegistry
 from next.urls import PageRoot, RouterBackend
 from tests.support import (
+    PAGE_BODY_SOURCE_CASES,
+    PAGE_CONTENT_CASES,
+    AppRootRouter,
     MalformedRootsRouter,
+    PageBodySourceCase,
+    PageContentCase,
     RaisingRootsRouter,
     RootPagesRouter,
     SkippingRouter,
@@ -40,19 +45,6 @@ from tests.support import (
     patch_checks_router_manager_with_routers,
     restored_provider_registry,
 )
-
-
-class _AppRouter(RouterBackend):
-    """Backend reporting one application tree, the shape `APP_DIRS` produces."""
-
-    def __init__(self, pages_path: Path) -> None:
-        self._pages_path = pages_path
-
-    def generate_urls(self) -> list:
-        return []
-
-    def page_roots(self) -> list[PageRoot]:
-        return [PageRoot(path=self._pages_path, label="App 'app'")]
 
 
 class TestPageChecks:
@@ -231,96 +223,24 @@ class TestLayoutChecks:
 class TestMissingPageContentChecks:
     """``check_page_functions`` raises E012 and E013 for invalid page modules."""
 
-    @pytest.mark.parametrize(
-        (
-            "test_case",
-            "page_content",
-            "create_template_djx",
-            "template_djx_content",
-            "create_layout_djx",
-            "layout_djx_content",
-            "expected_errors",
-            "expected_warnings",
-        ),
-        [
-            (
-                "with_template",
-                'template = "Hello World"',
-                False,
-                None,
-                False,
-                None,
-                0,
-                0,
-            ),
-            (
-                "with_render",
-                'def render(request, **kwargs):\n    return "Hello World"',
-                False,
-                None,
-                False,
-                None,
-                0,
-                0,
-            ),
-            ("with_template_djx", "", True, "<h1>Hello World</h1>", False, None, 0, 0),
-            (
-                "with_layout_djx",
-                "",
-                False,
-                None,
-                True,
-                "<html>{% template %}</html>",
-                0,
-                0,
-            ),
-            ("no_content", "", False, None, False, None, 1, 0),
-        ],
-        ids=[
-            "with_template",
-            "with_render",
-            "with_template_djx",
-            "with_layout_djx",
-            "no_content",
-        ],
-    )
+    @pytest.mark.parametrize("case", PAGE_CONTENT_CASES, ids=lambda case: case.id)
     def test_check_page_functions_content_scenarios(
-        self,
-        tmp_path,
-        test_case,
-        page_content,
-        create_template_djx,
-        template_djx_content,
-        create_layout_djx,
-        layout_djx_content,
-        expected_errors,
-        expected_warnings,
+        self, tmp_path, case: PageContentCase
     ) -> None:
         """``check_page_functions`` fires the expected error and warning counts."""
-        page_file = tmp_path / "page.py"
-        page_file.write_text(page_content)
+        (tmp_path / "page.py").write_text(case.page_content)
+        if case.template_djx is not None:
+            (tmp_path / "template.djx").write_text(case.template_djx)
+        if case.layout_djx is not None:
+            (tmp_path / "layout.djx").write_text(case.layout_djx)
 
-        if create_template_djx:
-            template_djx = tmp_path / "template.djx"
-            template_djx.write_text(template_djx_content)
-
-        if create_layout_djx:
-            layout_djx = tmp_path / "layout.djx"
-            layout_djx.write_text(layout_djx_content)
-
-        class _FakeRouter:
-            app_dirs = True
-            pages_dir = "pages"
-
-            def page_roots(self) -> list[PageRoot]:
-                return [PageRoot(path=tmp_path, label="App 'app'")]
-
-        with patch_checks_router_manager_with_routers(routers=[_FakeRouter()]):
+        with patch_checks_router_manager_with_routers(
+            routers=[AppRootRouter(tmp_path)]
+        ):
             messages = check_page_functions(None)
-            errors = [m for m in messages if m.id.startswith("next.E")]
-            warnings = [m for m in messages if m.id.startswith("next.W")]
-            assert len(errors) == expected_errors
-            assert len(warnings) == expected_warnings
+
+        assert len([m for m in messages if m.id.startswith("next.E")]) == case.errors
+        assert len([m for m in messages if m.id.startswith("next.W")]) == case.warnings
 
 
 class TestMemoAndBrokenPages:
@@ -332,7 +252,9 @@ class TestMemoAndBrokenPages:
         page_file.write_text("def render( invalid syntax {\n")
         loaders_module._MODULE_MEMO.pop(page_file)
 
-        with patch_checks_router_manager_with_routers(routers=[_AppRouter(tmp_path)]):
+        with patch_checks_router_manager_with_routers(
+            routers=[AppRootRouter(tmp_path)]
+        ):
             messages = check_page_functions(None)
         e012 = [m for m in messages if m.id == "next.E012"]
         assert e012 == []
@@ -343,7 +265,9 @@ class TestMemoAndBrokenPages:
         page_file.write_text('def render(request, **kwargs):\n    return "x"\n')
         loaders_module._MODULE_MEMO.pop(page_file)
 
-        with patch_checks_router_manager_with_routers(routers=[_AppRouter(tmp_path)]):
+        with patch_checks_router_manager_with_routers(
+            routers=[AppRootRouter(tmp_path)]
+        ):
             messages = check_page_functions(None)
         e012 = [m for m in messages if m.id == "next.E012"]
         assert e012 == []
@@ -354,7 +278,9 @@ class TestMemoAndBrokenPages:
         page_file.write_text("")
         loaders_module._MODULE_MEMO.pop(page_file)
 
-        with patch_checks_router_manager_with_routers(routers=[_AppRouter(tmp_path)]):
+        with patch_checks_router_manager_with_routers(
+            routers=[AppRootRouter(tmp_path)]
+        ):
             messages = check_page_functions(None)
         e012 = [m for m in messages if m.id == "next.E012"]
         assert len(e012) == 1
@@ -374,7 +300,7 @@ class TestMemoAndBrokenPages:
 
         monkeypatch.setattr(loaders_module, "_load_python_module", counting)
 
-        router = _AppRouter(tmp_path)
+        router = AppRootRouter(tmp_path)
         with (
             patch_checks_router_manager_with_routers(routers=[router]),
             patch("next.discovery.get_pages_directories", return_value=[tmp_path]),
@@ -424,112 +350,37 @@ class TestCheckTemplateLoaders:
     @override_settings(
         NEXT_FRAMEWORK={"TEMPLATE_LOADERS": ["next.pages.registry.PageContextRegistry"]}
     )
-    def test_non_subclass_entry_is_e043(self) -> None:
+    def test_non_subclass_entry_is_e089(self) -> None:
 
         self._reset_loader_cache()
         msgs = self._run()
         assert len(msgs) == 1
-        assert msgs[0].id == "next.E043"
+        assert msgs[0].id == "next.E089"
         assert "not a TemplateLoader subclass" in msgs[0].msg
 
 
 class TestBodySourceConflicts:
     """`check_page_functions` emits `next.W043` when two or more body sources coexist."""
 
-    @pytest.mark.parametrize(
-        (
-            "test_case",
-            "page_content",
-            "create_template_djx",
-            "expected_w043",
-            "expected_winner",
-            "expected_shadowed",
-        ),
-        [
-            (
-                "render_and_template_djx",
-                'def render(request, **kwargs):\n    return "x"',
-                True,
-                1,
-                "render()",
-                "template.djx",
-            ),
-            (
-                "render_and_template_attr",
-                'template = "x"\ndef render(request, **kwargs):\n    return "x"',
-                False,
-                1,
-                "render()",
-                "template",
-            ),
-            (
-                "template_attr_and_template_djx",
-                'template = "x"',
-                True,
-                1,
-                "template",
-                "template.djx",
-            ),
-            (
-                "all_three",
-                'template = "x"\ndef render(request, **kwargs):\n    return "x"',
-                True,
-                1,
-                "render()",
-                "template, template.djx",
-            ),
-            (
-                "only_render",
-                'def render(request, **kwargs):\n    return "x"',
-                False,
-                0,
-                None,
-                None,
-            ),
-            ("only_template_attr", 'template = "x"', False, 0, None, None),
-            ("only_template_djx", "", True, 0, None, None),
-        ],
-        ids=[
-            "render_and_template_djx",
-            "render_and_template_attr",
-            "template_attr_and_template_djx",
-            "all_three",
-            "only_render",
-            "only_template_attr",
-            "only_template_djx",
-        ],
-    )
+    @pytest.mark.parametrize("case", PAGE_BODY_SOURCE_CASES, ids=lambda case: case.id)
     def test_w043_triggers_when_multiple_sources(
-        self,
-        tmp_path,
-        test_case,
-        page_content,
-        create_template_djx,
-        expected_w043,
-        expected_winner,
-        expected_shadowed,
+        self, tmp_path, case: PageBodySourceCase
     ) -> None:
         """Exercise the priority ordering and W043 payload."""
-        page_file = tmp_path / "page.py"
-        page_file.write_text(page_content)
-        if create_template_djx:
+        (tmp_path / "page.py").write_text(case.page_content)
+        if case.template_djx:
             (tmp_path / "template.djx").write_text("<h1>body</h1>")
 
-        class _FakeRouter:
-            app_dirs = True
-            pages_dir = "pages"
-
-            def page_roots(self) -> list[PageRoot]:
-                return [PageRoot(path=tmp_path, label="App 'app'")]
-
-        with patch_checks_router_manager_with_routers(routers=[_FakeRouter()]):
+        with patch_checks_router_manager_with_routers(
+            routers=[AppRootRouter(tmp_path)]
+        ):
             messages = check_page_functions(None)
-            w043 = [m for m in messages if m.id == "next.W043"]
-            assert len(w043) == expected_w043
-            if expected_w043:
-                msg = w043[0].msg
-                assert f"{expected_winner} takes priority" in msg
-                assert expected_shadowed in msg
+
+        w043 = [m for m in messages if m.id == "next.W043"]
+        assert len(w043) == case.warnings
+        if case.winner is not None:
+            assert f"{case.winner} takes priority" in w043[0].msg
+            assert case.shadowed in w043[0].msg
 
 
 class TestContextFunctionsChecks:
@@ -976,7 +827,9 @@ class TestPageModuleImports:
         page_file.write_text("def render( invalid syntax {\n")
         (tmp_path / "template.djx").write_text("<p>ok</p>\n")
 
-        with patch_checks_router_manager_with_routers(routers=[_AppRouter(tmp_path)]):
+        with patch_checks_router_manager_with_routers(
+            routers=[AppRootRouter(tmp_path)]
+        ):
             body = check_page_functions(None)
         assert [m for m in body if m.id == "next.E012"] == []
 
@@ -1012,7 +865,9 @@ class TestPageModuleImports:
         page_file = tmp_path / "page.py"
         page_file.write_text("import missing_dep_xyz\n")
 
-        with patch_checks_router_manager_with_routers(routers=[_AppRouter(tmp_path)]):
+        with patch_checks_router_manager_with_routers(
+            routers=[AppRootRouter(tmp_path)]
+        ):
             body = check_page_functions(None)
         assert [m for m in body if m.id == "next.E012"] == []
 
@@ -1057,7 +912,9 @@ class TestPageModuleImports:
         page_file.write_text(page_body)
         (tmp_path / "template.djx").write_text("<p>ok</p>\n")
 
-        with patch_checks_router_manager_with_routers(routers=[_AppRouter(tmp_path)]):
+        with patch_checks_router_manager_with_routers(
+            routers=[AppRootRouter(tmp_path)]
+        ):
             messages = check_page_functions(None)
         assert [
             m for m in messages if m.id in {"next.E012", "next.E013", "next.W043"}
@@ -1766,7 +1623,8 @@ class TestUnroutedWorkingDirectoryPages:
         monkeypatch.chdir(tmp_path)
 
         with patch(
-            "next.pages.checks.get_router_manager", return_value=(None, [Mock()])
+            "next.pages.checks.structure.get_router_manager",
+            return_value=(None, [Mock()]),
         ):
             assert check_unrouted_working_directory_pages(None) == []
 
@@ -1855,10 +1713,20 @@ class TestBracketDirectoryNamesDjangoRefuses:
         assert [m.id for m in messages] == ["next.E009"]
         assert fragment in messages[0].msg
 
+    @pytest.mark.parametrize("name", ["[args", "[[args"], ids=["one", "two"])
+    def test_a_directory_that_never_closes_its_bracket_reports_e087(
+        self, tmp_path, name
+    ) -> None:
+        """An unclosed bracket is neither form, so it carries a code of its own."""
+        messages = self._messages(tmp_path, name)
+        assert [m.id for m in messages] == ["next.E087"]
+        assert "Incomplete args syntax" in messages[0].msg
+        assert "Use [[args]] format." in messages[0].msg
+
     def test_the_converter_registry_is_read_per_check(self, tmp_path) -> None:
         """A converter a project registers of its own counts as one Django knows."""
         with patch(
-            "next.pages.checks.get_converters",
+            "next.pages.checks.structure.get_converters",
             return_value={**get_converters(), "four_digit_year": object()},
         ):
             assert self._messages(tmp_path, "[four_digit_year:year]") == []

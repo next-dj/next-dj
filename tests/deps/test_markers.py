@@ -1,10 +1,18 @@
 import functools
+from collections.abc import Callable
 
 import pytest
 from django.http import HttpRequest
 
-from next.deps import DependencyResolver, Depends, UnknownDependencyError, resolver
-from next.deps.markers import DependsProvider
+from next.deps import (
+    DependencyCycleError,
+    DependencyResolver,
+    Depends,
+    UnknownDependencyError,
+    resolver,
+)
+from next.deps.cache import _IN_PROGRESS
+from next.deps.markers import DependsProvider, call_factory, factory_key
 from next.testing import make_resolution_context
 from tests.support import _ctx, _minimal_resolver, bound_dependency, inspect_parameter
 
@@ -279,3 +287,98 @@ class TestDependsFormsTakeBothPaths:
                 call()
             assert exc_info.value.name == "missing"
             assert exc_info.value.param_name == "missing"
+
+
+def _mutual_factories() -> tuple[Callable[..., str], Callable[..., str]]:
+    """Two factories naming each other, which one definition cannot express.
+
+    `beta` needs `alpha` to exist, so `alpha` is pointed back at `beta` after.
+    """
+
+    def alpha(value: str = Depends(None)) -> str:
+        return f"alpha:{value}"
+
+    def beta(value: str = Depends(alpha)) -> str:
+        return f"beta:{value}"
+
+    alpha.__defaults__ = (Depends(beta),)
+    return alpha, beta
+
+
+class TestFactoryKey:
+    """A callable `Depends` is tracked under the address that stands in for a name."""
+
+    def test_a_named_function_is_keyed_by_its_dotted_path(self) -> None:
+        assert factory_key(_built) == f"{__name__}._built"
+
+    def test_a_callable_without_a_qualname_falls_back_to_its_address(self) -> None:
+        """`functools.partial` carries no `__qualname__`, and a plan still needs a key."""
+        key = factory_key(functools.partial(_built))
+
+        assert key.startswith("partial@")
+
+    def test_two_partials_of_one_function_are_keyed_apart(self) -> None:
+        """One shared key would read as a cycle the moment both appear in a plan."""
+        first = functools.partial(_built)
+        second = functools.partial(_built)
+
+        assert factory_key(first) != factory_key(second)
+
+    def test_a_callable_object_is_keyed_by_its_class_and_address(self) -> None:
+        class Builder:
+            def __call__(self) -> str:
+                return "built"
+
+        instance = Builder()
+        # A class carries `__qualname__`, an instance of it does not.
+        assert factory_key(instance).startswith(f"{Builder.__qualname__}@")
+
+
+class TestCallableDependsCycle:
+    """Two factories naming each other report the cycle instead of recursing."""
+
+    def test_a_mutual_pair_raises_a_dependency_cycle(self) -> None:
+        alpha, beta = _mutual_factories()
+        instance = DependencyResolver()
+
+        with pytest.raises(DependencyCycleError) as caught:
+            call_factory(instance, alpha, factory_key(alpha), make_resolution_context())
+
+        assert factory_key(alpha) in caught.value.cycle
+        assert factory_key(beta) in caught.value.cycle
+
+    def test_the_chain_names_every_factory_it_walked_through(self) -> None:
+        alpha, beta = _mutual_factories()
+        instance = DependencyResolver()
+
+        with pytest.raises(DependencyCycleError) as caught:
+            call_factory(instance, alpha, factory_key(alpha), make_resolution_context())
+
+        assert caught.value.cycle == [
+            factory_key(alpha),
+            factory_key(beta),
+            factory_key(alpha),
+        ]
+
+    def test_a_key_already_in_progress_on_the_cache_is_refused(self) -> None:
+        """A second pass on one context is the cycle the stack alone cannot see."""
+        context = make_resolution_context()
+        key = factory_key(_built)
+        context.cache.mark_in_progress(key)
+
+        with pytest.raises(DependencyCycleError):
+            call_factory(DependencyResolver(), _built, key, context)
+
+    def test_a_finished_factory_leaves_the_stack_and_the_cache_clean(self) -> None:
+        """The guards unwind, so the same factory resolves again further down."""
+        instance = DependencyResolver()
+        instance.dependency("theme")(lambda: "dark")
+        context = make_resolution_context()
+        key = factory_key(_built)
+
+        first = call_factory(instance, _built, key, context)
+        second = call_factory(instance, _built, key, context)
+
+        assert first == second == "built-dark"
+        assert context.stack == []
+        assert context.cache.get(key) is not _IN_PROGRESS

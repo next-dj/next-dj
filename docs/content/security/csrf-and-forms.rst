@@ -27,23 +27,24 @@ Origin validation
 
 The framework adds a second hidden field named ``_next_form_origin``.
 The ``{% form %}`` tag sets it to the URL the form was rendered under with its query string, so the HTML never exposes the server filesystem layout.
-The dispatcher resolves the field on every POST to recover the origin page's URL kwargs for dependency injection.
-The checks below are enforced only when the dispatcher has to re-render the origin page, on a validation failure and when a form-backed handler returns ``None``.
-A missing or unresolvable origin never blocks a valid submission whose handler returns a response.
+The dispatcher resolves the field on every POST, to recover the origin page's URL kwargs for dependency injection and to ask the page it names whether it authorizes the submission.
+The checks below therefore run on every POST, and a resolved origin page that carries a ``render()`` gates every action posted from it, see :doc:`/content/topics/pages`.
+A value that fails the checks yields no origin match, which blocks nothing by itself, though the paths that need the origin page then answer HTTP 400, a validation failure and a form-backed handler that returns ``None``.
 
 The value passes the same-site test only when all of the following hold.
 
-- The posted value is a string.
+- The posted value is a string of at most 16384 characters, counted before the strip, so an oversized value is refused without a scan.
 - Its surrounding whitespace is stripped before any other test runs.
+- It starts with a single ``/`` followed by neither a second slash nor a backslash, so ``//evil.example`` and ``/\evil.example`` are refused as protocol-relative.
+  The rule is path-only and reads no host or scheme, so even an absolute URL naming this host is refused.
 - It contains no tab, no line feed, and no carriage return, because a browser drops those three code points before it resolves a URL and a value the check read as same-site would become a jump off site.
-- It starts with a single ``/`` once every backslash is read as a forward slash, so ``/\evil.example`` is refused as protocol-relative.
 
-The value must then resolve against the URLconf through :func:`django.urls.resolve`, and the resolved view must carry the ``next_page_path`` attribute the file router sets on every routed page.
+The value must then resolve against the URLconf through :func:`django.urls.resolve`, its path decoded the way Django builds ``request.path`` and refused again when decoding turns it protocol-relative, and the resolved view must carry the ``next_page_path`` attribute the file router sets on every routed page.
 The client therefore never names a file, and a re-render can target only pages that are already reachable through the routing table.
 A re-render whose field fails these checks returns HTTP 400.
 
 On the success path the same field feeds ``redirect_to_origin`` without URLconf resolution.
-A missing or off-site value never blocks a successful dispatch, ``redirect_to_origin`` falls back to ``/``.
+A missing or off-site value never blocks a successful dispatch, ``redirect_to_origin`` falls back to ``/``, and so does an origin longer than Django allows in a redirect ``Location``.
 Handlers can call ``redirect_to_origin`` from ``next.forms`` to redirect back to the page that rendered the form.
 
 Manual forms
@@ -154,7 +155,11 @@ Use these cookie flags in production.
    CSRF_COOKIE_HTTPONLY = True
    CSRF_COOKIE_SAMESITE = "Lax"
 
-The bundled runtime reads the token from the ``$csrf`` init payload instead of the cookie, so a project that leaves unsafe requests to the runtime keeps ``CSRF_COOKIE_HTTPONLY = True`` and the cookie out of reach of scripts.
+``CSRF_COOKIE_HTTPONLY`` keeps the cookie itself out of reach of page scripts, which narrows the ways a token is stolen from the browser, and it does not put the token out of reach of a script on the page.
+Every ``{% form %}`` block renders the token into a hidden input and the page's inline ``Next._init`` payload carries it under ``$csrf``, so any script running on the page reads it from the document whatever the flag says.
+The value of the flag is that an attacker who can read cookies through another channel still does not get this one.
+
+The bundled runtime takes its token from that ``$csrf`` payload rather than from the cookie, so a project that leaves unsafe requests to the runtime keeps the flag on with nothing to change.
 
 .. code-block:: python
    :caption: config/settings.py, when project JavaScript reads the cookie directly
@@ -162,6 +167,7 @@ The bundled runtime reads the token from the ``$csrf`` init payload instead of t
    CSRF_COOKIE_HTTPONLY = False
 
 Set ``CSRF_COOKIE_HTTPONLY`` to false only when project JavaScript reads the token out of the cookie itself, as the fetch wrapper above does.
+Reading the hidden input or the init payload instead keeps the flag on, see :doc:`sessions-and-auth`.
 
 Common pitfalls
 ---------------
@@ -173,7 +179,7 @@ Form post without ``_next_form_origin``.
 Language switch between render and submit.
    Under :func:`django.conf.urls.i18n.i18n_patterns` the origin resolves under the language active on the POST.
    A user who changes the language in between posts an origin whose prefix no longer resolves, so a failing validation answers HTTP 400 instead of re-rendering.
-   The success path is unaffected because the origin checks are enforced only on the re-render.
+   The success path is unaffected, because an origin that does not resolve names no page to re-render and none to authorize.
 
 Stale token after deploy.
    Cached page renders carry the previous token.

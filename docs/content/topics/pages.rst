@@ -57,45 +57,25 @@ A partial-zone request takes a different path.
 When the request targets named zones, the view returns a zone response before step 2, so the full page render does not run.
 See :doc:`/content/topics/partial-rendering/zones` for the zone-morph request.
 
-Broken page modules
--------------------
-
-A ``page.py`` whose body raises while importing is a broken module rather than an absent one.
-The loader records the failure against the modification time of the file that executed, and the traceback is written once per version of that file because the module memo keys on its mtime.
-A later request for the same unchanged file answers from the memo without a second log record.
-``ImportError``, ``SyntaxError``, and ``AttributeError`` are the common causes, not a closed list.
-
-What the request does with that record depends on one predicate, ``next.conf.fail_loudly``, which is true when ``settings.DEBUG`` or ``NEXT_FRAMEWORK["STRICT_LOADING"]`` is set.
-
-Fail loud.
-   The view raises ``PageModuleImportError`` with the original exception as its ``__cause__``.
-   Under ``DEBUG`` the technical 500 page points at the failing line, and under ``STRICT_LOADING`` alone the client sees the generic 500 while the traceback stays in the server log.
-
-Fail quiet, the default.
-   The view answers 404 and the failure is visible only in the log record.
-   A deployment that never reads its logs therefore reads a broken page as a missing one, which is the reason :doc:`/content/deployment/settings` recommends ``STRICT_LOADING`` in production.
-
-The blast radius is one page in every mode.
-The broken page still gets its URL pattern, so the error surfaces at the view rather than while the URL configuration is built, and every sibling page keeps its pattern and keeps serving.
-The record is keyed by modification time, so saving a fixed ``page.py`` clears it on the next request without a restart.
-``manage.py check`` reports the same failure as :ref:`next.E017 <ref-system-checks>`, naming the exception type and message, which catches a broken page before traffic reaches it.
-
-See :doc:`/content/ref/pages` for the exception class and :ref:`ref-settings` for the loudness table across ``DEBUG`` and the strict flags.
-
 The ``render`` function
 -----------------------
 
 The ``render`` function takes any DI-resolved parameters the resolver can fill.
 The most common shape is ``request`` plus captured URL parameters and marker-driven values.
 
+The request is injected by annotation, never by parameter name.
+Annotate the parameter :class:`~django.http.HttpRequest` and import the class, because the resolver treats ``request`` as a reserved name that no name-based provider claims.
+A bare ``def render(request)`` therefore receives ``None``.
+
 .. code-block:: python
    :caption: notes/pages/reports/[int:report_id]/page.py
 
+   from django.http import HttpRequest
    from notes.models import Report
 
    from next.urls import DUrl
 
-   def render(request, report_id: DUrl[int]) -> str:
+   def render(request: HttpRequest, report_id: DUrl[int]) -> str:
        report = Report.objects.get(pk=report_id)
        return f"<section>Report {report.title}</section>"
 
@@ -175,6 +155,7 @@ Unkeyed dict.
    ``@context`` on a function that returns a dict merges the dict into the template scope.
    Useful when several values share a dependency you only want to resolve once.
    The unkeyed form must return a mapping, and a return annotation that is not a mapping type reports :ref:`next.E029 <ref-system-checks>`.
+   A callable that answers a non-mapping at render time raises ``next.pages.PageContextShapeError``, a :class:`TypeError` subclass carrying the name of the callable and the path of the page it was building.
 
    .. code-block:: python
       :caption: unkeyed dict
@@ -457,12 +438,27 @@ A page that always redirects elsewhere uses a ``render`` function that returns `
 .. code-block:: python
    :caption: notes/pages/login/page.py
 
-   from django.http import HttpResponseRedirect
+   from django.http import HttpRequest, HttpResponseRedirect
 
    from next.urls import page_reverse
 
-   def render(request) -> HttpResponseRedirect:
+   def render(request: HttpRequest) -> HttpResponseRedirect:
        return HttpResponseRedirect(page_reverse("auth/login"))
+
+.. note::
+
+   A response returned from ``render`` is the page's own access control, and it covers more than a visit to the page URL.
+   A form submission that names this page as its origin, a zone morph against that origin, and a wizard step advance into this page all ask ``render`` whether the requester may be served before they render anything.
+   The body ``render`` returns is discarded on those paths, which compose from the page template, while a response it returns answers the request.
+   See *Render paths and what each one runs* in :doc:`/content/internals/request-lifecycle` for the table, and :doc:`/content/security/overview` for the other layers an identity check can sit in.
+
+.. note::
+
+   The request such a call carries describes the page, not the endpoint that asked on its behalf.
+   The framework restates the live request as a GET of the URL under authorization, so ``request.method`` is ``GET``, ``request.path`` is the page URL, and ``request.GET`` holds that URL's query string, while the user, the session, and everything else a middleware attached come through untouched.
+   A ``render`` that short-circuits on a missing query parameter, on a non-GET method, or on a canonical-URL comparison therefore answers a submission exactly as it answers a visit.
+   The live request is never modified, so the dispatcher reads its own POST as usual once ``render`` has answered.
+   One caller cannot name a URL, ``Patches.morph(zone=..., page=...)`` addressing the foreign page by file path rather than by URL, and its authorization call asks as a GET with no query and the live path in place.
 
 JSON endpoint
 ~~~~~~~~~~~~~
@@ -472,9 +468,9 @@ Return ``JsonResponse`` from ``render`` for a JSON endpoint that still benefits 
 .. code-block:: python
    :caption: notes/pages/api/health/page.py
 
-   from django.http import JsonResponse
+   from django.http import HttpRequest, JsonResponse
 
-   def render(request) -> JsonResponse:
+   def render(request: HttpRequest) -> JsonResponse:
        return JsonResponse({"status": "ok"})
 
 Streaming response
@@ -551,11 +547,40 @@ The ``check_template_loaders`` check validates every ``NEXT_FRAMEWORK["TEMPLATE_
    A ``TEMPLATE_LOADERS`` entry is not a dotted-path string.
 
 ``next.E043``.
-   A ``TEMPLATE_LOADERS`` entry cannot be imported or is not a ``TemplateLoader`` subclass.
+   A ``TEMPLATE_LOADERS`` entry names a dotted path that cannot be imported.
+
+``next.E089``.
+   A ``TEMPLATE_LOADERS`` entry imports to an object that is not a ``TemplateLoader`` subclass.
 
 A bad entry is skipped at render time with a debug log only, so run the checks after editing the list.
 
 Run them through ``uv run python manage.py check``.
+
+Broken page modules
+-------------------
+
+A ``page.py`` whose body raises while importing is a broken module rather than an absent one.
+The loader records the failure against the modification time of the file that executed, and the traceback is written once per version of that file because the module memo keys on its mtime.
+A later request for the same unchanged file answers from the memo without a second log record.
+``ImportError``, ``SyntaxError``, and ``AttributeError`` are the common causes, not a closed list.
+
+What the request does with that record depends on one predicate, ``next.conf.fail_loudly``, which is true when ``settings.DEBUG`` or ``NEXT_FRAMEWORK["STRICT_LOADING"]`` is set.
+
+Fail loud.
+   The view raises ``PageModuleImportError`` with the original exception as its ``__cause__``.
+   Under ``DEBUG`` the technical 500 page points at the failing line, and under ``STRICT_LOADING`` alone the client sees the generic 500 while the traceback stays in the server log.
+
+Fail quiet, the default.
+   The view answers 404 and the failure is visible only in the log record.
+   A deployment that never reads its logs therefore reads a broken page as a missing one, which is the reason :doc:`/content/deployment/settings` recommends ``STRICT_LOADING`` in production.
+
+The blast radius is one page in every mode.
+The broken page still gets its URL pattern, so the error surfaces at the view rather than while the URL configuration is built, and every sibling page keeps its pattern and keeps serving.
+The record is keyed by modification time, so saving a fixed ``page.py`` clears it on the next request without a restart.
+``manage.py check --deploy`` reports the same failure as :ref:`next.E017 <ref-system-checks>`, naming the exception type and message, which catches a broken page before traffic reaches it.
+The check imports every routed ``page.py`` and so costs a full tree walk, which is why it runs under the deployment flag rather than on every ``manage.py`` command.
+
+See :doc:`/content/ref/pages` for the exception class and :ref:`ref-settings` for the loudness table across ``DEBUG`` and the strict flags.
 
 See also
 --------

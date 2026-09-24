@@ -99,15 +99,94 @@ Tag injection
 After the layout chain finishes, the static manager replaces every placeholder token with the rendered tags accumulated by the request-scoped ``StaticCollector``.
 The framework injects the ``Next`` JS context script before any other script in the page.
 
+Both routed views then stamp the partial ``Vary`` set on the finished response, whether or not the project declares a single zone.
+The header names ``X-Next-Request``, ``X-Next-Zone``, ``X-Next-Merge``, and ``X-Next-Version``, because a full page and a zone envelope answer the same URL and a shared cache that ignores those headers would serve one where the other belongs.
+A project using no partial rendering therefore still ships the four names on every file-routed HTML response, which narrows what a shared cache may reuse across clients that send different values.
+The one response that escapes the stamp is the one a ``render`` function returns itself, because that branch leaves the view before the port is reached.
+See :doc:`/content/topics/partial-rendering/reference` for the request headers behind that set and what a shared cache does with them.
+
 Form submission path
 --------------------
 
 A form submission enters at ``/_next/form/<str:uid>/``.
 The dispatcher resolves the UID to the registered handler and form class.
+It then resolves the posted origin and asks the page that origin names to authorize the request, so a submission never reaches a handler on behalf of a visitor that page would refuse.
 On valid form the handler runs and returns a response that goes back to the browser.
 On invalid form the dispatcher loads the origin page and re-renders it through the same pipeline used for a fresh page request, with the bound form in the template scope.
 
 The dependency cache is reused across the failure path so context functions and providers run at most once per request.
+
+.. _internals-request-lifecycle-render-paths:
+
+Render paths and what each one runs
+-----------------------------------
+
+Six paths produce HTML from a page, and they do not run the same steps.
+The table below is the reference for deciding where an access check belongs.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 26 12 22 12 28
+
+   * - Path
+     - Runs ``render()``
+     - Composes the body from ``render()``
+     - Runs ``@context``
+     - Runs the page's own guard
+   * - Full page GET
+     - Yes
+     - Yes, when it returns a body
+     - Yes
+     - Yes
+   * - Zone GET on the page's own URL
+     - Yes
+     - No, a dynamic body is refused
+     - Yes
+     - Yes
+   * - Form re-render after an invalid submission
+     - Yes
+     - No
+     - Yes
+     - Yes
+   * - Form zone morph against the posted origin
+     - Yes
+     - No
+     - Yes
+     - Yes
+   * - Wizard step morph into the next step
+     - Yes
+     - No
+     - Yes
+     - Yes
+   * - Out-of-band foreign morph
+     - Yes
+     - No, a dynamic body is refused
+     - Yes
+     - Yes
+
+The two GET rows run the routed view, so a ``render`` function runs with its arguments resolved and a response it returns short-circuits everything after it.
+A zone GET resolves the body first and only then reads the partial intent, which is why a zone named on a page whose body comes from ``render()`` is answered with a 400 rather than rendered.
+
+The three middle rows never run the routed view of the page they render, so they call ``render()`` for its authorization alone and compose the markup from ``composed_template_for``, the compiled static body plus its layout chain.
+Those are two separate facts about one call.
+``render()`` runs, and the body it returns is discarded, while a response it returns is not, so a guard written inside ``render()`` holds on every row of the table.
+
+The denial each row sends differs, deliberately.
+The form re-render and every framework-driven ``morph(zone=...)`` answer with the origin page's own short-circuit response verbatim, so a ``render()`` returning ``HttpResponseRedirect("/login/")`` makes the POST answer 302 to ``/login/``.
+The wizard row authorizes the next step's page before it renders that step's zone, and a denial falls back to the plain step redirect the runtime-free path already sends, carrying the partial ``Vary`` set.
+``Patches.morph_zone`` reached outside the dispatch pipeline raises ``ForeignPageNotAuthorizedError``, because it is public API a handler can call with any posted origin behind it.
+
+The last row names the page in the call rather than in the POST.
+``Patches.morph(zone=..., page=...)`` resolves the foreign page's body through ``authorization_outcome`` before it renders anything, so the foreign ``render()`` runs once, a redirect or a denial it returns is raised as ``ForeignPageNotAuthorizedError`` instead of morphed, and a foreign page whose body is dynamic is refused.
+
+Every row asks ``render()`` the same question, so it reads the same kind of request on all of them.
+A row that does not run the routed view builds that request with ``next.pages.visits.visit_request``, which copies the live one and restates it as a GET of the URL under authorization, the posted origin on a form re-render and an origin zone morph, the next step's URL on a wizard advance, and the named URL on a foreign morph that was given one.
+A ``render()`` keyed on identity, on ``request.GET``, on ``request.method``, or on a canonical-URL comparison therefore answers the same on every row as it does on a visit.
+The one gap is a foreign morph whose caller named the page by file path, which carries no URL to present and leaves the live path in place, see :doc:`/content/topics/pages`.
+
+The ``@context`` column hides one difference worth naming.
+The form re-render and the origin zone morph build the context with no zone batch, so every page-level callable runs, ``zone=``-tagged ones included.
+The zone GET, the wizard step morph, and the foreign morph pass the requested batch, so a callable bound to another zone is skipped before its dependencies resolve.
 
 What is cached between requests
 -------------------------------

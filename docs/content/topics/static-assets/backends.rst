@@ -17,6 +17,20 @@ Backend contract
 A backend subclasses ``next.static.StaticBackend``, an abstract base class.
 The constructor receives the full backend entry from ``STATIC_BACKENDS``, a dict of the shape ``{"BACKEND": "...", "OPTIONS": {...}}``.
 
+The read-only ``config`` property hands that entry back, and it is the supported way to read ``OPTIONS`` from inside a backend.
+
+.. code-block:: python
+   :caption: notes/backends.py
+
+   class CdnBackend(StaticFilesBackend):
+       def __init__(self, config=None) -> None:
+           super().__init__(config)
+           opts = dict(self.config.get("OPTIONS") or {})
+           self._cdn_host = opts.get("CDN_HOST", "")
+
+A subclass that defines its own ``__init__`` calls ``super().__init__(config)`` first, because the base stores the mapping and primes the URL memo that ``forget_urls`` clears.
+:doc:`/content/howto/build-a-custom-asset-backend` reads a Vite manifest path through the same property.
+
 The only abstract method is ``register_file``, which covers co-located files.
 ``resolve_url``, ``asset_url``, and ``forget_urls`` are concrete on the base class, and a backend overrides the ones whose behaviour it changes.
 
@@ -38,10 +52,14 @@ The only abstract method is ``register_file``, which covers co-located files.
 Discovery catches ``OSError`` and ``ValueError`` from ``register_file`` and logs a warning, dropping that one asset.
 Any other exception, including ``RuntimeError``, propagates and aborts the render.
 The bundled ``StaticFilesBackend`` raises ``StaticAssetNotFoundError``, a ``RuntimeError`` exported from ``next.static``, when an asset is missing from the Django staticfiles manifest, so a stale manifest aborts the render rather than dropping the asset.
-A custom backend that wants a soft fail for an unresolvable asset should raise ``ValueError``.
 
-Renderer methods are not abstract.
-A backend adds the renderer methods that its registered kinds reference, see :doc:`asset-kinds`.
+The soft fail belongs to the door rather than to the backend.
+A ``resolve_url`` call for a module-level ``styles`` or ``scripts`` entry is wrapped the way ``register_file`` is, so an ``OSError`` or a ``ValueError`` raised there drops that one asset with a logged warning.
+A ``resolve_url`` call for a reference a template tag supplied is wrapped nowhere, so whatever it raises leaves the render, ``ValueError`` included.
+
+Renderer methods are not abstract, and they are concrete on ``StaticFilesBackend`` rather than on the base.
+A backend subclassing ``StaticFilesBackend`` inherits all three and overrides the ones whose markup it changes.
+A backend subclassing ``StaticBackend`` directly supplies ``render_link_tag``, ``render_script_tag``, and ``render_module_tag`` itself, along with any further method its registered kinds name, see :doc:`asset-kinds`.
 
 Resolving a name
 ~~~~~~~~~~~~~~~~
@@ -107,6 +125,10 @@ The backend ships three renderer methods.
 
 Each method takes the URL and an optional ``request`` keyword.
 The default backend ignores ``request`` in every renderer and in ``asset_url``.
+
+All three escape ``str(url)`` through the standard library :func:`html.escape` before formatting it into their tag template.
+A finished ``<link>`` or ``<script>`` is spliced into the document past the template engine, so the engine never gets the chance to escape what the tag carries and the escaping has to live in the renderer.
+An override takes that obligation on with the method, so a renderer building its own markup runs every interpolated value through :func:`django.utils.html.escape` itself.
 
 Configuring the default backend
 --------------------------------
@@ -194,6 +216,7 @@ A single constant host in front of the static origin is neither, and belongs in 
 
 :doc:`/content/howto/write-a-static-backend` walks through the attribute and CDN recipes.
 For a complete Subresource Integrity implementation that also computes the ``integrity`` hash, see :doc:`/content/security/static-assets`.
+An ``integrity`` or ``nonce`` override builds the whole tag rather than filling a template, so it carries the escaping obligation above along with the new attribute.
 
 Subclass the abstract ``StaticBackend`` directly only when the project resolves assets from a source other than Django staticfiles, such as a build manifest.
 
@@ -214,14 +237,14 @@ List the dotted path of the backend in ``STATIC_BACKENDS``.
        ]
    }
 
-The manager builds the backend instance from the config dict through ``load_backends`` and emits the ``backend_loaded`` signal.
+The manager builds the backend instance from the config dict through ``load_backends`` and emits the ``static_backend_loaded`` signal.
 An entry that names a class outside the ``StaticBackend`` family, or a path that cannot be imported, is logged and skipped, and the remaining entries still load.
 A backend that raises ``ImproperlyConfigured`` from its own ``__init__`` is skipped the same way.
 Any other exception a constructor raises is a bug in that backend and reaches the caller.
 When no entry survives, the manager seeds the built-in staticfiles backend so rendering always has one, and that seed announces itself through the same signal.
 
 ``StaticManager.default_backend`` is the first entry, and it is the only one the render path uses.
-A later entry is built and receives ``backend_loaded`` and ``forget_urls``, and renders nothing.
+A later entry is built and receives ``static_backend_loaded`` and ``forget_urls``, and renders nothing.
 
 Request-aware output
 --------------------
@@ -233,7 +256,7 @@ See :ref:`Tenant URL prefix <howto-static-backend-tenant-prefix>` for a worked b
 Signals
 -------
 
-The ``backend_loaded`` signal fires once per configured backend when the manager builds it.
+The ``static_backend_loaded`` signal fires once per configured backend when the manager builds it.
 The payload carries ``sender`` as the backend class, ``config`` as the config dict, and ``instance`` as the backend instance.
 
 System checks
@@ -245,26 +268,6 @@ The full list of static check codes lives in :doc:`/content/ref/system-checks`.
 
 The ``next.W031`` check validates the ``css_tag``, ``js_tag``, and ``module_tag`` templates.
 A template that carries no ``{url}`` placeholder raises the warning, because the rendered tag would carry no asset URL.
-
-Common patterns
----------------
-
-Cache busting
-~~~~~~~~~~~~~
-
-Use the default backend with ``ManifestStaticFilesStorage``.
-The manifest filename changes when the content changes, which invalidates browser caches.
-
-Subresource Integrity
-~~~~~~~~~~~~~~~~~~~~~
-
-Subclass ``StaticFilesBackend`` and override ``render_link_tag`` and ``render_script_tag`` to add an ``integrity`` attribute.
-
-Per-tenant CDN
-~~~~~~~~~~~~~~
-
-Use a request-aware ``asset_url`` that reads the tenant from the request and chooses a CDN host.
-A host that is the same for every request is ``STATIC_URL`` work rather than backend work.
 
 See also
 --------

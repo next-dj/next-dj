@@ -26,7 +26,7 @@ def _form_fallback_html(form: "BaseForm | BaseFormSet | None") -> str:
 
 
 @dataclass(frozen=True, slots=True)
-class _ErrorRenderParams:
+class ErrorRenderParams:
     """Bundle of failed-submission params for the validation-error re-render."""
 
     action_name: str
@@ -38,13 +38,13 @@ class _ErrorRenderParams:
 def render_form_page_with_errors(
     backend: "FormActionBackend",
     request: "HttpRequest",
-    params: _ErrorRenderParams,
+    params: ErrorRenderParams,
     page_file_path: "Path",
 ) -> str:
     """Render the page template for `page_file_path` with a bound form in context.
 
-    The HTML flows through `Page.render_with_static_assets`, so co-located CSS and JS
-    land in the response and a request-aware backend sees the same `request`.
+    The HTML flows through `Page.render_with_static_assets`, and dispatch authorized the
+    page first, so the re-render never decides for itself who may see what it composes.
     """
     file_path = page_file_path
     action_name = params.action_name
@@ -87,4 +87,4 @@ def render_form_page_with_errors(
     return rendered
 
 
-__all__ = ["_ErrorRenderParams", "render_form_page_with_errors"]
+__all__ = ["ErrorRenderParams", "render_form_page_with_errors"]

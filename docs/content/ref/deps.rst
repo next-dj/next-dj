@@ -62,6 +62,8 @@ Introspection
 ``cached_signature``, ``cached_type_hints`` and ``cached_accepts_var_keyword`` read one fact off a callable and memoise it under that callable, so a plan compile and a provider asking the same question pay for the read once.
 The memos are bounded, because a dev reload mints a fresh function object per save and each one would otherwise stay pinned with its globals.
 ``prepared_parameter`` is the parameter preparation both the plan compiler and the plan-free resolver fill from, so the second opinion they hold each other to is the choice of provider rather than the shape of the parameter.
+``IntrospectKey`` is the key all three memos and the plan cache share, a callable paired with a bound flag, and ``HINT_ERRORS`` is the tuple of everything an annotation expression is allowed to fail with.
+Both are type aliases or plain constants rather than classes, so they carry no members of their own.
 
 Plan
 ~~~~
@@ -138,3 +140,4 @@ See also
 
    :doc:`/content/topics/dependency-injection` for the topic guide.
    :doc:`/content/internals/di-resolver` for the resolver internals.
+   :doc:`/content/security/di-and-untrusted-input` for treating an injected URL or query value as untrusted.

@@ -17,6 +17,7 @@ from django.forms.renderers import DjangoTemplates
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 
+from next.caches import BoundedCache
 from next.conf import next_framework_settings
 from next.introspect import defining_file
 
@@ -26,8 +27,8 @@ from .backends import (
     _resolved_path_str,
     build_action_guard,
 )
-from .diagnostics import registration_diagnostics
 from .manager import form_action_manager
+from .registration import registration_diagnostics
 from .uid import redirect_to_origin
 
 
@@ -51,7 +52,7 @@ _FOREIGN_ROOTS: Final[tuple[tuple[str, str], ...]] = (
 
 # Both roots are process constants, so a per-path answer can never go stale.
 # The BASE_DIR decision stays uncached because settings repoint it.
-_foreign_file_cache: dict[str, bool] = {}
+_foreign_file_cache: BoundedCache[str, bool] = BoundedCache()
 
 # HttpResponseRedirect subclasses HttpResponse, so a login redirect needs no arm.
 type PermissionOutcome = bool | HttpResponse | None

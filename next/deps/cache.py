@@ -45,9 +45,7 @@ class DependencyCache:
         in_progress = self._in_progress
         if in_progress is not None and key in in_progress:
             return _IN_PROGRESS
-        if key in self._cache:
-            return self._cache[key]
-        return _CACHE_MISS
+        return self._cache.get(key, _CACHE_MISS)
 
     def set(self, key: str, value: object) -> None:
         """Store a finished resolution under the given key."""

@@ -1,4 +1,5 @@
 import logging
+import shutil
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -325,57 +326,39 @@ class TestFileRouterBackend:
         assert urls == []
         mock_gen.assert_called_with(tmp_path)
 
-    @pytest.mark.parametrize(
-        (
-            "test_case",
-            "cache_value",
-            "pages_path_return",
-            "patterns_return",
-            "expected_result",
-        ),
-        [
-            ("cached", ["cached_url"], None, None, ["cached_url"]),
-            ("no_pages_path", None, None, None, []),
-            (
-                "with_patterns",
-                None,
-                "mock_pages_path",
-                ["pattern1", "pattern2"],
-                ["pattern1", "pattern2"],
-            ),
-        ],
-        ids=["cached", "no_pages_path", "with_patterns"],
-    )
-    def test_generate_urls_for_app_variations(
-        self,
-        router,
-        test_case,
-        cache_value,
-        pages_path_return,
-        patterns_return,
-        expected_result,
-    ) -> None:
-        """Per app caching, missing path, and generated patterns."""
-        if cache_value:
-            router._patterns_cache["testapp"] = cache_value
-            result = router._generate_urls_for_app("testapp", {})
-            assert result == expected_result
-        else:
-            with patch.object(
-                router, "_get_app_pages_path", return_value=pages_path_return
-            ):
-                if pages_path_return:
-                    with patch.object(
-                        router,
-                        "_generate_patterns_from_directory",
-                        return_value=patterns_return,
-                    ):
-                        result = router._generate_urls_for_app("testapp", {})
-                        assert result == expected_result
-                        assert router._patterns_cache["testapp"] == patterns_return
-                else:
-                    result = router._generate_urls_for_app("testapp", {})
-                    assert result == expected_result
+    def _app_tree(self, tmp_path: Path, *routes: str) -> dict[str, Path]:
+        """Return the app-directory snapshot for one app carrying the named routes."""
+        for route in routes:
+            directory = tmp_path / "pages" / route
+            directory.mkdir(parents=True)
+            (directory / "page.py").write_text('template = "ok"\n')
+        return {"testapp": tmp_path}
+
+    def test_an_app_tree_contributes_one_pattern_per_page(self, router, tmp_path):
+        """Every routed page under the app's pages directory becomes a named pattern."""
+        directories = self._app_tree(tmp_path, "home", "about")
+
+        patterns = router._generate_urls_for_app("testapp", directories)
+
+        assert sorted(pattern.name for pattern in patterns) == [
+            "page_about",
+            "page_home",
+        ]
+        assert router._patterns_cache["testapp"] == patterns
+
+    def test_a_memoised_app_answers_after_its_tree_is_gone(self, router, tmp_path):
+        """The memo is what a reload drops, so it outlives the tree it was built from."""
+        directories = self._app_tree(tmp_path, "home")
+        first = router._generate_urls_for_app("testapp", directories)
+        shutil.rmtree(tmp_path / "pages")
+
+        assert router._generate_urls_for_app("testapp", directories) == first
+        assert [pattern.name for pattern in first] == ["page_home"]
+
+    def test_an_app_without_a_pages_tree_contributes_nothing(self, router, tmp_path):
+        """A missing pages directory leaves no pattern and nothing in the memo."""
+        assert router._generate_urls_for_app("testapp", {"testapp": tmp_path}) == []
+        assert "testapp" not in router._patterns_cache
 
     def test_generate_patterns_from_directory(self) -> None:
         """Builds URL patterns from scan results via create_url_pattern."""

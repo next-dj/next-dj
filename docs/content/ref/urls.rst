@@ -55,6 +55,8 @@ Any other exception from a custom backend propagates and stops startup, because 
 The build runs under a reentrant lock, so under a threaded server a read racing the first load waits for it rather than resolving against a list that is not there yet, while a backend consulting the manager while it is constructed still reads the pre-rebuild list.
 Iterating the manager yields URL patterns rather than backends, so the manager itself carries neither ``len`` nor indexing and ``backends`` answers both.
 ``version`` is the cache token the lazy urlpatterns concat keys on, bumped by every ``reload()``, and a caller that derives its own cache from the router set reads it for the same purpose.
+It is a read-only property with no setter, and the numbers come from one process-wide counter that starts at one, so two managers never hand out the same token and no manager ever reports zero.
+Compare two readings for inequality rather than reading a number as a reload count, because the counter advances for every manager in the process.
 
 .. automodule:: next.urls.manager
    :members:
@@ -196,10 +198,15 @@ See :doc:`/content/topics/dependency-injection` and :doc:`/content/topics/file-r
 Signals
 -------
 
-The URL subsystem fires two signals.
+The URL subsystem fires three signals.
 
 ``route_registered``.
    Sent by ``FileRouterBackend`` once per registered route, including virtual ``template.djx`` routes, with the ``url_path`` and ``file_path`` keyword arguments.
+
+``router_backend_loaded``.
+   Sent once per ``PAGE_BACKENDS`` entry the manager instantiates, with the ``config`` copy and the built ``instance``.
+   The sender is the resolved router class, so a receiver connected with ``sender=`` hears about one backend family alone.
+   ``reload(notify=False)`` builds the backends without sending it.
 
 ``router_reloaded``.
    Sent by the router manager class after the router rebuilds, with no keyword arguments.
@@ -243,7 +250,15 @@ Checks
       * - ``next.E026``
         - A ``FileRouterBackend`` entry carries no ``OPTIONS``.
       * - ``next.E006``
-        - ``DIRS`` is not a list, ``OPTIONS`` is not a dictionary, ``context_processors`` is not a list of strings, or ``OPTIONS`` names a key other than ``context_processors``.
+        - ``DIRS`` is not a list.
+      * - ``next.E094``
+        - ``OPTIONS`` is not a dictionary.
+      * - ``next.E095``
+        - ``OPTIONS['context_processors']`` is not a list.
+      * - ``next.E096``
+        - ``OPTIONS['context_processors']`` holds an entry that is not a string.
+      * - ``next.E097``
+        - ``OPTIONS`` names a key other than ``context_processors``.
       * - ``next.E035``
         - An entry carries a key outside its allowed set, ``BACKEND``, ``APP_DIRS``, ``DIRS``, ``OPTIONS``, and ``PAGES_DIR`` for a file router, ``BACKEND`` alone otherwise.
 
@@ -251,7 +266,9 @@ Checks
    Collects patterns from every configured tree, application pages and root ``DIRS`` alike.
    Fails with :ref:`next.E015 <ref-system-checks>` when two file routes convert to exactly the same Django path string.
    Fails with :ref:`next.E028 <ref-system-checks>` when a route repeats a captured parameter name, listing every conflicting name.
+   Fails with :ref:`next.E082 <ref-system-checks>` for any other refusal the parser raises for a bracket segment, so a name the route compiler would reject is reported instead of becoming a traceback out of the first resolution.
    Reports :ref:`next.E016 <ref-system-checks>` when pattern collection from a router raises.
+   Reports :ref:`next.E014 <ref-system-checks>` when the conflict comparison itself raises.
 
 ``check_reverse_name_collisions``.
    Fails with :ref:`next.E039 <ref-system-checks>` when two distinct routes collapse to the same reverse URL name.
@@ -260,6 +277,12 @@ Checks
 .. automodule:: next.urls.checks
    :members:
    :no-index:
+
+Ports
+-----
+
+``next.urls.ports`` holds ``RouterAccessImpl``, which binds router construction, manager construction, and the URL pattern parser to the ``RouterAccess`` port of :doc:`ports`.
+The page watcher and the system checks need routers while ``next.urls`` itself imports ``next.pages``, so they read the port rather than importing back across that edge.
 
 See also
 --------

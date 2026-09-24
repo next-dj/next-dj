@@ -241,6 +241,11 @@ class TestRedirectToLogin:
         assert "theme=dark" in resp.url
         assert "next=/x/" in resp.url
 
+    @pytest.mark.usefixtures("cap_redirects")
+    def test_next_past_the_redirect_cap_is_dropped(self) -> None:
+        resp = _redirect_to_login("/search/?q=" + "\u044f" * 3000)
+        assert resp.url == "/accounts/login/"
+
 
 class TestCheckAccess:
     """_check_access enforces AccessMixin semantics on the dispatch request."""
@@ -265,6 +270,13 @@ class TestCheckAccess:
         denial = _check_access(request, ActionGuard(login_required=True))
         assert denial is not None
         assert denial.url == "/accounts/login/?next=/"
+
+    def test_origin_past_the_url_length_cap_rides_along(self, rf) -> None:
+        origin = "/items/?q=" + "x" * 3000
+        request = rf.post("/_next/form/x/", {"_next_form_origin": origin})
+        denial = _check_access(request, ActionGuard(login_required=True))
+        assert denial is not None
+        assert denial.url == "/accounts/login/?next=/items/%3Fq%3D" + "x" * 3000
 
     def test_authenticated_without_permission_raises(self, rf) -> None:
         request = rf.post("/_next/form/x/")
@@ -1085,7 +1097,6 @@ class TestDepCacheReuse:
     def test_provider_resolves_once_across_hook_and_on_valid(
         self, mock_http_request
     ) -> None:
-        GuardedTenantForm.resolutions.clear()
         seen: dict[str, object] = {}
 
         def receiver(**kwargs) -> None:

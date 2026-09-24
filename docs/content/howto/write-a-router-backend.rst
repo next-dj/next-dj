@@ -34,7 +34,7 @@ Report only trees the backend actually serves from, because the same list is wha
 ``skip_dir_names`` names the directories the backend's own walk refuses to enter, an empty set for a backend that refuses none.
 
 The checks walk the reported trees themselves rather than asking the backend to walk them, so ``page_roots`` is the whole contract for being checked.
-A backend that reports a tree is reached by every page check, from the structural ones to ``next.E017`` and the partial zone checks.
+A backend that reports a tree is reached by every page check, from the structural ones to the partial zone checks and the deployment-only ``next.E017``.
 The names that walk refuses to enter are the folder ``components_folder_name`` returns plus the names ``skip_dir_names`` returns.
 Both come from the backend under check rather than from the settings, so one entry's ``DIRS`` never blinds the checks to another entry's trees.
 ``FileRouterBackend`` answers with the skip set it built from its own ``DIRS``, the entries that name no existing directory.
@@ -47,6 +47,8 @@ A backend that raises, or that answers something other than ``PageRoot`` entries
 ``skip_dir_names`` is guarded the same way, and a backend that raises there or answers anything but a collection of names refuses no directory to the check walk.
 The first such failure is logged once and the repeats stay quiet, because these paths run per reloader tick and per static lookup, and a backend that raised is logged with its traceback while one that answered the wrong type is named by that type.
 ``manage.py check`` reports the same failure once as ``next.E030``, with the traceback, which is where a human is reading output on purpose.
+``next.E030`` covers the report itself, a ``page_roots`` that raises or answers something other than ``PageRoot`` entries.
+A tree the backend reports successfully but the check walk then cannot read, an unreadable directory among them, is a separate report, ``next.E088``.
 An override that can fail slowly is still worth a cache of its own, because nothing upstream caches the answer for it.
 ``FileRouterBackend`` already implements filesystem discovery, so subclass it and extend ``generate_urls`` rather than starting from the bare base.
 

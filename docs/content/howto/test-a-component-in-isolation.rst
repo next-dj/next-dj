@@ -22,6 +22,7 @@ Load the components
 
 Component discovery is a side effect, so import the components before a test resolves one.
 ``next_components = true`` in ``pytest.ini`` calls ``eager_load_components`` once per session through ``next.testing.plugin``.
+A component that lives beside a page rather than in a configured root needs it, because the live registry holds such a folder only once a request has walked its page tree.
 
 .. code-block:: ini
    :caption: pytest.ini
@@ -32,10 +33,9 @@ Component discovery is a side effect, so import the components before a test res
    addopts = -p next.testing.plugin
    next_components = true
 
-``eager_load_components`` covers the roots configured through ``COMPONENT_BACKENDS``.
-Component folders inside a page tree register during the URL router walk instead, which runs when the URLconf first loads.
-A suite whose other tests issue ``NextClient`` requests has already triggered the walk.
-A suite that renders components without any HTTP triggers it by reversing one route in a session fixture, for example with ``page_reverse()`` from ``next.urls``.
+``eager_load_components`` covers the roots configured through ``COMPONENT_BACKENDS`` and the component folders inside every configured page tree.
+It registers the page-tree folders itself before importing anything, which is the step a live registry otherwise performs only once a request has walked that tree.
+A suite that never issues an HTTP request therefore needs no route reversal or other way of staging the walk.
 
 Render the component
 ~~~~~~~~~~~~~~~~~~~~
@@ -82,6 +82,7 @@ Pass ambient page values through ``context``
 
 A component that reads a value from the surrounding page scope rather than from its own call site takes it through the ``context`` mapping.
 Those keys are not published as props, so an unkeyed ``@component.context`` may shadow them exactly as it does on a page.
+The helper applies the mapping over the ambient keys it seeded from ``at``, so a ``context`` entry naming one of them replaces the seeded value.
 
 .. code-block:: python
    :caption: tests/test_info_card.py
@@ -145,6 +146,31 @@ When a component callable reads the request, build one with :class:`~django.test
            request=request,
        )
        assert "ada" in html
+
+Collect the assets a nested component registers
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A page render hands the component runtime its own collector, and an isolated render has none until the test supplies one.
+Pass a ``StaticCollector`` through the ``collector`` keyword to catch the co-located assets of the component and of anything it nests.
+
+.. code-block:: python
+   :caption: tests/test_info_card.py
+
+   from next.static import StaticCollector
+   from next.testing import render_component_by_name
+
+   def test_info_card_registers_its_stylesheet() -> None:
+       collector = StaticCollector()
+       render_component_by_name(
+           "info_card",
+           at="notes/pages/template.djx",
+           props={"title": "Quick start"},
+           collector=collector,
+       )
+       styles = collector.assets_in_slot("styles")
+       assert any("info_card" in asset.url for asset in styles)
+
+Pass ``page_module_path`` when the component body holds a page-scoped ``{% form %}`` or ``{% action_url %}``, naming the ``page.py`` the action resolves against.
 
 Verification
 ------------

@@ -46,6 +46,10 @@ Terms used throughout the next.dj documentation.
       A form widget that renders a field through a registered next.dj component instead of a Django widget template.
       One field maps to one component, and the component owns the markup.
 
+   ComponentFileWidget
+      A ``ComponentWidget`` for a ``FileField`` or ``ImageField`` that reads its value from the uploaded files and makes the form multipart.
+      A stored file reaches the component as ``value``, and an in-flight upload never does.
+
    context function
       A Python callable decorated with ``@context("key")`` that publishes a value to the template scope.
       Also written ``@context`` callable.
@@ -186,6 +190,8 @@ Terms used throughout the next.dj documentation.
 
    slot
       A named area inside a component template filled with caller content through the block form ``{% #component "name" %}`` … ``{% /component %}``, see :doc:`/content/topics/components`.
+      The bare word means this mechanism and no other.
+      The static collector's named collections are :term:`collector slots <collector slot>`, and the ``{% template %}`` opening a layout leaves for the page body is a layout placeholder, see :doc:`/content/topics/layouts`.
 
    stem
       The filename without the extension.
@@ -210,6 +216,14 @@ Terms used throughout the next.dj documentation.
    zone
       A named slice of a page template wrapped in ``{% zone %}``.
       The server re-renders the slice standalone, and patches address it by its name.
+
+   zone batch
+      The tuple of zone names one partial request asks the server to render, carried in the ``X-Next-Zone`` header.
+      A full page render carries no batch, which is what tells a page callable that every zone is about to render, see :doc:`/content/topics/context`.
+
+   layout placeholder
+      The ``{% template %}`` opening a ``layout.djx`` leaves for the wrapped body.
+      Composition fills the first one a layout carries, and a layout that carries none is dropped whole, see :doc:`/content/topics/layouts`.
 
 See also
 --------

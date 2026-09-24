@@ -68,7 +68,11 @@ The directory that contains a ``page.py`` becomes a URL.
 ``notes/pages/page.py`` therefore answers the empty path ``/``.
 The router scans each application in ``INSTALLED_APPS`` for a ``pages/`` directory, leaving out Django's own applications and ``next`` itself.
 
-Create the page module.
+:doc:`install` already created ``notes/pages/page.py`` and ``notes/pages/template.djx`` to prove the wiring.
+The two blocks below replace both files whole.
+The ``title`` context from the installation page goes away with them, and the HTML envelope moves into a layout in :doc:`tutorial02`.
+
+Replace the page module.
 
 .. code-block:: python
    :caption: notes/pages/page.py
@@ -81,7 +85,7 @@ Create the page module.
    def recent_notes() -> list[Note]:
        return list(Note.objects.all())
 
-Create the template.
+Replace the template.
 
 .. code-block:: jinja
    :caption: notes/pages/template.djx
@@ -142,12 +146,15 @@ Inspect through system checks
 next.dj contributes Django system checks for the page configuration.
 They confirm each ``page.py`` has a render function or a paired template, that a parameter directory carries a page file or a child page, and that the request context processor is installed.
 See :doc:`/content/ref/system-checks` for the full catalog.
-Run them and confirm no warnings remain.
 
 .. code-block:: bash
    :caption: shell
 
    uv run python manage.py check
+
+The run reports nothing about the page tree.
+Any message it does print names the file it read and the fix it wants.
+Add ``--deploy`` to the same command to run the three checks that import every ``page.py`` and ``component.py`` and compile every composed template.
 
 Checkpoint
 ----------
@@ -173,6 +180,10 @@ Common pitfalls
 
 Page module is not discovered.
    Confirm that ``NEXT_FRAMEWORK["PAGE_BACKENDS"][0]["APP_DIRS"]`` is ``True``.
+
+The page module raises while importing.
+   A ``page.py`` that fails to import leaves its directory unrouted, and a plain ``manage.py check`` never opens the module.
+   Run ``uv run python manage.py check --deploy``, which imports every page module and reports the failure as ``next.E017``, naming the module path and the exception that stopped it.
 
 Template renders without the notes loop.
    Make sure ``notes/pages/template.djx`` sits next to ``notes/pages/page.py``.

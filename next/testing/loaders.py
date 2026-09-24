@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 from next.components import components_manager
+from next.discovery import get_router_manager, iter_page_tree_component_folders
 
 
 _loaded_dirs: set[Path] = set()
@@ -62,8 +63,25 @@ def clear_loaded_dirs() -> None:
     _loaded_dirs.clear()
 
 
+def _register_page_tree_components() -> None:
+    """Register the components folder of every configured page tree.
+
+    A live registry holds only what a request made the router walk, and a component
+    test that renders before the first request would miss the folders of the trees.
+    """
+    router_manager, _errors = get_router_manager()
+    if router_manager is None:
+        return
+    for router in router_manager.backends:
+        for folder, tree_root, route_trail in iter_page_tree_component_folders(router):
+            components_manager.register_router_walk_folder(
+                folder, tree_root, route_trail
+            )
+
+
 def eager_load_components() -> None:
     """Import every registered `component.py` so decorators register before tests."""
+    _register_page_tree_components()
     for backend in components_manager.backends:
         backend.discover()
         # Running the module top level is its own capability, not `discover`'s.

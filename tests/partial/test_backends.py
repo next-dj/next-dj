@@ -9,6 +9,9 @@ from next.partial import (
     Patches,
 )
 from next.partial.headers import CONTENT_TYPE
+from next.partial.manager import partial_backend_manager
+from next.partial.signals import partial_backend_loaded
+from next.testing import capture_signals
 
 
 def _sample_envelope() -> Envelope:
@@ -146,3 +149,37 @@ class TestProtocolContract:
 
         with pytest.raises(TypeError, match="deserialize_envelope"):
             _WriteOnly()
+
+
+@pytest.fixture()
+def uncached_backend_manager():
+    """Drop the cached protocol backend around a test, the manager is global."""
+    partial_backend_manager.reset()
+    yield partial_backend_manager
+    partial_backend_manager.reset()
+
+
+@pytest.mark.usefixtures("uncached_backend_manager")
+class TestBackendLoadedSignal:
+    """Building the protocol backend announces the class the settings selected."""
+
+    def test_the_build_announces_the_class_and_the_instance(self) -> None:
+        with capture_signals(partial_backend_loaded) as recorded:
+            backend = partial_backend_manager.get()
+        event = recorded.first_for(partial_backend_loaded)
+        assert event.sender is type(backend)
+        assert event.kwargs["instance"] is backend
+
+    def test_the_announcement_carries_the_settings_entry(self) -> None:
+        with capture_signals(partial_backend_loaded) as recorded:
+            partial_backend_manager.get()
+        event = recorded.first_for(partial_backend_loaded)
+        assert isinstance(event.kwargs["config"], dict)
+
+    def test_a_cached_backend_is_not_announced_again(self) -> None:
+        # the signal marks a build, so a subscriber counting it would otherwise
+        # see one announcement per request that touches a partial response
+        partial_backend_manager.get()
+        with capture_signals(partial_backend_loaded) as recorded:
+            partial_backend_manager.get()
+        assert len(recorded) == 0

@@ -11,6 +11,7 @@ from next.deps.resolver import current_resolver
 from next.introspect import MisattributedContext, MisattributionLog, callable_name
 
 from .context import ContextResult
+from .errors import PageContextShapeError
 from .paths import page_path_info
 from .signals import context_registered
 
@@ -54,6 +55,13 @@ logger = logging.getLogger(__name__)
 
 
 type _OrderedEntries = tuple[tuple[str | None, PageContextEntry], ...]
+
+
+def _keyless_shape_error(
+    func: Callable[..., Any], file_path: Path
+) -> PageContextShapeError:
+    """Return the error a keyless `@context` returning a non-mapping raises."""
+    return PageContextShapeError(callable_name(func), file_path)
 
 
 class PageContextRegistry:
@@ -244,6 +252,8 @@ class PageContextRegistry:
             )
             result = entry.func(**resolved)
             if key is None:
+                if not isinstance(result, dict):
+                    raise _keyless_shape_error(entry.func, file_path)
                 context_data.update(result)
                 if entry.serialize:
                     # The one keyless callable opens the merge, so js_context is empty.
@@ -291,7 +301,10 @@ class PageContextRegistry:
                 **url_kwargs,
             )
             if key is None:
-                inherited_context.update(entry.func(**resolved))
+                inherited = entry.func(**resolved)
+                if not isinstance(inherited, dict):
+                    raise _keyless_shape_error(entry.func, file_path)
+                inherited_context.update(inherited)
             else:
                 inherited_context[key] = entry.func(**resolved)
         return inherited_context

@@ -8,7 +8,13 @@ A form re-renders only the form that failed, a filter swaps only the result list
 The server authors every DOM operation and the client applies it.
 Selectors and swap strategies never cross the wire.
 
-Every interaction in this section degrades to a full page cycle when JavaScript is off, layered on top of the same ``POST`` then ``303`` then ``GET`` flow the framework already serves.
+Partial rendering works on a page that declares no zone at all.
+The default answer to an invalid submission re-renders the origin page and marks it ``extract: true``, and the client trims the failed form out of that document and morphs it into place, so the gain is a targeted DOM update at the render cost a full reload already pays.
+Wrapping the form in a ``{% zone %}`` trades that whole-page render for a slice, which is what :doc:`zones` weighs.
+
+Every form and link in this section is layered on the same ``POST`` then ``303`` then ``GET`` flow the framework already serves, so an interaction the runtime intercepts degrades to a full page cycle when JavaScript is off.
+Four mechanisms have no such fallback, because the runtime is what drives them.
+A ``lazy=`` zone stops at its placeholder, a ``poll=`` zone renders once and never ticks, the Server-Sent Events bridge never opens, and the ``toast``, ``layer.open``, ``layer.close``, and ``event`` verbs ship only inside an envelope no unscripted page asks for.
 
 Read :doc:`comparison` when the open question is whether to reach for zones at all rather than for htmx, Turbo, or Django Unicorn.
 

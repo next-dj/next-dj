@@ -97,6 +97,11 @@ Extra keyword arguments.
    Every keyword passed to ``ComponentWidget("input", placeholder=..., rows=...)`` is spread to the top level too.
    A ``placeholder`` argument reaches the template as ``{{ placeholder }}``.
 
+Ambient keys.
+   The widget seeds the render frame of the surrounding render, naming the template the lookup ran from, the ``page.py`` of the page, the anchor the actions of the form resolve against, and the static collector.
+   They belong to the reserved render keys rather than to the props of the call, so an unkeyed ``@component.context`` that returns one raises ``ValueError`` while the component body composes from them.
+   The request is not seeded with them, the render stamps it instead, so a body reading ``request`` or spelling ``{% csrf_token %}`` needs the request the ``{% form %}`` tag passes to ``bind_component_widgets``.
+
 ``name``, ``value``, ``errors``, and ``attrs`` are reserved context keys.
 The widget writes them last, so they always win over a same-named entry from ``attrs=`` or an extra keyword argument.
 
@@ -127,6 +132,7 @@ Scope and registration
 A ``ComponentWidget`` resolves its component the same way the ``{% component %}`` tag does, walking outward from the page's location.
 The named component must be visible at the page's scope or at a level above it, such as a shared root.
 See :ref:`topics-components` for the scope rules and :ref:`components-folder-discovery` for how the backend finds a component.
+The anchor of that walk is the template of the page that rendered the form, and a nested tag inside the component resolves from the same anchor.
 
 The recommended home for a reusable field component is a shared components root, the directory configured under ``DIRS`` in ``NEXT_FRAMEWORK["COMPONENT_BACKENDS"]``.
 Components in a ``DIRS`` root are visible from every template, so one ``input`` component serves every form in the project.
@@ -148,9 +154,33 @@ A page-local component placed in the page's own component folder also works when
 
 The ``next.W054`` system check warns at startup when a ``ComponentWidget`` references a component that does not resolve.
 It is a warning rather than an error because the component may come from an app imported later in the boot sequence.
-Both ``next.W054`` and the field-type check ``next.W055`` described under `When not to use it`_ walk the registered form-class actions only, so a ``ComponentWidget`` on a wizard step form or on a form marked ``Meta.abstract = True`` is never inspected and surfaces at render time instead.
+Both ``next.W054`` and the field-pairing check ``next.W055`` described under `When not to use it`_ walk the registered form-class actions only, so a ``ComponentWidget`` on a wizard step form or on a form marked ``Meta.abstract = True`` is never inspected and surfaces at render time instead.
 A form built by a ``form_class`` factory is out of reach for the same reason, because the registry holds the callable rather than the class it returns.
 A reference that still fails to resolve at render time raises ``next.forms.UnregisteredComponentError``, a ``LookupError`` subclass whose message names the search anchor and the closest visible component names.
+
+.. _topics-forms-field-components-composition:
+
+Composition inside a field component
+------------------------------------
+
+The template of a field component calls ``{% component %}`` like any other component template.
+The nested reference resolves from the page anchor the widget searched from, so a component the page can see is a component the field component can see.
+See :ref:`topics-components` for the scope rules and :ref:`components-folder-discovery` for how the backend finds the nested name.
+
+The co-located assets of a nested component land in the document of the page that rendered the form, because the widget hands the component runtime the collector of that page.
+A file the page already carries is registered once, see :doc:`/content/topics/static-assets/deduplication` for the dedup rules.
+
+A ``@component.context(serialize=True)`` value inside a nested component reaches the js context of the page, the same payload a nested component publishes under a plain page render.
+The value is serialised as it is collected, so it has to be JSON-serialisable or carry a serializer of its own, and one collector serves the page, so two fields rendering the same component publish one entry under the merge policy of the collector rather than one entry each.
+See :ref:`topics-static-js-context` for how that payload reaches the browser.
+
+A page-scoped ``{% form %}`` or ``{% action_url %}`` inside a field component finds its page, because the frame carries the path of the page module beside the template path.
+It carries a second anchor as well, the one the ``{% form %}`` tag resolved for its own action, so an action registered on the ``component.py`` that holds the form is reachable from inside the field component too.
+A lookup tries the ``component.py`` of the component being rendered, then that form anchor, and then the page.
+See :doc:`templates` for the tags that read those anchors.
+
+The body of a field component inherits the widget scope the way a component nested in a page inherits the page scope, so ``name``, ``value``, ``errors``, and every extra keyword of the widget are ambient names inside a component it nests.
+A ``@component.context`` parameter of that nested component sharing one of those names is filled from the field state unless the call site passes a prop under the same name.
 
 Before and after
 ----------------
@@ -184,6 +214,47 @@ Every form that wants the same look copies the constant.
 The Tailwind classes now live once in the shared ``component.djx``.
 The ``INPUT_CLASS`` constant disappears from the form file, and a styling change happens in one place.
 
+.. _topics-forms-field-components-files:
+
+File fields
+-----------
+
+A :class:`~django.forms.FileField` or :class:`~django.forms.ImageField` takes ``ComponentFileWidget``, a ``ComponentWidget`` that mixes in Django's :class:`~django.forms.FileInput`.
+The widget therefore binds like the stock file control, reading its value from the uploaded files instead of the posted data and reporting the field as omitted only when no upload arrived under its name.
+An :class:`~django.forms.ImageField` adds its ``accept="image/*"`` attribute as usual, and a subclass that sets ``allow_multiple_selected`` collects every upload under the name.
+It sets ``needs_multipart_form``, so the ``{% form %}`` tag emits ``enctype="multipart/form-data"`` on its own.
+
+.. code-block:: python
+   :caption: a file field rendered through a component
+
+   import next.forms
+   from next.forms import ComponentFileWidget, ComponentWidget
+
+   class AttachmentForm(next.forms.Form):
+       title = next.forms.CharField(widget=ComponentWidget("input", placeholder="Title"))
+       file = next.forms.FileField(widget=ComponentFileWidget("file-input"))
+
+The component receives the same context as with ``ComponentWidget``.
+``value`` is the stored file when there is one, an object with a ``url`` such as the :class:`~django.db.models.fields.files.FieldFile` of a model instance, and ``None`` otherwise.
+An in-flight upload never reaches the component, because a browser never lets a server re-populate a file control, so a re-render after a failed submit still shows the stored file.
+The ``required`` attribute is dropped once a file is stored, so editing an instance does not force a fresh upload.
+
+.. code-block:: jinja
+   :caption: a minimal file input component
+
+   <input
+     type="file"
+     name="{{ name }}"
+     {% if id %}id="{{ id }}"{% endif %}
+     {% if required %}required{% endif %}
+   />
+   {% if value %}
+     <a href="{{ value.url }}">{{ value.name }}</a>
+   {% endif %}
+
+Clearing a stored file is out of scope.
+The checkbox that :class:`~django.forms.ClearableFileInput` adds has no counterpart here, so a field that needs it keeps the stock widget.
+
 When not to use it
 ------------------
 
@@ -194,13 +265,14 @@ A hidden field, a checkbox, or a select with no custom styling needs no componen
 A field that splits across several controls, such as a split date and time input, stays on a Django ``MultiWidget``.
 One ``ComponentWidget`` renders one component, so model a multi-control field with a regular widget instead.
 
-A few field types are unsupported because their value semantics need behaviour the widget does not implement.
+Two field shapes stay unsupported because their value semantics need behaviour the widgets do not implement.
 
-- A :class:`~django.forms.FileField` or :class:`~django.forms.ImageField` needs a multipart enctype that the widget does not request.
 - A :class:`~django.forms.MultiValueField` such as a split date and time needs value decompression across several controls.
-- A :class:`~django.forms.SelectMultiple` and a checkbox or boolean field need multi-value or omitted-value handling the widget does not perform.
+- A :class:`~django.forms.SelectMultiple` and a checkbox or boolean field need multi-value or omitted-value handling the widgets do not perform.
 
-The ``next.W055`` system check warns at startup for the first two cases, where the mismatch silently loses data.
+The ``next.W055`` system check warns at startup for the file and multi-value pairings, where the mismatch silently loses data.
+It reports a widget without multipart binding on a :class:`~django.forms.FileField`, a multipart widget such as ``ComponentFileWidget`` on a field that is not one, and any ``ComponentWidget`` on a :class:`~django.forms.MultiValueField`.
+A file field takes ``ComponentFileWidget``, see `File fields`_.
 
 The widget renders through next.dj's component runtime and bypasses Django's form renderer, so the project's ``FORM_RENDERER`` theming does not apply, and widget introspection through ``subwidgets`` or a ``BoundWidget`` does not reflect the rendered output.
 This is the intended contract, since the component is itself the rendering and theming layer.

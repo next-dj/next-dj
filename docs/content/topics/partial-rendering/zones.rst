@@ -112,6 +112,9 @@ A polling zone shows its body, so it cannot also be ``lazy=``, the two modes are
 A context function tagged ``@context(..., zone="name")`` does not run on a foreign poll tick.
 A poll GET runs the zone-less callables plus the ones bound to the polled zone, see :doc:`/content/topics/context`.
 
+The interval is a client timer, so a page without the runtime shows the body of the first paint and never refreshes it.
+A polling zone is therefore an enhancement over what the page already renders rather than the only path to the value, and a page that has to stay fresh without JavaScript keeps a plain reload control beside the zone.
+
 The wrapper element
 -------------------
 
@@ -187,7 +190,9 @@ A zone name must be unique within a page's composed template, the layout chain p
 A zone may not sit inside a ``{% for %}`` or a ``{% if %}``, because a standalone render does not see loop variables or the condition that gated the block.
 A zone may not sit directly inside a ``{% with %}`` either, because the with-bindings are not visible to a standalone zone render.
 This one is the warning ``next.W067`` rather than an error, so move the bindings into a context provider or inside the zone body.
-A ``lazy=`` zone needs a ``{% placeholder %}`` branch.
+A ``lazy=`` zone needs a ``{% placeholder %}`` branch that holds something, and a branch of whitespace alone still earns ``next.E064``, because the check reads the significant nodes of the branch rather than its presence.
+The inverse never reaches a check.
+A ``{% placeholder %}`` inside a zone that declares no ``lazy=`` raises ``TemplateSyntaxError`` when the template compiles, since such a zone shows its body and never renders the branch.
 A zone belongs to a page, not a component, so a ``{% zone %}`` in a component template is rejected.
 A zone name must be an ASCII slug, letters, digits, hyphens, or underscores, because it travels in the ``X-Next-Zone`` header, which is latin-1 (``next.E061``).
 See :doc:`/content/ref/system-checks` for the full list and the check codes.

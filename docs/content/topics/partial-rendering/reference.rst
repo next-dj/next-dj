@@ -52,7 +52,8 @@ A patch is one addressed DOM operation with a verb, an optional target, optional
 The operations apply in list order.
 The server is the only author of a target, the client never names one.
 ``Patches(request)`` opens the builder in a handler.
-``Patches.versioned(version)`` opens the same builder for code that holds no request, a test of a custom operation or a hand-assembled envelope.
+``Patches.versioned(version, *, echo_of=None, request=None)`` opens the same builder for a path that already holds the asset version and renders its own HTML, pinning that version literally instead of resolving it.
+Pass ``request`` whenever one exists, so the asset URLs of the envelope stay scoped per request, and ``echo_of`` to stamp the request id a stream envelope echoes.
 
 .. list-table::
    :header-rows: 1
@@ -145,7 +146,8 @@ An action that already sets ``Meta.success_message`` therefore shows a toast wit
 Draining marks the messages read, so a later full navigation does not replay them.
 
 A verb beyond this set is registered on both sides.
-``register_patch_op("confetti")`` on the server registers the name, which the ``next.E066`` check validates at ``manage.py check``, and earns the generic ``op()`` channel on the builder.
+``register_patch_op("confetti")`` on the server registers the name and earns the generic ``op()`` channel on the builder.
+``manage.py check`` reads the registered names, reporting ``next.E066`` for a name that shadows a built-in verb and ``next.E090`` for a name that is not a valid verb token.
 An unregistered name fails at runtime with ``UnknownPatchOpError``.
 ``Next.partial.defineOp("confetti", handler)`` on the client supplies the handler.
 See :doc:`extending` for the end-to-end recipe, the ``context`` and ``event`` seams, and the custom-verb exceptions.
@@ -164,6 +166,7 @@ Asset manifest
 The ``assets`` key of an envelope lists the co-located assets the rendered targets registered.
 Each entry carries ``kind`` and ``url`` always, plus ``inline`` and ``load`` when they apply.
 A reference a zone body registers, through ``{% use_style %}``, ``{% use_script %}``, or a module-level list, is resolved by the same backend on both paths, so the ``url`` of an entry is the URL a full render prints for that asset.
+``Patches.add_asset(kind, url, inline=None)`` is the route by which a handler authors an entry of its own, and the ``url`` it takes passes that same resolution, so a logical name reaches the manifest as the URL a full render would have written, see :doc:`/content/topics/static-assets/name-resolution`.
 
 .. list-table::
    :header-rows: 1
@@ -205,6 +208,8 @@ Request headers
 
 Client to server.
 All values are ASCII, and zone names are ASCII slugs.
+Every request goes to an absolute URL on the page's own origin with ``mode: "same-origin"``, so these headers never leave the site.
+A target off that origin is refused before any request leaves, with a ``partial:error`` of kind ``network``.
 
 .. list-table::
    :header-rows: 1
@@ -239,6 +244,8 @@ All values are ASCII, and zone names are ASCII slugs.
    * - ``X-Next-Origin``
      - Every layer request, the open GET, the accept re-GET, and a mutation submitted from a form inside the layer.
      - The path and query string of the page that hosts a layer, for a server-side morph of its zones.
+       The server validates the value as sent as a same-site path, then splits off the query and decodes the path as Django decodes ``request.path``.
+       A header that does not resolve to a page falls back to the posted form origin.
    * - CSRF header
      - Every unsafe method once the runtime holds a token
      - The name comes from ``CSRF_HEADER_NAME``, the token from the ``$csrf`` init payload and from any later rotation meta, the cookie is never read.
@@ -263,9 +270,11 @@ Server to client.
      - Every envelope
      - ``application/vnd.next.patches+json``, the marker the runtime keys on.
    * - ``Vary``
-     - Every partial response
+     - Every response from a zone-capable URL
      - ``X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-Version``, set on every envelope, on the 400 and 409 short-circuits, on a wizard advance, and on an SSE stream, so a shared cache never hands one intent's envelope to another.
-       A full page render keeps its own headers untouched and carries no partial ``Vary``, so a cache in front of a zoned page is configured for the page rather than by the framework.
+       A full page render from the same URL declares the same set, because the page and the envelope share an address and a cache that stored the unvaried HTML would answer a later partial request with it.
+       A page whose ``render()`` returns its own :class:`~django.http.HttpResponseBase` short-circuits before the shaper and stamps nothing, so such a view calls ``set_partial_vary(response)`` from ``next.partial.headers`` when the same URL also answers partial requests.
+       The three headers that never change the body, ``X-Next-Validate``, ``X-Next-Origin``, and ``X-Next-Request-Id``, stay out of the set.
    * - ``X-Next-Version``
      - Every envelope
      - The current asset version.
@@ -416,7 +425,7 @@ Lifecycle events
 The runtime fires events on three channels, the element, the document, and the ``Next.on`` bus.
 The ``next:*`` node events fire on the element as a bubbling ``CustomEvent`` caught with ``addEventListener``.
 The apply-stage ``partial:*`` events and ``next:toast`` fire on the document and the ``Next.on`` bus.
-A ``partial:error`` of kind ``asset``, raised when a co-located stylesheet fails to load or when the asset version still mismatches after the reload, reaches only the bus.
+A ``partial:error`` of kind ``asset``, raised when a co-located stylesheet fails to load, when the asset version still mismatches after the reload, or when the reload target sits off the page's origin, reaches only the bus.
 ``ready``, ``context-updated``, ``partial:before-request``, and the fetch-stage ``partial:error`` reach only the bus.
 The ``next:mounted``, ``next:removed``, and ``next:morph-*`` node events live only on ``document.addEventListener`` and never reach the bus, so ``Next.on("next:mounted")`` is a silent no-op.
 
@@ -451,11 +460,11 @@ The ``next:mounted``, ``next:removed``, and ``next:morph-*`` node events live on
    * - ``partial:error``
      - No
      - A discriminated union on ``kind``, where each cause carries only its own fields.
-       ``{kind: "network", error}`` is a fetch reject, a dropped stream connection, or a zone that still answers a non-envelope after the navigate-once fallback already navigated, with no status or body to report.
+       ``{kind: "network", error, url?}`` is a fetch reject, a dropped stream connection, a zone that still answers a non-envelope after the navigate-once fallback already navigated, or a target off the page's origin refused unsent, where ``url`` is present only on that refusal.
        ``{kind: "http", status, body}`` is a 5xx or a mutating reply that is not an envelope.
        ``{kind: "parse", body, error}`` is a malformed JSON body.
        ``{kind: "op", op, error, target?}`` is a thrown or unknown verb mid-apply, where ``op`` names the verb and ``target`` is the human-readable address of the patch, present only when the op carried a recognised target.
-       ``{kind: "asset", error, url?}`` is a stylesheet that failed to load or a version mismatch surviving a reload, where ``url`` is present only on a version mismatch.
+       ``{kind: "asset", error, url?}`` is a stylesheet that failed to load, a version mismatch surviving a reload, or a reload target off the page's origin, where ``url`` is present only on the last two.
        The ``status`` and ``body`` fields belong to ``http`` alone, and ``body`` also to ``parse``, so a listener branches on ``kind`` before reading them.
        An ``AbortError`` never reaches this event.
    * - ``partial:layer-opened``
@@ -497,82 +506,8 @@ The mounted and removed pair brackets the node's life inside the document, the s
 Client runtime
 --------------
 
-The runtime exposes ``window.Next`` once the bundle loads.
-The surface is small, and every entry mirrors a seam the runtime already uses internally.
-A member whose name starts with an underscore is a test seam rather than part of that surface, so ``Next.partial._configure`` and ``Next.partial._reset`` are not application entry points.
-
-.. list-table::
-   :header-rows: 1
-   :widths: 32 20 48
-
-   * - Member
-     - Returns
-     - Purpose
-   * - ``Next.on(event, listener)``
-     - An unsubscribe function
-     - Subscribe to a lifecycle event.
-       A known event from the table above types its payload.
-       A ``ready`` listener added after the runtime is ready fires at once.
-       A listener that throws is logged and the rest of the fan-out still runs.
-   * - ``Next.use(plugin)``
-     - Whatever the plugin returns
-     - Run a plugin function with ``Next`` as its only argument, the registration point for an island adapter or a wire-format plugin.
-   * - ``Next.context``
-     - A frozen copy of the client context
-     - A property rather than a call.
-       Each read copies the store the server seeded and the ``context`` verb merges into, so a held reference never sees a later merge.
-   * - ``Next._init(context)``
-     - Nothing
-     - The bootstrap the injected init script calls once per page.
-       It opens the dev channel when the payload sets ``$dev`` to ``true``, seeds the context and fires ``context-updated``, mounts the document, then fires ``ready``, so a ``ready`` listener sees a mounted document and a ``context-updated`` listener does not.
-   * - ``Next.partial.defineOp(name, handler)``
-     - Nothing
-     - Register a handler for a custom verb the server authors, dispatched through the same pipeline as the built-ins.
-       A second registration under one name replaces the first.
-   * - ``Next.partial.onMount(selector, callback)``
-     - A teardown that unregisters the callback
-     - A re-executable mount registry.
-       The callback runs over the matching elements at load and over every matching element a later patch inserts, and a registration made after the runtime is ready catches up over the present document at once.
-   * - ``Next.partial.parseHook(contentType, hook)``
-     - Nothing
-     - Register a parser keyed by bare content type.
-       The hook owns the response body before classification, so a foreign wire format becomes an envelope instead of a navigation.
-   * - ``Next.partial.setCsrf(csrf)``
-     - Nothing
-     - Replace the CSRF payload the next mutation submits, the seam a custom login flow drives after rotating a token out of band.
-       Passing ``undefined`` clears it, and an envelope carrying a rotated token overwrites it.
-   * - ``Next.partial.ready()``
-     - Nothing
-     - Seed the asset registry from the document, run the mount callbacks over it, then arm the triggers.
-       The bootstrap calls it once, and a page calls it only when it drives the runtime by hand.
-   * - ``Next.partial.apply(raw)``
-     - The parsed envelope
-     - Parse and apply a wire envelope directly, the entry a parse hook or a test feeds.
-       The return is the parsed envelope rather than a completion signal, because a stylesheet the manifest brings gates the ops into a continuation.
-       A body that is not an object, or one carrying no ``version``, raises a ``TypeError``.
-   * - ``Next.partial.fetch(request)``
-     - A promise
-     - Send one partial request through the wire's queues and locks.
-       The promise settles when the request finishes, and network, HTTP, and parse failures surface as ``partial:error`` rather than as a rejection.
-       A second mutation on a uid already in flight settles at once without sending.
-   * - ``Next.partial.layers``
-     - The layer stack
-     - The live stack of open layers, for driving modals from script.
-   * - ``Next.partial.sse``
-     - The stream registry
-     - The registry of open Server-Sent Events connections.
-
-The layer stack carries the members a page drives plus the seams the applier and the triggers call through it.
-``open(opener, href, zone)`` builds the dialog and its zone container, then returns a promise that resolves once the layer's first fetch lands, or rejects with that fetch's error after unwinding the half-built layer.
-A call naming neither an href nor a zone shows a bare shell, pushes no history entry, and resolves as soon as the shell is in the document.
-``close(detail)`` closes the top layer and returns nothing, accepting with a ``result`` key and dismissing with ``dismiss`` and ``reason``.
-``size()`` returns the number of open layers, ``toast(text, variant)`` appends one toast as ``textContent``, and ``urlFor(el)`` returns the URL of the page that owns an element, the address a poll tick re-GETs.
-``hostFor(el)`` returns the host page of the layer that owns an element, absent for an element outside every layer, the seam that stamps ``X-Next-Origin`` on a mutation submitted from a form inside the layer.
-``resolveZone``, ``resolveSelector``, ``busy``, and ``install`` are the resolution and instrumentation seams, reachable because the stack is one object rather than because a page drives them.
-
-The stream registry is narrower.
-``size()`` returns the count of open connections, ``remember(id)`` feeds a request id into the echo ring so the matching stream event drops, and ``scan(root)`` opens a stream for every ``data-next-sse`` container in an inserted subtree.
-The last two return nothing.
+The runtime exposes ``window.Next`` once the bundle loads, and :doc:`/content/ref/client` records that surface in full, its members, its layer and stream objects, and how the bundle is shipped.
+What belongs here is the part of the runtime that observes the protocol this page describes.
 
 The runtime's dev mode follows Django ``DEBUG``.
 Under the default ``auto`` script injection policy a full render seeds the ``$dev`` key of the init payload while ``DEBUG`` is on.
@@ -585,13 +520,6 @@ Dev also counts what the envelope boundary dropped, so a malformed op and a malf
 An ``ops`` or ``assets`` value that is not an array is dropped whole and earns its own console warning naming the field, since the per-entry counts would otherwise report nothing wrong.
 An asset whose insertion verb the envelope boundary cannot resolve is a ``console.debug`` skip naming its kind, because a kind with a custom renderer is a normal configuration rather than damage.
 A production page carries no ``$dev`` key, so it carries neither the measurements nor any of the console lines.
-
-How the bundle is shipped
-~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Inside a project the runtime is an ordinary staticfiles asset of the ``next`` application, published under the path ``next/next.min.js``, which the script builder resolves through the active staticfiles storage before writing the preload hint and the script tag.
-A project therefore installs no Node toolchain of its own to serve the runtime, and the pipeline that fingerprints the rest of its static files fingerprints this one the same way.
-See :doc:`/content/contributing/quality-gates` for how the bundle is built and what holds its size.
 
 Settings
 --------
@@ -607,7 +535,7 @@ The rest are ignored, multi-backend selection is not supported, and a list with 
        {
            "BACKEND": "next.partial.JsonPartialProtocolBackend",
            "OPTIONS": {
-               "VERSION": "manifest",
+               "VERSION": None,
                "PUSH_WIZARD_STEPS": False,
                "SSE": {
                    "HEARTBEAT_SECONDS": 25,
@@ -625,9 +553,10 @@ The rest are ignored, multi-backend selection is not supported, and a list with 
      - Default
      - Meaning
    * - ``VERSION``
-     - ``"manifest"``
+     - ``None``
      - The source of ``X-Next-Version``.
-       The sentinel hashes the staticfiles manifest when the active storage hashes its files, an explicit string overrides it, and without a manifest the version guard stays silent.
+       The default derives it from ``NEXT_FRAMEWORK["STATIC_VERSION"]``, falls back to the hash of the staticfiles manifest when the active storage hashes its files, and resolves the stable string ``"0"`` when neither is there, which ``next.W083`` reports on a deployment audit.
+       The sentinel ``"manifest"`` skips the deploy stamp and demands the manifest, which is the requirement ``next.W069`` enforces, and any other string pins a release tag of its own.
    * - ``PUSH_WIZARD_STEPS``
      - ``False``
      - The global default for pushing wizard steps to history.
@@ -647,6 +576,7 @@ See also
 .. seealso::
 
    :doc:`scenarios` for each verb, header, and attribute in the context of a task.
+   :doc:`/content/ref/client` for the ``window.Next`` surface that applies every envelope.
    :doc:`layers` for the modal narrative behind the layer verbs and attributes.
    :doc:`/content/ref/system-checks` for the zone and verb checks.
    :doc:`/content/topics/signals` for the partial subsystem signals.

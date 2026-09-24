@@ -1,5 +1,4 @@
 import uuid
-from pathlib import Path
 
 import pytest
 from django.http import HttpResponse
@@ -11,24 +10,8 @@ from next.forms.uid import URL_NAME_FORM_ACTION
 from next.testing import override_form_action, override_next_settings
 from next.urls import TrieURLResolver, page_reverse, router_manager
 from next.urls.manager import urlpatterns
-from tests.support import default_page_router_config
+from tests.urls.conftest import write_page
 
-
-_TREE_ROUTES = (
-    "",
-    "home",
-    "blog/2024/post",
-    "items/[int:id]",
-    "tag/[slug:tag]",
-    "u/[uuid:uid]",
-    "name/[username]",
-    "files/[[rest]]",
-    "docs/[[chapter]]/end",
-    "articles/latest",
-    "articles/[slug:topic]",
-    "num/[int:x]",
-    "num/[str:x]",
-)
 
 _RESOLVE_CASES = (
     ("", "page_", {}),
@@ -76,12 +59,6 @@ _PARITY_FIELDS = (
 )
 
 
-def _write_page(tree: Path, route: str) -> None:
-    directory = tree / route
-    directory.mkdir(parents=True, exist_ok=True)
-    (directory / "page.py").write_text('template = "ok"\n')
-
-
 def _plain_view(_request, **kwargs) -> HttpResponse:
     return HttpResponse(b"plain")
 
@@ -97,15 +74,6 @@ def _late_handler() -> None:
 def _tried_pattern_strings(exc_info) -> set[str]:
     tried = exc_info.value.args[0]["tried"]
     return {str(pattern.pattern) for entry in tried for pattern in entry}
-
-
-@pytest.fixture()
-def page_tree(tmp_path):
-    """Real page tree on disk wired as the only PAGE_BACKENDS source."""
-    for route in _TREE_ROUTES:
-        _write_page(tmp_path, route)
-    with override_next_settings(PAGE_BACKENDS=default_page_router_config(tmp_path)):
-        yield tmp_path
 
 
 class TestResolveAgainstPageTree:
@@ -176,7 +144,7 @@ class TestResolveAgainstPageTree:
         resolver = urlpatterns[0]
         with pytest.raises(Resolver404):
             resolver.resolve("fresh/")
-        _write_page(page_tree, "fresh")
+        write_page(page_tree, "fresh")
         router_manager.reload()
         assert resolver.resolve("fresh/").url_name == "page_fresh"
 

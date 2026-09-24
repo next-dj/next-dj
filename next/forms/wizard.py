@@ -15,6 +15,7 @@ from django.core.cache import caches
 from django.core.exceptions import ImproperlyConfigured
 from django.db.models import Model
 from django.http import HttpRequest, HttpResponse
+from django.utils.encoding import escape_uri_path
 
 from next.backends import SingleBackendManager
 from next.conf.signals import settings_reloaded
@@ -28,9 +29,10 @@ from .base import (
     _stamp_hook_flag,
     _to_snake_case,
 )
-from .diagnostics import registration_diagnostics
 from .errors import UnstorableWizardValueError
 from .manager import form_action_manager
+from .registration import registration_diagnostics
+from .signals import wizard_backend_loaded
 
 
 if TYPE_CHECKING:
@@ -260,7 +262,7 @@ class SessionFormWizardBackend(FormWizardBackend):
 
 # The settings key carries its own default path, so no fallback here.
 wizard_backend_manager = SingleBackendManager(
-    _FORM_WIZARD_BACKEND_KEY, base=FormWizardBackend
+    _FORM_WIZARD_BACKEND_KEY, base=FormWizardBackend, signal=wizard_backend_loaded
 )
 
 
@@ -351,7 +353,7 @@ class FormWizard:
         if base_path is not None:
             self.base_path = base_path
         else:
-            self.base_path = getattr(request, "path", "") or ""
+            self.base_path = escape_uri_path(getattr(request, "path", "") or "")
         self.wizard_id = _to_snake_case(type(self).__name__)
         # Read the class's own namespace so an unregistered subclass never
         # borrows the storage bucket of a registered ancestor.
@@ -467,9 +469,7 @@ class FormWizard:
     def current_step(self) -> str:
         """Return the active step from the URL kwarg, defaulting to the first.
 
-        URL kwargs that exist but lack the `Meta.url_param` key signal a step segment
-        named differently, so that misconfiguration raises rather than pinning the
-        wizard to its first step forever.
+        URL kwargs without the `Meta.url_param` key name another segment and raise.
         """
         names = self.step_names()
         raw = self.url_kwargs.get(self.url_param)

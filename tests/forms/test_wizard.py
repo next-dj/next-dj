@@ -16,8 +16,8 @@ from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.test import RequestFactory, override_settings
 
 from next.forms import Form, ModelForm, PermissionOutcome
-from next.forms.diagnostics import registration_diagnostics
 from next.forms.manager import form_action_manager
+from next.forms.registration import registration_diagnostics
 from next.forms.wizard import (
     CacheFormWizardBackend,
     FormWizard,
@@ -724,6 +724,11 @@ class TestWizardDoneContract:
         request = _request(path="/wizard/identity/")
         wizard = DemoWizard(request)
         assert wizard.base_path == "/wizard/identity/"
+
+    def test_default_base_path_is_percent_encoded(self) -> None:
+        """A `?` in a segment stays encoded, so a step URL keeps it in the path."""
+        wizard = DemoWizard(_request(path="/wizard/a%3Fb/identity/"))
+        assert wizard.base_path == "/wizard/a%3Fb/identity/"
 
 
 class TestEnsureSessionKey:

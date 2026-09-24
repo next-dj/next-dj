@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from django.test import override_settings
@@ -112,11 +113,17 @@ class _StubManager:
     def __init__(self, *backends: DummyComponentsBackend) -> None:
         self._backends = backends
         self.reads = 0
+        self.walked: list[tuple[Path, Path, str]] = []
 
     @property
     def backends(self) -> tuple[DummyComponentsBackend, ...]:
         self.reads += 1
         return self._backends
+
+    def register_router_walk_folder(
+        self, folder: Path, tree_root: Path, route_trail: str
+    ) -> None:
+        self.walked.append((folder, tree_root, route_trail))
 
 
 class TestEagerLoadComponents:
@@ -162,3 +169,35 @@ class TestEagerLoadComponents:
         eager_load_components()
         assert backend.import_component_modules() == ()
         assert backend.get_component("card", Path("t.djx")) is None
+
+
+class TestEagerLoadComponentsPageTrees:
+    """A live registry holds a page tree only once a request walked it."""
+
+    def test_the_components_folder_of_a_page_tree_is_registered(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        manager = _StubManager()
+        folder = tmp_path / "panels" / "_components"
+        router_manager = MagicMock()
+        router_manager.backends = (object(),)
+
+        monkeypatch.setattr(loaders, "components_manager", manager)
+        monkeypatch.setattr(loaders, "get_router_manager", lambda: (router_manager, []))
+        monkeypatch.setattr(
+            loaders,
+            "iter_page_tree_component_folders",
+            lambda _router: [(folder, tmp_path, "panels")],
+        )
+        eager_load_components()
+
+        assert manager.walked == [(folder, tmp_path, "panels")]
+
+    def test_no_router_manager_registers_nothing(self, monkeypatch) -> None:
+        manager = _StubManager()
+
+        monkeypatch.setattr(loaders, "components_manager", manager)
+        monkeypatch.setattr(loaders, "get_router_manager", lambda: (None, []))
+        eager_load_components()
+
+        assert manager.walked == []

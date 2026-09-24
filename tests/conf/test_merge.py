@@ -3,7 +3,10 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from django.test import override_settings
+from pytest_lazy_fixtures import lf
 
+from next.conf import next_framework_settings
 from next.conf.frozen import FrozenDict, FrozenList
 from next.conf.merge import (
     BOOL_KEYS,
@@ -72,33 +75,54 @@ class TestAcceptedValue:
         assert accepted_value("THIRD_PARTY_KEY", "value") is UNSET
 
 
+@pytest.mark.parametrize(
+    "settings_obj",
+    [lf("fresh_next_framework_settings"), next_framework_settings],
+    ids=["isolated", "global"],
+)
 class TestMergeUserSettings:
-    """The merge lays usable user values over frozen defaults, one level deep."""
+    """The merge lays usable user values over frozen defaults, one level deep.
+
+    Both the isolated instance and the process-wide singleton walk this matrix, so
+    a merged view one of the two keeps past a reload fails here.
+    """
 
     @pytest.mark.parametrize("user", [None, {}], ids=["none", "empty"])
     def test_no_user_mapping_yields_the_defaults(
-        self, user: dict[str, Any] | None
+        self, settings_obj, user: dict[str, Any] | None
     ) -> None:
-        merged = merge_user_settings(DEFAULTS, user)
+        merged = merge_user_settings(settings_obj.DEFAULTS, user)
         assert merged == DEFAULTS
         assert merged["PAGE_BACKENDS"] is not DEFAULTS["PAGE_BACKENDS"]
 
-    def test_defaults_reach_the_caller_frozen(self) -> None:
-        merged = merge_user_settings(DEFAULTS, None)
+    def test_defaults_reach_the_caller_frozen(self, settings_obj) -> None:
+        merged = merge_user_settings(settings_obj.DEFAULTS, None)
         assert isinstance(merged["PAGE_BACKENDS"], FrozenList)
         assert isinstance(merged["PAGE_BACKENDS"][0], FrozenDict)
 
-    def test_a_key_outside_defaults_is_ignored(self) -> None:
-        merged = merge_user_settings(DEFAULTS, {"MADE_UP": 1})
+    def test_a_key_outside_defaults_is_ignored(self, settings_obj) -> None:
+        merged = merge_user_settings(settings_obj.DEFAULTS, {"MADE_UP": 1})
         assert "MADE_UP" not in merged
 
-    def test_a_usable_value_replaces_the_default(self) -> None:
-        merged = merge_user_settings(DEFAULTS, {"URL_NAME_TEMPLATE": "route_{name}"})
-        assert merged["URL_NAME_TEMPLATE"] == "route_{name}"
+    def test_a_usable_value_replaces_the_default(self, settings_obj) -> None:
+        with override_settings(NEXT_FRAMEWORK={"URL_NAME_TEMPLATE": "route_{name}"}):
+            settings_obj.reload()
+            assert settings_obj.URL_NAME_TEMPLATE == "route_{name}"
 
-    def test_an_unusable_value_keeps_the_default(self) -> None:
-        merged = merge_user_settings(DEFAULTS, {"URL_NAME_TEMPLATE": 42})
-        assert merged["URL_NAME_TEMPLATE"] == DEFAULTS["URL_NAME_TEMPLATE"]
+    def test_an_unusable_value_keeps_the_default(self, settings_obj) -> None:
+        with override_settings(NEXT_FRAMEWORK={"URL_NAME_TEMPLATE": 42}):
+            settings_obj.reload()
+            assert DEFAULTS["URL_NAME_TEMPLATE"] == settings_obj.URL_NAME_TEMPLATE
+
+    def test_a_reload_drops_the_merged_view_of_the_previous_settings(
+        self, settings_obj
+    ) -> None:
+        """The merge runs once per reload, and both objects cache it their own way."""
+        with override_settings(NEXT_FRAMEWORK={"URL_NAME_TEMPLATE": "route_{name}"}):
+            settings_obj.reload()
+            assert settings_obj.URL_NAME_TEMPLATE == "route_{name}"
+        settings_obj.reload()
+        assert DEFAULTS["URL_NAME_TEMPLATE"] == settings_obj.URL_NAME_TEMPLATE
 
 
 class TestReplacementIsWhole:

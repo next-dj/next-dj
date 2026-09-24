@@ -1,11 +1,6 @@
 """Parameter-provider contracts and the auto-registered ABC.
 
-`ParameterProvider` is the Protocol consumed by `DependencyResolver`, and
-`CompilingParameterProvider` extends it with the optional `compile_resolve` hook the
-plan compiler asks for. `RegisteredParameterProvider` is the ABC used by the providers
-that ship with the framework. Subclasses of the ABC join `provider_registry` through
-`__init_subclass__`, which lets the resolver instantiate them without importing them
-explicitly. Providers are consulted in ascending `priority` order.
+The ABC registers its subclasses, so the resolver never imports a provider by name.
 """
 
 from __future__ import annotations

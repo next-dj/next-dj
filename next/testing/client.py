@@ -106,8 +106,7 @@ class PartialEnvelope:
 def envelope_of(response: HttpResponse) -> PartialEnvelope:
     """Return the structural envelope view of a partial response.
 
-    Raises when the response is not a patch envelope, so a navigation fallback never
-    silently passes a structural assertion.
+    A navigation fallback is no envelope and raises rather than passing the assertion.
     """
     backend = partial_backend_manager.get()
     content_type = response["Content-Type"].split(";")[0].strip()

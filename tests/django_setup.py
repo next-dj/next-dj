@@ -18,7 +18,7 @@ def _install_project_root_on_path() -> None:
 
 def _build_test_settings() -> dict[str, object]:
     return {
-        "DEBUG": True,
+        "DEBUG": False,
         "DATABASES": {
             "default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}
         },

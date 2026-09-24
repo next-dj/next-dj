@@ -21,13 +21,13 @@ Asset plans
 
 An asset plan is what ``AssetDiscovery`` remembers about one page path or one component.
 It holds the co-located files the walk found, the assets built from the ``styles`` and ``scripts`` lists of the owning module, and the directories the walk read.
-A plan caches what the walk read off the disk plus the URLs those module lists resolved to, and it records the URL generation they were resolved under.
+A plan caches what the walk read off the disk plus the URLs those module lists resolved to.
 The whole mechanism is gated by ``STATIC_DISCOVERY_CACHE``, which defaults to true, and a process that sets it false rebuilds a plan on every render instead of caching one.
 
 The stem probes, the layout walk, and the module import happen once, and every file the plan holds still goes to ``register_file`` on every render, so a backend free to resolve the same file to a different URL per request is asked every time.
 The default backend answers those calls from its own ``(logical_name, suffix)`` memo.
 The repeat therefore costs it a dictionary lookup, and its answer changes when ``StaticManager.reload`` builds a new backend or when a ``STATIC_ROOT``, ``STATIC_URL``, or ``STORAGES`` change drops the memo through ``forget_urls``.
-A module-list entry is resolved once instead, when the plan is built, because ``resolve_url`` answers for a file space the plan already tracks through its URL generation.
+A module-list entry is resolved once instead, when the plan is built.
 The backend answers a co-located file and an authored reference from one memo, keyed apart so a logical name and a reference cannot collide.
 
 The page plan is keyed by the page file path.
@@ -35,18 +35,19 @@ The component plan is keyed by the component's ``template_path``, ``module_path`
 A simple component owns no folder and reaches no plan at all, which keeps the entries the cache holds to the components that read the disk.
 Both caches are bounded and evict the oldest entry once full, because the working set of a project sits far below the bound and a warm render answers from them without writing anything.
 
-Four things invalidate a plan.
+Five things invalidate a plan.
 
 - A settings reload drops the whole static manager, and the discovery instance with its plans goes with it.
+- An ``INSTALLED_APPS`` change moves which page trees the routers report, so ``StaticManager.forget_page_roots`` drops the cached roots and the discovery built from them.
 - A registration in the stem, kind, or placeholder registry changes which filenames count as an asset without moving any file, so every plan carries the generation of those three registries and is rebuilt when it no longer matches.
   This check runs whatever ``DEBUG`` is set to, because it costs three integer reads and no syscall.
-- A ``STATIC_ROOT``, ``STATIC_URL``, or ``STORAGES`` change bumps the URL generation the manager keeps, so a plan holding module-list URLs read through the old storage is rebuilt alongside the backend memos those URLs came from.
-  This check is an integer read as well, and it runs whatever ``DEBUG`` is set to.
+- A ``STATIC_ROOT``, ``STATIC_URL``, or ``STORAGES`` change calls ``StaticManager.forget_backend_urls``, which drops the discovery instance outright alongside the script builder and the memo of every configured backend, so no plan survives holding a URL read through the old storage.
 - Under ``DEBUG`` each render re-stats the directories the plan was read from and rebuilds when one of them has moved, appeared, or gone away.
   The mtimes are read in nanoseconds and compared for inequality, so a directory restored from an archive with an older timestamp counts as changed too, and one that does not stat at all is recorded as absent rather than as a timestamp.
   For a page those directories are the whole walk from the page directory up to the page root, not only the ones that already hold a ``layout.djx``, so a layout added in between is visible on the next request.
   For a component they are the component folder and the folder holding its module.
 
+Two of the five are a comparison the plan itself carries, and the other three discard the discovery instance with every plan in it, so the next render builds a fresh one.
 A backend that rejects a file needs no invalidation, because the next render offers the file to it again, the warning repeats, and a fixed backend takes effect at once.
 Outside ``DEBUG`` a warm render issues no ``stat`` call at all, because a production process does not mutate co-located files under a running server.
 The ``asset_registered`` signal follows the collector rather than the render, so a component mounted several times on one page announces each of its assets once.
@@ -130,6 +131,7 @@ Modules
 
 ``next.seeding``.
    ``seed_collector`` hydrates one collector from the render context and binds it back under ``COLLECTOR_KEY``, and it sits at the root of the package because the page render reaches this area through a port rather than an import.
+   The module holds the shared render-context keys and the ``RenderFrame`` that seeds them as well, so the collector travels with the other ambient values of a render.
 
 ``next.static.inject``.
    ``PlaceholderInjector`` renders what a collector holds into the placeholder tokens of a finished page, and the manager delegates its ``inject`` to one.
@@ -162,7 +164,7 @@ The collector holds one dedup strategy for the request.
 The strategy is selected by the dotted path under the ``DEDUP_STRATEGY`` key of the first static backend ``OPTIONS``, instantiated once per request, defaulting to ``UrlDedup`` when the key is absent.
 One render holds one collector, so it holds one strategy and one JS context policy, and the first entry of ``STATIC_BACKENDS`` settles both for the whole pipeline.
 ``StaticManager.default_backend`` is the first entry, and it is the only one the render path uses.
-A later entry is built and receives ``backend_loaded`` and ``forget_urls``, and renders nothing.
+A later entry is built and receives ``static_backend_loaded`` and ``forget_urls``, and renders nothing.
 :doc:`/content/topics/static-assets/deduplication` covers the bundled strategies and the custom-strategy protocol.
 
 Signals
@@ -173,9 +175,10 @@ The pipeline fires four signals.
 - ``asset_registered`` fires once per co-located file the collector accepts from a backend registration.
   Module-level ``styles`` and ``scripts`` lists, every ``{% use_style %}`` and ``{% use_script %}`` form, void or block, and the ``{% use_module %}`` tag call ``collector.add`` directly and do not emit it.
   Those paths still resolve their reference through the backend first, so the collector holds a public URL whichever door an asset came through.
-- ``collector_finalized`` once per request after the collector closes its set.
+- ``collector_finalized`` once per request, as the first statement of ``inject`` and therefore before any slot is rendered.
+  Nothing seals the collector, so a receiver that calls ``add`` still reaches the rendered output.
 - ``html_injected`` once per request after the manager replaces the placeholder slots.
-- ``backend_loaded`` once per backend instance when the manager builds it, including the staticfiles backend it seeds when no entry survives.
+- ``static_backend_loaded`` once per backend instance when the manager builds it, including the staticfiles backend it seeds when no entry survives.
 
 A standalone zone render runs the same discovery but ships the collected assets in the patch envelope, so ``collector_finalized`` and ``html_injected`` fire only on full-page renders.
 

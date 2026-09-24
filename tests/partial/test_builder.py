@@ -1,7 +1,11 @@
+from collections.abc import Callable
+from dataclasses import dataclass
+
 import pytest
 from django.test import RequestFactory
 
-from next.partial import Patches, PatchResponse, UnknownZoneError, register_patch_op
+from next.forms.uid import MAX_ORIGIN_LENGTH
+from next.partial import Patches, PatchResponse, UnknownZoneError
 from next.partial.errors import (
     BuiltinPatchOpError,
     CrossSiteHrefError,
@@ -14,17 +18,11 @@ from next.partial.errors import (
     UnknownPatchOpError,
 )
 from next.partial.headers import CONTENT_TYPE
-from next.partial.registry import patch_op_registry
 from next.static.scripts import CSRF_PAYLOAD_KEY, DEV_PAYLOAD_KEY
 from tests.support import partial_request, plain_request
 
 
-@pytest.fixture()
-def custom_op():
-    """Register a custom patch verb for the test and drop it afterwards."""
-    register_patch_op("confetti")
-    yield "confetti"
-    patch_op_registry._custom.discard("confetti")
+_OVERSIZE_GROUP_ORIGIN = "/groups/" + "\u044f" * 3000 + "/"
 
 
 class TestMorphZone:
@@ -80,44 +78,111 @@ class TestMorphFormAndHtml:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class MorphRefusalCase:
+    """One morph() call carrying a keyword the route it selected does not own."""
+
+    label: str
+    call: Callable[[], Patches]
+    named: list[str]
+
+
+_MORPH_REFUSALS = (
+    MorphRefusalCase(
+        label="zone_route_html",
+        call=lambda: Patches(partial_request()).morph(zone="alpha", html="<p>x</p>"),
+        named=["html"],
+    ),
+    MorphRefusalCase(
+        label="zone_route_target_mapping",
+        call=lambda: Patches(partial_request()).morph({"zone": "alpha"}, zone="alpha"),
+        named=["target"],
+    ),
+    MorphRefusalCase(
+        label="zone_route_url_kwargs",
+        call=lambda: Patches(partial_request()).morph(
+            zone="alpha", url_kwargs={"pk": 1}
+        ),
+        named=["url_kwargs"],
+    ),
+    MorphRefusalCase(
+        label="zone_route_form",
+        call=lambda: Patches.versioned("v1").morph(zone="alpha", form="ab12"),
+        named=["form"],
+    ),
+    MorphRefusalCase(
+        label="foreign_zone_route_form",
+        call=lambda: Patches.versioned("v1").morph(
+            zone="alpha", page="/zoned/", form="ab12"
+        ),
+        named=["form"],
+    ),
+    MorphRefusalCase(
+        label="foreign_zone_route_overrides",
+        call=lambda: Patches(partial_request()).morph(
+            zone="alpha", page="/zoned/", overrides={"x": 1}
+        ),
+        named=["overrides"],
+    ),
+    MorphRefusalCase(
+        label="form_route_overrides",
+        call=lambda: Patches.versioned("v1").morph(
+            form="ab12", html="<form></form>", overrides={"x": 1}
+        ),
+        named=["overrides"],
+    ),
+    MorphRefusalCase(
+        label="form_route_url_kwargs",
+        call=lambda: Patches.versioned("v1").morph(
+            form="ab12", html="<form></form>", url_kwargs={"pk": 1}
+        ),
+        named=["url_kwargs"],
+    ),
+    MorphRefusalCase(
+        label="target_route_page",
+        call=lambda: Patches.versioned("v1").morph(
+            {"zone": "list"}, "<ul></ul>", page="/zoned/"
+        ),
+        named=["page"],
+    ),
+    MorphRefusalCase(
+        label="target_route_two_keywords",
+        call=lambda: Patches.versioned("v1").morph(
+            {"zone": "list"}, "<ul></ul>", page="/zoned/", overrides={"x": 1}
+        ),
+        named=["overrides", "page"],
+    ),
+)
+
+
 class TestMorphFacadeRefusals:
     """The morph() facade refuses a keyword the selected route does not own."""
+
+    @pytest.mark.parametrize("case", _MORPH_REFUSALS, ids=lambda case: case.label)
+    def test_the_refused_keyword_is_named_in_the_message(
+        self, case: MorphRefusalCase
+    ) -> None:
+        # the message is the only place the caller learns which keyword was wrong,
+        # so it is pinned whole rather than searched for the bracketed list
+        with pytest.raises(TypeError) as exc:
+            case.call()
+        assert str(exc.value) == (
+            f"morph() got {case.named}, which the selected route does not accept."
+        )
 
     def test_a_misspelled_keyword_is_refused_by_the_interpreter(self) -> None:
         with pytest.raises(TypeError, match="unexpected keyword argument"):
             Patches(partial_request()).morph(zone="alpha", overide={"x": 1})
 
-    def test_zone_refuses_html_rather_than_dropping_it(self) -> None:
-        with pytest.raises(TypeError, match=r"\['html'\]"):
-            Patches(partial_request()).morph(zone="alpha", html="<p>x</p>")
-
-    def test_zone_refuses_a_target_mapping(self) -> None:
-        with pytest.raises(TypeError, match=r"\['target'\]"):
-            Patches(partial_request()).morph({"zone": "alpha"}, zone="alpha")
-
-    def test_zone_url_kwargs_without_page_is_refused(self) -> None:
-        with pytest.raises(TypeError, match=r"\['url_kwargs'\]"):
-            Patches(partial_request()).morph(zone="alpha", url_kwargs={"pk": 1})
-
-    def test_foreign_zone_refuses_overrides(self) -> None:
-        with pytest.raises(TypeError, match=r"\['overrides'\]"):
-            Patches(partial_request()).morph(
-                zone="alpha", page="/zoned/", overrides={"x": 1}
-            )
-
-    def test_form_refuses_a_zone_keyword_of_another_route(self) -> None:
-        with pytest.raises(TypeError, match=r"\['url_kwargs'\]"):
-            Patches.versioned("v1").morph(
-                form="ab12", html="<form></form>", url_kwargs={"pk": 1}
-            )
-
-    def test_target_route_refuses_a_foreign_page(self) -> None:
-        with pytest.raises(TypeError, match=r"\['page'\]"):
-            Patches.versioned("v1").morph({"zone": "list"}, "<ul></ul>", page="/zoned/")
-
     def test_a_call_naming_nothing_is_refused(self) -> None:
         with pytest.raises(TypeError, match="needs a target mapping"):
             Patches.versioned("v1").morph()
+
+    def test_a_route_carrying_only_its_own_keywords_is_accepted(self) -> None:
+        # the refusal returns before naming anything on the hot path, and a false
+        # positive here would break every plain morph
+        envelope = Patches(partial_request()).morph(zone="alpha").envelope()
+        assert envelope.ops[0].as_dict()["target"] == {"zone": "alpha"}
 
 
 class TestStandaloneVerbs:
@@ -239,6 +304,19 @@ class TestStandaloneVerbs:
             "action": "push",
             "href": "/next/",
         }
+
+    def test_push_url_admits_a_path_past_the_url_length_cap(self) -> None:
+        href = "/items/" + "a" * 2100 + "/"
+        envelope = Patches(partial_request()).push_url(href).envelope()
+        assert envelope.ops[0].as_dict()["href"] == href
+
+    def test_push_url_admits_an_absolute_same_host_href(self) -> None:
+        envelope = Patches(partial_request()).push_url("//testserver/items/").envelope()
+        assert envelope.ops[0].as_dict()["href"] == "//testserver/items/"
+
+    def test_push_url_refuses_a_path_past_the_origin_cap(self) -> None:
+        with pytest.raises(CrossSiteHrefError):
+            Patches(partial_request()).push_url("/" + "a" * MAX_ORIGIN_LENGTH)
 
     def test_push_url_raises_on_a_cross_site_host(self) -> None:
         with pytest.raises(CrossSiteHrefError) as exc:
@@ -396,6 +474,24 @@ class TestResponse:
         request = RequestFactory().post("/loose/", data={})
         response = Patches(request).response()
         assert response["Location"] == "/loose/"
+
+    @pytest.mark.usefixtures("cap_redirects")
+    def test_origin_past_the_redirect_cap_falls_back_to_root(self) -> None:
+        response = Patches(plain_request(_OVERSIZE_GROUP_ORIGIN)).response()
+        assert response.status_code == 303
+        assert response["Location"] == "/"
+
+    @pytest.mark.usefixtures("cap_redirects")
+    def test_refused_origin_skips_an_offsite_fallback_for_root(self) -> None:
+        request = plain_request(_OVERSIZE_GROUP_ORIGIN)
+        response = Patches(request).response(fallback="//evil.example.com/")
+        assert response["Location"] == "/"
+
+    @pytest.mark.usefixtures("cap_redirects")
+    def test_fallback_past_the_redirect_cap_falls_back_to_root(self) -> None:
+        response = Patches(plain_request()).response(fallback=_OVERSIZE_GROUP_ORIGIN)
+        assert response.status_code == 303
+        assert response["Location"] == "/"
 
 
 class TestVersionBuilderCompatibility:

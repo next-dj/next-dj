@@ -105,7 +105,7 @@ class TestBenchErrorRerenderWithLayouts:
         )
         return backend, page_file
 
-    @pytest.mark.benchmark(group="forms.rendering.page")
+    @pytest.mark.benchmark(group="forms.rendering")
     def test_error_rerender_with_layouts(
         self, layered_error_setup: tuple[RegistryFormActionBackend, Path], benchmark
     ) -> None:
@@ -144,13 +144,13 @@ class TestBenchPageGetRender:
         clear_url_caches()
         return page_file
 
-    @pytest.mark.benchmark(group="forms.rendering.page")
+    @pytest.mark.benchmark(group="forms.rendering")
     def test_page_render_warm_cache(self, form_page, csrf_request, benchmark) -> None:
         reset_page_cache()
         page.render(form_page, csrf_request)
         benchmark(page.render, form_page, csrf_request)
 
-    @pytest.mark.benchmark(group="forms.rendering.page")
+    @pytest.mark.benchmark(group="forms.rendering")
     def test_page_render_cold_cache(self, form_page, csrf_request, benchmark) -> None:
         def run() -> str:
             reset_page_cache()

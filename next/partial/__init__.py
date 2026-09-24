@@ -1,6 +1,6 @@
 """Public facade for the partial-rendering subsystem."""
 
-from . import signals
+from . import checks, signals
 from .backends import JsonPartialProtocolBackend, PartialProtocolBackend
 from .envelope import Asset, Envelope, FormMeta, Patch
 from .errors import (
@@ -31,6 +31,7 @@ __all__ = [
     "Patches",
     "UnknownZoneError",
     "ZoneRenderResult",
+    "checks",
     "is_partial_request",
     "partial_intent",
     "register_patch_op",

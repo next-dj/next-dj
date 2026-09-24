@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from decimal import Decimal
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -28,6 +29,7 @@ if TYPE_CHECKING:
 
 
 URL = "/static/next/next.min.js"
+BREAKOUT_URL = '/static/next.min.js"><script>alert(1)</script>'
 
 
 def _legacy_init_payload(
@@ -131,6 +133,43 @@ class TestNextScriptBuilderUrlOverride:
         )
         assert builder.script_tag("/pfx/next.min.js") == (
             '<script defer src="/pfx/next.min.js"></script>'
+        )
+
+
+class TestRuntimeTagsEscapeTheUrl:
+    """The runtime tags are spliced into the page past the engine, so the URL is escaped."""
+
+    @pytest.mark.parametrize("builder_tag", ["preload_link", "script_tag"])
+    def test_a_url_closing_the_attribute_cannot_open_an_element(
+        self, builder_tag
+    ) -> None:
+        builder = NextScriptBuilder(URL)
+
+        rendered = getattr(builder, builder_tag)(BREAKOUT_URL)
+
+        assert "<script>alert(1)</script>" not in rendered
+        assert "&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;" in rendered
+
+    @pytest.mark.parametrize("builder_tag", ["preload_link", "script_tag"])
+    def test_the_resolved_runtime_url_is_escaped_too(self, builder_tag) -> None:
+        """A backend answering the URL at construction reaches the same escape."""
+        builder = NextScriptBuilder(BREAKOUT_URL)
+
+        assert "<script>alert(1)</script>" not in getattr(builder, builder_tag)()
+
+    @pytest.mark.parametrize("builder_tag", ["preload_link", "script_tag"])
+    def test_a_non_str_url_renders_as_its_str(self, builder_tag) -> None:
+        builder = NextScriptBuilder(URL)
+
+        rendered = getattr(builder, builder_tag)(PurePosixPath("/pfx/next.min.js"))
+
+        assert '"/pfx/next.min.js"' in rendered
+
+    def test_a_query_ampersand_renders_as_an_entity(self) -> None:
+        builder = NextScriptBuilder(URL)
+
+        assert builder.script_tag("/static/next.min.js?v=1&x=2") == (
+            '<script src="/static/next.min.js?v=1&amp;x=2"></script>'
         )
 
 

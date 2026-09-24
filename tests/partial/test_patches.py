@@ -4,10 +4,9 @@ import next.pages
 import next.partial
 import next.partial.errors
 import next.partial.patches
-from next.partial import Asset, FormMeta, Patches, PatchResponse, register_patch_op
+from next.partial import Asset, FormMeta, Patches, PatchResponse
 from next.partial.errors import ReservedPatchKeyError
 from next.partial.headers import CONTENT_TYPE
-from next.partial.registry import patch_op_registry
 from next.partial.render import ZoneRenderResult
 from next.static import KindRegistry, StaticAsset
 from next.static.manager import default_manager
@@ -363,14 +362,6 @@ class TestBuilderExceptionSurface:
             next.partial.ForeignPageNotAuthorizedError
             is next.partial.errors.ForeignPageNotAuthorizedError
         )
-
-
-@pytest.fixture()
-def custom_op():
-    """Register a custom patch verb for the test and drop it afterwards."""
-    register_patch_op("confetti")
-    yield "confetti"
-    patch_op_registry._custom.discard("confetti")
 
 
 class TestReservedPatchKey:

@@ -25,6 +25,7 @@ from next.forms.signals import (
 from .build import _bind_form_for_post, _call_get_initial, _resolve_form_class
 from .permissions import (
     _check_access,
+    _check_page_access,
     _enforce_object_permissions,
     _enforce_view_permissions,
 )
@@ -44,7 +45,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from django import forms as django_forms
-    from django.http import HttpRequest
+    from django.http import HttpRequest, HttpResponseBase
 
     from next.forms.backends import ActionMeta, FormActionBackend
     from next.forms.base import BaseForm as NextBaseForm
@@ -58,7 +59,8 @@ logger = logging.getLogger(__name__)
 class FormActionDispatch:
     """Shared POST pipeline and response shaping for backends.
 
-    The class sends every dispatch-time signal, the one identity receivers filter on.
+    It sends `action_dispatched`, `form_validation_failed` and `form_access_denied` with
+    itself as the sender, and the wizard signals with the wizard class.
     """
 
     # The documented address a custom backend that drives the pipeline by
@@ -71,8 +73,12 @@ class FormActionDispatch:
         request: "HttpRequest",
         action_name: str,
         meta: "ActionMeta",
-    ) -> HttpResponse:
-        """Validate the form, run the handler, or re-render errors."""
+    ) -> "HttpResponseBase":
+        """Validate the form, run the handler, or re-render errors.
+
+        The posted origin page authorizes the request before anything renders it, so a
+        submission never reaches a page body the requester would be refused on a visit.
+        """
         handler = meta.get("handler")
         form_class = meta.get("form_class")
         wizard_class = meta.get("wizard_class")
@@ -80,13 +86,13 @@ class FormActionDispatch:
         if request.method != "POST":
             return HttpResponseNotAllowed(["POST"])
 
-        guard = meta.get("guard")
-        if guard is not None:
-            denial = _check_access(request, guard)
-            if denial is not None:
-                return denial
-
         origin_match = resolve_origin(request)
+        refusal = FormActionDispatch._refuse_access(
+            request, meta, origin_match, action_name
+        )
+        if refusal is not None:
+            return refusal
+
         state = _DispatchState(
             url_kwargs=dict(origin_match.url_kwargs) if origin_match else {},
             dep_cache={},
@@ -117,6 +123,30 @@ class FormActionDispatch:
         )
         return HttpResponseBadRequest(
             f"Action {action_name!r} has no handler, form_class, or wizard_class."
+        )
+
+    @staticmethod
+    def _refuse_access(
+        request: "HttpRequest",
+        meta: "ActionMeta",
+        origin_match: "OriginMatch | None",
+        action_name: str,
+    ) -> "HttpResponseBase | None":
+        """Return the denial of the action guard or of the origin page, or None.
+
+        The action's guard answers first, it is cheaper and names the origin it denies.
+        """
+        guard = meta.get("guard")
+        if guard is not None:
+            denial = _check_access(request, guard)
+            if denial is not None:
+                return denial
+        return _check_page_access(
+            request,
+            origin_match,
+            action_name=action_name,
+            uid=meta.get("uid"),
+            sender=_DispatchState.signal_sender,
         )
 
     @staticmethod
@@ -333,9 +363,10 @@ class _DispatchState:
         response: HttpResponse,
     ) -> None:
         """Send `action_dispatched` when a receiver listens for this sender."""
-        if action_dispatched.has_listeners(FormActionDispatch):
+        sender = self.signal_sender
+        if action_dispatched.has_listeners(sender):
             action_dispatched.send(
-                sender=FormActionDispatch,
+                sender=sender,
                 action_name=action_name,
                 uid=self.uid,
                 request=request,
@@ -350,10 +381,11 @@ class _DispatchState:
         self, request: "HttpRequest", action_name: str, form: "django_forms.Form"
     ) -> None:
         """Send `form_validation_failed` when a receiver listens for this sender."""
-        if form_validation_failed.has_listeners(FormActionDispatch):
+        sender = self.signal_sender
+        if form_validation_failed.has_listeners(sender):
             error_count = sum(len(errors) for errors in form.errors.values())
             form_validation_failed.send(
-                sender=FormActionDispatch,
+                sender=sender,
                 action_name=action_name,
                 uid=self.uid,
                 request=request,

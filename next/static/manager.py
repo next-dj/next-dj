@@ -23,7 +23,7 @@ from .collector import StaticCollector
 from .discovery import AssetDiscovery, PathResolver
 from .inject import PlaceholderInjector
 from .scripts import NEXT_JS_STATIC_PATH, NextScriptBuilder
-from .signals import backend_loaded
+from .signals import static_backend_loaded
 
 
 if TYPE_CHECKING:
@@ -170,12 +170,12 @@ class StaticManager(BackendListManager[StaticBackend]):
             backend_entries("STATIC_BACKENDS"),
             base=StaticBackend,
             default=_DEFAULT_BACKEND_PATH,
-            signal=backend_loaded,
+            signal=static_backend_loaded,
         ) or load_backends(
             [{}],
             base=StaticBackend,
             default=_DEFAULT_BACKEND_PATH,
-            signal=backend_loaded,
+            signal=static_backend_loaded,
         )
         self._mark_loaded()
         self._static_version = _project_static_version()

@@ -53,6 +53,18 @@ class TestPartialIntentParsing:
         request = _request_with_headers(**{"X-Next-Request": "1", "X-Next-Zone": " , "})
         assert partial_intent(request).zones == ()
 
+    def test_an_empty_segment_between_names_is_dropped(self) -> None:
+        # a client joining an empty zone slot leaves a bare comma, and keeping the
+        # empty name would send the zone registry looking up ""
+        request = _request_with_headers(
+            **{"X-Next-Request": "1", "X-Next-Zone": "a,,b"}
+        )
+        assert partial_intent(request).zones == ("a", "b")
+
+    def test_a_trailing_comma_does_not_add_a_name(self) -> None:
+        request = _request_with_headers(**{"X-Next-Request": "1", "X-Next-Zone": "a,"})
+        assert partial_intent(request).zones == ("a",)
+
     def test_validate_fields_split(self) -> None:
         request = _request_with_headers(
             **{"X-Next-Request": "1", "X-Next-Validate": "email,name"}

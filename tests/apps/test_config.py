@@ -19,14 +19,22 @@ from next.components import FileComponentsBackend, components_manager
 from next.deps import resolver
 from next.deps.introspect import _signature_cache
 from next.pages import loaders as pages_loaders
+from next.pages.ports import PageScanImpl
 from next.pages.watch import get_pages_directories_for_watch
-from next.partial.shaper import PartialShaperImpl
-from next.ports import PortSlot
+from next.partial.ports import PartialShaperImpl
+from next.ports import (
+    PortSlot,
+    page_scan_slot,
+    partial_shaper_slot,
+    router_access_slot,
+    static_assets_slot,
+)
 from next.server import NextStatReloader
 from next.static import get_static_manager
-from next.static.manager import default_manager
+from next.static.ports import StaticAssetsImpl
 from next.urls import RouterFactory, router_manager
-from next.urls.access import RouterAccessImpl
+from next.urls.ports import RouterAccessImpl
+from next.urls.signals import router_reloaded
 from tests.support import (
     DUMMY_COMPONENTS_BACKEND,
     DummyComponentsBackend,
@@ -38,6 +46,14 @@ from tests.support import (
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+_PROCESS_SLOTS = (
+    page_scan_slot,
+    partial_shaper_slot,
+    router_access_slot,
+    static_assets_slot,
+)
 
 
 def _page_backend_entry(
@@ -371,6 +387,7 @@ class TestDependencyResolverInstall:
     STEPS: ClassVar[tuple[str, ...]] = (
         "_register_checks",
         "apply_resolver_setting",
+        "page_scan_slot",
         "partial_shaper_slot",
         "router_access_slot",
         "static_assets_slot",
@@ -395,6 +412,7 @@ class TestDependencyResolverInstall:
         assert made == [
             "_register_checks",
             "apply_resolver_setting",
+            "page_scan_slot.set",
             "partial_shaper_slot.set",
             "router_access_slot.set",
             "static_assets_slot.set",
@@ -405,38 +423,52 @@ class TestDependencyResolverInstall:
             "autodiscover_forms",
         ]
 
-    def test_ready_binds_the_partial_shaper_before_discovery_can_fail(self) -> None:
-        """A discovery failure leaves the shaper port bound for the process."""
+    @pytest.mark.parametrize(
+        ("slot_name", "subject", "implementation"),
+        [
+            pytest.param("page_scan_slot", "page scan port", PageScanImpl, id="scan"),
+            pytest.param(
+                "partial_shaper_slot", "partial shaper", PartialShaperImpl, id="shaper"
+            ),
+            pytest.param(
+                "router_access_slot",
+                "router access port",
+                RouterAccessImpl,
+                id="router",
+            ),
+            pytest.param(
+                "static_assets_slot",
+                "static assets port",
+                StaticAssetsImpl,
+                id="static",
+            ),
+        ],
+    )
+    def test_ready_binds_every_port_before_discovery_can_fail(
+        self, slot_name: str, subject: str, implementation: type
+    ) -> None:
+        """A discovery failure leaves no process behind with an unbound port."""
         config = apps.get_app_config("next")
-        slot = PortSlot("partial shaper")
+        slot = PortSlot(subject)
         with (
-            patch("next.apps.config.partial_shaper_slot", slot),
+            patch(f"next.apps.config.{slot_name}", slot),
             patch.object(next_components, "install", side_effect=RuntimeError("boom")),
             pytest.raises(RuntimeError, match="boom"),
         ):
             config.ready()
-        assert isinstance(slot.get(), PartialShaperImpl)
+        assert isinstance(slot.get(), implementation)
 
-    def test_ready_binds_the_router_port_before_discovery_can_fail(self) -> None:
-        """The watcher and the checks find a router builder however ready ends."""
+    def test_a_second_ready_rebinds_the_ports_without_doubling_the_wiring(self) -> None:
+        """Django readies an app once, but a test process calls `ready` repeatedly."""
         config = apps.get_app_config("next")
-        slot = PortSlot("router access port")
-        with (
-            patch("next.apps.config.router_access_slot", slot),
-            patch.object(next_components, "install", side_effect=RuntimeError("boom")),
-            pytest.raises(RuntimeError, match="boom"),
-        ):
-            config.ready()
-        assert isinstance(slot.get(), RouterAccessImpl)
+        connected = len(router_reloaded.receivers)
 
-    def test_ready_binds_the_static_port_before_discovery_can_fail(self) -> None:
-        """The render path finds the lazy static handle however ready ends."""
-        config = apps.get_app_config("next")
-        slot = PortSlot("static assets port")
-        with (
-            patch("next.apps.config.static_assets_slot", slot),
-            patch.object(next_components, "install", side_effect=RuntimeError("boom")),
-            pytest.raises(RuntimeError, match="boom"),
-        ):
-            config.ready()
-        assert slot.get() is default_manager
+        config.ready()
+
+        assert len(router_reloaded.receivers) == connected
+        assert [type(slot.get()) for slot in _PROCESS_SLOTS] == [
+            PageScanImpl,
+            PartialShaperImpl,
+            RouterAccessImpl,
+            StaticAssetsImpl,
+        ]

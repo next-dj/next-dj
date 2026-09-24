@@ -83,27 +83,23 @@ The keyword names are fixed by the framework.
 ``action_dispatched`` carries ``action_name``, ``uid``, ``request``, ``form``, ``url_kwargs``, ``duration_ms``, ``response_status``, and ``dep_cache``.
 ``form_validation_failed`` carries ``action_name``, ``uid``, ``request``, ``error_count``, and ``field_names``.
 ``form_access_denied`` carries ``action_name``, ``uid``, ``request``, ``layer``, and ``reason``.
-It fires only when a dynamic permission hook denies a request, never on the static ``ActionGuard`` path, which makes it the signal to audit refused form submissions.
+It fires when the origin page or a dynamic permission hook denies a request, never on the static ``ActionGuard`` path, which makes it the signal to audit refused form submissions.
 See :ref:`topics-forms-signals-form-access-denied` for the full contract.
 The ``request`` value is the live ``HttpRequest`` of the dispatch, so a receiver reads it synchronously and never stores it past the call.
 
 Cover the static pipeline
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The static subsystem emits ``asset_registered``, ``backend_loaded``, ``collector_finalized``, and ``html_injected``.
+The static subsystem emits ``asset_registered``, ``static_backend_loaded``, ``collector_finalized``, and ``html_injected``.
 The ``html_injected`` payload carries ``injected_bytes``, which is useful as a payload-size metric.
+``static_backend_loaded`` belongs to the backend-load family covered under `Inventory the loaded backends`_ below.
 
 .. code-block:: python
    :caption: obs/receivers.py
 
    from django.dispatch import receiver
 
-   from next.static.signals import (
-       asset_registered,
-       backend_loaded,
-       collector_finalized,
-       html_injected,
-   )
+   from next.static.signals import asset_registered, collector_finalized, html_injected
 
    from .metrics import incr
 
@@ -120,10 +116,6 @@ The ``html_injected`` payload carries ``injected_bytes``, which is useful as a p
        incr("static", "html_injected")
        if injected_bytes:
            incr("static", "injected_bytes_total", by=int(injected_bytes))
-
-   @receiver(backend_loaded)
-   def on_static_backend_loaded(**kwargs) -> None:
-       incr("static", "backend_loaded")
 
 Cover the router
 ~~~~~~~~~~~~~~~~
@@ -148,6 +140,72 @@ The URL subsystem emits ``route_registered`` for each route discovered during a 
    @receiver(router_reloaded)
    def on_router_reloaded(**kwargs) -> None:
        incr("urls", "router_reloaded")
+
+Inventory the loaded backends
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Each of the six settings-driven backend families announces what it built through a signal of its own.
+Every one of them carries the same two keyword arguments, ``config``, a copy of the settings entry that named the class, and ``instance``, the object the loader built from it, so one receiver serves all six.
+
+.. code-block:: python
+   :caption: obs/receivers.py
+
+   from functools import partial
+   from typing import Any
+
+   from next.signals import (
+       component_backend_loaded,
+       form_backend_loaded,
+       partial_backend_loaded,
+       router_backend_loaded,
+       static_backend_loaded,
+       wizard_backend_loaded,
+   )
+
+   from .metrics import incr
+
+   BACKEND_LOADED = {
+       "components": component_backend_loaded,
+       "forms": form_backend_loaded,
+       "partial": partial_backend_loaded,
+       "urls": router_backend_loaded,
+       "static": static_backend_loaded,
+       "wizard": wizard_backend_loaded,
+   }
+
+   def on_backend_loaded(
+       family: str,
+       config: dict[str, Any] | None = None,
+       instance: object = None,
+       **kwargs,
+   ) -> None:
+       entry = config or {}
+       incr(f"backends.{family}", str(entry.get("BACKEND")))
+       incr(f"backends.{family}.built", type(instance).__name__)
+
+   for family, signal in BACKEND_LOADED.items():
+       signal.connect(
+           partial(on_backend_loaded, family),
+           dispatch_uid=f"obs.backend_loaded.{family}",
+           weak=False,
+       )
+
+``config["BACKEND"]`` is the dotted path the settings entry named, and ``type(instance).__name__`` is the class that was actually built, which differ whenever a family falls back to its default entry.
+The sender is the resolved backend class rather than the manager, so ``sender=`` filtering works per family and a receiver can narrow to one implementation.
+
+.. code-block:: python
+   :caption: obs/receivers.py
+
+   from django.dispatch import receiver
+
+   from next.components import FileComponentsBackend
+   from next.signals import component_backend_loaded
+
+   @receiver(component_backend_loaded, sender=FileComponentsBackend)
+   def on_default_components_backend(**kwargs) -> None:
+       incr("backends.components", "default")
+
+``router_backend_loaded`` and ``component_backend_loaded`` are skipped by a reload that passes ``notify=False``, so a count taken from them is a count of announced loads rather than of every rebuild.
 
 Invalidate a cache on a settings reload
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

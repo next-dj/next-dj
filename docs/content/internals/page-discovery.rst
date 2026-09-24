@@ -42,9 +42,21 @@ Modules
    Each loader recognises one extension and produces a body string for a given page directory.
 
 ``next.pages.manager``.
-   Defines the ``Page`` coordinator that loads templates, collects context, composes layouts, renders, and builds the page ``URLPattern``.
+   A package whose ``__init__`` defines the ``Page`` coordinator that loads templates, collects context, composes layouts, renders, and builds the page ``URLPattern``.
    The process-wide singleton is exposed as ``next.pages.page`` and the class as ``next.pages.Page``.
-   The module also implements the ``@context`` decorator.
+   The package also implements the ``@context`` decorator.
+
+``next.pages.manager.templates``.
+   Holds ``PageTemplateCache``, the per-page composed source, compiled ``Template``, and layout skeleton layers, each with the mtime snapshot that dates it.
+   See `Composed-template cache`_ below for the layers and their staleness rule.
+
+``next.pages.manager.views``.
+   Builds the two routed views, the static one that serves a compiled composed template and the resolving one that runs ``render()`` per request, and the ``URLPattern`` the file router mounts either under.
+   Both carry ``next_page_path`` and both stamp the partial ``Vary`` set on the full-page branch.
+
+``next.pages.placeholder``.
+   Owns the ``{% template %}`` grammar, the single and the paired ``{% #template %}...{% /template %}`` spellings, and the Django-lexer scan that locates the region in a layout source.
+   Composition and the layout checks read the same spellings from here, which is why a placeholder inside ``{% verbatim %}`` or ``{% comment %}`` is left alone.
 
 ``next.pages.registry``.
    Stores ``PageContextEntry`` records and resolves context for a request.
@@ -63,7 +75,11 @@ Modules
    Memoises the path facts of one ``page.py``, its module path, its template path, and its ancestor chain, in a bounded cache the composition lifecycle clears.
 
 ``next.pages.errors``.
-   Defines ``PageModuleImportError``, the exception a broken ``page.py`` raises on the request path.
+   Defines the two exceptions the area raises.
+   ``PageModuleImportError`` is what a broken ``page.py`` raises on the request path, and ``PageContextShapeError`` is what a keyless ``@context`` answering a non-mapping raises during the context merge.
+
+``next.pages.ports``.
+   Holds ``PageScanImpl``, which binds the page-tree scan to the ``PageScan`` port so discovery reaches the scan without an import that would close the cycle.
 
 ``next.pages.checks``.
    Registers the Django system checks for the pages subsystem, listed with their identifiers in :doc:`/content/ref/system-checks`.

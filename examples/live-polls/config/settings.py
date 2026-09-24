@@ -83,6 +83,7 @@ USE_TZ = True
 STATIC_URL = "static/"
 
 SHARED_DIR = BASE_DIR.parent / "_shared"
+sys.path.insert(0, str(SHARED_DIR))
 STATICFILES_DIRS = [SHARED_DIR / "static"]
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
@@ -121,8 +122,6 @@ NEXT_FRAMEWORK = {
             },
         }
     ],
-    # Assets are served from disk, so no hashed manifest exists to derive an
-    # asset version from and the default sentinel would leave the guard silent.
     "PARTIAL_BACKENDS": extend_default_backend(
         "PARTIAL_BACKENDS", OPTIONS={"VERSION": "v1"}
     ),

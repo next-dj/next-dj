@@ -1,22 +1,21 @@
 """Annotation markers and the default `Depends` provider.
 
-`DDependencyBase` is the shared parent for type-annotation markers
-such as `DForm` or `DUrl`. `Depends` is a dataclass default value used
-to request dependency resolution by name, by callable, or by constant
-injection. `DependsProvider` is the built-in parameter provider that
-handles the `Depends` marker and registers itself through `RegisteredParameterProvider`.
+`Depends` ships with the provider that resolves it, so neither drifts from the other.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated, get_args, get_origin, override
+from typing import TYPE_CHECKING, Annotated, Any, get_args, get_origin, override
 
+from .cache import _IN_PROGRESS
+from .errors import DependencyCycleError
 from .providers import RegisteredParameterProvider
 
 
 if TYPE_CHECKING:
     import inspect
+    from collections.abc import Callable
 
     from .context import ResolutionContext
     from .plan import ParameterFiller
@@ -50,6 +49,41 @@ def marker_origin(annotation: object) -> object:
     if origin is Annotated:
         return get_origin(get_args(annotation)[0])
     return origin
+
+
+def factory_key(factory: object) -> str:
+    """Return the dotted identity a callable `Depends` is tracked under.
+
+    A factory carries no registered name, so its address stands in for one on the
+    resolution stack and in the cycle a `DependencyCycleError` reports.
+    """
+    qualname = getattr(factory, "__qualname__", "")
+    if not qualname:
+        return f"{type(factory).__qualname__}@{id(factory):x}"
+    module = getattr(factory, "__module__", "") or ""
+    return f"{module}.{qualname}"
+
+
+def call_factory(
+    resolver: DependencyResolver,
+    factory: Callable[..., Any],
+    key: str,
+    context: ResolutionContext,
+) -> object:
+    """Call a factory `Depends` under the cycle guards the named form owns.
+
+    Without them two factories naming each other raise `RecursionError`.
+    """
+    stack = context.stack
+    if key in stack or context.cache.get(key) is _IN_PROGRESS:
+        raise DependencyCycleError([*stack, key])
+    stack.append(key)
+    context.cache.mark_in_progress(key)
+    try:
+        return factory(**resolver.resolve(factory, context))
+    finally:
+        stack.pop()
+        context.cache.unmark_in_progress(key)
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,8 +133,7 @@ class DependsProvider(RegisteredParameterProvider):
             )
 
         if callable(dep):
-            resolved = self._resolver.resolve(dep, context)
-            return dep(**resolved)
+            return call_factory(self._resolver, dep, factory_key(dep), context)
 
         return dep
 
@@ -122,9 +155,10 @@ class DependsProvider(RegisteredParameterProvider):
 
         if callable(target):
             factory = target
+            key = factory_key(factory)
 
             def by_callable(context: ResolutionContext) -> object:
-                return factory(**resolver.resolve(factory, context))
+                return call_factory(resolver, factory, key, context)
 
             return by_callable
 

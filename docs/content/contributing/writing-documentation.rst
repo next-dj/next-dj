@@ -249,6 +249,9 @@ The table below lists the public package, its primary narrative page, and its re
    * - ``next.backends``
      - :doc:`/content/topics/extending`
      - :doc:`/content/ref/backends`
+   * - ``next/client``
+     - :doc:`/content/topics/partial-rendering/index`, :doc:`/content/topics/partial-rendering/co-located-js`
+     - :doc:`/content/ref/client`
 
 When you edit the signal aggregator in ``next/signals.py``, update :doc:`/content/topics/signals` and :doc:`/content/ref/signals` so every re-exported name and payload matches the module.
 

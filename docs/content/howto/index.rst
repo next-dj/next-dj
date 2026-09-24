@@ -3,7 +3,6 @@
 How-to guides
 =============
 
-How-to guides answer task-shaped questions.
 Each recipe states a problem, gives one minimal solution, walks through the steps, and shows how to verify the result.
 Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 
@@ -175,3 +174,7 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    observe-framework-signals
    stream-live-updates-with-sse
    split-settings-per-environment
+
+.. seealso::
+
+   :doc:`/content/security/index` for the checks a recipe touching forms, uploads, or assets is measured against.

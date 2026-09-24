@@ -1,10 +1,10 @@
-"""Implementation of the partial shaper port composed at app startup."""
+"""Partial shaper implementation bound into the `next.ports` slot at app startup."""
 
 from typing import TYPE_CHECKING, override
 
 from next.ports import PartialShaper
 
-from .headers import partial_intent
+from .headers import partial_intent, set_partial_vary
 from .shaping import ActionRef, shape_partial, shape_validate
 from .view import zone_response
 
@@ -76,6 +76,11 @@ class PartialShaperImpl(PartialShaper):
             ActionRef(action_name=action_name, uid=uid),
             wizard=wizard,
         )
+
+    @override
+    def set_vary(self, response: "HttpResponse") -> None:
+        """Declare the partial request headers `response` was negotiated on."""
+        set_partial_vary(response)
 
 
 __all__ = ["PartialShaperImpl"]

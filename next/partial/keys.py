@@ -1,4 +1,4 @@
-"""Wire-key constants shared by the patch serializer and the test envelope view.
+"""Wire-key constants of the partial protocol, shared by every area that writes them.
 
 These names are the frozen partial wire contract. The TypeScript runtime mirrors
 them in next/client/protocol.ts and the per-op fields in next/client/apply.ts, so
@@ -31,6 +31,9 @@ ERRORS: Final = "errors"
 ZONE: Final = "zone"
 FORM_SELECTOR: Final = "form"
 
+FORM_ZONE_ATTR: Final = "data-next-target"
+FORM_KEY_ATTR: Final = "data-next-key"
+
 RESERVED_PATCH_KEYS: Final[frozenset[str]] = frozenset({OP, TARGET, HTML})
 
 
@@ -39,7 +42,9 @@ __all__ = [
     "CSRF",
     "ERRORS",
     "FORM",
+    "FORM_KEY_ATTR",
     "FORM_SELECTOR",
+    "FORM_ZONE_ATTR",
     "HTML",
     "INLINE",
     "KIND",

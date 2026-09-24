@@ -15,58 +15,58 @@ Decorators
 @context
 ~~~~~~~~
 
-.. py:decorator:: @context(func_or_key=None, *, inherit_context=False, serialize=False, serializer=None, zone=None)
+.. py:decorator:: context(func_or_key=None, *, inherit_context=False, serialize=False, serializer=None, zone=None)
 
-Registers a context function on a page module (``page.py``).
-The first positional argument is ``func_or_key``.
-Called bare as ``@context`` it receives the decorated function and merges its returned dict into the template context.
-Called as ``@context("greeting")`` it receives a key string and binds the function's return value to that key.
-Pass ``inherit_context=True`` to publish the value to every descendant page.
-Pass ``serialize=True`` to expose the return value to the browser under ``window.Next.context``.
-The value must be JSON-encodable by the active serializer.
-See :ref:`Serialization for the browser <topics-context-serialization>` for the contract.
-Pass ``serializer=`` to route that key through a custom ``JsContextSerializer``.
-Pass ``zone="name"`` to run the callable only for a matching zone GET request.
-The callable still runs on a full page render.
-``zone=`` cannot be combined with ``inherit_context=True``, and the pair raises ``ValueError`` at registration.
+   Registers a context function on a page module (``page.py``).
+   The first positional argument is ``func_or_key``.
+   Called bare as ``@context`` it receives the decorated function and merges its returned dict into the template context.
+   Called as ``@context("greeting")`` it receives a key string and binds the function's return value to that key.
+   Pass ``inherit_context=True`` to publish the value to every descendant page.
+   Pass ``serialize=True`` to expose the return value to the browser under ``window.Next.context``.
+   The value must be JSON-encodable by the active serializer.
+   See :ref:`Serialization for the browser <topics-context-serialization>` for the contract.
+   Pass ``serializer=`` to route that key through a custom ``JsContextSerializer``.
+   Pass ``zone="name"`` to run the callable only for a matching zone GET request.
+   The callable still runs on a full page render.
+   ``zone=`` cannot be combined with ``inherit_context=True``, and the pair raises ``ValueError`` at registration.
 
 @component.context
 ~~~~~~~~~~~~~~~~~~
 
-.. py:decorator:: @component.context(func_or_key=None, *, serialize=False, serializer=None)
+.. py:decorator:: component.context(func_or_key=None, *, serialize=False, serializer=None)
 
-Registers a component context function inside ``component.py``.
-The first positional argument is ``func_or_key``.
-Called bare as ``@component.context`` it merges the function's returned dict into the component template scope.
-The merge is guarded, so a returned key naming one of the reserved render keys, or any key starting with ``slot_``, raises ``ValueError`` at render time.
-Rendering through ``{% component %}`` extends the guard to the props of that one call site, and ``ComponentWidget`` and the ``props`` mapping of ``render_component_by_name`` extend it the same way to the names they pass, while a bare ``render_component`` guards the reserved keys alone.
-See :doc:`/content/topics/components` for the reserved render set.
-Registration guards a different set, the six dependency-injection names ``request``, ``form``, ``cleaned_data``, ``_cache``, ``_stack``, and ``_context_data``, documented as ``RESERVED_KEYS`` in :doc:`deps`.
-Called as ``@component.context("greeting")`` it binds the function's return value to that key.
-Pass ``serialize=True`` to include the return value in ``window.Next.context``.
-The value must be JSON-encodable by the active serializer, the same contract documented under :ref:`Serialization for the browser <topics-context-serialization>`.
-Pass ``serializer=`` to route that key through a custom ``JsContextSerializer``.
+   Registers a component context function inside ``component.py``.
+   The first positional argument is ``func_or_key``.
+   Called bare as ``@component.context`` it merges the function's returned dict into the component template scope.
+   The merge is guarded, so a returned key naming one of the reserved render keys, or any key starting with ``slot_``, raises ``ValueError`` at render time.
+   Rendering through ``{% component %}`` extends the guard to the props of that one call site, and ``ComponentWidget`` and the ``props`` mapping of ``render_component_by_name`` extend it the same way to the names they pass, while a bare ``render_component`` guards the reserved keys alone.
+   See :doc:`/content/topics/components` for the reserved render set.
+   Registration guards a different set, the six dependency-injection names ``request``, ``form``, ``cleaned_data``, ``_cache``, ``_stack``, and ``_context_data``, documented as ``RESERVED_KEYS`` in :doc:`deps`.
+   Called as ``@component.context("greeting")`` it binds the function's return value to that key.
+   Pass ``serialize=True`` to include the return value in ``window.Next.context``.
+   The value must be JSON-encodable by the active serializer, the same contract documented under :ref:`Serialization for the browser <topics-context-serialization>`.
+   Pass ``serializer=`` to route that key through a custom ``JsContextSerializer``.
 
 @action
 ~~~~~~~
 
-.. py:decorator:: @action(name=None, *, form_class=None, scope=None, login_required=False, permission_required=None)
+.. py:decorator:: action(name=None, *, form_class=None, scope=None, login_required=False, permission_required=None)
 
-Registers a plain callable as a named form action.
-The name is optional.
-A bare ``@action`` or an empty ``@action()`` registers the function under its own name, and ``@action("custom_name")`` overrides it.
-The name must be unique within its scope, see :doc:`/content/topics/forms/actions`.
-Used without ``form_class``, the handler runs with no form validation.
-Reach for it for delete confirmations or logout buttons.
-Form classes register automatically through ``__init_subclass__`` and must not use ``@action``.
-Pass ``form_class=`` to receive the bound, validated form in the handler.
-It accepts a form class that does not register its own endpoint, such as a base marked ``Meta.abstract = True``, or a factory callable that builds the form class per request.
-Passing a ``Form`` subclass that already registered itself raises ``TypeError`` at decoration time.
-Pass ``scope="page"`` or ``scope="shared"`` to override the scope derived from the declaring file.
-Any other value is reported as the ``next.E047`` system check and the action is not registered.
-Pass ``login_required=True`` or ``permission_required=`` to guard the dispatch endpoint, see :ref:`topics-forms-actions-guards` for the semantics.
-Applying ``@action`` to a class registers no action and returns the class unchanged.
-The misuse is recorded and reported as the ``next.E053`` system check by ``manage.py check``.
+   Registers a plain callable as a named form action.
+   The name is optional.
+   A bare ``@action`` or an empty ``@action()`` registers the function under its own name, and ``@action("custom_name")`` overrides it.
+   The name must be unique within its scope, see :doc:`/content/topics/forms/actions`.
+   Used without ``form_class``, the handler runs with no form validation.
+   Reach for it for delete confirmations or logout buttons.
+   Form classes register automatically through ``__init_subclass__`` and must not use ``@action``.
+   Pass ``form_class=`` to receive the bound, validated form in the handler.
+   It accepts a form class that does not register its own endpoint, such as a base marked ``Meta.abstract = True``, or a factory callable that builds the form class per request.
+   Passing a ``Form`` subclass that already registered itself raises ``TypeError`` at decoration time.
+   Pass ``scope="page"`` or ``scope="shared"`` to override the scope derived from the declaring file.
+   Any other value is reported as the ``next.E085`` system check and the action is not registered, while the same mistake spelled as ``Meta.scope`` on a form class is reported as ``next.E047``.
+   Pass ``login_required=True`` or ``permission_required=`` to guard the dispatch endpoint, see :ref:`topics-forms-actions-guards` for the semantics.
+   Applying ``@action`` to a class registers no action and returns the class unchanged.
+   The misuse is recorded and reported as the ``next.E053`` system check by ``manage.py check``.
 
 Dependency markers
 ------------------

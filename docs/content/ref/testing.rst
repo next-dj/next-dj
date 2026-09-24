@@ -33,12 +33,13 @@ The module also ships ``envelope_of`` and ``PartialEnvelope`` for decoding patch
 .. automodule:: next.testing.client
    :members:
 
-Signals
-~~~~~~~
+Signal capture
+~~~~~~~~~~~~~~
 
 ``SignalRecorder`` and the ``capture_signals`` wrappers capture framework signal payloads inside a context manager.
+They live in ``next.testing.capture``, which leaves the name ``signals`` to the framework signal modules the recorder connects to.
 
-.. automodule:: next.testing.signals
+.. automodule:: next.testing.capture
    :members:
 
 Isolation
@@ -62,6 +63,10 @@ Rendering
 ~~~~~~~~~
 
 ``render_page`` and ``render_component_by_name`` render a single page or component without an HTTP round trip.
+``at`` drives visibility and seeds the ambient path the body composes from, so a nested ``{% component %}`` resolves from it as well, the way a field component does under :ref:`topics-forms-field-components-composition`.
+The ``collector`` keyword takes a ``StaticCollector`` that catches the co-located assets of the component itself and of anything it nests, which is the one ambient value ``context`` cannot state without naming a private key.
+The ``page_module_path`` keyword names the ``page.py`` a page-scoped ``{% form %}`` or ``{% action_url %}`` in the body resolves against.
+A ``context`` entry naming a seeded key wins over the seed, so a test that wants a different ambient value states it there.
 
 .. automodule:: next.testing.rendering
    :members:

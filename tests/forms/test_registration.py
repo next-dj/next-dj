@@ -3,7 +3,7 @@ import dataclasses
 
 import pytest
 
-from next.forms.diagnostics import RegistrationDiagnostics
+from next.forms.registration import RegistrationDiagnostics
 
 
 _SAMPLES: dict[str, list[object] | dict[str, set[object]]] = {

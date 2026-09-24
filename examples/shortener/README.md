@@ -105,7 +105,7 @@ def link_context(link: DLink[Link]) -> dict[str, object]:
     return {"link": link, "cache_key": f"{CLICK_PREFIX}{link.slug}"}
 ```
 
-`@context("link")` + `@context("cache_key")` would each trigger the `DLink` provider and hit the database twice. The unkeyed form runs the dependency once, merges the dict into the template context.
+`@context("link")` + `@context("cache_key")` would each trigger the `DLink` provider and hit the database twice. The unkeyed form runs the dependency once, merges the dict into the template context. A `dict` is the whole contract of the unkeyed form, so a callable that returns anything else is refused with `next.pages.PageContextShapeError` naming the callable and the page, rather than failing anonymously inside the merge.
 
 **Reusing a shared helper** — wrap it in the page module that needs it:
 
@@ -195,7 +195,7 @@ Three actions author their own patch envelopes through `Patches(request)` and fa
 
 The row markup ships from one place. `on_valid` renders the same [`link_row`](shortener/routes/_widgets/link_row/component.djx) component the page render uses, passing the page's `template.djx` path as `current_template_path` so the component resolver finds a page-scoped `_widgets/` name outside a page render.
 
-Every partial response carries the asset version so the client can tell a stale tab from a fresh deploy. These examples serve assets straight off disk with no hashed manifest to derive a version from, so `config/settings.py` pins one explicitly with `extend_default_backend("PARTIAL_BACKENDS", OPTIONS={"VERSION": "v1"})`. The default `"manifest"` sentinel would resolve to a constant here and leave the guard silent.
+Every partial response carries the asset version so the client can tell a stale tab from a fresh deploy. These examples serve assets straight off disk with no hashed manifest to derive a version from, so `config/settings.py` names the release tag itself with `"STATIC_VERSION": "v1"`. The same string stamps every asset URL and every partial response, and bumping it is what asks an open tab to reload.
 
 ### 7. Components — simple, composite, and shared
 

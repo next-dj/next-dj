@@ -147,7 +147,7 @@ def render(request: HttpRequest, poll: DPoll[Poll]) -> PatchEventStream:
     return PatchEventStream(request, patch_source(request, poll.pk))
 ```
 
-The page module returns a `PatchEventStream` directly. The framework escape hatch in `next/pages/manager.py` returns any `HttpResponseBase` subclass verbatim, so the layout chain and the static collector are bypassed for the streaming endpoint. `PatchEventStream` sets `Cache-Control: no-cache, no-transform` and `X-Accel-Buffering: no` on construction so a proxy or `GZipMiddleware` does not eat the flush, and emits a leading `retry` hint from the `SSE.RETRY_MS` option.
+The page module returns a `PatchEventStream` directly. The framework escape hatch in `next/pages/manager/` returns any `HttpResponseBase` subclass verbatim, so the layout chain and the static collector are bypassed for the streaming endpoint. `PatchEventStream` sets `Cache-Control: no-cache, no-transform` and `X-Accel-Buffering: no` on construction so a proxy or `GZipMiddleware` does not eat the flush, and emits a leading `retry` hint from the `SSE.RETRY_MS` option.
 
 The endpoint stays sync because the broker waits on `threading.Condition`. An ASGI deployment swaps the wake primitive for an `asyncio.Condition` and passes an async source for heartbeat support without touching the page or the signal layer.
 
@@ -264,7 +264,11 @@ Component visibility follows the directory tree. A component is in scope for eve
 
 ### The asset-version guard needs an explicit version
 
-The Vite build is served through plain staticfiles rather than a hashed manifest storage, so the asset-version guard has nothing to derive a stamp from and the example pins `VERSION` by hand. The [examples README](../README.md#conventions-every-example-follows) covers that convention and the `next.W069` check behind it.
+Vite hashes the filenames it builds, so the asset URLs need no `v` parameter and the example sets no `STATIC_VERSION`. The partial guard still wants a stamp that moves, and with no `STATIC_VERSION` to derive from and no hashed manifest storage behind staticfiles it would resolve to a constant, so the example pins a release tag in `PARTIAL_BACKENDS` instead. Bumping it after a rebuild is what tells an open tab its bundle is stale. The [examples README](../README.md#conventions-every-example-follows) covers the convention.
+
+### A page that always redirects refuses submissions it would own
+
+[`polls/screens/page.py`](polls/screens/page.py) is a `render()` that redirects the bare root to `/polls/` unconditionally. Form dispatch authorizes the posted origin page by replaying its `render()`, so any submission naming `/` as its origin would come back as that redirect instead of being handled. Nothing here does: `/` never renders HTML, and the only `{% form %}` of the example sits in `poll_chart` under `polls/[int:id]/_widgets/`, so the poll page is the only origin it can carry. The refusal is honest rather than accidental, because a page that redirects every visitor serves nobody and the authorization call asks it as a GET of `/` exactly as a browser would. A redirect meant to let some requests through stays conditional and is reproduced faithfully, query string and method included.
 
 ## Further reading
 
@@ -279,4 +283,4 @@ The Vite build is served through plain staticfiles rather than a hashed manifest
 - [`next/forms/signals.py`](../../next/forms/signals.py) — `action_dispatched` payload contract used by the receiver.
 - [`next/static/signals.py`](../../next/static/signals.py) — `collector_finalized` signal that drives the Vite dev preamble.
 - [`next/components/context.py`](../../next/components/context.py) — `@component.context` and the `serialize=True` flag.
-- [`docs/content/ref/system-checks.rst`](../../docs/content/ref/system-checks.rst) — `next.W074` for a kind with no insertion verb and `next.W069` for the asset-version guard.
+- [`docs/content/ref/system-checks.rst`](../../docs/content/ref/system-checks.rst) — `next.W074` for a kind with no insertion verb.

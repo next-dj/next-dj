@@ -46,6 +46,16 @@ def _origin_field(html: str) -> str:
     return match.group(1)
 
 
+def _preview_pane(html: str) -> str:
+    match = re.search(
+        r'<div data-markdown-preview.*?<div class="markdown-body[^"]*">(.*?)</div>',
+        html,
+        re.DOTALL,
+    )
+    assert match, "Page did not render a markdown preview pane."
+    return match.group(1)
+
+
 @pytest.fixture()
 def make_article() -> Callable[..., Article]:
     """Return a factory building articles with a slug-derived title."""
@@ -373,6 +383,31 @@ class TestMarkdownPreviewMount:
         assert "data-markdown-preview" in body
         assert "components/markdown_preview.mjs" in body
         assert "marked.min.js" in body
+
+
+class TestNestedFieldComponent:
+    """The textarea widget renders the preview component and carries its assets."""
+
+    def test_widget_output_nests_the_preview_pane(
+        self, next_client: NextClient
+    ) -> None:
+        body = next_client.get(reverse("next:page_articles_new")).content.decode()
+        assert re.search(r"</textarea>\s*<div data-markdown-preview", body)
+
+    def test_nested_component_stylesheet_reaches_the_document(
+        self, next_client: NextClient
+    ) -> None:
+        body = next_client.get(reverse("next:page_articles_new")).content.decode()
+        assert 'href="/static/next/components/markdown_preview.css?v=v1"' in body
+
+    def test_preview_renders_the_bound_body_on_first_paint(
+        self, next_client: NextClient, routing_doc: Article
+    ) -> None:
+        page = reverse(
+            "next:page_articles_edit_slug", kwargs={"slug": routing_doc.slug}
+        )
+        body = next_client.get(page).content.decode()
+        assert "<h1>Routing internals</h1>" in _preview_pane(body)
 
 
 class TestRouterReloadSignal:

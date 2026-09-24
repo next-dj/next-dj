@@ -12,12 +12,58 @@ It also covers the custom-verb registration hook and the protocol backend that s
 The wire protocol and the ``data-next-*`` attributes live in the topic section, see :doc:`/content/topics/partial-rendering/reference`.
 The browser half of the same protocol has its own page, see :doc:`client`.
 
+One module graph sits behind the package facade, and the table below names the piece each concern lives in.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 78
+
+   * - Module
+     - Concern
+   * - ``backends``
+     - The ``PartialProtocolBackend`` contract and the shipped ``JsonPartialProtocolBackend``.
+   * - ``checks``
+     - The startup validation of zone placement, custom verbs, repeated forms, and backend configuration.
+       A package whose submodules re-export through the package address.
+   * - ``envelope``
+     - The frozen value objects of the wire contract, ``Envelope``, ``Patch``, ``Asset``, and ``FormMeta``, and their wire forms.
+   * - ``errors``
+     - Every exception the builder and the zone branch raise when a caller breaks a wire contract.
+   * - ``headers``
+     - The request and response header names, ``PartialIntent`` parsing, ``MergeMode``, and the ``Vary`` stamping.
+   * - ``keys``
+     - The wire keys of the patch protocol, the one module the TypeScript runtime mirrors.
+   * - ``manager``
+     - The protocol-backend manager and the resolution of the asset version.
+   * - ``origin``
+     - Resolution of the host page a partial request morphs out of band, with ``PartialOrigin`` and ``OriginSource``.
+   * - ``patches``
+     - The request-bound ``Patches`` builder and the ``PatchResponse`` it finalises.
+   * - ``ports``
+     - ``PartialShaperImpl``, the implementation bound into the ``PartialShaper`` slot at startup.
+   * - ``registry``
+     - The patch verbs and the zones of a compiled page template.
+       A package holding two unrelated records, the verbs in its ``ops`` submodule and the zones in its ``zones`` submodule, both re-exporting through the package address.
+   * - ``render``
+     - Standalone zone rendering over the full page context, behind ``render_zone``.
+   * - ``shaping``
+     - The pipeline that turns a form action outcome into an envelope, split across submodules behind the package address.
+       ``shape_partial`` is its only entry on the curated ``next.partial`` surface.
+   * - ``signals``
+     - The seven signals the subsystem emits.
+   * - ``sse``
+     - The ``PatchEventStream`` bridge over the page render escape hatch.
+   * - ``view``
+     - The zone branch of the unified page view and its status short-circuits.
+   * - ``zone``
+     - The ``{% zone %}`` tag, its node, and the standalone zone-body renderable.
+
 API tiers
 ---------
 
 The surface splits into tiers that describe the intended audience for each name.
 The lists below are representative.
-The autodoc blocks under `Public API`_ are the exhaustive surface.
+The autodoc blocks under `Public API`_ are the exhaustive surface of every name the tiers list, apart from the ``signals`` and ``checks`` submodules, which are documented on the pages `Signals`_ and `System checks`_ point at.
 
 Stable.
    ``Patches``, ``PatchResponse``, ``PatchEventStream``, ``render_zone``, ``ZoneRenderResult``, ``zone_requested``, ``is_partial_request``, ``partial_intent``, ``register_patch_op``, ``UnknownZoneError``, ``ForeignPageNotAuthorizedError``, and ``LayerHrefWithoutZoneError``.
@@ -32,17 +78,21 @@ Advanced.
    ``ZoneInfo`` and ``zones_of`` live in ``next.partial.registry``.
    The custom-verb exceptions live in ``next.partial.errors``.
 
-   The ``signals`` and ``checks`` submodules carry the partial telemetry.
+   The ``signals`` submodule carries the partial telemetry.
+   The ``checks`` submodule carries the startup validation, which a project reads rather than calls.
    Use these when writing a custom protocol backend, a wire-format plugin, or telemetry.
 
 Framework machinery.
    ``REQUEST_ID`` is the ``X-Next-Request-Id`` header name and lives in ``next.partial.headers``.
    ``PartialIntent`` and ``MergeMode`` live in ``next.partial.headers``.
+   ``VARY_HEADERS`` is the tuple of request headers a partial-capable URL negotiates on, and ``set_partial_vary(response)`` stamps it, both in ``next.partial.headers``.
+   A ``render()`` escape hatch that returns its own response stamps nothing by itself and calls ``set_partial_vary`` when the same URL also answers partial requests.
    ``PartialOrigin`` lives in ``next.partial.origin``.
 
    ``ActionRef``, ``shape_validate``, and ``drain_messages`` live in ``next.partial.shaping``.
    ``PatchOpRegistry``, the ``patch_op_registry`` instance, and ``BUILTIN_OPS`` live in ``next.partial.registry``.
-   ``PartialShaperImpl``, the implementation the app binds into the :doc:`next.ports <ports>` slot at startup, lives in ``next.partial.shaper``.
+   ``PartialShaperImpl``, the implementation the app binds into the :doc:`next.ports <ports>` slot at startup, lives in ``next.partial.ports``.
+   The wire keys of the patch protocol, ``FORM_ZONE_ATTR`` and ``FORM_KEY_ATTR`` among them, live in ``next.partial.keys``, which is the one module the TypeScript runtime mirrors.
 
 Internal hooks.
    Underscore-prefixed helpers inside the submodules are implementation details.
@@ -78,6 +128,7 @@ Building patches
 ``Patches`` is the request-bound builder.
 Each method records one operation and returns ``self`` for chaining, and ``response`` finalises a ``PatchResponse`` or falls back to a redirect when the runtime is absent.
 ``Envelope``, ``Patch``, ``Asset``, and ``FormMeta`` are the frozen value objects the builder assembles, surfaced for a custom backend that serializes the wire format itself.
+``add_asset(kind, url, *, inline=None)`` is the route by which a handler authors an asset reference of its own into the manifest, and the ``url`` it takes passes the same name resolution a full render performs, so a logical name a backend maps to a build output answers alike on both paths, see :doc:`/content/topics/static-assets/name-resolution`.
 
 .. autoclass:: next.partial.Patches
    :members:
@@ -100,7 +151,8 @@ Each method records one operation and returns ``self`` for chaining, and ``respo
 Custom verbs
 ~~~~~~~~~~~~
 
-``register_patch_op`` registers a custom verb name on the server, validated by the ``next.E066`` check, and earns the generic ``Patches.op`` channel.
+``register_patch_op`` registers a custom verb name on the server and earns the generic ``Patches.op`` channel.
+``manage.py check`` reads the registered names, reporting ``next.E066`` for a name that shadows a built-in verb and ``next.E090`` for a name that is not a valid verb token.
 An unregistered name fails at runtime with ``UnknownPatchOpError``.
 The client supplies the handler through ``Next.partial.defineOp``.
 See :doc:`/content/topics/partial-rendering/extending` for the end-to-end recipe.
@@ -127,6 +179,8 @@ Origin and authorization
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``resolve_partial_origin`` is a thin helper that reads the host page that owns a zone out of the same-site ``X-Next-Origin`` header, falling back to the posted form origin, so a ``done`` step can hand the path to ``morph(zone=, page=)`` for a server out-of-band swap.
+The header is validated as sent, percent-encoded like the form origin, and its path is decoded the way Django builds ``request.path`` only once split from the query, so an encoded ``?`` stays in its segment.
+A header that is absent, invalid, or names no page yields to the form origin.
 It stays importable from ``next.partial`` but sits in the Advanced tier, the canonical done choreography addresses the foreign zone through ``morph(zone=, page=, url_kwargs=)``.
 ``OriginSource``, which discriminates the two sources, lives in ``next.partial.origin``.
 
@@ -146,11 +200,14 @@ A custom backend that overrides ``shape_response`` routes partial requests throu
 
 .. autofunction:: next.partial.shape_partial
 
-``PartialShaperImpl`` in ``next.partial.shaper`` is the object that binds these shaping entry points to the ``PartialShaper`` port, so ``next.pages`` and ``next.forms`` reach partial rendering without importing it.
+``PartialShaperImpl`` in ``next.partial.ports`` is the object that binds these shaping entry points to the ``PartialShaper`` port, so ``next.pages`` and ``next.forms`` reach partial rendering without importing it.
 ``NextFrameworkConfig.ready`` composes it into ``next.ports.partial_shaper_slot``, the one place the binding happens, and unlike the settings-driven backends it answers to no ``NEXT_FRAMEWORK`` key.
-A project that shapes partial responses differently subclasses it, overrides one of ``intent``, ``zone_response``, ``shape_response``, and ``shape_validate``, then calls ``partial_shaper_slot.set`` from the ``ready`` of an application listed after ``next`` in ``INSTALLED_APPS``.
+A project that shapes partial responses differently subclasses it, overrides one of ``intent``, ``zone_response``, ``shape_response``, ``shape_validate``, and ``set_vary``, then calls ``partial_shaper_slot.set`` from the ``ready`` of an application listed after ``next`` in ``INSTALLED_APPS``.
 The slot holds one implementation and the last binding wins, so the replacement serves every later request.
 See :doc:`ports` for the protocol the subclass satisfies.
+
+.. autoclass:: next.partial.ports.PartialShaperImpl
+   :members:
 
 SSE stream
 ~~~~~~~~~~
@@ -180,7 +237,7 @@ Exceptions
 
 ``UnknownZoneError``, ``ForeignPageNotAuthorizedError``, and ``LayerHrefWithoutZoneError`` are curated ``next.partial`` exceptions.
 ``UnknownZoneError`` is raised when a partial request names a zone the template does not declare, surfacing as a 400 before any render.
-``ForeignPageNotAuthorizedError`` is raised when an out-of-band morph of a foreign page fails that page's own authorization, so a zone never travels in a response the page would have denied.
+``ForeignPageNotAuthorizedError`` is raised when a zone morph names a page that denies the request, whether the handler named that page itself or ``morph_zone`` took it from the posted origin, so a zone never travels in a response the page would have denied.
 ``LayerHrefWithoutZoneError`` is raised when a layer seeds an ``href`` but names no ``zone=`` to load it into, so the builder refuses the layer instead of opening an empty one on the client.
 
 The remaining nine are rarely caught and stay out of the curated surface.
@@ -225,12 +282,12 @@ They guard the custom-verb contract, the event-name, context-key, and dedupe voc
 Signals
 -------
 
-See :doc:`signals` and :doc:`/content/topics/signals` for the partial signals (``zone_registered``, ``zone_rendered``, ``patch_op_registered``, ``field_validated``, ``sse_stream_opened``, ``sse_stream_closed``).
+See :doc:`signals` and :doc:`/content/topics/signals` for the partial signals (``zone_registered``, ``zone_rendered``, ``patch_op_registered``, ``field_validated``, ``sse_stream_opened``, ``sse_stream_closed``, ``partial_backend_loaded``).
 
 System checks
 -------------
 
-See :doc:`system-checks` for the zone-placement, template-compile, custom-verb, context-binding, and backend-configuration checks (``next.E060`` through ``next.E067``, ``next.E072``, ``next.E073``, ``next.E078``, and ``next.W067`` through ``next.W071``).
+See :doc:`system-checks` for the zone-placement, template-compile, custom-verb, context-binding, and backend-configuration checks (``next.E060`` through ``next.E067``, ``next.E072``, ``next.E073``, ``next.E078``, ``next.E090``, and ``next.W067`` through ``next.W071``).
 
 See also
 --------

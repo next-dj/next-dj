@@ -1,4 +1,4 @@
-"""Exceptions the pages area raises for a page module it cannot load."""
+"""Exceptions the pages area raises for a page module it cannot load or merge."""
 
 from __future__ import annotations
 
@@ -21,4 +21,20 @@ class PageModuleImportError(Exception):
         self.file_path = file_path
 
 
-__all__ = ["PageModuleImportError"]
+class PageContextShapeError(TypeError):
+    """A keyless `@context` answered something other than a mapping.
+
+    The merge would otherwise fail inside `dict.update` without naming the callable.
+    """
+
+    def __init__(self, context_name: str, file_path: Path) -> None:
+        """Compose the message from the callable and the page it was building."""
+        super().__init__(
+            f"The keyless `@context` {context_name} returned a non-mapping "
+            f"while building the context of {file_path}."
+        )
+        self.context_name = context_name
+        self.file_path = file_path
+
+
+__all__ = ["PageContextShapeError", "PageModuleImportError"]

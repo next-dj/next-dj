@@ -75,9 +75,7 @@ def compile_plan(
 ) -> InjectionPlan:
     """Return one plan entry per injectable parameter of `signature`.
 
-    A verdict outside the three-valued contract raises immediately rather than
-    silently changing injection semantics, and does so for every parameter until
-    it is fixed.
+    A verdict outside the three-valued contract raises instead of changing semantics.
     """
     entries: list[ParameterPlan] = []
     for name, raw in signature.parameters.items():

@@ -39,6 +39,7 @@ The framework ships three strategies in ``next.static.collector``.
 ``IdentityDedup``.
    Disables deduplication.
    Every registration yields a unique key, so every asset is emitted.
+   Switch to it while debugging, to confirm exactly which owners registered which assets.
 
 Choosing a strategy
 -------------------
@@ -114,25 +115,6 @@ Point the backend ``OPTIONS`` at the new strategy.
    }
 
 The strategy lives for one request, so it can hold per-request state.
-
-Common patterns
----------------
-
-Shared vendor file
-~~~~~~~~~~~~~~~~~~
-
-The default ``UrlDedup`` already collapses two references to the same vendor URL.
-No configuration is needed for the common case.
-
-Content aware dedup
-~~~~~~~~~~~~~~~~~~~
-
-Switch to ``HashContentDedup`` when the same content ships from two different paths and should emit once.
-
-Disable dedup
-~~~~~~~~~~~~~
-
-Switch to ``IdentityDedup`` for debugging, to confirm exactly which owners registered which assets.
 
 See also
 --------

@@ -12,9 +12,10 @@ from next.forms.dispatch import FormActionDispatch
 from next.forms.dispatch.responses import _normalize_handler_response
 from next.forms.origin import (
     _ORIGIN_MATCH_ATTR,
-    _filter_reserved_url_kwargs,
+    filter_reserved_url_kwargs,
     resolve_origin,
 )
+from next.forms.uid import validated_origin_path
 from tests.support.helpers import build_mock_http_request
 
 
@@ -48,7 +49,7 @@ class TestBenchDispatchHelpers:
     def test_filter_reserved_url_kwargs(self, benchmark) -> None:
         payload = {f"k_{i}": i for i in range(30)}
         payload.update({"request": 1, "form": 2})
-        benchmark(_filter_reserved_url_kwargs, payload)
+        benchmark(filter_reserved_url_kwargs, payload)
 
     @pytest.mark.benchmark(group="forms.dispatch")
     def test_resolve_origin_cold(self, benchmark) -> None:
@@ -78,6 +79,17 @@ class TestBenchDispatchHelpers:
         first = resolve_origin(request)
         match = benchmark(resolve_origin, request)
         assert match is first
+
+
+class TestBenchOriginValidation:
+    @pytest.mark.benchmark(group="forms.origin")
+    def test_validated_origin_path(self, benchmark) -> None:
+        assert benchmark(validated_origin_path, "/items/42/?q=x") == "/items/42/?q=x"
+
+    @pytest.mark.benchmark(group="forms.origin")
+    def test_oversize_protocol_relative_value_refuses(self, benchmark) -> None:
+        """Refused on its length alone, so a megabyte value costs no scan."""
+        assert benchmark(validated_origin_path, "//" + "a" * 2_400_000) is None
 
 
 class _BenchForm(Form):

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import threading
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, override
 
@@ -75,9 +76,7 @@ class ComponentsBackend(ABC):
     def global_component_roots(self) -> Iterable[Path]:
         """Return the scope roots whose root-scope components resolve everywhere.
 
-        A shared root makes its root-scope components visible from every template, a
-        page tree does not, and the cross-root name check reads this to tell the two
-        apart.
+        The cross-root name check reads this to tell a shared root from a page tree.
         """
         return ()
 
@@ -108,6 +107,7 @@ class FileComponentsBackend(ComponentsBackend):
         self._visibility_resolver = ComponentVisibilityResolver(self._registry)
 
         self._loaded = False
+        self._lock = threading.RLock()
 
     @override
     def discover(self) -> None:
@@ -115,10 +115,17 @@ class FileComponentsBackend(ComponentsBackend):
         self._ensure_loaded()
 
     def _ensure_loaded(self) -> None:
+        """Discover the roots once, whatever reaches the backend first.
+
+        The scan registers every `ComponentInfo` it finds, so a second thread
+        arriving mid-discovery has to wait rather than register the tree twice.
+        """
         if self._loaded:
             return
-        self._discover_and_register_all()
-        self._loaded = True
+        with self._lock:
+            if not self._loaded:
+                self._discover_and_register_all()
+                self._loaded = True
 
     def _discover_and_register_all(self) -> None:
         for comp_root in self._extra_component_roots:

@@ -24,9 +24,11 @@ from next.discovery import (
     reset_router_manager_cache,
 )
 from next.pages import page
+from next.pages.ports import PageScanImpl
 from next.ports import PortSlot
 from next.urls import FileRouterBackend, PageRoot, RouterBackend, RouterFactory
 from next.urls.dispatcher import scan_pages_tree
+from next.urls.ports import RouterAccessImpl
 from next.utils import walk_page_tree
 from tests.support import (
     MalformedRootsRouter,
@@ -128,32 +130,75 @@ def _walked_trees(spy: MagicMock) -> list[Path]:
     return [call.args[0] for call in spy.call_args_list]
 
 
+class _CountingRouterAccess(RouterAccessImpl):
+    """Router port that counts the managers a check run asks it to build."""
+
+    def __init__(self, failure: Exception | None = None) -> None:
+        self.built = 0
+        self._failure = failure
+
+    def create_manager(self):
+        self.built += 1
+        if self._failure is not None:
+            raise self._failure
+        return super().create_manager()
+
+
+@contextmanager
+def _counting_router_access(
+    failure: Exception | None = None,
+) -> Iterator[_CountingRouterAccess]:
+    """Bind a counting router port into the slot the discovery pass reads."""
+    access = _CountingRouterAccess(failure)
+    slot: PortSlot = PortSlot("router access port")
+    slot.set(access)
+    with patch("next.discovery.router_access_slot", slot):
+        yield access
+
+
 class TestRouterManagerCache:
     """`get_router_manager` reuses one manager per check run."""
 
     def test_built_once_across_repeated_calls(self) -> None:
-        with patch("next.urls.access.RouterManager") as mock_cls:
+        with _counting_router_access() as access:
             first = get_router_manager()
             second = get_router_manager()
             third = get_router_manager()
         assert first is second is third
-        assert mock_cls.call_count == 1
-        assert mock_cls.return_value.reload.call_count == 1
+        assert access.built == 1
 
     def test_explicit_reset_forces_rebuild(self) -> None:
-        with patch("next.urls.access.RouterManager") as mock_cls:
-            get_router_manager()
+        with _counting_router_access() as access:
+            first, _errors = get_router_manager()
             reset_router_manager_cache()
-            get_router_manager()
-        assert mock_cls.call_count == 2
-        assert mock_cls.return_value.reload.call_count == 2
+            second, _again = get_router_manager()
+        assert access.built == 2
+        assert first is not second
 
     def test_settings_reloaded_signal_resets_cache(self) -> None:
-        with patch("next.urls.access.RouterManager") as mock_cls:
+        with _counting_router_access() as access:
             get_router_manager()
             settings_reloaded.send(sender=None)
             get_router_manager()
-        assert mock_cls.call_count == 2
+        assert access.built == 2
+
+    def test_the_cached_manager_reports_the_routers_of_the_settings(
+        self, tmp_path: Path
+    ) -> None:
+        """A check run reads its routes off this manager, so it carries the trees."""
+        _write_page(tmp_path, "blog")
+        entry = file_router_config_entry(pages_dir=tmp_path)
+
+        with (
+            override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}),
+            _counting_router_access(),
+        ):
+            manager, errors = get_router_manager()
+
+        assert errors == []
+        assert [
+            root.path for backend in manager.backends for root in backend.page_roots()
+        ] == [tmp_path.resolve()]
 
     def test_an_unbound_port_is_reported_rather_than_raised(self) -> None:
         # `manage.py check` on a project whose app never started reports the
@@ -166,13 +211,14 @@ class TestRouterManagerCache:
         assert "unbound" in errors[0].msg
 
     def test_init_error_result_is_cached(self) -> None:
-        with patch("next.urls.access.RouterManager", side_effect=ImportError("boom")):
+        with _counting_router_access(ImportError("boom")) as access:
             manager, errors = get_router_manager()
             second_manager, second_errors = get_router_manager()
         assert manager is None
         assert second_manager is None
         assert errors is second_errors
         assert errors[0].id == "next.E007"
+        assert access.built == 1
 
 
 @contextmanager
@@ -184,11 +230,25 @@ def _manager_over(routers: list[object]) -> Iterator[None]:
         yield
 
 
+class _CountingPageScan(PageScanImpl):
+    """Page-scan port that records the managers a discovery pass hands it."""
+
+    def __init__(self) -> None:
+        self.managers: list[object] = []
+
+    def load_scanned_page_modules(self, router_manager):
+        self.managers.append(router_manager)
+        return super().load_scanned_page_modules(router_manager)
+
+
 @contextmanager
-def _import_spy() -> Iterator[MagicMock]:
-    """Count the page-import passes the discovery seam runs."""
-    with patch("next.pages.scan.load_scanned_page_modules") as spy:
-        yield spy
+def _counting_page_scan() -> Iterator[_CountingPageScan]:
+    """Bind a counting page-scan port into the slot the discovery pass reads."""
+    scan = _CountingPageScan()
+    slot: PortSlot = PortSlot("page scan port")
+    slot.set(scan)
+    with patch("next.discovery.page_scan_slot", slot):
+        yield scan
 
 
 class TestPageRegistrationDiscovery:
@@ -217,21 +277,50 @@ class TestPageRegistrationDiscovery:
         assert loaded == []
 
     def test_a_second_call_runs_the_pass_again(self, tmp_path: Path) -> None:
-        """A repeat is what lets a check run see the tree as it stands."""
-        with _manager_over([_RootTreeRouter([tmp_path])]), _import_spy() as spy:
-            discover_page_registrations()
-            discover_page_registrations()
-        assert spy.call_count == 2
+        """A repeat is what lets a check run see the tree as it stands.
+
+        Django orders its checks freely, so no memo may sit in front of the scan.
+        """
+        page_file = _write_page(tmp_path, "blog")
+        with (
+            _manager_over([_RootTreeRouter([tmp_path])]),
+            _counting_page_scan() as scan,
+        ):
+            first = discover_page_registrations()
+            second = discover_page_registrations()
+
+        assert first == second == [("blog", page_file)]
+        assert len(scan.managers) == 2
+
+    def test_a_tree_rescanned_after_a_reset_reports_the_new_page(
+        self, tmp_path: Path
+    ) -> None:
+        """The per-run walk is what freezes the tree, and a reset is what thaws it."""
+        blog = _write_page(tmp_path, "blog")
+        router = _RootTreeRouter([tmp_path])
+        with _manager_over([router]):
+            first = discover_page_registrations()
+            about = _write_page(tmp_path, "about")
+            frozen = discover_page_registrations()
+            reset_router_manager_cache()
+            after = discover_page_registrations()
+
+        assert first == frozen == [("blog", blog)]
+        assert sorted(after) == sorted([("about", about), ("blog", blog)])
 
     def test_a_given_manager_is_the_one_walked(self, tmp_path: Path) -> None:
         """A caller that resolved its own routers is not sent back to the slot."""
         page_file = _write_page(tmp_path, "blog")
         manager = MagicMock()
         manager.backends = (_RootTreeRouter([tmp_path]),)
-        with patch("next.discovery.get_router_manager") as resolve:
+        with (
+            patch("next.discovery.get_router_manager") as resolve,
+            _counting_page_scan() as scan,
+        ):
             loaded = discover_page_registrations(manager)
         assert loaded == [("blog", page_file)]
         assert resolve.call_count == 0
+        assert scan.managers == [manager]
 
     def test_an_uninitialised_manager_imports_nothing(self) -> None:
         with (
@@ -239,11 +328,11 @@ class TestPageRegistrationDiscovery:
                 "next.discovery.get_router_manager",
                 return_value=(None, [Error("boom", id="next.E007")]),
             ),
-            _import_spy() as spy,
+            _counting_page_scan() as scan,
         ):
             loaded = discover_page_registrations()
         assert loaded == []
-        assert spy.call_count == 0
+        assert scan.managers == []
 
 
 class TestScannedPairsCache:

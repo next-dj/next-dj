@@ -303,6 +303,12 @@ class TestResultsZone:
         assert "X-Next-Zone" in vary
         assert "X-Next-Merge" in vary
 
+    def test_full_page_declares_the_same_vary_set(self, next_client, demo_data) -> None:
+        full = next_client.get("/catalog/")
+        zoned = next_client.get_zones("/catalog/", "catalog-results")
+        declared = {name.strip() for name in zoned["Vary"].split(",")}
+        assert declared <= {name.strip() for name in full["Vary"].split(",")}
+
 
 class TestInfiniteScrollAppend:
     """Cover the revealed sentinel and the append merge it drives."""

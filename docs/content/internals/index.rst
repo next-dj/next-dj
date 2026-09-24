@@ -6,7 +6,25 @@ Internals
 The internals section explains how next.dj works under the hood.
 Each page traces one pipeline with a mermaid diagram, lists the modules involved, and points at the public hooks used to extend it.
 The pages read top to bottom, from a whole-framework map down to individual subsystem pipelines.
-The partial rendering pipeline is traced in :doc:`/content/topics/partial-rendering/how-it-works` rather than on a page here.
+
+The shape every one of them fits into is the request pipeline below.
+
+.. mermaid::
+
+   flowchart LR
+       Request[HTTP request] --> Router["next.urls<br/>file router"]
+       Router --> View["next.pages<br/>page view"]
+       View --> Deps["next.deps<br/>fill parameters"]
+       Deps --> Compose["next.pages + next.components<br/>compose and render"]
+       Compose --> Static["next.static<br/>collect and inject assets"]
+       Static --> Response[HTML response]
+       View -- "zones named" --> Partial["next.partial<br/>render zones, build patches"]
+       Partial --> Envelope[Patch envelope]
+       Request -- "POST /_next/form/uid/" --> Forms["next.forms<br/>guard, bind, dispatch"]
+       Forms -- "valid" --> Redirect[Redirect or handler response]
+       Forms -- "invalid" --> Compose
+
+:doc:`request-lifecycle` expands that into the full account, and :doc:`overview` maps the subsystems it names.
 
 :doc:`overview`
    Map of every subsystem with a signals fan-out diagram.
@@ -32,6 +50,9 @@ The partial rendering pipeline is traced in :doc:`/content/topics/partial-render
 :doc:`action-dispatch`
    Form dispatch, validation, re-render.
 
+:doc:`partial-pipeline`
+   Zones, zone render, patch envelopes, registries.
+
 :doc:`autoreload`
    Watchers, route reload, signals.
 
@@ -53,6 +74,7 @@ The partial rendering pipeline is traced in :doc:`/content/topics/partial-render
    di-resolver
    static-pipeline
    action-dispatch
+   partial-pipeline
    autoreload
    contributing-notes
    adding-an-area

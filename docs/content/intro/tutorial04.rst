@@ -130,13 +130,13 @@ Reload ``/``, submit the form with a title, and confirm that the index lists a n
 Edit a note
 ~~~~~~~~~~~
 
-Create a new page at ``notes/pages/notes/[id]/edit/``.
+Create a new page at ``notes/pages/notes/[int:id]/edit/``.
 The action binds ``CreateNoteForm`` to the existing note through a ``form_class`` factory callable.
 A factory callable is a plain function (not a form class) that returns a ``(FormClass, init_kwargs)`` tuple.
 It receives the same DI-resolved parameters as any other callable, including URL parameters.
 
 .. code-block:: python
-   :caption: notes/pages/notes/[id]/edit/page.py
+   :caption: notes/pages/notes/[int:id]/edit/page.py
 
    from django.http import HttpResponseRedirect
    from django.shortcuts import get_object_or_404
@@ -158,10 +158,10 @@ It receives the same DI-resolved parameters as any other callable, including URL
    @action("update_note", form_class=note_edit_form)
    def update_note(form: CreateNoteForm) -> HttpResponseRedirect:
        note = form.save()
-       return HttpResponseRedirect(reverse("next:page_notes_id", kwargs={"id": note.id}))
+       return HttpResponseRedirect(reverse("next:page_notes_int_id", kwargs={"id": note.id}))
 
-The reverse name ``next:page_notes_id`` assumes the untyped ``notes/[id]/`` directory used in this tutorial.
-A typed segment such as ``notes/[int:id]/`` produces ``page_notes_int_id`` instead.
+The reverse name ``next:page_notes_int_id`` follows the ``notes/[int:id]/`` directory used in this tutorial, converter prefix included.
+An untyped ``notes/[id]/`` directory produces ``page_notes_id`` instead.
 
 The factory passed to ``form_class`` is dependency-resolved at dispatch time, so it receives the captured URL ``id`` and returns the form class paired with the ``instance`` to bind.
 The dispatcher builds and validates that bound form before it calls ``update_note``, so the handler only saves it.
@@ -173,14 +173,14 @@ This tutorial keeps the factory to show the general ``form_class`` mechanism.
 See :doc:`/content/topics/forms/modelforms` for the declarative alternative.
 
 .. code-block:: jinja
-   :caption: notes/pages/notes/[id]/edit/template.djx
+   :caption: notes/pages/notes/[int:id]/edit/template.djx
 
    <h2>Edit {{ note.title }}</h2>
    {% form "update_note" %}
      <label>Title {{ form.title }}</label>
      <label>Body {{ form.body }}</label>
      <button type="submit">Save</button>
-     <a href="{% url 'next:page_notes_id' id=note.id %}">Cancel</a>
+     <a href="{% url 'next:page_notes_int_id' id=note.id %}">Cancel</a>
    {% endform %}
 
 The ``{% form %}`` tag builds and binds the form for the named action itself.
@@ -189,15 +189,15 @@ The ``form`` variable inside the block is the form for ``update_note``, pre-fill
 Add a link from the detail page.
 
 .. code-block:: jinja
-   :caption: notes/pages/notes/[id]/template.djx
+   :caption: notes/pages/notes/[int:id]/template.djx
 
    <article>
      <h2>{{ note.title }}</h2>
      {% if note.body %}<p>{{ note.body }}</p>{% endif %}
      <small>{{ note.created_at|date:"Y-m-d H:i" }}</small>
-     <p>
-       <a href="{% url 'next:page_notes_id_edit' id=note.id %}">Edit</a>
-     </p>
+     <div class="note-actions">
+       <a href="{% url 'next:page_notes_int_id_edit' id=note.id %}">Edit</a>
+     </div>
    </article>
 
 Delete a note
@@ -207,20 +207,23 @@ Delete uses the same dispatch but does not need its own page because a single bu
 Extend the detail template.
 
 .. code-block:: jinja
-   :caption: notes/pages/notes/[id]/template.djx
+   :caption: notes/pages/notes/[int:id]/template.djx
 
    <article>
      <h2>{{ note.title }}</h2>
      {% if note.body %}<p>{{ note.body }}</p>{% endif %}
      <small>{{ note.created_at|date:"Y-m-d H:i" }}</small>
-     <p>
-       <a href="{% url 'next:page_notes_id_edit' id=note.id %}">Edit</a>
+     <div class="note-actions">
+       <a href="{% url 'next:page_notes_int_id_edit' id=note.id %}">Edit</a>
        {% form "delete_note_form" %}
          <input type="hidden" name="confirm" value="on">
          <button type="submit" class="button-danger">Delete</button>
        {% endform %}
-     </p>
+     </div>
    </article>
+
+The wrapper is a ``<div>`` rather than a ``<p>`` because the HTML parser closes an open ``p`` the moment a ``form`` start tag arrives.
+A form nested in a paragraph therefore lands outside it in the browser, leaving an empty paragraph behind and a DOM that no longer matches the template.
 
 The rendered form carries several hidden inputs from different sources.
 ``confirm`` is a real field on ``DeleteNoteForm``, so the template posts it explicitly.
@@ -241,7 +244,7 @@ Add the delete handler to the detail page.
 The detail ``page.py`` only needs to add its own context.
 
 .. code-block:: python
-   :caption: notes/pages/notes/[id]/page.py
+   :caption: notes/pages/notes/[int:id]/page.py
 
    from django.shortcuts import get_object_or_404
    from notes.models import Note
@@ -375,7 +378,7 @@ The Notes application is functionally complete.
            component.js
        notes/
          layout.djx
-         [id]/
+         [int:id]/
            page.py
            template.djx
            edit/

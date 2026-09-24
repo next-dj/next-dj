@@ -36,15 +36,10 @@ With ``DEBUG=False`` the client sees the generic 500 page, and the traceback app
 Without the flag a broken ``page.py`` answers a generic 404 and a missed component renders as an empty string, which monitoring rarely catches.
 See :ref:`ref-settings` for the loudness table across ``DEBUG`` and the strict flags.
 
-Eager component loading
------------------------
+Component module loading
+------------------------
 
-.. code-block:: python
-   :caption: config/settings.py
-
-   NEXT_FRAMEWORK["LAZY_COMPONENT_MODULES"] = False
-
-``LAZY_COMPONENT_MODULES`` defaults to ``False``, and production confirms that value.
+``LAZY_COMPONENT_MODULES`` already defaults to ``False``, which is the production value, so a deployment writes the key only to turn lazy loading on.
 The framework discovers the component tree eagerly in both modes, so the registry knows every component name before traffic.
 The flag controls only when each ``component.py`` module is imported.
 With the default ``False``, every ``component.py`` is imported during startup, so any import-time error surfaces before the first request.
@@ -143,7 +138,6 @@ When several recommendations apply at once, merge them into a single ``NEXT_FRAM
    NEXT_FRAMEWORK = {
        "STRICT_CONTEXT": True,
        "STRICT_LOADING": True,
-       "LAZY_COMPONENT_MODULES": False,
        "JS_CONTEXT_SERIALIZER": "next.static.PydanticJsContextSerializer",
        "PAGE_BACKENDS": extend_default_backend(
            "PAGE_BACKENDS",

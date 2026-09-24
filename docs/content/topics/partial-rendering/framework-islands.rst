@@ -146,4 +146,5 @@ See also
 .. seealso::
 
    :doc:`co-located-js` for the simpler idioms a widget without a framework root uses.
-   :doc:`reference` for the lifecycle events and the client runtime surface in tables.
+   :doc:`reference` for the lifecycle events in tables.
+   :doc:`/content/ref/client` for the runtime surface an island adapter is written against.

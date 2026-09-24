@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from next.caches import BoundedCache
@@ -10,8 +11,6 @@ from next.utils import stat_mtime_ns, template_edits_watched
 
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from django.template import Template
 
     from next.pages.loaders import LayoutTemplateLoader

@@ -43,8 +43,9 @@ For the Notes application the most common layout sits at the root of the page tr
      </body>
    </html>
 
-Writing the ``{% template %}`` placeholder explicitly is the recommended practice because it controls where the page body lands.
+Every ``layout.djx`` carries exactly one ``{% template %}`` placeholder, and it marks where the page body lands.
 The framework substitutes the body of each page into that placeholder.
+A layout that carries none is dropped from composition whole, the pages under it render without its markup, and ``manage.py check`` reports the layout as ``next.W001``.
 When the page has no sibling ``layout.djx``, the framework wraps the page body in the paired ``{% #template %}`` form itself, so an ancestor layout's placeholder stays valid.
 
 Reverse names such as ``next:page_`` come from the file router.
@@ -72,7 +73,6 @@ Share site context
 The layout references ``site_name`` and ``tagline``, but no page module produces them yet.
 Extend the existing ``notes/pages/page.py`` with a :term:`context function` for each value.
 A context function is a callable decorated with ``@context("key")`` that publishes a value to the template scope.
-Pass ``inherit_context=True`` so every descendant page can read the value too.
 
 .. code-block:: python
    :caption: notes/pages/page.py
@@ -93,20 +93,19 @@ Pass ``inherit_context=True`` so every descendant page can read the value too.
    def recent_notes() -> list[Note]:
        return list(Note.objects.all())
 
-``inherit_context`` defaults to ``False``, so a context value published in ``page.py`` is visible only to the page that declares it.
-Passing ``inherit_context=True`` publishes the value to every descendant page as well.
-Without that flag the layout would still render but pages further down the tree would not see them.
+``inherit_context`` defaults to ``False``, so a value published in ``page.py`` reaches only the page that declares it.
+Passing ``inherit_context=True`` publishes it to every descendant page as well, which is what lets the root layout read ``site_name`` on the detail page added below.
 
 Add the detail page
 ~~~~~~~~~~~~~~~~~~~
 
-Create a new directory ``notes/pages/notes/[id]/``.
-The bracketed segment is a URL parameter that the file router captures as ``id``.
-The untyped ``[id]`` segment matches any non-slash string, and ``DUrl["id", int]`` in the page module coerces it to an integer.
-The typed ``[int:id]`` directory form rejects non-numeric URLs at routing time before any page code runs, see :doc:`/content/topics/file-router`.
+Create a new directory ``notes/pages/notes/[int:id]/``.
+The bracketed segment is a URL parameter that the file router captures as ``id``, and the ``int:`` prefix names the Django path converter that matches it.
+A typed segment rejects a non-numeric URL at routing time, before any page code runs, so ``/notes/abc/`` is a 404 rather than a request that carries the string ``abc`` into the query.
+The untyped ``[id]`` form matches any non-slash string instead and leaves every decision about the value to the page, see :doc:`/content/topics/file-router`.
 
 .. code-block:: python
-   :caption: notes/pages/notes/[id]/page.py
+   :caption: notes/pages/notes/[int:id]/page.py
 
    from django.shortcuts import get_object_or_404
    from notes.models import Note
@@ -119,7 +118,7 @@ The typed ``[int:id]`` directory form rejects non-numeric URLs at routing time b
        return get_object_or_404(Note, pk=note_id)
 
 The ``DUrl["id", int]`` annotation is a :term:`DI marker`, the mechanism :doc:`overview` introduces and :doc:`/content/topics/dependency-injection` covers in full.
-It tells the resolver to read the ``id`` segment captured by the ``[id]`` directory and coerce it to ``int``.
+It tells the resolver to read the ``id`` segment captured by the ``[int:id]`` directory and hand it over as an ``int``.
 The segment name is given explicitly because the parameter ``note_id`` differs from the captured segment.
 
 The :func:`~django.shortcuts.get_object_or_404` shortcut is the standard Django way to fetch a row or return a 404 response.
@@ -129,7 +128,7 @@ See :doc:`/content/howto/customize-error-pages` for customising what the visitor
 Add the matching template.
 
 .. code-block:: jinja
-   :caption: notes/pages/notes/[id]/template.djx
+   :caption: notes/pages/notes/[int:id]/template.djx
 
    <article>
      <h2>{{ note.title }}</h2>
@@ -145,12 +144,12 @@ Update the list item inside ``notes/pages/template.djx``.
    :caption: notes/pages/template.djx, the list item
 
    <li>
-     <a href="{% url 'next:page_notes_id' id=note.id %}">{{ note.title }}</a>
+     <a href="{% url 'next:page_notes_int_id' id=note.id %}">{{ note.title }}</a>
      <small>{{ note.created_at|date:"Y-m-d H:i" }}</small>
    </li>
 
 Click a note from the index and confirm that the detail page renders the captured note.
-The URL name ``next:page_notes_id`` reverses with a single keyword argument ``id`` and is generated from the directory shape.
+The URL name ``next:page_notes_int_id`` reverses with a single keyword argument ``id`` and is generated from the directory shape, converter prefix included.
 
 Trace the layout stack
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -212,7 +211,7 @@ Your project tree looks like this.
      template.djx
      notes/
        layout.djx
-       [id]/
+       [int:id]/
          page.py
          template.djx
 
@@ -231,7 +230,7 @@ A layout's markup does not appear on the page.
    ``DUrl[T]`` reads the segment whose name matches the parameter and coerces the value to ``T``.
    The supported types are documented in :doc:`/content/topics/dependency-injection`.
    ``DUrl["name"]`` returns the captured segment in string form.
-   When the Python parameter name differs from the segment, use ``DUrl["id", int]`` for an ``[id]`` directory.
+   When the Python parameter name differs from the segment, use ``DUrl["id", int]`` for an ``[int:id]`` directory.
    A ``DUrl`` segment whose name is not captured by the URL resolves to ``None``, so check that the segment name in ``DUrl["name"]`` matches the bracketed directory.
 
 Inherited context not available in a descendant.

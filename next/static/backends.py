@@ -7,6 +7,7 @@ so manifest, S3, and CDN settings apply automatically.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from html import escape
 from typing import TYPE_CHECKING, Any, ClassVar, override
 
 from django.contrib.staticfiles.storage import staticfiles_storage
@@ -84,7 +85,8 @@ class StaticBackend(ABC):
 class StaticFilesBackend(StaticBackend):
     """Resolve co-located asset URLs through Django staticfiles.
 
-    `css_tag`, `js_tag`, and `module_tag` hold format strings needing `{url}`.
+    `css_tag`, `js_tag`, and `module_tag` hold format strings needing `{url}`, and the
+    URL is escaped into them because the finished tag is spliced past the engine.
     """
 
     _DEFAULT_CSS_TAG: ClassVar[str] = '<link rel="stylesheet" href="{url}">'
@@ -151,7 +153,7 @@ class StaticFilesBackend(StaticBackend):
         The `request` argument holds the contract and the default backend ignores it.
         """
         del request
-        return self._css_tag.format(url=url)
+        return self._css_tag.format(url=escape(str(url)))
 
     def render_script_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
         """Return a script tag built from the configured js_tag template.
@@ -159,7 +161,7 @@ class StaticFilesBackend(StaticBackend):
         The `request` argument holds the contract and the default backend ignores it.
         """
         del request
-        return self._js_tag.format(url=url)
+        return self._js_tag.format(url=escape(str(url)))
 
     def render_module_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
         """Return a module script tag built from the configured module_tag template.
@@ -167,4 +169,4 @@ class StaticFilesBackend(StaticBackend):
         The `request` argument holds the contract and the default backend ignores it.
         """
         del request
-        return self._module_tag.format(url=url)
+        return self._module_tag.format(url=escape(str(url)))
