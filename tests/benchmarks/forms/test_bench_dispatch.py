@@ -45,7 +45,7 @@ class TestBenchDispatchHelpers:
         assert isinstance(_normalize_handler_response(raw), HttpResponseRedirect)
 
     @pytest.mark.benchmark(group="forms.dispatch")
-    def testfilter_reserved_url_kwargs(self, benchmark) -> None:
+    def test_filter_reserved_url_kwargs(self, benchmark) -> None:
         payload = {f"k_{i}": i for i in range(30)}
         payload.update({"request": 1, "form": 2})
         benchmark(filter_reserved_url_kwargs, payload)

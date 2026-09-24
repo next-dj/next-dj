@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import enum
 import json
+from html import escape
 from typing import TYPE_CHECKING, Any, ClassVar, Final
 
 from django.conf import settings
 from django.http.request import HttpHeaders
 from django.middleware.csrf import get_token
-from django.utils.html import escape
 
 from .serializers import resolve_serializer
 

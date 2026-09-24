@@ -278,9 +278,9 @@ Action URL helpers
 It lives in ``next.forms.uid`` and is not re-exported at the package level.
 ``ORIGIN_FIELD_NAME`` is the wire name of the hidden origin field every rendered form carries, ``"_next_form_origin"``.
 ``current_origin_path`` names the URL a rendering request should return to, its query string included.
-``validated_origin_path`` takes the posted value and the live request as a keyword argument, and answers the value only when it is a same-site path.
-Host and scheme are settled by Django's :func:`~django.utils.http.url_has_allowed_host_and_scheme`, given the one host the request names and ``require_https`` taken from ``request.is_secure()``, so a request that names no host lets no absolute target through at all.
-A path-only policy runs on top of that answer and refuses even an absolute URL naming this host, along with a value carrying a tab, a newline, or a carriage return, and a value whose backslashes collapse into a protocol-relative ``//`` prefix.
+``validated_origin_path`` takes the posted value and answers it only when it is a same-site path.
+A path-only policy refuses any absolute URL, this host's own included, along with a value carrying a tab, a newline, or a carriage return, and a value whose backslashes collapse into a protocol-relative ``//`` prefix.
+A value that passes then goes through Django's :func:`~django.utils.http.url_has_allowed_host_and_scheme` with no allowed host, since a path names none, so a fix Django lands in that helper applies here too.
 A browser drops those code points and folds a backslash into a slash before resolving a URL, so leaving either in place would hide a protocol-relative target behind a value that reads as a path.
 ``redirect_to_origin`` builds the success redirect back to the page named by the posted origin field, falling back to ``fallback`` when the field is absent or off-site.
 It is re-exported from ``next.forms``.

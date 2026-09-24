@@ -77,8 +77,7 @@ File uploads.
 
 Origin spoofing.
    The only page identity a form submission carries is the ``_next_form_origin`` URL path, which the dispatcher resolves through the URLconf with :func:`django.urls.resolve`.
-   Before it resolves anything the posted value goes through :func:`django.utils.http.url_has_allowed_host_and_scheme` against the host of the request in flight, the same helper Django's own login ``next`` handling uses, and a path-only rule on top refuses even an absolute URL naming this host.
-   A request carrying no host, such as one built in code, allows no host at all rather than allowing every one.
+   Before it resolves anything a path-only rule refuses every absolute URL, this host's own included, and the path that remains goes through :func:`django.utils.http.url_has_allowed_host_and_scheme`, the same helper Django's own login ``next`` handling uses.
    The client never supplies a filesystem path, so an error re-render can target only pages that are reachable through the routing table anyway.
    A value that does not resolve returns HTTP 400 on the paths that need the origin page, a validation failure, a wizard step, and a handler that returns ``None`` and so re-renders the origin in place.
    Every POST reads the field all the same, because the page it names authorizes the request, and a handler that answers with a response of its own needs nothing further from it.

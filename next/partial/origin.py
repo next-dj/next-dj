@@ -40,7 +40,7 @@ def resolve_partial_origin(request: "HttpRequest") -> "PartialOrigin | None":
     zone of the page owning the layer, and the posted form origin is the fallback.
     """
     intent = partial_intent(request)
-    header = validated_origin_path(intent.origin, request=request)
+    header = validated_origin_path(intent.origin)
     if header is not None:
         match = resolve_url_to_match(header, request)
         if match is not None:

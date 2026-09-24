@@ -132,15 +132,15 @@ _MODULE_MEMO: BoundedCache[Path, tuple[int, types.ModuleType | None]] = BoundedC
 
 
 def _load_python_module_memo(file_path: Path) -> types.ModuleType | None:
-    """Return `_load_python_module(file_path)` memoised by mtime.
+    """Return `_load_python_module(file_path)` memoised by nanosecond mtime.
 
-    The memo keys by nanosecond mtime, so an edit a coarser stamp would round away is
-    still seen, and it is bounded because every entry holds a whole module alive.
+    The absent `page.py` of a template-only page does not stat and answers `None` as is.
     """
     mtime = stat_mtime_ns(file_path)
     if mtime is None:
         _MODULE_MEMO.pop(file_path)
-        return _load_python_module(file_path)
+        _LAST_LOAD_ERROR.pop(file_path, None)
+        return None
 
     cached = _MODULE_MEMO.get(file_path)
     if cached is not None and cached[0] == mtime:

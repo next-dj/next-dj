@@ -145,9 +145,7 @@ class FormNode(template.Node):
         if override is not None:
             return str(override)
         if getattr(request, "method", None) == "POST":
-            posted = validated_origin_path(
-                request.POST.get(ORIGIN_FIELD_NAME), request=request
-            )
+            posted = validated_origin_path(request.POST.get(ORIGIN_FIELD_NAME))
             if posted is not None:
                 return posted
         return current_origin_path(request)

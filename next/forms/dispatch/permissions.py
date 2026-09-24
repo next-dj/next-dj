@@ -65,9 +65,7 @@ def _check_access(
     """
     user = getattr(request, "user", None)
     if user is None or not user.is_authenticated:
-        origin = validated_origin_path(
-            request.POST.get(ORIGIN_FIELD_NAME), request=request
-        )
+        origin = validated_origin_path(request.POST.get(ORIGIN_FIELD_NAME))
         return _redirect_to_login(origin or "/")
     if guard.permissions and not user.has_perms(guard.permissions):
         raise PermissionDenied

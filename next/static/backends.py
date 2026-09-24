@@ -7,10 +7,10 @@ so manifest, S3, and CDN settings apply automatically.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from html import escape
 from typing import TYPE_CHECKING, Any, ClassVar, override
 
 from django.contrib.staticfiles.storage import staticfiles_storage
-from django.utils.html import escape
 
 from next.caches import BoundedCache
 

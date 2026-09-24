@@ -1,8 +1,8 @@
 from unittest.mock import MagicMock
 
 import pytest
-from django.http import HttpRequest
 from django.test import RequestFactory
+from django.utils.http import MAX_URL_LENGTH
 
 from next.forms import redirect_to_origin
 from next.forms.uid import current_origin_path, validated_origin_path
@@ -113,16 +113,11 @@ class TestCurrentOriginPath:
 class TestValidatedOriginPath:
     """`validated_origin_path` keeps a same-site path and refuses everything else."""
 
-    def test_relative_path_survives(self) -> None:
-        request = RequestFactory().post("/items/7/")
-        assert validated_origin_path("/items/9/?q=x", request=request) == (
-            "/items/9/?q=x"
-        )
-
-    def test_secure_request_keeps_a_relative_path(self) -> None:
-        request = RequestFactory().post("/items/7/", secure=True)
-        assert request.is_secure()
-        assert validated_origin_path("/items/9/", request=request) == "/items/9/"
+    @pytest.mark.parametrize(
+        "target", ["/items/9/", "/items/9/?q=x"], ids=("path", "path_with_query")
+    )
+    def test_relative_path_survives(self, target: str) -> None:
+        assert validated_origin_path(target) == target
 
     @pytest.mark.parametrize(
         "target",
@@ -136,8 +131,7 @@ class TestValidatedOriginPath:
     )
     def test_absolute_target_is_refused(self, target: str) -> None:
         """Only a path comes back, so no absolute URL survives, own host included."""
-        request = RequestFactory().post("/items/7/")
-        assert validated_origin_path(target, request=request) is None
+        assert validated_origin_path(target) is None
 
     @pytest.mark.parametrize(
         "target",
@@ -151,30 +145,14 @@ class TestValidatedOriginPath:
     )
     def test_disguised_absolute_target_is_refused(self, target: str) -> None:
         """A browser drops the backslash and the control character, so both refuse."""
-        request = RequestFactory().post("/items/7/")
-        assert validated_origin_path(target, request=request) is None
+        assert validated_origin_path(target) is None
 
     def test_a_path_carrying_a_dropped_code_point_is_refused(self) -> None:
-        request = RequestFactory().post("/items/7/")
-        assert validated_origin_path("/items/?q=x\ty", request=request) is None
+        assert validated_origin_path("/items/?q=x\ty") is None
 
-    def test_request_without_a_host_still_takes_a_relative_path(self) -> None:
-        """A request built in code names no host, which no relative target needs."""
-        request = HttpRequest()
-        request.method = "POST"
-        assert validated_origin_path("/items/9/", request=request) == "/items/9/"
+    def test_a_path_django_refuses_is_refused(self) -> None:
+        """Django's helper still rules on a plain path, here on its length cap."""
+        assert validated_origin_path("/" + "a" * MAX_URL_LENGTH) is None
 
-    @pytest.mark.parametrize(
-        "target",
-        [
-            pytest.param("https://testserver/x/", id="https"),
-            pytest.param("//testserver/x/", id="protocol-relative"),
-            pytest.param("/\\testserver/x/", id="backslash"),
-        ],
-    )
-    def test_request_without_a_host_refuses_an_absolute_target(
-        self, target: str
-    ) -> None:
-        request = HttpRequest()
-        request.method = "POST"
-        assert validated_origin_path(target, request=request) is None
+    def test_a_non_string_is_refused(self) -> None:
+        assert validated_origin_path(None) is None

@@ -90,7 +90,7 @@ def resolve_url_to_page(url: str, request: "HttpRequest") -> "Path | None":
 def _resolve_origin_match(request: "HttpRequest") -> "OriginMatch | None":
     """Resolve the posted origin field against the URLconf."""
     raw = request.POST.get(ORIGIN_FIELD_NAME) if hasattr(request, "POST") else None
-    origin = validated_origin_path(raw, request=request)
+    origin = validated_origin_path(raw)
     if origin is None:
         return None
     return resolve_url_to_match(origin, request)
