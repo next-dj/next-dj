@@ -170,7 +170,7 @@ It is cleared on ``settings_reloaded`` and on a ``setting_changed`` naming ``STO
 
 The partial intent is memoised on the request object, so the page view, the dispatcher, and a template tag all read one parse.
 
-The checks add a fifth, the composed-pages memo in ``next.partial.checks.pages``, which keeps one compile per page for a whole check run and is dropped by ``reset_composed_pages_memo``.
+The checks add a fifth, the composed-pages memo in ``next.pages.checks.composed``, a ``RunMemo`` that keeps one compile per page for a whole check run and is dropped by ``forget_run_memos`` through ``reset_check_caches``.
 
 Signals
 -------

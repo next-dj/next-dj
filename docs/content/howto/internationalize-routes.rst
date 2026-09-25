@@ -129,7 +129,7 @@ See :doc:`/content/topics/seo/social-and-canonical` for the mapping form and the
 
 The sitemap follows the same languages.
 ``i18n = True`` in the ``sitemap.py`` at the top of the page root lists every URL once per language with the prefix in the path, and ``alternates = True`` adds the hreflang block to each entry, see :doc:`/content/topics/seo/sitemaps`.
-Because the router include sits inside ``i18n_patterns``, the sitemap and robots routes it carries sit under the prefix too, so ``path("", include("next.seo.urls"))`` goes in the plain ``urlpatterns`` list ahead of the language block to mount them at the host root.
+Because the router include sits inside ``i18n_patterns``, the sitemap and robots routes it carries sit under the prefix too, so ``path("", include("next.seo.urls"))`` goes in the plain ``urlpatterns`` list ahead of the language block to mount them at the host root, see :ref:`topics-seo-host-root`.
 
 Compile the catalogs
 ~~~~~~~~~~~~~~~~~~~~

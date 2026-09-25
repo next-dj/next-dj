@@ -162,6 +162,15 @@ The same name under a deeper route trail of one tree is the documented override 
 
 .. autofunction:: next.components.get_component_paths_for_watch
 
+Ports
+-----
+
+``next.components.ports`` holds ``ComponentTagsImpl``, which binds the ``ComponentTags`` port of :doc:`ports` to the node the ``{% component %}`` tag compiles to.
+The tag library imports ``next.pages``, so the pages checks behind ``next.W085`` read the component names of a compiled template through the port rather than importing the node class back.
+
+.. automodule:: next.components.ports
+   :members:
+
 System checks
 -------------
 

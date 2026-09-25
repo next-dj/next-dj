@@ -203,7 +203,6 @@ describe("layer flow through the partial surface", () => {
     await partial.layers.open(null, "/w/", "z");
     partial.apply(envelope([{ op: "meta", title: "Wizard" }]));
     expect(document.title).toBe("Wizard");
-    // Ops apply in order, so the close restores "Feed" and the meta then overrides it.
     partial.apply(
       envelope([
         { op: "layer.close", result: 1 },

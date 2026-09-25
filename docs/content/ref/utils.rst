@@ -16,6 +16,7 @@ It lives here rather than beside the router because the system checks build one 
 The rest of the module is framework machinery and is excluded from the listing below.
 It holds ``walk_page_tree``, the depth-first page-tree walk the file router and the system checks both run, ``page_roots_shape_error``, the shared shape probe a check runs over what a router reports, ``template_edits_watched``, the ``DEBUG`` predicate the page, component, and static caches read before they stat anything, and ``normalise_route_name``, the one reading of a hyphen as an underscore that the URL parser and the directory check share.
 Those four sit beside ``PageRoot`` for the reason ``PageRoot`` sits here, that more than one subsystem reads each of them.
+``WEB_SCHEMES``, ``is_bool``, ``is_int``, ``ROUTE_BRACKET_PATTERN``, and ``is_dynamic_trail`` join them for the same reason, the URL schemes a head tag or a sitemap may name, the strict bool and int probes the metadata normaliser and the SEO checks share, and the bracket-segment pattern behind the predicate that tells a route with a parameter from a static one.
 
 Five more flat modules sit at the root of the package for the same reason, and all five are framework-internal.
 ``next.caches`` holds ``BoundedCache`` and ``LruCache``, the two bounded caches every path-keyed memo of the framework is built from, each owning its bound and the policy it gives an entry up by.
@@ -29,7 +30,7 @@ Public API
 
 .. automodule:: next.utils
    :members:
-   :exclude-members: walk_page_tree, page_roots_shape_error, template_edits_watched, normalise_route_name, stat_mtime_ns, resolved_tree, forget_resolved_trees, on_forget_resolved_trees, MAX_ANCESTOR_WALK_DEPTH
+   :exclude-members: walk_page_tree, page_roots_shape_error, template_edits_watched, normalise_route_name, stat_mtime_ns, resolved_tree, forget_resolved_trees, on_forget_resolved_trees, MAX_ANCESTOR_WALK_DEPTH, WEB_SCHEMES, is_bool, is_int, ROUTE_BRACKET_PATTERN, is_dynamic_trail
 
 See also
 --------

@@ -7,6 +7,8 @@ from next.seo import Entry, Rule
 
 
 class TestEntry:
+    """An `Entry` is a frozen value with no kwargs and no hints by default."""
+
     def test_defaults_to_no_kwargs_and_no_hints(self) -> None:
         entry = Entry()
         assert entry.kwargs == {}
@@ -19,6 +21,8 @@ class TestEntry:
 
 
 class TestRule:
+    """A `Rule` pins its lists as tuples and answers every agent it names."""
+
     def test_defaults_to_every_agent_with_no_directives(self) -> None:
         rule = Rule()
         assert rule.user_agent == "*"
@@ -31,6 +35,11 @@ class TestRule:
         assert rule.user_agents == ("a", "b")
         assert rule.allow == ("/",)
         assert rule.disallow == ("/private/",)
+
+    def test_a_bare_path_is_one_path(self) -> None:
+        rule = Rule(allow="/public/", disallow="/admin/")
+        assert rule.allow == ("/public/",)
+        assert rule.disallow == ("/admin/",)
 
     def test_a_single_agent_stays_a_string(self) -> None:
         rule = Rule(user_agent="Googlebot", crawl_delay=5)

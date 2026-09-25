@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Applier, parseEnvelope } from "./apply";
 import type { Asset, AssetBridge, Envelope } from "./apply";
+import { stubBridge } from "./test-doubles";
 
 interface Dispatched {
   event: string;
@@ -1521,8 +1522,7 @@ describe("Applier morph verb", () => {
     const { applier } = makeApplier();
     applier.apply(
       envelope([{ op: "inner", target: { form: "u1" }, html: "<i>hit</i>" }]),
-      undefined,
-      "b",
+      { key: "b" },
     );
     const forms = document.querySelectorAll('[data-next-action="u1"]');
     expect(forms[0]!.textContent).toBe("A");
@@ -1547,8 +1547,7 @@ describe("Applier morph verb", () => {
     const { applier } = makeApplier();
     applier.apply(
       envelope([{ op: "inner", target: { form: "u1" }, html: "<i>hit</i>" }]),
-      undefined,
-      "missing",
+      { key: "missing" },
     );
     expect(document.querySelector('[data-next-action="u1"]')!.textContent).toBe("hit");
   });
@@ -1565,8 +1564,7 @@ describe("Applier morph verb", () => {
       "</body></html>";
     applier.apply(
       envelope([{ op: "morph", target: { form: "u1" }, html: full, extract: true }]),
-      undefined,
-      "b",
+      { key: "b" },
     );
     const forms = document.querySelectorAll('[data-next-action="u1"]');
     expect(forms[0]!.textContent).toBe("A");
@@ -1598,7 +1596,7 @@ describe("Applier morph verb", () => {
           html: '<form data-next-action="u1"><input name="email" value="new"></form>',
         },
       ]),
-      0,
+      { snapshot: 0 },
     );
     expect(input.value).toBe("new");
   });
@@ -1670,7 +1668,7 @@ describe("Applier morph verb", () => {
           html: '<form data-next-action="u1"><input name="email" value="new"></form>',
         },
       ]),
-      0,
+      { snapshot: 0 },
     );
     expect(input.value).toBe("typed");
   });
@@ -1696,7 +1694,7 @@ describe("Applier morph verb", () => {
           html: '<div data-next-zone="z"><details id="d"></details></div>',
         },
       ]),
-      0,
+      { snapshot: 0 },
     );
     expect(document.querySelector("#d")!.hasAttribute("open")).toBe(true);
   });
@@ -1813,19 +1811,13 @@ describe("Applier csrf rotation", () => {
 describe("Applier layer, toast, and url verbs", () => {
   function makeLayerApplier() {
     const calls: { verb: string; args: unknown[] }[] = [];
-    const layers = {
-      resolveZone: (name: string, root: ParentNode) =>
-        root.querySelector(`[data-next-zone="${name}"]`),
-      resolveSelector: (selector: string, root: ParentNode) =>
-        root.querySelector(selector),
-      urlFor: () => "/here/",
-      open: (opener: null, href?: string, zone?: string) =>
+    const layers = stubBridge({
+      open: (opener, href, zone) =>
         calls.push({ verb: "open", args: [opener, href, zone] }),
-      close: (detail: Record<string, unknown>) =>
-        calls.push({ verb: "close", args: [detail] }),
-      toast: (text: string, variant: string) =>
-        calls.push({ verb: "toast", args: [text, variant] }),
-    };
+      close: (detail) => calls.push({ verb: "close", args: [detail] }),
+      retitle: (title, page) => calls.push({ verb: "retitle", args: [title, page] }),
+      toast: (text, variant) => calls.push({ verb: "toast", args: [text, variant] }),
+    });
     const history = {
       push: (href: string) => calls.push({ verb: "push", args: [href] }),
       replace: (href: string) => calls.push({ verb: "replace", args: [href] }),
@@ -1888,6 +1880,27 @@ describe("Applier layer, toast, and url verbs", () => {
     });
   });
 
+  it("meta hands the title and the envelope's page to the stack", () => {
+    const { applier, calls } = makeLayerApplier();
+    applier.apply(envelope([{ op: "meta", title: "Inbox (3)" }]), { page: "/inbox/" });
+    applier.apply(envelope([{ op: "meta", title: "Live" }]), {
+      page: "/a/",
+      owner: "/b/",
+    });
+    applier.apply(envelope([{ op: "meta", title: "Saved" }]));
+    expect(calls).toEqual([
+      { verb: "retitle", args: ["Inbox (3)", "/inbox/"] },
+      { verb: "retitle", args: ["Live", "/b/"] },
+      { verb: "retitle", args: ["Saved", undefined] },
+    ]);
+  });
+
+  it("meta with a non-string title never reaches the stack", () => {
+    const { applier, calls } = makeLayerApplier();
+    applier.apply(envelope([{ op: "meta", title: 7 }]));
+    expect(calls).toEqual([]);
+  });
+
   it("toast hands text and a defaulted variant to the stack", () => {
     const { applier, calls } = makeLayerApplier();
     applier.apply(envelope([{ op: "toast", text: "saved" }]));
@@ -1919,15 +1932,10 @@ describe("Applier layer, toast, and url verbs", () => {
     document.body.innerHTML =
       '<form data-next-action="u1" id="page-form"></form>' +
       '<dialog><div><form data-next-action="u1" id="modal-form"></form></div></dialog>';
-    const layers = {
+    const layers = stubBridge({
       resolveZone: () => null,
-      resolveSelector: (selector: string) =>
-        document.querySelector(`dialog ${selector}`),
-      urlFor: () => "/here/",
-      open: () => undefined,
-      close: () => undefined,
-      toast: () => undefined,
-    };
+      resolveSelector: (selector) => document.querySelector(`dialog ${selector}`),
+    });
     const applier = new Applier({
       dispatch: () => undefined,
       mergeContext: () => undefined,
@@ -1943,18 +1951,12 @@ describe("Applier layer, toast, and url verbs", () => {
 describe("Applier page-scoped zone resolve", () => {
   function makeRecordingApplier() {
     const pages: (string | undefined)[] = [];
-    const layers = {
-      resolveZone: (name: string, root: ParentNode, page?: string) => {
+    const layers = stubBridge({
+      resolveZone: (name, root, page) => {
         pages.push(page);
         return root.querySelector(`[data-next-zone="${name}"]`);
       },
-      resolveSelector: (selector: string, root: ParentNode) =>
-        root.querySelector(selector),
-      urlFor: () => "/here/",
-      open: () => undefined,
-      close: () => undefined,
-      toast: () => undefined,
-    };
+    });
     const applier = new Applier({
       dispatch: () => undefined,
       mergeContext: () => undefined,
@@ -1971,12 +1973,9 @@ describe("Applier page-scoped zone resolve", () => {
   it("threads the fetched page of a zone GET into the layer resolve", () => {
     document.body.innerHTML = '<div data-next-zone="z">old</div>';
     const { applier, pages } = makeRecordingApplier();
-    applier.apply(
-      envelope([{ op: "inner", target: { zone: "z" }, html: "new" }]),
-      undefined,
-      undefined,
-      "/host/",
-    );
+    applier.apply(envelope([{ op: "inner", target: { zone: "z" }, html: "new" }]), {
+      page: "/host/",
+    });
     expect(pages).toEqual(["/host/"]);
     expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("new");
   });
@@ -2106,8 +2105,7 @@ describe("Applier keeps overlapping applies apart across the CSS gate", () => {
         ],
         { assets: [{ kind: "css", url: "/a.css" }] },
       ),
-      1,
-      "a",
+      { snapshot: 1, key: "a" },
     );
     // Apply B runs to completion in the same tick, no CSS to defer behind.
     applier.apply(
@@ -2118,8 +2116,7 @@ describe("Applier keeps overlapping applies apart across the CSS gate", () => {
           html: '<form data-next-action="u1" data-next-key="b" data-from="B"><input name="f" value="server-b-fresh"></form>',
         },
       ]),
-      2,
-      "b",
+      { snapshot: 2, key: "b" },
     );
 
     // B already ran against its own form, so every mark landed on form b.

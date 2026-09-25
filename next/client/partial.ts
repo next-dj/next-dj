@@ -189,7 +189,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
   function sseDeps(adapters?: PartialAdapters) {
     return {
       // A stream event carries no dirty snapshot, so the server value wins.
-      apply: (raw: unknown) => void applier.apply(raw),
+      apply: (raw: unknown, page: string) => void applier.apply(raw, { owner: page }),
       fetch: (request: WireRequest) => void wire.fetch(request),
       dispatch: deps.dispatch,
       pageUrl: (el: Element) => layers.urlFor(el),
@@ -214,7 +214,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
         key: string | undefined,
         page: string | undefined,
       ) => {
-        const envelope = applier.apply(raw, snapshot, key, page);
+        const envelope = applier.apply(raw, { snapshot, key, page });
         // A csrf meta rotates the token so the next mutation submits the fresh
         // one, not just the forms already in the document.
         if (envelope.csrf) csrf = envelope.csrf;

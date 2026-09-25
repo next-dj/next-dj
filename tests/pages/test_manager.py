@@ -1111,7 +1111,7 @@ class TestResolvePageBodyWithoutRender:
         page_file.write_text('template = "<p>static</p>"')
 
         module = _load_python_module_memo(page_file)
-        resolution = page_instance._resolve_page_body(page_file, module)
+        resolution = page_instance._resolve_page_body(page_file, module, _dep_cache={})
 
         assert resolution.body == "<p>static</p>"
         assert resolution.http_response is None
@@ -1123,7 +1123,9 @@ class TestResolvePageBodyWithoutRender:
         """A `template.djx`-only page has no module to carry a `render()`."""
         (tmp_path / "template.djx").write_text("<p>virtual</p>")
 
-        resolution = page_instance._resolve_page_body(tmp_path / "page.py", None)
+        resolution = page_instance._resolve_page_body(
+            tmp_path / "page.py", None, _dep_cache={}
+        )
 
         assert resolution.body == "<p>virtual</p>"
         assert resolution.dynamic is False

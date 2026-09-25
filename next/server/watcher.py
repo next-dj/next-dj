@@ -13,6 +13,7 @@ from next.pages.watch import (
     get_pages_directories_for_watch,
     iter_pages_roots_with_components_folder_names,
 )
+from next.seo.discovery import SOURCE_NAMES
 
 from .signals import watch_specs_ready
 
@@ -23,9 +24,6 @@ if TYPE_CHECKING:
 
 
 _registered_extra_watch_specs: list[tuple[Path, str]] = []
-
-SEO_SOURCE_NAMES: tuple[str, ...] = ("sitemap.py", "robots.py", "robots.txt")
-"""The files at the top of a page tree that switch the SEO routes on."""
 
 
 def register_autoreload_watch_spec(path: Path, glob: str) -> None:
@@ -59,7 +57,7 @@ def _iter_default_autoreload_watch_specs() -> list[tuple[Path, str]]:
     """
     page_roots = get_pages_directories_for_watch()
     specs: list[tuple[Path, str]] = [(p, "**/page.py") for p in page_roots]
-    specs.extend((p, name) for p in page_roots for name in SEO_SOURCE_NAMES)
+    specs.extend((p, name) for p in page_roots for name in SOURCE_NAMES)
     specs.extend(
         (root, f"**/{comp_name}/**/component.py")
         for root, comp_name in iter_pages_roots_with_components_folder_names()

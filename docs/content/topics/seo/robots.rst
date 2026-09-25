@@ -5,7 +5,7 @@ Robots
 
 ``/robots.txt`` has two sources, a ``robots.py`` that declares its groups in Python and a static ``robots.txt`` served as written.
 Both sit at the top of a page root, beside the ``sitemap.py`` of :doc:`sitemaps`, and a site has exactly one of them.
-This page covers the two forms, the ``Sitemap:`` line, the one-source rule, mounting the route at the host root, and why a ``noindex`` page never becomes a ``Disallow``.
+This page covers the two forms, the ``Sitemap:`` line, the one-source rule, and why a ``noindex`` page never becomes a ``Disallow``.
 
 .. contents::
    :local:
@@ -16,6 +16,7 @@ The declared form
 
 ``robots.py`` declares ``rules``, a list of ``Rule`` groups, and an optional ``host``.
 Each ``Rule`` names one user agent or several, the paths it allows and disallows, and a crawl delay.
+A bare string counts as one value for ``user_agent``, ``allow``, and ``disallow`` alike, so ``disallow="/private/"`` disallows that one path.
 
 .. code-block:: python
    :caption: notes/pages/robots.py
@@ -49,12 +50,12 @@ The response is ``text/plain; charset=utf-8``.
 
 An empty ``robots.py`` declares allow-all, ``User-agent: *`` and ``Allow: /``, plus the ``Sitemap:`` line when a sitemap exists, which is the shortest way to point a crawler at the document.
 A ``rules`` value that is not a list of ``Rule`` reads as none and ``next.E113`` reports it, as it does a ``host`` that is not a string.
-Like ``sitemap.py``, the file is executed like a ``page.py``, memoised on its mtime, and watched by the development server.
+Like ``sitemap.py``, the file is loaded once when the framework discovers the tree and kept until the SEO routes reset, and the development server restarts on an edit.
 
 The Sitemap line
 ----------------
 
-The ``Sitemap:`` line is written when any page root declares a ``sitemap.py``, and left out otherwise.
+The ``Sitemap:`` line is written while the project serves a sitemap, and left out when no page root declares a ``sitemap.py`` or ``NOINDEX`` keeps the sitemap unserved, see :doc:`/content/ref/settings`.
 Its URL is absolute, ``base`` from ``NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]`` followed by the path of the sitemap route, and without a base the origin of the request.
 The path is reversed in the namespace the request reached the robots route through, so a robots served from ``include("next.seo.urls")`` names a sitemap under the same include.
 
@@ -72,7 +73,7 @@ The file is re-read when its mtime moves and answers 404 when it is gone.
 
    Sitemap: https://notes.example/sitemap.xml
 
-Nothing is appended to a static file, so the ``Sitemap:`` line is written by hand with the absolute URL.
+Nothing is appended to a static file, so the ``Sitemap:`` line is written by hand with the absolute URL, and ``NOINDEX`` leaves it in place.
 ``next.W103`` reports a static file that names no sitemap while the project serves one, and ``next.E117`` a file that does not decode as UTF-8.
 The static form suits a project whose robots never changes, and the declared form a project that wants the sitemap URL to follow ``base``.
 
@@ -85,27 +86,7 @@ At runtime the first source in router order answers, ``robots.py`` ahead of ``ro
 
 The route ``next:robots`` exists only while a source does, like the sitemap routes, so a project without a robots file keeps whatever ``path("robots.txt", ...)`` it mounts after ``include("next.urls")``.
 A page directory named ``robots.txt`` or a urlpattern ahead of the include on the same address is ``next.E115``.
-
-Mounting at the host root
--------------------------
-
-Crawlers read ``/robots.txt`` and ``/sitemap.xml`` at the root of the host, and the routes go wherever ``include("next.urls")`` goes.
-A router mounted under a prefix, or inside :func:`~django.conf.urls.i18n.i18n_patterns`, moves them out of reach, which ``next.W099`` reports as an address the URLconf does not resolve.
-``next.seo.urls`` mounts the same three routes on its own, under the ``next_seo`` namespace, for the root of the URLconf.
-
-.. code-block:: python
-   :caption: config/urls.py
-
-   from django.conf.urls.i18n import i18n_patterns
-   from django.urls import include, path
-
-   urlpatterns = [
-       path("", include("next.seo.urls")),
-       *i18n_patterns(path("", include("next.urls")), prefix_default_language=False),
-   ]
-
-The include lists ``sitemap.xml``, ``sitemap-<section>.xml``, and ``robots.txt`` whether or not a source exists, and a route without one answers 404.
-Mounted beside a prefix-free ``include("next.urls")`` the two answer the same views, so the pair draws no collision error.
+A router under a prefix or inside :func:`~django.conf.urls.i18n.i18n_patterns` takes the route away from the host root, and :ref:`topics-seo-host-root` brings it back through ``next.seo.urls``.
 
 No Disallow from noindex
 ------------------------

@@ -7,6 +7,7 @@ from typing import override
 from django.apps import AppConfig
 
 from next.checks import register_all as _register_checks
+from next.components.ports import ComponentTagsImpl
 from next.deps.resolver import apply_resolver_setting, forget_dep_caches
 from next.forms.autodiscover import autodiscover_forms
 from next.pages.loaders import forget_page_roots
@@ -14,6 +15,7 @@ from next.pages.ports import PageScanImpl
 from next.pages.watch import forget_watch_state
 from next.partial.ports import PartialShaperImpl
 from next.ports import (
+    component_tags_slot,
     page_scan_slot,
     partial_shaper_slot,
     router_access_slot,
@@ -54,6 +56,7 @@ class NextFrameworkConfig(AppConfig):
         # For the same reason, and so a discovery failure leaves no process behind
         # with an unbound port. The static handle stays lazy, because binding it
         # stores the handle rather than reading through it.
+        component_tags_slot.set(ComponentTagsImpl())
         page_scan_slot.set(PageScanImpl())
         partial_shaper_slot.set(PartialShaperImpl())
         router_access_slot.set(RouterAccessImpl())

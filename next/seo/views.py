@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import datetime
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -11,8 +10,7 @@ from django.contrib.sitemaps.views import x_robots_tag
 from django.contrib.sites.shortcuts import get_current_site
 from django.http import Http404, HttpResponse
 from django.template.response import TemplateResponse
-from django.urls import reverse
-from django.utils import timezone
+from django.urls import NoReverseMatch, reverse
 from django.utils.http import http_date
 from django.views.decorators.cache import cache_page
 
@@ -20,9 +18,11 @@ from next.pages.metadata import site_segment
 
 from .manager import seo_manager
 from .robots import RobotsFile
+from .sitemaps import lastmod_datetime
 
 
 if TYPE_CHECKING:
+    import datetime
     from collections.abc import Callable
 
     from django.http import HttpRequest
@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 
 ROBOTS_CONTENT_TYPE = "text/plain; charset=utf-8"
 DEFAULT_NAMESPACE = "next"
+HOST_ROOT_NAMESPACE = "next_seo"
 
 type View = Callable[..., HttpResponse]
 
@@ -55,12 +56,23 @@ def _namespace(request: HttpRequest) -> str:
 def _later(
     current: datetime.datetime | None, new: datetime.datetime | datetime.date
 ) -> datetime.datetime:
-    """Return the later of two lastmod values, a bare date read as midnight UTC."""
-    if not isinstance(new, datetime.datetime):
-        new = datetime.datetime.combine(new, datetime.time.min)
-    if timezone.is_naive(new):
-        new = timezone.make_aware(new, datetime.UTC)
+    """Return the later of two lastmod values, read the way the sections read them."""
+    new = lastmod_datetime(new)
     return new if current is None else max(current, new)
+
+
+def _is_prefixed_copy(request: HttpRequest) -> bool:
+    """Whether `next.seo.urls` serves this route elsewhere, so this copy answers 404."""
+    match = request.resolver_match
+    if match is None or match.namespace == HOST_ROOT_NAMESPACE:
+        return False
+    try:
+        address = reverse(
+            f"{HOST_ROOT_NAMESPACE}:{match.url_name}", kwargs=match.kwargs
+        )
+    except NoReverseMatch:
+        return False
+    return address != request.path
 
 
 def _needs_index(sitemaps: dict[str, RouteSitemap]) -> bool:
@@ -107,9 +119,12 @@ def _index(request: HttpRequest, sitemaps: dict[str, RouteSitemap]) -> HttpRespo
 
 def _sitemap(request: HttpRequest, section: str | None = None) -> HttpResponse:
     """Answer one section, the whole set, or the index when the set needs one."""
+    if _is_prefixed_copy(request):
+        msg = "The sitemap is served at the host root through next.seo.urls"
+        raise Http404(msg)
     sitemaps = seo_manager.sitemaps(request=request)
     if not sitemaps:
-        msg = "No sitemap.py declares a sitemap"
+        msg = "No sitemap.py declares a sitemap, or NOINDEX keeps it unserved"
         raise Http404(msg)
     if section is None and _needs_index(sitemaps):
         return _index(request, sitemaps)
@@ -118,7 +133,7 @@ def _sitemap(request: HttpRequest, section: str | None = None) -> HttpResponse:
 
 
 def _sitemap_url(request: HttpRequest) -> str | None:
-    """Return the absolute `sitemap.xml` for the `Sitemap:` line, when one exists."""
+    """Return the absolute `sitemap.xml` for the `Sitemap:` line, when one is served."""
     if not seo_manager.has_sitemap():
         return None
     url = reverse(f"{_namespace(request)}:sitemap")
@@ -128,8 +143,11 @@ def _sitemap_url(request: HttpRequest) -> str | None:
     return request.build_absolute_uri(url)
 
 
-def _robots(request: HttpRequest) -> HttpResponse:
-    """Answer the one robots source as plain text."""
+def robots_view(request: HttpRequest) -> HttpResponse:
+    """Serve `/robots.txt`, never cached, so a `robots.txt` edit shows at once."""
+    if _is_prefixed_copy(request):
+        msg = "robots.txt is served at the host root through next.seo.urls"
+        raise Http404(msg)
     source = seo_manager.robots_source()
     if source is None:
         msg = "No robots.py or robots.txt declares robots"
@@ -169,14 +187,9 @@ class _WrappedSitemap:
 _wrapped_sitemap = _WrappedSitemap()
 
 
-def sitemap(request: HttpRequest, section: str | None = None) -> HttpResponse:
+def sitemap_view(request: HttpRequest, section: str | None = None) -> HttpResponse:
     """Serve `/sitemap.xml` and `/sitemap-<section>.xml`."""
     return _wrapped_sitemap.get()(request, section=section)
 
 
-def robots(request: HttpRequest) -> HttpResponse:
-    """Serve `/robots.txt`, never cached so a `robots.py` edit shows at once."""
-    return _robots(request)
-
-
-__all__ = ["ROBOTS_CONTENT_TYPE", "IndexItem", "robots", "sitemap"]
+__all__ = ["robots_view", "sitemap_view"]

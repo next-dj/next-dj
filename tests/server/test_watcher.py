@@ -8,14 +8,15 @@ from django.test import override_settings
 
 import next.server
 from next.conf import next_framework_settings
+from next.seo.discovery import SOURCE_NAMES
 from next.server import iter_all_autoreload_watch_specs, register_autoreload_watch_spec
 from next.server.watcher import (
-    SEO_SOURCE_NAMES,
     _dedupe_watch_specs,
     _iter_default_autoreload_watch_specs,
     _registered_extra_watch_specs,
 )
 from tests.support.backends import file_components_entry, watching_components_entry
+from tests.support.helpers import file_router_config_entry
 
 
 if TYPE_CHECKING:
@@ -123,26 +124,19 @@ class TestServerAutoreloadWatchApi:
 
 
 class TestSeoSourcesAreWatched:
-    """The files that switch the SEO routes on restart the dev server on change."""
+    """The SEO sources at the top of a page tree restart the dev server on change."""
 
     def test_every_page_root_watches_the_three_seo_sources(self, tmp_path) -> None:
-        with override_settings(
-            NEXT_FRAMEWORK={
-                "PAGE_BACKENDS": [
-                    {
-                        "BACKEND": "next.urls.FileRouterBackend",
-                        "PAGES_DIR": "pages",
-                        "APP_DIRS": False,
-                        "DIRS": [str(tmp_path.resolve())],
-                        "OPTIONS": {},
-                    }
-                ]
-            }
-        ):
+        entry = file_router_config_entry(pages_dir=str(tmp_path.resolve()))
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}):
             specs = _iter_default_autoreload_watch_specs()
         globs = [g for p, g in specs if p == tmp_path.resolve()]
         assert globs[0] == "**/page.py"
-        assert [g for g in globs if g in SEO_SOURCE_NAMES] == list(SEO_SOURCE_NAMES)
+        assert [g for g in globs if g in SOURCE_NAMES] == [
+            "sitemap.py",
+            "robots.py",
+            "robots.txt",
+        ]
 
 
 class TestServerPublicSurface:

@@ -14,7 +14,7 @@ NEXT: str = "next"
 """Shared system-check tag that selects every `next-dj` check."""
 
 SEO: str = "seo"
-"""System-check tag selecting the opt-in SEO content audits."""
+"""System-check tag selecting the `next.seo` checks and the opt-in SEO audits."""
 
 
 if TYPE_CHECKING:
@@ -114,6 +114,7 @@ if TYPE_CHECKING:
         check_seo_routes_at_host_root,
         check_seo_sources_below_root,
         check_sitemap_dynamic_routes,
+        check_sitemap_items_files,
         check_sitemap_items_trails,
         check_sitemap_noindex_items,
         check_sitemap_section_labels,
@@ -231,6 +232,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_seo_routes_at_host_root",
         "check_seo_sources_below_root",
         "check_sitemap_dynamic_routes",
+        "check_sitemap_items_files",
         "check_sitemap_items_trails",
         "check_sitemap_noindex_items",
         "check_sitemap_section_labels",
@@ -338,6 +340,7 @@ __all__ = [
     "check_single_metadata_callable",
     "check_single_partial_backend",
     "check_sitemap_dynamic_routes",
+    "check_sitemap_items_files",
     "check_sitemap_items_trails",
     "check_sitemap_noindex_items",
     "check_sitemap_section_labels",
@@ -378,17 +381,12 @@ def reset_check_caches() -> None:
     # Reached by name because each of these pulls in an area package that imports
     # its own `checks` module, and that module imports `NEXT` back from here.
     importlib.import_module("next.discovery").reset_router_manager_cache()
+    importlib.import_module("next.checks.common").forget_run_memos()
     sources = importlib.import_module("next.components.sources")
     sources.reset_components_manager_cache()
-    importlib.import_module("next.partial.checks").reset_composed_pages_memo()
     importlib.import_module("next.urls.checks").reset_collected_patterns_cache()
-    importlib.import_module("next.pages.loaders").reset_module_memo()
-    manager = importlib.import_module("next.pages.manager")
-    manager.reset_context_registry()
-    manager.reset_metadata_registry()
-    importlib.import_module("next.pages.metadata").forget_site_defaults()
-    importlib.import_module("next.seo.manager").seo_manager.reset()
-    importlib.import_module("next.seo.registry").sitemap_items_registry.reset()
+    importlib.import_module("next.pages.manager").reset_page_registrations()
+    importlib.import_module("next.seo.manager").reset_seo_sources()
 
 
 def __getattr__(name: str) -> object:

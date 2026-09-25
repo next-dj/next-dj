@@ -33,14 +33,22 @@ They read ``router_access_slot`` instead, at watch time and at check time.
 ``collect_component_assets`` folds the co-located assets of one composite component into a caller-supplied collector, which is how a component render reaches the static pipeline from the same side.
 Every method resolves the manager when it is called rather than when the slot is bound, so a settings reload that drops the wrapped manager still reaches every later render.
 
-``SeoRoutes`` answers the sitemap and robots routes the lazy urlpatterns of ``next.urls`` append as their third pattern source, and the version those routes were built under.
+``SeoRoutes`` answers the sitemap and robots routes the lazy urlpatterns of ``next.urls`` append as their third pattern source.
 ``next.seo`` imports ``next.urls`` for the router manager and the reverse helper, so the pattern concat reads ``seo_routes_slot`` rather than importing the seo area back.
-``patterns`` answers the two sitemap routes while a ``sitemap.py`` exists and the robots route while a robots source does, and ``version`` is the seo manager version that joins the router and form-action versions in the three-part token the concat is cached against.
+``patterns`` answers the two sitemap routes while a page tree declares a ``sitemap.py`` and the robots route while a robots source exists.
+The sources change only through a router reload, which moves the router version, so the concat stays cached against the router and form-action versions alone.
+
+``ComponentTags`` answers the name of every ``{% component %}`` tag a compiled node list holds.
+The component tag library imports ``next.pages``, so the pages checks read ``component_tags_slot`` rather than importing the node class back.
+
+``PortSlot.peek`` answers the bound implementation, or ``None`` before the app is ready.
+The lazy urlpatterns read the seo slot through it, so a concat built before ``NextFrameworkConfig.ready()`` leaves the seo routes out and caches nothing, and a URL resolved or reversed from an earlier ``ready()`` still works.
 
 Implementations
 ---------------
 
-Each area binds its own implementation from a ``ports`` module of its own, one class per port, holding nothing but the delegation to the area's real entry points.
+Each area binds its own implementation, one class per port, holding nothing but the delegation to the area's real entry points.
+Every implementation lives in the ``ports`` module of its area.
 
 .. list-table::
    :header-rows: 1
@@ -49,6 +57,9 @@ Each area binds its own implementation from a ``ports`` module of its own, one c
    * - Port
      - Implementation
      - Slot
+   * - ``ComponentTags``
+     - ``next.components.ports.ComponentTagsImpl``
+     - ``component_tags_slot``
    * - ``PageScan``
      - ``next.pages.ports.PageScanImpl``
      - ``page_scan_slot``
@@ -65,7 +76,7 @@ Each area binds its own implementation from a ``ports`` module of its own, one c
      - ``next.static.ports.StaticAssetsImpl``
      - ``static_assets_slot``
 
-``next.apps`` binds all five in ``NextFrameworkConfig.ready()``, ahead of every step that imports user code.
+``next.apps`` binds all six in ``NextFrameworkConfig.ready()``, ahead of every step that imports user code.
 A project that replaces one subclasses the shipped implementation and calls ``set`` on the slot from the ``ready()`` of an application listed after ``next`` in ``INSTALLED_APPS``, since the slot holds one implementation and the last binding wins.
 
 Public API

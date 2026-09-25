@@ -260,6 +260,18 @@ Page and component modules that use `DPoll[Poll]` never start with `from __futur
 
 Component visibility follows the directory tree. A component is in scope for every template at or below its scope root, so the detail template can call `poll_card` but the index template cannot call `poll_chart`. Placing a composite at the narrowest scope that uses it keeps the name from leaking into pages that have no data to feed it.
 
+### 10. A vote tab titled after its question
+
+[`studio/layout.djx`](studio/layout.djx) calls the shared `page_head` component without a title, and the builtin `{% metadata %}` tag inside it folds `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` from [`config/settings.py`](config/settings.py) with what the page tree declares. [`polls/page.py`](polls/screens/polls/page.py) titles the index with the one-line `metadata: MetadataDict = {"title": "Polls"}`, and [`[int:id]/page.py`](polls/screens/polls/[int:id]/page.py) registers a callable beside the `poll` context of section 7:
+
+```python
+@page.metadata
+def poll_meta(poll: Poll) -> MetadataDict:
+    return {"title": poll.question}
+```
+
+The parameter is named after the context key, so the callable receives the row that context resolved through `DPoll[Poll]` and the tab reads `Tabs or spaces? · next.dj polls`. The index dict still reaches the vote page as a parent, and the callable's title overrides it. The bare root is a redirect and the stream endpoint hands its response back verbatim from `render()`, so neither renders a head. Every poll is public, so no page carries a robots directive. One parametrized integration test pins both titles.
+
 ## Gotchas
 
 ### The asset-version guard needs an explicit version
@@ -283,4 +295,5 @@ Vite hashes the filenames it builds, so the asset URLs need no `v` parameter and
 - [`next/forms/signals.py`](../../next/forms/signals.py) — `action_dispatched` payload contract used by the receiver.
 - [`next/static/signals.py`](../../next/static/signals.py) — `collector_finalized` signal that drives the Vite dev preamble.
 - [`next/components/context.py`](../../next/components/context.py) — `@component.context` and the `serialize=True` flag.
+- [`next/pages/metadata/`](../../next/pages/metadata/) — the metadata chain behind the index dict and the `@page.metadata` callable of section 10.
 - [`docs/content/ref/system-checks.rst`](../../docs/content/ref/system-checks.rst) — `next.W074` for a kind with no insertion verb.

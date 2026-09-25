@@ -8,7 +8,22 @@ from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
 from next.pages.errors import PageMetadataShapeError, PageMetadataURLError
-from next.pages.metadata import OpenGraph, Robots
+from next.pages.metadata import normalize_metadata, normalize_site_metadata
+from next.pages.metadata.schema import (
+    AlternatesDict,
+    ArticleDict,
+    MetadataDict,
+    OpenGraph,
+    OpenGraphDict,
+    OpenGraphImageDict,
+    Robots,
+    RobotsDict,
+    SiteMetadataDict,
+    SiteTitleDict,
+    TitleDict,
+    TwitterDict,
+    VerificationDict,
+)
 from next.urls import DUrl
 from tests.support.backends import PROJECT_APP_DIRECTORIES_FINDER
 from tests.support.helpers import file_router_config_entry
@@ -20,6 +35,7 @@ if TYPE_CHECKING:
     from django.http import HttpRequest
 
     from next.deps import DependencyResolver
+    from next.pages.metadata import Segment
 
 
 _UUID_TEXT = "12345678-1234-5678-1234-567812345678"
@@ -1100,7 +1116,7 @@ METADATA_MERGE_CASES: tuple[MetadataMergeCase, ...] = (
 
 
 @dataclass(frozen=True, slots=True)
-class TemplateCase:
+class TitleTemplateCase:
     """One title template and either its substitution or the error it raises."""
 
     id: str
@@ -1110,63 +1126,63 @@ class TemplateCase:
     error_fragment: str | None = None
 
 
-TEMPLATE_CASES: tuple[TemplateCase, ...] = (
-    TemplateCase(
+TITLE_TEMPLATE_CASES: tuple[TitleTemplateCase, ...] = (
+    TitleTemplateCase(
         "both_placeholders",
         "{title} · {site_name}",
         {"title": "Wallet", "site_name": "Acme"},
         expected="Wallet · Acme",
     ),
-    TemplateCase("plain_text", "Acme", {"title": "Wallet"}, expected="Acme"),
-    TemplateCase(
+    TitleTemplateCase("plain_text", "Acme", {"title": "Wallet"}, expected="Acme"),
+    TitleTemplateCase(
         "escaped_braces",
         "{{title}} {title}",
         {"title": "Wallet"},
         expected="{title} Wallet",
     ),
-    TemplateCase(
+    TitleTemplateCase(
         "site_name_alone",
         "{site_name}",
         {"title": "Wallet", "site_name": "Acme"},
         expected="Acme",
     ),
-    TemplateCase(
+    TitleTemplateCase(
         "attribute_access",
         "{x.__class__}",
         error_fragment="names the placeholder 'x.__class__', expected one of "
         "site_name, title",
     ),
-    TemplateCase(
+    TitleTemplateCase(
         "index_access", "{c[0]}", error_fragment="names the placeholder 'c[0]'"
     ),
-    TemplateCase("positional", "{0}", error_fragment="names the placeholder '0'"),
-    TemplateCase("auto_numbered", "{}", error_fragment="names the placeholder ''"),
-    TemplateCase(
+    TitleTemplateCase("positional", "{0}", error_fragment="names the placeholder '0'"),
+    TitleTemplateCase("auto_numbered", "{}", error_fragment="names the placeholder ''"),
+    TitleTemplateCase(
         "conversion",
         "{title!r}",
         error_fragment="formats the placeholder 'title', expected a bare {title}",
     ),
-    TemplateCase(
+    TitleTemplateCase(
         "format_spec",
         "{title:>10}",
         error_fragment="formats the placeholder 'title', expected a bare {title}",
     ),
-    TemplateCase(
+    TitleTemplateCase(
         "unbalanced_open",
         "{title",
         error_fragment="is malformed, expected '}' before end of string",
     ),
-    TemplateCase(
+    TitleTemplateCase(
         "unbalanced_close",
         "}",
         error_fragment="is malformed, Single '}' encountered in format string",
     ),
-    TemplateCase(
+    TitleTemplateCase(
         "unknown_name",
         "{nope}",
         error_fragment="names the placeholder 'nope', expected one of site_name, title",
     ),
-    TemplateCase(
+    TitleTemplateCase(
         "missing_value",
         "{title} · {site_name}",
         {"title": "Wallet"},
@@ -1219,8 +1235,7 @@ ROBOTS_CASES: tuple[RobotsCase, ...] = (
 class AbsoluteUrlCase:
     """One URL to make absolute, the base and request path it sees, and the outcome.
 
-    A `path` of `None` means no request at all, and `error` names the exception the
-    resolution raises instead of answering `expected`.
+    A `path` of `None` means no request, and `error` names what raises over `expected`.
     """
 
     id: str
@@ -1289,4 +1304,47 @@ ABSOLUTE_URL_CASES: tuple[AbsoluteUrlCase, ...] = (
     AbsoluteUrlCase(
         "ftp_scheme", "ftp://x.example/a", path="/p/", error=PageMetadataShapeError
     ),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class SchemaParityCase:
+    """One metadata ``TypedDict`` and how a public normaliser reaches its block."""
+
+    id: str
+    typed_dict: type
+    normalize: Callable[..., Segment]
+    nest: Callable[[dict[str, object]], dict[str, object]] = lambda block: block
+
+
+SCHEMA_PARITY_CASES: tuple[SchemaParityCase, ...] = (
+    SchemaParityCase("page", MetadataDict, normalize_metadata),
+    SchemaParityCase("site", SiteMetadataDict, normalize_site_metadata),
+    SchemaParityCase("title", TitleDict, normalize_metadata, lambda b: {"title": b}),
+    SchemaParityCase(
+        "site_title", SiteTitleDict, normalize_site_metadata, lambda b: {"title": b}
+    ),
+    SchemaParityCase("og", OpenGraphDict, normalize_metadata, lambda b: {"og": b}),
+    SchemaParityCase(
+        "og_image",
+        OpenGraphImageDict,
+        normalize_metadata,
+        lambda b: {"og": {"images": [b]}},
+    ),
+    SchemaParityCase(
+        "article", ArticleDict, normalize_metadata, lambda b: {"og": {"article": b}}
+    ),
+    SchemaParityCase(
+        "twitter", TwitterDict, normalize_metadata, lambda b: {"twitter": b}
+    ),
+    SchemaParityCase(
+        "alternates", AlternatesDict, normalize_metadata, lambda b: {"alternates": b}
+    ),
+    SchemaParityCase(
+        "verification",
+        VerificationDict,
+        normalize_metadata,
+        lambda b: {"verification": b},
+    ),
+    SchemaParityCase("robots", RobotsDict, normalize_metadata, lambda b: {"robots": b}),
 )

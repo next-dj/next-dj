@@ -16,17 +16,23 @@ Run the opt-in content audits with ``manage.py check --deploy --tag seo`` in CI 
 Walkthrough
 -----------
 
-Run the audit locally.
+Run the audit locally
+~~~~~~~~~~~~~~~~~~~~~
+
+The ``seo`` tag narrows the run to the SEO checks, and ``--deploy`` adds the audits to them.
 
 .. code-block:: bash
    :caption: shell
 
    uv run python manage.py check --deploy --tag seo
 
-The command runs the eight audits ``next.W089`` to ``next.W096`` and nothing else, so its output is the SEO report alone.
-Every message names the ``page.py`` it concerns and the fix it expects.
+The command runs the four audits, ``next.W089`` to ``next.W096``, beside the sitemap and robots checks that carry the tag too, so its output is the SEO report alone.
+Every message names the file it concerns and the fix it expects.
 
-Set the thresholds the site works to.
+Set the thresholds
+~~~~~~~~~~~~~~~~~~
+
+The audits compare titles and descriptions against the numbers the site works to.
 
 .. code-block:: python
    :caption: config/settings.py
@@ -41,7 +47,10 @@ Set the thresholds the site works to.
        },
    }
 
-Silence a deliberate warning by its id.
+Silence a deliberate warning
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A warning that names an intended shape is dropped by its id.
 
 .. code-block:: python
    :caption: config/settings.py
@@ -50,7 +59,10 @@ Silence a deliberate warning by its id.
 
 The setting drops the message and still counts it in the closing line of the run, so the fact that the project overrides a check stays visible.
 
-Gate the pipeline on the audit.
+Gate the pipeline
+~~~~~~~~~~~~~~~~~
+
+The deploy fails on any warning the audit raises.
 
 .. code-block:: bash
    :caption: .github/workflows/ci.yml

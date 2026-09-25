@@ -215,6 +215,35 @@ The `/admin/_next/` exemption means the middleware never sees an action POST. Th
 
 Login runs Django's own `AuthenticationForm`, which the dispatcher cannot build directly: its `__init__(self, request, data=...)` takes the request positionally, while dispatch calls `form_class(post_data, files, ...)`. `admin_login_form_factory` bridges the gap by returning the tuple `(AuthenticationForm, {"request": request})`, so the dispatcher constructs the form with `data=` plus that keyword and the handler only calls `form.get_user()`. Bad credentials fail the form's own validation before the handler runs, and the login page re-renders with the non-field error [`surfaces/login/template.djx`](shadcn_admin/surfaces/login/template.djx) already prints. The `login_state` context supplies the `?next=` target the template writes into a hidden field, which `admin_login` reads back from `request.POST` to pick the post-login destination.
 
+### 13. A private site in the head
+
+Every tag the admin puts in `<head>` comes from `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` in [`config/settings.py`](config/settings.py):
+
+```python
+"METADATA": {
+    "DEFAULTS": {
+        "site_name": "next.dj admin",
+        "title": {"template": "{title} · {site_name}", "default": "next.dj admin"},
+        "robots": {"index": False, "follow": False},
+    }
+},
+```
+
+[`chrome/layout.djx`](chrome/layout.djx) calls the shared `page_head` component without a title, and the component renders the builtin `{% metadata %}` tag. The settings tier sits under every fold, so every page, the login screen included, carries `<meta name="robots" content="noindex, nofollow">`. `nofollow` earns its place on the one page a crawler can reach. `AdminPermissionMiddleware` of section 12 sends every anonymous request under `/admin/` to `/admin/login/`, and the tag stops a crawler that lands there from following its links any further.
+
+The one dynamic tier is `changelist_meta` in [`[str:model_name]/page.py`](shadcn_admin/surfaces/%5Bstr%3Aapp_label%5D/%5Bstr%3Amodel_name%5D/page.py):
+
+```python
+@page.metadata(inherit=True)
+def changelist_meta(app_label: str, model_name: str) -> MetadataDict:
+    model, _ = utils.resolve_model_admin(app_label, model_name)
+    return {"title": capfirst(str(model._meta.verbose_name_plural))}
+```
+
+`inherit=True` extends it to every page below the changelist, the add and change views that exist only as `template.djx` directories and the delete and history pages, so all five tabs read `Books · next.dj admin`. The callable takes the URL kwargs rather than the `changelist_state` context, because that context is page-local and absent on the sub-pages, and the lookup of section 2 reads the app registry without a query.
+
+Neither page root declares a `sitemap.py` or a robots source, so the framework mounts neither route and `/robots.txt` and `/sitemap.xml` answer 404. A sitemap hands crawlers the URLs worth indexing, and every URL here sits behind a login and says `noindex`. A robots file would be the wrong tool as well. `Disallow: /admin/` stops the fetch, a crawler that never fetches a page never reads its `noindex`, and a URL linked from elsewhere can still be listed as a bare address. The tag needs the fetch, so the admin leaves robots out and lets each page say `noindex, nofollow` itself.
+
 ## What is in core for this example
 
 Six pieces of next.dj's form layer carry the example.
@@ -237,3 +266,4 @@ Six pieces of next.dj's form layer carry the example.
 - [`docs/content/topics/context.rst`](../../docs/content/topics/context.rst) for `@context` and `inherit_context` used by `app_list` and `is_auth_page`.
 - [`docs/content/topics/dependency-injection.rst`](../../docs/content/topics/dependency-injection.rst) for `@resolver.dependency` and `Depends("name")` used by the `admin_spec` registration in section 4.
 - [`docs/content/topics/file-router.rst`](../../docs/content/topics/file-router.rst) for the `[str:app_label]/[int:pk]/` directory naming under `surfaces/`.
+- [`next/pages/metadata/`](../../next/pages/metadata/) for the metadata chain behind the settings tier and `@page.metadata(inherit=True)` in section 13.

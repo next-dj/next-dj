@@ -24,8 +24,7 @@ _FORMATTER: Final = string.Formatter()
 def parse_template(text: str) -> tuple[Part, ...]:
     """Split an evaluated template into literal text and placeholder names.
 
-    The whitelist plus `isidentifier` rejects attribute and index access, and the bare
-    field rule rejects conversions and specs, so nothing but the two names ever runs.
+    The whitelist and the bare-field rule refuse attribute, index, conversion and spec.
     """
     try:
         fields = tuple(_FORMATTER.parse(text))
@@ -63,20 +62,44 @@ def substitute_title(template: Text, values: Mapping[str, Text | None]) -> str:
     return "".join(pieces)
 
 
-title_lazy = lazy(substitute_title, str)
-"""The substitution as a `Promise`, so a folded title stays lazy until rendered."""
+def template_names(template: str) -> frozenset[str]:
+    """Return the placeholder names the evaluated template carries."""
+    return frozenset(name for _, name in parse_template(template) if name is not None)
 
 
 def template_has_title(template: str) -> bool:
     """Whether the evaluated template names `{title}` at all."""
-    return any(name == "title" for _, name in parse_template(template))
+    return "title" in template_names(template)
+
+
+def _title_or_bare(template: Text, text: Text, site_name: Text | None) -> str:
+    """Fill the template, or answer the bare text when it wants an absent site name.
+
+    The template is parsed after translation, so the decision has to wait for `str()`.
+    """
+    evaluated = str(template)
+    if site_name is None and "site_name" in template_names(evaluated):
+        return str(text)
+    return substitute_title(evaluated, {"title": text, "site_name": site_name})
+
+
+_title_or_bare_lazy = lazy(_title_or_bare, str)
+
+
+def apply_title_template(
+    template: Text | None, text: Text, *, site_name: Text | None
+) -> Text:
+    """Return `text` under the chain template, still lazy until it is rendered."""
+    if template is None:
+        return text
+    return _title_or_bare_lazy(template, text, site_name)
 
 
 __all__ = [
     "PLACEHOLDERS",
-    "Part",
+    "apply_title_template",
     "parse_template",
     "substitute_title",
     "template_has_title",
-    "title_lazy",
+    "template_names",
 ]

@@ -302,6 +302,16 @@ The root header uses `active_when="page_admin"` so `/admin/` and `/admin/metrics
 
 The bulk-toggle action is mounted at the framework's action URL. Tests use `NextClient.post_action("bulk_toggle_form", {...})` instead of a hardcoded path.
 
+### 11. Tab titles and a `noindex` admin
+
+[`frame/layout.djx`](frame/layout.djx) calls the shared `page_head` component without a title, and the component renders the builtin `{% metadata %}` tag. `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` in [`config/settings.py`](config/settings.py) supplies the `site_name`, the template `{title} · {site_name}` and the `default` that the flag board at `/` renders as-is. Every other panel names itself with a one-line dict in its `page.py`, and [`panels/admin/page.py`](flags/panels/admin/page.py) adds a robots directive to it:
+
+```python
+metadata: MetadataDict = {"title": "Flag admin", "robots": {"index": False}}
+```
+
+A dict is inherited by every page below it, so [`admin/metrics/page.py`](flags/panels/admin/metrics/page.py) declares only `{"title": "Metrics"}` and still renders `<meta name="robots" content="noindex">`. The toggle form and the render counters are operator screens with nothing a search engine should rank. `/demo/` is titled `Guard demo` and stays indexable like the board. One parametrized integration test pins all four titles and where the robots tag appears.
+
 ## Gotchas
 
 ### `DFlag` needs the annotation at runtime
@@ -328,4 +338,5 @@ A page with both `render()` and `template.djx` emits `next.W043`. If a page has 
 - [next/pages/signals.py](../../next/pages/signals.py) — `page_rendered` payload documentation.
 - [next/forms/manager.py](../../next/forms/manager.py) — form-action registration, dispatch, and the CSRF + form-class contract.
 - [next/forms/dispatch/permissions.py](../../next/forms/dispatch/permissions.py) — where `check_permissions` runs in the dispatch sequence and how its return is normalised into an allow / `403` / verbatim response.
+- [next/pages/metadata/](../../next/pages/metadata/) — the metadata chain that folds the panel dicts of section 11.
 - [next/signals.py](../../next/signals.py) — aggregate re-export covering every signal the framework emits, including `page_rendered` and `form_access_denied`.

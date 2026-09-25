@@ -5,15 +5,9 @@ from django.utils import translation
 from django.utils.functional import Promise, lazy
 from django.utils.translation import gettext, gettext_lazy
 
-from next.pages.metadata import (
-    EMPTY_METADATA,
-    Metadata,
-    Segment,
-    apply_title_template,
-    fold_metadata,
-    normalize_metadata,
-)
-from next.pages.metadata.merge import MERGED_FIELDS
+from next.pages.metadata import Metadata, Segment, normalize_metadata
+from next.pages.metadata.merge import MERGED_FIELDS, fold_metadata
+from next.pages.metadata.schema import EMPTY_METADATA
 from tests.support import METADATA_MERGE_CASES, MetadataMergeCase
 
 
@@ -30,7 +24,7 @@ class TestFold:
     @pytest.mark.parametrize(
         "case", METADATA_MERGE_CASES, ids=[case.id for case in METADATA_MERGE_CASES]
     )
-    def test_matrix(self, case: MetadataMergeCase) -> None:
+    def test_the_nearer_segment_wins_per_field(self, case: MetadataMergeCase) -> None:
         meta = fold_metadata(_chain(*case.segments_raw))
         title = None if meta.title is None else str(meta.title)
         assert title == case.expected_title
@@ -97,18 +91,3 @@ class TestLaziness:
         )
         assert isinstance(meta.title, Promise)
         assert str(meta.title) == "Wallet"
-
-
-class TestApplyTitleTemplate:
-    """The chain template can be applied to any text, lazily."""
-
-    def test_without_a_template_the_text_passes_through(self) -> None:
-        text = gettext_lazy("Yes")
-        assert apply_title_template(None, text, site_name=None) is text
-
-    def test_with_a_template_the_result_is_lazy(self) -> None:
-        title = apply_title_template(
-            "{title} · {site_name}", "Wallet", site_name="Acme"
-        )
-        assert isinstance(title, Promise)
-        assert str(title) == "Wallet · Acme"

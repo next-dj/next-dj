@@ -177,7 +177,7 @@ Terms used throughout the next.dj documentation.
       Implements ``can_handle`` and ``resolve``.
 
    request cache
-      The dependency cache that lives on the request between context functions, components, and form re-render.
+      The dependency cache a form dispatch attaches to the request, shared by its handler and by the context functions, metadata callables, and components of the re-render.
 
    re-render
       The dispatch path that re-renders the origin page after a failed form validation.

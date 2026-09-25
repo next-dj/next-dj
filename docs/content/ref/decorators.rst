@@ -35,14 +35,9 @@ Decorators
 
 .. py:decorator:: page.metadata(func=None, /, *, inherit=False)
 
-   Registers the metadata callable of a page module (``page.py``).
-   Called bare as ``@page.metadata`` it receives the decorated function, and ``@page.metadata(inherit=True)`` runs the callable for every descendant page as well, ahead of the descendant's own segment.
-   The callable takes dependency-injected parameters like ``@context``, and a parameter annotated ``Metadata`` receives the fold of every segment before it.
-   It returns a mapping of metadata keys, which ``next.E108`` expects the return annotation to say.
-   A ``page.py`` declares one form, this callable or a module-level ``metadata`` dict, and a file carrying both raises ``PageMetadataConflictError`` and is reported as ``next.E102``.
-   The callable runs on the first ``{% metadata %}`` read of a full page render and shares the dependency cache of the request with ``render()`` and the ``@context`` callables.
-   A zone GET and a ``render()`` returning a response never run it.
-   See :doc:`/content/topics/seo/metadata` for the merge order and the title template.
+   Registers the dependency-injected callable that builds the metadata of a page module (``page.py``) per request, and ``inherit=True`` runs it for every descendant page as well.
+   ``next.E108`` expects the return annotation to name a mapping, and ``next.E102`` reports a ``page.py`` that declares a module-level ``metadata`` dict beside the callable.
+   See :doc:`/content/topics/seo/metadata` for the parameters, when the callable runs, and the merge order.
 
 @component.context
 ~~~~~~~~~~~~~~~~~~

@@ -165,7 +165,7 @@ for zone in LISTING_ZONES:
 return patches.response()
 ```
 
-The handler points `request.GET` at the preset's params before morphing, so the cached search, the product count, the active-filter chips, and the pagination all agree with the URL `push_url` writes to history. `push_url` validates the href against the request host, so the envelope carries a `url` op with `action: "push"` and a same-site target. The chained `.meta(PRESET_TITLES[preset])` adds a `meta` op that sets `document.title` on the client, folded through the title template of the origin page, so the tab reads `Cheapest first · next.dj catalog` after the apply just as it would after a navigation. Without the runtime the apply falls back to a redirect to the same canonical URL, so the preset stays a plain link.
+The handler points `request.GET` at the preset's params before morphing, so the cached search, the product count, the active-filter chips, and the pagination all agree with the URL `push_url` writes to history. `push_url` validates the href against the request host, so the envelope carries a `url` op with `action: "push"` and a same-site target. The chained `.meta(preset.title)` adds a `meta` op that sets `document.title` on the client, folded through the title template of the origin page, so the tab reads `Cheapest first · next.dj catalog` after the apply just as it would after a navigation. Without the runtime the apply falls back to a redirect to the same canonical URL, so the preset stays a plain link.
 
 ### 9. `cached_search` and the LocMem hit path
 

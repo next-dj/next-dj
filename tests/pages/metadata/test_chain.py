@@ -1,32 +1,32 @@
+from collections.abc import Callable
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from typing import Any
 
 import pytest
-from django.http import Http404
+from django.http import Http404, HttpRequest
 from django.test import override_settings
 
 from next.deps import Depends
 from next.pages.errors import PageMetadataConflictError, PageMetadataShapeError
-from next.pages.loaders import _load_python_module_memo, reset_module_memo
+from next.pages.loaders import forget_page_roots, load_page_module, reset_module_memo
 from next.pages.metadata import (
-    EMPTY_METADATA,
-    PARENT_KEY,
-    ChainEntry,
-    ChainSource,
     Metadata,
     MetadataThunk,
-    OpenGraph,
     PageMetadataRegistry,
-    Robots,
     Segment,
     chain_entry,
-    resolve_metadata,
+    chain_title,
     site_segment,
-    static_metadata,
-    templated_title,
 )
-from tests.support import bound_dependency, write_page_chain
+from next.pages.metadata.chain import PARENT_KEY, ChainEntry, ChainSource
+from next.pages.metadata.schema import EMPTY_METADATA, OpenGraph, Robots
+from tests.support import (
+    bound_dependency,
+    build_page_request,
+    default_page_router_config,
+    write_page_chain,
+)
 
 
 ROOT = 'metadata = {"title": {"template": "{title} | Root"}, "description": "Root"}\n'
@@ -40,6 +40,13 @@ PLAIN = "x = 1\n"
 NAMED_METADATA = """
 def metadata() -> dict:
     return {"title": "Named"}
+"""
+DYNAMIC_TEMPLATE = {"title": {"template": "{title} | Dyn"}}
+ABOVE_THE_TREE = """
+from pathlib import Path
+
+Path(__file__).with_name("loaded").touch()
+metadata = {"description": "Above"}
 """
 SITE_DEFAULTS = {
     "site_name": "Acme",
@@ -56,14 +63,18 @@ def _resolve(
     dep_cache: dict[str, Any] | None = None,
     context_data: dict[str, object] | None = None,
 ) -> Metadata:
-    return resolve_metadata(
+    thunk = MetadataThunk(
         registry,
         file_path,
-        request=None,
-        url_kwargs=url_kwargs or {},
-        dep_cache=dep_cache if dep_cache is not None else {},
-        context_data=context_data if context_data is not None else {},
+        None,
+        url_kwargs or {},
+        dep_cache if dep_cache is not None else {},
     )
+    return thunk.resolve(context_data if context_data is not None else {})
+
+
+def static_metadata(registry: PageMetadataRegistry, file_path: Path) -> Metadata:
+    return chain_entry(registry, file_path).static
 
 
 @pytest.fixture()
@@ -74,7 +85,7 @@ def registry() -> PageMetadataRegistry:
 class TestValueObjects:
     """The chain records are frozen and the parent key is fixed."""
 
-    def test_parent_key(self) -> None:
+    def test_the_parent_is_published_under_a_fixed_key(self) -> None:
         assert PARENT_KEY == "_next_metadata_parent"
 
     def test_chain_source_is_frozen(self, tmp_path: Path) -> None:
@@ -164,7 +175,7 @@ class TestTitleTemplates:
             assert str(static_metadata(registry, root).title) == "R · Acme"
 
 
-class TestTemplatedTitle:
+class TestChainTitle:
     """The title a page would render for a text of its own."""
 
     def test_applies_the_ancestor_template_and_ignores_the_own_dict(
@@ -172,26 +183,112 @@ class TestTemplatedTitle:
     ) -> None:
         own = 'metadata = {"title": {"template": "{title} - Leaf", "default": "L"}}\n'
         _root, leaf = write_page_chain(tmp_path, [("root", ROOT), ("leaf", own)])
-        assert str(templated_title(registry, leaf, "Post")) == "Post | Root"
-
-    def test_absolute_returns_the_bare_text(
-        self, registry: PageMetadataRegistry, tmp_path: Path
-    ) -> None:
-        _root, leaf = write_page_chain(tmp_path, [("root", ROOT), ("leaf", LEAF)])
-        assert templated_title(registry, leaf, "Post", absolute=True) == "Post"
+        assert str(chain_title(registry, leaf, "Post")) == "Post | Root"
 
     def test_without_a_template_the_text_stands(
         self, registry: PageMetadataRegistry, tmp_path: Path
     ) -> None:
         (leaf,) = write_page_chain(tmp_path, [("leaf", LEAF)])
-        assert templated_title(registry, leaf, "Post") == "Post"
+        assert chain_title(registry, leaf, "Post") == "Post"
 
     def test_a_callable_source_of_the_page_is_skipped_as_well(
         self, registry: PageMetadataRegistry, tmp_path: Path
     ) -> None:
         _root, leaf = write_page_chain(tmp_path, [("root", ROOT), ("leaf", PLAIN)])
         registry.register(leaf, lambda: {"title": "Dynamic"})
-        assert str(templated_title(registry, leaf, "Post")) == "Post | Root"
+        assert str(chain_title(registry, leaf, "Post")) == "Post | Root"
+
+    def test_an_inherited_callable_template_shapes_the_text_as_in_the_render(
+        self, registry: PageMetadataRegistry, tmp_path: Path
+    ) -> None:
+        root, leaf = write_page_chain(tmp_path, [("root", PLAIN), ("leaf", LEAF)])
+        registry.register(root, lambda: DYNAMIC_TEMPLATE, inherit=True)
+        assert str(_resolve(registry, leaf).title) == "Leaf | Dyn"
+        assert str(chain_title(registry, leaf, "Post")) == "Post | Dyn"
+
+    def test_the_inherited_callable_reads_the_request_the_kwargs_and_the_context(
+        self, registry: PageMetadataRegistry, tmp_path: Path
+    ) -> None:
+        root, leaf = write_page_chain(tmp_path, [("root", PLAIN), ("leaf", PLAIN)])
+
+        def root_meta(request: HttpRequest, slug: str, board: str) -> dict[str, object]:
+            template = f"{{title}} | {request.method} {slug} {board}"
+            return {"title": {"template": template}}
+
+        registry.register(root, root_meta, inherit=True)
+        title = chain_title(
+            registry,
+            leaf,
+            "Post",
+            request=build_page_request(),
+            url_kwargs={"slug": "s"},
+            context_data=lambda: {"board": "B"},
+        )
+        assert str(title) == "Post | GET s B"
+
+    def test_the_context_is_built_only_for_an_inherited_callable(
+        self, registry: PageMetadataRegistry, tmp_path: Path
+    ) -> None:
+        _root, leaf = write_page_chain(tmp_path, [("root", ROOT), ("leaf", PLAIN)])
+        builds: list[int] = []
+
+        def context() -> dict[str, object]:
+            builds.append(1)
+            return {}
+
+        registry.register(leaf, lambda: {"title": "Own"})
+        title = chain_title(registry, leaf, "Post", context_data=context)
+        assert str(title) == "Post | Root"
+        assert builds == []
+
+    def test_an_inherited_callable_without_a_context_reads_an_empty_one(
+        self, registry: PageMetadataRegistry, tmp_path: Path
+    ) -> None:
+        root, leaf = write_page_chain(tmp_path, [("root", PLAIN), ("leaf", PLAIN)])
+        registry.register(root, lambda: DYNAMIC_TEMPLATE, inherit=True)
+        assert str(chain_title(registry, leaf, "Post")) == "Post | Dyn"
+
+    def test_the_own_site_name_still_fills_the_template(
+        self, registry: PageMetadataRegistry, tmp_path: Path
+    ) -> None:
+        root = 'metadata = {"title": {"template": "{title} · {site_name}"}}\n'
+        own = 'metadata = {"title": "Leaf", "site_name": "Leaf Co"}\n'
+        _root, leaf = write_page_chain(tmp_path, [("root", root), ("leaf", own)])
+        assert str(static_metadata(registry, leaf).title) == "Leaf · Leaf Co"
+        assert str(chain_title(registry, leaf, "Post")) == "Post · Leaf Co"
+
+
+class TestPageTreeRoot:
+    """The walk stops at the page tree the page belongs to."""
+
+    def test_a_page_py_above_the_page_tree_is_never_loaded(
+        self, registry: PageMetadataRegistry, tmp_path: Path
+    ) -> None:
+        (tmp_path / "page.py").write_text(ABOVE_THE_TREE)
+        tree, leaf = write_page_chain(tmp_path, [("tree", ROOT), ("leaf", LEAF)])
+        config = default_page_router_config(tree.parent)
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": config}):
+            meta = static_metadata(registry, leaf)
+        assert str(meta.title) == "Leaf | Root"
+        assert meta.description == "Root"
+        assert not (tmp_path / "loaded").exists()
+
+    def test_a_page_outside_every_tree_walks_every_ancestor(
+        self, registry: PageMetadataRegistry, tmp_path: Path
+    ) -> None:
+        (tmp_path / "page.py").write_text(ABOVE_THE_TREE)
+        _tree, leaf = write_page_chain(tmp_path, [("tree", PLAIN), ("leaf", LEAF)])
+        assert static_metadata(registry, leaf).description == "Above"
+        assert (tmp_path / "loaded").exists()
+
+    def test_moved_page_trees_rebuild_the_entry(
+        self, registry: PageMetadataRegistry, tmp_path: Path
+    ) -> None:
+        _tree, leaf = write_page_chain(tmp_path, [("tree", ROOT), ("leaf", LEAF)])
+        chain_entry(registry, leaf)
+        before = chain_entry(registry, leaf)
+        forget_page_roots()
+        assert chain_entry(registry, leaf) is not before
 
 
 class TestCallables:
@@ -296,7 +393,7 @@ class TestCallables:
         _root, leaf = write_page_chain(
             tmp_path, [("root", ROOT), ("leaf", NAMED_METADATA)]
         )
-        module = _load_python_module_memo(leaf)
+        module, _error = load_page_module(leaf)
         assert module is not None
         registry.register(leaf, module.metadata)
 
@@ -363,24 +460,25 @@ class TestMemo:
         assert entry.folded is None
         assert _resolve(registry, leaf) is not _resolve(registry, leaf)
 
-    def test_a_registration_rebuilds_the_entry(
-        self, registry: PageMetadataRegistry, tmp_path: Path
+    @pytest.mark.parametrize(
+        "invalidate",
+        [
+            lambda registry, leaf: registry.register(leaf, lambda: {"title": "D"}),
+            lambda _registry, _leaf: reset_module_memo(),
+            lambda registry, _leaf: registry.reset(),
+        ],
+        ids=["registration", "module_reload", "registry_reset"],
+    )
+    def test_an_invalidation_rebuilds_the_entry(
+        self,
+        registry: PageMetadataRegistry,
+        tmp_path: Path,
+        invalidate: Callable[[PageMetadataRegistry, Path], object],
     ) -> None:
         _root, leaf = write_page_chain(tmp_path, [("root", ROOT), ("leaf", PLAIN)])
         chain_entry(registry, leaf)
         before = chain_entry(registry, leaf)
-        registry.register(leaf, lambda: {"title": "Dynamic"})
-        after = chain_entry(registry, leaf)
-        assert after is not before
-        assert after.folded is None
-
-    def test_a_module_reload_rebuilds_the_entry(
-        self, registry: PageMetadataRegistry, tmp_path: Path
-    ) -> None:
-        _root, leaf = write_page_chain(tmp_path, [("root", ROOT), ("leaf", LEAF)])
-        chain_entry(registry, leaf)
-        before = chain_entry(registry, leaf)
-        reset_module_memo()
+        invalidate(registry, leaf)
         assert chain_entry(registry, leaf) is not before
 
     def test_a_settings_override_rebuilds_the_entry(
@@ -398,46 +496,28 @@ class TestMemo:
             assert inside.static.site_name == "Acme"
         assert chain_entry(registry, leaf) is not inside
 
-    def test_forget_chains_drops_the_entry(
-        self, registry: PageMetadataRegistry, tmp_path: Path
-    ) -> None:
-        (leaf,) = write_page_chain(tmp_path, [("leaf", LEAF)])
-        chain_entry(registry, leaf)
-        before = chain_entry(registry, leaf)
-        registry.forget_chains()
-        assert chain_entry(registry, leaf) is not before
-
 
 class TestThunk:
-    """The render-time thunk folds once and answers the same object after that."""
+    """The render-time thunk folds against whatever context each read hands it."""
 
-    def test_resolve_memoises_the_metadata(
+    def test_each_read_folds_against_the_context_it_is_handed(
         self, registry: PageMetadataRegistry, tmp_path: Path
     ) -> None:
         (leaf,) = write_page_chain(tmp_path, [("leaf", PLAIN)])
-        calls: list[int] = []
+        registry.register(leaf, lambda user: {"title": user})
+        thunk = MetadataThunk(registry, leaf, None, {}, {})
+        assert thunk.resolve({"user": "Ann"}).title == "Ann"
+        assert thunk.resolve({"user": "Bob"}).title == "Bob"
 
-        def leaf_meta() -> dict[str, str]:
-            calls.append(1)
-            return {"title": "Dynamic"}
-
-        registry.register(leaf, leaf_meta)
-        thunk = MetadataThunk(registry, leaf, None, {}, {}, {})
-        first = thunk.resolve()
-        assert thunk.resolve() is first
-        assert first.title == "Dynamic"
-        assert len(calls) == 1
-
-    def test_the_thunk_carries_what_the_resolve_needs(
+    def test_the_thunk_carries_what_the_resolve_needs_and_no_context(
         self, registry: PageMetadataRegistry, tmp_path: Path
     ) -> None:
         leaf = tmp_path / "page.py"
         cache: dict[str, Any] = {}
-        context: dict[str, object] = {}
-        thunk = MetadataThunk(registry, leaf, None, {"slug": "s"}, cache, context)
+        thunk = MetadataThunk(registry, leaf, None, {"slug": "s"}, cache)
         assert thunk.registry is registry
         assert thunk.file_path == leaf
         assert thunk.request is None
         assert thunk.url_kwargs == {"slug": "s"}
         assert thunk.dep_cache is cache
-        assert thunk.context_data is context
+        assert not hasattr(thunk, "context_data")

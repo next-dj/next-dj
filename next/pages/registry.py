@@ -6,7 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from next.caches import BoundedCache
-from next.deps import get_request_dep_cache
+from next.deps.cache import shared_dep_cache
 from next.deps.resolver import current_resolver
 from next.introspect import MisattributedContext, MisattributionLog, callable_name
 
@@ -55,20 +55,6 @@ logger = logging.getLogger(__name__)
 
 
 type _OrderedEntries = tuple[tuple[str | None, PageContextEntry], ...]
-
-
-def _dep_cache_for(
-    request: HttpRequest | None, dep_cache: dict[str, Any] | None
-) -> dict[str, Any]:
-    """Return the cache the merge resolves through, the given one first.
-
-    Without one, the dispatch cache of a validation-failure re-render is reused, so a
-    `Depends("name")` the form action resolved is not recomputed here.
-    """
-    if dep_cache is not None:
-        return dep_cache
-    shared = get_request_dep_cache(request)
-    return shared if shared is not None else {}
 
 
 def _keyless_shape_error(
@@ -231,12 +217,11 @@ class PageContextRegistry:
 
         Inherited context comes from `inherit_context=True` callables in ancestor
         `page.py` files, not layouts, and first registration wins for the js_context.
-        A `dep_cache` handed in is the one the render shares with its other resolves.
         """
         context_data: dict[str, Any] = {}
         js_context: dict[str, Any] = {}
         js_context_serializers: dict[str, JsContextSerializer] = {}
-        dep_cache = _dep_cache_for(request, dep_cache)
+        dep_cache = shared_dep_cache(request) if dep_cache is None else dep_cache
         dep_stack: list[str] = []
 
         inherited_context = self._collect_inherited_context(

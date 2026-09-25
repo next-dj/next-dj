@@ -6,7 +6,7 @@ from next.pages import MetadataDict
 
 
 metadata: MetadataDict = {
-    "title": {"default": "Home · next.dj Wiki"},
+    "title": "Home",
     "description": "File-routed documentation beside database articles, one router.",
 }
 

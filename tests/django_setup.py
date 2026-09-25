@@ -16,7 +16,8 @@ def _install_project_root_on_path() -> None:
         sys.path.insert(0, root_str)
 
 
-def _build_test_settings() -> dict[str, object]:
+def build_test_settings() -> dict[str, object]:
+    """Return the Django settings every test process configures."""
     return {
         "DEBUG": False,
         "DATABASES": {
@@ -82,7 +83,7 @@ def setup() -> None:
     if settings.configured:
         return
 
-    settings.configure(**_build_test_settings())
+    settings.configure(**build_test_settings())
     # `django.setup()` loads `next.urls` and builds the patterns, so the
     # `@action` handlers must already sit in the form-action registry.
 

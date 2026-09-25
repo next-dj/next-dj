@@ -49,6 +49,7 @@ The callable takes dependency-injected parameters exactly like a ``@context`` ca
 .. code-block:: python
    :caption: notes/pages/notes/[int:note_id]/page.py
 
+   from django.shortcuts import get_object_or_404
    from notes.models import Note
 
    from next import page
@@ -57,7 +58,7 @@ The callable takes dependency-injected parameters exactly like a ``@context`` ca
 
    @page.metadata
    def note_metadata(note_id: DUrl[int], parent: Metadata) -> MetadataDict:
-       note = Note.objects.get(pk=note_id)
+       note = get_object_or_404(Note, pk=note_id)
        return {
            "title": note.title,
            "description": note.summary or parent.description,
@@ -67,9 +68,9 @@ A parameter annotated ``Metadata`` receives the fold of every segment before the
 A callable is local to its own page unless it is registered with ``@page.metadata(inherit=True)``, which runs it for every descendant page as well, ahead of the descendant's own segment.
 One ``page.py`` declares one form, a dict or a callable, and a file carrying both raises ``PageMetadataConflictError``.
 
-The callable runs once per render, on the first ``{% metadata %}`` read.
-It shares the dependency cache of the request with ``render()`` and the ``@context`` callables, so a ``Depends`` value resolved by one of them is reused rather than resolved again.
-A callable that raises :exc:`~django.http.Http404` turns the whole page into a 404, which is the right answer for a metadata lookup that finds no row.
+The callable runs once per template render, on the first ``{% metadata %}`` read, against the context the tag renders in, so a value a ``{% with %}`` block or a zone override puts in scope reaches it.
+It shares the dependency cache of the render with ``render()`` and the ``@context`` callables, so a ``Depends`` value resolved by one of them is reused rather than resolved again.
+A callable that raises :exc:`~django.http.Http404` turns the whole page into a 404, which is the right answer for a metadata lookup that finds no row and what :func:`~django.shortcuts.get_object_or_404` raises above.
 A zone GET renders no head, and a ``render()`` returning an :class:`~django.http.HttpResponse` short-circuits the layout, so neither path runs the callable.
 
 Title template
@@ -132,8 +133,9 @@ It takes no arguments, belongs in the ``<head>`` of the root ``layout.djx``, and
      </body>
    </html>
 
-The tag emits one line per tag in a fixed order, the title, the description, the robots directives, the canonical link, the hreflang alternates, the verification tokens, the ``other`` entries, the Open Graph properties, the Twitter card, and the JSON-LD script.
-A page whose fold sets none of them renders nothing, and ``next.W085`` reports a page that declares metadata while no layout in its chain carries the tag.
+The tag emits one line per head tag in a fixed order, which the key-to-tag table in :doc:`/content/ref/pages` lists.
+The markup comes from the renderer ``NEXT_FRAMEWORK["METADATA"]["RENDERER"]`` names, and a project that needs a tag of its own swaps the class there, see :doc:`/content/ref/settings`.
+A page whose fold sets none of them renders nothing, and ``next.W085`` reports a page that declares metadata while nothing its composition renders carries the tag, the layouts, the components they reach, and the templates they include by a literal name.
 The tag is registered as a Django builtin, so no ``{% load %}`` is needed.
 
 Partial updates
@@ -141,7 +143,12 @@ Partial updates
 
 A partial update that changes what the page is about retitles the document through the ``meta`` verb.
 ``Patches.meta(title)`` ships the title the origin page would render, the chain template already applied, and the client assigns it to ``document.title`` without touching the markup.
-A layer captures the title at open time and restores it when it closes, so a ``meta`` sent while a layer is open lasts as long as the layer, and a ``meta`` that follows ``layer_close()`` in the same envelope still wins.
+The fold keeps the static fields of the page's own dict, ``site_name`` among them, and runs every inherited ancestor callable as the render would.
+An inherited callable reads the origin page, so ``meta()`` first runs the ``render()`` guard of that page, raising ``ForeignPageNotAuthorizedError`` on a denial, and then builds its render context for the callable.
+A chain without an inherited callable, or ``absolute=True``, runs neither.
+
+The title belongs to the page whose envelope carried it, so a ``meta`` from a layer's own page lasts as long as the layer, and one from the page underneath becomes the title the layer restores when it closes, see :doc:`/content/topics/partial-rendering/layers`.
+A ``meta`` that follows ``layer_close()`` in the same envelope still wins.
 
 .. code-block:: python
    :caption: notes/pages/notes/[int:note_id]/page.py

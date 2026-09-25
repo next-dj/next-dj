@@ -604,3 +604,21 @@ class TestProductionStartup:
         form = build_form_for("vote_form")
         assert type(form).__name__ == "VoteForm"
         assert type(form).__module__ == "polls.forms"
+
+
+class TestPageMetadata:
+    """The index names itself, a vote page is titled after its question."""
+
+    @pytest.mark.parametrize(
+        ("path", "title"),
+        [
+            ("/polls/", "Polls · next.dj polls"),
+            ("/polls/{pk}/", "Tabs or spaces? · next.dj polls"),
+        ],
+        ids=["index", "detail"],
+    )
+    def test_each_page_carries_its_title(
+        self, next_client: NextClient, poll: Poll, path: str, title: str
+    ) -> None:
+        body = next_client.get(path.format(pk=poll.pk)).content.decode()
+        assert f"<title>{title}</title>" in body

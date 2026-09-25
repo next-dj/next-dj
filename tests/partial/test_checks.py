@@ -7,8 +7,10 @@ import pytest
 from django.core.checks.registry import registry as check_registry
 from django.test import override_settings
 
+from next.checks import reset_check_caches
 from next.components import ComponentInfo, FileComponentsBackend
 from next.forms.backends import FormActionBackend, RegistryFormActionBackend
+from next.pages.checks import composed
 from next.partial import checks
 from next.partial.registry import BUILTIN_OPS, register_patch_op
 from tests.support import (
@@ -743,14 +745,14 @@ _ZONE_CHECKS = (
 @contextmanager
 def _counting_collect() -> Iterator[list[int]]:
     """Count calls to the composed-page collector, delegating to the real one."""
-    real = checks.pages._collect_composed_pages
+    real = composed._collect_composed_pages
     calls = [0]
 
     def counting(manager: object) -> Iterator[tuple[Path, object]]:
         calls[0] += 1
         return real(manager)
 
-    with patch.object(checks.pages, "_collect_composed_pages", side_effect=counting):
+    with patch.object(composed, "_collect_composed_pages", side_effect=counting):
         yield calls
 
 
@@ -777,14 +779,16 @@ class TestComposedPagesMemo:
             ids = [m.id for m in checks.check_duplicate_zone_names()]
         assert ids == [checks.E_DUPLICATE_ZONE]
 
-    def test_reset_hook_recollects_on_live_manager(self, tmp_path: Path) -> None:
+    def test_a_check_cache_reset_recollects_on_a_live_manager(
+        self, tmp_path: Path
+    ) -> None:
         page_file = _page_dir(tmp_path, "live")
         body = '{% zone "z" %}<p>{{ a }}</p>{% endzone %}'
         with _composed_pages((page_file, body)), _counting_collect() as calls:
             checks.check_duplicate_zone_names()
             checks.check_zone_name_is_slug()
             assert calls[0] == 1
-            checks.reset_composed_pages_memo()
+            reset_check_caches()
             checks.check_zone_not_in_loop()
             assert calls[0] == 2
 

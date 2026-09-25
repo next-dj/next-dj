@@ -1,9 +1,4 @@
-"""Signals emitted during template loading, context collection, and rendering.
-
-`Page` sends `template_loaded` and `page_rendered`, `PageContextRegistry` sends
-`context_registered`, `PageMetadataRegistry` sends `metadata_registered`, and the
-signals reference lists the keyword arguments.
-"""
+"""Signals the pages area emits while loading, registering, and rendering pages."""
 
 from django.dispatch import Signal
 

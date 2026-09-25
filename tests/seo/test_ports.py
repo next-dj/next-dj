@@ -1,29 +1,45 @@
-from next.seo import seo_manager, views
+import pytest
+
+from next.seo import urls, views
+from next.seo.manager import seo_manager
 from next.seo.ports import SeoRoutesImpl
 from tests.seo.trees import routed, write_tree
 
 
 class TestSeoRoutesImpl:
-    def test_a_sitemap_alone_adds_the_two_sitemap_routes(self, tmp_path) -> None:
-        with routed(write_tree(tmp_path / "pages", sitemap="")):
-            patterns = SeoRoutesImpl().patterns()
-        assert [pattern.name for pattern in patterns] == ["sitemap", "sitemap_section"]
-        assert {pattern.callback for pattern in patterns} == {views.sitemap}
+    """The routes port answers only the `next.seo.urls` routes a source backs."""
 
-    def test_a_robots_source_alone_adds_the_robots_route(self, tmp_path) -> None:
-        with routed(write_tree(tmp_path / "pages", robots_txt=b"x")):
-            patterns = SeoRoutesImpl().patterns()
-        assert [pattern.name for pattern in patterns] == ["robots"]
-        assert patterns[0].callback is views.robots
-
-    def test_both_sources_add_all_three(self, tmp_path) -> None:
-        with routed(write_tree(tmp_path / "pages", sitemap="", robots="")):
-            names = [pattern.name for pattern in SeoRoutesImpl().patterns()]
-        assert names == ["sitemap", "sitemap_section", "robots"]
-
-    def test_version_follows_the_manager(self) -> None:
-        source = SeoRoutesImpl().version_source()
-        assert source is seo_manager
-        before = source.version
+    @pytest.fixture(autouse=True)
+    def _fresh_manager(self):
         seo_manager.reset()
-        assert source.version != before
+        yield
+        seo_manager.reset()
+
+    @pytest.mark.parametrize(
+        ("sources", "names"),
+        [
+            ({}, []),
+            ({"sitemap": ""}, ["sitemap", "sitemap_section"]),
+            ({"robots": ""}, ["robots"]),
+            ({"robots_txt": b"User-agent: *\n"}, ["robots"]),
+            ({"sitemap": "", "robots": ""}, ["sitemap", "sitemap_section", "robots"]),
+        ],
+        ids=["none", "sitemap", "robots-py", "robots-txt", "both"],
+    )
+    def test_a_route_is_served_only_with_its_source(
+        self, tmp_path, sources, names
+    ) -> None:
+        with routed(write_tree(tmp_path / "pages", **sources)):
+            patterns = SeoRoutesImpl().patterns()
+        assert [pattern.name for pattern in patterns] == names
+
+    def test_the_routes_are_those_of_the_seo_urls(self, tmp_path) -> None:
+        with routed(write_tree(tmp_path / "pages", sitemap="", robots="")):
+            patterns = SeoRoutesImpl().patterns()
+        assert patterns == urls.urlpatterns
+        assert patterns is not urls.urlpatterns
+        assert [pattern.callback for pattern in patterns] == [
+            views.sitemap_view,
+            views.sitemap_view,
+            views.robots_view,
+        ]

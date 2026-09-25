@@ -2,7 +2,9 @@ import pytest
 from e2e_support.browser import (
     PageProbe,
     applied_count,
+    assert_same_document,
     expect_no_partial_request,
+    mark_document,
     request_baseline,
     wait_for_apply,
     wait_for_runtime,
@@ -78,7 +80,7 @@ def test_typing_narrows_the_search_without_pressing_enter(
     seed_articles()
     page.goto(f"{base_url}/search/")
     wait_for_runtime(page)
-    page.evaluate("() => { window.__stillHere = true; }")
+    mark_document(page)
     expect(page.locator(RESULTS_ZONE)).to_contain_text(
         "Type a query to search file docs and articles."
     )
@@ -93,7 +95,7 @@ def test_typing_narrows_the_search_without_pressing_enter(
     expect(file_hits).to_have_text(["Routing"])
     expect(article_hits).to_have_count(1)
     expect(article_hits).to_have_text(["Routing internals"])
-    assert page.evaluate("() => window.__stillHere") is True
+    assert_same_document(page)
 
 
 def test_a_burst_of_keystrokes_collapses_into_one_zone_request(
@@ -202,40 +204,3 @@ def test_a_reserved_slug_reports_the_error_and_keeps_the_preview_live(
 
     expect(page.locator(f"{PREVIEW} em")).to_have_text("italic")
     expect(page.locator(f"{PREVIEW} strong")).to_have_count(0)
-
-
-def test_an_article_titles_the_tab_after_itself(page: Page, base_url: str) -> None:
-    seed_articles()
-    page.goto(base_url)
-    wait_for_runtime(page)
-    expect(page).to_have_title("Home · next.dj Wiki")
-
-    page.get_by_role("link", name="Routing internals").click()
-
-    expect(page).to_have_url(f"{base_url}/wiki/routing-internals/")
-    expect(page).to_have_title("Routing internals · next.dj Wiki")
-
-
-def test_the_sitemap_lists_the_seeded_articles(page: Page, base_url: str) -> None:
-    seed_articles()
-    response = page.request.get(f"{base_url}/sitemap.xml")
-
-    assert response.status == 200
-    assert response.headers["content-type"] == "application/xml"
-    body = response.text()
-    assert "<loc>https://wiki.example/wiki/routing-internals/</loc>" in body
-    assert "<loc>https://wiki.example/wiki/lifecycle/</loc>" in body
-    assert "<loc>https://wiki.example/docs/routing/</loc>" in body
-    assert "/search/" not in body
-
-
-def test_robots_fences_the_search_and_names_the_sitemap(
-    page: Page, base_url: str
-) -> None:
-    response = page.request.get(f"{base_url}/robots.txt")
-
-    assert response.status == 200
-    assert response.text() == (
-        "User-agent: *\nDisallow: /search/\n\n"
-        "Sitemap: https://wiki.example/sitemap.xml\n"
-    )

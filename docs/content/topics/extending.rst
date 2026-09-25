@@ -269,11 +269,14 @@ The framework calls the strategy at a well known point in the pipeline.
    * - Component template loader
      - ``COMPONENT_TEMPLATE_LOADER`` at the top level of ``NEXT_FRAMEWORK``
      - ``next.components.CachedComponentTemplateLoader``
+   * - Metadata renderer
+     - ``RENDERER`` inside ``NEXT_FRAMEWORK["METADATA"]``
+     - ``next.pages.HtmlMetadataRenderer``
 
 Use a strategy when the customisation is a single algorithm rather than a complete subsystem.
 
-Three strategies are configured at the top level of ``NEXT_FRAMEWORK`` rather than inside a backend ``OPTIONS`` mapping.
-``URL_RESOLVER``, ``DEPENDENCY_RESOLVER``, and ``COMPONENT_TEMPLATE_LOADER`` each hold a single dotted path, and ``next.backends.resolve_setting_class`` reads all three against the base class its key declares.
+Three strategies are configured at the top level of ``NEXT_FRAMEWORK`` rather than inside a backend ``OPTIONS`` mapping, and the metadata renderer inside the ``METADATA`` scope.
+``URL_RESOLVER``, ``DEPENDENCY_RESOLVER``, ``COMPONENT_TEMPLATE_LOADER``, and ``METADATA["RENDERER"]`` each hold a single dotted path, and ``next.backends.resolve_setting_class`` reads all four against the base class its key declares, the last one through its ``scope`` argument.
 A value that is not a string is dropped by the settings merge for any of the three, which leaves the default in place with no error, and :ref:`next.E076 <ref-system-checks>` reports the dropped value on ``manage.py check``.
 
 ``URL_RESOLVER`` names a ``django.urls.resolvers.URLResolver`` subclass, and the framework builds one instance of that class around the lazy list of page and form-action patterns.
@@ -287,6 +290,9 @@ See :doc:`dependency-injection` for the resolver contract and :doc:`/content/ref
 
 ``COMPONENT_TEMPLATE_LOADER`` names a ``next.components.ComponentTemplateLoader`` subclass, and the components manager builds one instance of it around the shared module loader.
 The loader decides where a component body comes from and how long a compiled template is reused, so the shipped ``CachedComponentTemplateLoader`` is the subclass to start from when only the caching policy changes.
+
+``METADATA["RENDERER"]`` names a ``next.pages.MetadataRenderer`` subclass, whose ``render`` turns the folded ``Metadata`` of a page and the request into the markup ``{% metadata %}`` writes into the head.
+Subclass ``HtmlMetadataRenderer`` and extend the markup its ``render`` answers to add a tag while keeping every stock one, see :doc:`/content/ref/pages` for the contract.
 
 Signals
 -------
@@ -310,6 +316,9 @@ A port is the narrow surface one subsystem calls another through.
    * - Slot
      - Shipped implementation
      - What it answers
+   * - ``component_tags_slot``
+     - ``next.components.ports.ComponentTagsImpl``
+     - Names every ``{% component %}`` tag a compiled template holds.
    * - ``page_scan_slot``
      - ``next.pages.ports.PageScanImpl``
      - Executes every routed ``page.py`` and answers the ones that loaded.
@@ -319,11 +328,14 @@ A port is the narrow surface one subsystem calls another through.
    * - ``router_access_slot``
      - ``next.urls.ports.RouterAccessImpl``
      - Builds router backends and managers and answers the URL pattern parser.
+   * - ``seo_routes_slot``
+     - ``next.seo.ports.SeoRoutesImpl``
+     - Answers the sitemap and robots routes the lazy urlpatterns append, each only while its source exists.
    * - ``static_assets_slot``
      - ``next.static.ports.StaticAssetsImpl``
      - Creates a collector, discovers page and component assets, and injects the placeholder tags.
 
-``NextFrameworkConfig.ready()`` binds all four, ahead of every step that imports user code.
+``NextFrameworkConfig.ready()`` binds all six, ahead of every step that imports user code.
 Replace one by subclassing the shipped implementation and calling ``set`` on its slot from the ``ready()`` of an application listed after ``next`` in ``INSTALLED_APPS``, since a slot holds one implementation and the last binding wins.
 
 .. code-block:: python
@@ -411,7 +423,7 @@ Position the app relative to ``next`` in ``INSTALLED_APPS`` by what it registers
    ]
 
 For every registry on this page the position does not change the outcome, as *App order in* ``INSTALLED_APPS`` above explains.
-A port replacement is the case that does, because ``NextFrameworkConfig.ready()`` binds all four slots and the last binding wins, so a package that replaces a port has to be listed after ``next``.
+A port replacement is the case that does, because ``NextFrameworkConfig.ready()`` binds all six slots and the last binding wins, so a package that replaces a port has to be listed after ``next``.
 A package that reuses an existing kind or placeholder name with different parameters fails at startup either way, and its position only decides which ``ready`` call raises.
 
 Declare the dependency on next.dj under its distribution name, and constrain it from below only.

@@ -5,7 +5,7 @@ Layers and modals
 
 A layer is a modal the runtime opens over the current view and fills with a zone of a page.
 A ``data-next-layer`` link opens one from the markup, ``Patches.layer_open`` opens one from a handler, and both load the same thing, a named zone of a page that also renders on its own.
-This page covers the click-side interception, the server builder, the authorization step a foreign page's zone passes through, and the CSS hooks the runtime leaves behind.
+This page covers the click-side interception, the title a layer restores, the server builder, the authorization step a foreign page's zone passes through, and the CSS hooks the runtime leaves behind.
 
 .. contents::
    :local:
@@ -19,13 +19,26 @@ The pushed URL is the real address of the body rather than a masked URL of the p
 A refresh or a shared link resolves that URL as its own standalone page through its own ``page.py``, and Back closes the top layer.
 There is no client router and no URL masking.
 A single ``popstate`` handler closes the layer whose pushed URL the browser moved past.
-Every layer captures ``document.title`` when it opens and restores it when it closes, whichever way it closes, so a ``meta`` patch received inside the layer retitles the tab only for as long as the layer is up.
 
 ``data-next-confirm`` and ``data-next-layer`` combine on one link.
 The confirm gate is a capture-phase click handler, the layer opener is a bubble-phase one, so the confirm runs first regardless of install order.
 A cancelled confirm stops the click before it reaches the opener, so the layer never opens.
 An accepted confirm lets the click through and the layer opens.
 The same gate protects every click-driven trigger, so a prompt fronts a layer open the same way it fronts a pagination merge.
+
+Titles under a layer
+--------------------
+
+Every layer keeps the title underneath it and restores that title when it closes, whichever way it closes, by accept, dismiss, Back, or reset.
+A ``meta`` patch retitles the page whose envelope carried it.
+
+A title from the layer's own page, carried by the layer body, a zone GET inside the layer, or a mutation fired from it, lasts as long as the layer.
+A title from the host page or a lower layer, carried by a poll of the base page, a lazy zone GET, or a stream the host subscribed, becomes the title the covering layer restores, so the newest title of the page underneath survives the close.
+That title shows at once when the covering layers set no title of their own, and otherwise the layer title stays in the tab until they close.
+With nested layers each one restores the newest title of the layer below it.
+
+A mutation and a programmatic ``Next.partial.apply()`` carry no page, so their title counts as the top layer's.
+A stream counts as the page that subscribed it only while that URL still matches the host or the pushed URL of a layer, and otherwise its title counts as the top layer's as well.
 
 .. _partial-server-layers:
 

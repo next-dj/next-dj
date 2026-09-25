@@ -11,6 +11,7 @@ from .context import Context, ContextResult
 from .errors import (
     PageContextShapeError,
     PageMetadataConflictError,
+    PageMetadataRequestError,
     PageMetadataShapeError,
     PageMetadataTemplateError,
     PageMetadataURLError,
@@ -36,6 +37,7 @@ __all__ = [
     "Page",
     "PageContextShapeError",
     "PageMetadataConflictError",
+    "PageMetadataRequestError",
     "PageMetadataShapeError",
     "PageMetadataTemplateError",
     "PageMetadataURLError",

@@ -52,12 +52,28 @@ def build_nested_page(root: Path, *, body: str = "<h1>{{ title }}</h1>") -> Path
     return page_file
 
 
-def write_page_chain(root: Path, specs: Sequence[tuple[str, str]]) -> list[Path]:
-    """Write one nested ``page.py`` per spec under ``root`` and return them root first.
+def write_page(
+    root: Path,
+    trail: str = "",
+    source: str = 'template = "ok"\n',
+    *,
+    body: str | None = None,
+) -> Path:
+    """Write one ``page.py`` at ``trail`` under ``root`` and return it.
 
-    Each spec names the directory of one level and the source of its ``page.py``, so
-    a test states an ancestor chain as the list of files a reader would walk.
+    A ``body`` also writes the sibling ``template.djx`` the page renders.
     """
+    directory = root / trail
+    directory.mkdir(parents=True, exist_ok=True)
+    page_file = directory / "page.py"
+    page_file.write_text(source)
+    if body is not None:
+        (directory / "template.djx").write_text(body)
+    return page_file
+
+
+def write_page_chain(root: Path, specs: Sequence[tuple[str, str]]) -> list[Path]:
+    """Write one nested ``page.py`` per spec under ``root`` and return them root first."""
     directory = root
     pages: list[Path] = []
     for name, source in specs:

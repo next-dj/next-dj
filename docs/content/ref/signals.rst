@@ -161,8 +161,8 @@ Each family owns its own signal rather than sharing one, so a receiver connected
        The first error reaches the caller that asked for the reload once the chain is done.
    * - ``sitemap_items_registered``
      - ``SitemapItemsRegistry``
-     - ``root``, ``trail``, ``func``
-     - After ``@sitemap.items`` binds a callable to a route trail under a page root, and again when a re-executed ``sitemap.py`` replaces the binding.
+     - ``file``, ``trail``, ``func``
+     - After ``@sitemap.items`` binds a callable to a route trail of the tree of the running file, and again when a re-executed ``sitemap.py`` replaces the binding.
    * - ``sse_stream_closed``
      - ``PatchEventStream``
      - ``request``, ``duration_ms``, ``envelopes_sent``

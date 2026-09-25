@@ -16,11 +16,13 @@ Absolute URLs and the base origin
 
 A canonical link, an hreflang alternate, and a social image are only useful as absolute URLs, so every URL field of the fold is made absolute before it renders.
 An ``http`` or ``https`` URL passes through, a root-relative path such as ``/notes/`` is joined to the ``base`` origin of the fold, and a path without a leading slash is resolved against the request path first.
+A protocol-relative URL such as ``//cdn.notes.example/cover.png`` keeps its own host and takes the scheme of ``base``, or of the request when no base is set.
 A URL with any other scheme is a ``PageMetadataShapeError``, which ``next.E109`` reports ahead of the render.
 
 ``base`` is an origin and nothing more, a scheme and a host with no path, query, or fragment, which ``next.E101`` enforces.
 Declare it once in ``NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]`` so the whole tree shares it.
-Without a base the renderer falls back to :meth:`~django.http.HttpRequest.build_absolute_uri`, and a fold that has neither a base nor a request raises ``PageMetadataURLError``.
+Without a base the renderer falls back to :meth:`~django.http.HttpRequest.build_absolute_uri`, and a relative URL in a fold that has neither a base nor a request raises ``PageMetadataURLError``.
+A ``"canonical": True`` or an ``"alternates": {"languages": True}`` names the page itself, so it raises ``PageMetadataRequestError`` when rendered without a request, whatever the base.
 The fallback follows whatever host the request arrived on, which is why ``next.W086`` asks for a base once ``DEBUG`` is off.
 
 Canonical
@@ -65,6 +67,7 @@ The page renders ``<meta name="robots" content="noindex, follow">``.
 
 ``NOINDEX`` in ``NEXT_FRAMEWORK["METADATA"]`` overrides the robots block of every page with ``noindex, nofollow``.
 Set it on a staging host so a crawler that finds the deployment indexes none of it, and leave it off in production.
+It also takes the sitemap routes down and the ``Sitemap:`` line out of a generated robots, and :doc:`/content/ref/settings` lists every effect, the system checks included.
 
 hreflang alternates
 -------------------
@@ -75,6 +78,7 @@ The mapping is rendered as written, and ``x_default`` names the fallback variant
 
 ``True`` walks ``LANGUAGES`` and translates the canonical path, or the self path when no canonical is set, into each language through :func:`~django.urls.translate_url`.
 It needs the page routes wrapped in :func:`~django.conf.urls.i18n.i18n_patterns`, otherwise every code translates to the same URL and ``next.W087`` says so.
+The script prefix is set aside for the translation and put back by the reverse, so a project served under a ``SCRIPT_NAME`` gets translated alternates too, and a path outside that prefix keeps its URL as given.
 The ``x-default`` alternate defaults to the ``LANGUAGE_CODE`` variant and always renders last.
 :doc:`/content/howto/internationalize-routes` shows the settings side.
 

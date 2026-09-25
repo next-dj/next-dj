@@ -26,17 +26,13 @@ def get_request_dep_cache(request: object | None) -> dict[str, Any] | None:
     return cache if isinstance(cache, dict) else None
 
 
-def ensure_request_dep_cache(request: object | None) -> dict[str, Any]:
-    """Return the dep cache of `request`, attaching a fresh one when it has none.
+def shared_dep_cache(request: object | None) -> dict[str, Any]:
+    """Return the dispatch cache on `request`, or a fresh dict the request never sees.
 
-    The page view, the context merge and the metadata callables share one per request.
+    A render publishing its own cache would hand it to every component on the page.
     """
     cache = get_request_dep_cache(request)
-    if cache is None:
-        cache = {}
-        if request is not None:
-            setattr(request, REQUEST_DEP_CACHE_ATTR, cache)
-    return cache
+    return {} if cache is None else cache
 
 
 class DependencyCache:

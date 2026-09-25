@@ -9,10 +9,11 @@ Module summary
 ``next.apps`` contains the Django ``AppConfig`` and the helpers that the framework runs at application startup.
 
 ``NextFrameworkConfig.ready()`` first runs ``next.checks.register_all()`` to register the framework system checks.
-It then runs twelve startup steps in a fixed order.
+It then runs thirteen startup steps in a fixed order.
 
 #. ``router_reloaded.connect()`` for the five cache-forgetting receivers
 #. ``apply_resolver_setting()``
+#. ``component_tags_slot.set(ComponentTagsImpl())``
 #. ``page_scan_slot.set(PageScanImpl())``
 #. ``partial_shaper_slot.set(PartialShaperImpl())``
 #. ``router_access_slot.set(RouterAccessImpl())``
@@ -34,7 +35,7 @@ It runs ahead of every install because the two discovery steps import user modul
 ``autodiscover_forms()`` imports the ``forms`` submodule of every installed app so shared forms register before the first request arrives.
 It respects the ``FORM_AUTODISCOVER`` setting and is a no-op when that setting is ``False``.
 
-Steps three to seven bind the five :doc:`next.ports <ports>` slots, ahead of every step that imports user code so that a module touching a framework path at import time never reads an unbound slot.
+Steps three to eight bind the six :doc:`next.ports <ports>` slots, ahead of every step that imports user code so that a module touching a framework path at import time never reads an unbound slot.
 They also run ahead of the discovery steps so a discovery failure leaves no process behind with a slot still empty.
 Each implementation resolves its manager when a method is called rather than when the slot is bound, so the static manager is still built on first use.
 

@@ -11,8 +11,7 @@ from typing import TYPE_CHECKING, override
 from django import template
 from django.template.base import Node, NodeList
 
-from next.pages.metadata import MetadataThunk, render_metadata
-from next.seeding import METADATA_KEY
+from next.pages.metadata.nodes import MetadataNode
 
 
 if TYPE_CHECKING:
@@ -46,18 +45,6 @@ class TemplatePlaceholderNode(Node):
     def render(self, context: Context) -> str:
         """Render the fallback body, the empty string when the tag carries none."""
         return self.nodelist.render(context)
-
-
-class MetadataNode(Node):
-    """Renders the head tags of the page whose metadata thunk the context carries."""
-
-    @override
-    def render(self, context: Context) -> str:
-        """Resolve the thunk and render it, the empty string outside a page render."""
-        thunk = context.get(METADATA_KEY)
-        if not isinstance(thunk, MetadataThunk):
-            return ""
-        return render_metadata(thunk.resolve(), request=thunk.request)
 
 
 @register.tag(name="template")

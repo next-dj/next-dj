@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 from django.test import override_settings
 
-from tests.support import file_router_config_entry
+from tests.support import file_router_config_entry, write_page
 
 
 if TYPE_CHECKING:
@@ -16,17 +16,19 @@ if TYPE_CHECKING:
 BASE = "https://acme.example"
 NAMESPACED_URLCONF = "tests.urls.urls_namespaced"
 WITH_BASE = {"METADATA": {"DEFAULTS": {"base": BASE}}}
+PREFIXED_URLCONF = "tests.seo.urls_prefixed"
+USER_URLCONF = "tests.seo.urls_user"
+NOINDEX = 'template = "x"\nmetadata = {"robots": {"index": False}}\n'
+POSTS_ITEMS = """
+from next.seo import sitemap
+
+
+@sitemap.items("posts/[slug]")
+def posts():
+    yield {"slug": "a"}
+"""
 CALLS: list[str] = []
 """Appended to by the `sitemap.py` bodies the tests write, to count their calls."""
-
-
-def write_page(root: Path, trail: str, source: str = 'template = "ok"\n') -> Path:
-    """Write one `page.py` at `trail` under `root` and return it."""
-    directory = root / trail if trail else root
-    directory.mkdir(parents=True, exist_ok=True)
-    page = directory / "page.py"
-    page.write_text(source)
-    return page
 
 
 def write_tree(
@@ -61,3 +63,8 @@ def routed(
         ROOT_URLCONF=urlconf, NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry], **framework}
     ):
         yield
+
+
+def listed_elsewhere() -> list[dict[str, str]]:
+    """List one post from a module that is no `sitemap.py`, for a sitemap to import."""
+    return [{"slug": "elsewhere"}]

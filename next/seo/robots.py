@@ -12,7 +12,10 @@ from .markers import Rule
 
 if TYPE_CHECKING:
     import types
+    from collections.abc import Iterable
     from pathlib import Path
+
+    from .discovery import SeoRoot
 
 
 DEFAULT_RULES: tuple[Rule, ...] = (Rule(allow=("/",)),)
@@ -29,21 +32,6 @@ def _group(rule: Rule) -> str:
     return "\n".join(lines)
 
 
-def render_rules(
-    rules: tuple[Rule, ...], host: str | None, sitemap_url: str | None
-) -> str:
-    """Render the groups, then the `Host` and `Sitemap` lines as a trailing block."""
-    blocks = [_group(rule) for rule in rules or DEFAULT_RULES]
-    trailer = []
-    if host is not None:
-        trailer.append(f"Host: {host}")
-    if sitemap_url is not None:
-        trailer.append(f"Sitemap: {sitemap_url}")
-    if trailer:
-        blocks.append("\n".join(trailer))
-    return "\n\n".join(blocks) + "\n"
-
-
 @dataclass(frozen=True, slots=True)
 class RobotsRules:
     """The `rules` and `host` a `robots.py` declares."""
@@ -53,21 +41,33 @@ class RobotsRules:
     host: str | None
 
     def render(self, sitemap_url: str | None) -> str:
-        """Return the robots text with `sitemap_url` as its `Sitemap` line."""
-        return render_rules(self.rules, self.host, sitemap_url)
+        """Render the groups, then `Host` and `sitemap_url` as a trailing block."""
+        blocks = [_group(rule) for rule in self.rules or DEFAULT_RULES]
+        trailer = []
+        if self.host is not None:
+            trailer.append(f"Host: {self.host}")
+        if sitemap_url is not None:
+            trailer.append(f"Sitemap: {sitemap_url}")
+        if trailer:
+            blocks.append("\n".join(trailer))
+        return "\n\n".join(blocks) + "\n"
+
+
+def declared_rules(module: types.ModuleType) -> tuple[Rule, ...]:
+    """Return the `Rule` groups a `robots.py` declares, anything else read as none."""
+    declared = getattr(module, "rules", ())
+    if not isinstance(declared, list | tuple):
+        return ()
+    return tuple(rule for rule in declared if isinstance(rule, Rule))
 
 
 def rules_from_module(path: Path, module: types.ModuleType) -> RobotsRules:
     """Read `rules` and `host` leniently, the checks report the wrong shapes."""
-    declared = getattr(module, "rules", ())
-    rules = tuple(
-        rule
-        for rule in (declared if isinstance(declared, list | tuple) else ())
-        if isinstance(rule, Rule)
-    )
     host = getattr(module, "host", None)
     return RobotsRules(
-        path=path, rules=rules, host=host if isinstance(host, str) else None
+        path=path,
+        rules=declared_rules(module),
+        host=host if isinstance(host, str) else None,
     )
 
 
@@ -101,11 +101,31 @@ class RobotsFile:
 type RobotsSource = RobotsRules | RobotsFile
 
 
+def robots_candidates(
+    roots: Iterable[SeoRoot],
+) -> tuple[tuple[Path, RobotsSource | None], ...]:
+    """Pair every `/robots.txt` source with what it serves, in the order preferred.
+
+    A `robots.py` precedes its `robots.txt` and still counts when its import failed.
+    """
+    candidates: list[tuple[Path, RobotsSource | None]] = []
+    for root in roots:
+        if root.robots is not None:
+            module = root.robots.module
+            path = root.robots.path
+            served = None if module is None else rules_from_module(path, module)
+            candidates.append((path, served))
+        if root.robots_file is not None:
+            candidates.append((root.robots_file, RobotsFile(root.robots_file)))
+    return tuple(candidates)
+
+
 __all__ = [
     "DEFAULT_RULES",
     "RobotsFile",
     "RobotsRules",
     "RobotsSource",
-    "render_rules",
+    "declared_rules",
+    "robots_candidates",
     "rules_from_module",
 ]

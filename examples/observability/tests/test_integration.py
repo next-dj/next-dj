@@ -554,3 +554,26 @@ class TestFlushMetricsCommand:
         call_command("flush_metrics")
         captured = capsys.readouterr()
         assert f"flushed {before} counters" in captured.out
+
+
+class TestPageMetadata:
+    """The root dict keeps the dashboard out of the index, each stats page names itself."""
+
+    @pytest.mark.parametrize(
+        ("url", "title"),
+        [
+            ("/", "next.dj — Observability dashboard"),
+            ("/stats/", "Live stats · next.dj observability"),
+            ("/stats/pages/", "Page renders · next.dj observability"),
+            ("/stats/components/", "Component renders · next.dj observability"),
+            ("/stats/forms/", "Form actions · next.dj observability"),
+            ("/stats/static/", "Static pipeline · next.dj observability"),
+        ],
+        ids=["overview", "live", "pages", "components", "forms", "static"],
+    )
+    def test_each_page_carries_its_title_and_noindex(
+        self, next_client, url: str, title: str
+    ) -> None:
+        body = next_client.get(url).content.decode()
+        assert f"<title>{title}</title>" in body
+        assert '<meta name="robots" content="noindex">' in body

@@ -1,5 +1,5 @@
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from typing import override
 
@@ -7,30 +7,44 @@ import pytest
 from django.core.signals import setting_changed
 from django.http import HttpRequest
 from django.test import RequestFactory, override_settings
-from django.urls import set_urlconf
+from django.urls import clear_script_prefix, set_script_prefix, set_urlconf
 from django.utils import translation
 from django.utils.functional import lazy
 from django.utils.safestring import SafeString
 
 import next.pages.metadata.backends as backends_module
 from next.conf.signals import settings_reloaded
-from next.pages.errors import PageMetadataShapeError, PageMetadataURLError
+from next.errors import (
+    AbstractBackendError,
+    SettingImportError,
+    SettingNotSubclassError,
+)
+from next.pages.errors import (
+    PageMetadataRequestError,
+    PageMetadataShapeError,
+    PageMetadataURLError,
+)
 from next.pages.metadata import (
-    EMPTY_METADATA,
-    Alternates,
-    Article,
     HtmlMetadataRenderer,
     Metadata,
     MetadataRenderer,
+    render_metadata,
+)
+from next.pages.metadata.backends import (
+    absolute_url,
+    forget_translated_urls,
+    metadata_renderer,
+)
+from next.pages.metadata.schema import (
+    EMPTY_METADATA,
+    Alternates,
+    Article,
     OpenGraph,
     OpenGraphImage,
     Robots,
     Twitter,
     Verification,
-    absolute_url,
-    render_metadata,
 )
-from next.pages.metadata.backends import default_renderer, forget_translated_urls
 from next.testing import override_next_settings
 from tests.support import (
     ABSOLUTE_URL_CASES,
@@ -38,12 +52,13 @@ from tests.support import (
     AbsoluteUrlCase,
     RobotsCase,
     build_mock_http_request,
+    record_calls,
 )
 
 
 BASE = "https://acme.example"
 I18N = {
-    "ROOT_URLCONF": "tests.support.i18n_urls",
+    "ROOT_URLCONF": "tests.support.urls_i18n_pages",
     "LANGUAGES": [("en", "English"), ("de", "German")],
     "LANGUAGE_CODE": "en",
     "USE_I18N": True,
@@ -132,16 +147,8 @@ def _lines(meta: Metadata, request: HttpRequest | None = None) -> list[str]:
     return render_metadata(meta, request=request).split("\n")
 
 
-def _count_translations(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]:
-    calls: list[tuple[str, str]] = []
-    original = backends_module.translate_url
-
-    def counting(url: str, code: str) -> str:
-        calls.append((url, code))
-        return original(url, code)
-
-    monkeypatch.setattr(backends_module, "translate_url", counting)
-    return calls
+def _changed(setting: str) -> None:
+    setting_changed.send(sender=None, setting=setting, value=None, enter=True)
 
 
 @pytest.fixture(autouse=True)
@@ -167,13 +174,77 @@ class TestRendererContract:
         assert Plain().render(Metadata(title="T"), request=None) == "T"
 
     def test_render_metadata_goes_through_the_default_renderer(self) -> None:
-        assert isinstance(default_renderer, HtmlMetadataRenderer)
+        assert isinstance(metadata_renderer(), HtmlMetadataRenderer)
         assert render_metadata(EMPTY_METADATA, request=None) == ""
 
     def test_empty_metadata_renders_a_safe_empty_string(self) -> None:
         rendered = HtmlMetadataRenderer().render(EMPTY_METADATA, request=None)
         assert isinstance(rendered, SafeString)
         assert rendered == ""
+
+
+class TitleOnlyRenderer(MetadataRenderer):
+    @override
+    def render(self, meta: Metadata, *, request: HttpRequest | None) -> SafeString:
+        return SafeString(f"<title>{meta.title}</title>")
+
+
+TITLE_ONLY = f"{__name__}.TitleOnlyRenderer"
+
+
+def _renderer_setting(dotted: object) -> dict[str, object]:
+    return {"METADATA": {"RENDERER": dotted}}
+
+
+class TestConfiguredRenderer:
+    """`METADATA["RENDERER"]` names the class `render_metadata` goes through."""
+
+    def test_the_renderer_is_built_once_per_reload(self) -> None:
+        first = metadata_renderer()
+        assert metadata_renderer() is first
+        with override_settings(NEXT_FRAMEWORK={"METADATA": {"NOINDEX": True}}):
+            assert metadata_renderer() is not first
+            assert isinstance(metadata_renderer(), HtmlMetadataRenderer)
+
+    def test_the_setting_names_the_renderer(self) -> None:
+        with override_settings(NEXT_FRAMEWORK=_renderer_setting(TITLE_ONLY)):
+            assert type(metadata_renderer()).__name__ == "TitleOnlyRenderer"
+            html = render_metadata(Metadata(title="T"), request=None)
+        assert html == "<title>T</title>"
+        assert isinstance(metadata_renderer(), HtmlMetadataRenderer)
+
+    def test_a_class_outside_the_family_is_refused(self) -> None:
+        with (
+            override_settings(NEXT_FRAMEWORK=_renderer_setting("next.pages.Metadata")),
+            pytest.raises(SettingNotSubclassError) as caught,
+        ):
+            metadata_renderer()
+        assert caught.value.scope == "METADATA"
+        assert "NEXT_FRAMEWORK['METADATA']['RENDERER']" in str(caught.value)
+
+    def test_a_value_that_is_no_dotted_path_is_refused(self) -> None:
+        with (
+            override_settings(NEXT_FRAMEWORK=_renderer_setting(42)),
+            pytest.raises(SettingNotSubclassError, match="42 is not a"),
+        ):
+            metadata_renderer()
+
+    def test_a_path_that_does_not_import_is_refused(self) -> None:
+        with (
+            override_settings(NEXT_FRAMEWORK=_renderer_setting("nope.Renderer")),
+            pytest.raises(SettingImportError) as caught,
+        ):
+            metadata_renderer()
+        assert caught.value.setting == "RENDERER"
+        assert "NEXT_FRAMEWORK['METADATA']['RENDERER']" in str(caught.value)
+
+    def test_the_abstract_root_is_refused(self) -> None:
+        dotted = "next.pages.MetadataRenderer"
+        with (
+            override_settings(NEXT_FRAMEWORK=_renderer_setting(dotted)),
+            pytest.raises(AbstractBackendError),
+        ):
+            metadata_renderer()
 
 
 class TestEscaping:
@@ -225,9 +296,13 @@ class TestEscaping:
 class TestAbsoluteUrl:
     """`absolute_url` prefers the base, then the request host, and rejects schemes."""
 
-    @pytest.mark.parametrize("case", ABSOLUTE_URL_CASES, ids=lambda c: c.id)
+    @pytest.mark.parametrize(
+        "case", ABSOLUTE_URL_CASES, ids=[case.id for case in ABSOLUTE_URL_CASES]
+    )
     @override_settings(ALLOWED_HOSTS=["testserver"])
-    def test_resolution(self, case: AbsoluteUrlCase) -> None:
+    def test_a_url_resolves_on_the_base_or_the_request(
+        self, case: AbsoluteUrlCase
+    ) -> None:
         request = None if case.path is None else _request(case.path)
         if case.error is not None:
             with pytest.raises(case.error):
@@ -253,21 +328,51 @@ class TestAbsoluteUrl:
         assert absolute_url("./a", base=BASE, request=request) == f"{BASE}/p/q/a"
 
     @pytest.mark.parametrize(
-        ("field", "meta"),
+        "meta",
         [
-            ("canonical", Metadata(canonical="ftp://x/")),
-            ("hreflang", Metadata(alternates=Alternates(languages={"en": "ftp://x/"}))),
-            ("og:url", Metadata(og=OpenGraph(url="ftp://x/"))),
-            ("og:image", Metadata(og=OpenGraph(images=(OpenGraphImage("ftp://x"),)))),
-            ("twitter:image", Metadata(twitter=Twitter(images=("ftp://x",)))),
+            Metadata(canonical="ftp://x/"),
+            Metadata(alternates=Alternates(languages={"en": "ftp://x/"})),
+            Metadata(og=OpenGraph(url="ftp://x/")),
+            Metadata(og=OpenGraph(images=(OpenGraphImage("ftp://x"),))),
+            Metadata(twitter=Twitter(images=("ftp://x",))),
         ],
-        ids=lambda value: value if isinstance(value, str) else "",
+        ids=["canonical", "hreflang", "og_url", "og_image", "twitter_image"],
     )
     def test_every_url_field_goes_through_the_scheme_allowlist(
-        self, field: str, meta: Metadata
+        self, meta: Metadata
     ) -> None:
         with pytest.raises(PageMetadataShapeError):
             render_metadata(meta, request=_request())
+
+    @pytest.mark.parametrize(
+        ("base", "scheme", "expected"),
+        [
+            (BASE, "http", "https://cdn.example/x.png"),
+            ("http://acme.example", "https", "http://cdn.example/x.png"),
+            (None, "https", "https://cdn.example/x.png"),
+            (None, "http", "http://cdn.example/x.png"),
+        ],
+        ids=["base_https", "base_http", "request_https", "request_http"],
+    )
+    @override_settings(ALLOWED_HOSTS=["testserver"])
+    def test_a_protocol_relative_url_keeps_its_own_host(
+        self, base: str | None, scheme: str, expected: str
+    ) -> None:
+        request = RequestFactory().get("/p/", secure=scheme == "https")
+        assert absolute_url("//cdn.example/x.png", base=base, request=request) == (
+            expected
+        )
+
+    def test_a_protocol_relative_url_takes_the_base_scheme_without_a_request(
+        self,
+    ) -> None:
+        url = absolute_url("//cdn.example/x.png", base=BASE, request=None)
+        assert url == "https://cdn.example/x.png"
+
+    def test_a_protocol_relative_url_needs_a_base_or_a_request(self) -> None:
+        with pytest.raises(PageMetadataURLError) as info:
+            absolute_url("//cdn.example/x.png", base=None, request=None)
+        assert info.value.url == "//cdn.example/x.png"
 
     def test_og_url_given_absolute_is_kept(self) -> None:
         meta = Metadata(og=OpenGraph(url="https://x.example/a/"))
@@ -281,10 +386,13 @@ class TestCanonical:
     def test_off_renders_no_link(self, *, canonical: bool | None) -> None:
         assert _lines(Metadata(canonical=canonical, base=BASE)) == [""]
 
-    def test_true_without_a_request_raises(self) -> None:
-        with pytest.raises(PageMetadataURLError) as info:
+    def test_true_without_a_request_names_the_key(self) -> None:
+        with pytest.raises(PageMetadataRequestError) as info:
             render_metadata(Metadata(canonical=True, base=BASE), request=None)
-        assert info.value.url == "canonical"
+        assert info.value.key == "canonical"
+        assert str(info.value) == (
+            "`canonical=True` names the page itself and needs a request"
+        )
 
     def test_true_is_the_request_path_without_a_query(self) -> None:
         meta = Metadata(canonical=True, base=BASE)
@@ -293,20 +401,19 @@ class TestCanonical:
             f'<link rel="canonical" href="{BASE}/wallet/">'
         ]
 
+    @pytest.mark.parametrize(
+        ("path", "href"),
+        [
+            ("/wallet/?utm=1&page=2&q=a%20b&q=c", "/wallet/?q=a+b&amp;q=c&amp;page=2"),
+            ("/wallet/?page=1&q=x", "/wallet/?q=x"),
+        ],
+        ids=["allowlist_order", "first_page_dropped"],
+    )
     @override_settings(NEXT_FRAMEWORK=QUERY)
-    def test_true_keeps_the_allowlisted_keys_in_allowlist_order(self) -> None:
+    def test_true_keeps_the_allowlisted_query(self, path: str, href: str) -> None:
         meta = Metadata(canonical=True, base=BASE)
-        request = _request("/wallet/?utm=1&page=2&q=a%20b&q=c")
-        assert _lines(meta, request) == [
-            f'<link rel="canonical" href="{BASE}/wallet/?q=a+b&amp;q=c&amp;page=2">'
-        ]
-
-    @override_settings(NEXT_FRAMEWORK=QUERY)
-    def test_true_drops_the_first_page(self) -> None:
-        meta = Metadata(canonical=True, base=BASE)
-        request = _request("/wallet/?page=1&q=x")
-        assert _lines(meta, request) == [
-            f'<link rel="canonical" href="{BASE}/wallet/?q=x">'
+        assert _lines(meta, _request(path)) == [
+            f'<link rel="canonical" href="{BASE}{href}">'
         ]
 
     def test_true_keeps_the_script_name(self) -> None:
@@ -332,42 +439,51 @@ class TestCanonical:
 class TestRobots:
     """The directives fold like Next.js, and `NOINDEX` overrides everything."""
 
-    @pytest.mark.parametrize("case", ROBOTS_CASES, ids=lambda c: c.id)
-    def test_folding(self, case: RobotsCase) -> None:
+    @pytest.mark.parametrize(
+        "case", ROBOTS_CASES, ids=[case.id for case in ROBOTS_CASES]
+    )
+    def test_the_directives_fold_into_one_meta(self, case: RobotsCase) -> None:
         expected = [f'<meta name="robots" content="{case.expected}">']
         assert _lines(Metadata(robots=case.robots)) == (
             expected if case.expected else [""]
         )
 
-    def test_googlebot_is_a_separate_meta(self) -> None:
-        robots = Robots(index=True, googlebot=Robots(index=False, nosnippet=True))
-        assert _lines(Metadata(robots=robots)) == [
-            '<meta name="robots" content="index">',
-            '<meta name="googlebot" content="noindex, nosnippet">',
-        ]
+    @pytest.mark.parametrize(
+        ("robots", "expected"),
+        [
+            (
+                Robots(index=True, googlebot=Robots(index=False, nosnippet=True)),
+                [
+                    '<meta name="robots" content="index">',
+                    '<meta name="googlebot" content="noindex, nosnippet">',
+                ],
+            ),
+            (Robots(googlebot="none"), ['<meta name="googlebot" content="none">']),
+            (
+                Robots(index=True, googlebot=Robots()),
+                ['<meta name="robots" content="index">'],
+            ),
+        ],
+        ids=["folded", "text", "empty_fold"],
+    )
+    def test_googlebot_renders_as_a_meta_of_its_own(
+        self, robots: Robots, expected: list[str]
+    ) -> None:
+        assert _lines(Metadata(robots=robots)) == expected
 
-    def test_googlebot_as_a_string(self) -> None:
-        assert _lines(Metadata(robots=Robots(googlebot="none"))) == [
-            '<meta name="googlebot" content="none">'
-        ]
-
-    def test_an_empty_googlebot_fold_emits_nothing(self) -> None:
-        assert _lines(Metadata(robots=Robots(index=True, googlebot=Robots()))) == [
-            '<meta name="robots" content="index">'
-        ]
-
+    @pytest.mark.parametrize(
+        "meta",
+        [
+            Metadata(robots=Robots(index=True, follow=True, googlebot="all")),
+            EMPTY_METADATA,
+        ],
+        ids=["declared_robots", "no_robots"],
+    )
     @override_settings(NEXT_FRAMEWORK=NOINDEX)
-    def test_noindex_overrides_the_chain_and_drops_googlebot(self) -> None:
-        robots = Robots(index=True, follow=True, googlebot="all")
-        assert _lines(Metadata(robots=robots)) == [
-            '<meta name="robots" content="noindex, nofollow">'
-        ]
-
-    @override_settings(NEXT_FRAMEWORK=NOINDEX)
-    def test_noindex_applies_without_any_robots(self) -> None:
-        assert _lines(EMPTY_METADATA) == [
-            '<meta name="robots" content="noindex, nofollow">'
-        ]
+    def test_noindex_overrides_the_chain_and_drops_googlebot(
+        self, meta: Metadata
+    ) -> None:
+        assert _lines(meta) == ['<meta name="robots" content="noindex, nofollow">']
 
 
 class TestHreflang:
@@ -400,7 +516,7 @@ class TestHreflang:
     def test_true_emits_one_link_per_language_and_an_unprefixed_default(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        calls = _count_translations(monkeypatch)
+        calls = record_calls(monkeypatch, backends_module, "translate_url")
         meta = Metadata(base=BASE, alternates=Alternates(languages=True))
         expected = [
             f'<link rel="alternate" hreflang="en" href="{BASE}/headed/">',
@@ -408,7 +524,7 @@ class TestHreflang:
             f'<link rel="alternate" hreflang="x-default" href="{BASE}/headed/">',
         ]
         assert _lines(meta, _request("/headed/")) == expected
-        assert calls == [("/headed/", "en"), ("/headed/", "de")]
+        assert [call.args for call in calls] == [("/headed/", "en"), ("/headed/", "de")]
         assert _lines(meta, _request("/headed/")) == expected
         assert len(calls) == 2
 
@@ -434,9 +550,9 @@ class TestHreflang:
     @override_settings(**I18N)
     def test_true_without_a_request_or_canonical_raises(self) -> None:
         meta = Metadata(base=BASE, alternates=Alternates(languages=True))
-        with pytest.raises(PageMetadataURLError) as info:
+        with pytest.raises(PageMetadataRequestError) as info:
             render_metadata(meta, request=None)
-        assert info.value.url == "alternates"
+        assert info.value.key == "alternates"
 
     @override_settings(**I18N)
     def test_true_keeps_the_canonical_query(self) -> None:
@@ -447,10 +563,64 @@ class TestHreflang:
             f'<link rel="alternate" hreflang="de" href="{BASE}/de/headed/?page=2">'
         )
 
+    @override_settings(**I18N)
+    def test_true_translates_below_the_script_prefix(self) -> None:
+        meta = Metadata(base=BASE, alternates=Alternates(languages=True))
+        request = RequestFactory().get("/headed/", SCRIPT_NAME="/app")
+        set_script_prefix("/app/")
+        try:
+            lines = _lines(meta, request)
+        finally:
+            clear_script_prefix()
+        assert lines == [
+            f'<link rel="alternate" hreflang="en" href="{BASE}/app/headed/">',
+            f'<link rel="alternate" hreflang="de" href="{BASE}/app/de/headed/">',
+            f'<link rel="alternate" hreflang="x-default" href="{BASE}/app/headed/">',
+        ]
+
+    @override_settings(**I18N)
+    def test_an_unrouted_path_keeps_the_script_prefix(self) -> None:
+        meta = Metadata(base=BASE, alternates=Alternates(languages=True))
+        request = RequestFactory().get("/nowhere/", SCRIPT_NAME="/app")
+        set_script_prefix("/app/")
+        try:
+            lines = _lines(meta, request)
+        finally:
+            clear_script_prefix()
+        assert {line.split('href="')[1] for line in lines} == {f'{BASE}/app/nowhere/">'}
+
+    @override_settings(**I18N)
+    def test_a_canonical_outside_the_script_prefix_stays_as_declared(self) -> None:
+        canonical = "https://other.example/headed/"
+        meta = Metadata(canonical=canonical, alternates=Alternates(languages=True))
+        set_script_prefix("/app/")
+        try:
+            lines = _lines(meta)
+        finally:
+            clear_script_prefix()
+        assert {line.split('href="')[1] for line in lines} == {f'{canonical}">'}
+
+    @override_settings(**I18N)
+    def test_the_memo_tells_script_prefixes_apart(self) -> None:
+        meta = Metadata(base=BASE, alternates=Alternates(languages=True))
+        request = RequestFactory().get("/headed/", SCRIPT_NAME="/app")
+        bare = _lines(meta, request)[1]
+        set_script_prefix("/app/")
+        try:
+            prefixed = _lines(meta, request)[1]
+        finally:
+            clear_script_prefix()
+        assert bare == (
+            f'<link rel="alternate" hreflang="de" href="{BASE}/app/headed/">'
+        )
+        assert prefixed == (
+            f'<link rel="alternate" hreflang="de" href="{BASE}/app/de/headed/">'
+        )
+
     @override_settings(LANGUAGES=I18N["LANGUAGES"], LANGUAGE_CODE="en")
     def test_the_thread_urlconf_is_honoured(self) -> None:
         meta = Metadata(base=BASE, alternates=Alternates(languages=True))
-        set_urlconf("tests.support.i18n_urls")
+        set_urlconf(I18N["ROOT_URLCONF"])
         try:
             lines = _lines(meta, _request("/headed/"))
         finally:
@@ -463,28 +633,29 @@ class TestHreflang:
 class TestTranslationMemo:
     """The memo drops on a settings reload and on a URLconf or language change."""
 
+    @pytest.mark.parametrize(
+        ("invalidate", "translations"),
+        [
+            (lambda: settings_reloaded.send(sender=None), 4),
+            (lambda: _changed("ROOT_URLCONF"), 4),
+            (lambda: _changed("LANGUAGES"), 4),
+            (lambda: _changed("DEBUG"), 2),
+        ],
+        ids=["settings_reloaded", "urlconf", "languages", "other_setting"],
+    )
     @override_settings(**I18N)
-    def test_settings_reloaded_clears_the_memo(
-        self, monkeypatch: pytest.MonkeyPatch
+    def test_a_second_render_translates_again_only_after_a_drop(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        invalidate: Callable[[], object],
+        translations: int,
     ) -> None:
-        calls = _count_translations(monkeypatch)
+        calls = record_calls(monkeypatch, backends_module, "translate_url")
         meta = Metadata(base=BASE, alternates=Alternates(languages=True))
         _lines(meta, _request("/headed/"))
-        settings_reloaded.send(sender=None)
+        invalidate()
         _lines(meta, _request("/headed/"))
-        assert len(calls) == 4
-
-    @pytest.mark.parametrize(
-        ("setting", "cleared"),
-        [("ROOT_URLCONF", True), ("LANGUAGES", True), ("DEBUG", False)],
-        ids=["urlconf", "languages", "other"],
-    )
-    def test_setting_changed_clears_only_for_urlconf_and_languages(
-        self, setting: str, *, cleared: bool
-    ) -> None:
-        backends_module._translated[(None, "/x/", "en")] = "/x/"
-        setting_changed.send(sender=None, setting=setting, value=None, enter=True)
-        assert ((None, "/x/", "en") in backends_module._translated) is not cleared
+        assert len(calls) == translations
 
 
 class TestOpenGraphDerivation:
@@ -570,7 +741,7 @@ class TestOpenGraphDerivation:
 class TestOutputOrder:
     """A fully populated value renders every line in the documented order."""
 
-    def test_full_metadata(self) -> None:
+    def test_every_line_renders_in_the_documented_order(self) -> None:
         assert _lines(FULL, _request()) == list(FULL_LINES)
 
     def test_lines_are_joined_by_newlines_only(self) -> None:

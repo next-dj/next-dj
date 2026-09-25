@@ -26,19 +26,16 @@ from tests.support import (
     APP_FINDER_CASES,
     PROJECT_APP_DIRECTORIES_FINDER,
     AppFinderCase,
+    check_ids,
     patch_checks_router_manager,
 )
-
-
-def _ids(messages: list) -> list[str]:
-    return [m.id for m in messages]
 
 
 class TestEmptyConfig:
     def test_empty_list_emits_w030(self) -> None:
         with override_settings(NEXT_FRAMEWORK={"STATIC_BACKENDS": []}):
             messages = check_static_backends(app_configs=None)
-        assert _ids(messages) == ["next.W030"]
+        assert check_ids(messages) == ["next.W030"]
         assert isinstance(messages[0], DjangoWarning)
 
     def test_non_list_falls_back_to_defaults(self) -> None:
@@ -80,27 +77,27 @@ class TestBadEntries:
     def test_non_dict_entry_emits_e037(self) -> None:
         with override_settings(NEXT_FRAMEWORK={"STATIC_BACKENDS": ["not-a-dict"]}):
             messages = check_static_backends(app_configs=None)
-        assert _ids(messages) == ["next.E037"]
+        assert check_ids(messages) == ["next.E037"]
         assert isinstance(messages[0], Error)
 
     def test_non_string_backend_emits_e092(self) -> None:
         with override_settings(NEXT_FRAMEWORK={"STATIC_BACKENDS": [{"BACKEND": 123}]}):
             messages = check_static_backends(app_configs=None)
-        assert _ids(messages) == ["next.E092"]
+        assert check_ids(messages) == ["next.E092"]
 
     def test_missing_module_emits_e036(self) -> None:
         with override_settings(
             NEXT_FRAMEWORK={"STATIC_BACKENDS": [{"BACKEND": "does.not.exist.Backend"}]}
         ):
             messages = check_static_backends(app_configs=None)
-        assert _ids(messages) == ["next.E036"]
+        assert check_ids(messages) == ["next.E036"]
 
     def test_not_subclass_emits_e093(self) -> None:
         with override_settings(
             NEXT_FRAMEWORK={"STATIC_BACKENDS": [{"BACKEND": "builtins.dict"}]}
         ):
             messages = check_static_backends(app_configs=None)
-        assert _ids(messages) == ["next.E093"]
+        assert check_ids(messages) == ["next.E093"]
 
     def test_duplicate_backend_emits_e038(self) -> None:
         with override_settings(
@@ -112,7 +109,7 @@ class TestBadEntries:
             }
         ):
             messages = check_static_backends(app_configs=None)
-        assert "next.E038" in _ids(messages)
+        assert "next.E038" in check_ids(messages)
 
 
 class TestOptionsWarnings:
@@ -128,7 +125,7 @@ class TestOptionsWarnings:
             }
         ):
             messages = check_static_backends(app_configs=None)
-        assert "next.W031" in _ids(messages)
+        assert "next.W031" in check_ids(messages)
 
     def test_js_tag_without_placeholder_emits_w031(self) -> None:
         with override_settings(
@@ -142,7 +139,7 @@ class TestOptionsWarnings:
             }
         ):
             messages = check_static_backends(app_configs=None)
-        assert "next.W031" in _ids(messages)
+        assert "next.W031" in check_ids(messages)
 
     def test_module_tag_without_placeholder_emits_w031(self) -> None:
         with override_settings(
@@ -156,7 +153,7 @@ class TestOptionsWarnings:
             }
         ):
             messages = check_static_backends(app_configs=None)
-        assert "next.W031" in _ids(messages)
+        assert "next.W031" in check_ids(messages)
 
     def test_non_string_tag_template_is_ignored(self) -> None:
         with override_settings(
@@ -170,7 +167,7 @@ class TestOptionsWarnings:
             }
         ):
             messages = check_static_backends(app_configs=None)
-        assert "next.W031" not in _ids(messages)
+        assert "next.W031" not in check_ids(messages)
 
     def test_options_that_are_no_mapping_name_no_tag(self) -> None:
         with override_settings(
@@ -184,7 +181,7 @@ class TestOptionsWarnings:
             }
         ):
             messages = check_static_backends(app_configs=None)
-        assert "next.W031" not in _ids(messages)
+        assert "next.W031" not in check_ids(messages)
 
 
 class TestChecksRegistered:
@@ -317,7 +314,7 @@ class TestAssetKindLoadableCheck:
         )
         monkeypatch.setattr(checks_module, "default_kinds", mixed)
         messages = check_asset_kinds_are_loadable()
-        assert _ids(messages) == ["next.W074"]
+        assert check_ids(messages) == ["next.W074"]
         assert isinstance(messages[0], DjangoWarning)
         assert "'jsx'" in messages[0].msg
         assert "'render_babel_script_tag'" in messages[0].msg
@@ -367,7 +364,7 @@ class TestInlineAssetBodyLoadableCheck:
         )
         monkeypatch.setattr(checks_module, "default_kinds", mismatched)
         messages = check_inline_asset_bodies_are_loadable()
-        assert _ids(messages) == ["next.W076"]
+        assert check_ids(messages) == ["next.W076"]
         assert isinstance(messages[0], DjangoWarning)
         assert "'tpl'" in messages[0].msg
         assert "'render_link_tag'" in messages[0].msg
@@ -384,7 +381,7 @@ class TestInlineAssetBodyLoadableCheck:
             inline_tag="script",
         )
         monkeypatch.setattr(checks_module, "default_kinds", wrapped_module)
-        assert _ids(check_inline_asset_bodies_are_loadable()) == ["next.W076"]
+        assert check_ids(check_inline_asset_bodies_are_loadable()) == ["next.W076"]
 
 
 class TestReservedJsContextKeyCheck:
@@ -413,7 +410,7 @@ class TestReservedJsContextKeyCheck:
         loaders_module._MODULE_MEMO.pop(page_file)
         with patch_checks_router_manager(pages_directory=tmp_path):
             messages = check_reserved_js_context_keys()
-        assert _ids(messages) == ["next.W075"]
+        assert check_ids(messages) == ["next.W075"]
         assert "'$csrf'" in messages[0].msg
         assert "Rename the key." in messages[0].msg
 
@@ -431,7 +428,7 @@ class TestReservedJsContextKeyCheck:
         loaders_module._MODULE_MEMO.pop(page_file)
         with patch_checks_router_manager(pages_directory=tmp_path):
             messages = check_reserved_js_context_keys()
-        assert _ids(messages) == ["next.W075"]
+        assert check_ids(messages) == ["next.W075"]
         assert f"'{key}'" in messages[0].msg
         assert f"The framework owns {key} on every render" in messages[0].msg
         assert (
@@ -460,7 +457,7 @@ class TestReservedJsContextKeyCheck:
             "next.components.sources.get_components_manager", return_value=manager
         ):
             messages = check_reserved_js_context_keys()
-        assert _ids(messages) == ["next.W075"]
+        assert check_ids(messages) == ["next.W075"]
         assert messages[0].msg.startswith("Component context key '$csrf'")
         assert messages[0].obj == str(comp_dir / "component.py")
 
@@ -488,7 +485,7 @@ class TestAppDirectoriesFinderCheck:
         with override_settings(STATICFILES_FINDERS=[case.path]):
             messages = check_app_directories_finder(app_configs=None)
 
-        assert _ids(messages) == (["next.E083"] if case.refused else [])
+        assert check_ids(messages) == (["next.E083"] if case.refused else [])
 
     def test_the_refusal_names_the_entry_and_the_replacement(self) -> None:
         with override_settings(STATICFILES_FINDERS=[PROJECT_APP_DIRECTORIES_FINDER]):

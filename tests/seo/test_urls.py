@@ -4,6 +4,8 @@ from next.seo import urls, views
 
 
 class TestSeoUrls:
+    """`next.seo.urls` mounts the three routes under the `next_seo` namespace."""
+
     def test_the_namespace_and_the_route_names(self) -> None:
         assert urls.app_name == "next_seo"
         assert [pattern.name for pattern in urls.urlpatterns] == [
@@ -20,7 +22,7 @@ class TestSeoUrls:
             "robots.txt",
         ]
         assert [pattern.callback for pattern in urls.urlpatterns] == [
-            views.sitemap,
-            views.sitemap,
-            views.robots,
+            views.sitemap_view,
+            views.sitemap_view,
+            views.robots_view,
         ]

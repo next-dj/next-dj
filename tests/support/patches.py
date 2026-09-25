@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import sys
 from contextlib import ExitStack, contextmanager
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
@@ -24,6 +25,8 @@ if TYPE_CHECKING:
         Set as AbstractSet,
     )
     from pathlib import Path
+
+    import pytest
 
 
 def _advance_version(registry: object, *, reached: int = 0) -> None:
@@ -149,13 +152,15 @@ def importable_dir(directory: Path) -> Generator[None, None, None]:
 # Every checks submodule that binds `get_router_manager` at import time. The name is
 # read through the module that imported it, so patching the package misses all of them.
 PAGES_ROUTER_MANAGER_TARGETS: tuple[str, ...] = (
+    "next.pages.checks.composed.get_router_manager",
     "next.pages.checks.contexts.get_router_manager",
     "next.pages.checks.layouts.get_router_manager",
+    "next.pages.checks.metadata.pages.get_router_manager",
     "next.pages.checks.modules.get_router_manager",
     "next.pages.checks.structure.get_router_manager",
 )
 PARTIAL_ROUTER_MANAGER_TARGETS: tuple[str, ...] = (
-    "next.partial.checks.pages.get_router_manager",
+    "next.pages.checks.composed.get_router_manager",
     "next.partial.checks.templates.get_router_manager",
 )
 URLS_ROUTER_MANAGER_TARGETS: tuple[str, ...] = ("next.urls.checks.get_router_manager",)
@@ -251,3 +256,28 @@ def static_names_resolved_by(
 
     with patch.object(StaticFilesStorage, "url", side_effect=resolve) as url:
         yield url
+
+
+@dataclass(frozen=True, slots=True)
+class RecordedCall:
+    """One call a `record_calls` spy saw, with what the real callable returned."""
+
+    args: tuple[object, ...]
+    kwargs: dict[str, object]
+    result: object
+
+
+def record_calls(
+    monkeypatch: pytest.MonkeyPatch, target: object, name: str
+) -> list[RecordedCall]:
+    """Record each call to `target.name` for the rest of the test, forwarding it on."""
+    calls: list[RecordedCall] = []
+    original = getattr(target, name)
+
+    def recording(*args: object, **kwargs: object) -> object:
+        result = original(*args, **kwargs)
+        calls.append(RecordedCall(args, kwargs, result))
+        return result
+
+    monkeypatch.setattr(target, name, recording)
+    return calls

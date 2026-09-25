@@ -46,10 +46,9 @@ class PageContexts(NamedTuple):
 
 
 def load_routed_pages() -> tuple[list[CheckMessage], list[tuple[str, Path]]]:
-    """Import every routed `page.py`, answering with the ones that loaded.
+    """Import every routed `page.py` once per run, answering with the ones that loaded.
 
-    The pass is the one the form checks run, and it takes the manager these checks
-    resolved so a caller that pointed them at a router tree reaches it here too.
+    The manager is the one these checks resolved, so a patched router tree reaches it.
     """
     router_manager, init_errors = get_router_manager()
     if router_manager is None:
@@ -71,7 +70,7 @@ def loaded_page_contexts() -> tuple[list[CheckMessage], list[PageContexts]]:
     ]
 
 
-def annotation_is_dict_like(annotation: object) -> bool:
+def _annotation_is_dict_like(annotation: object) -> bool:
     """Return True when the return annotation maps to a dict-like result."""
     if annotation is inspect.Signature.empty:
         return True
@@ -85,7 +84,7 @@ def annotation_is_dict_like(annotation: object) -> bool:
         return False
 
 
-def return_annotation(func: Callable[..., Any]) -> object:
+def _return_annotation(func: Callable[..., Any]) -> object:
     """Return the resolved return annotation, read the way the DI resolver reads it.
 
     A hint the resolver itself could not evaluate is no ground to block a page, so an
@@ -97,18 +96,24 @@ def return_annotation(func: Callable[..., Any]) -> object:
         return inspect.Signature.empty
 
 
+def annotation_mismatch(func: Callable[..., Any]) -> str | None:
+    """Return the name of a return annotation that is not dict-like, else `None`.
+
+    Static on purpose, since running user code at check time can hit an unmigrated DB.
+    """
+    annotation = _return_annotation(func)
+    if _annotation_is_dict_like(annotation):
+        return None
+    return getattr(annotation, "__name__", None) or repr(annotation)
+
+
 def _check_context_function(
     func_name: str, func: Callable[..., Any], page_path: Path
 ) -> CheckMessage | None:
-    """Emit an error when keyless context callables are not annotated dict-like.
-
-    The check is static, because executing user code at ``manage.py check`` time is
-    expensive and can hit databases that have yet to be migrated.
-    """
-    annotation = return_annotation(func)
-    if annotation_is_dict_like(annotation):
+    """Emit an error when keyless context callables are not annotated dict-like."""
+    annotation_name = annotation_mismatch(func)
+    if annotation_name is None:
         return None
-    annotation_name = getattr(annotation, "__name__", None) or repr(annotation)
     return Error(
         f"Context function '{func_name}' in {page_path} "
         "must return a dictionary when registered as a keyless context "
@@ -191,11 +196,10 @@ def check_single_keyless_context(*args, **kwargs) -> list[CheckMessage]:
 
 __all__ = [
     "PageContexts",
-    "annotation_is_dict_like",
+    "annotation_mismatch",
     "check_context_functions",
     "check_context_registration_files",
     "check_single_keyless_context",
     "load_routed_pages",
     "loaded_page_contexts",
-    "return_annotation",
 ]
