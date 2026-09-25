@@ -214,6 +214,22 @@ def _on_form_access_denied(action_name, layer, reason, request, **kwargs):
     )
 ```
 
+### 8. Every tab names its workspace
+
+[`root_pages/layout.djx`](root_pages/layout.djx) calls the shared `page_head` component without a title, and the builtin `{% metadata %}` tag inside it folds `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` from [`config/settings.py`](config/settings.py) with what the page tree declares. The settings tier cannot know the tenant, so the workspace root overrides part of it per request in [`notes/workspaces/page.py`](notes/workspaces/page.py):
+
+```python
+@page.metadata(inherit=True)
+def workspace_meta(active_tenant: DTenant) -> MetadataDict:
+    return {
+        "site_name": active_tenant.name,
+        "title": {"default": active_tenant.name},
+        "robots": {"index": False},
+    }
+```
+
+`inherit=True` runs the callable for every page below the root, the way `inherit_context=True` shares the `tenant` context of section 5. `site_name` feeds the `{title} · {site_name}` template of the settings tier, so `/notes/` reads `Notes · Acme Industries` under `X-Tenant: acme` and `Notes · Globex Corporation` under `globex`. `title.default` is what a page without a title of its own renders, which makes the landing tab the bare tenant name. The settings tier keeps its own `default`, which `manage.py check` requires beside a template, but no workspace page renders it any more. The pages below add titles in the two usual forms, a one-line dict on `/notes/` and `/notes/new/`, and on the editor a `@page.metadata` callable that names the `note` context and gets the row that context already scoped to the tenant. A workspace is private to its tenant, so the root callable says `noindex` once for all of them. One parametrized integration test walks both tenants through the landing, the list, the create form and the editor.
+
 ## Gotchas
 
 ### The asset-version guard reads the same build id
@@ -228,6 +244,7 @@ def _on_form_access_denied(action_name, layer, reason, request, **kwargs):
 - [`next/components/backends.py`](../../next/components/backends.py) — the matching `FileComponentsBackend.DIRS` handling for `root_blocks/`.
 - [`next/deps/providers.py`](../../next/deps/providers.py) — the `RegisteredParameterProvider` ABC used by `TenantProvider`.
 - [`next/pages/registry.py`](../../next/pages/registry.py) — the `inherit_context` walk that lifts `tenant` to every descendant page.
+- [`next/pages/metadata/`](../../next/pages/metadata/) — the metadata chain that runs the inherited tenant callable of section 8.
 - [`docs/content/topics/static-assets/backends.rst`](../../docs/content/topics/static-assets/backends.rst) — the request-aware output section that this example anchors.
 - [`docs/content/security/static-assets.rst`](../../docs/content/security/static-assets.rst) — the rule behind the theme key table in section 2.
 - [`docs/content/topics/dependency-injection.rst`](../../docs/content/topics/dependency-injection.rst) — the request-scoped provider pattern.

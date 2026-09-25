@@ -485,9 +485,9 @@ METADATA
 
 Dict holding the page metadata scope, the site-wide defaults of the metadata chain and the options beside them.
 
-Default value ``{}``.
+Default value ``{"RENDERER": "next.pages.HtmlMetadataRenderer"}``.
 
-The scope takes four upper-case options, and any other key is reported as ``next.E035``.
+The scope takes five upper-case options, and any other key is reported as ``next.E035``.
 
 .. code-block:: python
    :caption: config/settings.py
@@ -508,6 +508,7 @@ The scope takes four upper-case options, and any other key is reported as ``next
            "NOINDEX": False,
            "CANONICAL_QUERY": ("page",),
            "CHECKS": {"TITLE_MAX": 60, "DESCRIPTION_MAX": 160, "REQUIRE_DESCRIPTION": True},
+           "RENDERER": "next.pages.HtmlMetadataRenderer",
        },
    }
 
@@ -516,17 +517,28 @@ Its ``title`` is the ``{"template": ..., "default": ...}`` form alone, because t
 The value is normalised once per settings reload, a key or a value the schema refuses is reported as ``next.E098``, and a template without a default, a ``base`` that is not an origin, and an empty title draw ``next.E100``, ``next.E101``, and ``next.E105`` here as they do on a page.
 See :doc:`/content/topics/seo/metadata` for the merge order and the title template.
 
-``NOINDEX`` set to ``True`` replaces the robots directives of every page with ``noindex, nofollow``, for a staging host a crawler must not index.
+``NOINDEX`` set to ``True`` keeps the whole deployment out of the index, for a staging host a crawler must not index.
+Every page renders ``noindex, nofollow`` in place of its robots directives, and the sitemap and the checks read every page as ``noindex`` through ``page_noindex`` of ``next.pages.metadata``.
+``Metadata.noindex`` itself reads the robots directives of the fold alone, so a folded value answers the same with the switch on or off.
+The sitemap routes are not built, and the sitemap view answers 404, the ``next.seo.urls`` mount at the host root included.
+A generated robots leaves its ``Sitemap:`` line out, and a static ``robots.txt`` is served as written.
+The system checks read the same switch, so ``next.W101`` treats every page as ``noindex``, ``next.W088`` fires for any cross-origin canonical, and ``next.W098``, ``next.W100``, and ``next.W103``, which concern a served sitemap, stay silent.
 It passes through ``bool()`` and defaults to ``False``.
 
 ``CANONICAL_QUERY`` is the tuple of query parameter names a self canonical keeps, in the order the tuple lists them.
 Every other parameter is dropped from the canonical URL, and a ``page=1`` pair is dropped even when ``page`` is listed.
 It defaults to the empty tuple, so a self canonical carries no query at all until the project names the parameters that change the content.
 
-``CHECKS`` holds the thresholds of the SEO audits that run under ``manage.py check --deploy --tag seo``.
+``CHECKS`` holds the thresholds of the four audits, ``next.W089`` to ``next.W096``, that run under ``manage.py check --deploy``.
 ``TITLE_MAX`` defaults to 60 and ``DESCRIPTION_MAX`` to 160 characters, and ``REQUIRE_DESCRIPTION`` defaults to ``True``.
 A threshold holding anything but an integer falls back to its default, and ``REQUIRE_DESCRIPTION`` passes through ``bool()``.
 See :doc:`/content/topics/seo/auditing` for the audits and :doc:`system-checks` for the codes.
+
+``RENDERER`` is the dotted path to the class ``{% metadata %}`` renders the fold through.
+A custom value names a ``next.pages.MetadataRenderer`` subclass, whose ``render`` takes the folded ``Metadata`` and the request and answers the head markup, see :doc:`pages` for the contract.
+The key is read through ``next.backends.resolve_setting_class``, documented in :doc:`backends`, the same helper ``URL_RESOLVER`` goes through, and a ``METADATA`` written without the key keeps the default.
+A path that fails to import, or one that names anything other than a ``MetadataRenderer`` subclass, raises :exc:`~django.core.exceptions.ImproperlyConfigured` on the first render of ``{% metadata %}``.
+The renderer is built once and built again on ``settings_reloaded``.
 
 A ``METADATA`` value that is not a dict is dropped in favour of the default and reported as ``next.E076``.
 

@@ -463,6 +463,7 @@ Resolution cache
 
 Each resolution pass wraps a per-render dependency cache in a fresh ``DependencyCache``.
 The wrapper is new per call, but the backing store is shared across every ``@context`` callable in one page render, so a ``Depends("name")`` value resolved by one callable is reused by the next.
+The page's ``render()`` function fills the same store before the context runs, and the ``@page.metadata`` callables read it after, so a value any of them resolved is reused by the rest.
 The cache memoises ``Depends("name")`` callables only, keyed by the registered name.
 
 A second context function in the same page render that asks for the same ``Depends("name")`` dependency receives the memoised value, not a fresh call.

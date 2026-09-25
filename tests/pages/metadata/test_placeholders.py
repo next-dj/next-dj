@@ -1,17 +1,17 @@
 import pytest
-from django.utils import translation
-from django.utils.functional import Promise, lazy
-from django.utils.translation import gettext
+from django.utils.functional import Promise
+from django.utils.translation import gettext_lazy
 
 from next.pages.errors import PageMetadataTemplateError
-from next.pages.metadata import (
+from next.pages.metadata import template_has_title
+from next.pages.metadata.placeholders import (
     PLACEHOLDERS,
+    apply_title_template,
     parse_template,
     substitute_title,
-    template_has_title,
-    title_lazy,
+    template_names,
 )
-from tests.support import TEMPLATE_CASES, TemplateCase
+from tests.support import TITLE_TEMPLATE_CASES, TitleTemplateCase
 
 
 class TestTemplates:
@@ -21,9 +21,9 @@ class TestTemplates:
         assert frozenset({"title", "site_name"}) == PLACEHOLDERS
 
     @pytest.mark.parametrize(
-        "case", TEMPLATE_CASES, ids=[case.id for case in TEMPLATE_CASES]
+        "case", TITLE_TEMPLATE_CASES, ids=[case.id for case in TITLE_TEMPLATE_CASES]
     )
-    def test_substitution_or_error(self, case: TemplateCase) -> None:
+    def test_substitution_or_error(self, case: TitleTemplateCase) -> None:
         if case.error_fragment is None:
             assert substitute_title(case.template, case.values) == case.expected
             return
@@ -69,33 +69,29 @@ class TestTemplates:
     def test_template_has_title(self, template: str, *, expected: bool) -> None:
         assert template_has_title(template) is expected
 
+    @pytest.mark.parametrize(
+        ("template", "expected"),
+        [
+            ("{title} · {site_name}", {"title", "site_name"}),
+            ("{title} {title}", {"title"}),
+            ("Acme", set()),
+        ],
+        ids=["both", "repeated", "plain"],
+    )
+    def test_template_names(self, template: str, expected: set[str]) -> None:
+        assert template_names(template) == expected
 
-class TestLazyTitle:
-    """`title_lazy` answers a `Promise` that evaluates under the active language."""
 
-    def test_answers_a_promise_without_evaluating(self) -> None:
-        calls: list[str] = []
+class TestApplyTitleTemplate:
+    """The chain template can be applied to any text, lazily."""
 
-        def build() -> str:
-            calls.append("evaluated")
-            return "{title}"
+    def test_without_a_template_the_text_passes_through(self) -> None:
+        text = gettext_lazy("Yes")
+        assert apply_title_template(None, text, site_name=None) is text
 
-        title = title_lazy(lazy(build, str)(), {"title": "Wallet"})
+    def test_with_a_template_the_result_is_lazy(self) -> None:
+        title = apply_title_template(
+            "{title} · {site_name}", "Wallet", site_name="Acme"
+        )
         assert isinstance(title, Promise)
-        assert calls == []
-        assert str(title) == "Wallet"
-        assert calls == ["evaluated"]
-
-    def test_evaluates_under_the_active_language(self) -> None:
-        template = lazy(lambda: "{title} · " + gettext("Yes"), str)()
-        title = title_lazy(template, {"title": "Wallet"})
-        with translation.override("de"):
-            assert str(title) == "Wallet · Ja"
-        with translation.override("en"):
-            assert str(title) == "Wallet · Yes"
-
-    def test_a_broken_translation_fails_only_when_evaluated(self) -> None:
-        template = lazy(lambda: "{x.__class__}", str)()
-        title = title_lazy(template, {"title": "Wallet"})
-        with pytest.raises(PageMetadataTemplateError, match=r"x\.__class__"):
-            str(title)
+        assert str(title) == "Wallet · Acme"

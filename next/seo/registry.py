@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, NamedTuple
 
+from next.introspect import callable_name
+
 from .signals import sitemap_items_registered
 
 
@@ -13,9 +15,9 @@ if TYPE_CHECKING:
 
 
 class SitemapItemsEntry(NamedTuple):
-    """One callable registered for the trail of one page tree."""
+    """One callable registered for a trail by the file running `@sitemap.items`."""
 
-    root: Path
+    file: Path
     trail: str
     func: Callable[..., Any]
 
@@ -34,13 +36,13 @@ class SitemapItemsRegistry:
         """Monotonic counter bumped on every write."""
         return self._version
 
-    def register(self, root: Path, trail: str, func: Callable[..., Any]) -> None:
-        """Bind `func` to `trail` under `root`, replacing an earlier binding.
+    def register(self, file: Path, trail: str, func: Callable[..., Any]) -> None:
+        """Bind `func` to `trail` in the tree of `file`, replacing an earlier binding.
 
         A re-executed `sitemap.py` registers the same trail again, which is a replace.
         """
-        entry = SitemapItemsEntry(root=root, trail=trail, func=func)
-        key = (root, trail)
+        entry = SitemapItemsEntry(file=file, trail=trail, func=func)
+        key = (file, trail)
         existing = self._index.get(key)
         if existing is None:
             self._entries.append(entry)
@@ -49,16 +51,23 @@ class SitemapItemsRegistry:
         self._index[key] = entry
         self._version += 1
         sitemap_items_registered.send(
-            sender=SitemapItemsRegistry, root=root, trail=trail, func=func
+            sender=SitemapItemsRegistry, file=file, trail=trail, func=func
         )
 
-    def entries_for(self, root: Path) -> tuple[tuple[str, Callable[..., Any]], ...]:
-        """Return `(trail, func)` for every callable registered under `root`."""
+    def registered_names(self) -> dict[Path, tuple[str, ...]]:
+        """Return the callable names registered per registering file, for the checks."""
+        names: dict[Path, list[str]] = {}
+        for entry in self._entries:
+            names.setdefault(entry.file, []).append(callable_name(entry.func))
+        return {file: tuple(found) for file, found in names.items()}
+
+    def entries_for(self, file: Path) -> tuple[tuple[str, Callable[..., Any]], ...]:
+        """Return `(trail, func)` for every callable the module at `file` registered."""
         return tuple(
-            (entry.trail, entry.func) for entry in self._entries if entry.root == root
+            (entry.trail, entry.func) for entry in self._entries if entry.file == file
         )
 
-    def reset(self, **kwargs) -> None:
+    def reset(self) -> None:
         """Drop every registration so a re-executed `sitemap.py` repopulates it."""
         self._entries.clear()
         self._index.clear()

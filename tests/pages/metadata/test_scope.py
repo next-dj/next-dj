@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import FrozenInstanceError
 
 import pytest
@@ -9,15 +10,51 @@ from next.checks import reset_check_caches
 from next.conf import next_framework_settings
 from next.pages.errors import PageMetadataShapeError
 from next.pages.metadata import (
-    MetadataOptions,
+    SITE_SOURCE,
+    Metadata,
     Segment,
-    TitleSpec,
-    forget_site_defaults,
+    forget_metadata_scope,
     metadata_options,
+    page_noindex,
     site_segment,
 )
-from next.pages.metadata.defaults import SITE_SOURCE
+from next.pages.metadata.schema import Robots, TitleSpec
+from next.pages.metadata.scope import MetadataOptions
 from tests.support import next_framework_settings_stand_in
+
+
+class TestMetadataOptions:
+    """The upper-case options are read leniently beside the defaults."""
+
+    def test_default_options(self) -> None:
+        assert metadata_options() == MetadataOptions(
+            noindex=False, canonical_query=(), checks={}
+        )
+
+    def test_options_are_read_from_the_scope(self) -> None:
+        scope = {
+            "NOINDEX": True,
+            "CANONICAL_QUERY": ["page", 1, "sort"],
+            "CHECKS": {"TITLE_MAX": 60},
+        }
+        with override_settings(NEXT_FRAMEWORK={"METADATA": scope}):
+            options = metadata_options()
+        assert options == MetadataOptions(
+            noindex=True, canonical_query=("page", "sort"), checks={"TITLE_MAX": 60}
+        )
+
+    @pytest.mark.parametrize(
+        "scope",
+        [{"CANONICAL_QUERY": "page"}, {"CANONICAL_QUERY": 1}, {"CHECKS": "x"}],
+        ids=["query_is_a_string", "query_is_an_int", "checks_is_a_string"],
+    )
+    def test_unusable_values_fall_back(self, scope: dict[str, object]) -> None:
+        with override_settings(NEXT_FRAMEWORK={"METADATA": scope}):
+            assert metadata_options() == MetadataOptions()
+
+    def test_options_are_frozen(self) -> None:
+        with pytest.raises(FrozenInstanceError):
+            MetadataOptions().noindex = True  # type: ignore[misc]
 
 
 class TestSiteSegment:
@@ -81,66 +118,42 @@ class TestSiteSegment:
     ) -> None:
         stand_in = next_framework_settings_stand_in(METADATA="x")
         monkeypatch.setattr(
-            "next.pages.metadata.defaults.next_framework_settings", stand_in
+            "next.pages.metadata.scope.next_framework_settings", stand_in
         )
         assert site_segment() == Segment(SITE_SOURCE)
         assert metadata_options() == MetadataOptions()
 
 
-class TestMetadataOptions:
-    """The upper-case options are read leniently beside the defaults."""
-
-    def test_default_options(self) -> None:
-        assert metadata_options() == MetadataOptions(
-            noindex=False, canonical_query=(), checks={}
-        )
-
-    def test_options_are_read_from_the_scope(self) -> None:
-        scope = {
-            "NOINDEX": True,
-            "CANONICAL_QUERY": ["page", 1, "sort"],
-            "CHECKS": {"TITLE_MAX": 60},
-        }
-        with override_settings(NEXT_FRAMEWORK={"METADATA": scope}):
-            options = metadata_options()
-        assert options == MetadataOptions(
-            noindex=True, canonical_query=("page", "sort"), checks={"TITLE_MAX": 60}
-        )
+class TestPageNoindex:
+    """A page stays out of the index by its robots or by the `NOINDEX` switch."""
 
     @pytest.mark.parametrize(
-        "scope",
-        [{"CANONICAL_QUERY": "page"}, {"CANONICAL_QUERY": 1}, {"CHECKS": "x"}],
-        ids=["query_is_a_string", "query_is_an_int", "checks_is_a_string"],
+        ("robots", "expected"),
+        [(None, False), (Robots(index=False), True), ("noindex", True)],
+        ids=["none", "robots_noindex", "text_noindex"],
     )
-    def test_unusable_values_fall_back(self, scope: dict[str, object]) -> None:
-        with override_settings(NEXT_FRAMEWORK={"METADATA": scope}):
-            assert metadata_options() == MetadataOptions()
+    def test_the_robots_decide_without_the_switch(
+        self, robots: Robots | str | None, *, expected: bool
+    ) -> None:
+        assert page_noindex(Metadata(robots=robots)) is expected
 
-    def test_options_are_frozen(self) -> None:
-        with pytest.raises(FrozenInstanceError):
-            MetadataOptions().noindex = True  # type: ignore[misc]
+    @override_settings(NEXT_FRAMEWORK={"METADATA": {"NOINDEX": True}})
+    def test_the_switch_keeps_every_page_out(self) -> None:
+        assert page_noindex(Metadata(robots=Robots(index=True))) is True
+        assert page_noindex(Metadata()) is True
 
 
-class TestForgetSiteDefaults:
+class TestForgetMetadataScope:
     """Both memos drop on an explicit call, a settings reload and a check reset."""
 
-    def test_explicit_call_clears_both_memos(self) -> None:
+    @pytest.mark.parametrize(
+        "reset",
+        [forget_metadata_scope, next_framework_settings.reload, reset_check_caches],
+        ids=["explicit", "settings_reload", "check_reset"],
+    )
+    def test_the_trigger_clears_both_memos(self, reset: Callable[[], object]) -> None:
         site_segment()
         metadata_options()
-        forget_site_defaults()
-        assert site_segment.cache_info().currsize == 0
-        assert metadata_options.cache_info().currsize == 0
-
-    def test_settings_reload_clears_both_memos(self) -> None:
-        site_segment()
-        metadata_options()
-        next_framework_settings.reload()
-        assert site_segment.cache_info().currsize == 0
-        assert metadata_options.cache_info().currsize == 0
-
-    def test_check_reset_clears_both_memos(self) -> None:
-        site_segment()
-        metadata_options()
-        reset_check_caches()
+        reset()
         assert site_segment.cache_info().currsize == 0
         assert metadata_options.cache_info().currsize == 0

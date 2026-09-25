@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import functools
 import inspect
+import sys
 from pathlib import Path
 from types import CodeType
 from typing import TYPE_CHECKING, Any, NamedTuple
@@ -69,6 +70,26 @@ def defining_file(obj: object) -> Path:
         "function with 'def' in the file that uses it and decorate that."
     )
     raise TypeError(msg)
+
+
+def registering_file() -> Path:
+    """Return the file that called the decorator factory calling this helper.
+
+    Read before the decorator runs, so the bare and the called spelling see one file.
+    """
+    return Path(sys._getframe(2).f_code.co_filename)
+
+
+def declared_file(
+    func: Callable[..., Any],
+    registered_from: Path,
+    note: Callable[[Path, Path, Callable[..., Any]], None],
+) -> Path:
+    """Return the file declaring `func`, noting a mismatch with `registered_from`."""
+    declared_in = defining_file(func)
+    if declared_in != registered_from:
+        note(registered_from, declared_in, func)
+    return declared_in
 
 
 def callable_name(obj: object) -> str:
@@ -136,6 +157,8 @@ __all__ = [
     "MisattributionLog",
     "callable_name",
     "code_filename",
+    "declared_file",
     "defining_file",
     "describe_callable",
+    "registering_file",
 ]

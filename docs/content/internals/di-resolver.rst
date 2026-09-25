@@ -74,7 +74,7 @@ Modules
    An abstract intermediate base is skipped by that rebuild, because it is a legitimate class to register and no instance of it exists to place.
 
 ``next.deps.cache``.
-   ``DependencyCache`` accumulator, the ``REQUEST_DEP_CACHE_ATTR`` constant, and the ``get_request_dep_cache`` accessor.
+   ``DependencyCache`` accumulator, the ``REQUEST_DEP_CACHE_ATTR`` constant, the ``get_request_dep_cache`` accessor, and ``shared_dep_cache``, which hands a page render the dispatch cache when the request carries one and a fresh dict the request never sees otherwise.
 
 ``next.deps.errors``.
    ``DependencyCycleError`` and ``UnknownDependencyError``, the two exceptions a graph the resolver cannot serve raises.
@@ -190,6 +190,7 @@ The cache key is the dependency name string alone, with no type component.
 The cache is shared across each stage of the dispatch, from ``get_initial`` and the factory resolution to the handler call and any re-render after validation failure.
 On a re-render the page context and component context renderers read it back through ``get_request_dep_cache`` and rejoin the same cache.
 An ordinary page request that does not pass through the form dispatcher never sees this attribute.
+Its page view still shares one cache between ``render()``, the ``@context`` callables, and the metadata callables of that render, passed along the render rather than attached to the request, so the components on the page keep a cache of their own.
 
 Two consequences flow from the cache.
 

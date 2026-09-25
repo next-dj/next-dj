@@ -200,6 +200,18 @@ The two providers answer `static_can_handle` differently, and the difference is 
 
 Modules that use these markers never start with `from __future__ import annotations` and import both the marker and the model at runtime. The resolver does evaluate string hints through `get_type_hints`, but a single name it cannot evaluate — a marker or a model imported only under `if TYPE_CHECKING` — drops the whole callable back to its raw annotations, where `get_origin` sees a string and the parameter silently falls through to another provider.
 
+### 10. One title for the board and its settings page
+
+No template spells the `<title>`. [`cockpit/layout.djx`](cockpit/layout.djx) calls the shared `page_head` component, which renders the builtin `{% metadata %}` tag, and the tag folds `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` from [`config/settings.py`](config/settings.py) with whatever the page tree declares. The settings tier holds a `site_name`, the template `{title} · {site_name}` and a `default`, and the index renders that default because it names no title of its own. [`board/[int:id]/page.py`](kanban/boards/board/%5Bint%3Aid%5D/page.py) adds the one dynamic tier:
+
+```python
+@page.metadata(inherit=True)
+def board_meta(active_board: DBoard[Board]) -> MetadataDict:
+    return {"title": active_board.title}
+```
+
+`active_board` goes through the `BoardProvider` of section 9, so the board tab reads `Roadmap · next.dj Kanban`. A metadata callable runs for its own page only unless it says `inherit=True`, and this one has to say it. `board/<id>/settings/` is a virtual page, a `template.djx` with no `page.py` beside it, so it has nowhere to register a callable of its own. `inherit=True` puts the board callable into the metadata chain of every page below it, the provider reads the same `id` URL kwarg there, and the settings tab carries the board title instead of the site default. The integration tests pin the index, board and settings titles.
+
 ## Gotchas
 
 ### The asset-version guard needs an explicit version
@@ -225,4 +237,5 @@ The settings page hosts three independent `<form>` blocks. Each one posts to its
 - [`next/components/context.py`](../../next/components/context.py) — `@component.context` and the `serialize=True` flag.
 - [`next/forms/manager.py`](../../next/forms/manager.py) — `form_action_manager.get_action_url(...)` used by the page to lift the move and create endpoint URLs into the React layer.
 - [`next/deps/providers.py`](../../next/deps/providers.py) — `RegisteredParameterProvider` ABC used by `BoardProvider`/`CardProvider`.
+- [`next/pages/metadata/`](../../next/pages/metadata/) — the metadata chain behind `@page.metadata(inherit=True)` in section 10.
 - [`docs/content/ref/system-checks.rst`](../../docs/content/ref/system-checks.rst) — `next.E048` / `next.E049` for `Meta.instance_from_url`.

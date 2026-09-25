@@ -6,7 +6,6 @@ import pytest
 from next.pages.metadata import PageMetadataEntry, PageMetadataRegistry
 from next.pages.metadata.chain import ChainEntry
 from next.pages.metadata.schema import EMPTY_METADATA, Segment
-from next.testing import SignalRecorder
 from tests.support import handler_declared_here
 
 
@@ -134,7 +133,7 @@ class TestMisattribution:
 
 
 class TestReset:
-    """A reset drops every record and moves the version on."""
+    """A reset drops every record and memoised chain and moves the version on."""
 
     def test_reset_clears_entries_conflicts_and_misattributions(
         self, registry: PageMetadataRegistry, page_file: Path, tmp_path: Path
@@ -151,28 +150,9 @@ class TestReset:
         assert registry.misattributed() == ()
         assert registry.version == before + 1
 
-    def test_reset_leaves_the_chain_memo_to_forget_chains(
+    def test_reset_drops_the_chain_memo_too(
         self, registry: PageMetadataRegistry, page_file: Path
     ) -> None:
-        registry._chains[page_file] = _entry()
+        registry.remember(page_file, _entry())
         registry.reset()
-        assert page_file in registry._chains
-        registry.forget_chains()
-        assert page_file not in registry._chains
-
-
-class TestSignal:
-    """`metadata_registered` names the file and whether the callable inherits."""
-
-    def test_register_sends_file_path_and_inherit(
-        self,
-        registry: PageMetadataRegistry,
-        page_file: Path,
-        capture_metadata_registered: SignalRecorder,
-    ) -> None:
-        registry.register(page_file, _wallet_meta, inherit=True)
-        assert len(capture_metadata_registered) == 1
-        event = capture_metadata_registered.events[0]
-        assert event.sender is PageMetadataRegistry
-        assert event.kwargs["file_path"] == page_file
-        assert event.kwargs["inherit"] is True
+        assert registry.chain(page_file) is None

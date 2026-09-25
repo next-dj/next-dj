@@ -19,15 +19,8 @@ from tests.support import (
     file_router,
     importable_dir,
     patch_checks_router_manager_with_routers,
+    write_page,
 )
-
-
-def _write_page(tree: Path, route: str) -> Path:
-    directory = tree / route
-    directory.mkdir(parents=True, exist_ok=True)
-    page_file = directory / "page.py"
-    page_file.write_text('template = "ok"\n')
-    return page_file
 
 
 def _write_virtual_page(tree: Path, route: str) -> Path:
@@ -98,7 +91,7 @@ class TestDoublyMountedTree:
         app = tmp_path / "shop"
         (app / "__init__.py").parent.mkdir(parents=True)
         (app / "__init__.py").write_text("")
-        _write_page(app / "pages", "hello")
+        write_page(app / "pages", "hello")
         router = file_router(app_dirs=True, dirs=[app / "pages"])
 
         with importable_dir(tmp_path):
@@ -121,8 +114,8 @@ class TestCheckUrlPatterns:
         """`[id]` and `[str:id]` from an app tree and a root tree conflict."""
         app_tree = tmp_path / "app_pages"
         root_tree = tmp_path / "root_pages"
-        _write_page(app_tree, "things/[id]")
-        _write_page(root_tree, "things/[str:id]")
+        write_page(app_tree, "things/[id]")
+        write_page(root_tree, "things/[str:id]")
         router = _TreeRouter(app_trees={"shop": app_tree}, root_trees=[root_tree])
 
         with patch_checks_router_manager_with_routers(routers=[router]):
@@ -139,7 +132,7 @@ class TestCheckUrlPatterns:
         app_tree = tmp_path / "app_pages"
         root_tree = tmp_path / "root_pages"
         _write_virtual_page(app_tree, "about")
-        _write_page(root_tree, "about")
+        write_page(root_tree, "about")
         router = _TreeRouter(app_trees={"shop": app_tree}, root_trees=[root_tree])
 
         with patch_checks_router_manager_with_routers(routers=[router]):
@@ -153,8 +146,8 @@ class TestCheckUrlPatterns:
         """The same route trail in two trees is a path conflict, not a name one."""
         tree_a = tmp_path / "tree_a"
         tree_b = tmp_path / "tree_b"
-        _write_page(tree_a, "blog")
-        _write_page(tree_b, "blog")
+        write_page(tree_a, "blog")
+        write_page(tree_b, "blog")
         router = _TreeRouter(root_trees=[tree_a, tree_b])
 
         with patch_checks_router_manager_with_routers(routers=[router]):
@@ -166,7 +159,7 @@ class TestCheckUrlPatterns:
 
     def test_e028_for_normalised_duplicate_in_one_route(self, tmp_path) -> None:
         """`[a-b]/[a_b]` collapses to one parameter name and reports the page file."""
-        page_file = _write_page(tmp_path, "[a-b]/[a_b]")
+        page_file = write_page(tmp_path, "[a-b]/[a_b]")
         router = _TreeRouter(root_trees=[tmp_path])
 
         with patch_checks_router_manager_with_routers(routers=[router]):
@@ -180,7 +173,7 @@ class TestCheckUrlPatterns:
 
     def test_no_e028_for_distinct_parameter_names(self, tmp_path) -> None:
         """Unique parameter names in one route pass the check."""
-        _write_page(tmp_path, "user/[id]/post/[slug]")
+        write_page(tmp_path, "user/[id]/post/[slug]")
         router = _TreeRouter(root_trees=[tmp_path])
 
         with patch_checks_router_manager_with_routers(routers=[router]):
@@ -190,7 +183,7 @@ class TestCheckUrlPatterns:
 
     def test_e028_for_repeated_param_reports_page_file(self, tmp_path) -> None:
         """A plain repeated bracket name yields one E028 naming the page file."""
-        page_file = _write_page(tmp_path, "user/[id]/[id]")
+        page_file = write_page(tmp_path, "user/[id]/[id]")
         router = _TreeRouter(root_trees=[tmp_path])
 
         with patch_checks_router_manager_with_routers(routers=[router]):
@@ -204,7 +197,7 @@ class TestCheckUrlPatterns:
 
     def test_e028_message_lists_every_duplicate_name(self, tmp_path) -> None:
         """Two independent duplicates in one route both land in the message."""
-        page_file = _write_page(tmp_path, "a/[id]/[int:id]/[slug]/[slug]")
+        page_file = write_page(tmp_path, "a/[id]/[int:id]/[slug]/[slug]")
         router = _TreeRouter(root_trees=[tmp_path])
 
         with patch_checks_router_manager_with_routers(routers=[router]):
@@ -219,7 +212,7 @@ class TestCheckUrlPatterns:
         self, tmp_path
     ) -> None:
         """Two wildcards with distinct names still fail and name the second one."""
-        page_file = _write_page(tmp_path, "[[a]]/[[b]]")
+        page_file = write_page(tmp_path, "[[a]]/[[b]]")
         router = _TreeRouter(root_trees=[tmp_path])
 
         with patch_checks_router_manager_with_routers(routers=[router]):
@@ -232,7 +225,7 @@ class TestCheckUrlPatterns:
 
     def test_e028_reported_once_across_both_url_checks(self, tmp_path) -> None:
         """A duplicate route yields exactly one E028 over the whole check run."""
-        _write_page(tmp_path, "user/[id]/[id]")
+        write_page(tmp_path, "user/[id]/[id]")
         router = _TreeRouter(root_trees=[tmp_path])
 
         with patch_checks_router_manager_with_routers(routers=[router]):
@@ -244,8 +237,8 @@ class TestCheckUrlPatterns:
         """The folder a backend names through the contract leaves the collection."""
         tree_a = tmp_path / "tree_a"
         tree_b = tmp_path / "tree_b"
-        _write_page(tree_a, "_components/widget")
-        _write_page(tree_b, "_components/widget")
+        write_page(tree_a, "_components/widget")
+        write_page(tree_b, "_components/widget")
 
         unskipped = _TreeRouter(root_trees=[tree_a, tree_b])
         with patch_checks_router_manager_with_routers(routers=[unskipped]):
@@ -264,8 +257,8 @@ class TestCheckUrlPatterns:
         """A directory the router itself refuses keeps its pages out of the routes."""
         tree_a = tmp_path / "tree_a"
         tree_b = tmp_path / "tree_b"
-        _write_page(tree_a, "_drafts/wip")
-        _write_page(tree_b, "_drafts/wip")
+        write_page(tree_a, "_drafts/wip")
+        write_page(tree_b, "_drafts/wip")
         router = _TreeRouter(root_trees=[tree_a, tree_b])
 
         with patch_checks_router_manager_with_routers(routers=[router]):
@@ -284,8 +277,8 @@ class TestCheckReverseNameCollisions:
 
     def test_e039_lists_both_paths_once(self, tmp_path) -> None:
         """`foo-bar` and `foo_bar` collapse to one name and yield a single error."""
-        _write_page(tmp_path, "foo-bar")
-        _write_page(tmp_path, "foo_bar")
+        write_page(tmp_path, "foo-bar")
+        write_page(tmp_path, "foo_bar")
         router = _TreeRouter(root_trees=[tmp_path])
 
         with patch_checks_router_manager_with_routers(routers=[router]):
@@ -299,8 +292,8 @@ class TestCheckReverseNameCollisions:
 
     def test_e039_ignores_routes_with_distinct_signatures(self, tmp_path) -> None:
         """`[year]/[month]` and literal `year/month` share a name, not a signature."""
-        _write_page(tmp_path, "[year]/[month]")
-        _write_page(tmp_path, "year/month")
+        write_page(tmp_path, "[year]/[month]")
+        write_page(tmp_path, "year/month")
         router = _TreeRouter(root_trees=[tmp_path])
 
         with patch_checks_router_manager_with_routers(routers=[router]):
@@ -310,8 +303,8 @@ class TestCheckReverseNameCollisions:
 
     def test_e039_flags_routes_sharing_name_and_signature(self, tmp_path) -> None:
         """`a/[x]` and `a-[x]` share both the reverse name and the `x` parameter."""
-        _write_page(tmp_path, "a/[x]")
-        _write_page(tmp_path, "a-[x]")
+        write_page(tmp_path, "a/[x]")
+        write_page(tmp_path, "a-[x]")
         router = _TreeRouter(root_trees=[tmp_path])
 
         with patch_checks_router_manager_with_routers(routers=[router]):
@@ -323,8 +316,8 @@ class TestCheckReverseNameCollisions:
 
     def test_e039_name_uses_custom_url_name_template(self, tmp_path) -> None:
         """The reported name honours `URL_NAME_TEMPLATE` instead of `page_`."""
-        _write_page(tmp_path, "foo-bar")
-        _write_page(tmp_path, "foo_bar")
+        write_page(tmp_path, "foo-bar")
+        write_page(tmp_path, "foo_bar")
         router = _TreeRouter(root_trees=[tmp_path])
 
         with (
@@ -369,7 +362,7 @@ class TestCollectUrlPatterns:
         self, tmp_path
     ) -> None:
         """Only the refusals the parser declares are caught, never every ValueError."""
-        _write_page(tmp_path, "broken")
+        write_page(tmp_path, "broken")
 
         with (
             patch(
@@ -382,7 +375,7 @@ class TestCollectUrlPatterns:
 
     def test_a_refused_parameter_name_is_reported_as_e082(self, tmp_path) -> None:
         """A bracket name Django refuses leaves the map under a code of its own."""
-        _write_page(tmp_path, "[2fa]")
+        write_page(tmp_path, "[2fa]")
         errors: list[Error] = []
 
         patterns = _collect_url_patterns(tmp_path, "Root", errors)

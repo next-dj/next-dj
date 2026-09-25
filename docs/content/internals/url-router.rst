@@ -84,8 +84,9 @@ Resolution algorithm
 --------------------
 
 ``include("next.urls")`` mounts a single ``TrieURLResolver`` that wraps the lazy sequence of router, form-action, and SEO patterns.
-The third source is read through the ``SeoRoutes`` port, because ``next.seo`` imports ``next.urls`` and the manager cannot import it back, and it holds the sitemap and robots routes only while a source file exists at the top of a page root, see :doc:`seo-pipeline`.
-The sequence caches the concatenated pattern list against a three-part version token, one counter bumped by ``router_manager.reload()``, one bumped when form actions register or clear through the form-action manager, and one bumped when the seo manager resets.
+The third source is read through the ``SeoRoutes`` port, because ``next.seo`` imports ``next.urls`` and the manager cannot import it back, and it holds the sitemap routes only while the project serves a sitemap and the robots route only while a robots source exists at the top of a page root, see :doc:`seo-pipeline`.
+The sequence caches the concatenated pattern list against a two-part version token, one counter bumped by ``router_manager.reload()`` and one bumped when form actions register or clear through the form-action manager.
+The seo sources change only through a router reload, which moves the router counter, so they add no counter, and a sequence read before the port is bound leaves the seo routes out and caches nothing.
 The counters are read after the pattern build, because expanding page modules can register form actions mid-build, so the cache stays valid for the post-registration state.
 A registration that writes into a backend directly, bypassing the manager, is not tracked.
 

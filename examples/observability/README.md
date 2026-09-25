@@ -268,6 +268,16 @@ The command drains every counter (cumulative and bucketed) and clears the index 
 
 [obs/management/commands/flush_metrics.py](obs/management/commands/flush_metrics.py).
 
+### 10. Titles and a `noindex` dashboard
+
+[`instrument/layout.djx`](instrument/layout.djx) calls the shared `page_head` component without a title, and the builtin `{% metadata %}` tag inside it folds `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` from [`config/settings.py`](config/settings.py) with what the page tree declares. The root [`dashboards/page.py`](obs/dashboards/page.py) declares a dict with no title in it:
+
+```python
+metadata: MetadataDict = {"robots": {"index": False}}
+```
+
+A dict is inherited by every page below it, so the whole dashboard renders `<meta name="robots" content="noindex">` from that one line. Render counts, dispatch totals and asset statistics describe one running process, and none of it belongs in a search index. The overview renders the settings `default` because the root names no title, and each stats page adds its own with a one-line dict, `Live stats` on `/stats/` and `Page renders`, `Component renders`, `Form actions` and `Static pipeline` below it. One parametrized integration test pins all six titles and the robots tag.
+
 ## Out of scope
 
 The dashboard renders every counter without pagination, so a long-lived process with thousands of distinct page paths will eventually need a top-N filter. The cumulative counters never expire on their own either, they only go away with `flush_metrics`. Fine for an example, worth calling out before adopting the pattern in production.
@@ -276,3 +286,4 @@ The dashboard renders every counter without pagination, so a long-lived process 
 
 - Aggregated signal catalogue at [docs/content/ref/signals.rst](../../docs/content/ref/signals.rst).
 - JS context serialization and the per-decorator serializer override at [docs/content/topics/static-assets/js-context.rst](../../docs/content/topics/static-assets/js-context.rst).
+- The metadata chain that folds the dicts of section 10 at [next/pages/metadata/](../../next/pages/metadata/).

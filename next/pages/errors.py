@@ -69,6 +69,15 @@ class PageMetadataURLError(ValueError):
         self.url = url
 
 
+class PageMetadataRequestError(ValueError):
+    """A metadata key set to `True` names the page itself, which needs a request."""
+
+    def __init__(self, key: str) -> None:
+        """Compose the message from the key that asked for the page URL."""
+        super().__init__(f"`{key}=True` names the page itself and needs a request")
+        self.key = key
+
+
 class PageMetadataTemplateError(ValueError):
     """A title template used a placeholder or a syntax the safe substitution rejects."""
 
@@ -82,6 +91,7 @@ class PageMetadataTemplateError(ValueError):
 __all__ = [
     "PageContextShapeError",
     "PageMetadataConflictError",
+    "PageMetadataRequestError",
     "PageMetadataShapeError",
     "PageMetadataTemplateError",
     "PageMetadataURLError",

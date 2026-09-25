@@ -16,6 +16,7 @@ from django.utils.autoreload import (
 
 from next.apps import autoreload as next_autoreload, components as next_components
 from next.components import FileComponentsBackend, components_manager
+from next.components.ports import ComponentTagsImpl
 from next.deps import resolver
 from next.deps.introspect import _signature_cache
 from next.pages import loaders as pages_loaders
@@ -24,6 +25,7 @@ from next.pages.watch import get_pages_directories_for_watch
 from next.partial.ports import PartialShaperImpl
 from next.ports import (
     PortSlot,
+    component_tags_slot,
     page_scan_slot,
     partial_shaper_slot,
     router_access_slot,
@@ -52,6 +54,7 @@ if TYPE_CHECKING:
 
 
 _PROCESS_SLOTS = (
+    component_tags_slot,
     page_scan_slot,
     partial_shaper_slot,
     router_access_slot,
@@ -391,6 +394,7 @@ class TestDependencyResolverInstall:
     STEPS: ClassVar[tuple[str, ...]] = (
         "_register_checks",
         "apply_resolver_setting",
+        "component_tags_slot",
         "page_scan_slot",
         "partial_shaper_slot",
         "router_access_slot",
@@ -417,6 +421,7 @@ class TestDependencyResolverInstall:
         assert made == [
             "_register_checks",
             "apply_resolver_setting",
+            "component_tags_slot.set",
             "page_scan_slot.set",
             "partial_shaper_slot.set",
             "router_access_slot.set",
@@ -432,6 +437,12 @@ class TestDependencyResolverInstall:
     @pytest.mark.parametrize(
         ("slot_name", "subject", "implementation"),
         [
+            pytest.param(
+                "component_tags_slot",
+                "component tags port",
+                ComponentTagsImpl,
+                id="tags",
+            ),
             pytest.param("page_scan_slot", "page scan port", PageScanImpl, id="scan"),
             pytest.param(
                 "partial_shaper_slot", "partial shaper", PartialShaperImpl, id="shaper"
@@ -474,6 +485,7 @@ class TestDependencyResolverInstall:
 
         assert len(router_reloaded.receivers) == connected
         assert [type(slot.get()) for slot in _PROCESS_SLOTS] == [
+            ComponentTagsImpl,
             PageScanImpl,
             PartialShaperImpl,
             RouterAccessImpl,

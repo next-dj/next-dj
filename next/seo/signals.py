@@ -1,4 +1,4 @@
-"""Signals the seo area emits, sent by `SitemapItemsRegistry` on every registration."""
+"""Django signals emitted by the seo subsystem."""
 
 from django.dispatch import Signal
 

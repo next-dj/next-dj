@@ -44,8 +44,7 @@ def _defined_check_names(module_path: pathlib.Path) -> frozenset[str]:
 def _area_check_sources() -> dict[str, tuple[pathlib.Path, ...]]:
     """Map each area's `checks` address to the files that define its checks.
 
-    An area that outgrew one file exposes a package whose `__init__` only re-exports, so
-    the names live in the submodules beside it.
+    A package `__init__` only re-exports, so the names live in the submodules below it.
     """
     flat = {
         f"next.{path.parent.name}.checks": (path,)
@@ -53,7 +52,7 @@ def _area_check_sources() -> dict[str, tuple[pathlib.Path, ...]]:
     }
     packages = {
         f"next.{path.parent.parent.name}.checks": tuple(
-            sorted(path.parent.glob("*.py"))
+            sorted(path.parent.rglob("*.py"))
         )
         for path in sorted(_NEXT_ROOT.glob("*/checks/__init__.py"))
     }

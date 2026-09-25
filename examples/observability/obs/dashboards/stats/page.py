@@ -6,7 +6,10 @@ from obs.forms import DEFAULT_WINDOW
 from obs.serializers import WrappedJsContextSerializer
 
 from next import context
+from next.pages import MetadataDict
 
+
+metadata: MetadataDict = {"title": "Live stats"}
 
 # Page level, not next to the widget, because it must land first.
 scripts = [

@@ -233,7 +233,10 @@ class TestStaticFastPathView:
 
         reference = Page()
         body = reference._load_static_body(page_file, module)
-        assert fast == reference._render_composed(page_file, body, request, title="Hi")
+        slow = reference._render_composed(
+            page_file, body, request, _dep_cache={}, title="Hi"
+        )
+        assert fast == slow
         assert fast == "<html><main><h1>Hi</h1></main></html>"
 
     def test_created_layout_shows_up_without_a_restart(

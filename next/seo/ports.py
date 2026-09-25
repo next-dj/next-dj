@@ -2,40 +2,31 @@
 
 from typing import TYPE_CHECKING, override
 
-from django.urls import path
-
 from next.ports import SeoRoutes
 
 from .manager import seo_manager
-from .views import robots, sitemap
+from .urls import urlpatterns
 
 
 if TYPE_CHECKING:
     from django.urls import URLPattern
 
-    from next.ports import VersionSource
-
 
 class SeoRoutesImpl(SeoRoutes):
-    """Answer the routes the discovered sources call for, none without a source."""
+    """Answer the sitemap and robots routes of the sources the page trees declare.
+
+    A route without its source stays out, so a project's own view there still answers.
+    """
 
     @override
     def patterns(self) -> "list[URLPattern]":
-        """Return the sitemap routes and the robots route, each behind its source."""
-        patterns: list[URLPattern] = []
+        """Return the routes of `next.seo.urls` whose source a page tree declares."""
+        served: set[str] = set()
         if seo_manager.has_sitemap():
-            patterns.append(path("sitemap.xml", sitemap, name="sitemap"))
-            patterns.append(
-                path("sitemap-<slug:section>.xml", sitemap, name="sitemap_section")
-            )
+            served.update(("sitemap", "sitemap_section"))
         if seo_manager.robots_source() is not None:
-            patterns.append(path("robots.txt", robots, name="robots"))
-        return patterns
-
-    @override
-    def version_source(self) -> "VersionSource":
-        """Return the manager, whose version the lazy urlpatterns key on."""
-        return seo_manager
+            served.add("robots")
+        return [pattern for pattern in urlpatterns if pattern.name in served]
 
 
 __all__ = ["SeoRoutesImpl"]

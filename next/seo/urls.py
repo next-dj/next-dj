@@ -2,13 +2,13 @@
 
 from django.urls import path
 
-from .views import robots, sitemap
+from .views import HOST_ROOT_NAMESPACE, robots_view, sitemap_view
 
 
-app_name = "next_seo"
+app_name = HOST_ROOT_NAMESPACE
 
 urlpatterns = [
-    path("sitemap.xml", sitemap, name="sitemap"),
-    path("sitemap-<slug:section>.xml", sitemap, name="sitemap_section"),
-    path("robots.txt", robots, name="robots"),
+    path("sitemap.xml", sitemap_view, name="sitemap"),
+    path("sitemap-<slug:section>.xml", sitemap_view, name="sitemap_section"),
+    path("robots.txt", robots_view, name="robots"),
 ]

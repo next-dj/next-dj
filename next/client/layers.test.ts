@@ -447,6 +447,97 @@ describe("closing a layer restores the title captured at open", () => {
   });
 });
 
+describe("a meta op keeps to the page it was rendered for", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    window.history.replaceState(null, "", "/inbox/");
+    document.title = "Inbox (0)";
+  });
+
+  it("sets the title directly while no layer is open", () => {
+    const { layers } = makeStack();
+    layers.retitle("Inbox (3)", "/inbox/");
+    expect(document.title).toBe("Inbox (3)");
+  });
+
+  it("a layer's own meta lasts only as long as the layer", async () => {
+    const { layers } = makeStack();
+    await layers.open(null, "/inbox/7/", "mail");
+    layers.retitle("Mail 7", "/inbox/7/");
+    expect(document.title).toBe("Mail 7");
+    layers.close({ result: 1 });
+    expect(document.title).toBe("Inbox (0)");
+  });
+
+  it("a meta with no page or an unknown one belongs to the top layer", async () => {
+    const { layers } = makeStack();
+    await layers.open(null, "/inbox/7/", "mail");
+    layers.retitle("Saved", undefined);
+    expect(document.title).toBe("Saved");
+    layers.retitle("Elsewhere", "/other/");
+    expect(document.title).toBe("Elsewhere");
+    layers.close({ result: 1 });
+    expect(document.title).toBe("Inbox (0)");
+  });
+
+  it("a host retitle under a titled layer waits for the close", async () => {
+    const { layers } = makeStack();
+    await layers.open(null, "/inbox/7/", "mail");
+    layers.retitle("Mail 7", "/inbox/7/");
+    layers.retitle("Inbox (3)", "/inbox/");
+    expect(document.title).toBe("Mail 7");
+    layers.close({ result: 1 });
+    expect(document.title).toBe("Inbox (3)");
+  });
+
+  it("a host retitle under an untitled layer shows at once and survives", async () => {
+    const { layers } = makeStack();
+    await layers.open(null, "/inbox/7/", "mail");
+    layers.retitle("Inbox (3)", "/inbox/");
+    expect(document.title).toBe("Inbox (3)");
+    layers.close({ dismiss: true, reason: "escape" });
+    expect(document.title).toBe("Inbox (3)");
+  });
+
+  it("nested layers each restore the newest title of the layer below", async () => {
+    const { layers } = makeStack();
+    await layers.open(null, "/inbox/7/", "mail");
+    layers.retitle("Mail 7", "/inbox/7/");
+    await layers.open(null, "/inbox/7/reply/", "reply");
+    layers.retitle("Reply", "/inbox/7/reply/");
+    layers.retitle("Inbox (3)", "/inbox/");
+    layers.retitle("Mail 7 (read)", "/inbox/7/");
+    expect(document.title).toBe("Reply");
+    layers.close({ result: 1 });
+    expect(document.title).toBe("Mail 7 (read)");
+    layers.close({ result: 1 });
+    expect(document.title).toBe("Inbox (3)");
+  });
+
+  it("a host retitle passes through an untitled middle layer", async () => {
+    const { layers } = makeStack();
+    await layers.open(null, undefined, "bare");
+    await layers.open(null, "/inbox/7/", "mail");
+    layers.retitle("Mail 7", "/inbox/7/");
+    layers.retitle("Inbox (3)", "/inbox/");
+    expect(document.title).toBe("Mail 7");
+    layers.close({ result: 1 });
+    expect(document.title).toBe("Inbox (3)");
+    layers.close({ result: 1 });
+    expect(document.title).toBe("Inbox (3)");
+  });
+
+  it("_reset lands on the host's newest title", async () => {
+    const { layers } = makeStack();
+    await layers.open(null, "/inbox/7/", "mail");
+    layers.retitle("Mail 7", "/inbox/7/");
+    await layers.open(null, "/inbox/7/reply/", "reply");
+    layers.retitle("Inbox (3)", "/inbox/");
+    layers._reset();
+    expect(document.title).toBe("Inbox (3)");
+  });
+});
+
 describe("layer requests carry the host origin", () => {
   interface Request {
     url: string;
@@ -891,6 +982,18 @@ describe("layer intercepting URL lifecycle", () => {
     fire();
     expect(layers.size()).toBe(0);
     expect(document.title).toBe("Feed");
+  });
+
+  it("Back past a layer lands on the host's newest title", async () => {
+    document.title = "Feed";
+    await layers.open(null, "/photos/1/", "a");
+    layers.retitle("Photo", "/photos/1/");
+    layers.retitle("Feed (2)", "/feed/");
+    expect(document.title).toBe("Photo");
+    window.history.replaceState(null, "", "/feed/");
+    fire();
+    expect(layers.size()).toBe(0);
+    expect(document.title).toBe("Feed (2)");
   });
 
   it("Back with only bare layers open is a no-op", async () => {

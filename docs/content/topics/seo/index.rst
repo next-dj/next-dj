@@ -20,10 +20,10 @@ The section covers the two declaration forms and their merge along the page tree
 .. rubric:: Crawlers
 
 :doc:`sitemaps`
-   The ``sitemap.py`` convention, static and dynamic routes, the module attributes, the index, the ``base`` origin, and caching.
+   The ``sitemap.py`` convention, static and dynamic routes, the module attributes, the index, the ``base`` origin, caching, and mounting at the host root.
 
 :doc:`robots`
-   The declared and the static ``/robots.txt``, the ``Sitemap:`` line, the one-source rule, and mounting at the host root.
+   The declared and the static ``/robots.txt``, the ``Sitemap:`` line, the one-source rule, and why ``noindex`` never becomes ``Disallow``.
 
 .. rubric:: Auditing
 

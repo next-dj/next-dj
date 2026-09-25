@@ -5,11 +5,10 @@ from next.deps import (
     REQUEST_DEP_CACHE_ATTR,
     DependencyResolver,
     Depends,
-    ensure_request_dep_cache,
     get_request_dep_cache,
     resolver,
 )
-from next.deps.cache import _CACHE_MISS, _IN_PROGRESS, DependencyCache
+from next.deps.cache import _CACHE_MISS, _IN_PROGRESS, DependencyCache, shared_dep_cache
 from tests.support import bound_dependency, build_mock_http_request
 
 
@@ -171,39 +170,39 @@ class TestDependencyCacheLayout:
             cache.extra = 1
 
 
-class TestEnsureRequestDepCache:
-    """One dict per request, attached on first ask and found on every later one."""
+class TestSharedDepCache:
+    """The dispatch cache on a request when there is one, a private dict otherwise."""
 
-    def test_attaches_a_fresh_dict_to_a_request_without_one(self) -> None:
+    def test_a_request_without_one_gets_a_fresh_dict_it_never_carries(self) -> None:
         request = HttpRequest()
-        cache = ensure_request_dep_cache(request)
+        cache = shared_dep_cache(request)
         assert cache == {}
-        assert getattr(request, REQUEST_DEP_CACHE_ATTR) is cache
-        assert get_request_dep_cache(request) is cache
+        assert get_request_dep_cache(request) is None
+        assert shared_dep_cache(request) is not cache
 
-    def test_returns_the_dict_already_on_the_request(self) -> None:
+    def test_the_dict_already_on_the_request_is_returned(self) -> None:
         request = HttpRequest()
         attached: dict[str, object] = {"wallet": "w"}
         setattr(request, REQUEST_DEP_CACHE_ATTR, attached)
-        assert ensure_request_dep_cache(request) is attached
+        assert shared_dep_cache(request) is attached
 
-    def test_a_second_ask_finds_the_first_dict(self) -> None:
+    def test_an_empty_dispatch_cache_is_shared_rather_than_replaced(self) -> None:
         request = HttpRequest()
-        assert ensure_request_dep_cache(request) is ensure_request_dep_cache(request)
+        attached: dict[str, object] = {}
+        setattr(request, REQUEST_DEP_CACHE_ATTR, attached)
+        assert shared_dep_cache(request) is attached
 
     def test_without_a_request_every_ask_is_a_fresh_dict(self) -> None:
-        first = ensure_request_dep_cache(None)
+        first = shared_dep_cache(None)
         assert first == {}
-        assert ensure_request_dep_cache(None) is not first
+        assert shared_dep_cache(None) is not first
 
-    def test_a_non_dict_attribute_is_replaced(self) -> None:
+    def test_a_non_dict_attribute_is_ignored(self) -> None:
         request = HttpRequest()
         setattr(request, REQUEST_DEP_CACHE_ATTR, "junk")
-        cache = ensure_request_dep_cache(request)
-        assert cache == {}
-        assert getattr(request, REQUEST_DEP_CACHE_ATTR) is cache
+        assert shared_dep_cache(request) == {}
+        assert getattr(request, REQUEST_DEP_CACHE_ATTR) == "junk"
 
-    def test_a_spec_mock_request_takes_the_dict(self) -> None:
+    def test_a_spec_mock_request_gets_a_fresh_dict(self) -> None:
         request = build_mock_http_request()
-        cache = ensure_request_dep_cache(request)
-        assert ensure_request_dep_cache(request) is cache
+        assert shared_dep_cache(request) is not shared_dep_cache(request)

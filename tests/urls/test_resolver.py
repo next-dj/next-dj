@@ -10,7 +10,7 @@ from next.forms.uid import URL_NAME_FORM_ACTION
 from next.testing import override_form_action, override_next_settings
 from next.urls import TrieURLResolver, page_reverse, router_manager
 from next.urls.manager import urlpatterns
-from tests.urls.conftest import write_page
+from tests.support import write_page
 
 
 _RESOLVE_CASES = (

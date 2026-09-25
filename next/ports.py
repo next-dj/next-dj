@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 
     from django.forms import BaseForm, BaseFormSet
     from django.http import HttpRequest, HttpResponse
+    from django.template.base import NodeList
     from django.urls import URLPattern
 
     from next.components.info import ComponentInfo
@@ -45,6 +46,10 @@ class PortSlot[T]:
         """Return the bound implementation."""
         if self._impl is None:
             raise ImproperlyConfigured(self._unbound_message())
+        return self._impl
+
+    def peek(self) -> T | None:
+        """Return the bound implementation, `None` before the app is ready."""
         return self._impl
 
     def _unbound_message(self) -> str:
@@ -172,12 +177,14 @@ class StaticAssets(Protocol):
         ...
 
 
-class VersionSource(Protocol):
-    """An object whose `version` moves with every reset of what it stands for."""
+class ComponentTags(Protocol):
+    """What the component tag library answers about a compiled template.
 
-    @property
-    def version(self) -> int:
-        """Return the current version."""
+    The library imports `next.pages`, so a pages check asks it through this.
+    """
+
+    def component_names(self, nodelist: NodeList) -> list[str]:
+        """Return the name of every `{% component %}` tag the nodes hold."""
         ...
 
 
@@ -188,17 +195,11 @@ class SeoRoutes(Protocol):
     """
 
     def patterns(self) -> list[URLPattern]:
-        """Return the sitemap and robots routes the discovered sources call for."""
-        ...
-
-    def version_source(self) -> VersionSource:
-        """Return the object whose `version` the routes were built under.
-
-        Handed over once, because the lazy urlpatterns read it on every resolve.
-        """
+        """Return the sitemap and robots routes, spliced after every page route."""
         ...
 
 
+component_tags_slot = PortSlot["ComponentTags"]("component tags port")
 page_scan_slot = PortSlot["PageScan"]("page scan port")
 partial_shaper_slot = PortSlot["PartialShaper"]("partial shaper")
 router_access_slot = PortSlot["RouterAccess"]("router access port")
@@ -207,13 +208,14 @@ static_assets_slot = PortSlot["StaticAssets"]("static assets port")
 
 
 __all__ = [
+    "ComponentTags",
     "PageScan",
     "PartialShaper",
     "PortSlot",
     "RouterAccess",
     "SeoRoutes",
     "StaticAssets",
-    "VersionSource",
+    "component_tags_slot",
     "page_scan_slot",
     "partial_shaper_slot",
     "router_access_slot",

@@ -3,8 +3,10 @@ from typing import Annotated
 import pytest
 
 from next.deps import resolver
-from next.pages.metadata import EMPTY_METADATA, PARENT_KEY, Metadata
+from next.pages.metadata import Metadata
+from next.pages.metadata.chain import PARENT_KEY
 from next.pages.metadata.providers import ParentMetadataProvider
+from next.pages.metadata.schema import EMPTY_METADATA
 from next.testing import make_resolution_context
 from tests.support import inspect_parameter
 

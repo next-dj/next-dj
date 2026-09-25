@@ -32,11 +32,12 @@ logger = logging.getLogger(__name__)
 
 
 class _RouterManagerCache:
-    """The one manager a check run builds, instead of one per asking check."""
+    """The one manager a check run builds and the routed pages it imported."""
 
     def __init__(self) -> None:
         """Start with nothing built."""
         self.held: tuple[RouterManager | None, list[CheckMessage]] | None = None
+        self.pages: tuple[RouterManager, list[tuple[str, Path]]] | None = None
 
 
 _router_manager_cache = _RouterManagerCache()
@@ -103,24 +104,29 @@ def get_router_manager() -> tuple[RouterManager | None, list[CheckMessage]]:
 def discover_page_registrations(
     router_manager: RouterManager | None = None,
 ) -> list[tuple[str, Path]]:
-    """Execute every routed `page.py`, answering the trail and path of each that ran.
+    """Execute every routed `page.py` once per manager, answering each that ran.
 
-    Django runs its checks in an order none may rely on, and the import pass is
-    memoised per file by mtime, so every asking check runs it and a repeat costs a stat.
+    The pass reads the per-run walk of the trees, so it is dropped together with it.
     """
     if router_manager is None:
         router_manager, _errors = get_router_manager()
     if router_manager is None:
         return []
-    return page_scan_slot.get().load_scanned_page_modules(router_manager)
+    held = _router_manager_cache.pages
+    if held is not None and held[0] is router_manager:
+        return held[1]
+    loaded = page_scan_slot.get().load_scanned_page_modules(router_manager)
+    _router_manager_cache.pages = (router_manager, loaded)
+    return loaded
 
 
 def reset_router_manager_cache(**kwargs) -> None:
     """Drop the cached `RouterManager` and everything read off its routers.
 
-    The scans and the contract answers go with it.
+    The scans, the imported pages and the contract answers go with it.
     """
     _router_manager_cache.held = None
+    _router_manager_cache.pages = None
     _SCANNED_TREES_CACHE.clear()
     _ROUTER_CONTRACT_CACHE.clear()
     _CACHED_ROUTERS.clear()

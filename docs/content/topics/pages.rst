@@ -544,7 +544,7 @@ The ``check_context_functions`` check looks for keyless ``@context`` callables i
 ``next.E029``.
    A keyless ``@context`` callable has a return annotation that is not a mapping type.
 
-The ``metadata`` checks validate the ``METADATA`` settings scope and the metadata each ``page.py`` declares, ``next.E098`` to ``next.E109`` and ``next.W084`` to ``next.W088``, and the opt-in SEO audits ``next.W089`` to ``next.W096`` answer to ``manage.py check --deploy --tag seo``.
+The ``metadata`` checks validate the ``METADATA`` settings scope and the metadata each ``page.py`` declares, ``next.E098`` to ``next.E109`` and ``next.W084`` to ``next.W088``, and the four audits, ``next.W089`` to ``next.W096``, answer to ``manage.py check --deploy``.
 See :doc:`seo/auditing` for the two tiers.
 
 The ``check_template_loaders`` check validates every ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`` entry.

@@ -44,15 +44,20 @@ class PageMetadataRegistry:
         self._version += 1
 
     def reset(self) -> None:
-        """Drop every registration so a re-executed `page.py` repopulates it."""
+        """Drop every registration and memoised chain for a re-executed `page.py`."""
         self._entries.clear()
         self._conflicts.clear()
         self._misattributions.clear()
+        self._chains.clear()
         self._bump()
 
-    def forget_chains(self) -> None:
-        """Drop every memoised chain."""
-        self._chains.clear()
+    def chain(self, file_path: Path) -> ChainEntry | None:
+        """Return the memoised chain of `file_path`, whatever tokens it was built at."""
+        return self._chains.get(file_path)
+
+    def remember(self, file_path: Path, entry: ChainEntry) -> None:
+        """Memoise the chain built for `file_path`, replacing an earlier one."""
+        self._chains[file_path] = entry
 
     def misattributed(self) -> tuple[MisattributedContext, ...]:
         """Return every registration bound to a file other than the one running it."""

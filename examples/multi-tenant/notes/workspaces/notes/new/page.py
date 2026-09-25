@@ -4,7 +4,11 @@ from notes.models import Note
 from notes.providers import DTenant
 
 from next.forms import ComponentWidget, Form
+from next.pages import MetadataDict
 from next.urls import page_reverse
+
+
+metadata: MetadataDict = {"title": "New note"}
 
 
 class NoteCreateForm(Form):

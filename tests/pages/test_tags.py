@@ -1,4 +1,5 @@
 import re
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,6 +12,7 @@ from django.utils.functional import lazy
 
 from next.components import ComponentInfo, components_manager
 from next.pages.metadata import MetadataThunk, PageMetadataRegistry
+from next.pages.metadata.nodes import MetadataNode
 from next.seeding import METADATA_KEY, TEMPLATE_PATH_KEY
 from tests.support import write_page_chain
 
@@ -32,7 +34,16 @@ def _thunk(
             return {"title": lazy(translation.get_language, str)()}
 
         registry.register(leaf, meta)
-    return MetadataThunk(registry, leaf, RequestFactory().get("/leaf/"), {}, {}, {})
+    return MetadataThunk(registry, leaf, RequestFactory().get("/leaf/"), {}, {})
+
+
+def _thunk_over(root: Path, meta: Callable[..., object]) -> MetadataThunk:
+    """Return a thunk over a fresh registry whose one page registers `meta`."""
+    root.mkdir(exist_ok=True)
+    (leaf,) = write_page_chain(root, [("leaf", "x = 1\n")])
+    registry = PageMetadataRegistry()
+    registry.register(leaf, meta)
+    return MetadataThunk(registry, leaf, None, {}, {})
 
 
 class TestTemplatePlaceholderTag:
@@ -108,6 +119,24 @@ class TestMetadataTag:
             html = _render("{% metadata %}|{% metadata %}", **{METADATA_KEY: thunk})
         assert html == "<title>en</title>|<title>en</title>"
         assert calls == [1]
+
+    def test_the_callable_reads_the_context_the_tag_renders_in(
+        self, tmp_path: Path
+    ) -> None:
+        thunk = _thunk_over(tmp_path, lambda user: {"title": user})
+        html = _render(
+            '{% with user="Ann" %}{% metadata %}{% endwith %}', **{METADATA_KEY: thunk}
+        )
+        assert html == "<title>Ann</title>"
+
+    def test_the_memo_of_another_thunk_is_not_reused(self, tmp_path: Path) -> None:
+        first = _thunk_over(tmp_path / "a", lambda: {"title": "First"})
+        second = _thunk_over(tmp_path / "b", lambda: {"title": "Second"})
+        context = Context({METADATA_KEY: first})
+        node = MetadataNode()
+        assert node.render(context) == "<title>First</title>"
+        context[METADATA_KEY] = second
+        assert node.render(context) == "<title>Second</title>"
 
     def test_a_lazy_title_renders_under_the_language_of_each_render(
         self, tmp_path: Path

@@ -12,7 +12,7 @@ from .schema import EMPTY_METADATA, Metadata
 
 
 def _parent_metadata(context: ResolutionContext) -> object:
-    """Return the parent fold of the resolve under way, or nothing outside one."""
+    """Return the parent fold of the resolve under way, else the empty metadata."""
     return context.context_data.get(PARENT_KEY, EMPTY_METADATA)
 
 

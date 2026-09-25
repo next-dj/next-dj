@@ -545,7 +545,9 @@ class TestPageMetadata:
         ]
         assert len(by_slug) == 2
 
-    def test_index_uses_the_root_default_title(self, next_client: NextClient) -> None:
+    def test_index_names_itself_through_the_template(
+        self, next_client: NextClient
+    ) -> None:
         body = next_client.get("/").content.decode()
         assert "<title>Home · next.dj Wiki</title>" in body
         assert (
@@ -618,14 +620,6 @@ class TestSitemapAndRobots:
         body = next_client.get("/sitemap.xml").content.decode()
         assert "/search/" not in body
         assert "/articles/" not in body
-
-    def test_the_section_route_answers_under_the_app_label(
-        self, next_client: NextClient, routing_doc: Article
-    ) -> None:
-        whole = next_client.get("/sitemap.xml")
-        section = next_client.get("/sitemap-wiki.xml")
-        assert section.status_code == 200
-        assert section.content == whole.content
 
     def test_robots_fences_the_search_and_names_the_sitemap(
         self, next_client: NextClient

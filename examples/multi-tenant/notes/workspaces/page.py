@@ -3,11 +3,22 @@ from typing import TYPE_CHECKING
 from notes.models import Note
 from notes.providers import DTenant
 
-from next import context
+from next import context, page
+from next.pages import MetadataDict
 
 
 if TYPE_CHECKING:
     from notes.models import Tenant
+
+
+@page.metadata(inherit=True)
+def workspace_meta(active_tenant: DTenant) -> MetadataDict:
+    """Brand every tab with the tenant and keep its workspace out of the index."""
+    return {
+        "site_name": active_tenant.name,
+        "title": {"default": active_tenant.name},
+        "robots": {"index": False},
+    }
 
 
 @context("tenant", inherit_context=True)

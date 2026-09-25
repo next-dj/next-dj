@@ -32,7 +32,6 @@ from .codes import (
 )
 from .forms import check_form_backend_partial_aware, check_repeated_form_has_key
 from .ops import check_custom_patch_ops_well_formed
-from .pages import reset_composed_pages_memo
 from .templates import check_composed_templates_compile
 from .zones import (
     check_context_zone_names_exist,
@@ -82,5 +81,4 @@ __all__ = [
     "check_zone_name_is_slug",
     "check_zone_not_in_if",
     "check_zone_not_in_loop",
-    "reset_composed_pages_memo",
 ]

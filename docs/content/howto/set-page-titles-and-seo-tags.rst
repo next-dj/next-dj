@@ -16,7 +16,10 @@ Put the site defaults and the title template in ``NEXT_FRAMEWORK["METADATA"]["DE
 Walkthrough
 -----------
 
-Declare the site defaults.
+Declare the site defaults
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The settings tier is the outermost segment of every page, so the site name, the title template, and the fallback description are written once.
 
 .. code-block:: python
    :caption: config/settings.py
@@ -27,15 +30,18 @@ Declare the site defaults.
                "base": "https://notes.example",
                "site_name": "Notes",
                "title": {"template": "{title} · {site_name}", "default": "Notes"},
-               "description": "A notebook that lives in the browser.",
+               "description": "A notebook that lives in the browser, with every note one search away.",
                "og": {"type": "website"},
            },
        },
    }
 
-The template applies to every page, the default is what a page without a title renders, and the empty-looking ``og`` block turns Open Graph derivation on for the whole site.
+The template applies to every page, the default is what a page without a title renders, and the ``og`` block turns Open Graph derivation on for the whole site.
 
-Render the head in the root layout.
+Render the head
+~~~~~~~~~~~~~~~
+
+One ``{% metadata %}`` tag in the root layout writes the whole head.
 
 .. code-block:: jinja
    :caption: notes/pages/layout.djx
@@ -53,23 +59,29 @@ Render the head in the root layout.
      </body>
    </html>
 
-Give a static page its title.
+Title a static page
+~~~~~~~~~~~~~~~~~~~
+
+A module-level ``metadata`` dict is readable without a request, so the checks see what the page renders.
 
 .. code-block:: python
    :caption: notes/pages/about/page.py
 
    metadata = {
        "title": "About",
-       "description": "Who writes these notes and why.",
+       "description": "Who writes these notes, why they exist, and how to reach the author.",
        "canonical": True,
    }
 
-Build the metadata of a dynamic page from its row.
+Build a dynamic page from its row
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A ``@page.metadata`` callable builds the segment per request from the row the URL names.
 
 .. code-block:: python
    :caption: notes/pages/notes/[int:note_id]/page.py
 
-   from django.http import Http404
+   from django.shortcuts import get_object_or_404
    from notes.models import Note
 
    from next import page
@@ -78,10 +90,7 @@ Build the metadata of a dynamic page from its row.
 
    @page.metadata
    def note_metadata(note_id: DUrl[int]) -> MetadataDict:
-       try:
-           note = Note.objects.get(pk=note_id)
-       except Note.DoesNotExist as exc:
-           raise Http404 from exc
+       note = get_object_or_404(Note, pk=note_id)
        return {
            "title": note.title,
            "description": note.summary,
@@ -89,7 +98,7 @@ Build the metadata of a dynamic page from its row.
            "og": {"type": "article"},
        }
 
-The :exc:`~django.http.Http404` answers the request with a 404 page, the same as a ``@context`` callable raising it would.
+A missing row raises :exc:`~django.http.Http404`, which answers the request with a 404 page, the same as a ``@context`` callable raising it would.
 
 Verification
 ------------
@@ -112,7 +121,9 @@ Run the checks.
    uv run python manage.py check
    uv run python manage.py check --deploy --tag seo
 
-The first run reports no error, and the second one lists the pages still missing a description.
+The first run reports no error.
+The second one runs the four audits, ``next.W089`` to ``next.W096``, and stays quiet for these pages, because both descriptions fall between 50 and 160 characters and the title and description audits skip the note page, whose head a callable builds.
+It warns with ``next.W090`` once two static pages fold to the same title, such as two pages that both fall back on the default ``Notes``.
 
 See also
 --------

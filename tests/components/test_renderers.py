@@ -17,10 +17,42 @@ from next.components.renderers import (
     COMPONENT_PROPS_CONTEXT_KEY,
     _inject_component_context,
 )
+from next.deps import Depends
+from next.pages import page
+from tests.support import (
+    bound_dependency,
+    build_page_request,
+    unified_view,
+    write_page_chain,
+)
 from tests.support.components import build_composite_component
 
 
 RESERVED_KEYS = sorted(_RESERVED_CONTEXT_KEYS)
+
+LOOPING_PAGE = """
+from next.deps import Depends
+from next.pages import context
+
+
+@context("title")
+def title(value=Depends("site_label")):
+    return value
+
+
+@context("items")
+def items():
+    return ["alpha", "beta", "gamma"]
+"""
+LOOP_TEMPLATE = '{% for x in items %}{% component "badge" label=x %}{% endfor %}'
+RENDERING_PAGE = (
+    LOOPING_PAGE
+    + f"""
+
+def render(value=Depends("site_label")):
+    return {LOOP_TEMPLATE!r}
+"""
+)
 
 # The inventory as the docs publish it, pinned so a core-set change is deliberate.
 PINNED_RESERVED_KEYS = frozenset(
@@ -44,6 +76,38 @@ def _inject(
     """Run the injection step with `manager` standing in for the global one."""
     with patch("next.components.renderers.component", manager):
         _inject_component_context(info, context_data, None)
+
+
+def _upper(value: str = Depends("label_upper")) -> str:
+    return value
+
+
+class TestNamedDependenciesPerInstance:
+    """A page GET leaves every component instance a named-dependency cache of its own."""
+
+    @pytest.mark.parametrize(
+        "source", [LOOPING_PAGE, RENDERING_PAGE], ids=["template", "render"]
+    )
+    def test_looped_instances_resolve_their_own_value(
+        self, tmp_path: Path, source: str
+    ) -> None:
+        mgr, info, module_path = build_composite_component(
+            tmp_path / "badge", name="badge", template="<b>{{ label }}={{ upper }}</b>"
+        )
+        mgr._registry.register(module_path, "upper", _upper)
+        (leaf,) = write_page_chain(tmp_path, [("items", source)])
+        (leaf.parent / "template.djx").write_text(LOOP_TEMPLATE)
+        view = unified_view(page, leaf)
+        with (
+            bound_dependency("site_label", lambda: "SITE"),
+            bound_dependency("label_upper", lambda label: label.upper()),
+            patch.object(components_manager, "get_component", return_value=info),
+            patch("next.components.renderers.component", mgr),
+        ):
+            response = view(build_page_request())
+        assert response.content.decode().count("<b>") == 3
+        for label in ("alpha", "beta", "gamma"):
+            assert f"<b>{label}={label.upper()}</b>" in response.content.decode()
 
 
 class TestKeylessContextCollisions:

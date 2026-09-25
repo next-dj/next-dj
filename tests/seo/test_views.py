@@ -1,16 +1,28 @@
 import os
 import re
+from collections.abc import Iterator
 
 import pytest
 from django.conf import settings
 from django.core.cache import cache
 from django.http import Http404
 from django.test import Client, RequestFactory, override_settings
-from django.urls import reverse
+from django.urls import NoReverseMatch, reverse
 
 from next.conf import next_framework_settings
 from next.seo import SitemapTrailError, seo_manager, views
-from tests.seo.trees import BASE, CALLS, WITH_BASE, routed, write_page, write_tree
+from next.testing import override_next_settings
+from tests.seo.trees import (
+    BASE,
+    CALLS,
+    NOINDEX,
+    PREFIXED_URLCONF,
+    USER_URLCONF,
+    WITH_BASE,
+    routed,
+    write_tree,
+)
+from tests.support import write_page
 
 
 I18N = {
@@ -18,12 +30,11 @@ I18N = {
     "LANGUAGE_CODE": "en",
     "USE_I18N": True,
 }
-I18N_URLCONF = "tests.support.i18n_urls"
-USER_URLCONF = "tests.seo.user_urls"
-PREFIXED_URLCONF = "tests.seo.prefixed_urls"
+I18N_URLCONF = "tests.support.urls_i18n_pages"
+I18N_ROOT_URLCONFS = ["tests.seo.urls_i18n", "tests.seo.urls_i18n_after"]
 HOSTS = {"ALLOWED_HOSTS": ["testserver", "req.example"]}
-NOINDEX_DICT = 'template = "x"\nmetadata = {"robots": {"index": False}}\n'
 NOINDEX_TEXT = 'template = "x"\nmetadata = {"robots": "noindex, nofollow"}\n'
+NOINDEX_SITE = {"METADATA": {"NOINDEX": True}}
 ITEMS = """
 from datetime import date
 
@@ -65,6 +76,18 @@ from next.seo import Entry, sitemap
 def docs():
     yield Entry(kwargs={"slug": "z"}, lastmod=datetime(2026, 1, 3, tzinfo=UTC))
 """
+MIXED = """
+from datetime import UTC, date, datetime
+
+from next.seo import Entry, sitemap
+
+
+@sitemap.items("posts/[slug]")
+def posts():
+    yield Entry(kwargs={"slug": "a"}, lastmod=date(2026, 1, 2))
+    yield Entry(kwargs={"slug": "b"}, lastmod=datetime(2026, 1, 1, 12, tzinfo=UTC))
+    yield Entry(kwargs={"slug": "c"}, lastmod=datetime(2026, 1, 1, 18))
+"""
 UNKNOWN = """
 from next.seo import sitemap
 
@@ -85,6 +108,13 @@ host = "acme.example"
 """
 
 
+@pytest.fixture(autouse=True)
+def _fresh_calls() -> Iterator[None]:
+    CALLS.clear()
+    yield
+    CALLS.clear()
+
+
 def _locs(response) -> list[str]:
     return sorted(re.findall(r"<loc>(.*?)</loc>", response.content.decode()))
 
@@ -95,12 +125,18 @@ def _touch(path, delta_ns: int) -> None:
 
 
 class TestNoSource:
-    def test_no_routes_without_a_source(self, tmp_path) -> None:
+    """Without a source the SEO routes stay out, so the address is free."""
+
+    def test_no_route_is_mounted_without_a_source(self, tmp_path) -> None:
         with routed(write_tree(tmp_path / "pages")):
+            with pytest.raises(NoReverseMatch):
+                reverse("next:sitemap")
+            with pytest.raises(NoReverseMatch):
+                reverse("next:robots")
             assert Client().get("/sitemap.xml").status_code == 404
             assert Client().get("/robots.txt").status_code == 404
 
-    def test_a_user_pattern_after_the_include_wins(self, tmp_path) -> None:
+    def test_a_user_pattern_after_the_include_answers(self, tmp_path) -> None:
         with routed(write_tree(tmp_path / "pages"), urlconf=USER_URLCONF):
             assert Client().get("/sitemap.xml").content == b"mine"
             assert Client().get("/robots.txt").content == b"mine"
@@ -115,19 +151,21 @@ class TestNoSource:
         factory = RequestFactory()
         with routed(write_tree(tmp_path / "pages")):
             with pytest.raises(Http404, match=r"No sitemap\.py"):
-                views.sitemap(factory.get("/sitemap.xml"))
+                views.sitemap_view(factory.get("/sitemap.xml"))
             with pytest.raises(Http404, match=r"No robots\.py"):
-                views.robots(factory.get("/robots.txt"))
+                views.robots_view(factory.get("/robots.txt"))
 
 
 class TestStaticSitemap:
+    """A bare `sitemap.py` lists every static route a crawler may index."""
+
     def test_lists_every_static_route_and_nothing_else(self, tmp_path) -> None:
         root = write_tree(
             tmp_path / "pages",
             pages=("", "about", "posts/[slug]", "admin/users"),
             sitemap="exclude = ['admin/*']\n",
         )
-        write_page(root, "secret", NOINDEX_DICT)
+        write_page(root, "secret", NOINDEX)
         write_page(root, "hidden", NOINDEX_TEXT)
         with routed(root, **WITH_BASE):
             response = Client().get("/sitemap.xml")
@@ -135,6 +173,16 @@ class TestStaticSitemap:
         assert response["Content-Type"] == "application/xml"
         assert response["X-Robots-Tag"] == "noindex, noodp, noarchive"
         assert _locs(response) == [f"{BASE}/", f"{BASE}/about/"]
+
+    def test_an_exclude_trail_drops_only_that_route(self, tmp_path) -> None:
+        root = write_tree(
+            tmp_path / "pages",
+            pages=("posts/[slug]", "posts/s", "posts/g"),
+            sitemap="exclude = ['posts/[slug]']\n",
+        )
+        with routed(root, **WITH_BASE):
+            response = Client().get("/sitemap.xml")
+        assert _locs(response) == [f"{BASE}/posts/g/", f"{BASE}/posts/s/"]
 
     @override_settings(**HOSTS)
     def test_without_base_the_request_host_is_the_origin(self, tmp_path) -> None:
@@ -156,9 +204,10 @@ class TestStaticSitemap:
 
 
 class TestDeclaredItems:
+    """`@sitemap.items` fills a dynamic route through the page URL."""
+
     def test_entries_reverse_through_the_page_url(self, tmp_path) -> None:
         root = write_tree(tmp_path / "pages", pages=("", "posts/[slug]"), sitemap=ITEMS)
-        CALLS.clear()
         with routed(root, **WITH_BASE):
             response = Client().get("/sitemap.xml")
         assert _locs(response) == [
@@ -177,13 +226,44 @@ class TestDeclaredItems:
             response = Client().get("/sitemap.xml")
         assert response["Last-Modified"] == "Fri, 02 Jan 2026 00:00:00 GMT"
 
+    def test_dates_and_datetimes_mix_in_one_sitemap(self, tmp_path) -> None:
+        root = write_tree(tmp_path / "pages", pages=("posts/[slug]",), sitemap=MIXED)
+        with routed(root, **WITH_BASE):
+            response = Client().get("/sitemap.xml")
+        assert response.status_code == 200
+        assert response["Last-Modified"] == "Fri, 02 Jan 2026 00:00:00 GMT"
+        body = response.content.decode()
+        assert body.count("<lastmod>2026-01-02</lastmod>") == 1
+        assert body.count("<lastmod>2026-01-01</lastmod>") == 2
+
+    @override_settings(TIME_ZONE="America/Chicago")
+    def test_a_date_renders_as_declared_west_of_utc(self, tmp_path) -> None:
+        root = write_tree(tmp_path / "pages", pages=("posts/[slug]",), sitemap=DATED)
+        with routed(root, **WITH_BASE):
+            response = Client().get("/sitemap.xml")
+        assert "<lastmod>2026-01-02</lastmod>" in response.content.decode()
+        assert response["Last-Modified"] == "Fri, 02 Jan 2026 06:00:00 GMT"
+
+    def test_a_page_with_refused_metadata_leaves_the_sitemap_served(
+        self, tmp_path
+    ) -> None:
+        root = write_tree(tmp_path / "pages", pages=("",), sitemap="")
+        write_page(root, "bad", 'template = "x"\nmetadata = {"bogus": 1}\n')
+        with routed(root, **WITH_BASE):
+            response = Client().get("/sitemap.xml")
+        assert response.status_code == 200
+        assert _locs(response) == [f"{BASE}/", f"{BASE}/bad/"]
+
     def test_an_unknown_trail_raises_at_build(self, tmp_path) -> None:
         root = write_tree(tmp_path / "pages", pages=("about",), sitemap=UNKNOWN)
-        with routed(root), pytest.raises(SitemapTrailError, match="nope"):
+        with routed(root), pytest.raises(SitemapTrailError, match="nope") as caught:
             Client().get("/sitemap.xml")
+        assert caught.value.file == root / "sitemap.py"
 
 
 class TestIndex:
+    """Several sections or pages answer an index that links each one."""
+
     def test_two_roots_answer_an_index_absolute_on_base(self, tmp_path) -> None:
         first = write_tree(tmp_path / "a" / "pages", pages=("about",), sitemap="")
         second = write_tree(tmp_path / "b" / "pages", pages=("team",), sitemap="")
@@ -246,7 +326,7 @@ class TestIndex:
         with routed(first, second, **WITH_BASE):
             index = Client().get("/sitemap.xml")
         assert index["Last-Modified"] == "Sat, 03 Jan 2026 00:00:00 GMT"
-        assert "<lastmod>2026-01-02</lastmod>" in index.content.decode()
+        assert "<lastmod>2026-01-02T00:00:00+00:00</lastmod>" in index.content.decode()
 
     def test_an_undated_section_ahead_of_a_dated_one_drops_the_header(
         self, tmp_path
@@ -259,6 +339,8 @@ class TestIndex:
 
 
 class TestI18n:
+    """`i18n` lists one location per language, with alternates on demand."""
+
     @override_settings(**I18N)
     def test_one_location_per_language(self, tmp_path) -> None:
         root = write_tree(tmp_path / "pages", pages=("about",), sitemap="i18n = True\n")
@@ -298,30 +380,55 @@ class TestI18n:
 
 
 class TestCache:
-    def test_cache_wraps_both_views_once_per_version(self, tmp_path) -> None:
+    """`cache` in a `sitemap.py` caches the sitemap view and never robots."""
+
+    @pytest.fixture(autouse=True)
+    def _empty_cache(self) -> Iterator[None]:
+        cache.clear()
+        yield
+        cache.clear()
+
+    def test_the_sitemap_is_cached_and_robots_is_not(self, tmp_path) -> None:
         root = write_tree(tmp_path / "pages", pages=("posts/[slug]",), sitemap=CACHED)
         (root / "robots.py").write_text("")
-        CALLS.clear()
-        cache.clear()
-        try:
-            with routed(root, **WITH_BASE):
-                first = Client().get("/sitemap.xml")
-                second = Client().get("/sitemap.xml")
-                robots = Client().get("/robots.txt")
-                wrapped = views._wrapped_sitemap.get()
-                assert views._wrapped_sitemap.get() is wrapped
-                seo_manager.reset()
-                assert views._wrapped_sitemap.get() is not wrapped
-        finally:
-            cache.clear()
+        with routed(root, **WITH_BASE):
+            first = Client().get("/sitemap.xml")
+            second = Client().get("/sitemap.xml")
+            robots = Client().get("/robots.txt")
         assert first.content == second.content
         assert CALLS == ["/sitemap.xml"]
         assert "max-age=60" in second["Cache-Control"]
         assert "Cache-Control" not in robots
 
-    def test_without_cache_the_view_is_served_bare(self, tmp_path) -> None:
-        with routed(write_tree(tmp_path / "pages", sitemap="")):
-            assert views._wrapped_sitemap.get() is views._sitemap
+    def test_the_cached_view_is_wrapped_once_per_manager_version(
+        self, tmp_path
+    ) -> None:
+        root = write_tree(tmp_path / "pages", pages=("posts/[slug]",), sitemap=CACHED)
+        with routed(root, **WITH_BASE):
+            wrapped = views._wrapped_sitemap.get()
+            assert views._wrapped_sitemap.get() is wrapped
+            seo_manager.reset()
+            assert views._wrapped_sitemap.get() is not wrapped
+
+    def test_a_bool_cache_leaves_the_sitemap_uncached(self, tmp_path) -> None:
+        root = write_tree(
+            tmp_path / "pages",
+            pages=("posts/[slug]",),
+            sitemap="cache = True\n" + ITEMS,
+        )
+        with routed(root, **WITH_BASE):
+            first = Client().get("/sitemap.xml")
+            Client().get("/sitemap.xml")
+        assert CALLS == ["/sitemap.xml", "/sitemap.xml"]
+        assert "Cache-Control" not in first
+
+    def test_without_cache_every_request_builds_afresh(self, tmp_path) -> None:
+        root = write_tree(tmp_path / "pages", pages=("posts/[slug]",), sitemap=ITEMS)
+        with routed(root, **WITH_BASE):
+            first = Client().get("/sitemap.xml")
+            Client().get("/sitemap.xml")
+        assert CALLS == ["/sitemap.xml", "/sitemap.xml"]
+        assert "Cache-Control" not in first
 
 
 class TestReloadKeepsDeclaredItems:
@@ -356,6 +463,8 @@ class TestReloadKeepsDeclaredItems:
 
 
 class TestRobots:
+    """`/robots.txt` renders the `robots.py` rules or serves the static file."""
+
     def test_rules_and_host_render_with_an_absolute_sitemap_line(
         self, tmp_path
     ) -> None:
@@ -431,8 +540,40 @@ class TestRobots:
         )
 
 
+class TestNoindex:
+    """`NOINDEX` drops the sitemap and its line in a generated robots."""
+
+    def test_noindex_drops_the_sitemap_routes_while_it_holds(self, tmp_path) -> None:
+        root = write_tree(tmp_path / "pages", pages=("about",), sitemap="")
+        with routed(root):
+            assert Client().get("/sitemap.xml").status_code == 200
+            with override_next_settings(METADATA={"NOINDEX": True}):
+                assert Client().get("/sitemap.xml").status_code == 404
+                assert Client().get("/sitemap-pages.xml").status_code == 404
+            assert Client().get("/sitemap.xml").status_code == 200
+
+    def test_noindex_answers_404_at_the_host_root_mount(self, tmp_path) -> None:
+        root = write_tree(tmp_path / "pages", pages=("about",), sitemap="")
+        with routed(root, urlconf=PREFIXED_URLCONF, **NOINDEX_SITE):
+            assert Client().get("/sitemap.xml").status_code == 404
+
+    def test_noindex_drops_the_sitemap_line_of_generated_robots(self, tmp_path) -> None:
+        root = write_tree(tmp_path / "pages", sitemap="", robots="")
+        with routed(root, **NOINDEX_SITE):
+            response = Client().get("/robots.txt")
+        assert response.content.decode() == "User-agent: *\nAllow: /\n"
+
+    def test_noindex_leaves_a_static_robots_file_as_written(self, tmp_path) -> None:
+        raw = b"User-agent: *\nSitemap: https://acme.example/sitemap.xml\n"
+        root = write_tree(tmp_path / "pages", sitemap="", robots_txt=raw)
+        with routed(root, **NOINDEX_SITE):
+            assert Client().get("/robots.txt").content == raw
+
+
 class TestHostRootMount:
-    def test_the_seo_urls_serve_at_the_host_root(self, tmp_path) -> None:
+    """`next.seo.urls` at the host root serves a tree mounted under a prefix."""
+
+    def test_the_seo_urls_serve_at_the_host_root_and_only_there(self, tmp_path) -> None:
         root = write_tree(tmp_path / "pages", pages=("about",), sitemap="", robots="")
         with routed(root, urlconf=PREFIXED_URLCONF):
             assert reverse("next_seo:robots") == "/robots.txt"
@@ -441,10 +582,12 @@ class TestHostRootMount:
             robots = Client().get("/robots.txt")
             top = Client().get("/sitemap.xml")
             prefixed = Client().get("/prefix/sitemap.xml")
+            prefixed_robots = Client().get("/prefix/robots.txt")
         assert robots.content.decode().endswith(
             "Sitemap: http://testserver/sitemap.xml\n"
         )
-        assert _locs(top) == _locs(prefixed) == ["http://testserver/prefix/about/"]
+        assert _locs(top) == ["http://testserver/prefix/about/"]
+        assert prefixed.status_code == prefixed_robots.status_code == 404
 
     def test_the_index_links_the_sections_under_the_serving_mount(
         self, tmp_path
@@ -453,12 +596,29 @@ class TestHostRootMount:
         second = write_tree(tmp_path / "b", pages=("team",), sitemap="")
         with routed(first, second, urlconf=PREFIXED_URLCONF):
             top = Client().get("/sitemap.xml")
-            prefixed = Client().get("/prefix/sitemap.xml")
+            section = Client().get("/sitemap-a.xml")
+            prefixed = Client().get("/prefix/sitemap-a.xml")
         assert _locs(top) == [
             "http://testserver/sitemap-a.xml",
             "http://testserver/sitemap-b.xml",
         ]
-        assert _locs(prefixed) == [
-            "http://testserver/prefix/sitemap-a.xml",
-            "http://testserver/prefix/sitemap-b.xml",
-        ]
+        assert _locs(section) == ["http://testserver/prefix/about/"]
+        assert prefixed.status_code == 404
+
+    @override_settings(**I18N)
+    @pytest.mark.parametrize("urlconf", I18N_ROOT_URLCONFS)
+    def test_a_language_prefix_serves_no_copy(self, tmp_path, urlconf) -> None:
+        root = write_tree(tmp_path / "pages", pages=("about",), sitemap="", robots="")
+        with routed(root, urlconf=urlconf):
+            robots = Client().get("/robots.txt")
+            top = Client().get("/sitemap.xml")
+            copies = [
+                Client().get("/de/sitemap.xml"),
+                Client().get("/de/sitemap-pages.xml"),
+                Client().get("/de/robots.txt"),
+            ]
+        assert robots.content.decode().endswith(
+            "Sitemap: http://testserver/sitemap.xml\n"
+        )
+        assert _locs(top) == ["http://testserver/about/"]
+        assert [copy.status_code for copy in copies] == [404, 404, 404]

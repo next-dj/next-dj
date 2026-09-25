@@ -295,6 +295,25 @@ The test suite asserts the server contract — the envelopes, the zone targets, 
 - **Toast and list refresh.** The success toast appears once on submit, and the recent-requests list under the closed modal shows the new row without a full page reload.
 - **Lazy audit table.** Opening `/admin/audit/` shows the skeleton first, and the table fills in once it scrolls into view, with the `?kind=` filter applied on the zone request the same way it was on the full page.
 
+### 11. Tab titles that never name the requester
+
+[`portal/layout.djx`](portal/layout.djx) calls the shared `page_head` component without a title, and the builtin `{% metadata %}` tag inside it folds `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` from [`config/settings.py`](config/settings.py) with what the page tree declares. The landing declares nothing and renders the settings `default`. The wizard and the global log declare a one-line dict each:
+
+```python
+# access/views/request/[step]/page.py
+metadata: MetadataDict = {"title": "Request access", "robots": {"index": False}}
+```
+
+`/admin/audit/` has the same shape titled `Audit log`, and one title covers all three wizard steps. The per-request trail is dynamic, so [`request/[int:request_id]/audit/page.py`](access/views/request/%5Bint%3Arequest_id%5D/audit/page.py) registers a callable that names the `access_request` context as its parameter and gets the row that context already fetched:
+
+```python
+@page.metadata
+def audit_meta(access_request: AccessRequest) -> MetadataDict:
+    return {"title": f"Request #{access_request.pk}", "robots": {"index": False}}
+```
+
+The row carries the requester's name and email, and the title uses the primary key on purpose. A tab title ends up in browser history, bookmarks and screenshots, which is the wrong place for the personal data the audit trail exists to protect. Every page that shows request data says `noindex` for the same reason. One parametrized integration test pins the four titles and which pages carry the robots tag.
+
 ## Further reading
 
 - [`next/forms/wizard.py`](../../next/forms/wizard.py) — the declarative `FormWizard` base class, the `FormWizardBackend` contract, the default `SessionFormWizardBackend` this example builds on, and the optional `CacheFormWizardBackend`.
@@ -304,5 +323,6 @@ The test suite asserts the server contract — the envelopes, the zone targets, 
 - [`next/forms/checks/actions.py`](../../next/forms/checks/actions.py) — `next.E041` (duplicate handlers).
 - [`next/forms/checks/config.py`](../../next/forms/checks/config.py) — `next.E044` (`FORM_ACTION_BACKENDS` is no list), `next.E068` (backend path cannot be imported), `next.E045` (wrong backend type).
 - [`next/forms/checks/wizards.py`](../../next/forms/checks/wizards.py) — `next.W057` (a step form registered as an action) and `next.W059` (a field two steps both declare).
+- [`next/pages/metadata/`](../../next/pages/metadata/) — the metadata chain behind the dicts and the `@page.metadata` callable of section 11.
 - [`next/testing/capture.py`](../../next/testing/capture.py) — `SignalRecorder` and `capture_signals` helpers used in the tests.
 - [`next/testing/plugin.py`](../../next/testing/plugin.py) — the pytest plugin behind the `next_pages`, `next_clear_cache`, and `next_client` entries this example's `pytest.ini` uses.

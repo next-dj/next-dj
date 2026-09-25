@@ -3,22 +3,24 @@
 from __future__ import annotations
 
 from collections import ChainMap
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Final, cast
 
+from next.deps.cache import shared_dep_cache
 from next.deps.resolver import current_resolver
 from next.introspect import callable_name
 from next.pages.errors import PageMetadataConflictError
-from next.pages.loaders import _load_python_module_memo, module_generation
+from next.pages.loaders import load_page_module, module_generation, page_tree_depth
 from next.pages.paths import page_path_info
 
-from .defaults import site_segment
 from .merge import fold_metadata
-from .schema import Metadata, Segment, Text, TitleSpec, normalize_metadata
+from .normalize import normalize_metadata
+from .schema import Metadata, Segment, Text, TitleSpec
+from .scope import site_segment
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, MutableMapping
+    from collections.abc import Callable, Iterable, Mapping, MutableMapping
     from pathlib import Path
 
     from django.http import HttpRequest
@@ -34,8 +36,7 @@ PARENT_KEY: Final = "_next_metadata_parent"
 class ChainSource:
     """One `page.py` of the chain, as a segment or as the callable that yields one.
 
-    A callable source carries an empty segment, so the static fold reads every source
-    alike and only the request-time fold has to tell the two apart.
+    A callable source carries an empty segment, so the static fold reads all alike.
     """
 
     file_path: Path
@@ -45,10 +46,9 @@ class ChainSource:
 
 @dataclass(frozen=True, slots=True)
 class ChainEntry:
-    """The memoised chain of one page with the three tokens that validate it.
+    """The memoised chain of one page with the tokens that validate it.
 
-    `folded` is the whole fold when no source is a callable, and `static` is the fold
-    of the segments alone, which the checks and the sitemap read without a request.
+    `folded` is the whole fold when no source is a callable, `static` the segments.
     """
 
     version: int
@@ -62,18 +62,18 @@ class ChainEntry:
 def _build_chain(
     registry: PageMetadataRegistry, file_path: Path, site: Segment
 ) -> ChainEntry:
-    """Walk the ancestors root first and fold what each one declares.
+    """Walk the ancestors inside the page tree root first and fold what each declares.
 
-    Both tokens are read before the walk, so a module the walk itself loads or
-    registers moves them past the entry and the next read rebuilds it settled. A
-    callable named `metadata` is the module attribute too, and counts as the callable.
+    Both tokens are read before the walk, so a module the walk loads forces a rebuild.
+    A callable named `metadata` is the module attribute too, and counts as the callable.
     """
     version = registry.version
     generation = module_generation()
+    in_tree = page_path_info(file_path).ancestors[: page_tree_depth(file_path.parent)]
     sources: list[ChainSource] = []
     dynamic = False
-    for ancestor in reversed(page_path_info(file_path).ancestors):
-        module = _load_python_module_memo(ancestor)
+    for ancestor in reversed(in_tree):
+        module, _error = load_page_module(ancestor)
         raw = None if module is None else getattr(module, "metadata", None)
         entry = registry.entry(ancestor)
         if entry is not None and raw is entry.func:
@@ -100,7 +100,7 @@ def _build_chain(
 def chain_entry(registry: PageMetadataRegistry, file_path: Path) -> ChainEntry:
     """Return the memoised chain of `file_path`, rebuilt once any token has moved."""
     site = site_segment()
-    entry = registry._chains.get(file_path)
+    entry = registry.chain(file_path)
     if (
         entry is None
         or entry.version != registry.version
@@ -108,54 +108,23 @@ def chain_entry(registry: PageMetadataRegistry, file_path: Path) -> ChainEntry:
         or entry.site is not site
     ):
         entry = _build_chain(registry, file_path, site)
-        registry._chains[file_path] = entry
+        registry.remember(file_path, entry)
     return entry
 
 
-def static_metadata(registry: PageMetadataRegistry, file_path: Path) -> Metadata:
-    """Return the fold of the settings tier and every static segment of the chain."""
-    return chain_entry(registry, file_path).static
-
-
-def templated_title(
-    registry: PageMetadataRegistry,
-    file_path: Path,
-    text: Text,
-    *,
-    absolute: bool = False,
-) -> Text:
-    """Return the title the page would render if its own `page.py` said `text`."""
-    entry = chain_entry(registry, file_path)
-    segments = [entry.site]
-    segments.extend(
-        source.segment for source in entry.sources if source.file_path != file_path
-    )
-    spec = TitleSpec(absolute=text) if absolute else TitleSpec(text=text)
-    segments.append(Segment(str(file_path), title=spec))
-    return cast("Text", fold_metadata(segments).title)
-
-
-def resolve_metadata(
-    registry: PageMetadataRegistry,
-    file_path: Path,
+def _fold_sources(
+    site: Segment,
+    sources: Iterable[ChainSource],
     *,
     request: HttpRequest | None,
     url_kwargs: Mapping[str, object],
     dep_cache: dict[str, Any],
     context_data: MutableMapping[str, object],
 ) -> Metadata:
-    """Fold the chain of `file_path` for one request, running its callables.
-
-    A callable sees the fold of everything before it as its parent, and shares the
-    dependency cache of the request with the context merge and `render()`.
-    """
-    entry = chain_entry(registry, file_path)
-    folded = entry.folded
-    if folded is not None:
-        return folded
-    acc: list[Segment] = [entry.site]
+    """Fold `sources` over the settings tier, each callable over the fold before it."""
+    acc: list[Segment] = [site]
     active = current_resolver()
-    for source in entry.sources:
+    for source in sources:
         func = source.func
         if func is None:
             acc.append(source.segment)
@@ -175,18 +144,49 @@ def resolve_metadata(
     return fold_metadata(acc)
 
 
-class MetadataThunk:
-    """The deferred metadata resolve of one render, folded once by the first reader."""
+def chain_title(
+    registry: PageMetadataRegistry,
+    file_path: Path,
+    text: Text,
+    *,
+    request: HttpRequest | None = None,
+    url_kwargs: Mapping[str, object] | None = None,
+    context_data: Callable[[], MutableMapping[str, object]] | None = None,
+) -> Text:
+    """Return the title the page would render if its own `page.py` said `text`.
 
-    __slots__ = (
-        "_resolved",
-        "context_data",
-        "dep_cache",
-        "file_path",
-        "registry",
-        "request",
-        "url_kwargs",
+    An inherited callable runs as in the render, its context built only on demand.
+    """
+    entry = chain_entry(registry, file_path)
+    own = Segment(str(file_path), title=TitleSpec(text=text))
+    sources: list[ChainSource] = []
+    dynamic = False
+    for source in entry.sources:
+        if source.file_path != file_path:
+            sources.append(source)
+            dynamic = dynamic or source.func is not None
+        elif source.func is None:
+            own = replace(source.segment, title=own.title)
+    sources.append(ChainSource(file_path, own))
+    context = context_data() if dynamic and context_data is not None else {}
+    folded = _fold_sources(
+        entry.site,
+        sources,
+        request=request,
+        url_kwargs=url_kwargs or {},
+        dep_cache=shared_dep_cache(request),
+        context_data=context,
     )
+    return cast("Text", folded.title)
+
+
+class MetadataThunk:
+    """The deferred metadata resolve of one render, handed its context on each read.
+
+    It keeps no reference to the context, which carries the thunk itself.
+    """
+
+    __slots__ = ("dep_cache", "file_path", "registry", "request", "url_kwargs")
 
     def __init__(
         self,
@@ -195,7 +195,6 @@ class MetadataThunk:
         request: HttpRequest | None,
         url_kwargs: Mapping[str, object],
         dep_cache: dict[str, Any],
-        context_data: MutableMapping[str, object],
     ) -> None:
         """Hold what the resolve needs without doing any of it yet."""
         self.registry = registry
@@ -203,23 +202,28 @@ class MetadataThunk:
         self.request = request
         self.url_kwargs = url_kwargs
         self.dep_cache = dep_cache
-        self.context_data = context_data
-        self._resolved: Metadata | None = None
 
-    def resolve(self) -> Metadata:
-        """Return the metadata of the render, folding the chain on the first call."""
-        resolved = self._resolved
-        if resolved is None:
-            resolved = resolve_metadata(
-                self.registry,
-                self.file_path,
-                request=self.request,
-                url_kwargs=self.url_kwargs,
-                dep_cache=self.dep_cache,
-                context_data=self.context_data,
-            )
-            self._resolved = resolved
-        return resolved
+    def folded(self) -> Metadata | None:
+        """Return the fold of a chain without callables, `None` when one must run."""
+        return chain_entry(self.registry, self.file_path).folded
+
+    def resolve(self, context_data: MutableMapping[str, object]) -> Metadata:
+        """Fold the chain of the render, its callables reading `context_data`.
+
+        A callable sees the fold before it as its parent and shares the render's cache.
+        """
+        entry = chain_entry(self.registry, self.file_path)
+        folded = entry.folded
+        if folded is not None:
+            return folded
+        return _fold_sources(
+            entry.site,
+            entry.sources,
+            request=self.request,
+            url_kwargs=self.url_kwargs,
+            dep_cache=self.dep_cache,
+            context_data=context_data,
+        )
 
 
 __all__ = [
@@ -228,7 +232,5 @@ __all__ = [
     "ChainSource",
     "MetadataThunk",
     "chain_entry",
-    "resolve_metadata",
-    "static_metadata",
-    "templated_title",
+    "chain_title",
 ]

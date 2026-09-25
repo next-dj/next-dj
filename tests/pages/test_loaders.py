@@ -26,6 +26,7 @@ from next.pages.loaders import (
     last_load_error,
     load_page_module,
     module_generation,
+    page_tree_depth,
     read_module_string_lists,
     reset_module_memo,
 )
@@ -693,6 +694,30 @@ class TestLayoutTemplateLoader:
                 forget_page_roots()
 
                 assert _page_roots() == (first, second)
+        finally:
+            forget_page_roots()
+
+    def test_the_tree_depth_is_measured_once_per_set_of_roots(self, tmp_path) -> None:
+        """A second ask resolves nothing, and new page trees measure the depth again."""
+        page_dir = tmp_path / "a" / "b"
+        page_dir.mkdir(parents=True)
+        forget_page_roots()
+        try:
+            with patch.object(
+                loaders_module,
+                "get_pages_directories_for_watch",
+                return_value=[tmp_path.resolve()],
+            ):
+                assert page_tree_depth(page_dir) == 3
+                with patch.object(Path, "resolve", side_effect=AssertionError):
+                    assert page_tree_depth(page_dir) == 3
+            forget_page_roots()
+            with patch.object(
+                loaders_module,
+                "get_pages_directories_for_watch",
+                return_value=[(tmp_path / "a").resolve()],
+            ):
+                assert page_tree_depth(page_dir) == 2
         finally:
             forget_page_roots()
 
@@ -1707,7 +1732,7 @@ class TestTheModuleMemoIsBounded:
 
 
 class TestModuleGeneration:
-    """The generation moves on every write to the memo and on nothing else."""
+    """The generation moves on every memo write and page tree reload, nothing else."""
 
     def test_a_load_moves_the_generation(self, tmp_path) -> None:
         page_file = tmp_path / "page.py"
@@ -1750,4 +1775,9 @@ class TestModuleGeneration:
     def test_reset_module_memo_moves_it(self) -> None:
         before = module_generation()
         reset_module_memo()
+        assert module_generation() == before + 1
+
+    def test_forgetting_the_page_trees_moves_it(self) -> None:
+        before = module_generation()
+        forget_page_roots()
         assert module_generation() == before + 1

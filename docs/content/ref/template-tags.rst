@@ -267,12 +267,12 @@ Metadata
 
 .. describe:: {% metadata %}
 
-   Renders the head tags of the page being rendered, the title, the description, the robots directives, the canonical link, the hreflang alternates, the verification tokens, the ``other`` entries, the Open Graph properties, the Twitter card, and the JSON-LD script, one per line in that order.
+   Renders the head tags of the page being rendered, one per line in the order the key-to-tag table of :doc:`pages` lists.
    The values come from the fold of the settings tier and every ``metadata`` dict or ``@page.metadata`` callable along the ancestor chain of the page, and the first read of the tag is what runs the callables.
    Takes no arguments, and an argument raises ``TemplateSyntaxError`` at parse time.
    A template rendered outside a page render, such as an error page or a plain Django view, renders the empty string.
-   A page that declares metadata while no layout in its chain carries the tag is reported as ``next.W085``.
-   See :doc:`/content/topics/seo/metadata` for the declaration forms and :doc:`pages` for the key-to-tag table.
+   A page that declares metadata while nothing its composition renders carries the tag, the layouts, the components they reach, and the templates they include by a literal name, is reported as ``next.W085``.
+   See :doc:`/content/topics/seo/metadata` for the declaration forms.
 
 Tag loading
 -----------

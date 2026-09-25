@@ -5,9 +5,7 @@ The file declaring each callable is recorded, so only its component's context ru
 
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, overload
 
 from next.caches import BoundedCache
@@ -16,13 +14,16 @@ from next.introspect import (
     MisattributedContext,
     MisattributionLog,
     callable_name,
+    declared_file,
     defining_file,
+    registering_file,
 )
 from next.utils import resolved_tree
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+    from pathlib import Path
 
     from next.static.serializers import JsContextSerializer
 
@@ -197,14 +198,12 @@ class ComponentContextManager:
         `serialize=True` publishes the return value on `window.Next.context`, and
         `serializer=` overrides the global `JS_CONTEXT_SERIALIZER` for this key.
         """
-        # Captured here rather than inside the decorator so both spellings see
-        # the component.py that ran `@component.context`, not this module.
-        registered_from = Path(sys._getframe(1).f_code.co_filename)
+        registered_from = registering_file()
 
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-            declared_in = defining_file(func)
-            if declared_in != registered_from:
-                self._registry.note_misattribution(registered_from, declared_in, func)
+            declared_in = declared_file(
+                func, registered_from, self._registry.note_misattribution
+            )
             key = None if callable(func_or_key) else func_or_key
             self._registry.register(
                 declared_in, key, func, serialize=serialize, serializer=serializer

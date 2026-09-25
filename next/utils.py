@@ -1,4 +1,4 @@
-"""Cross-area helpers for paths, `DIRS` entries, page trees, and edit watching.
+"""Cross-area helpers for paths, `DIRS` entries, page trees, routes, and edit watching.
 
 Everything here sits below the subpackages that share it, so a value object
 two of them build travels through this module rather than closing a cycle.
@@ -9,9 +9,10 @@ from __future__ import annotations
 import functools
 import logging
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final, TypeGuard
 from urllib.parse import unquote_to_bytes
 
 from django.conf import settings
@@ -30,6 +31,30 @@ logger = logging.getLogger(__name__)
 
 # The bound every ancestor walk shares, so none reaches the filesystem root.
 MAX_ANCESTOR_WALK_DEPTH = 64
+
+WEB_SCHEMES: Final[frozenset[str]] = frozenset({"http", "https"})
+"""The URL schemes a page, a head tag or a sitemap may point a crawler at."""
+
+
+def is_bool(value: object) -> TypeGuard[bool]:
+    """Whether `value` is a bool."""
+    return isinstance(value, bool)
+
+
+def is_int(value: object) -> TypeGuard[int]:
+    """Whether `value` is an int that is not a bool."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+ROUTE_BRACKET_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"\[\[(?P<wild>[^\[\]]+)\]\]|\[(?P<param>[^\[\]]+)\]"
+)
+"""The bracket segments of a trail, a double-bracket wildcard or a typed parameter."""
+
+
+def is_dynamic_trail(url_path: str) -> bool:
+    """Whether `url_path` carries a bracket segment, so it routes with parameters."""
+    return ROUTE_BRACKET_PATTERN.search(url_path) is not None
 
 
 def normalise_route_name(raw_name: str) -> str:

@@ -15,27 +15,31 @@ class Entry:
     priority: float | None = None
 
 
+def _as_tuple(value: str | Sequence[str]) -> tuple[str, ...]:
+    """Return the strings of `value`, a bare string read as one."""
+    return (value,) if isinstance(value, str) else tuple(value)
+
+
 @dataclass(frozen=True, slots=True)
 class Rule:
-    """One `User-agent` group of a `robots.py`, sequences read as tuples."""
+    """One `User-agent` group of a `robots.py`, a bare string read as one value."""
 
     user_agent: str | Sequence[str] = "*"
-    allow: Sequence[str] = ()
-    disallow: Sequence[str] = ()
+    allow: str | Sequence[str] = ()
+    disallow: str | Sequence[str] = ()
     crawl_delay: int | None = None
 
     def __post_init__(self) -> None:
-        """Pin the sequences as tuples so a shared list cannot move under a group."""
+        """Pin the paths as tuples so a shared list cannot move under a group."""
         if not isinstance(self.user_agent, str):
             object.__setattr__(self, "user_agent", tuple(self.user_agent))
-        object.__setattr__(self, "allow", tuple(self.allow))
-        object.__setattr__(self, "disallow", tuple(self.disallow))
+        object.__setattr__(self, "allow", _as_tuple(self.allow))
+        object.__setattr__(self, "disallow", _as_tuple(self.disallow))
 
     @property
     def user_agents(self) -> tuple[str, ...]:
         """Return the agents of the group, one or several."""
-        agent = self.user_agent
-        return (agent,) if isinstance(agent, str) else tuple(agent)
+        return _as_tuple(self.user_agent)
 
 
 __all__ = ["Entry", "Rule"]

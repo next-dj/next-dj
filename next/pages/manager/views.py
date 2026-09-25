@@ -8,6 +8,7 @@ from django.http import Http404, HttpResponse
 from django.urls import path
 
 from next.conf import fail_loudly, next_framework_settings
+from next.deps.cache import shared_dep_cache
 from next.pages.loaders import (
     build_registered_loaders,
     has_load_errors,
@@ -113,8 +114,9 @@ def _resolving_view(
             error = last_load_error(file_path)
             if error is not None:
                 raise error
+        dep_cache = shared_dep_cache(request)
         resolution = page._resolve_page_body(
-            file_path, active_module, request, **kwargs
+            file_path, active_module, request, _dep_cache=dep_cache, **kwargs
         )
         if resolution.http_response is not None:
             return resolution.http_response
@@ -130,7 +132,9 @@ def _resolving_view(
             )
         body = resolution.body if resolution.body is not None else ""
         response = HttpResponse(
-            page._render_composed(file_path, body, request, **kwargs)
+            page._render_composed(
+                file_path, body, request, _dep_cache=dep_cache, **kwargs
+            )
         )
         shaper.set_vary(response)
         return response

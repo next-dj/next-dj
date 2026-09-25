@@ -12,5 +12,5 @@ urlpatterns = [
     path("", include("next.urls")),
     path("sitemap.xml", mine),
     path("robots.txt", mine),
-    path("direct/robots.txt", seo_views.robots),
+    path("direct/robots.txt", seo_views.robots_view),
 ]

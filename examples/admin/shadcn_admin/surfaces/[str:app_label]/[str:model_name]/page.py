@@ -160,10 +160,11 @@ def changelist_state(
     }
 
 
-@page.metadata
-def changelist_meta(changelist_state: dict[str, Any]) -> MetadataDict:
-    """Title the tab after the model, read from the context key by its name."""
-    return {"title": capfirst(changelist_state["verbose_name_plural"])}
+@page.metadata(inherit=True)
+def changelist_meta(app_label: str, model_name: str) -> MetadataDict:
+    """Title the changelist and every page below it after the model in the URL."""
+    model, _ = utils.resolve_model_admin(app_label, model_name)
+    return {"title": capfirst(str(model._meta.verbose_name_plural))}
 
 
 @action("admin:bulk_action", login_required=True)

@@ -8,18 +8,17 @@ from django.test import RequestFactory, override_settings
 
 from next.deps import Depends
 from next.pages import Page
-from next.pages.metadata import (
+from next.pages.metadata import Metadata, render_metadata
+from next.pages.metadata.backends import forget_translated_urls
+from next.pages.metadata.schema import (
     Alternates,
     Article,
-    Metadata,
     OpenGraph,
     OpenGraphImage,
     Robots,
     Twitter,
     Verification,
-    render_metadata,
 )
-from next.pages.metadata.backends import forget_translated_urls
 from tests.support import bound_dependency, write_page_chain
 
 
@@ -60,7 +59,7 @@ _FULL = Metadata(
     jsonld=({"@type": "WebPage"},),
 )
 _I18N = {
-    "ROOT_URLCONF": "tests.support.i18n_urls",
+    "ROOT_URLCONF": "tests.support.urls_i18n_pages",
     "LANGUAGES": [("en", "English"), ("de", "German")],
     "LANGUAGE_CODE": "en",
     "USE_I18N": True,
@@ -87,7 +86,7 @@ class TestBenchMetadataChain:
         page.resolve_metadata(leaf)
 
         def run() -> None:
-            page._metadata_registry.forget_chains()
+            page._metadata_registry.reset()
             page.resolve_metadata(leaf)
 
         benchmark(run)

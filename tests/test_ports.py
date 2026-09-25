@@ -3,24 +3,27 @@ import inspect
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpResponse
+from django.template import Template
 from django.test import override_settings
 
+from next.components.ports import ComponentTagsImpl
 from next.pages.ports import PageScanImpl
 from next.partial.ports import PartialShaperImpl
 from next.ports import (
+    ComponentTags,
     PageScan,
     PartialShaper,
     PortSlot,
     RouterAccess,
     SeoRoutes,
     StaticAssets,
+    component_tags_slot,
     page_scan_slot,
     partial_shaper_slot,
     router_access_slot,
     seo_routes_slot,
     static_assets_slot,
 )
-from next.seo.manager import seo_manager
 from next.seo.ports import SeoRoutesImpl
 from next.static.manager import StaticManager
 from next.static.ports import StaticAssetsImpl
@@ -56,6 +59,7 @@ def _parameter_shape(owner: type, name: str) -> list[tuple[str, object, object]]
 
 
 PROCESS_SLOTS = [
+    pytest.param(component_tags_slot, ComponentTagsImpl, id="component_tags"),
     pytest.param(page_scan_slot, PageScanImpl, id="page_scan"),
     pytest.param(partial_shaper_slot, PartialShaperImpl, id="partial_shaper"),
     pytest.param(router_access_slot, RouterAccessImpl, id="router_access"),
@@ -64,6 +68,7 @@ PROCESS_SLOTS = [
 ]
 
 SLOT_SUBJECTS = [
+    "component tags port",
     "page scan port",
     "partial shaper",
     "router access port",
@@ -94,6 +99,10 @@ class TestUnboundSlot:
         assert "NextFrameworkConfig.ready()" in str(caught.value)
         assert "never finished starting" in str(caught.value)
 
+    def test_peek_answers_none_before_set(self) -> None:
+        """An early reader can tell the app is not ready without catching an error."""
+        assert PortSlot("seo routes port").peek() is None
+
     def test_a_slot_carries_no_instance_dictionary(self) -> None:
         """Four process-wide singletons, so the slot stays a two-field object."""
         assert not hasattr(PortSlot("partial shaper"), "__dict__")
@@ -107,6 +116,7 @@ class TestBoundSlot:
         shaper = IntentOnlyShaper()
         slot.set(shaper)
         assert slot.get() is shaper
+        assert slot.peek() is shaper
 
     def test_set_replaces_the_previous_binding(self) -> None:
         slot = PortSlot("partial shaper")
@@ -269,20 +279,32 @@ class TestSeoRoutesPort:
     """The SEO port hands the lazy urlpatterns its routes without an import."""
 
     def test_the_port_declares_the_expected_methods(self) -> None:
-        assert _methods_of(SeoRoutes) == ["patterns", "version_source"]
+        assert _methods_of(SeoRoutes) == ["patterns"]
 
-    @pytest.mark.parametrize("name", ["patterns", "version_source"])
-    def test_implementation_parameters_match_the_port(self, name) -> None:
-        assert _call_shape(SeoRoutesImpl, name) == _call_shape(SeoRoutes, name)
+    def test_implementation_parameters_match_the_port(self) -> None:
+        assert _call_shape(SeoRoutesImpl, "patterns") == _call_shape(
+            SeoRoutes, "patterns"
+        )
 
-    def test_version_is_the_manager_version(self) -> None:
-        assert SeoRoutesImpl().version_source() is seo_manager
 
-    def test_patterns_are_empty_without_a_source(self, tmp_path) -> None:
-        (tmp_path / "page.py").write_text('template = "ok"\n')
-        entry = file_router_config_entry(pages_dir=tmp_path)
-        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}):
-            assert SeoRoutesImpl().patterns() == []
+class TestComponentTagsPort:
+    """The tags port answers from the node the component tag library compiles to."""
+
+    def test_the_port_declares_the_expected_methods(self) -> None:
+        assert _methods_of(ComponentTags) == ["component_names"]
+
+    def test_implementation_parameters_match_the_port(self) -> None:
+        assert _call_shape(ComponentTagsImpl, "component_names") == _call_shape(
+            ComponentTags, "component_names"
+        )
+
+    def test_component_names_include_a_nested_component(self) -> None:
+        source = '{% #component "card" %}{% component "badge" %}{% /component %}'
+        names = ComponentTagsImpl().component_names(Template(source).nodelist)
+        assert sorted(names) == ["badge", "card"]
+
+    def test_a_template_without_components_names_none(self) -> None:
+        assert ComponentTagsImpl().component_names(Template("<p>x</p>").nodelist) == []
 
 
 class TestSubscriptedSlotSingletons:

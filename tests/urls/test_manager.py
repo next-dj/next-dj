@@ -12,7 +12,7 @@ from django.test import RequestFactory, override_settings
 from django.urls import Resolver404, URLResolver, include, path
 
 from next.forms import ActionRegistration, RegistryFormActionBackend
-from next.forms.manager import FormActionManager
+from next.forms.manager import FormActionManager, form_action_manager
 from next.pages import page
 from next.testing import capture_signals, override_next_settings
 from next.urls import (
@@ -676,6 +676,14 @@ class TestLazyUrlPatterns:
         lazy_urlpatterns._cache = None
         urlpatterns[0]._index_cache = None
 
+    @pytest.fixture()
+    def _one_seo_route(self):
+        """Stand one marker in for the SEO routes, which close the concat."""
+        port = SimpleNamespace(peek=lambda: SimpleNamespace(patterns=lambda: ["s1"]))
+        with patch("next.urls.manager.seo_routes_slot", port):
+            yield
+
+    @pytest.mark.usefixtures("_one_seo_route")
     def test_sequence_protocol_without_list_inheritance(self) -> None:
         """Iteration, len, indexing, slicing, and reversed work without list."""
         with (
@@ -684,12 +692,33 @@ class TestLazyUrlPatterns:
         ):
             lazy = _LazyUrlPatterns()
             assert not isinstance(lazy, list)
-            assert list(lazy) == ["r1", "r2", "f1"]
-            assert len(lazy) == 3
+            assert list(lazy) == ["r1", "r2", "f1", "s1"]
+            assert len(lazy) == 4
             assert lazy[0] == "r1"
-            assert lazy[-1] == "f1"
-            assert lazy[1:] == ["r2", "f1"]
-            assert list(reversed(lazy)) == ["f1", "r2", "r1"]
+            assert lazy[-1] == "s1"
+            assert lazy[1:] == ["r2", "f1", "s1"]
+            assert list(reversed(lazy)) == ["s1", "f1", "r2", "r1"]
+
+    def test_an_early_build_leaves_the_seo_routes_out_and_caches_nothing(self) -> None:
+        """A resolve before the app is ready builds, and the bound port joins later."""
+        unbound = SimpleNamespace(peek=lambda: None)
+        bound = SimpleNamespace(peek=lambda: SimpleNamespace(patterns=lambda: ["s1"]))
+        with (
+            patch("next.urls.manager.router_manager", _StubManager(["r1"])),
+            patch("next.urls.manager.form_action_manager", _StubManager(["f1"])),
+        ):
+            lazy = _LazyUrlPatterns()
+            with patch("next.urls.manager.seo_routes_slot", unbound):
+                assert list(lazy) == ["r1", "f1"]
+            with patch("next.urls.manager.seo_routes_slot", bound):
+                assert list(lazy) == ["r1", "f1", "s1"]
+
+    def test_the_token_is_the_router_and_the_form_action_versions(self) -> None:
+        """No SEO state keys the concat, since its routes never change."""
+        assert lazy_urlpatterns.version_token() == (
+            router_manager.version,
+            form_action_manager.version,
+        )
 
     def test_reversed_override_builds_patterns_once(self) -> None:
         """Explicit ``__reversed__`` walks one ``_patterns()`` build, not one per index."""
@@ -720,6 +749,7 @@ class TestLazyUrlPatterns:
             list(lazy_urlpatterns)
         assert mock_iter.call_count == 2
 
+    @pytest.mark.usefixtures("_one_seo_route")
     def test_late_action_appears_after_forms_version_bump(self) -> None:
         """A bumped forms version rebuilds the concat, so late actions appear."""
         router = _StubManager([])
@@ -729,12 +759,12 @@ class TestLazyUrlPatterns:
             patch("next.urls.manager.form_action_manager", forms),
         ):
             lazy = _LazyUrlPatterns()
-            assert list(lazy) == ["f1"]
-            assert list(lazy) == ["f1"]
+            assert list(lazy) == ["f1", "s1"]
+            assert list(lazy) == ["f1", "s1"]
             assert forms.builds == 1
             forms.items.append("f2")
             forms.version += 1
-            assert list(lazy) == ["f1", "f2"]
+            assert list(lazy) == ["f1", "f2", "s1"]
             assert forms.builds == 2
 
     def test_invalidated_by_register_action(self) -> None:
@@ -775,6 +805,7 @@ class TestLazyUrlPatterns:
             list(lazy)
             assert router.builds == 2
 
+    @pytest.mark.usefixtures("_one_seo_route")
     def test_registration_during_build_keeps_cache_valid(self) -> None:
         """Actions registered while pages expand do not stale the cache."""
         forms = _StubManager(["f1"])
@@ -789,11 +820,12 @@ class TestLazyUrlPatterns:
             patch("next.urls.manager.form_action_manager", forms),
         ):
             lazy = _LazyUrlPatterns()
-            assert list(lazy) == ["r1", "f1", "f2"]
-            assert list(lazy) == ["r1", "f1", "f2"]
+            assert list(lazy) == ["r1", "f1", "f2", "s1"]
+            assert list(lazy) == ["r1", "f1", "f2", "s1"]
             assert router.builds == 1
             assert forms.builds == 1
 
+    @pytest.mark.usefixtures("_one_seo_route")
     def test_sequence_reads_share_one_cached_build(self) -> None:
         """reversed, len, indexing, and slicing all read the cached concat."""
         router = _StubManager(["r1", "r2"])
@@ -803,11 +835,11 @@ class TestLazyUrlPatterns:
             patch("next.urls.manager.form_action_manager", forms),
         ):
             lazy = _LazyUrlPatterns()
-            assert list(reversed(lazy)) == ["f1", "r2", "r1"]
-            assert len(lazy) == 3
+            assert list(reversed(lazy)) == ["s1", "f1", "r2", "r1"]
+            assert len(lazy) == 4
             assert lazy[0] == "r1"
-            assert lazy[1:] == ["r2", "f1"]
-            assert list(lazy) == ["r1", "r2", "f1"]
+            assert lazy[1:] == ["r2", "f1", "s1"]
+            assert list(lazy) == ["r1", "r2", "f1", "s1"]
             assert router.builds == 1
             assert forms.builds == 1
 

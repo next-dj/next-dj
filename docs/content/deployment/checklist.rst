@@ -47,8 +47,8 @@ Page metadata
 -------------
 
 - ``NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]["base"]`` names the public origin, so the canonical links, the social images, the sitemap locations, and the ``Sitemap:`` line of the robots file stop following the request host.
-- ``NEXT_FRAMEWORK["METADATA"]["NOINDEX"]`` is ``False`` in production and ``True`` on every staging host.
-- Run ``uv run python manage.py check --deploy --tag seo`` and resolve or silence every audit warning by its id.
+- ``NEXT_FRAMEWORK["METADATA"]["NOINDEX"]`` is ``False`` in production and ``True`` on every staging host, where it also takes the sitemap down, see :doc:`/content/ref/settings` for every effect.
+- Run ``uv run python manage.py check --deploy --tag seo`` and resolve or silence every warning of the four audits, ``next.W089`` to ``next.W096``, by its id.
 
 See :doc:`/content/topics/seo/auditing` for the two tiers of metadata checks.
 
@@ -146,7 +146,7 @@ A clean exit is required for the deployment to proceed.
 The ``--deploy`` flag is what matters here, because eight framework checks are registered as deployment checks and a plain ``check`` never runs them.
 Three report ``next.E017`` for a ``page.py`` that raises on import, ``next.E084`` for a ``component.py`` that does, and ``next.E072`` for a composed page template that does not compile.
 Each one costs a full walk of the page tree, which is why it is paid once per deploy rather than on every management command, and each one names a failure a visitor would otherwise meet as a 404, a silently stripped body, or a 500.
-``next.W083`` reports an asset version that never moves, and the four SEO audits, ``next.W089`` to ``next.W096``, grade the folded metadata of every page.
+``next.W083`` reports an asset version that never moves, and the four audits, ``next.W089`` to ``next.W096``, grade the folded metadata of every page.
 
 See :ref:`ref-system-checks` for the full catalog.
 

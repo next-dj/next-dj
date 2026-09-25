@@ -1,28 +1,35 @@
 """The head markup of a folded `Metadata`, one tag per line in a fixed order."""
 
+import functools
 import json
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from datetime import datetime
-from typing import Final, override
-from urllib.parse import urlencode, urljoin, urlsplit
+from typing import Final, cast, override
+from urllib.parse import urlencode, urljoin, urlsplit, urlunsplit
 
 from django.conf import settings
 from django.conf.urls.i18n import is_language_prefix_patterns_used
 from django.core.serializers.json import DjangoJSONEncoder
 from django.core.signals import setting_changed
 from django.http import HttpRequest
-from django.urls import get_urlconf, translate_url
+from django.urls import get_script_prefix, get_urlconf, translate_url
 from django.utils.html import format_html
 from django.utils.safestring import SafeString
 from django.utils.translation import get_language, to_locale
 
+from next.backends import resolve_setting_class
 from next.caches import LruCache
 from next.conf.signals import settings_reloaded
-from next.pages.errors import PageMetadataShapeError, PageMetadataURLError
+from next.pages.errors import (
+    PageMetadataRequestError,
+    PageMetadataShapeError,
+    PageMetadataURLError,
+)
+from next.utils import WEB_SCHEMES
 
-from .defaults import metadata_options
 from .schema import Alternates, Article, Metadata, OpenGraph, Robots, Text, Twitter
+from .scope import metadata_options
 
 
 _TITLE: Final = "<title>{}</title>"
@@ -32,10 +39,9 @@ _CANONICAL: Final = '<link rel="canonical" href="{}">'
 _ALTERNATE: Final = '<link rel="alternate" hreflang="{}" href="{}">'
 _JSONLD: Final = '<script type="application/ld+json">{}</script>'
 _JSONLD_ESCAPES: Final = {ord("<"): "\\u003C", ord(">"): "\\u003E", ord("&"): "\\u0026"}
-_SCHEMES: Final = frozenset({"http", "https"})
 _PAGE_ONE: Final = ("page", "1")
 _NOINDEX: Final = "noindex, nofollow"
-_ROBOTS_FLAGS: Final = ("noarchive", "nosnippet", "noimageindex", "notranslate")
+_ROBOTS_BOOLEANS: Final = ("noarchive", "nosnippet", "noimageindex", "notranslate")
 _ROBOTS_LIMITS: Final = (
     ("unavailable_after", "unavailable_after: "),
     ("max_snippet", "max-snippet:"),
@@ -52,17 +58,22 @@ _CANONICAL_SELF: Final = "canonical"
 _ALTERNATES_SELF: Final = "alternates"
 _METADATA_SOURCE: Final = "metadata"
 
-_translated: Final[LruCache[tuple[str | None, str, str], str]] = LruCache()
+_translated: Final[LruCache[tuple[str, str, str, str], str]] = LruCache()
 
 
 def absolute_url(url: str, *, base: str | None, request: HttpRequest | None) -> str:
-    """Return `url` absolute, against `base` first and the request host second."""
-    scheme = urlsplit(url).scheme
-    if scheme in _SCHEMES:
+    """Return `url` absolute, against `base` first and the request host second.
+
+    A protocol-relative URL keeps its own host and takes only the scheme.
+    """
+    parts = urlsplit(url)
+    if parts.scheme in WEB_SCHEMES:
         return url
-    if scheme:
+    if parts.scheme:
         detail = f"carries the URL {url!r} with a scheme outside http and https"
         raise PageMetadataShapeError(_METADATA_SOURCE, detail)
+    if parts.netloc:
+        return f"{_scheme(base, request, url)}:{url}"
     if not url.startswith("/"):
         if request is None:
             raise PageMetadataURLError(url)
@@ -72,6 +83,15 @@ def absolute_url(url: str, *, base: str | None, request: HttpRequest | None) -> 
     if request is None:
         raise PageMetadataURLError(url)
     return request.build_absolute_uri(url)
+
+
+def _scheme(base: str | None, request: HttpRequest | None, url: str) -> str:
+    """Return the scheme of `base`, else of the request, for a protocol-relative URL."""
+    if base is not None:
+        return urlsplit(base).scheme
+    if request is None:
+        raise PageMetadataURLError(url)
+    return request.scheme or "https"
 
 
 def _self_path(request: HttpRequest) -> str:
@@ -95,17 +115,26 @@ def _canonical_path(meta: Metadata, request: HttpRequest | None) -> str | None:
         return None
     if canonical is True:
         if request is None:
-            raise PageMetadataURLError(_CANONICAL_SELF)
+            raise PageMetadataRequestError(_CANONICAL_SELF)
         return _self_path(request)
     return canonical
 
 
-def _translated_url(path: str, code: str) -> str:
-    """Return `path` under the language `code`, memoised per URLconf."""
-    key = (get_urlconf(), path, code)
+def _translated_url(path: str, code: str, *, urlconf: str, prefix: str) -> str:
+    """Return `path` under the language `code`, memoised per URLconf and prefix.
+
+    A path outside the script prefix, or one no route answers, comes back as given.
+    """
+    key = (urlconf, prefix, path, code)
     url = _translated.get(key)
     if url is None:
-        url = translate_url(path, code)
+        url = path
+        parts = urlsplit(path)
+        if parts.path.startswith(prefix):
+            local = urlunsplit(parts._replace(path=parts.path[len(prefix) - 1 :]))
+            translated = translate_url(local, code)
+            if translated != local:
+                url = translated
         _translated[key] = url
     return url
 
@@ -125,9 +154,10 @@ setting_changed.connect(_on_setting_changed)
 
 
 def _alternate_links(
-    alternates: Alternates, meta: Metadata, request: HttpRequest | None
+    meta: Metadata, request: HttpRequest | None
 ) -> list[tuple[str, str]]:
     """Return the hreflang pairs, from the mapping or the localised URLconf."""
+    alternates = cast("Alternates", meta.alternates)
     languages = alternates.languages
     x_default = alternates.x_default
     if isinstance(languages, Mapping):
@@ -140,11 +170,17 @@ def _alternate_links(
         path = _canonical_path(meta, request)
         if path is None:
             if request is None:
-                raise PageMetadataURLError(_ALTERNATES_SELF)
+                raise PageMetadataRequestError(_ALTERNATES_SELF)
             path = _self_path(request)
-        links = [(code, _translated_url(path, code)) for code, _ in settings.LANGUAGES]
+        prefix = get_script_prefix()
+        links = [
+            (code, _translated_url(path, code, urlconf=urlconf, prefix=prefix))
+            for code, _ in settings.LANGUAGES
+        ]
         if x_default is None:
-            x_default = _translated_url(path, settings.LANGUAGE_CODE)
+            x_default = _translated_url(
+                path, settings.LANGUAGE_CODE, urlconf=urlconf, prefix=prefix
+            )
     else:
         return []
     if x_default is not None:
@@ -161,7 +197,7 @@ def _robots_value(robots: Robots | str) -> str:
         parts.append("index" if robots.index else "noindex")
     if robots.follow is not None:
         parts.append("follow" if robots.follow else "nofollow")
-    parts.extend(flag for flag in _ROBOTS_FLAGS if getattr(robots, flag))
+    parts.extend(flag for flag in _ROBOTS_BOOLEANS if getattr(robots, flag))
     for name, label in _ROBOTS_LIMITS:
         limit = getattr(robots, name)
         if limit is not None:
@@ -192,7 +228,6 @@ class HtmlMetadataRenderer(MetadataRenderer):
     def render(self, meta: Metadata, *, request: HttpRequest | None) -> SafeString:
         """Return the head lines of `meta` joined by newlines, empty for nothing."""
         lines: list[SafeString] = []
-        base = meta.base
         if meta.title is not None:
             lines.append(format_html(_TITLE, meta.title))
         if meta.description is not None:
@@ -205,9 +240,9 @@ class HtmlMetadataRenderer(MetadataRenderer):
         lines.extend(self._verification(meta))
         lines.extend(format_html(_NAMED, name, value) for name, value in meta.other)
         if meta.og is not None:
-            lines.extend(self._open_graph(meta, meta.og, canonical, base, request))
+            lines.extend(self._open_graph(meta, canonical, request))
         if meta.twitter is not None:
-            lines.extend(self._twitter(meta.twitter, base, request))
+            lines.extend(self._twitter(meta, request))
         lines.extend(self._jsonld(obj) for obj in meta.jsonld)
         return SafeString("\n".join(lines))
 
@@ -243,7 +278,7 @@ class HtmlMetadataRenderer(MetadataRenderer):
             format_html(
                 _ALTERNATE, code, absolute_url(url, base=meta.base, request=request)
             )
-            for code, url in _alternate_links(meta.alternates, meta, request)
+            for code, url in _alternate_links(meta, request)
         ]
 
     def _verification(self, meta: Metadata) -> list[SafeString]:
@@ -257,13 +292,10 @@ class HtmlMetadataRenderer(MetadataRenderer):
         ]
 
     def _open_graph(
-        self,
-        meta: Metadata,
-        og: OpenGraph,
-        canonical: str | None,
-        base: str | None,
-        request: HttpRequest | None,
+        self, meta: Metadata, canonical: str | None, request: HttpRequest | None
     ) -> list[SafeString]:
+        og = cast("OpenGraph", meta.og)
+        base = meta.base
         language = get_language()
         locale = og.locale
         if locale is None and language is not None:
@@ -313,9 +345,9 @@ class HtmlMetadataRenderer(MetadataRenderer):
         lines.extend(format_html(_PROPERTY, "article:tag", tag) for tag in article.tags)
         return lines
 
-    def _twitter(
-        self, twitter: Twitter, base: str | None, request: HttpRequest | None
-    ) -> list[SafeString]:
+    def _twitter(self, meta: Metadata, request: HttpRequest | None) -> list[SafeString]:
+        twitter = cast("Twitter", meta.twitter)
+        base = meta.base
         fields = (
             ("twitter:card", twitter.card),
             ("twitter:site", twitter.site),
@@ -341,20 +373,40 @@ class HtmlMetadataRenderer(MetadataRenderer):
         return format_html(_JSONLD, SafeString(text))
 
 
-default_renderer: Final = HtmlMetadataRenderer()
-"""The renderer the `{% metadata %}` tag delegates to."""
+def _configured_renderer_class() -> type[MetadataRenderer]:
+    """Return the class named by `NEXT_FRAMEWORK["METADATA"]["RENDERER"]`."""
+    return resolve_setting_class(
+        "RENDERER",
+        scope="METADATA",
+        base=MetadataRenderer,
+        shipped=HtmlMetadataRenderer,
+        base_path="next.pages.MetadataRenderer",
+    )
+
+
+@functools.cache
+def metadata_renderer() -> MetadataRenderer:
+    """Return the renderer `METADATA["RENDERER"]` names, built once per reload."""
+    return _configured_renderer_class()()
+
+
+def _forget_renderer(**kwargs) -> None:
+    metadata_renderer.cache_clear()
+
+
+settings_reloaded.connect(_forget_renderer)
 
 
 def render_metadata(meta: Metadata, *, request: HttpRequest | None) -> SafeString:
-    """Render `meta` through the default HTML renderer."""
-    return default_renderer.render(meta, request=request)
+    """Render `meta` through the renderer `NEXT_FRAMEWORK["METADATA"]` configures."""
+    return metadata_renderer().render(meta, request=request)
 
 
 __all__ = [
     "HtmlMetadataRenderer",
     "MetadataRenderer",
     "absolute_url",
-    "default_renderer",
     "forget_translated_urls",
+    "metadata_renderer",
     "render_metadata",
 ]

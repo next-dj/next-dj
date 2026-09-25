@@ -9,6 +9,9 @@ from django.test import override_settings
 from next.errors import InvalidDirsError
 from next.utils import (
     classify_dirs_entries,
+    is_bool,
+    is_dynamic_trail,
+    is_int,
     resolve_base_dir,
     stat_mtime_ns,
     template_edits_watched,
@@ -157,3 +160,40 @@ class TestResolveBaseDir:
         with patch("next.utils.settings") as mock_settings:
             del mock_settings.BASE_DIR
             assert resolve_base_dir() is None
+
+
+class TestTypePredicates:
+    @pytest.mark.parametrize(
+        ("value", "boolean", "integer"),
+        [
+            (True, True, False),
+            (0, False, True),
+            (1.5, False, False),
+            ("1", False, False),
+        ],
+        ids=["bool", "int", "float", "str"],
+    )
+    def test_a_bool_is_never_an_int(
+        self, value: object, *, boolean: bool, integer: bool
+    ) -> None:
+        assert is_bool(value) is boolean
+        assert is_int(value) is integer
+
+
+class TestIsDynamicTrail:
+    @pytest.mark.parametrize(
+        ("trail", "expected"),
+        [
+            ("", False),
+            ("about", False),
+            ("posts/[slug]", True),
+            ("posts/[int:id]/edit", True),
+            ("docs/[[path]]", True),
+            ("odd[", False),
+        ],
+        ids=["root", "static", "param", "typed", "wildcard", "unclosed"],
+    )
+    def test_a_bracket_segment_makes_a_trail_dynamic(
+        self, trail: str, *, expected: bool
+    ) -> None:
+        assert is_dynamic_trail(trail) is expected

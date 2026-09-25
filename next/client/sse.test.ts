@@ -85,6 +85,25 @@ describe("createSse", () => {
     expect(applied).toHaveLength(1);
   });
 
+  it("applies each event on behalf of the page the stream subscribed from", () => {
+    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    const { adapter, opened } = mockSource();
+    const pages: string[] = [];
+    const sse = createSse({
+      apply: (_raw, page) => pages.push(page),
+      fetch: () => undefined,
+      dispatch: () => undefined,
+      document,
+      source: adapter,
+      visibility: manualVisibility(),
+      pageUrl: () => "/inbox/",
+    });
+    sse.scan(document);
+    opened[0]!.message(envelope([{ op: "meta", title: "Inbox (3)" }]));
+    expect(pages).toEqual(["/inbox/"]);
+    sse._reset();
+  });
+
   it("scan opens a stream only once per url", () => {
     document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
     const { adapter, opened } = mockSource();

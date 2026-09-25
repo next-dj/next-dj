@@ -45,7 +45,7 @@ export interface VisibilityAdapter {
 /** The seams the bridge draws on, injectable so jsdom-blind pieces stay testable. */
 export interface SseDeps {
   // A parsed envelope rides the same apply pipeline as an HTTP response.
-  apply: (raw: unknown) => void;
+  apply: (raw: unknown, page: string) => void;
   // The zone re-GET that revalidates bound zones on resume, intent not headers.
   fetch: (request: { url: string; zone: string }) => void;
   dispatch: (event: string, detail: Record<string, unknown>) => void;
@@ -128,7 +128,7 @@ export function createSse(deps: SseDeps): Sse {
       if (isEcho(asString(raw.request_id))) return;
       recordBound(connection, raw);
     }
-    deps.apply(raw);
+    deps.apply(raw, connection.pageUrl);
   }
 
   // Register every zone the stream addressed, the set re-GET on resume.

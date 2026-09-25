@@ -23,18 +23,15 @@ A duplicate title two rows produce at runtime is therefore a matter for the test
 The default tier
 ----------------
 
-The default tier is the set of ``next.E098`` to ``next.E109`` and ``next.W084`` to ``next.W088``.
-It reports a settings scope with an unknown option or a malformed ``DEFAULTS``, a title template with a placeholder outside ``{title}`` and ``{site_name}``, a template without a default, a ``base`` that is not an origin, an empty title, a ``page.py`` carrying both a dict and a callable, a dict with an unknown key, and a callable declared in the wrong file or not annotated to return a mapping.
-The warnings cover a page whose composed template never renders ``{% metadata %}``, a root-relative canonical or image with no base outside ``DEBUG``, an ``alternates.languages=True`` without :func:`~django.conf.urls.i18n.i18n_patterns`, and a ``noindex`` page whose canonical points elsewhere.
+The default tier is the set of ``next.E098`` to ``next.E109`` and ``next.W084`` to ``next.W088``, from the settings scope and the title templates to the shape of every ``page.py`` declaration and the layout that renders ``{% metadata %}``.
 
 .. code-block:: bash
    :caption: shell
 
    uv run python manage.py check
 
-The sitemap and robots checks, ``next.E110`` to ``next.E117`` and ``next.W097`` to ``next.W103``, belong to the same default tier and carry the ``urls`` tag beside ``next``.
-They read the ``sitemap.py``, ``robots.py``, and ``robots.txt`` at the top of every page root without a request, so a file that fails to import, an ``@sitemap.items`` trail the tree does not route, a second robots source, a ``Disallow`` covering a listed URL or a ``noindex`` page, and a route the host root does not resolve are all reported here.
-:doc:`sitemaps` and :doc:`robots` name each condition where the behaviour it guards is described.
+The sitemap and robots checks, ``next.E110`` to ``next.E118`` and ``next.W097`` to ``next.W104``, belong to the same default tier, read the files at the top of every page root without a request, and carry the ``seo`` and ``urls`` tags beside ``next``.
+:doc:`sitemaps` and :doc:`robots` name each code where the behaviour it guards is described.
 
 The conditions and the emitting module of every code are tabulated in :doc:`/content/ref/system-checks`.
 
@@ -42,23 +39,25 @@ The content audits
 ------------------
 
 The audits are ``next.W089`` to ``next.W096``.
-They carry ``deploy=True`` and the ``seo`` tag, so a plain ``manage.py check`` never runs them, ``manage.py check --deploy`` runs them beside the other deployment checks, and the tag narrows a run to the audits alone.
+They carry ``deploy=True`` and the ``seo`` tag, so a plain ``manage.py check`` never runs them, ``manage.py check --deploy`` runs them beside the other deployment checks, and the tag narrows a run to the audits and the sitemap and robots checks, which carry it as well.
 
 .. code-block:: bash
    :caption: shell
 
    uv run python manage.py check --deploy --tag seo
 
-The audits warn about a page without a description, a description outside 50 to ``DESCRIPTION_MAX`` characters, a title over ``TITLE_MAX`` characters, two routes folding to the same title, a same-origin canonical that resolves to no URL of the project, a literal canonical on a dynamic route, an hreflang mapping without an ``x-default``, and an hreflang code ``LANGUAGES`` does not list.
+The audits grade the description, the title, the canonical, and the hreflang mapping of every page, and :doc:`/content/ref/system-checks` holds the condition of each code.
 Titles and descriptions are measured under ``LANGUAGE_CODE``, so a translation that runs long in another language is not caught here.
 
 .. mermaid::
 
    flowchart LR
-       Plain["manage.py check"] --> Default["E098 to E117, W084 to W088, W097 to W103"]
+       Plain["manage.py check"] --> Default["E098 to E118, W084 to W088, W097 to W104"]
        Deploy["manage.py check --deploy"] --> Default
        Deploy --> Audits["W089 to W096"]
-       Tagged["manage.py check --deploy --tag seo"] --> Audits
+       Tag["manage.py check --tag seo"] --> Seo["E110 to E118, W097 to W104"]
+       Tagged["manage.py check --deploy --tag seo"] --> Seo
+       Tagged --> Audits
 
 Thresholds
 ----------

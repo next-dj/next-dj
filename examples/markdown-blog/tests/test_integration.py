@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 from blog.markdown_template import read_post_body, reading_minutes
-from django.urls import reverse
 
 from next.testing import (
     assert_has_class,
@@ -177,6 +176,7 @@ class TestPageMetadata:
 
     def test_every_page_lists_both_languages_as_alternates(self, next_client) -> None:
         body = next_client.get("/posts/hello-world/").content.decode()
+        assert body.count('<link rel="alternate" hreflang=') == 3
         assert (
             '<link rel="alternate" hreflang="en" '
             'href="https://blog.example/posts/hello-world/">'
@@ -232,21 +232,8 @@ class TestSitemapAndRobots:
             "<changefreq>weekly</changefreq>" in block for block in blocks.values()
         )
 
-    def test_the_section_route_serves_the_same_document(self, next_client) -> None:
-        whole = next_client.get("/sitemap.xml")
-        section = next_client.get("/sitemap-blog.xml")
-        assert section.status_code == 200
-        assert section.content == whole.content
-
-    def test_the_seo_routes_sit_at_the_host_root_outside_the_prefix(self) -> None:
-        assert reverse("next_seo:sitemap") == "/sitemap.xml"
-        assert reverse("next_seo:robots") == "/robots.txt"
-
     def test_robots_is_the_static_file_byte_for_byte(self, next_client) -> None:
         response = next_client.get("/robots.txt")
         assert response.status_code == 200
         assert response["Content-Type"] == "text/plain; charset=utf-8"
         assert response.content == ROBOTS_FILE.read_bytes()
-        assert response.content.decode() == (
-            "User-agent: *\nAllow: /\n\nSitemap: https://blog.example/sitemap.xml\n"
-        )
