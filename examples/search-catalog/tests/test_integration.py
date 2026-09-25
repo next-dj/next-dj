@@ -1,7 +1,10 @@
 import re
+from decimal import Decimal
 
 import pytest
 from catalog import queries as catalog_queries
+from catalog.demo import CATEGORIES
+from catalog.models import Category, Product
 from catalog.zones import CATEGORY_ZONES, LISTING_ZONES, zone_target
 from django.core.cache import cache
 
@@ -18,6 +21,7 @@ FILTER_FORM_PATTERN = re.compile(r"<form method=\"get\"[\s\S]*?>")
 MORE_ZONE_PATTERN = re.compile(
     r'<div data-next-zone="catalog-more"[^>]*>([\s\S]*?)</div>'
 )
+LOC_PATTERN = re.compile(r"<loc>([^<]+)</loc>")
 
 LISTING_TARGET = zone_target(LISTING_ZONES)
 CATEGORY_TARGET = zone_target(CATEGORY_ZONES)
@@ -432,7 +436,7 @@ class TestPresetFilterPushUrl:
         )
         assert response.status_code == 200
         envelope = envelope_of(response)
-        assert envelope.op_verbs() == ["url", *["morph"] * len(LISTING_ZONES)]
+        assert envelope.op_verbs() == ["url", "meta", *["morph"] * len(LISTING_ZONES)]
         assert envelope.zone_targets() == list(LISTING_ZONES)
 
     def test_preset_bar_targets_the_full_listing_zone_set(
@@ -588,3 +592,102 @@ class TestLiveFilterMorphsTheWholeListing:
         chips = envelope.html_for_zone("catalog-chips")
         assert chips.startswith('<div data-next-zone="catalog-chips">')
         assert "active-filter" not in chips
+
+
+class TestPageMetadata:
+    """One title template spans the landing, the listings and the product page."""
+
+    def test_landing_uses_the_site_default(self, next_client, demo_data) -> None:
+        body = next_client.get("/").content.decode()
+        assert "<title>next.dj — Search catalog</title>" in body
+        assert '<link rel="canonical"' not in body
+
+    def test_listing_declares_a_static_title_and_a_self_canonical(
+        self, next_client, demo_data
+    ) -> None:
+        body = next_client.get("/catalog/?q=item&sort=price_asc").content.decode()
+        assert "<title>All products · next.dj catalog</title>" in body
+        assert '<link rel="canonical" href="https://catalog.example/catalog/">' in body
+
+    def test_category_title_comes_from_the_inherited_category(
+        self, next_client, demo_data
+    ) -> None:
+        body = next_client.get("/catalog/electronics/?brand=Acme&page=2")
+        body = body.content.decode()
+        assert "<title>Electronics · next.dj catalog</title>" in body
+        assert (
+            '<link rel="canonical" '
+            'href="https://catalog.example/catalog/electronics/?page=2">'
+        ) in body
+
+    def test_the_canonical_drops_the_first_page(self, next_client, demo_data) -> None:
+        body = next_client.get("/catalog/electronics/?page=1").content.decode()
+        assert (
+            '<link rel="canonical" href="https://catalog.example/catalog/electronics/">'
+        ) in body
+
+    def test_product_title_and_description_come_from_the_product(
+        self, next_client, demo_data
+    ) -> None:
+        body = next_client.get("/catalog/electronics/iphone-15/").content.decode()
+        assert "<title>iPhone 15 · next.dj catalog</title>" in body
+        assert (
+            '<meta name="description" content="Flagship handset used by routing '
+            'tests.">'
+        ) in body
+
+    def test_a_preset_renames_the_tab_through_the_page_template(
+        self, next_client, demo_data
+    ) -> None:
+        envelope = envelope_of(
+            next_client.post_action(
+                "preset_filter_form",
+                {"preset": "cheapest"},
+                origin="/catalog/",
+                partial=True,
+                zones=LISTING_TARGET,
+            )
+        )
+        meta_op = next(op for op in envelope.ops if op["op"] == "meta")
+        assert meta_op["title"] == "Cheapest first · next.dj catalog"
+
+
+class TestSitemap:
+    """`sitemap.py` lists the listings over the rows and caches the document."""
+
+    def test_sitemap_lists_static_routes_categories_and_products(
+        self, next_client, demo_data
+    ) -> None:
+        response = next_client.get("/sitemap.xml")
+        assert response.status_code == 200
+        assert response["Content-Type"] == "application/xml"
+        locs = set(LOC_PATTERN.findall(response.content.decode()))
+        assert {"https://catalog.example/", "https://catalog.example/catalog/"} <= locs
+        assert {
+            f"https://catalog.example/catalog/{slug}/" for slug, _ in CATEGORIES
+        } <= locs
+        assert "https://catalog.example/catalog/electronics/iphone-15/" in locs
+        assert len(locs) == 2 + Category.objects.count() + Product.objects.count()
+
+    def test_the_document_is_cached_for_five_minutes(
+        self, next_client, demo_data
+    ) -> None:
+        first = next_client.get("/sitemap.xml")
+        assert first["Cache-Control"] == "max-age=300"
+        Product.objects.create(
+            category=Category.objects.get(slug="books"),
+            slug="late-arrival",
+            name="Late arrival",
+            brand="Acme",
+            price=Decimal("1.00"),
+        )
+        second = next_client.get("/sitemap.xml")
+        assert second.content == first.content
+        assert "late-arrival" not in second.content.decode()
+
+    def test_an_empty_catalog_still_lists_the_static_routes(self, next_client) -> None:
+        locs = LOC_PATTERN.findall(next_client.get("/sitemap.xml").content.decode())
+        assert sorted(locs) == [
+            "https://catalog.example/",
+            "https://catalog.example/catalog/",
+        ]

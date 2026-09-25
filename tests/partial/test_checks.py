@@ -10,7 +10,7 @@ from django.test import override_settings
 from next.components import ComponentInfo, FileComponentsBackend
 from next.forms.backends import FormActionBackend, RegistryFormActionBackend
 from next.partial import checks
-from next.partial.registry import register_patch_op
+from next.partial.registry import BUILTIN_OPS, register_patch_op
 from tests.support import (
     PARTIAL_ROUTER_MANAGER_TARGETS,
     RootPagesRouter,
@@ -415,9 +415,10 @@ class TestCustomPatchOpCheck:
         register_patch_op("confetti")
         assert checks.check_custom_patch_ops_well_formed() == []
 
-    def test_shadowing_a_builtin_verb_errors(self) -> None:
+    @pytest.mark.parametrize("verb", sorted(BUILTIN_OPS))
+    def test_shadowing_a_builtin_verb_errors(self, verb: str) -> None:
         # a custom op named after a built-in verb never runs, the built-in wins
-        register_patch_op("morph")
+        register_patch_op(verb)
         messages = checks.check_custom_patch_ops_well_formed()
         assert [m.id for m in messages] == [checks.E_OP_SHADOWS_BUILTIN]
         assert "shadows a built-in verb" in messages[0].msg

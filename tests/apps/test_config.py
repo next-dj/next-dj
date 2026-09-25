@@ -27,8 +27,11 @@ from next.ports import (
     page_scan_slot,
     partial_shaper_slot,
     router_access_slot,
+    seo_routes_slot,
     static_assets_slot,
 )
+from next.seo.manager import seo_manager
+from next.seo.ports import SeoRoutesImpl
 from next.server import NextStatReloader
 from next.static import get_static_manager
 from next.static.ports import StaticAssetsImpl
@@ -52,6 +55,7 @@ _PROCESS_SLOTS = (
     page_scan_slot,
     partial_shaper_slot,
     router_access_slot,
+    seo_routes_slot,
     static_assets_slot,
 )
 
@@ -390,6 +394,7 @@ class TestDependencyResolverInstall:
         "page_scan_slot",
         "partial_shaper_slot",
         "router_access_slot",
+        "seo_routes_slot",
         "static_assets_slot",
         "autoreload",
         "templates",
@@ -415,6 +420,7 @@ class TestDependencyResolverInstall:
             "page_scan_slot.set",
             "partial_shaper_slot.set",
             "router_access_slot.set",
+            "seo_routes_slot.set",
             "static_assets_slot.set",
             "autoreload.install",
             "templates.install",
@@ -436,6 +442,7 @@ class TestDependencyResolverInstall:
                 RouterAccessImpl,
                 id="router",
             ),
+            pytest.param("seo_routes_slot", "seo routes port", SeoRoutesImpl, id="seo"),
             pytest.param(
                 "static_assets_slot",
                 "static assets port",
@@ -470,5 +477,15 @@ class TestDependencyResolverInstall:
             PageScanImpl,
             PartialShaperImpl,
             RouterAccessImpl,
+            SeoRoutesImpl,
             StaticAssetsImpl,
         ]
+
+    def test_a_router_reload_resets_the_seo_manager(self) -> None:
+        """The SEO routes follow the routers, so their memo goes with a reload."""
+        apps.get_app_config("next").ready()
+        before = seo_manager.version
+
+        router_manager.reload()
+
+        assert seo_manager.version != before

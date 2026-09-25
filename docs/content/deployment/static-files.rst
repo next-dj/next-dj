@@ -160,7 +160,7 @@ Run ``uv run python manage.py check --deploy`` before shipping.
 
 The framework static checks validate the backend chain, the registered asset kinds, the inline asset bodies, the JS context serializer, and the finder wiring.
 None of them is a deployment check, so they already run on every ``manage.py check`` and the build catches a malformed backend long before the deploy step.
-What ``--deploy`` adds is Django's own hardening pass over ``STATIC_ROOT`` and ``STATIC_URL``, plus the three framework deployment checks that import or compile the whole page tree, see :doc:`checklist`.
+What ``--deploy`` adds is Django's own hardening pass over ``STATIC_ROOT`` and ``STATIC_URL``, plus the framework deployment checks that import or compile the whole page tree and the opt-in SEO audits, see :doc:`checklist`.
 
 See also
 --------

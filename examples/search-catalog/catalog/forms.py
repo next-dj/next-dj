@@ -18,6 +18,12 @@ PRESETS: dict[str, dict[str, str]] = {
     "newest": {"sort": "newest"},
 }
 
+PRESET_TITLES: dict[str, str] = {
+    "in_stock": "In stock",
+    "cheapest": "Cheapest first",
+    "newest": "Newest",
+}
+
 
 class PresetFilterForm(Form):
     """Apply a named preset filter to the all-products listing.
@@ -43,18 +49,18 @@ class PresetFilterForm(Form):
     def on_valid(self, request: HttpRequest) -> HttpResponse:
         """Push the canonical preset URL and morph the listing under it.
 
-        Pointing `request.GET` at the preset's querystring makes the zones
-        re-render exactly as a navigation to that URL would, so the cached
-        search, the product count, the active-filter chips, and the
-        pagination all agree with the URL push_url writes to history.
+        Pointing `request.GET` at the preset's querystring makes the zones re-render
+        exactly as a navigation to that URL would, so the cached search, the product
+        count, the active-filter chips, and the pagination all agree with the URL
+        push_url writes to history, and the `meta` op renames the tab to match.
         """
-        params = PRESETS[self.cleaned_data["preset"]]
+        preset = self.cleaned_data["preset"]
         target = self._target()
         if not is_partial_request(request):
             return HttpResponseRedirect(target)
         request.GET = QueryDict(mutable=True)
-        request.GET.update(params)
-        patches = Patches(request).push_url(target)
+        request.GET.update(PRESETS[preset])
+        patches = Patches(request).push_url(target).meta(PRESET_TITLES[preset])
         for zone in LISTING_ZONES:
             patches.morph(zone=zone)
         return patches.response()

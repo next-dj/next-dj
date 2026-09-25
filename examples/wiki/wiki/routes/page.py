@@ -2,6 +2,13 @@ from django.urls import reverse
 from wiki.models import Article
 
 from next import context
+from next.pages import MetadataDict
+
+
+metadata: MetadataDict = {
+    "title": {"default": "Home · next.dj Wiki"},
+    "description": "File-routed documentation beside database articles, one router.",
+}
 
 
 @context("file_pages")

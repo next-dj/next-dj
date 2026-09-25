@@ -2,7 +2,12 @@ from collections.abc import Generator
 
 import pytest
 
-from next.pages.signals import context_registered, page_rendered, template_loaded
+from next.pages.signals import (
+    context_registered,
+    metadata_registered,
+    page_rendered,
+    template_loaded,
+)
 from next.testing import SignalRecorder, capture_signals
 
 
@@ -24,4 +29,11 @@ def capture_context_registered() -> Generator[SignalRecorder, None, None]:
 def capture_page_rendered() -> Generator[SignalRecorder, None, None]:
     """Record ``page_rendered`` emissions."""
     with capture_signals(page_rendered) as recorder:
+        yield recorder
+
+
+@pytest.fixture()
+def capture_metadata_registered() -> Generator[SignalRecorder, None, None]:
+    """Record ``metadata_registered`` emissions."""
+    with capture_signals(metadata_registered) as recorder:
         yield recorder

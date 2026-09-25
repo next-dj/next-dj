@@ -19,6 +19,7 @@ The pushed URL is the real address of the body rather than a masked URL of the p
 A refresh or a shared link resolves that URL as its own standalone page through its own ``page.py``, and Back closes the top layer.
 There is no client router and no URL masking.
 A single ``popstate`` handler closes the layer whose pushed URL the browser moved past.
+Every layer captures ``document.title`` when it opens and restores it when it closes, whichever way it closes, so a ``meta`` patch received inside the layer retitles the tab only for as long as the layer is up.
 
 ``data-next-confirm`` and ``data-next-layer`` combine on one link.
 The confirm gate is a capture-phase click handler, the layer opener is a bubble-phase one, so the confirm runs first regardless of install order.

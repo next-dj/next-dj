@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from django.http import HttpResponseBase
 
     from next.forms.origin import OriginMatch
+    from next.pages.metadata import Text
 
     from .render import ZoneRenderResult
 
@@ -417,6 +418,22 @@ class Patches:
         )
         return self
 
+    def meta(self, title: "Text", *, absolute: bool = False) -> "Patches":
+        """Set the document title, as the origin page would render it.
+
+        Only `document.title` is assigned on the client, so no HTML travels. The text
+        is evaluated here under the active language. `absolute=True` skips the chain
+        template, and a builder without an origin page sends the bare text.
+        """
+        page_path = self._origin_page_path()
+        text = (
+            title
+            if page_path is None
+            else page_manager.templated_title(page_path, title, absolute=absolute)
+        )
+        self._ops.append(Patch(op="meta", extras={"title": str(text)}))
+        return self
+
     def redirect(self, href: str, *, external: bool = False) -> "Patches":
         """Drive a full client navigation to a server-authored href.
 
@@ -551,6 +568,13 @@ class Patches:
             msg = "The request origin does not resolve to a page."
             raise RuntimeError(msg)
         return match.page_path
+
+    def _origin_page_path(self) -> "Path | None":
+        """Return the origin page path, or None when the builder cannot know one."""
+        if self._request is None:
+            return None
+        match = self._origin_match()
+        return None if match is None else match.page_path
 
     def _authorize_origin(self) -> None:
         """Re-run the origin page's authorization once per builder.

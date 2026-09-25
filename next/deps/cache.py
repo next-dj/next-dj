@@ -26,6 +26,19 @@ def get_request_dep_cache(request: object | None) -> dict[str, Any] | None:
     return cache if isinstance(cache, dict) else None
 
 
+def ensure_request_dep_cache(request: object | None) -> dict[str, Any]:
+    """Return the dep cache of `request`, attaching a fresh one when it has none.
+
+    The page view, the context merge and the metadata callables share one per request.
+    """
+    cache = get_request_dep_cache(request)
+    if cache is None:
+        cache = {}
+        if request is not None:
+            setattr(request, REQUEST_DEP_CACHE_ATTR, cache)
+    return cache
+
+
 class DependencyCache:
     """Store resolved dependency values and detect cycles via in-progress keys.
 

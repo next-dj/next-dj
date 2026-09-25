@@ -103,7 +103,7 @@ Each provider claims a parameter through ``can_handle`` at resolve time, or sett
 The compiled plan keeps that order, but a static verdict removes the check from every parameter the provider provably never owns.
 
 Every ``RegisteredParameterProvider`` subclass carries a ``priority`` class attribute, and the resolver sorts the registry by it.
-The nine built-in providers pin the values ``10`` through ``80``, which yields ``DependsProvider``, ``ContextByDefaultProvider``, ``ContextByNameProvider``, ``FormProvider``, ``CleanedDataProvider``, ``HttpRequestProvider``, ``UrlByAnnotationProvider``, ``UrlKwargsProvider``, and ``QueryParamProvider``.
+The ten built-in providers pin the values ``10`` through ``80``, which yields ``DependsProvider``, ``ContextByDefaultProvider``, ``ParentMetadataProvider``, ``ContextByNameProvider``, ``FormProvider``, ``CleanedDataProvider``, ``HttpRequestProvider``, ``UrlByAnnotationProvider``, ``UrlKwargsProvider``, and ``QueryParamProvider``.
 ``FormProvider`` and ``CleanedDataProvider`` share priority ``40``.
 
 See :doc:`/content/topics/dependency-injection` for the single source of truth on this order and what each provider matches.

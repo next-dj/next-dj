@@ -18,6 +18,7 @@ from django.urls.resolvers import RoutePattern
 from next.backends import backend_entries, load_backends, resolve_setting_class
 from next.conf.signals import settings_reloaded
 from next.forms.manager import form_action_manager
+from next.ports import seo_routes_slot
 
 from .backends import RouterBackend
 from .resolver import TrieURLResolver
@@ -164,35 +165,41 @@ settings_reloaded.connect(_on_settings_reloaded)
 setting_changed.connect(_on_setting_changed)
 
 
+type _VersionToken = tuple[int, int, int]
+
+
 class _LazyUrlPatterns(Sequence["URLPattern | URLResolver"]):
-    """Defer expanding router and form patterns until first use.
+    """Defer expanding router, form and SEO patterns until first use.
 
     Skips `list` so `include()` defers materialisation, overrides `__reversed__` to
-    avoid a per-index list build, and caches the concat against both manager versions.
+    avoid a per-index list build, and caches the concat against every manager version.
     """
 
     def __init__(self) -> None:
-        """Empty cache until the first pattern build."""
-        self._cache: tuple[int, int, list[URLPattern | URLResolver]] | None = None
+        """Empty cache until the first pattern build.
 
-    def version_token(self) -> tuple[int, int]:
-        """Router and form-action versions keying caches derived from this."""
-        return (router_manager.version, form_action_manager.version)
+        The seo version source is bound here, because the token is read on every
+        resolve and the slot never rebinds once the app is ready.
+        """
+        self._cache: tuple[_VersionToken, list[URLPattern | URLResolver]] | None = None
+        self._seo = seo_routes_slot.get().version_source()
+
+    def version_token(self) -> _VersionToken:
+        """Router, form-action and SEO versions keying caches derived from this."""
+        return (router_manager.version, form_action_manager.version, self._seo.version)
 
     def _patterns(self) -> list[URLPattern | URLResolver]:
         cache = self._cache
-        if cache is not None and (cache[0], cache[1]) == (
-            router_manager.version,
-            form_action_manager.version,
-        ):
-            return cache[2]
+        if cache is not None and cache[0] == self.version_token():
+            return cache[1]
         patterns: list[URLPattern | URLResolver] = [
             *router_manager,
             *form_action_manager,
+            *seo_routes_slot.get().patterns(),
         ]
         # Versions are read after the build because expanding pages can
         # register form actions and bump the forms version mid-build.
-        self._cache = (router_manager.version, form_action_manager.version, patterns)
+        self._cache = (self.version_token(), patterns)
         return patterns
 
     @override

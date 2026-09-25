@@ -96,4 +96,13 @@ NEXT_FRAMEWORK = {
         }
     ],
     "STATIC_VERSION": "v1",
+    "METADATA": {
+        "DEFAULTS": {
+            "site_name": "next.dj template",
+            "title": {
+                "template": "{title} · {site_name}",
+                "default": "Next.dj example template",
+            },
+        }
+    },
 }

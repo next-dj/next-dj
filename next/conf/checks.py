@@ -41,7 +41,7 @@ _KEY_TYPES: dict[str, type] = (
     dict.fromkeys(sorted(_TYPED_LIST_KEYS), list)
     | dict.fromkeys(sorted(NextFrameworkSettings.STR_KEYS), str)
     | dict.fromkeys(sorted(_TYPED_OPTIONAL_KEYS), str)
-    | {"NEXT_JS_OPTIONS": dict}
+    | {"METADATA": dict, "NEXT_JS_OPTIONS": dict}
 )
 
 _SILENCE_HINT = (

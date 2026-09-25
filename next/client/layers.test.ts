@@ -396,6 +396,57 @@ describe("layer stack", () => {
   });
 });
 
+describe("closing a layer restores the title captured at open", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    document.title = "Feed";
+  });
+
+  it("open leaves the title alone", async () => {
+    const { layers } = makeStack();
+    await layers.open(null, "/photos/1/", "photo");
+    expect(document.title).toBe("Feed");
+  });
+
+  it("a title change while open is reverted by a programmatic close", async () => {
+    const { layers } = makeStack();
+    await layers.open(null, "/photos/1/", "photo");
+    document.title = "Photo";
+    layers.close({ result: 1 });
+    expect(document.title).toBe("Feed");
+  });
+
+  it("a browser dismiss gesture restores the title too", async () => {
+    const { layers, dismissed } = makeStack();
+    await layers.open(null, "/photos/1/", "photo");
+    document.title = "Photo";
+    dismissed[0]!("escape");
+    expect(document.title).toBe("Feed");
+  });
+
+  it("nested layers restore the intermediate title, then the page title", async () => {
+    const { layers } = makeStack();
+    await layers.open(null, "/photos/1/", "photo");
+    document.title = "Photo";
+    await layers.open(null, undefined, "edit");
+    document.title = "Edit";
+    layers.close({ dismiss: true, reason: "cancel" });
+    expect(document.title).toBe("Photo");
+    layers.close({ result: 1 });
+    expect(document.title).toBe("Feed");
+  });
+
+  it("_reset closes top-down, so the page title is what remains", async () => {
+    const { layers } = makeStack();
+    await layers.open(null, "/photos/1/", "photo");
+    document.title = "Photo";
+    await layers.open(null, undefined, "edit");
+    document.title = "Edit";
+    layers._reset();
+    expect(document.title).toBe("Feed");
+  });
+});
+
 describe("layer requests carry the host origin", () => {
   interface Request {
     url: string;
@@ -828,6 +879,18 @@ describe("layer intercepting URL lifecycle", () => {
         (d) => d.event === "partial:layer-dismissed" && d.detail.reason === "popstate",
       ),
     ).toHaveLength(2);
+  });
+
+  it("Back past two layers restores the title the anchor captured", async () => {
+    document.title = "Feed";
+    await layers.open(null, "/photos/1/", "a");
+    document.title = "Photo";
+    await layers.open(null, undefined, "seeded");
+    document.title = "Edit";
+    window.history.replaceState(null, "", "/feed/");
+    fire();
+    expect(layers.size()).toBe(0);
+    expect(document.title).toBe("Feed");
   });
 
   it("Back with only bare layers open is a no-op", async () => {

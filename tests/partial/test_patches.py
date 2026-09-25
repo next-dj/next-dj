@@ -1,11 +1,12 @@
 import pytest
+from django.utils.functional import lazy
 
 import next.pages
 import next.partial
 import next.partial.errors
 import next.partial.patches
 from next.partial import Asset, FormMeta, Patches, PatchResponse
-from next.partial.errors import ReservedPatchKeyError
+from next.partial.errors import BuiltinPatchOpError, ReservedPatchKeyError
 from next.partial.headers import CONTENT_TYPE
 from next.partial.render import ZoneRenderResult
 from next.static import KindRegistry, StaticAsset
@@ -312,6 +313,68 @@ class TestPatchesBuilder:
 
     def test_a_request_free_builder_needs_no_versioned_sugar(self) -> None:
         assert Patches(None, version="9f3c").envelope().version == "9f3c"
+
+
+class TestMeta:
+    """`meta` ships the title the origin page would render, and nothing else."""
+
+    def test_payload_carries_only_the_title(self) -> None:
+        envelope = Patches(partial_request("/titled/leaf/")).meta("Wallets").envelope()
+        assert envelope.ops[0].as_dict() == {"op": "meta", "title": "Wallets · Site"}
+
+    def test_the_ancestor_template_wraps_the_title(self) -> None:
+        envelope = Patches(partial_request("/titled/leaf/")).meta("Wallets").envelope()
+        assert envelope.ops[0].extras == {"title": "Wallets · Site"}
+
+    def test_the_leaf_own_static_title_gives_way_to_the_verb(self) -> None:
+        envelope = Patches(partial_request("/titled/leaf/")).meta("Wallets").envelope()
+        assert "Leaf" not in envelope.ops[0].extras["title"]
+
+    def test_the_template_applies_only_to_descendants(self) -> None:
+        envelope = Patches(partial_request("/titled/")).meta("Wallets").envelope()
+        assert envelope.ops[0].extras == {"title": "Wallets"}
+
+    def test_absolute_bypasses_the_template(self) -> None:
+        envelope = (
+            Patches(partial_request("/titled/leaf/"))
+            .meta("Wallets", absolute=True)
+            .envelope()
+        )
+        assert envelope.ops[0].as_dict() == {"op": "meta", "title": "Wallets"}
+
+    def test_a_builder_without_a_request_sends_the_bare_title(self) -> None:
+        envelope = Patches.versioned("v1").meta("Wallets").envelope()
+        assert envelope.ops[0].as_dict() == {"op": "meta", "title": "Wallets"}
+
+    def test_a_request_naming_no_origin_sends_the_bare_title(self) -> None:
+        envelope = Patches(partial_request(origin=None)).meta("Wallets").envelope()
+        assert envelope.ops[0].as_dict() == {"op": "meta", "title": "Wallets"}
+
+    def test_an_origin_outside_the_pages_sends_the_bare_title(self) -> None:
+        envelope = Patches(partial_request("/_next/form/x/")).meta("Wallets").envelope()
+        assert envelope.ops[0].as_dict() == {"op": "meta", "title": "Wallets"}
+
+    def test_a_lazy_title_is_evaluated_when_the_op_is_recorded(self) -> None:
+        language = ["en"]
+        title = lazy(lambda: f"Wallets ({language[0]})", str)()
+        builder = Patches(partial_request("/titled/leaf/")).meta(title)
+        language[0] = "de"
+        payload = builder.envelope().ops[0].as_dict()
+        assert payload == {"op": "meta", "title": "Wallets (en) · Site"}
+        assert type(payload["title"]) is str
+
+    def test_op_refuses_the_builtin_verb(self) -> None:
+        with pytest.raises(BuiltinPatchOpError):
+            Patches.versioned("v1").op("meta", title="Wallets")
+
+    def test_meta_chains_in_order(self) -> None:
+        envelope = (
+            Patches(partial_request("/titled/leaf/"))
+            .push_url("/titled/leaf/")
+            .meta("Wallets")
+            .envelope()
+        )
+        assert [op.op for op in envelope.ops] == ["url", "meta"]
 
 
 class TestPatchResponse:

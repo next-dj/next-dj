@@ -12,12 +12,16 @@ from next.ports import (
     PartialShaper,
     PortSlot,
     RouterAccess,
+    SeoRoutes,
     StaticAssets,
     page_scan_slot,
     partial_shaper_slot,
     router_access_slot,
+    seo_routes_slot,
     static_assets_slot,
 )
+from next.seo.manager import seo_manager
+from next.seo.ports import SeoRoutesImpl
 from next.static.manager import StaticManager
 from next.static.ports import StaticAssetsImpl
 from next.urls import FileRouterBackend, RouterManager, URLPatternParser
@@ -55,6 +59,7 @@ PROCESS_SLOTS = [
     pytest.param(page_scan_slot, PageScanImpl, id="page_scan"),
     pytest.param(partial_shaper_slot, PartialShaperImpl, id="partial_shaper"),
     pytest.param(router_access_slot, RouterAccessImpl, id="router_access"),
+    pytest.param(seo_routes_slot, SeoRoutesImpl, id="seo_routes"),
     pytest.param(static_assets_slot, StaticAssetsImpl, id="static_assets"),
 ]
 
@@ -62,6 +67,7 @@ SLOT_SUBJECTS = [
     "page scan port",
     "partial shaper",
     "router access port",
+    "seo routes port",
     "static assets port",
 ]
 
@@ -257,6 +263,26 @@ class TestStaticAssetsPort:
         info = component_info(folder, name="card", template="<p>c</p>\n")
 
         assert StaticAssetsImpl().collect_component_assets(info, None) is None
+
+
+class TestSeoRoutesPort:
+    """The SEO port hands the lazy urlpatterns its routes without an import."""
+
+    def test_the_port_declares_the_expected_methods(self) -> None:
+        assert _methods_of(SeoRoutes) == ["patterns", "version_source"]
+
+    @pytest.mark.parametrize("name", ["patterns", "version_source"])
+    def test_implementation_parameters_match_the_port(self, name) -> None:
+        assert _call_shape(SeoRoutesImpl, name) == _call_shape(SeoRoutes, name)
+
+    def test_version_is_the_manager_version(self) -> None:
+        assert SeoRoutesImpl().version_source() is seo_manager
+
+    def test_patterns_are_empty_without_a_source(self, tmp_path) -> None:
+        (tmp_path / "page.py").write_text('template = "ok"\n')
+        entry = file_router_config_entry(pages_dir=tmp_path)
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}):
+            assert SeoRoutesImpl().patterns() == []
 
 
 class TestSubscriptedSlotSingletons:

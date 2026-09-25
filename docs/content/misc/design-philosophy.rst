@@ -47,6 +47,7 @@ The cost is one slot per layout and no override across the chain.
 A layout offers exactly one placeholder, the substitution fills it once, and a layout that declares no placeholder contributes nothing to the composed template.
 Composition produces one flat template rather than a parent and a child, so a page cannot override a named region of an ancestor the way ``{% block sidebar %}`` would, and there is no ``{{ block.super }}`` to call.
 A shared region that varies per page is expressed through ``@context`` and a component rather than through a block override.
+The head is the one region a page fills through data rather than markup, a ``metadata`` declaration in ``page.py`` that one ``{% metadata %}`` tag in the root layout renders, see :doc:`/content/topics/seo/metadata`.
 See :doc:`/content/topics/layouts` for the discovery rules.
 
 Dependency injection resolves by name
@@ -68,7 +69,7 @@ The patch protocol is closed
 The rejected alternative is an open protocol, where markup carries a selector and a swap strategy and the client executes whatever the response describes.
 next.dj closes the protocol.
 The server authors every verb, the client applies only verbs it already knows, and selectors and swap strategies never cross the wire.
-The built-in set is fixed at ``morph``, ``replace``, ``inner``, ``append``, ``prepend``, ``remove``, ``refresh``, ``context``, ``event``, ``toast``, ``layer.open``, ``layer.close``, ``url``, and ``visit``.
+The built-in set is fixed at ``morph``, ``replace``, ``inner``, ``append``, ``prepend``, ``remove``, ``refresh``, ``context``, ``event``, ``toast``, ``layer.open``, ``layer.close``, ``url``, ``visit``, and ``meta``.
 
 The cost is that a new behaviour is a two-sided change.
 A custom verb is registered on the server with ``register_patch_op`` and supplied on the client with ``Next.partial.defineOp``, so a template author cannot express a new DOM operation from markup alone.

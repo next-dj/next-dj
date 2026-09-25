@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
-{% component "page_head" title="next.dj — Wiki" tailwind_plugins="typography" icon="📚" %}
+{% component "page_head" tailwind_plugins="typography" icon="📚" %}
 <body class="min-h-screen flex flex-col">
   {% #component "app_shell" brand="Wiki" brand_href="/" brand_icon="📚" %}
     {% #slot "actions" %}

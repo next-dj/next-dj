@@ -111,4 +111,13 @@ NEXT_FRAMEWORK = {
         }
     ],
     "JS_CONTEXT_SERIALIZER": "obs.serializers.PydanticJsContextSerializer",
+    "METADATA": {
+        "DEFAULTS": {
+            "site_name": "next.dj observability",
+            "title": {
+                "template": "{title} · {site_name}",
+                "default": "next.dj — Observability dashboard",
+            },
+        }
+    },
 }

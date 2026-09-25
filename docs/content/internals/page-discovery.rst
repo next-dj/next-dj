@@ -74,9 +74,13 @@ Modules
 ``next.pages.paths``.
    Memoises the path facts of one ``page.py``, its module path, its template path, and its ancestor chain, in a bounded cache the composition lifecycle clears.
 
+``next.pages.metadata``.
+   Folds the settings tier and the ``metadata`` dicts and ``@page.metadata`` callables of the ancestor chain into one ``Metadata`` value, see `Metadata resolution`_ below.
+   ``schema`` holds the input shapes and the strict normaliser, ``placeholders`` the safe title template, ``merge`` the fold, ``defaults`` the settings tier, ``chain`` the ancestor walk and its memo, ``registry`` the callable per file, ``providers`` the ``Metadata`` parameter provider, and ``backends`` the HTML renderer.
+
 ``next.pages.errors``.
-   Defines the two exceptions the area raises.
-   ``PageModuleImportError`` is what a broken ``page.py`` raises on the request path, and ``PageContextShapeError`` is what a keyless ``@context`` answering a non-mapping raises during the context merge.
+   Defines the six exceptions the area raises.
+   ``PageModuleImportError`` is what a broken ``page.py`` raises on the request path, ``PageContextShapeError`` is what a keyless ``@context`` answering a non-mapping raises during the context merge, and the four ``PageMetadata*`` errors name a metadata declaration the schema, the template, the URL resolution, or the one-form rule refuses.
 
 ``next.pages.ports``.
    Holds ``PageScanImpl``, which binds the page-tree scan to the ``PageScan`` port so discovery reaches the scan without an import that would close the cycle.
@@ -176,6 +180,38 @@ A cache that spans the page and its components exists only on the form-dispatch 
 
 The canonical description is in :doc:`/content/topics/context`.
 This page focuses on which module performs each step.
+
+Metadata resolution
+-------------------
+
+``Page.build_render_context`` ends by placing a ``MetadataThunk`` under the ``_next_metadata`` key of the context dict it returns, the ``METADATA_KEY`` constant of ``next.seeding``.
+The thunk holds the registry, the page path, the request, the URL kwargs, the dependency cache of the request, and the context dict itself, and does nothing until ``{% metadata %}`` reads it.
+The first read folds the chain and memoises the ``Metadata`` on the thunk, so a second tag in the same render pays nothing and a template without the tag runs no callable at all.
+``Page.resolve_metadata`` builds the same context and reads the thunk at once, for a caller outside a render.
+
+.. mermaid::
+
+   flowchart LR
+       Site["Settings tier<br/>METADATA.DEFAULTS"] --> Dicts["Ancestor metadata dicts<br/>root first"]
+       Dicts --> Inherited["Inherited callables<br/>inherit=True"]
+       Inherited --> Own["Own dict or callable"]
+       Own --> Thunk["MetadataThunk<br/>in the render context"]
+       Thunk --> Tag["The metadata tag"]
+       Tag --> Head["Head markup"]
+
+The chain of a page is built once and memoised on the ``PageMetadataRegistry``, keyed by the page path.
+``chain_entry`` walks the ancestors of the page root first, reads the ``metadata`` attribute of each module through the mtime-keyed module memo, and asks the registry for the callable registered against that file.
+A dict becomes a normalised ``Segment`` at once, a callable is kept as a source with an empty segment, and a file carrying both raises ``PageMetadataConflictError``.
+The entry also stores the static fold, the settings tier plus every dict, which the checks read without a request, and the whole fold when no source is a callable, which the request-time resolve answers with directly.
+
+Three tokens date the memo.
+The registry ``version`` moves on every registration and reset, the module generation of ``next.pages.loaders`` moves when a ``page.py`` is re-executed, and the settings tier is compared by identity, since ``site_segment`` is a ``functools.cache`` that ``settings_reloaded`` clears.
+An entry whose tokens do not match the current three is rebuilt on the next read, and both tokens are read before the walk, so a module the walk itself loads or registers moves them past the entry and the following read rebuilds it settled.
+
+The request-time fold replays the sources in order.
+A dict source appends its segment, and a callable source is resolved through the dependency resolver with the request, the URL kwargs, the shared cache, and a context view that publishes the fold so far under ``_next_metadata_parent``, which is what a parameter annotated ``Metadata`` reads through the ``ParentMetadataProvider`` at priority 25.
+The mapping the callable returns is normalised with the callable and its file as the source name, so a shape error names the function rather than the page.
+``fold_metadata`` then merges the segments root to leaf, the nearer one winning per top-level key, and walks the title through the chain with the template in force, see :doc:`/content/topics/seo/metadata` for the rules that fold implements.
 
 Extension points
 ----------------

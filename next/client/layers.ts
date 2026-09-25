@@ -49,6 +49,8 @@ interface Layer {
   // The opening page URL, captured at open time. Rides X-Next-Origin so the
   // server resolves the host for an out-of-band render of its zones.
   host: string;
+  // The title at open time, restored on close so a layer's meta op never outlives it.
+  title: string;
   // The honest URL pushed on open, absent for a layer that never touched
   // history. A programmatic close replaces it back to the host.
   pushedUrl?: string;
@@ -212,7 +214,8 @@ export function createLayers(deps: LayerDeps): LayerStack {
     // A browser dismiss gesture (Esc, backdrop, dialog form) reaches the same
     // close path as a server dismiss, so the reason flows through one channel.
     const close = dialogAdapter.open(dialog, (reason) => dismissFrom(dialog, reason));
-    const layer: Layer = { dialog, root, opener, close, returnFocus, host };
+    const title = doc.title;
+    const layer: Layer = { dialog, root, opener, close, returnFocus, host, title };
     stack.push(layer);
     // Both ends go busy before the request, and the opener's flag is what the
     // double-click guard above reads. Nothing awaits before this line.
@@ -293,6 +296,9 @@ export function createLayers(deps: LayerDeps): LayerStack {
     if (layer.pushedUrl !== undefined && currentUrl() === layer.pushedUrl) {
       history.replace(layer.host);
     }
+    // A meta op inside the layer changed the tab title, the page under it gets
+    // its own back. Layers close top-down, so the lowest closed one lands last.
+    doc.title = layer.title;
   }
 
   // Back past the topmost pushed URL closes that layer and the bare layers above
@@ -372,7 +378,7 @@ export function createLayers(deps: LayerDeps): LayerStack {
     busy,
     install,
     _reset() {
-      for (const layer of [...stack]) remove(layer);
+      for (const layer of topDown()) remove(layer);
       if (toastHost !== null) {
         toastHost.remove();
         toastHost = null;

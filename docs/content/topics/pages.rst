@@ -14,7 +14,8 @@ Overview
 --------
 
 The smallest page is a folder that contains a ``page.py`` and a sibling ``template.djx``.
-A page module declares context functions, action handlers, and optional ``render`` or ``template`` attributes, and any number of ancestor ``layout.djx`` files wrap the resulting body.
+A page module declares context functions, action handlers, page metadata, and optional ``render`` or ``template`` attributes, and any number of ancestor ``layout.djx`` files wrap the resulting body.
+The metadata, a ``metadata`` dict or a ``@page.metadata`` callable, is what ``{% metadata %}`` in the root layout renders as the head, see :doc:`seo/metadata`.
 
 Body sources
 ------------
@@ -50,11 +51,13 @@ This is the authoritative ordering for the page render path.
    A ``template`` attribute or a template file supplies the body string directly.
 2. The body is composed through the ancestor layouts.
 3. The ``@context`` callables are collected and run, and the composed template renders with that namespace.
+4. The page metadata folds when ``{% metadata %}`` renders inside that pass, which is where a ``@page.metadata`` callable runs, with the dependency cache the previous steps filled.
 
 A ``render`` function therefore cannot read a value that a ``@context`` callable would publish, because the callables have not run yet.
+A response returned from ``render`` in step 1 skips the metadata as it skips the layouts, so a metadata callable never runs for a redirect or a download.
 
 A partial-zone request takes a different path.
-When the request targets named zones, the view returns a zone response before step 2, so the full page render does not run.
+When the request targets named zones, the view returns a zone response before step 2, so the full page render does not run and no metadata callable runs either.
 See :doc:`/content/topics/partial-rendering/zones` for the zone-morph request.
 
 The ``render`` function
@@ -541,6 +544,9 @@ The ``check_context_functions`` check looks for keyless ``@context`` callables i
 ``next.E029``.
    A keyless ``@context`` callable has a return annotation that is not a mapping type.
 
+The ``metadata`` checks validate the ``METADATA`` settings scope and the metadata each ``page.py`` declares, ``next.E098`` to ``next.E109`` and ``next.W084`` to ``next.W088``, and the opt-in SEO audits ``next.W089`` to ``next.W096`` answer to ``manage.py check --deploy --tag seo``.
+See :doc:`seo/auditing` for the two tiers.
+
 The ``check_template_loaders`` check validates every ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`` entry.
 
 ``next.E042``.
@@ -589,5 +595,6 @@ See also
 
    :doc:`layouts` for how the layout chain wraps the page body.
    :doc:`context` for ``@context`` patterns and inheritance.
+   :doc:`seo/metadata` for the metadata a page declares and the head it renders.
    :doc:`/content/internals/page-discovery` for the discovery pipeline.
    :doc:`/content/ref/pages` for the public API.

@@ -30,6 +30,20 @@ Decorators
    The callable still runs on a full page render.
    ``zone=`` cannot be combined with ``inherit_context=True``, and the pair raises ``ValueError`` at registration.
 
+@page.metadata
+~~~~~~~~~~~~~~
+
+.. py:decorator:: page.metadata(func=None, /, *, inherit=False)
+
+   Registers the metadata callable of a page module (``page.py``).
+   Called bare as ``@page.metadata`` it receives the decorated function, and ``@page.metadata(inherit=True)`` runs the callable for every descendant page as well, ahead of the descendant's own segment.
+   The callable takes dependency-injected parameters like ``@context``, and a parameter annotated ``Metadata`` receives the fold of every segment before it.
+   It returns a mapping of metadata keys, which ``next.E108`` expects the return annotation to say.
+   A ``page.py`` declares one form, this callable or a module-level ``metadata`` dict, and a file carrying both raises ``PageMetadataConflictError`` and is reported as ``next.E102``.
+   The callable runs on the first ``{% metadata %}`` read of a full page render and shares the dependency cache of the request with ``render()`` and the ``@context`` callables.
+   A zone GET and a ``render()`` returning a response never run it.
+   See :doc:`/content/topics/seo/metadata` for the merge order and the title template.
+
 @component.context
 ~~~~~~~~~~~~~~~~~~
 
@@ -124,7 +138,7 @@ DForm
 Type annotation that injects a form instance during action dispatch.
 ``DForm[MyForm]`` names the class directly and ``DForm["MyForm"]`` names it as a string, which keeps a page free of an import it needs for nothing else.
 
-The nine built-in providers are listed with their priorities in :doc:`/content/topics/dependency-injection`.
+The ten built-in providers are listed with their priorities in :doc:`/content/topics/dependency-injection`.
 
 Provider base classes
 ---------------------
@@ -154,6 +168,7 @@ See also
 .. seealso::
 
    :doc:`/content/topics/context` for ``@context`` semantics.
+   :doc:`/content/topics/seo/metadata` for ``@page.metadata``.
    :doc:`/content/topics/components` for ``@component.context``.
    :doc:`/content/topics/forms/actions` for ``@action`` handlers.
    :doc:`/content/topics/dependency-injection` for the resolver and providers.

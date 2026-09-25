@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 
     from django.forms import BaseForm, BaseFormSet
     from django.http import HttpRequest, HttpResponse
+    from django.urls import URLPattern
 
     from next.components.info import ComponentInfo
     from next.forms.backends import FormActionBackend
@@ -171,9 +172,37 @@ class StaticAssets(Protocol):
         ...
 
 
+class VersionSource(Protocol):
+    """An object whose `version` moves with every reset of what it stands for."""
+
+    @property
+    def version(self) -> int:
+        """Return the current version."""
+        ...
+
+
+class SeoRoutes(Protocol):
+    """The routes the seo area adds to the lazy urlpatterns.
+
+    `next.seo` imports `next.urls`, so the pattern concat reaches back through this.
+    """
+
+    def patterns(self) -> list[URLPattern]:
+        """Return the sitemap and robots routes the discovered sources call for."""
+        ...
+
+    def version_source(self) -> VersionSource:
+        """Return the object whose `version` the routes were built under.
+
+        Handed over once, because the lazy urlpatterns read it on every resolve.
+        """
+        ...
+
+
 page_scan_slot = PortSlot["PageScan"]("page scan port")
 partial_shaper_slot = PortSlot["PartialShaper"]("partial shaper")
 router_access_slot = PortSlot["RouterAccess"]("router access port")
+seo_routes_slot = PortSlot["SeoRoutes"]("seo routes port")
 static_assets_slot = PortSlot["StaticAssets"]("static assets port")
 
 
@@ -182,9 +211,12 @@ __all__ = [
     "PartialShaper",
     "PortSlot",
     "RouterAccess",
+    "SeoRoutes",
     "StaticAssets",
+    "VersionSource",
     "page_scan_slot",
     "partial_shaper_slot",
     "router_access_slot",
+    "seo_routes_slot",
     "static_assets_slot",
 ]

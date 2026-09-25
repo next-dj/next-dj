@@ -25,6 +25,7 @@ from next.pages.checks import (
     check_template_loaders,
     check_unrouted_working_directory_pages,
 )
+from next.pages.checks.contexts import annotation_is_dict_like, return_annotation
 from next.pages.checks.modules import _has_template_or_djx
 from next.pages.manager import page
 from next.pages.registry import PageContextRegistry
@@ -45,6 +46,42 @@ from tests.support import (
     patch_checks_router_manager_with_routers,
     restored_provider_registry,
 )
+
+
+def _returns_dict() -> dict:
+    return {}
+
+
+def _returns_mapping() -> dict[str, int]:
+    return {}
+
+
+def _returns_str() -> str:
+    return ""
+
+
+def _unannotated():
+    return {}
+
+
+class TestReturnAnnotationHelpers:
+    """The return-shape probe both the context and the metadata checks share."""
+
+    @pytest.mark.parametrize(
+        ("func", "expected"),
+        [
+            (_returns_dict, True),
+            (_returns_mapping, True),
+            (_returns_str, False),
+            (_unannotated, True),
+        ],
+        ids=["dict", "generic_dict", "str", "unannotated"],
+    )
+    def test_dict_like_is_read_off_the_resolved_hint(self, func, expected) -> None:
+        assert annotation_is_dict_like(return_annotation(func)) is expected
+
+    def test_a_non_type_annotation_is_not_dict_like(self) -> None:
+        assert annotation_is_dict_like("dict") is False
 
 
 class TestPageChecks:

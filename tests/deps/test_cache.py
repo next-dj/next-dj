@@ -1,9 +1,16 @@
 import pytest
 from django.http import HttpRequest
 
-from next.deps import DependencyResolver, Depends, resolver
+from next.deps import (
+    REQUEST_DEP_CACHE_ATTR,
+    DependencyResolver,
+    Depends,
+    ensure_request_dep_cache,
+    get_request_dep_cache,
+    resolver,
+)
 from next.deps.cache import _CACHE_MISS, _IN_PROGRESS, DependencyCache
-from tests.support import bound_dependency
+from tests.support import bound_dependency, build_mock_http_request
 
 
 class TestDependencyCache:
@@ -162,3 +169,41 @@ class TestDependencyCacheLayout:
         cache = DependencyCache()
         with pytest.raises(AttributeError):
             cache.extra = 1
+
+
+class TestEnsureRequestDepCache:
+    """One dict per request, attached on first ask and found on every later one."""
+
+    def test_attaches_a_fresh_dict_to_a_request_without_one(self) -> None:
+        request = HttpRequest()
+        cache = ensure_request_dep_cache(request)
+        assert cache == {}
+        assert getattr(request, REQUEST_DEP_CACHE_ATTR) is cache
+        assert get_request_dep_cache(request) is cache
+
+    def test_returns_the_dict_already_on_the_request(self) -> None:
+        request = HttpRequest()
+        attached: dict[str, object] = {"wallet": "w"}
+        setattr(request, REQUEST_DEP_CACHE_ATTR, attached)
+        assert ensure_request_dep_cache(request) is attached
+
+    def test_a_second_ask_finds_the_first_dict(self) -> None:
+        request = HttpRequest()
+        assert ensure_request_dep_cache(request) is ensure_request_dep_cache(request)
+
+    def test_without_a_request_every_ask_is_a_fresh_dict(self) -> None:
+        first = ensure_request_dep_cache(None)
+        assert first == {}
+        assert ensure_request_dep_cache(None) is not first
+
+    def test_a_non_dict_attribute_is_replaced(self) -> None:
+        request = HttpRequest()
+        setattr(request, REQUEST_DEP_CACHE_ATTR, "junk")
+        cache = ensure_request_dep_cache(request)
+        assert cache == {}
+        assert getattr(request, REQUEST_DEP_CACHE_ATTR) is cache
+
+    def test_a_spec_mock_request_takes_the_dict(self) -> None:
+        request = build_mock_http_request()
+        cache = ensure_request_dep_cache(request)
+        assert ensure_request_dep_cache(request) is cache

@@ -36,7 +36,8 @@ Pipeline
        ZoneResp --> Response
        ZoneIntent -- "full page" --> LayoutChain["Compose layout chain"]
        LayoutChain --> ContextCtx["Run context functions"]
-       ContextCtx --> CollectAssets["Static collector"]
+       ContextCtx --> Metadata["Fold page metadata as the head renders"]
+       Metadata --> CollectAssets["Static collector"]
        CollectAssets --> InjectTags["Emit collected tags"]
        InjectTags --> Response(["HTTP response"])
        FormDispatch --> Validation{"Form valid"}
@@ -70,12 +71,14 @@ When the module exposes a ``render`` function the view calls it before context r
 When the body comes from the ``template`` attribute or a ``template.djx`` file the view reads that source as a plain string.
 After the body is in hand the view builds the render context and runs every ``@context`` function in order.
 Captured URL kwargs from the matched route are seeded into the context dict before any ``@context`` function runs.
+The render context also carries a deferred fold of the page metadata, which ``{% metadata %}`` in the root layout resolves as the composed template renders, so a ``@page.metadata`` callable runs after every ``@context`` function and reads the same dependency cache.
 
 Zone requests
 ~~~~~~~~~~~~~
 
 After the body source resolves, the view inspects the request for a partial intent.
 A request that targets named zones receives a zone response instead of the full page render.
+A zone body carries no head, so the metadata chain of the page is never folded and a ``@page.metadata`` callable never runs on this path.
 See :doc:`/content/topics/partial-rendering/how-it-works` for the zone request wire format and the patch envelope.
 
 Layout chain
@@ -183,6 +186,8 @@ Every row asks ``render()`` the same question, so it reads the same kind of requ
 A row that does not run the routed view builds that request with ``next.pages.visits.visit_request``, which copies the live one and restates it as a GET of the URL under authorization, the posted origin on a form re-render and an origin zone morph, the next step's URL on a wizard advance, and the named URL on a foreign morph that was given one.
 A ``render()`` keyed on identity, on ``request.GET``, on ``request.method``, or on a canonical-URL comparison therefore answers the same on every row as it does on a visit.
 The one gap is a foreign morph whose caller named the page by file path, which carries no URL to present and leaves the live path in place, see :doc:`/content/topics/pages`.
+
+The head is rendered on the two rows that compose the whole document, the full page GET and the form re-render, so a ``@page.metadata`` callable runs on those two and on no zone row.
 
 The ``@context`` column hides one difference worth naming.
 The form re-render and the origin zone morph build the context with no zone batch, so every page-level callable runs, ``zone=``-tagged ones included.

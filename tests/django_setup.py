@@ -38,6 +38,7 @@ def _build_test_settings() -> dict[str, object]:
             "django.contrib.sessions",
             "django.contrib.messages",
             "django.contrib.staticfiles",
+            "django.contrib.sitemaps",
             "next",
         ],
         "MIDDLEWARE": [

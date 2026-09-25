@@ -16,6 +16,7 @@ The example focuses on the file-router and DI subsystems of next-dj. It dogfoods
 | `/catalog/?q=iPhone&page=2` | Search and pagination preserved across query overrides. |
 | `/catalog/electronics/` | Category-scoped listing. Inherited `Category` shows in the breadcrumb. |
 | `/catalog/electronics/iphone-15/` | Product detail. The `Category` instance comes through inherited context, no extra query. |
+| `/sitemap.xml` | The landing, the listing, one entry per category and one per product, cached for five minutes. |
 
 The user flow:
 
@@ -164,7 +165,7 @@ for zone in LISTING_ZONES:
 return patches.response()
 ```
 
-The handler points `request.GET` at the preset's params before morphing, so the cached search, the product count, the active-filter chips, and the pagination all agree with the URL `push_url` writes to history. `push_url` validates the href against the request host, so the envelope carries a `url` op with `action: "push"` and a same-site target. Without the runtime the apply falls back to a redirect to the same canonical URL, so the preset stays a plain link.
+The handler points `request.GET` at the preset's params before morphing, so the cached search, the product count, the active-filter chips, and the pagination all agree with the URL `push_url` writes to history. `push_url` validates the href against the request host, so the envelope carries a `url` op with `action: "push"` and a same-site target. The chained `.meta(PRESET_TITLES[preset])` adds a `meta` op that sets `document.title` on the client, folded through the title template of the origin page, so the tab reads `Cheapest first · next.dj catalog` after the apply just as it would after a navigation. Without the runtime the apply falls back to a redirect to the same canonical URL, so the preset stays a plain link.
 
 ### 9. `cached_search` and the LocMem hit path
 
@@ -178,9 +179,44 @@ The database carries the same filter set. `Product` declares `db_index=True` on 
 
 The `sort` key never becomes a chip. It always carries a value, so a chip for it would be permanent noise rather than something a click can drop.
 
+### 11. Title template across three layouts
+
+The nested layouts of section 4 add chrome, the metadata chain adds the head. `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` in [`config/settings.py`](config/settings.py) declares `site_name` and the title template `{title} · {site_name}` with its default, and `"CANONICAL_QUERY": ("page",)` beside it. The shared `page_head` component renders `{% metadata %}`, so every page under [`marketplace/layout.djx`](marketplace/layout.djx) gets its head from the same fold, whichever layouts sit between.
+
+The landing declares nothing and renders the default. [`catalog/storefront/catalog/page.py`](catalog/storefront/catalog/page.py) declares a dict, `{"title": "All products", "canonical": True}`, and a dict is inherited, so the category listing and the product page below it carry the self canonical too. A self canonical is the request path plus the allowlisted query, and the allowlist is the one key `CANONICAL_QUERY` names: `/catalog/electronics/?brand=Acme&page=2` publishes `/catalog/electronics/?page=2`, the brand filter is a view of the same listing rather than a page of its own, and `page=1` is dropped because it is the listing itself.
+
+The two dynamic pages override the title with a callable. [`[category]/page.py`](catalog/storefront/catalog/[category]/page.py) takes `category: Category`, the instance the inherited context of section 5 resolved, and answers `{"title": category.name}`. [`[slug]/page.py`](catalog/storefront/catalog/[category]/[slug]/page.py) takes `product` the same way and adds the product description. Neither runs a query of its own, the callable reads a context key by parameter name exactly as a downstream `@context` would. The preset handler of section 8 is the third place the template applies, through `Patches.meta()`, so a title set by a partial and a title set by a render look the same.
+
+### 12. Cached sitemap over categories and products
+
+[`catalog/storefront/sitemap.py`](catalog/storefront/sitemap.py) at the top of the page root switches `/sitemap.xml` on and declares one callable per dynamic trail:
+
+```python
+cache = 300
+
+
+@sitemap.items("catalog/[category]")
+def categories() -> Iterator[Entry]:
+    for slug in Category.objects.values_list("slug", flat=True):
+        yield Entry(kwargs={"category": slug})
+
+
+@sitemap.items("catalog/[category]/[slug]")
+def products() -> Iterator[Entry]:
+    rows = Product.objects.values_list("category__slug", "slug")
+    for category, slug in rows:
+        yield Entry(kwargs={"category": category, "slug": slug})
+```
+
+The trail is the directory path of the page and the kwargs are what reverses it, so the entries go through the router and come out as `/catalog/electronics/` and `/catalog/electronics/iphone-15/`. `values_list` fetches the columns a URL needs and nothing else, twenty-nine rows cost two queries and no model instances. `/` and `/catalog/` are listed on their own because they carry no parameter. `base` in `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` is `https://catalog.example`, so every `<loc>` is absolute on the published origin, and the self canonical of section 11 moves onto the same origin with it.
+
+`cache = 300` wraps the sitemap views in `cache_page` for five minutes on the default cache, the same `LocMemCache` the search of section 7 already uses. The document is rebuilt from the tables on every uncached request, so a catalog of any size pays for the query once per window instead of once per crawler visit, and the integration test creates a product after the first request and reads the same document back. The catalog declares no robots source, so `/robots.txt` is not served here, the [markdown-blog](../markdown-blog/) and the [wiki](../wiki/) show its two forms.
+
 ## Further reading
 
 - [`next/urls/markers.py`](../../next/urls/markers.py) ships both the `DUrl` provider for URL path segments and the `DQuery` provider for query-string parameters. The narrative section lives in [`docs/content/topics/dependency-injection.rst`](../../docs/content/topics/dependency-injection.rst).
 - [`next/pages/registry.py`](../../next/pages/registry.py) hosts the `_collect_inherited_context` walk used by `inherit_context=True`.
 - [`next/pages/context.py`](../../next/pages/context.py) hosts the `ContextByDefaultProvider` that injects inherited values into downstream callables by parameter name.
 - [`next/static/collector.py`](../../next/static/collector.py) hosts the static collector that deduplicates co-located component CSS.
+- [`next/pages/metadata/`](../../next/pages/metadata/) hosts the metadata chain of section 11, and `Patches.meta()` in [`next/partial/patches.py`](../../next/partial/patches.py) applies the same title template from a handler.
+- [`next/seo/`](../../next/seo/) hosts `@sitemap.items`, `Entry`, and the `RouteSitemap` of section 12, with the `cache` attribute wrapping its views.

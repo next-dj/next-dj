@@ -4,7 +4,8 @@ from catalog.queries import cached_search
 from catalog.zones import CATEGORY_ZONES, zone_target
 from django.http import Http404
 
-from next import context
+from next import context, page
+from next.pages import MetadataDict
 
 
 @context("filter_zones")
@@ -30,6 +31,12 @@ def category(category: object) -> Category:
         return Category.objects.get(slug=category)
     except Category.DoesNotExist as exc:
         raise Http404 from exc
+
+
+@page.metadata
+def category_meta(category: Category) -> MetadataDict:
+    """Title the listing after the category the inherited context resolved."""
+    return {"title": category.name}
 
 
 @context("page_obj")

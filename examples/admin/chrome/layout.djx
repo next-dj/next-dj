@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
-{% component "page_head" title="next.dj admin" icon="⚙️" %}
+{% component "page_head" icon="⚙️" %}
 <body class="min-h-screen bg-background text-foreground">
   {% template %}
   {% collect_scripts %}

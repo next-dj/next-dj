@@ -62,6 +62,27 @@ _FAILED_PATHS: set[Path] = set()
 _MEMO_WRITE_LOCK = threading.Lock()
 
 
+class _Generation:
+    """A counter every write to the module memo moves."""
+
+    __slots__ = ("value",)
+
+    def __init__(self) -> None:
+        """Start at zero."""
+        self.value = 0
+
+
+_GENERATION = _Generation()
+
+
+def module_generation() -> int:
+    """Return the generation of the module memo, moved by every write to it.
+
+    A chain memo keys off it, so it never has to stat an ancestor to learn of a reload.
+    """
+    return _GENERATION.value
+
+
 def has_load_errors() -> bool:
     """Whether the latest load of any `page.py` failed.
 
@@ -118,6 +139,7 @@ def _remember(file_path: Path, load: _PageLoad) -> None:
         else:
             _FAILED_PATHS.add(file_path)
             _MODULE_MEMO[file_path] = load
+        _GENERATION.value += 1
 
 
 def _forget(file_path: Path) -> None:
@@ -125,6 +147,7 @@ def _forget(file_path: Path) -> None:
     with _MEMO_WRITE_LOCK:
         _MODULE_MEMO.pop(file_path)
         _FAILED_PATHS.discard(file_path)
+        _GENERATION.value += 1
 
 
 def _page_load(file_path: Path) -> _PageLoad | None:
@@ -173,6 +196,7 @@ def reset_module_memo() -> None:
     with _MEMO_WRITE_LOCK:
         _MODULE_MEMO.clear()
         _FAILED_PATHS.clear()
+        _GENERATION.value += 1
 
 
 def _pages_dirs_for_config(config: dict) -> list[Path]:

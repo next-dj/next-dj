@@ -17,8 +17,11 @@ from next.ports import (
     page_scan_slot,
     partial_shaper_slot,
     router_access_slot,
+    seo_routes_slot,
     static_assets_slot,
 )
+from next.seo.manager import seo_manager
+from next.seo.ports import SeoRoutesImpl
 from next.static.manager import forget_manager_page_roots
 from next.static.ports import StaticAssetsImpl
 from next.urls.ports import RouterAccessImpl
@@ -44,6 +47,7 @@ class NextFrameworkConfig(AppConfig):
         router_reloaded.connect(forget_page_roots)
         router_reloaded.connect(forget_manager_page_roots)
         router_reloaded.connect(forget_dep_caches)
+        router_reloaded.connect(seo_manager.reset)
         # Ahead of every install, because component discovery and form autodiscovery
         # import user modules that must see the configured resolver, not the base one.
         apply_resolver_setting()
@@ -53,6 +57,7 @@ class NextFrameworkConfig(AppConfig):
         page_scan_slot.set(PageScanImpl())
         partial_shaper_slot.set(PartialShaperImpl())
         router_access_slot.set(RouterAccessImpl())
+        seo_routes_slot.set(SeoRoutesImpl())
         static_assets_slot.set(StaticAssetsImpl())
         autoreload.install()
         templates.install()

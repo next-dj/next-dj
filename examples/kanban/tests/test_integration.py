@@ -503,3 +503,25 @@ def test_index_page_renders_at_the_reversed_root(next_client: NextClient) -> Non
     response = next_client.get(reverse("next:page_"))
     assert response.status_code == 200
     assert "Boards" in response.content.decode()
+
+
+class TestPageMetadata:
+    """The board callable titles the board and, through `inherit`, its settings."""
+
+    def test_index_uses_the_site_default(self, next_client: NextClient) -> None:
+        body = next_client.get("/").content.decode()
+        assert "<title>next.dj — Kanban</title>" in body
+
+    def test_board_title_comes_from_the_board_provider(
+        self, next_client: NextClient, board: Board
+    ) -> None:
+        assert "<title>Roadmap · next.dj Kanban</title>" in _board_html(
+            next_client, board
+        )
+
+    def test_settings_inherits_the_board_title(
+        self, next_client: NextClient, board: Board
+    ) -> None:
+        assert "<title>Roadmap · next.dj Kanban</title>" in _settings_html(
+            next_client, board
+        )

@@ -10,6 +10,7 @@ import next.server
 from next.conf import next_framework_settings
 from next.server import iter_all_autoreload_watch_specs, register_autoreload_watch_spec
 from next.server.watcher import (
+    SEO_SOURCE_NAMES,
     _dedupe_watch_specs,
     _iter_default_autoreload_watch_specs,
     _registered_extra_watch_specs,
@@ -119,6 +120,29 @@ class TestServerAutoreloadWatchApi:
         for root in (custom.resolve(), pages_tree.resolve()):
             matches = [(p, g) for p, g in specs if p == root and g == expected_glob]
             assert len(matches) == 1
+
+
+class TestSeoSourcesAreWatched:
+    """The files that switch the SEO routes on restart the dev server on change."""
+
+    def test_every_page_root_watches_the_three_seo_sources(self, tmp_path) -> None:
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "PAGE_BACKENDS": [
+                    {
+                        "BACKEND": "next.urls.FileRouterBackend",
+                        "PAGES_DIR": "pages",
+                        "APP_DIRS": False,
+                        "DIRS": [str(tmp_path.resolve())],
+                        "OPTIONS": {},
+                    }
+                ]
+            }
+        ):
+            specs = _iter_default_autoreload_watch_specs()
+        globs = [g for p, g in specs if p == tmp_path.resolve()]
+        assert globs[0] == "**/page.py"
+        assert [g for g in globs if g in SEO_SOURCE_NAMES] == list(SEO_SOURCE_NAMES)
 
 
 class TestServerPublicSurface:
