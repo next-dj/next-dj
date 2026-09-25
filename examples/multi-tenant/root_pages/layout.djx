@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
-{% #component "page_head" title="next.dj — Multi-tenant notes" tailwind_plugins="typography" icon="🏢" %}
+{% #component "page_head" tailwind_plugins="typography" icon="🏢" %}
   {% #slot "extra" %}
     {% use_style "notes/css/theme.css" %}
     {% if tenant_stylesheet %}{% use_style tenant_stylesheet %}{% endif %}

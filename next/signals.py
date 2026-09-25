@@ -21,7 +21,12 @@ from next.forms.signals import (
     wizard_completed,
     wizard_step_submitted,
 )
-from next.pages.signals import context_registered, page_rendered, template_loaded
+from next.pages.signals import (
+    context_registered,
+    metadata_registered,
+    page_rendered,
+    template_loaded,
+)
 from next.partial.signals import (
     field_validated,
     partial_backend_loaded,
@@ -31,6 +36,7 @@ from next.partial.signals import (
     zone_registered,
     zone_rendered,
 )
+from next.seo.signals import sitemap_items_registered
 from next.server.signals import watch_specs_ready
 from next.static.signals import (
     asset_registered,
@@ -56,6 +62,7 @@ __all__ = [
     "form_backend_loaded",
     "form_validation_failed",
     "html_injected",
+    "metadata_registered",
     "page_rendered",
     "partial_backend_loaded",
     "patch_op_registered",
@@ -64,6 +71,7 @@ __all__ = [
     "router_backend_loaded",
     "router_reloaded",
     "settings_reloaded",
+    "sitemap_items_registered",
     "sse_stream_closed",
     "sse_stream_opened",
     "static_backend_loaded",

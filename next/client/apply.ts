@@ -107,6 +107,11 @@ export interface ContextPatch {
   data?: unknown;
 }
 
+export interface MetaPatch {
+  op: "meta";
+  title?: string;
+}
+
 export type BuiltinPatch =
   | MorphPatch
   | ReplacePatch
@@ -120,7 +125,8 @@ export type BuiltinPatch =
   | ToastPatch
   | UrlPatch
   | VisitPatch
-  | ContextPatch;
+  | ContextPatch
+  | MetaPatch;
 
 /** A custom op registered through defineOp, its payload open past the op. */
 export interface CustomPatch {
@@ -147,6 +153,7 @@ const BUILTIN_OPS = new Set<string>([
   "url",
   "visit",
   "context",
+  "meta",
 ] satisfies BuiltinPatch["op"][]);
 
 // A predicate, not a boolean check, so #applyBuiltin keeps the per-op narrowing.
@@ -628,6 +635,9 @@ export class Applier {
       case "context":
         this.#contextOp(patch);
         return;
+      case "meta":
+        this.#meta(patch);
+        return;
       // A verb missing here would be a silent no-op reported as ok, so the never
       // binding turns it into a build error, and this throw is that error at runtime.
       /* v8 ignore next 3 */
@@ -686,6 +696,11 @@ export class Applier {
   // Merging into the client context fires context-updated, so islands react.
   #contextOp(patch: ContextPatch): void {
     if (isRecord(patch.data)) this.#mergeContext(patch.data);
+  }
+
+  // The title arrives as plain text, so a browser's own escaping is all it needs.
+  #meta(patch: MetaPatch): void {
+    if (typeof patch.title === "string") this.#document.title = patch.title;
   }
 
   // The default verb, parsing and neutralising content then morphing the live

@@ -115,4 +115,13 @@ NEXT_FRAMEWORK = {
     "PARTIAL_BACKENDS": extend_default_backend(
         "PARTIAL_BACKENDS", OPTIONS={"VERSION": "v1"}
     ),
+    "METADATA": {
+        "DEFAULTS": {
+            "site_name": "next.dj Kanban",
+            "title": {
+                "template": "{title} · {site_name}",
+                "default": "next.dj — Kanban",
+            },
+        }
+    },
 }

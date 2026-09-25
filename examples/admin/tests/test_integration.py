@@ -1310,3 +1310,17 @@ class TestFlashMessages:
         )
         body = r.content.decode()
         assert "Welcome, admin." in body
+
+
+class TestPageMetadata:
+    """A private site: every page is `noindex, nofollow`, changelists name the model."""
+
+    def test_login_page_carries_the_site_default_and_noindex(self, next_client):
+        body = next_client.get("/admin/login/").content.decode()
+        assert "<title>next.dj admin</title>" in body
+        assert '<meta name="robots" content="noindex, nofollow">' in body
+
+    def test_changelist_is_titled_after_the_model(self, admin_client):
+        body = admin_client.get("/admin/library/book/").content.decode()
+        assert "<title>Books · next.dj admin</title>" in body
+        assert '<meta name="robots" content="noindex, nofollow">' in body

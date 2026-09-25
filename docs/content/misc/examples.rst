@@ -29,7 +29,8 @@ The table runs roughly in order of how much it assumes.
      - :doc:`/content/topics/file-router`, :doc:`/content/topics/dependency-injection`, :doc:`/content/topics/partial-rendering/index`
    * - :repo:`markdown-blog <tree/main/examples/markdown-blog>`
      - Publishes Markdown posts through nested layouts, hands serialised values to the browser, feeds a site-wide value through a context processor, and runs a co-located ``component.js`` beside the component that needs it.
-     - :doc:`/content/topics/layouts`, :doc:`/content/topics/context`, :doc:`/content/topics/static-assets/js-context`
+       Builds the head from the settings tier down to a per-post ``@page.metadata`` callable, with a self canonical and hreflang alternates under ``i18n_patterns``.
+     - :doc:`/content/topics/layouts`, :doc:`/content/topics/context`, :doc:`/content/topics/static-assets/js-context`, :doc:`/content/topics/seo/metadata`
    * - :repo:`feature-flags <tree/main/examples/feature-flags>`
      - Turns features on and off behind a composite guard component, and invalidates the flag cache from signal receivers rather than from the views that read it.
      - :doc:`/content/topics/components`, :doc:`/content/topics/signals`
@@ -39,10 +40,12 @@ The table runs roughly in order of how much it assumes.
      - :doc:`/content/topics/forms/wizard`, :doc:`/content/topics/forms/backends`, :doc:`/content/topics/forms/signals`, :doc:`/content/topics/partial-rendering/index`
    * - :repo:`search-catalog <tree/main/examples/search-catalog>`
      - Filters a catalog from the query string with faceted filters that submit themselves and a list that extends as the visitor scrolls, across three levels of nested layouts sharing inherited context and a cached search.
-     - :doc:`/content/topics/dependency-injection`, :doc:`/content/topics/context`
+       Carries one title template across the layouts, a self canonical filtered by ``CANONICAL_QUERY``, and a ``meta`` patch that retitles the document after a preset filter.
+     - :doc:`/content/topics/dependency-injection`, :doc:`/content/topics/context`, :doc:`/content/topics/seo/social-and-canonical`
    * - :repo:`wiki <tree/main/examples/wiki>`
      - Serves articles out of the database through a hybrid router that rebuilds its routes on a signal, with a search zone that answers as the visitor types and an editor that previews Markdown live.
-     - :doc:`/content/topics/file-router`, :doc:`/content/howto/write-a-router-backend`, :doc:`/content/topics/partial-rendering/index`
+       Titles each article through a ``@page.metadata`` callable that reuses the row its context resolved, and marks the editing pages ``noindex``.
+     - :doc:`/content/topics/file-router`, :doc:`/content/howto/write-a-router-backend`, :doc:`/content/topics/partial-rendering/index`, :doc:`/content/topics/seo/metadata`
    * - :repo:`multi-tenant <tree/main/examples/multi-tenant>`
      - Resolves a tenant from a request header in middleware, rewrites every co-located asset URL per tenant on top of the staticfiles names it inherits, stamps a deploy build id into those URLs, and shares a header and footer across page roots.
      - :doc:`/content/howto/scope-requests-per-tenant`, :doc:`/content/topics/static-assets/backends`

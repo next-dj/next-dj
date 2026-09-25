@@ -43,6 +43,28 @@ next.dj settings
 Tune ``NEXT_FRAMEWORK`` using :doc:`settings` (production-oriented commentary and patterns).
 Canonical semantics for each key live in :doc:`/content/ref/settings`.
 
+Page metadata
+-------------
+
+- ``NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]["base"]`` names the public origin, so the canonical links, the social images, the sitemap locations, and the ``Sitemap:`` line of the robots file stop following the request host.
+- ``NEXT_FRAMEWORK["METADATA"]["NOINDEX"]`` is ``False`` in production and ``True`` on every staging host.
+- Run ``uv run python manage.py check --deploy --tag seo`` and resolve or silence every audit warning by its id.
+
+See :doc:`/content/topics/seo/auditing` for the two tiers of metadata checks.
+
+Sitemap and robots
+------------------
+
+Review these when a page root carries a ``sitemap.py``, a ``robots.py``, or a ``robots.txt``.
+
+- ``django.contrib.sitemaps`` is in ``INSTALLED_APPS`` and the Django template backend keeps ``APP_DIRS``, otherwise ``next.E112`` reports the missing templates.
+- ``base`` is set on every deployment that installs ``django.contrib.sites``, because without it the sitemap reads the ``Site`` row and the row ships as ``example.com``.
+- ``include("next.seo.urls")`` sits at the root of the URLconf when ``include("next.urls")`` is under a prefix or inside ``i18n_patterns``, otherwise ``next.W099`` reports the unreachable routes.
+- Fetch ``/sitemap.xml`` and ``/robots.txt`` on the deployed host and read the first ``<loc>`` and the ``Sitemap:`` line for the public origin.
+- A sitemap over a large table declares ``cache`` and the default cache is shared across every worker.
+
+See :doc:`/content/topics/seo/sitemaps` and :doc:`/content/topics/seo/robots` for the two files.
+
 Wizard drafts
 -------------
 
@@ -121,9 +143,10 @@ Run the framework system checks as part of CI and as part of the deployment scri
 
 A clean exit is required for the deployment to proceed.
 
-The ``--deploy`` flag is what matters here, because three framework checks are registered as deployment checks and a plain ``check`` never runs them.
-They report ``next.E017`` for a ``page.py`` that raises on import, ``next.E084`` for a ``component.py`` that does, and ``next.E072`` for a composed page template that does not compile.
+The ``--deploy`` flag is what matters here, because eight framework checks are registered as deployment checks and a plain ``check`` never runs them.
+Three report ``next.E017`` for a ``page.py`` that raises on import, ``next.E084`` for a ``component.py`` that does, and ``next.E072`` for a composed page template that does not compile.
 Each one costs a full walk of the page tree, which is why it is paid once per deploy rather than on every management command, and each one names a failure a visitor would otherwise meet as a 404, a silently stripped body, or a 500.
+``next.W083`` reports an asset version that never moves, and the four SEO audits, ``next.W089`` to ``next.W096``, grade the folded metadata of every page.
 
 See :ref:`ref-system-checks` for the full catalog.
 

@@ -9,13 +9,14 @@ Module summary
 ``next.apps`` contains the Django ``AppConfig`` and the helpers that the framework runs at application startup.
 
 ``NextFrameworkConfig.ready()`` first runs ``next.checks.register_all()`` to register the framework system checks.
-It then runs eleven startup steps in a fixed order.
+It then runs twelve startup steps in a fixed order.
 
-#. ``router_reloaded.connect()`` for the four cache-forgetting receivers
+#. ``router_reloaded.connect()`` for the five cache-forgetting receivers
 #. ``apply_resolver_setting()``
 #. ``page_scan_slot.set(PageScanImpl())``
 #. ``partial_shaper_slot.set(PartialShaperImpl())``
 #. ``router_access_slot.set(RouterAccessImpl())``
+#. ``seo_routes_slot.set(SeoRoutesImpl())``
 #. ``static_assets_slot.set(StaticAssetsImpl())``
 #. ``autoreload.install()``
 #. ``templates.install()``
@@ -23,8 +24,8 @@ It then runs eleven startup steps in a fixed order.
 #. ``components.install()``
 #. ``autodiscover_forms()``
 
-Step one connects ``forget_watch_state``, ``forget_page_roots``, ``forget_manager_page_roots``, and ``forget_dep_caches`` to ``router_reloaded``.
-A reload that replaces the routers from code changes what they report without touching settings, so the watch state, the page roots, the static manager page roots, and the dependency caches all go with the generation that produced them.
+Step one connects ``forget_watch_state``, ``forget_page_roots``, ``forget_manager_page_roots``, ``forget_dep_caches``, and ``seo_manager.reset`` to ``router_reloaded``.
+A reload that replaces the routers from code changes what they report without touching settings, so the watch state, the page roots, the static manager page roots, the dependency caches, and the discovered sitemap and robots sources all go with the generation that produced them.
 See :doc:`/content/howto/reload-routes-from-code` for the reload itself.
 
 ``apply_resolver_setting()`` points the dependency-injection singleton at the class named by ``DEPENDENCY_RESOLVER``, see :doc:`settings`.
@@ -33,7 +34,7 @@ It runs ahead of every install because the two discovery steps import user modul
 ``autodiscover_forms()`` imports the ``forms`` submodule of every installed app so shared forms register before the first request arrives.
 It respects the ``FORM_AUTODISCOVER`` setting and is a no-op when that setting is ``False``.
 
-Steps three to six bind the four :doc:`next.ports <ports>` slots, ahead of every step that imports user code so that a module touching a framework path at import time never reads an unbound slot.
+Steps three to seven bind the five :doc:`next.ports <ports>` slots, ahead of every step that imports user code so that a module touching a framework path at import time never reads an unbound slot.
 They also run ahead of the discovery steps so a discovery failure leaves no process behind with a slot still empty.
 Each implementation resolves its manager when a method is called rather than when the slot is bound, so the static manager is still built on first use.
 
@@ -54,7 +55,7 @@ Template tag registration
    :members:
 
 ``templates.install()`` also prepends a line-spanning branch to Django's template lexing pattern, so a component tag can carry its arguments over more than one line.
-The branch matches thirteen literal framework tag names and nothing else, and Django's own block-tag branch stays behind it, so a stock tag, a third-party tag, a variable, and a comment all lex as Django lexes them.
+The branch matches fourteen literal framework tag names and nothing else, and Django's own block-tag branch stays behind it, so a stock tag, a third-party tag, a variable, and a comment all lex as Django lexes them.
 See :doc:`template-tags` for the tags this enables and the exact set.
 A Django release that spells the block-tag branch differently raises ``RuntimeError`` out of ``ready``, because a pattern left unwidened would turn every multi-line tag into template text at render time.
 

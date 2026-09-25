@@ -46,6 +46,7 @@ class TestPostMetadata:
             "slug": "my-post",
             "url_name": "next:page_posts_my_post",
             "title": "Something",
+            "excerpt": "text",
         }
 
 

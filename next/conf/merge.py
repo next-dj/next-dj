@@ -26,7 +26,9 @@ LIST_KEYS: Final[frozenset[str]] = frozenset(
         "FORM_ANCHOR_FILES",
     }
 )
-DICT_KEYS: Final[frozenset[str]] = frozenset({"NEXT_JS_OPTIONS", "FORM_WIZARD_BACKEND"})
+DICT_KEYS: Final[frozenset[str]] = frozenset(
+    {"NEXT_JS_OPTIONS", "FORM_WIZARD_BACKEND", "METADATA"}
+)
 STR_KEYS: Final[frozenset[str]] = frozenset(
     {
         "COMPONENT_TEMPLATE_LOADER",

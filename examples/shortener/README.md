@@ -13,6 +13,7 @@ This is the example to read first. It is the smallest complete project in the ca
 | `/admin/` | Top ten links with an inline edit form and a delete button per row, plus the unflushed click counters. Nested admin layout with a subnav. |
 | `/admin/stats/` | Totals for links, persisted clicks, and pending clicks, plus the live per-action dispatch counters. |
 | `/admin/links/<slug>/` | Link detail, resolved through a custom `DLink[Link]` DI provider. Resets the cached clicks for that slug. |
+| `/robots.txt` | Rendered from a one-line `robots.py`, keeps crawlers off the `/s/` redirects. |
 
 ## How to run
 
@@ -361,6 +362,16 @@ def _on_action_dispatched(action_name: str, **kwargs) -> None:
 
 `AppConfig.ready()` imports the module so the receiver connects at startup, and [`admin/stats/page.py`](shortener/routes/admin/stats/page.py) exposes `action_counts()` as the `form_actions` context. Submitting the create form, an inline edit, a delete, or a clicks reset moves a row in that card without any of those handlers knowing the counter exists.
 
+### 14. `robots.py` at the page root
+
+[`shortener/routes/robots.py`](shortener/routes/robots.py) is one line beside the root `page.py`:
+
+```python
+rules = [Rule(user_agent="*", disallow=["/s/"])]
+```
+
+The file's presence switches `/robots.txt` on, served as `text/plain; charset=utf-8` with one group per `Rule`. `/s/<slug>/` is the plain Django view of section 11, a redirect that bumps the click counter of section 12 on every hit, so a crawler chasing short links would count as traffic, and there is nothing at those URLs to index anyway. `/admin/` is left open on purpose. Its [`page.py`](shortener/routes/admin/page.py) declares `"robots": {"index": False}`, a crawler has to fetch a page to see that tag, and `manage.py check` reports a `Disallow` that would hide it. There is no `sitemap.py` here, the one public page is `/` and a document listing it would add nothing, so `/sitemap.xml` stays a 404 and the rendered robots carries no `Sitemap:` line. Drop a `sitemap.py` into the root and both appear, the [markdown-blog](../markdown-blog/) and the [wiki](../wiki/) show the two ways to fill one.
+
 ## Gotchas
 
 ### PEP 563 and DI annotations
@@ -384,3 +395,4 @@ Two rules:
 - [next/components/context.py](../../next/components/context.py) — `@component.context` mechanics.
 - [next/pages/loaders.py](../../next/pages/loaders.py) — layout composition logic.
 - [next/partial/](../../next/partial/) — zones, patch envelopes, and the fallback contract used in section 6.
+- [next/seo/](../../next/seo/) — the `Rule` marker and the robots view behind section 14.

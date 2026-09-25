@@ -71,7 +71,7 @@ def loaded_page_contexts() -> tuple[list[CheckMessage], list[PageContexts]]:
     ]
 
 
-def _annotation_is_dict_like(annotation: object) -> bool:
+def annotation_is_dict_like(annotation: object) -> bool:
     """Return True when the return annotation maps to a dict-like result."""
     if annotation is inspect.Signature.empty:
         return True
@@ -85,7 +85,7 @@ def _annotation_is_dict_like(annotation: object) -> bool:
         return False
 
 
-def _return_annotation(func: Callable[..., Any]) -> object:
+def return_annotation(func: Callable[..., Any]) -> object:
     """Return the resolved return annotation, read the way the DI resolver reads it.
 
     A hint the resolver itself could not evaluate is no ground to block a page, so an
@@ -105,8 +105,8 @@ def _check_context_function(
     The check is static, because executing user code at ``manage.py check`` time is
     expensive and can hit databases that have yet to be migrated.
     """
-    annotation = _return_annotation(func)
-    if _annotation_is_dict_like(annotation):
+    annotation = return_annotation(func)
+    if annotation_is_dict_like(annotation):
         return None
     annotation_name = getattr(annotation, "__name__", None) or repr(annotation)
     return Error(
@@ -191,9 +191,11 @@ def check_single_keyless_context(*args, **kwargs) -> list[CheckMessage]:
 
 __all__ = [
     "PageContexts",
+    "annotation_is_dict_like",
     "check_context_functions",
     "check_context_registration_files",
     "check_single_keyless_context",
     "load_routed_pages",
     "loaded_page_contexts",
+    "return_annotation",
 ]

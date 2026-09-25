@@ -696,6 +696,36 @@ describe("Applier verbs", () => {
     applier.apply(envelope([{ op: "context", data: null }]));
     expect(merged).toEqual([]);
   });
+
+  it("meta sets document.title from the plain-text title", () => {
+    document.title = "Before";
+    const { applier, dispatched } = makeApplier();
+    applier.apply(envelope([{ op: "meta", title: "Board <7> & co" }]));
+    expect(document.title).toBe("Board <7> & co");
+    expect(dispatched.some((d) => d.event === "partial:error")).toBe(false);
+    const applied = dispatched.find((d) => d.event === "partial:applied");
+    expect(applied!.detail.ok).toBe(true);
+  });
+
+  it("meta with a non-string title leaves document.title untouched", () => {
+    document.title = "Before";
+    const { applier, dispatched } = makeApplier();
+    applier.apply(envelope([{ op: "meta", title: 7 }, { op: "meta" }]));
+    expect(document.title).toBe("Before");
+    expect(dispatched.some((d) => d.event === "partial:error")).toBe(false);
+    const applied = dispatched.find((d) => d.event === "partial:applied");
+    expect(applied!.detail.ok).toBe(true);
+  });
+
+  it("meta is a built-in verb, so a defineOp handler under that name never runs", () => {
+    document.title = "Before";
+    const { applier } = makeApplier();
+    const handler = vi.fn();
+    applier.defineOp("meta", handler);
+    applier.apply(envelope([{ op: "meta", title: "After" }]));
+    expect(document.title).toBe("After");
+    expect(handler).not.toHaveBeenCalled();
+  });
 });
 
 describe("Applier script neutralisation", () => {

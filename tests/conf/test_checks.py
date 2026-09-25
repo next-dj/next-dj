@@ -27,6 +27,7 @@ VALID_TYPED_VALUES: dict[str, object] = {
     "DEPENDENCY_RESOLVER": "next.deps.DependencyResolver",
     "COMPONENT_TEMPLATE_LOADER": "next.components.CachedComponentTemplateLoader",
     "NEXT_JS_OPTIONS": {},
+    "METADATA": {},
     "STATIC_VERSION": "2026.9.19",
 }
 
@@ -49,6 +50,7 @@ class TestValueTypeErrors:
             ("DEPENDENCY_RESOLVER", []),
             ("COMPONENT_TEMPLATE_LOADER", []),
             ("NEXT_JS_OPTIONS", []),
+            ("METADATA", []),
             ("STATIC_VERSION", 42),
         ],
         ids=[
@@ -61,6 +63,7 @@ class TestValueTypeErrors:
             "str_key_given_list_deps_resolver",
             "str_key_given_list_template_loader",
             "dict_key_given_list",
+            "dict_key_given_list_metadata",
             "optional_str_key_given_int",
         ],
     )

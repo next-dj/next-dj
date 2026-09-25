@@ -110,4 +110,13 @@ NEXT_FRAMEWORK = {
         "OPTIONS": {"CACHE_ALIAS": "wizards", "TIMEOUT": 1800},
     },
     "STATIC_VERSION": "v1",
+    "METADATA": {
+        "DEFAULTS": {
+            "site_name": "next.dj audit",
+            "title": {
+                "template": "{title} · {site_name}",
+                "default": "next.dj — Audit-trail forms",
+            },
+        }
+    },
 }

@@ -15,6 +15,7 @@ INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
+    "django.contrib.sitemaps",
     "django.contrib.staticfiles",
     "next",
     "blog",
@@ -23,6 +24,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.locale.LocaleMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -53,7 +55,8 @@ DATABASES = {
     "default": {"ENGINE": "django.db.backends.sqlite3", "NAME": BASE_DIR / "db.sqlite3"}
 }
 
-LANGUAGE_CODE = "en-us"
+LANGUAGE_CODE = "en"
+LANGUAGES = [("en", "English"), ("es", "Spanish")]
 TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
@@ -77,6 +80,7 @@ NEXT_FRAMEWORK = {
             "OPTIONS": {
                 "context_processors": [
                     "django.template.context_processors.request",
+                    "django.template.context_processors.i18n",
                     "blog.context_processors.site_nav",
                 ]
             },
@@ -98,4 +102,16 @@ NEXT_FRAMEWORK = {
         "next.pages.loaders.DjxTemplateLoader",
     ],
     "STATIC_VERSION": "v1",
+    "METADATA": {
+        "DEFAULTS": {
+            "base": "https://blog.example",
+            "site_name": "next.dj blog",
+            "description": "Small posts, plain Markdown, zero front-end build.",
+            "title": {
+                "template": "{title} · {site_name}",
+                "default": "next.dj — Markdown blog",
+            },
+            "og": {"type": "website"},
+        }
+    },
 }

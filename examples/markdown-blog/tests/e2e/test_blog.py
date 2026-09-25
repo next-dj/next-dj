@@ -92,3 +92,58 @@ def test_the_index_lists_the_posts_without_a_share_button(
 
     expect(page).to_have_url(f"{base_url}/posts/welcome/")
     expect(page.locator(SHARE)).to_have_count(1)
+
+
+def test_each_page_titles_the_tab_from_its_own_metadata(
+    page: Page, base_url: str
+) -> None:
+    page.goto(base_url)
+    wait_for_runtime(page)
+    expect(page).to_have_title("Latest posts · next.dj blog")
+
+    page.get_by_role("link", name="Welcome to the blog").click()
+
+    expect(page).to_have_url(f"{base_url}/posts/welcome/")
+    expect(page).to_have_title("Welcome to the blog · next.dj blog")
+
+
+def test_a_post_lists_an_alternate_link_per_language(page: Page, base_url: str) -> None:
+    page.goto(f"{base_url}/posts/welcome/")
+    wait_for_runtime(page)
+
+    alternates = page.locator("link[rel='alternate'][hreflang]")
+    expect(alternates).to_have_count(3)
+    expect(page.locator("link[rel='alternate'][hreflang='en']")).to_have_attribute(
+        "href", "https://blog.example/posts/welcome/"
+    )
+    expect(page.locator("link[rel='alternate'][hreflang='es']")).to_have_attribute(
+        "href", "https://blog.example/es/posts/welcome/"
+    )
+    expect(
+        page.locator("link[rel='alternate'][hreflang='x-default']")
+    ).to_have_attribute("href", "https://blog.example/posts/welcome/")
+
+
+def test_the_sitemap_lists_each_post_under_both_language_prefixes(
+    page: Page, base_url: str
+) -> None:
+    response = page.request.get(f"{base_url}/sitemap.xml")
+
+    assert response.status == 200
+    assert response.headers["content-type"] == "application/xml"
+    body = response.text()
+    assert "<loc>https://blog.example/posts/welcome/</loc>" in body
+    assert "<loc>https://blog.example/es/posts/welcome/</loc>" in body
+    assert 'hreflang="x-default" href="https://blog.example/posts/welcome/"' in body
+
+
+def test_robots_allows_every_crawler_and_names_the_sitemap(
+    page: Page, base_url: str
+) -> None:
+    response = page.request.get(f"{base_url}/robots.txt")
+
+    assert response.status == 200
+    assert response.headers["content-type"] == "text/plain; charset=utf-8"
+    assert response.text() == (
+        "User-agent: *\nAllow: /\n\nSitemap: https://blog.example/sitemap.xml\n"
+    )

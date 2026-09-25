@@ -1,8 +1,13 @@
 from pathlib import Path
 
 from next.pages import Page
+from next.pages.metadata import PageMetadataRegistry
 from next.pages.registry import PageContextRegistry
 from next.testing import SignalRecorder
+
+
+def _meta() -> dict[str, str]:
+    return {}
 
 
 class TestTemplateLoadedSignal:
@@ -109,6 +114,48 @@ class TestContextRegisteredSignal:
         """Creating a ``Page`` without registering context does not emit the signal."""
         Page()
         assert len(capture_context_registered) == 0
+
+
+class TestMetadataRegisteredSignal:
+    """``metadata_registered`` fires when a metadata callable is registered."""
+
+    def test_fires_once_per_registration(
+        self, capture_metadata_registered: SignalRecorder, tmp_path: Path
+    ) -> None:
+        page_inst = Page()
+        page_inst._metadata_registry.register(tmp_path / "a.py", dict)
+        page_inst._metadata_registry.register(tmp_path / "b.py", dict)
+        assert len(capture_metadata_registered) == 2
+
+    def test_sender_is_the_registry_class(
+        self, capture_metadata_registered: SignalRecorder, tmp_path: Path
+    ) -> None:
+        page_inst = Page()
+        page_inst._metadata_registry.register(tmp_path / "page.py", dict)
+        assert capture_metadata_registered.events[0].sender is PageMetadataRegistry
+
+    def test_event_carries_file_path_and_inherit(
+        self, capture_metadata_registered: SignalRecorder, tmp_path: Path
+    ) -> None:
+        page_inst = Page()
+        page_file = tmp_path / "page.py"
+        page_inst._metadata_registry.register(page_file, dict, inherit=True)
+        event = capture_metadata_registered.events[0]
+        assert event.kwargs == {"file_path": page_file, "inherit": True}
+
+    def test_the_decorator_fires_it(
+        self, capture_metadata_registered: SignalRecorder
+    ) -> None:
+        page_inst = Page()
+        page_inst.metadata(_meta)
+        assert len(capture_metadata_registered) == 1
+        assert capture_metadata_registered.events[0].kwargs["inherit"] is False
+
+    def test_does_not_fire_without_registration(
+        self, capture_metadata_registered: SignalRecorder
+    ) -> None:
+        Page()
+        assert len(capture_metadata_registered) == 0
 
 
 class TestPageRenderedSignal:

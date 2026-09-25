@@ -145,7 +145,7 @@ Multiline tag bodies
 The framework adds one line-spanning branch to Django's template tag pattern during ``AppConfig.ready``, so a framework block tag may carry its arguments over several lines.
 That allows readable block components and slots when the argument list is long.
 
-The added branch matches thirteen literal tag names, ``action_url``, ``asset``, ``collect_scripts``, ``collect_styles``, ``component``, ``form``, ``set_slot``, ``slot``, ``template``, ``use_module``, ``use_script``, ``use_style``, and ``zone``, in the void form and in the ``{% #name %}`` opening form alike.
+The added branch matches fourteen literal tag names, ``action_url``, ``asset``, ``collect_scripts``, ``collect_styles``, ``component``, ``form``, ``metadata``, ``set_slot``, ``slot``, ``template``, ``use_module``, ``use_script``, ``use_style``, and ``zone``, in the void form and in the ``{% #name %}`` opening form alike.
 Django's own block-tag branch stays behind it untouched, so every other tag lexes exactly as stock Django lexes it, in a DJX file and in a plain Django template alike.
 A newline inside ``{% if x %}`` still ends the tag, a third-party tag keeps its stock lexing, and a stray ``{%`` inside inline JavaScript swallows no more text than it does without next.dj installed.
 ``{{ ... }}`` and ``{# ... #}`` are outside the rebind entirely, so a newline still ends a variable or a comment.
@@ -262,6 +262,18 @@ Django's own lexer finds them, so a placeholder written inside ``{% verbatim %}`
 A ``layout.djx`` carrying no placeholder reports ``next.W001`` during ``manage.py check`` and one carrying several reports ``next.W078``.
 Nested layouts each carry their own placeholder and compose from innermost to outermost.
 
+Metadata
+--------
+
+.. describe:: {% metadata %}
+
+   Renders the head tags of the page being rendered, the title, the description, the robots directives, the canonical link, the hreflang alternates, the verification tokens, the ``other`` entries, the Open Graph properties, the Twitter card, and the JSON-LD script, one per line in that order.
+   The values come from the fold of the settings tier and every ``metadata`` dict or ``@page.metadata`` callable along the ancestor chain of the page, and the first read of the tag is what runs the callables.
+   Takes no arguments, and an argument raises ``TemplateSyntaxError`` at parse time.
+   A template rendered outside a page render, such as an error page or a plain Django view, renders the empty string.
+   A page that declares metadata while no layout in its chain carries the tag is reported as ``next.W085``.
+   See :doc:`/content/topics/seo/metadata` for the declaration forms and :doc:`pages` for the key-to-tag table.
+
 Tag loading
 -----------
 
@@ -280,3 +292,4 @@ See also
    :doc:`/content/topics/components` for ``{% component %}`` and slots.
    :doc:`/content/topics/static-assets/template-tags` for the static tags.
    :doc:`/content/topics/partial-rendering/zones` for the ``{% zone %}`` tag.
+   :doc:`/content/topics/seo/metadata` for the ``{% metadata %}`` tag.

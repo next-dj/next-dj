@@ -202,3 +202,40 @@ def test_a_reserved_slug_reports_the_error_and_keeps_the_preview_live(
 
     expect(page.locator(f"{PREVIEW} em")).to_have_text("italic")
     expect(page.locator(f"{PREVIEW} strong")).to_have_count(0)
+
+
+def test_an_article_titles_the_tab_after_itself(page: Page, base_url: str) -> None:
+    seed_articles()
+    page.goto(base_url)
+    wait_for_runtime(page)
+    expect(page).to_have_title("Home · next.dj Wiki")
+
+    page.get_by_role("link", name="Routing internals").click()
+
+    expect(page).to_have_url(f"{base_url}/wiki/routing-internals/")
+    expect(page).to_have_title("Routing internals · next.dj Wiki")
+
+
+def test_the_sitemap_lists_the_seeded_articles(page: Page, base_url: str) -> None:
+    seed_articles()
+    response = page.request.get(f"{base_url}/sitemap.xml")
+
+    assert response.status == 200
+    assert response.headers["content-type"] == "application/xml"
+    body = response.text()
+    assert "<loc>https://wiki.example/wiki/routing-internals/</loc>" in body
+    assert "<loc>https://wiki.example/wiki/lifecycle/</loc>" in body
+    assert "<loc>https://wiki.example/docs/routing/</loc>" in body
+    assert "/search/" not in body
+
+
+def test_robots_fences_the_search_and_names_the_sitemap(
+    page: Page, base_url: str
+) -> None:
+    response = page.request.get(f"{base_url}/robots.txt")
+
+    assert response.status == 200
+    assert response.text() == (
+        "User-agent: *\nDisallow: /search/\n\n"
+        "Sitemap: https://wiki.example/sitemap.xml\n"
+    )

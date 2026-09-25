@@ -37,4 +37,53 @@ class PageContextShapeError(TypeError):
         self.file_path = file_path
 
 
-__all__ = ["PageContextShapeError", "PageModuleImportError"]
+class PageMetadataShapeError(TypeError):
+    """A metadata source declared a key or a value the schema does not accept."""
+
+    def __init__(self, source: str, detail: str) -> None:
+        """Compose the message from the source and what it got wrong."""
+        super().__init__(f"{source} {detail}")
+        self.source = source
+        self.detail = detail
+
+
+class PageMetadataConflictError(ValueError):
+    """A `page.py` declared metadata both as a dict and as a callable."""
+
+    def __init__(self, file_path: Path) -> None:
+        """Compose the message from the page that carries both forms."""
+        super().__init__(
+            f"{file_path} declares both a metadata dict and an @page.metadata callable"
+        )
+        self.file_path = file_path
+
+
+class PageMetadataURLError(ValueError):
+    """A relative metadata URL had neither a request nor a base to resolve against."""
+
+    def __init__(self, url: str) -> None:
+        """Compose the message from the URL that stayed relative."""
+        super().__init__(
+            f"cannot make {url!r} absolute without a request or a metadata base"
+        )
+        self.url = url
+
+
+class PageMetadataTemplateError(ValueError):
+    """A title template used a placeholder or a syntax the safe substitution rejects."""
+
+    def __init__(self, template: str, detail: str) -> None:
+        """Compose the message from the template and what it got wrong."""
+        super().__init__(f"metadata title template {template!r} {detail}")
+        self.template = template
+        self.detail = detail
+
+
+__all__ = [
+    "PageContextShapeError",
+    "PageMetadataConflictError",
+    "PageMetadataShapeError",
+    "PageMetadataTemplateError",
+    "PageMetadataURLError",
+    "PageModuleImportError",
+]

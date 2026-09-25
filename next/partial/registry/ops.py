@@ -19,6 +19,7 @@ BUILTIN_OPS: frozenset[str] = frozenset(
         "layer.close",
         "url",
         "visit",
+        "meta",
     }
 )
 

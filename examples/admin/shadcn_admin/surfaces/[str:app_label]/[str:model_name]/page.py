@@ -12,10 +12,12 @@ from django.core.exceptions import PermissionDenied
 from django.db.models import Field, Model
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.utils.safestring import SafeString, mark_safe
+from django.utils.text import capfirst
 from shadcn_admin import utils
 
-from next import action, context
+from next import action, context, page
 from next.forms import redirect_to_origin
+from next.pages import MetadataDict
 from next.urls import with_query
 
 
@@ -156,6 +158,12 @@ def changelist_state(
         "has_change_permission": model_admin.has_change_permission(request),
         "has_add_permission": model_admin.has_add_permission(request),
     }
+
+
+@page.metadata
+def changelist_meta(changelist_state: dict[str, Any]) -> MetadataDict:
+    """Title the tab after the model, read from the context key by its name."""
+    return {"title": capfirst(changelist_state["verbose_name_plural"])}
 
 
 @action("admin:bulk_action", login_required=True)

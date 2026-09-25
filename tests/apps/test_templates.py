@@ -17,8 +17,8 @@ _DJANGO_BACKEND = "django.template.backends.django.DjangoTemplates"
 
 _DJANGO_TAG_PATTERN = r"({%.*?%}|{{.*?}}|{#.*?#})"
 _NEXT_TAG_ALTERNATION = (
-    "action_url|asset|collect_scripts|collect_styles|component|form|set_slot|slot|"
-    "template|use_module|use_script|use_style|zone"
+    "action_url|asset|collect_scripts|collect_styles|component|form|metadata|"
+    "set_slot|slot|template|use_module|use_script|use_style|zone"
 )
 _WIDENED_TAG_PATTERN = (
     rf"((?:{{%\s*#?(?:{_NEXT_TAG_ALTERNATION})\b(?s:.*?)%}}|{{%.*?%}})"

@@ -103,4 +103,13 @@ NEXT_FRAMEWORK = {
     ],
     "STATIC_BACKENDS": [{"BACKEND": "notes.backends.TenantPrefixStaticBackend"}],
     "STATIC_VERSION": ASSET_BUILD_ID,
+    "METADATA": {
+        "DEFAULTS": {
+            "site_name": "next.dj notes",
+            "title": {
+                "template": "{title} · {site_name}",
+                "default": "next.dj — Multi-tenant notes",
+            },
+        }
+    },
 }

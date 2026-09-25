@@ -116,6 +116,11 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - After placeholder replacement completes.
        ``placeholders_replaced`` is the tuple of replaced slot names.
        ``injected_bytes`` is the length delta.
+   * - ``metadata_registered``
+     - ``PageMetadataRegistry``
+     - ``file_path``, ``inherit``
+     - After a ``@page.metadata`` callable is attached to a page module.
+       ``inherit`` is the flag the registration carried.
    * - ``page_rendered``
      - ``Page``
      - ``file_path``, ``duration_ms``, ``styles_count``, ``scripts_count``, ``context_keys``
@@ -154,6 +159,10 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - After ``NextFrameworkSettings.reload`` drops its caches.
        Every receiver runs even when one raises, so a receiver that validates a settings value never leaves the managers behind it holding state built from the settings that reload discarded.
        The first error reaches the caller that asked for the reload once the chain is done.
+   * - ``sitemap_items_registered``
+     - ``SitemapItemsRegistry``
+     - ``root``, ``trail``, ``func``
+     - After ``@sitemap.items`` binds a callable to a route trail under a page root, and again when a re-executed ``sitemap.py`` replaces the binding.
    * - ``sse_stream_closed``
      - ``PatchEventStream``
      - ``request``, ``duration_ms``, ``envelopes_sent``
@@ -241,6 +250,12 @@ Partial rendering
 ~~~~~~~~~~~~~~~~~
 
 .. automodule:: next.partial.signals
+   :members:
+
+SEO
+~~~
+
+.. automodule:: next.seo.signals
    :members:
 
 Dependencies

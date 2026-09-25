@@ -33,6 +33,10 @@ They read ``router_access_slot`` instead, at watch time and at check time.
 ``collect_component_assets`` folds the co-located assets of one composite component into a caller-supplied collector, which is how a component render reaches the static pipeline from the same side.
 Every method resolves the manager when it is called rather than when the slot is bound, so a settings reload that drops the wrapped manager still reaches every later render.
 
+``SeoRoutes`` answers the sitemap and robots routes the lazy urlpatterns of ``next.urls`` append as their third pattern source, and the version those routes were built under.
+``next.seo`` imports ``next.urls`` for the router manager and the reverse helper, so the pattern concat reads ``seo_routes_slot`` rather than importing the seo area back.
+``patterns`` answers the two sitemap routes while a ``sitemap.py`` exists and the robots route while a robots source does, and ``version`` is the seo manager version that joins the router and form-action versions in the three-part token the concat is cached against.
+
 Implementations
 ---------------
 
@@ -54,11 +58,14 @@ Each area binds its own implementation from a ``ports`` module of its own, one c
    * - ``RouterAccess``
      - ``next.urls.ports.RouterAccessImpl``
      - ``router_access_slot``
+   * - ``SeoRoutes``
+     - ``next.seo.ports.SeoRoutesImpl``
+     - ``seo_routes_slot``
    * - ``StaticAssets``
      - ``next.static.ports.StaticAssetsImpl``
      - ``static_assets_slot``
 
-``next.apps`` binds all four in ``NextFrameworkConfig.ready()``, ahead of every step that imports user code.
+``next.apps`` binds all five in ``NextFrameworkConfig.ready()``, ahead of every step that imports user code.
 A project that replaces one subclasses the shipped implementation and calls ``set`` on the slot from the ``ready()`` of an application listed after ``next`` in ``INSTALLED_APPS``, since the slot holds one implementation and the last binding wins.
 
 Public API
@@ -73,5 +80,5 @@ See also
 .. seealso::
 
    :doc:`apps` for the startup step that binds the slots.
-   :doc:`partial` for the subsystem that implements ``PartialShaper``.
+   :doc:`partial` for the subsystem that implements ``PartialShaper``, and :doc:`seo` for the one that implements ``SeoRoutes``.
    :doc:`/content/internals/overview` for where ``next.ports`` sits in the subsystem dependency graph.

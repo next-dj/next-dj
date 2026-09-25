@@ -313,3 +313,15 @@ def test_replacing_the_island_unmounts_the_old_root_and_mounts_one_new(
 
     expect(column_of(page, backlog).locator(CARD)).to_have_count(3)
     assert Card.objects.filter(title="Mounted once").count() == 1
+
+
+def test_a_board_titles_the_tab_after_itself(
+    page: Page, base_url: str, board: Board
+) -> None:
+    page.goto(base_url)
+    wait_for_runtime(page)
+    expect(page).to_have_title("next.dj — Kanban")
+
+    open_board(page, base_url, board)
+
+    expect(page).to_have_title(f"{board.title} · next.dj Kanban")

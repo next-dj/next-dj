@@ -159,6 +159,7 @@ omit = [
     "*/next/forms/checks/*",
     "*/next/partial/checks/*",
     "*/next/apps/checks.py",
+    "*/next/seo/checks.py",
 ]
 
 # Collapse source-tree and site-packages paths so coverage reports, omits, and

@@ -8,33 +8,35 @@ Module summary
 
 next.dj contributes Django system checks for every subsystem.
 Run them through ``uv run python manage.py check`` and the framework reports configuration mistakes with a code and a hint.
-Four of them are deployment checks and answer only to ``uv run python manage.py check --deploy``, see `Check registration`_ for which four and why.
+Eight of them are deployment checks and answer only to ``uv run python manage.py check --deploy``, see `Check registration`_ for which eight and why.
 
 Check registration
 ------------------
 
 ``next.checks.register_all`` runs during ``AppConfig.ready``.
 It imports each subsystem ``checks`` module so the ``@register`` side effects take effect.
-The imported modules are ``next.apps.checks``, ``next.components.checks``, ``next.conf.checks``, ``next.forms.checks``, ``next.pages.checks``, ``next.partial.checks``, ``next.static.checks``, and ``next.urls.checks``.
+The imported modules are ``next.apps.checks``, ``next.components.checks``, ``next.conf.checks``, ``next.forms.checks``, ``next.pages.checks``, ``next.partial.checks``, ``next.seo.checks``, ``next.static.checks``, and ``next.urls.checks``.
 
 Each of these modules registers checks.
 ``next.pages.checks``, ``next.forms.checks``, and ``next.partial.checks`` are packages rather than single modules, and importing the package imports every submodule that carries a check.
 The address a project imports stays the same either way, and each submodule opens with the catalogue of codes it owns, which is what the tables under `Check code reference`_ are derived from.
 
-Four checks are deployment checks and carry ``deploy=True``, so ``manage.py check`` alone never runs them and ``manage.py check --deploy`` does.
-They are ``check_page_module_imports`` (``next.E017``), ``check_component_module_imports`` (``next.E084``), ``check_composed_templates_compile`` (``next.E072``), and ``check_asset_version_moves_between_deploys`` (``next.W083``).
+Eight checks are deployment checks and carry ``deploy=True``, so ``manage.py check`` alone never runs them and ``manage.py check --deploy`` does.
+Four of them are ``check_page_module_imports`` (``next.E017``), ``check_component_module_imports`` (``next.E084``), ``check_composed_templates_compile`` (``next.E072``), and ``check_asset_version_moves_between_deploys`` (``next.W083``).
 The first three import or compile every user module of a tree, which costs a full walk that a routine ``manage.py`` command should not pay.
 The fourth describes a configuration every development checkout has, so reporting it outside a deployment audit would warn every project about nothing.
+The other four are the SEO content audits ``check_seo_description``, ``check_seo_titles``, ``check_seo_canonical``, and ``check_seo_alternates`` (``next.W089`` to ``next.W096``), which grade the folded metadata of every page and carry the ``seo`` tag beside ``deploy=True``, see `SEO`_ below.
 
 Every next.dj check carries the ``next`` tag.
 That tag is the importable string constant ``next.checks.NEXT``, so a project check joins the framework ones by decorating itself with ``@register(NEXT)`` rather than by repeating the literal.
 Run ``uv run python manage.py check --tag next`` to execute only the framework checks and skip the built-in Django and third-party ones.
 Checks that also concern templates or URL patterns keep their :doc:`Django tags <django:ref/checks>` (``templates``, ``urls``) alongside ``next``, so filtering by those tags still reaches them.
-A tagged run reports what a full run reports, and ``--tag next --deploy`` adds the four deployment checks to it.
+A tagged run reports what a full run reports, and ``--tag next --deploy`` adds the eight deployment checks to it.
+The SEO audits also carry the ``seo`` tag, the importable constant ``next.checks.SEO``, so ``manage.py check --deploy --tag seo`` runs the audits and nothing else.
 Every check that reads registrations discovers the files declaring them itself, rather than relying on a URL check having expanded the router first.
 
 ``next.checks.reset_check_caches`` drops every per-run check cache so the next run rebuilds from the current sources.
-The cached state covers the router and components managers, the composed-pages memo, the collected URL patterns, the page module memo, and the context registry.
+The cached state covers the router and components managers, the composed-pages memo, the collected URL patterns, the page module memo, the context and metadata registries, the site metadata defaults, and the seo manager with its items registry.
 Most of these caches also clear on ``settings_reloaded``, which a ``NEXT_FRAMEWORK`` change through ``override_settings`` triggers.
 Tests and scripts that invoke checks directly and mutate the page or component tree in place call ``reset_check_caches`` explicitly, since the caches otherwise freeze the scanned state for the lifetime of the process.
 
@@ -72,9 +74,34 @@ Pages
 ~~~~~
 
 The package splits by subject, one submodule per group of codes.
-``contexts`` covers the ``@context`` callables of a routed ``page.py``, ``layouts`` the page-body placeholder of a ``layout.djx``, ``loaders`` the ``TEMPLATE_LOADERS`` entries, ``modules`` what a ``page.py`` declares, ``processors`` the context processors a render runs, ``structure`` the shape of a tree on disk, and ``zones`` a ``@context`` reading a key another callable bound to a zone.
+``contexts`` covers the ``@context`` callables of a routed ``page.py``, ``layouts`` the page-body placeholder of a ``layout.djx``, ``loaders`` the ``TEMPLATE_LOADERS`` entries, ``metadata`` the ``METADATA`` settings scope and the metadata of every routed ``page.py``, ``modules`` what a ``page.py`` declares, ``processors`` the context processors a render runs, ``structure`` the shape of a tree on disk, and ``zones`` a ``@context`` reading a key another callable bound to a zone.
 
 .. automodule:: next.pages.checks
+   :members:
+
+SEO
+~~~
+
+The ``metadata`` submodule of ``next.pages.checks`` carries two tiers.
+The default tier, ``next.E098`` to ``next.E109`` and ``next.W084`` to ``next.W088``, runs on every ``manage.py check`` and reports a declaration the framework cannot render as intended, from an unknown key to a page whose composed template never renders ``{% metadata %}``.
+The audit tier, ``next.W089`` to ``next.W096``, grades the folded result the way a search engine would, a missing or wrongly sized description, a duplicate or over-long title, a canonical that resolves nowhere, and an hreflang mapping without a fallback.
+
+The audits are registered with ``deploy=True`` and the ``seo`` tag, so a plain ``manage.py check`` never runs them, ``manage.py check --deploy`` runs them beside the other deployment checks, and ``manage.py check --deploy --tag seo`` narrows the run to the audits alone.
+The thresholds live in ``NEXT_FRAMEWORK["METADATA"]["CHECKS"]``, ``TITLE_MAX`` at 60, ``DESCRIPTION_MAX`` at 160, and ``REQUIRE_DESCRIPTION`` at ``True``, and the description floor of 50 characters is fixed.
+Every check of both tiers reads the static fold, the settings tier plus the ``metadata`` dicts of the chain, so a ``@page.metadata`` callable is validated for its shape and never called, and the title and description audits skip a page whose chain carries one.
+``SILENCED_SYSTEM_CHECKS`` drops an audit by its id and cannot turn one on.
+See :doc:`/content/topics/seo/auditing` for the two tiers from the project side.
+
+SEO: sitemap and robots
+~~~~~~~~~~~~~~~~~~~~~~~
+
+``next.seo.checks`` reads the ``sitemap.py``, ``robots.py``, and ``robots.txt`` at the top of every page root.
+Every check is in the default tier and carries the ``urls`` tag beside ``next``, and none of them needs a request or a database.
+The errors, ``next.E110`` to ``next.E117``, cover a source that fails to import or defers its annotations, an ``@sitemap.items`` trail the tree does not route, sitemap templates that do not load, a module attribute outside its shape, a second robots source, a page or a urlpattern on a served address, two roots sharing a section label, and a static ``robots.txt`` that is not UTF-8.
+The warnings, ``next.W097`` to ``next.W103``, cover a dynamic route the sitemap neither lists nor excludes, a listed trail whose page is ``noindex``, a served address the host root does not resolve, a ``Disallow`` covering a listed URL or a ``noindex`` page, a source below the top of its tree, and a static ``robots.txt`` naming no ``Sitemap:`` line.
+See :doc:`seo` for the check callables and :doc:`/content/topics/seo/sitemaps` and :doc:`/content/topics/seo/robots` for the behaviour each one guards.
+
+.. automodule:: next.seo.checks
    :members:
 
 URLs
@@ -486,6 +513,70 @@ Errors
      - ``OPTIONS`` names a key other than ``context_processors``, the one option a file router entry supports.
        Extra page roots belong in the top-level ``DIRS``.
      - ``next.urls.checks``
+   * - ``next.E098``
+     - ``NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]`` is no mapping, or names a key or a value the metadata schema refuses.
+       The keys are the lower-case ones a ``page.py`` declares, and the settings title takes only the ``template`` and ``default`` form.
+       An option of ``METADATA`` outside ``DEFAULTS``, ``NOINDEX``, ``CANONICAL_QUERY``, and ``CHECKS`` is ``next.E035``.
+     - ``next.pages.checks.metadata``
+   * - ``next.E099``
+     - A title template, in the settings or in a ``page.py``, names a placeholder outside ``{title}`` and ``{site_name}``, reaches an attribute or an index, carries a conversion or a format spec, or is malformed.
+       Every template is evaluated under every ``LANGUAGES`` code, and the message names the languages the failure held under when it is not all of them.
+     - ``next.pages.checks.metadata``
+   * - ``next.E100``
+     - A title template is declared without a ``default``, so a page under it with no title of its own renders none.
+     - ``next.pages.checks.metadata``
+   * - ``next.E101``
+     - A ``base`` is not an origin, an absolute http or https URL with a host and no path, query, or fragment.
+     - ``next.pages.checks.metadata``
+   * - ``next.E102``
+     - A ``page.py`` declares both a ``metadata`` dict and a ``@page.metadata`` callable.
+     - ``next.pages.checks.metadata``
+   * - ``next.E103``
+     - A module-level ``metadata`` is not a mapping.
+     - ``next.pages.checks.metadata``
+   * - ``next.E104``
+     - A ``metadata`` dict names a key or a value the schema refuses, at the top level or inside ``og``, ``twitter``, ``robots``, ``alternates``, or ``verification``, or a ``twitter.card`` outside ``summary``, ``summary_large_image``, ``app``, and ``player``.
+     - ``next.pages.checks.metadata``
+   * - ``next.E105``
+     - A title, a title default, or an absolute title is the empty string, which renders an empty ``<title>``.
+     - ``next.pages.checks.metadata``
+   * - ``next.E106``
+     - A ``@page.metadata`` callable is declared in a file no page render collects, an imported helper module or a sibling page.
+     - ``next.pages.checks.metadata``
+   * - ``next.E107``
+     - A ``page.py`` registers more than one ``@page.metadata`` callable, and only the last one runs.
+     - ``next.pages.checks.metadata``
+   * - ``next.E108``
+     - A ``@page.metadata`` callable is not annotated as returning a mapping.
+       The check is static, because running the callable at check time could reach an unmigrated database.
+     - ``next.pages.checks.metadata``
+   * - ``next.E109``
+     - A URL field of the fold, a canonical, an ``og.url``, an alternate, or an image, carries a scheme outside http and https.
+     - ``next.pages.checks.metadata``
+   * - ``next.E110``
+     - A ``sitemap.py`` or a ``robots.py`` raises on import, or opens with ``from __future__ import annotations``, which turns the annotations the dependency resolver reads into strings.
+     - ``next.seo.checks``
+   * - ``next.E111``
+     - An ``@sitemap.items`` trail is routed by no page of its tree, so the sitemap raises when built.
+     - ``next.seo.checks``
+   * - ``next.E112``
+     - A ``sitemap.py`` exists and ``sitemap.xml`` or ``sitemap_index.xml`` does not load, because ``django.contrib.sitemaps`` is not installed or the template backend has no ``APP_DIRS``.
+     - ``next.seo.checks``
+   * - ``next.E113``
+     - A module attribute of ``sitemap.py`` or ``robots.py`` is outside its shape, a ``changefreq`` outside the protocol, a ``priority`` outside 0 to 1, a ``limit`` or ``cache`` that is not an int, or a ``rules`` that is not a list of ``Rule``.
+     - ``next.seo.checks``
+   * - ``next.E114``
+     - More than one robots source exists, a ``robots.py`` beside a ``robots.txt`` or a source in two page roots, and only the first answers ``/robots.txt``.
+     - ``next.seo.checks``
+   * - ``next.E115``
+     - A page directory is named ``sitemap.xml``, ``sitemap-<section>.xml``, or ``robots.txt`` while a source serves that address, or a urlpattern of ``ROOT_URLCONF`` resolves the address ahead of the framework view.
+     - ``next.seo.checks``
+   * - ``next.E116``
+     - Two page roots take the same sitemap section label, so the later one serves as ``<label>-2``.
+     - ``next.seo.checks``
+   * - ``next.E117``
+     - A static ``robots.txt`` does not decode as UTF-8.
+     - ``next.seo.checks``
 
 A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.
 
@@ -617,6 +708,77 @@ Warnings
        Every deploy then stamps the same version and the guard cannot ask an open client to reload stale assets.
        The check carries ``deploy=True`` and the code fires under ``manage.py check --deploy`` alone, because a development checkout is exactly the configuration it describes.
      - ``next.partial.checks.backends``
+   * - ``next.W084``
+     - A title template never names ``{title}``, so every page under it renders the same title.
+       The hint names ``{title}`` as the spelling, because the ``%s`` placeholder of Next.js is not substituted.
+     - ``next.pages.checks.metadata``
+   * - ``next.W085``
+     - A page declares metadata, but its composed template and the components it reaches render no ``{% metadata %}``, so the head tags never reach the page.
+       A ``render()`` page and a composition ``next.E072`` reports are skipped.
+     - ``next.pages.checks.metadata``
+   * - ``next.W086``
+     - A canonical or a social image folds to a root-relative URL while no ``base`` is set, so the absolute form follows the request host.
+       Reported only with ``DEBUG`` off.
+     - ``next.pages.checks.metadata``
+   * - ``next.W087``
+     - A page asks for hreflang alternates with ``alternates.languages=True``, but ``ROOT_URLCONF`` uses no ``i18n_patterns()``, so every language points at the same URL.
+     - ``next.pages.checks.metadata``
+   * - ``next.W088``
+     - A ``noindex`` page points its canonical at another origin, which passes no signal.
+     - ``next.pages.checks.metadata``
+   * - ``next.W089``
+     - A page folds to no description while ``METADATA["CHECKS"]["REQUIRE_DESCRIPTION"]`` is on.
+       The check carries ``deploy=True`` and the ``seo`` tag.
+     - ``next.pages.checks.metadata``
+   * - ``next.W090``
+     - Two or more routes fold to the same title under ``LANGUAGE_CODE``, one warning per group.
+       The check carries ``deploy=True`` and the ``seo`` tag.
+     - ``next.pages.checks.metadata``
+   * - ``next.W091``
+     - A title folds to more than ``METADATA["CHECKS"]["TITLE_MAX"]`` characters under ``LANGUAGE_CODE``.
+       The check carries ``deploy=True`` and the ``seo`` tag.
+     - ``next.pages.checks.metadata``
+   * - ``next.W092``
+     - A description folds to fewer than 50 or more than ``METADATA["CHECKS"]["DESCRIPTION_MAX"]`` characters under ``LANGUAGE_CODE``.
+       The check carries ``deploy=True`` and the ``seo`` tag.
+     - ``next.pages.checks.metadata``
+   * - ``next.W093``
+     - A literal same-origin canonical resolves to no URL of the project.
+       The check carries ``deploy=True`` and the ``seo`` tag.
+     - ``next.pages.checks.metadata``
+   * - ``next.W094``
+     - A literal canonical sits on a dynamic route, so every match claims the same URL.
+       The check carries ``deploy=True`` and the ``seo`` tag.
+     - ``next.pages.checks.metadata``
+   * - ``next.W095``
+     - An hreflang mapping names no ``x-default``, neither as a key nor as ``alternates.x_default``.
+       The check carries ``deploy=True`` and the ``seo`` tag.
+     - ``next.pages.checks.metadata``
+   * - ``next.W096``
+     - An hreflang mapping names a language code ``settings.LANGUAGES`` does not list.
+       The check carries ``deploy=True`` and the ``seo`` tag.
+     - ``next.pages.checks.metadata``
+   * - ``next.W097``
+     - A dynamic route of a tree with a ``sitemap.py`` has no ``@sitemap.items`` callable and matches no ``exclude`` glob, so the sitemap lists no URL for it.
+     - ``next.seo.checks``
+   * - ``next.W098``
+     - An ``@sitemap.items`` trail names a page whose static metadata is ``noindex``, so the sitemap invites crawlers to a page the tag turns away.
+     - ``next.seo.checks``
+   * - ``next.W099``
+     - A source exists and ``/sitemap.xml`` or ``/robots.txt`` does not resolve under ``ROOT_URLCONF``, because ``include("next.urls")`` sits under a prefix or inside ``i18n_patterns``.
+     - ``next.seo.checks``
+   * - ``next.W100``
+     - A ``Disallow`` of ``robots.py`` covers a URL the sitemap lists, or ``/sitemap.xml`` itself.
+     - ``next.seo.checks``
+   * - ``next.W101``
+     - A ``Disallow`` of ``robots.py`` covers a ``noindex`` page, whose tag a crawler kept out never reads.
+     - ``next.seo.checks``
+   * - ``next.W102``
+     - A ``sitemap.py``, ``robots.py``, or ``robots.txt`` sits below the top of its page tree, where nothing reads it.
+     - ``next.seo.checks``
+   * - ``next.W103``
+     - A static ``robots.txt`` names no ``Sitemap:`` line while the project serves a sitemap, and a static file is served as written.
+     - ``next.seo.checks``
 
 Codes are assigned per check and are not contiguous.
 

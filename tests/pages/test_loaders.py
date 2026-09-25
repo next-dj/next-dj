@@ -25,6 +25,7 @@ from next.pages.loaders import (
     has_load_errors,
     last_load_error,
     load_page_module,
+    module_generation,
     read_module_string_lists,
     reset_module_memo,
 )
@@ -1703,3 +1704,50 @@ class TestTheModuleMemoIsBounded:
 
         assert _load_python_module_memo(page_file) is None
         assert page_file not in loaders_module._MODULE_MEMO
+
+
+class TestModuleGeneration:
+    """The generation moves on every write to the memo and on nothing else."""
+
+    def test_a_load_moves_the_generation(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("x = 1\n")
+        before = module_generation()
+        _load_python_module_memo(page_file)
+        assert module_generation() == before + 1
+
+    def test_a_memo_hit_leaves_it_alone(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("x = 1\n")
+        _load_python_module_memo(page_file)
+        before = module_generation()
+        _load_python_module_memo(page_file)
+        assert module_generation() == before
+
+    def test_an_absent_file_that_was_never_loaded_leaves_it_alone(
+        self, tmp_path
+    ) -> None:
+        before = module_generation()
+        _load_python_module_memo(tmp_path / "page.py")
+        assert module_generation() == before
+
+    def test_forgetting_a_removed_file_moves_it(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("x = 1\n")
+        _load_python_module_memo(page_file)
+        before = module_generation()
+        page_file.unlink()
+        _load_python_module_memo(page_file)
+        assert module_generation() == before + 1
+
+    def test_a_failed_load_moves_it(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("def render( invalid syntax {\n")
+        before = module_generation()
+        _load_python_module_memo(page_file)
+        assert module_generation() == before + 1
+
+    def test_reset_module_memo_moves_it(self) -> None:
+        before = module_generation()
+        reset_module_memo()
+        assert module_generation() == before + 1

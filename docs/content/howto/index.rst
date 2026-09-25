@@ -35,6 +35,17 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 :doc:`customize-error-pages`
    Replace the default 404 and 500 pages.
 
+.. rubric:: SEO
+
+:doc:`set-page-titles-and-seo-tags`
+   Give every page its title, description, canonical link, and Open Graph tags.
+
+:doc:`publish-a-sitemap`
+   Serve ``/sitemap.xml`` and ``/robots.txt`` from the page root, with database-backed routes.
+
+:doc:`audit-seo-before-deploy`
+   Run the opt-in SEO audits in CI and tune their thresholds.
+
 .. rubric:: Context and components
 
 :doc:`share-context-across-pages`
@@ -145,6 +156,9 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    require-login-on-pages
    internationalize-routes
    customize-error-pages
+   set-page-titles-and-seo-tags
+   publish-a-sitemap
+   audit-seo-before-deploy
    share-context-across-pages
    resolve-feature-flags-with-di
    build-a-composite-component

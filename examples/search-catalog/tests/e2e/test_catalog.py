@@ -230,3 +230,18 @@ def test_the_minlength_hint_follows_the_field_state(
         "Looks good — typing filters the catalog live."
     )
     assert page.locator(SEARCH).evaluate("field => field.validity.valid") is True
+
+
+def test_a_preset_renames_the_tab_without_a_reload(
+    page: Page, base_url: str, demo_data: None
+) -> None:
+    open_listing(page, base_url)
+    expect(page).to_have_title("All products · next.dj catalog")
+    page.evaluate("() => { window.__stillHere = true; }")
+
+    seen = applied_count(page)
+    page.get_by_role("button", name="Cheapest first").click()
+    wait_for_apply(page, seen)
+
+    expect(page).to_have_title("Cheapest first · next.dj catalog")
+    assert page.evaluate("() => window.__stillHere") is True

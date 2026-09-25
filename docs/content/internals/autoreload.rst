@@ -93,11 +93,12 @@ The failure costs that backend its trees and nothing else.
 It is logged once per backend and subject rather than per tick, and again once the framework is reconfigured.
 
 - Each page root contributes a ``**/page.py`` spec.
+- Each page root contributes one spec per name in ``SEO_SOURCE_NAMES``, the ``sitemap.py``, ``robots.py``, and ``robots.txt`` at the top of the tree, so an edit to a sitemap or robots source restarts the process like a ``page.py`` edit does.
 - Each page root paired with the name its router returns from ``components_folder_name`` contributes a ``**/<components-folder>/**/component.py`` spec, ``_components`` by default.
   A router that returns ``None`` there contributes no component spec.
 - Each extra component root from ``COMPONENT_BACKENDS`` contributes a ``**/component.py`` spec.
 
-Only Python entrypoints are watched.
+Only Python entrypoints and the static ``robots.txt`` are watched.
 ``.djx`` templates and co-located assets are deliberately omitted from the specs.
 
 ``iter_all_autoreload_watch_specs`` appends the specs registered through ``register_autoreload_watch_spec``.

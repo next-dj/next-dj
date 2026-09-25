@@ -136,9 +136,25 @@ Terms used throughout the next.dj documentation.
    page
       A directory under the page root with a ``page.py``, or a virtual route with only a ``template.djx``.
 
+   page metadata
+      The title, the description, and the rest of the head a page declares through a ``metadata`` dict or a ``@page.metadata`` callable in ``page.py``, folded along the ancestor chain and rendered by ``{% metadata %}``.
+      Distinct from the registry metadata of an action, which is the guard and the dispatch data stored on a registration.
+      See :doc:`/content/topics/seo/metadata`.
+
    page root
       A directory that the router walks for page discovery.
       Comes from ``APP_DIRS`` and ``DIRS`` in ``PAGE_BACKENDS``.
+      A ``sitemap.py``, ``robots.py``, or ``robots.txt`` at its top switches the sitemap and robots routes on for the tree.
+
+   robots source
+      The one file a site serves ``/robots.txt`` from, a ``robots.py`` declaring ``Rule`` groups or a static ``robots.txt`` served as written.
+      A site has exactly one, and ``next.E114`` reports a second.
+      See :doc:`/content/topics/seo/robots`.
+
+   sitemap section
+      The sitemap of one page root, served at ``/sitemap-<section>.xml`` and labelled after the application or the directory of the root.
+      ``/sitemap.xml`` is the section itself while there is one, and an index of every section otherwise.
+      See :doc:`/content/topics/seo/sitemaps`.
 
    multi-project layout
       Multiple Django applications or explicit ``DIRS`` entries each contributing page trees while optionally sharing component directories through ``COMPONENT_BACKENDS``.

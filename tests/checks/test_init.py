@@ -10,7 +10,7 @@ import next.checks as checks_package
 from next.checks import _LAZY_ATTRIBUTES, _LAZY_SOURCES_BY_MODULE
 
 
-_EAGER = frozenset({"NEXT", "register_all", "reset_check_caches"})
+_EAGER = frozenset({"NEXT", "SEO", "register_all", "reset_check_caches"})
 _NEXT_ROOT = pathlib.Path(inspect.getfile(checks_package)).parent.parent
 _CHECK_ID = re.compile(r"^next\.[EWI]\d+$")
 

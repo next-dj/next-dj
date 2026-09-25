@@ -78,7 +78,7 @@ Composition fills the first placeholder a layout carries, so keep exactly one pe
    <!doctype html>
    <html>
      <head>
-       <title>{{ site_name }}</title>
+       {% metadata %}
        {% collect_styles %}
      </head>
      <body>
@@ -97,6 +97,7 @@ A layout in an intermediate segment directory without a sibling page is not cove
 
 Layouts can declare layout-level CSS and JS through the static collector tags shown above.
 The tags also live in inner layouts when you want a section-scoped style sheet.
+``{% metadata %}`` renders the title and the rest of the head from the metadata the pages declare, so no layout writes a ``<title>`` of its own, see :doc:`seo/metadata`.
 
 Fallback for an unfilled placeholder
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -130,6 +131,10 @@ The ``inherit_context=True`` flag publishes the value to every descendant page, 
 
 Context functions in a segment ``page.py`` take dependencies the same way any page does.
 The resolver shares its cache across the entire layout chain and the leaf page, so a value resolved at an ancestor segment is not recomputed further down.
+
+The same segment ``page.py`` is where a section declares its metadata.
+A module-level ``metadata`` dict reaches every page under the directory without a flag, and a ``@page.metadata(inherit=True)`` callable does the same with the request in hand.
+The section title template, the robots directives of a private area, and the Open Graph type of a blog all live here, see :doc:`seo/metadata` for the merge order.
 
 Nested layout patterns
 ----------------------
@@ -267,5 +272,6 @@ See also
 
    :doc:`pages` for the page body sources and the layout placeholder.
    :doc:`context` for context inheritance rules.
+   :doc:`seo/metadata` for the ``{% metadata %}`` tag and the metadata a segment ``page.py`` declares.
    :doc:`multi-project` for project-level layout roots.
    :doc:`/content/internals/page-discovery` for the composition pipeline.

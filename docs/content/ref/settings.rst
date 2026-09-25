@@ -21,7 +21,7 @@ A plural ``*_BACKENDS`` key holds an ordered list of sources the manager consult
 Partial rendering uses a single protocol backend, so only the first entry runs.
 A singular ``*_BACKEND`` key holds the one engine for a concern.
 A subsystem prefix (``PAGE_``, ``COMPONENT_``, ``STATIC_``, ``FORM_``, ``URL_``, ``TEMPLATE_``, ``JS_``, ``PARTIAL_``) groups related keys.
-``NEXT_JS_OPTIONS`` stands outside the prefix scheme and configures the bundled client runtime.
+``NEXT_JS_OPTIONS`` stands outside the prefix scheme and configures the bundled client runtime, and ``METADATA`` stands outside it as the page metadata scope.
 
 .. _ref-settings-merge:
 
@@ -45,7 +45,7 @@ Write the whole entry, ``BACKEND`` included.
 Each key accepts one shape, and a value of any other type is dropped in favour of the default rather than merged into it.
 
 - The list keys (``PAGE_BACKENDS``, ``COMPONENT_BACKENDS``, ``STATIC_BACKENDS``, ``FORM_ACTION_BACKENDS``, ``PARTIAL_BACKENDS``, ``TEMPLATE_LOADERS``, ``FORM_ANCHOR_FILES``) accept a list.
-- The mapping keys (``NEXT_JS_OPTIONS``, ``FORM_WIZARD_BACKEND``) accept a dict.
+- The mapping keys (``NEXT_JS_OPTIONS``, ``FORM_WIZARD_BACKEND``, ``METADATA``) accept a dict.
 - The dotted-path keys (``URL_RESOLVER``, ``DEPENDENCY_RESOLVER``, ``COMPONENT_TEMPLATE_LOADER``) accept a string naming an importable class, and ``JS_CONTEXT_SERIALIZER`` accepts such a dotted path or ``None``.
 - ``STATIC_VERSION`` accepts a string or ``None``.
 - ``URL_NAME_TEMPLATE`` also accepts a string, but a format template such as ``page_{name}`` rather than a dotted path.
@@ -477,6 +477,59 @@ The key is also the deploy stamp the partial asset version derives from, so one 
 A project that wants the two to differ pins ``VERSION`` in its ``PARTIAL_BACKENDS`` entry, which wins over this key, and a project that names neither while running no manifest earns ``next.W083`` on ``manage.py check --deploy``.
 See :doc:`/content/deployment/static-files` for the trade-off, :doc:`/content/topics/partial-rendering/reference` for the ``VERSION`` option, and :doc:`/content/topics/static-assets/template-tags` for the per-URL ``version`` argument of ``{% asset %}``.
 
+Metadata
+--------
+
+METADATA
+~~~~~~~~
+
+Dict holding the page metadata scope, the site-wide defaults of the metadata chain and the options beside them.
+
+Default value ``{}``.
+
+The scope takes four upper-case options, and any other key is reported as ``next.E035``.
+
+.. code-block:: python
+   :caption: config/settings.py
+
+   from django.utils.translation import gettext_lazy as _
+
+   NEXT_FRAMEWORK = {
+       "METADATA": {
+           "DEFAULTS": {
+               "base": "https://notes.example",
+               "site_name": _("Notes"),
+               "title": {"template": _("{title} · {site_name}"), "default": _("Notes")},
+               "description": _("A notebook that lives in the browser."),
+               "robots": {"index": True, "follow": True},
+               "og": {"type": "website"},
+               "twitter": {"card": "summary_large_image", "site": "@notes"},
+           },
+           "NOINDEX": False,
+           "CANONICAL_QUERY": ("page",),
+           "CHECKS": {"TITLE_MAX": 60, "DESCRIPTION_MAX": 160, "REQUIRE_DESCRIPTION": True},
+       },
+   }
+
+``DEFAULTS`` is the outermost segment of every page's metadata chain and takes the same lower-case keys a ``metadata`` dict in a ``page.py`` takes, with one difference.
+Its ``title`` is the ``{"template": ..., "default": ...}`` form alone, because the settings tier has no page of its own to title, and its template therefore applies to every page, the root included.
+The value is normalised once per settings reload, a key or a value the schema refuses is reported as ``next.E098``, and a template without a default, a ``base`` that is not an origin, and an empty title draw ``next.E100``, ``next.E101``, and ``next.E105`` here as they do on a page.
+See :doc:`/content/topics/seo/metadata` for the merge order and the title template.
+
+``NOINDEX`` set to ``True`` replaces the robots directives of every page with ``noindex, nofollow``, for a staging host a crawler must not index.
+It passes through ``bool()`` and defaults to ``False``.
+
+``CANONICAL_QUERY`` is the tuple of query parameter names a self canonical keeps, in the order the tuple lists them.
+Every other parameter is dropped from the canonical URL, and a ``page=1`` pair is dropped even when ``page`` is listed.
+It defaults to the empty tuple, so a self canonical carries no query at all until the project names the parameters that change the content.
+
+``CHECKS`` holds the thresholds of the SEO audits that run under ``manage.py check --deploy --tag seo``.
+``TITLE_MAX`` defaults to 60 and ``DESCRIPTION_MAX`` to 160 characters, and ``REQUIRE_DESCRIPTION`` defaults to ``True``.
+A threshold holding anything but an integer falls back to its default, and ``REQUIRE_DESCRIPTION`` passes through ``bool()``.
+See :doc:`/content/topics/seo/auditing` for the audits and :doc:`system-checks` for the codes.
+
+A ``METADATA`` value that is not a dict is dropped in favour of the default and reported as ``next.E076``.
+
 Patching defaults
 -----------------
 
@@ -518,4 +571,5 @@ See also
    :doc:`/content/topics/extending` for the broader picture.
    :doc:`/content/deployment/settings` for production tuned values.
    :doc:`/content/topics/static-assets/js-context` for ``NEXT_JS_OPTIONS``.
+   :doc:`/content/topics/seo/metadata` for ``METADATA``.
    :class:`next.static.scripts.ScriptInjectionPolicy` for the policy enum.

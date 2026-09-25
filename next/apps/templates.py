@@ -30,6 +30,7 @@ _NEXT_TAG_NAMES = (
     "collect_styles",
     "component",
     "form",
+    "metadata",
     "set_slot",
     "slot",
     "template",
