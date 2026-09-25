@@ -27,6 +27,9 @@ Read the topic that matches the part you are touching, then jump to the referenc
 :doc:`components`
    Simple and composite components, props, slots, co-located assets.
 
+:doc:`seo/index`
+   Page metadata, the title template, social and canonical tags, the sitemap and robots files, and the SEO audits.
+
 .. rubric:: Forms and static assets
 
 :doc:`forms/index`
@@ -70,6 +73,7 @@ Read the topic that matches the part you are touching, then jump to the referenc
    layouts
    context
    components
+   seo/index
    forms/index
    static-assets/index
    partial-rendering/index

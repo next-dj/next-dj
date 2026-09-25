@@ -8,7 +8,9 @@ from unittest.mock import patch
 import pytest
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.db import connection
 from django.http import Http404
+from django.test.utils import CaptureQueriesContext
 from django.urls import path, reverse
 from wiki.backends import HybridRouterBackend
 from wiki.models import Article
@@ -31,6 +33,8 @@ if TYPE_CHECKING:
 
 
 pytestmark = pytest.mark.django_db
+
+LOC_RE = re.compile(r"<loc>([^<]+)</loc>")
 
 
 def _article_param(annotation: object) -> inspect.Parameter:
@@ -515,3 +519,115 @@ class TestValidationPreservesPreview:
         assert response.status_code == 200
         assert "data-markdown-preview" in body
         assert "<strong>bold</strong> preview" in body
+
+
+class TestPageMetadata:
+    """Titles fold through the site template, editing pages opt out of the index."""
+
+    def test_article_title_comes_from_the_slug_provider(
+        self, next_client: NextClient, routing_doc: Article
+    ) -> None:
+        body = next_client.get(routing_doc.url).content.decode()
+        assert f"<title>{routing_doc.title} · next.dj Wiki</title>" in body
+        assert '<meta name="robots"' not in body
+
+    def test_article_metadata_reads_the_context_row_without_a_query(
+        self, next_client: NextClient, routing_doc: Article
+    ) -> None:
+        """Only the two `DArticle` contexts hit the table, the callable adds none."""
+        next_client.get(routing_doc.url)
+        with CaptureQueriesContext(connection) as captured:
+            next_client.get(routing_doc.url)
+        by_slug = [
+            query["sql"]
+            for query in captured.captured_queries
+            if '"wiki_article"."slug" = ' in query["sql"]
+        ]
+        assert len(by_slug) == 2
+
+    def test_index_names_itself_through_the_template(
+        self, next_client: NextClient
+    ) -> None:
+        body = next_client.get("/").content.decode()
+        assert "<title>Home · next.dj Wiki</title>" in body
+        assert (
+            '<meta name="description" content="File-routed documentation beside '
+            'database articles, one router.">'
+        ) in body
+
+    @pytest.mark.parametrize(
+        ("path", "title"),
+        [
+            ("/docs/routing/", "Routing"),
+            ("/docs/components/", "Components"),
+            ("/search/", "Search"),
+        ],
+        ids=["routing", "components", "search"],
+    )
+    def test_file_docs_carry_their_own_titles(
+        self, next_client: NextClient, path: str, title: str
+    ) -> None:
+        body = next_client.get(path).content.decode()
+        assert f"<title>{title} · next.dj Wiki</title>" in body
+        assert '<meta name="robots"' not in body
+
+    @pytest.mark.parametrize(
+        ("path", "title"),
+        [
+            ("/articles/new/", "Create an article"),
+            ("/articles/edit/routing-internals/", "Edit article"),
+        ],
+        ids=["new", "edit"],
+    )
+    def test_editing_pages_stay_out_of_the_index(
+        self, next_client: NextClient, routing_doc: Article, path: str, title: str
+    ) -> None:
+        body = next_client.get(path).content.decode()
+        assert f"<title>{title} · next.dj Wiki</title>" in body
+        assert '<meta name="robots" content="noindex">' in body
+
+
+class TestSitemapAndRobots:
+    """`sitemap.py` lists articles from the table, `robots.py` fences the forms."""
+
+    def test_sitemap_lists_the_docs_and_every_article(
+        self, next_client: NextClient, routing_doc: Article, lifecycle_doc: Article
+    ) -> None:
+        response = next_client.get("/sitemap.xml")
+        assert response.status_code == 200
+        assert response["Content-Type"] == "application/xml"
+        assert set(LOC_RE.findall(response.content.decode())) == {
+            "https://wiki.example/",
+            "https://wiki.example/docs/routing/",
+            "https://wiki.example/docs/components/",
+            f"https://wiki.example{routing_doc.url}",
+            f"https://wiki.example{lifecycle_doc.url}",
+        }
+
+    def test_an_article_carries_its_save_date_as_lastmod(
+        self, next_client: NextClient, routing_doc: Article
+    ) -> None:
+        body = next_client.get("/sitemap.xml").content.decode()
+        stamp = routing_doc.updated_at.date().isoformat()
+        assert (
+            f"<loc>https://wiki.example{routing_doc.url}</loc>"
+            f"<lastmod>{stamp}</lastmod>"
+        ) in body
+
+    def test_noindex_pages_and_excluded_trails_stay_out(
+        self, next_client: NextClient, routing_doc: Article
+    ) -> None:
+        body = next_client.get("/sitemap.xml").content.decode()
+        assert "/search/" not in body
+        assert "/articles/" not in body
+
+    def test_robots_fences_the_search_and_names_the_sitemap(
+        self, next_client: NextClient
+    ) -> None:
+        response = next_client.get("/robots.txt")
+        assert response.status_code == 200
+        assert response["Content-Type"] == "text/plain; charset=utf-8"
+        assert response.content.decode() == (
+            "User-agent: *\nDisallow: /search/\n\n"
+            "Sitemap: https://wiki.example/sitemap.xml\n"
+        )

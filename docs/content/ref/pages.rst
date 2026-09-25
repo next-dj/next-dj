@@ -7,6 +7,7 @@ Module summary
 --------------
 
 ``next.pages`` exposes the ``Page`` coordinator and its ``page`` singleton, the ``@context`` decorator, the ``Context`` and ``ContextResult`` value objects, the ``PageModuleImportError`` raised by a broken ``page.py`` and the ``PageContextShapeError`` raised by a keyless ``@context`` answering no mapping, and the ``checks`` and ``signals`` submodules.
+It also exposes the page metadata surface, the folded ``Metadata`` value, the ``MetadataDict`` and ``SiteMetadataDict`` input shapes, the ``MetadataRenderer`` contract with its ``HtmlMetadataRenderer``, and the five ``PageMetadata*`` errors, see `Metadata`_ below.
 
 Public API
 ----------
@@ -35,9 +36,9 @@ Public API
 Cross-area contract
 ~~~~~~~~~~~~~~~~~~~
 
-Nine ``Page`` methods carry no leading underscore because other framework areas call them, not because application code should.
-``composed_template_for``, ``build_render_context``, ``render_with_static_assets``, ``authorization_outcome``, ``has_template``, ``zone_bindings``, ``create_url_pattern``, ``render``, and ``clear_template_caches`` serve ``next.forms``, ``next.partial``, ``next.urls``, and ``next.testing``.
-``next.forms`` and ``next.partial`` read the first six, ``next.urls`` builds every page pattern through ``create_url_pattern``, and ``next.testing`` calls ``render`` and ``clear_template_caches`` from its rendering and isolation helpers.
+Eleven ``Page`` methods carry no leading underscore because other framework areas call them, not because application code should.
+``composed_template_for``, ``build_render_context``, ``render_with_static_assets``, ``authorization_outcome``, ``has_template``, ``zone_bindings``, ``create_url_pattern``, ``render``, ``clear_template_caches``, ``templated_title``, and ``static_metadata`` serve ``next.forms``, ``next.partial``, ``next.urls``, ``next.testing``, and ``next.seo``.
+``next.forms`` and ``next.partial`` read the first six, ``next.urls`` builds every page pattern through ``create_url_pattern``, ``next.testing`` calls ``render`` and ``clear_template_caches`` from its rendering and isolation helpers, ``next.partial`` reads ``templated_title`` for the ``meta`` patch verb, and ``next.seo`` reads ``static_metadata`` to keep a ``noindex`` page out of the sitemap and its checks.
 They follow the underscore rule of :doc:`/content/faq/general`, so they are safe from removal without notice.
 They do not carry the application-facing stability of a Stable tier, and their signatures may drift as partial rendering evolves.
 ``register_template`` is called by ``composed_template_for`` on every cache miss and by no other area, so it serves application code seeding a composed body under the same underscore rule, again without the Stable tier's signature guarantee.
@@ -145,6 +146,85 @@ The ``next.E029`` check reports the same mistake statically, from the return ann
 .. autoclass:: next.pages.PageContextShapeError
    :members:
 
+Metadata
+~~~~~~~~
+
+``next.pages.metadata`` folds the settings tier and every ``metadata`` dict or ``@page.metadata`` callable along the ancestor chain of a page into one ``Metadata`` value, which ``{% metadata %}`` renders through the class ``NEXT_FRAMEWORK["METADATA"]["RENDERER"]`` names, ``HtmlMetadataRenderer`` by default.
+:doc:`/content/topics/seo/metadata` covers the declaration forms and the merge order.
+``Page.metadata`` is the decorator, ``Page.static_metadata`` folds the settings tier and the dicts of a page without a request, ``Page.templated_title`` applies the chain template to one title the way that page would render it, running the inherited ancestor callables against a context it builds only when one exists, and ``Page.resolve_metadata`` runs the whole chain, callables included, for a request built by the caller.
+``resolve_metadata`` gets there by building the whole render context of the page, so every context callable runs as well and the call costs what a render costs short of the template.
+
+.. autoclass:: next.pages.Metadata
+   :members:
+
+.. autoclass:: next.pages.MetadataDict
+   :members:
+
+.. autoclass:: next.pages.SiteMetadataDict
+   :members:
+
+The renderer contract takes a folded ``Metadata`` and the request, which may be ``None`` outside one, and answers the head markup as a ``SafeString``.
+The contract is pluggable, ``NEXT_FRAMEWORK["METADATA"]["RENDERER"]`` names the subclass, and the framework builds it without arguments once and again on every ``settings_reloaded``, see :doc:`settings`.
+
+.. autoclass:: next.pages.MetadataRenderer
+   :members:
+
+.. autoclass:: next.pages.HtmlMetadataRenderer
+   :members:
+
+The table below names the tag each key of the fold emits, in the order the renderer writes them.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 76
+
+   * - Key
+     - Emitted markup
+   * - ``title``
+     - ``<title>``, the chain template already applied.
+   * - ``description``
+     - ``<meta name="description">``.
+   * - ``robots``
+     - ``<meta name="robots">`` from the flags and limits, plus ``<meta name="googlebot">`` when the block carries a ``googlebot`` entry.
+       ``NOINDEX`` in the settings replaces both with ``noindex, nofollow``.
+   * - ``canonical``
+     - ``<link rel="canonical">``, the self URL for ``True`` and the declared URL for a string, made absolute against ``base``.
+   * - ``alternates``
+     - One ``<link rel="alternate" hreflang="...">`` per language, the ``x-default`` entry last.
+   * - ``verification``
+     - ``<meta name="google-site-verification">``, ``<meta name="yandex-verification">``, and ``<meta name="msvalidate.01">`` per token.
+   * - ``other``
+     - One ``<meta name="...">`` per name and text.
+   * - ``og``
+     - ``<meta property="og:*">`` for the block, ``og:image`` with ``og:image:width``, ``og:image:height``, and ``og:image:alt`` per image, and ``<meta property="article:*">`` for the article block.
+       ``og:title``, ``og:description``, ``og:site_name``, ``og:url``, and ``og:locale`` are derived from the fold when the block leaves them empty.
+   * - ``twitter``
+     - ``<meta name="twitter:*">`` for the fields the block names, nothing derived.
+   * - ``jsonld``
+     - One ``<script type="application/ld+json">`` per mapping, with ``<``, ``>``, and ``&`` escaped inside the JSON.
+   * - ``base`` and ``site_name``
+     - No tag of their own.
+       ``base`` resolves every relative URL above and ``site_name`` fills ``{site_name}`` in the title template and ``og:site_name``.
+
+The five metadata errors name the source that misbehaved.
+``PageMetadataShapeError`` is a key or a value the schema refuses, ``PageMetadataConflictError`` a ``page.py`` declaring both a dict and a callable, ``PageMetadataTemplateError`` a title template the safe substitution rejects, and ``PageMetadataURLError`` a relative URL with neither a request nor a base to resolve against.
+``PageMetadataRequestError`` is a ``"canonical": True`` or an ``"alternates": {"languages": True}`` rendered without a request, since both name the page itself, and its ``key`` attribute names the key that asked.
+
+.. autoclass:: next.pages.PageMetadataShapeError
+   :members:
+
+.. autoclass:: next.pages.PageMetadataConflictError
+   :members:
+
+.. autoclass:: next.pages.PageMetadataTemplateError
+   :members:
+
+.. autoclass:: next.pages.PageMetadataURLError
+   :members:
+
+.. autoclass:: next.pages.PageMetadataRequestError
+   :members:
+
 Ports
 ~~~~~
 
@@ -164,27 +244,44 @@ Visits
 ``next.pages.visits`` holds ``visit_request``, which copies a live request and restates it as a GET of one page URL.
 ``authorization_outcome`` asks a page through that copy, so a ``render()`` reading the method, the path, or the query string answers an out-of-band caller as it answers a visit.
 The live request is never modified, and the user, the session, and every other attribute a middleware attached come through untouched.
+The copy leaves out the dependency cache of a form dispatch, and ``authorization_outcome`` resolves ``render()`` with a fresh cache, so a guard never reads a value the dispatch resolved.
 See *Render paths and what each one runs* in :doc:`/content/internals/request-lifecycle` for the callers.
 
 System checks
 ~~~~~~~~~~~~~
 
 ``next.pages.checks`` registers the Django system checks for the pages subsystem.
-They run through ``uv run python manage.py check``, except ``check_page_module_imports``, which is a deployment check and runs under ``manage.py check --deploy``.
-The package splits by subject into ``contexts``, ``layouts``, ``loaders``, ``modules``, ``processors``, ``structure``, and ``zones``, and importing the package registers every one of them.
+They run through ``uv run python manage.py check``, except ``check_page_module_imports``, which is a deployment check and runs under ``manage.py check --deploy``, and the four ``check_seo_*`` audits, which run under ``manage.py check --deploy`` and carry the ``seo`` tag.
+The package splits by subject into ``contexts``, ``layouts``, ``loaders``, ``metadata``, ``modules``, ``processors``, ``structure``, and ``zones``, and importing the package registers every one of them.
+``metadata`` is a package of its own, ``scope``, ``shape``, ``templates``, and ``audits``, see :doc:`system-checks` for the codes each one owns.
 
-The package exports twelve check callables.
+The package exports twenty-seven check callables.
 
 - ``check_context_functions``.
 - ``check_context_processor_signature``.
 - ``check_context_reads_foreign_zone``.
 - ``check_context_registration_files``.
 - ``check_layout_templates``.
+- ``check_metadata_absolute_urls``.
+- ``check_metadata_callable_returns_mapping``.
+- ``check_metadata_hreflang_patterns``.
+- ``check_metadata_noindex_canonical``.
+- ``check_metadata_registration_files``.
+- ``check_metadata_settings_scope``.
+- ``check_metadata_tag_rendered``.
+- ``check_metadata_title_templates``.
+- ``check_metadata_url_schemes``.
 - ``check_page_functions``.
+- ``check_page_metadata_shape``.
 - ``check_page_module_imports``.
 - ``check_pages_structure``.
 - ``check_request_in_context``.
+- ``check_seo_alternates``.
+- ``check_seo_canonical``.
+- ``check_seo_description``.
+- ``check_seo_titles``.
 - ``check_single_keyless_context``.
+- ``check_single_metadata_callable``.
 - ``check_template_loaders``.
 - ``check_unrouted_working_directory_pages``.
 
@@ -193,7 +290,7 @@ See :doc:`system-checks` for each check identifier, its condition, and the full 
 Signals
 -------
 
-See :doc:`signals` and :doc:`/content/topics/signals` for the pages signals (``template_loaded``, ``context_registered``, ``page_rendered``).
+See :doc:`signals` and :doc:`/content/topics/signals` for the pages signals (``template_loaded``, ``context_registered``, ``metadata_registered``, ``page_rendered``).
 
 See also
 --------
@@ -201,4 +298,5 @@ See also
 .. seealso::
 
    :doc:`/content/topics/pages` for the topic guide.
+   :doc:`/content/topics/seo/metadata` for the metadata guide.
    :doc:`/content/internals/page-discovery` for the internal pipeline.

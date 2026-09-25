@@ -1,11 +1,20 @@
+from collections.abc import Callable
+from pathlib import Path
+
 import pytest
+from django.test import override_settings
+from django.utils.functional import lazy
 
 import next.pages
 import next.partial
 import next.partial.errors
 import next.partial.patches
 from next.partial import Asset, FormMeta, Patches, PatchResponse
-from next.partial.errors import ReservedPatchKeyError
+from next.partial.errors import (
+    BuiltinPatchOpError,
+    ForeignPageNotAuthorizedError,
+    ReservedPatchKeyError,
+)
 from next.partial.headers import CONTENT_TYPE
 from next.partial.render import ZoneRenderResult
 from next.static import KindRegistry, StaticAsset
@@ -15,8 +24,62 @@ from tests.support import (
     BUILD_MANIFEST,
     MANIFEST_BACKENDS,
     BuildManifestBackend,
+    file_router_config_entry,
     partial_request,
+    write_page_chain,
 )
+
+
+INHERITING_ROOT = """
+from next.pages import page
+
+
+@page.context("board", inherit_context=True)
+def board():
+    return "Kanban"
+
+
+@page.metadata(inherit=True)
+def root_meta(board):
+    return {"title": {"template": "{title} | " + board}}
+"""
+DENYING_LEAF = """
+from django.http import HttpResponseForbidden
+
+metadata = {"title": "Leaf"}
+
+
+def render():
+    return HttpResponseForbidden()
+"""
+LEAF_TITLE = 'template = "<p>Leaf</p>"\nmetadata = {"title": "Leaf"}\n'
+STATIC_ROOT = 'metadata = {"title": {"template": "{title} | Static"}}\n'
+ZONED_LEAF = """
+from next.pages import page
+
+
+@page.context("user")
+def user():
+    return "Ann"
+
+
+@page.metadata
+def leaf_meta(user):
+    return {"title": user}
+"""
+
+
+def _routed(root: Path) -> override_settings:
+    """Route the page tree under `root` as the only page backend."""
+    entry = file_router_config_entry(pages_dir=root)
+    return override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]})
+
+
+def _builder_for(root: Path, page_path: Path) -> Patches:
+    """Return a builder whose posted origin is the URL routing `page_path`."""
+    return Patches(
+        partial_request(f"/{page_path.parent.relative_to(root).as_posix()}/")
+    )
 
 
 class TestAddAssetResolvesLoad:
@@ -314,6 +377,91 @@ class TestPatchesBuilder:
         assert Patches(None, version="9f3c").envelope().version == "9f3c"
 
 
+class TestMeta:
+    """`meta` ships the title the origin page would render, and nothing else."""
+
+    def test_the_ancestor_template_wraps_the_title_of_the_verb(self) -> None:
+        envelope = Patches(partial_request("/titled/leaf/")).meta("Wallets").envelope()
+        assert envelope.ops[0].as_dict() == {"op": "meta", "title": "Wallets · Site"}
+        assert envelope.ops[0].extras == {"title": "Wallets · Site"}
+
+    def test_the_template_applies_only_to_descendants(self) -> None:
+        envelope = Patches(partial_request("/titled/")).meta("Wallets").envelope()
+        assert envelope.ops[0].extras == {"title": "Wallets"}
+
+    def test_absolute_bypasses_the_template(self) -> None:
+        envelope = (
+            Patches(partial_request("/titled/leaf/"))
+            .meta("Wallets", absolute=True)
+            .envelope()
+        )
+        assert envelope.ops[0].as_dict() == {"op": "meta", "title": "Wallets"}
+
+    @pytest.mark.parametrize(
+        "builder",
+        [
+            lambda: Patches.versioned("v1"),
+            lambda: Patches(partial_request(origin=None)),
+            lambda: Patches(partial_request("/_next/form/x/")),
+        ],
+        ids=["no_request", "no_origin", "foreign_origin"],
+    )
+    def test_a_builder_without_an_origin_page_sends_the_bare_title(
+        self, builder: Callable[[], Patches]
+    ) -> None:
+        envelope = builder().meta("Wallets").envelope()
+        assert envelope.ops[0].as_dict() == {"op": "meta", "title": "Wallets"}
+
+    def test_a_lazy_title_is_evaluated_when_the_op_is_recorded(self) -> None:
+        language = ["en"]
+        title = lazy(lambda: f"Wallets ({language[0]})", str)()
+        builder = Patches(partial_request("/titled/leaf/")).meta(title)
+        language[0] = "de"
+        payload = builder.envelope().ops[0].as_dict()
+        assert payload == {"op": "meta", "title": "Wallets (en) · Site"}
+        assert type(payload["title"]) is str
+
+    def test_op_refuses_the_builtin_verb(self) -> None:
+        with pytest.raises(BuiltinPatchOpError):
+            Patches.versioned("v1").op("meta", title="Wallets")
+
+    def test_an_inherited_callable_template_wraps_the_title(
+        self, tmp_path: Path
+    ) -> None:
+        _root, leaf = write_page_chain(
+            tmp_path, [("root", INHERITING_ROOT), ("leaf", LEAF_TITLE)]
+        )
+        with _routed(tmp_path):
+            envelope = _builder_for(tmp_path, leaf).meta("Post").envelope()
+        assert envelope.ops[0].extras == {"title": "Post | Kanban"}
+
+    def test_an_inherited_callable_runs_behind_the_origin_guard(
+        self, tmp_path: Path
+    ) -> None:
+        _root, leaf = write_page_chain(
+            tmp_path, [("root", INHERITING_ROOT), ("leaf", DENYING_LEAF)]
+        )
+        with _routed(tmp_path), pytest.raises(ForeignPageNotAuthorizedError):
+            _builder_for(tmp_path, leaf).meta("Post")
+
+    def test_a_static_chain_runs_no_guard(self, tmp_path: Path) -> None:
+        _root, leaf = write_page_chain(
+            tmp_path, [("root", STATIC_ROOT), ("leaf", DENYING_LEAF)]
+        )
+        with _routed(tmp_path):
+            envelope = _builder_for(tmp_path, leaf).meta("Post").envelope()
+        assert envelope.ops[0].extras == {"title": "Post | Static"}
+
+    def test_meta_chains_in_order(self) -> None:
+        envelope = (
+            Patches(partial_request("/titled/leaf/"))
+            .push_url("/titled/leaf/")
+            .meta("Wallets")
+            .envelope()
+        )
+        assert [op.op for op in envelope.ops] == ["url", "meta"]
+
+
 class TestPatchResponse:
     """`PatchResponse` is an HttpResponse carrying serialized bytes."""
 
@@ -428,6 +576,22 @@ class TestBuilderZoneManifest:
         )
         assert [op.op for op in envelope.ops] == ["morph", "context"]
         assert envelope.ops[1].as_dict() == {"op": "context", "data": {"seen": 7}}
+
+
+class TestZoneOverridesReachTheMetadataTag:
+    """A `{% metadata %}` in a zone body reads the overrides of the morph."""
+
+    def test_the_override_replaces_the_context_value(self, tmp_path: Path) -> None:
+        (leaf,) = write_page_chain(tmp_path, [("leaf", ZONED_LEAF)])
+        (leaf.parent / "template.djx").write_text(
+            '{% zone "head" %}{% metadata %}{% endzone %}'
+        )
+        with _routed(tmp_path):
+            builder = _builder_for(tmp_path, leaf)
+            bob = builder.morph(zone="head", overrides={"user": "Bob"}).envelope()
+            assert "<title>Bob</title>" in bob.ops[0].html
+            ann = builder.morph(zone="head").envelope()
+        assert "<title>Ann</title>" in ann.ops[1].html
 
 
 class TestZoneDeltaReservedKeys:

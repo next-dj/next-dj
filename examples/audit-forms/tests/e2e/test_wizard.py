@@ -3,6 +3,8 @@ from access.models import AccessRequest, AuditEntry
 from e2e_support.browser import (
     PageProbe,
     applied_count,
+    assert_same_document,
+    mark_document,
     wait_for_apply,
     wait_for_runtime,
 )
@@ -87,13 +89,13 @@ def test_the_opener_shows_a_real_modal_dialog_without_a_reload(
 ) -> None:
     page.goto(base_url)
     wait_for_runtime(page)
-    page.evaluate("() => { window.__stillHere = true; }")
+    mark_document(page)
 
     dialog = open_wizard(page)
 
     assert dialog.evaluate("element => element.open") is True
     assert dialog.evaluate("element => element.matches(':modal')") is True
-    assert page.evaluate("() => window.__stillHere") is True
+    assert_same_document(page)
     expect(page).to_have_url(f"{base_url}/request/identity/")
     expect(section(dialog, "identity")).to_have_attribute("data-state", "active")
     expect(progress(dialog, "identity")).to_have_attribute("data-status", "current")
@@ -128,7 +130,7 @@ def test_walking_every_step_closes_the_dialog_and_refreshes_the_list(
 ) -> None:
     page.goto(base_url)
     wait_for_runtime(page)
-    page.evaluate("() => { window.__stillHere = true; }")
+    mark_document(page)
     expect(page.locator(f"{REQUEST_LIST} li")).to_have_count(0)
 
     dialog = open_wizard(page)
@@ -160,7 +162,7 @@ def test_walking_every_step_closes_the_dialog_and_refreshes_the_list(
     expect(page.locator(f"{REQUEST_LIST} li")).to_have_count(1)
     expect(page.locator(REQUEST_LIST)).to_contain_text("ada@example.com")
     expect(page).to_have_url(f"{base_url}/")
-    assert page.evaluate("() => window.__stillHere") is True
+    assert_same_document(page)
 
     access_request = AccessRequest.objects.get()
     assert access_request.email == "ada@example.com"

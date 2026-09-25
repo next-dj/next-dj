@@ -6,12 +6,15 @@ The example covers the reading side of the framework: a custom `TemplateLoader` 
 
 ## What you will see
 
-| URL                   | Description                                                |
-| --------------------- | ---------------------------------------------------------- |
-| `/`                   | Latest posts, one entry per folder under `screens/posts/`. |
-| `/posts/welcome/`     | A longer post. Headings, lists, and reading-time meta.     |
-| `/posts/hello-world/` | A minimal post with a fenced code block.                   |
-| `/about/`             | Virtual page. Only `template.djx`, no `page.py`.           |
+| URL | Description |
+| --- | --- |
+| `/` | Latest posts, one entry per folder under `screens/posts/`. |
+| `/posts/welcome/` | A longer post. Headings, lists, and reading-time meta. |
+| `/posts/hello-world/` | A minimal post with a fenced code block. |
+| `/es/posts/welcome/` | The same post under the Spanish prefix. Same body, `lang="es"`, its own canonical. |
+| `/about/` | Static page. A `template.djx` body and a `page.py` that only declares metadata. |
+| `/sitemap.xml` | Every static route once per language with hreflang alternates, from a four-line `sitemap.py`. |
+| `/robots.txt` | The static `robots.txt` at the page root, served byte for byte. |
 
 ## How to run
 
@@ -110,7 +113,7 @@ The URL name is derived, not stored. `post_metadata` builds `next:page_posts_<sl
 
 ### 4. Per-post `page.py`
 
-Each post module registers metadata and nothing else, because the loader owns the body:
+Each post module registers context and page metadata and nothing else, because the loader owns the body:
 
 ```python
 _POST = Path(__file__).parent / "template.md"
@@ -124,9 +127,15 @@ def post() -> dict[str, str]:
 @context("reading_minutes")
 def read() -> int:
     return reading_minutes(read_post_body(_POST))
+
+
+@page.metadata
+def post_meta(post: dict[str, str]) -> MetadataDict:
+    """Title and describe the post from its Markdown heading and first paragraph."""
+    return {"title": post["title"], "description": post["excerpt"]}
 ```
 
-No `template = "..."`, no `render()`, no `render_markdown` call. `post` carries `serialize=True` so `{slug, url_name, title}` lands in `window.Next.context.post` for the share button. `reading_minutes` stays server-only and feeds the meta bar. Import time computes a `Path` and nothing more, the file is read when a request arrives.
+No `template = "..."`, no `render()`, no `render_markdown` call. `post` carries `serialize=True` so `{slug, url_name, title, excerpt}` lands in `window.Next.context.post` for the share button. `reading_minutes` stays server-only and feeds the meta bar. `post_meta` names the `post` context key as a parameter and receives the dict the first callable produced, so the Markdown is read once per request even though two callables want it. Section 12 covers what the tab and the crawlers see. Import time computes a `Path` and nothing more, the file is read when a request arrives.
 
 ### 5. Nested layout wraps the rendered Markdown
 
@@ -191,11 +200,50 @@ await navigator.clipboard.writeText(`${post.title} — ${location.href}`);
 | File | URL | Name |
 | --- | --- | --- |
 | `screens/page.py` + `screens/template.djx` | `/` | `next:page_` |
-| `screens/about/template.djx` (virtual) | `/about/` | `next:page_about` |
+| `screens/about/page.py` + `screens/about/template.djx` | `/about/` | `next:page_about` |
 | `screens/posts/welcome/page.py` + `template.md` | `/posts/welcome/` | `next:page_posts_welcome` |
 | `screens/posts/hello-world/page.py` + `template.md` | `/posts/hello-world/` | `next:page_posts_hello_world` |
 
-Hyphens in folder names become underscores in the name, so `hello-world` routes as `/posts/hello-world/` and reverses as `page_posts_hello_world`. `screens/posts/` itself holds only `layout.djx`, so it contributes chrome without becoming a route.
+Hyphens in folder names become underscores in the name, so `hello-world` routes as `/posts/hello-world/` and reverses as `page_posts_hello_world`. `screens/posts/` itself holds only `layout.djx`, so it contributes chrome without becoming a route. Every name resolves under the Spanish prefix too, because [`config/urls.py`](config/urls.py) wraps `include("next.urls")` in `i18n_patterns(..., prefix_default_language=False)`: `/posts/welcome/` stays the English URL and `/es/posts/welcome/` serves the same page with Spanish active. The blog ships no translations, Spanish is there only as a second language for the hreflang alternates and the sitemap to point at.
+
+### 12. Page metadata from the post source
+
+The `<title>` is not in any template. [`site/layout.djx`](site/layout.djx) calls the shared `page_head` component and that component renders `{% metadata %}`, the builtin tag that writes the head tags of the page being rendered. What it writes is the fold of three tiers, outermost first.
+
+The settings tier is `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` in [`config/settings.py`](config/settings.py). `base` is the canonical origin of the site, `https://blog.example` here, and every relative URL the tag emits is made absolute against it, so the canonical and the hreflang links point at the published domain rather than at whatever host served the request. `site_name`, a site-wide `description`, `og: {"type": "website"}` and the `title` template `{title} · {site_name}` with its `default` sit beside it. The template applies to every page below, the default is what a page without a title of its own renders.
+
+The root [`screens/page.py`](blog/screens/page.py) declares the static tier as a module dict, and a dict is inherited by every descendant:
+
+```python
+metadata: MetadataDict = {
+    "title": "Latest posts",
+    "canonical": True,
+    "alternates": {"languages": True},
+}
+```
+
+`canonical: True` means the page's own path, so `/posts/welcome/` emits `https://blog.example/posts/welcome/` without anyone spelling it. `alternates.languages: True` reads `LANGUAGES` and the `i18n_patterns` URLconf and emits one `<link rel="alternate" hreflang>` per language plus `x-default`, each URL translated through Django's `translate_url`. The `LocaleMiddleware` activates Spanish under `/es/`, and the `i18n` context processor registered on the page backend hands `LANGUAGE_CODE` to the layout, so `<html lang>` follows the prefix and `og:locale` follows the active language. [`screens/about/page.py`](blog/screens/about/page.py) is the smallest possible `page.py`, a dict with a title and a description, and it exists only so `/about/` names itself instead of inheriting `Latest posts`.
+
+A post cannot be a dict because its title lives in the Markdown. The `post_meta` callable from section 4 is the dynamic tier, `@page.metadata` runs it for that page only, and its return value is the same `MetadataDict` shape. [`blog/markdown_template.py`](blog/markdown_template.py) supplies the `excerpt` it uses, the first paragraph after the heading with inline markup stripped and cut to a description-sized length. Static and dynamic are one form per file, a `page.py` declares either the dict or the callable. The callable may take any name, `metadata` included, and a decorated function under that name still counts as the callable rather than the dict.
+
+The integration tests read the rendered head straight off the response. `manage.py check` covers the structural half at import time, a template without `{title}`, a template without a default, a `page.py` declaring both forms, metadata without `{% metadata %}` anywhere in the composition, and `manage.py check --deploy --tag seo` audits the content of the static tier before a deploy.
+
+### 13. Sitemap and robots from the page root
+
+A `sitemap.py` at the top of a page root switches `/sitemap.xml` on for that tree. The blog's is [`blog/screens/sitemap.py`](blog/screens/sitemap.py), four lines and no code:
+
+```python
+i18n = True
+alternates = True
+x_default = True
+changefreq = "weekly"
+```
+
+Every route without a `[param]` segment is listed on its own, so `/`, `/about/` and the two posts are in the document because they are directories, and nothing has to enumerate them. A route whose static metadata says `noindex` is left out, a dynamic route needs an `@sitemap.items` callable, which the [wiki](../wiki/) shows, and `exclude = ["drafts/**"]` drops whole trails by glob. The module attributes are the ones Django's `Sitemap` class reads, `i18n`, `languages`, `alternates`, `x_default`, `changefreq`, `priority`, `protocol`, `limit`, plus `cache` for a `cache_page` wrapper. `i18n = True` lists every URL once per entry of `LANGUAGES`, reversed under `translation.override`, so the `i18n_patterns` prefix of section 12 lands in the path, `/posts/welcome/` and `/es/posts/welcome/` are two `<url>` entries. `alternates` and `x_default` add the `<xhtml:link hreflang>` block to each of them, the same set the `<head>` already carries. Every `<loc>` is absolute on `base`, so the document says `https://blog.example` whichever host served it. The XML comes from the templates of `django.contrib.sitemaps`, which is why that app joins `INSTALLED_APPS` in [`config/settings.py`](config/settings.py).
+
+The sitemap and the robots file belong at the host root, and [`config/urls.py`](config/urls.py) has `next.urls` inside `i18n_patterns`, so the routes that include mounts answer at `/sitemap.xml` only through the prefix-free default language, and `/es/sitemap.xml` and `/es/robots.txt` serve a second copy of each. The line `path("", include("next.seo.urls"))` above the language block mounts `sitemap.xml`, `sitemap-<section>.xml` and `robots.txt` at the root outright, and the copies under the language prefix then answer 404, so each document has one address. `/sitemap-blog.xml` is the section of this one root, labelled after the app, and with a single root `/sitemap.xml` is the same document. An index takes its place on its own once a second root declares a `sitemap.py` or a section grows past `limit`.
+
+Robots has two forms and the blog uses the static one, [`blog/screens/robots.txt`](blog/screens/robots.txt). A `robots.txt` at the page root is served byte for byte as `text/plain; charset=utf-8`, nothing is appended, so the `Sitemap:` line is written by hand with the absolute URL, and the check warns when a sitemap exists and the file does not name it. The other form is a `robots.py` declaring `rules = [Rule(...)]`, the [wiki](../wiki/) and the [shortener](../shortener/) show it, and that form gets the `Sitemap:` line from the framework. A site has one source for `/robots.txt`, both files in one root or robots in two roots is an error at check time.
 
 ## Gotchas
 
@@ -221,6 +269,8 @@ The example sets `STATIC_VERSION` and the partial asset version derives from it,
 - [`next/pages/manager/__init__.py`](../../next/pages/manager/__init__.py) — `_resolve_page_body` and the layout composition entry point.
 - [`next/pages/signals.py`](../../next/pages/signals.py) — the `template_loaded` payload contract used in section 7.
 - [`next/pages/processors.py`](../../next/pages/processors.py) — context-processor discovery across the router and Django `TEMPLATES`.
+- [`next/pages/metadata/`](../../next/pages/metadata/) — the metadata chain of section 12: the `MetadataDict` schema, the fold, and the `{% metadata %}` renderer.
+- [`next/seo/`](../../next/seo/) — the sitemap and robots of section 13: `RouteSitemap` over the page tree, the two robots sources, and the `next.seo.urls` include.
 - [`next/static/serializers.py`](../../next/static/serializers.py) — how `@context(serialize=True)` values reach `window.Next.context`.
 - [`docs/content/topics/pages.rst`](../../docs/content/topics/pages.rst) — the "Custom template loaders" section this example anchors.
 - [`docs/content/ref/system-checks.rst`](../../docs/content/ref/system-checks.rst) — `next.E012`, `next.E040`, `next.E042`, `next.E043`, `next.E089`, and `next.W043`.

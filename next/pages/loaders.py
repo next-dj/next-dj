@@ -62,6 +62,24 @@ _FAILED_PATHS: set[Path] = set()
 _MEMO_WRITE_LOCK = threading.Lock()
 
 
+@dataclass(slots=True)
+class _Generation:
+    """A counter every module memo write and every page tree reload moves."""
+
+    value: int = 0
+
+
+_GENERATION = _Generation()
+
+
+def module_generation() -> int:
+    """Return the generation of the module memo, moved by every write and tree reload.
+
+    A chain memo keys off it, so it never has to stat an ancestor to learn of a reload.
+    """
+    return _GENERATION.value
+
+
 def has_load_errors() -> bool:
     """Whether the latest load of any `page.py` failed.
 
@@ -118,6 +136,7 @@ def _remember(file_path: Path, load: _PageLoad) -> None:
         else:
             _FAILED_PATHS.add(file_path)
             _MODULE_MEMO[file_path] = load
+        _GENERATION.value += 1
 
 
 def _forget(file_path: Path) -> None:
@@ -125,6 +144,7 @@ def _forget(file_path: Path) -> None:
     with _MEMO_WRITE_LOCK:
         _MODULE_MEMO.pop(file_path)
         _FAILED_PATHS.discard(file_path)
+        _GENERATION.value += 1
 
 
 def _page_load(file_path: Path) -> _PageLoad | None:
@@ -173,6 +193,7 @@ def reset_module_memo() -> None:
     with _MEMO_WRITE_LOCK:
         _MODULE_MEMO.clear()
         _FAILED_PATHS.clear()
+        _GENERATION.value += 1
 
 
 def _pages_dirs_for_config(config: dict) -> list[Path]:
@@ -220,6 +241,8 @@ def _page_roots() -> tuple[Path, ...]:
 def forget_page_roots(**kwargs) -> None:
     """Drop the memoised page trees so the next walk asks the routers again."""
     _page_roots.cache_clear()
+    with _MEMO_WRITE_LOCK:
+        _GENERATION.value += 1
 
 
 def _on_setting_changed(*, setting: str, **kwargs) -> None:
@@ -234,6 +257,30 @@ def _on_setting_changed(*, setting: str, **kwargs) -> None:
 
 settings_reloaded.connect(forget_page_roots)
 setting_changed.connect(_on_setting_changed)
+
+
+_TREE_DEPTHS: BoundedCache[Path, tuple[tuple[Path, ...], int]] = BoundedCache()
+
+
+def page_tree_depth(start_dir: Path) -> int:
+    """Return the number of directories from `start_dir` up to its page tree root.
+
+    A directory outside every tree answers the walk cap, memoised per set of trees.
+    """
+    roots = _page_roots()
+    held = _TREE_DEPTHS.get(start_dir)
+    if held is not None and held[0] is roots:
+        return held[1]
+    resolved = start_dir.resolve()
+    depths = [
+        len(resolved.relative_to(root).parts) + 1
+        for root in roots
+        if resolved.is_relative_to(root)
+    ]
+    depths.append(MAX_ANCESTOR_WALK_DEPTH)
+    depth = min(depths)
+    _TREE_DEPTHS[start_dir] = (roots, depth)
+    return depth
 
 
 def _read_string_list(module: types.ModuleType, attr: str) -> list[str]:
@@ -377,9 +424,7 @@ class LayoutTemplateLoader:
         A `layout.djx` appearing or disappearing moves the mtime of its directory and of
         no tracked file, so a caller detecting change needs the directories too.
         """
-        return self._walk_ancestors(
-            file_path, self._watched_ancestor_depth(file_path.parent)
-        )
+        return self._walk_ancestors(file_path, page_tree_depth(file_path.parent))
 
     def _walk_ancestors(
         self, file_path: Path, watched_depth: int
@@ -404,21 +449,6 @@ class LayoutTemplateLoader:
                 layout_files.append(additional_layout)
 
         return layout_files, watched_dirs
-
-    def _watched_ancestor_depth(self, start_dir: Path) -> int:
-        """Return how many ancestors of `start_dir` are worth watching for change.
-
-        The walk climbs past the page tree because a layout above it still
-        joins the chain, but a directory up there moves for reasons no page shares.
-        """
-        resolved = start_dir.resolve()
-        depths = [
-            len(resolved.relative_to(root).parts) + 1
-            for root in _page_roots()
-            if resolved.is_relative_to(root)
-        ]
-        depths.append(MAX_ANCESTOR_WALK_DEPTH)
-        return min(depths)
 
     def _find_layout_files(self, file_path: Path) -> list[Path]:
         """Return `layout.djx` paths from near to far plus global layouts.

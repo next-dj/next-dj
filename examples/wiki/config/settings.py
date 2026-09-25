@@ -15,6 +15,7 @@ INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
+    "django.contrib.sitemaps",
     "django.contrib.staticfiles",
     "next",
     "wiki",
@@ -96,4 +97,11 @@ NEXT_FRAMEWORK = {
         }
     ],
     "STATIC_VERSION": "v1",
+    "METADATA": {
+        "DEFAULTS": {
+            "base": "https://wiki.example",
+            "site_name": "next.dj Wiki",
+            "title": {"template": "{title} · {site_name}", "default": "next.dj — Wiki"},
+        }
+    },
 }

@@ -52,6 +52,9 @@ The left column names the Django idiom, the middle column names the shape that t
    * - ``{% extends "base.html" %}``
      - An ancestor ``layout.djx`` that wraps every page below its directory
      - :doc:`/content/topics/layouts`
+   * - ``{% block title %}`` in every child template
+     - A ``metadata`` dict or a ``@page.metadata`` callable in ``page.py``, rendered by one ``{% metadata %}`` tag in the root layout
+     - :doc:`/content/topics/seo/metadata`
    * - ``{% include "_card.html" %}``
      - ``{% component "card" %}``, a folder carrying its own template, Python, CSS, and JS
      - :doc:`/content/topics/components`

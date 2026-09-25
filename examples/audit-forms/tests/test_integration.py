@@ -751,3 +751,32 @@ class TestAcknowledgementRoundTrip:
         )
         assert "policy_acknowledged" not in row.payload
         assert row.payload["email"] == ["ada@example.com"]
+
+
+class TestPageMetadata:
+    """The landing keeps the site default, every page holding request data is `noindex`."""
+
+    @pytest.mark.parametrize(
+        ("path", "title", "noindex"),
+        [
+            ("/", "next.dj — Audit-trail forms", False),
+            ("/request/identity/", "Request access · next.dj audit", True),
+            ("/request/{pk}/audit/", "Request #{pk} · next.dj audit", True),
+            ("/admin/audit/", "Audit log · next.dj audit", True),
+        ],
+        ids=["landing", "wizard", "request-audit", "audit-log"],
+    )
+    def test_each_page_carries_its_title_and_robots(
+        self,
+        next_client,
+        submitted_request: AccessRequest,
+        path: str,
+        title: str,
+        *,
+        noindex: bool,
+    ) -> None:
+        pk = submitted_request.pk
+        body = next_client.get(path.format(pk=pk)).content.decode()
+        assert f"<title>{title.format(pk=pk)}</title>" in body
+        robots = ['<meta name="robots" content="noindex">'] if noindex else []
+        assert re.findall(r'<meta name="robots"[^>]*>', body) == robots

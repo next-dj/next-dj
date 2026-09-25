@@ -788,7 +788,7 @@ Pytest can run ``manage.py check`` as part of the suite.
 ``call_command("check")`` on its own raises only when a check reports an error, so a framework warning such as a shadowed component name passes silently.
 A suite that wants the warnings gated too passes ``fail_level="WARNING"``.
 
-Three framework checks are registered with ``deploy=True`` and stay out of that run, because each one imports or compiles the whole page tree.
+Eight framework checks are registered with ``deploy=True`` and stay out of that run, three because each one imports or compiles the whole page tree, one because it describes every development checkout, and four because they are the opt-in SEO audits.
 A test suite is the cheapest place to pay that cost, so a second call turns them on.
 
 .. code-block:: python
@@ -801,6 +801,7 @@ A test suite is the cheapest place to pay that cost, so a second call turns them
 
 That run adds ``next.E017`` for a ``page.py`` that raises on import, ``next.E084`` for a ``component.py`` that does, and ``next.E072`` for a composed page template that does not compile.
 All three are failures a request would otherwise surface as a 404, a stripped body, or a 500.
+It also adds ``next.W083`` and the four audits, ``next.W089`` to ``next.W096``, so a suite that gates on ``fail_level="WARNING"`` either keeps every page described and titled or silences the audits it does not want through ``SILENCED_SYSTEM_CHECKS``, see :doc:`seo/auditing`.
 See :ref:`ref-system-checks` for the full catalog.
 
 See also

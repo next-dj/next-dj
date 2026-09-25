@@ -1,6 +1,8 @@
 // Shared test doubles for the seams more than one suite drives. Imported only
 // from *.test.ts files, so the bundle built from next.ts never ships them.
 
+import { vi } from "vitest";
+import type { LayerBridge } from "./apply";
 import type { VisibilityAdapter } from "./sse";
 import type { Clock } from "./wire";
 
@@ -58,5 +60,23 @@ export function manualVisibility(): VisibilityAdapter & {
       hidden = v;
       for (const listener of listeners) listener();
     },
+  };
+}
+
+export const STUB_OWNER = "/owner/";
+
+const select = (selector: string, root: ParentNode): Element | null =>
+  root.querySelector(selector);
+
+export function stubBridge(overrides: Partial<LayerBridge> = {}): LayerBridge {
+  return {
+    resolveZone: (name, root) => select(`[data-next-zone="${name}"]`, root),
+    resolveSelector: select,
+    urlFor: () => STUB_OWNER,
+    open: vi.fn<LayerBridge["open"]>(),
+    close: vi.fn<LayerBridge["close"]>(),
+    retitle: vi.fn<LayerBridge["retitle"]>(),
+    toast: vi.fn<LayerBridge["toast"]>(),
+    ...overrides,
   };
 }

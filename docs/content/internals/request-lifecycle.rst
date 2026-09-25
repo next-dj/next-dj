@@ -36,7 +36,8 @@ Pipeline
        ZoneResp --> Response
        ZoneIntent -- "full page" --> LayoutChain["Compose layout chain"]
        LayoutChain --> ContextCtx["Run context functions"]
-       ContextCtx --> CollectAssets["Static collector"]
+       ContextCtx --> Metadata["Fold page metadata as the head renders"]
+       Metadata --> CollectAssets["Static collector"]
        CollectAssets --> InjectTags["Emit collected tags"]
        InjectTags --> Response(["HTTP response"])
        FormDispatch --> Validation{"Form valid"}
@@ -70,12 +71,14 @@ When the module exposes a ``render`` function the view calls it before context r
 When the body comes from the ``template`` attribute or a ``template.djx`` file the view reads that source as a plain string.
 After the body is in hand the view builds the render context and runs every ``@context`` function in order.
 Captured URL kwargs from the matched route are seeded into the context dict before any ``@context`` function runs.
+The render context also carries a deferred fold of the page metadata, which ``{% metadata %}`` in the root layout resolves as the composed template renders, so a ``@page.metadata`` callable runs after every ``@context`` function and reads the same dependency cache.
 
 Zone requests
 ~~~~~~~~~~~~~
 
 After the body source resolves, the view inspects the request for a partial intent.
 A request that targets named zones receives a zone response instead of the full page render.
+A zone body carries no head, so the metadata chain of the page is never folded and a ``@page.metadata`` callable never runs on this path.
 See :doc:`/content/topics/partial-rendering/how-it-works` for the zone request wire format and the patch envelope.
 
 Layout chain
@@ -114,7 +117,7 @@ It then resolves the posted origin and asks the page that origin names to author
 On valid form the handler runs and returns a response that goes back to the browser.
 On invalid form the dispatcher loads the origin page and re-renders it through the same pipeline used for a fresh page request, with the bound form in the template scope.
 
-The dependency cache is reused across the failure path so context functions and providers run at most once per request.
+The dependency cache is reused across the failure path, so a named dependency the dispatch already resolved is not resolved again by the re-render.
 
 .. _internals-request-lifecycle-render-paths:
 
@@ -184,6 +187,9 @@ A row that does not run the routed view builds that request with ``next.pages.vi
 A ``render()`` keyed on identity, on ``request.GET``, on ``request.method``, or on a canonical-URL comparison therefore answers the same on every row as it does on a visit.
 The one gap is a foreign morph whose caller named the page by file path, which carries no URL to present and leaves the live path in place, see :doc:`/content/topics/pages`.
 
+The head is rendered on the two rows that compose the whole document, the full page GET and the form re-render, so a ``@page.metadata`` callable runs on those two and on no zone row.
+``Patches.meta`` is the one caller outside the head, and it runs the inherited callables of the origin chain only after the origin ``render()`` has authorized the request.
+
 The ``@context`` column hides one difference worth naming.
 The form re-render and the origin zone morph build the context with no zone batch, so every page-level callable runs, ``zone=``-tagged ones included.
 The zone GET, the wizard step morph, and the foreign morph pass the requested batch, so a callable bound to another zone is skipped before its dependencies resolve.
@@ -226,7 +232,7 @@ Asset plans.
 
 The caches hold structures and compilations, never a rendered answer.
 Every request still runs each ``@context`` function in order, resolves the parameters the compiled plan left as runtime candidates, renders the body and the layout chain against a freshly assembled scope, and fills a ``StaticCollector`` created for that request alone.
-The dependency cache lives for a single resolution pass, and the form dispatch path shares one such cache across the stages of a single POST.
+The dependency cache lives for a single page render, shared by its ``render()``, ``@context``, and metadata callables, and the form dispatch path shares one such cache across the stages of a single POST.
 
 An edit to a source file reaches the next request rather than the next restart.
 The module memo compares mtimes on every load, the version counters behind the route index, the component registry, and the asset plans are compared on every read, and under ``DEBUG`` the composition, component-template, and asset-plan caches re-stat their sources before a hit counts.

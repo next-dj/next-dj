@@ -76,6 +76,9 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
 :doc:`partial`
    ``next.partial`` for the patch builder, zones, SSE streams, and the protocol backend.
 
+:doc:`seo`
+   ``next.seo`` for the sitemap and robots served from the page roots.
+
 :doc:`deps`
    ``next.deps`` for the dependency resolver and providers.
 
@@ -137,6 +140,7 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
    forms
    static
    partial
+   seo
    deps
    conf
    server

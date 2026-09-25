@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from django.http import QueryDict
 from django.urls import get_script_prefix
 
+from next.deps import REQUEST_DEP_CACHE_ATTR
 from next.utils import decode_url_path
 
 
@@ -18,7 +19,7 @@ def visit_request(request: "HttpRequest", url: str | None) -> "HttpRequest":
 
     A page answers an out-of-band caller through the same `render()` its own view runs,
     so that `render()` has to read the page, not the endpoint that asked on its behalf.
-    The copy keeps whatever a middleware attached, the user and the session included.
+    The copy keeps what a middleware attached, not the dependency cache of a dispatch.
     """
     path, _, query = (url or "").partition("?")
     visit = copy.copy(request)
@@ -27,6 +28,7 @@ def visit_request(request: "HttpRequest", url: str | None) -> "HttpRequest":
     visit.GET = QueryDict(query)
     visit.POST = QueryDict()
     visit.resolver_match = None
+    vars(visit).pop(REQUEST_DEP_CACHE_ATTR, None)
     if path:
         path = decode_url_path(path)
         info = _path_info(path)

@@ -281,6 +281,17 @@ def wait_for_runtime(page: Page, timeout: int = 10_000) -> None:
     )
 
 
+def mark_document(page: Page) -> None:
+    """Tag the live document so `assert_same_document` can tell a reload apart."""
+    page.evaluate("() => { window.__stillHere = true; }")
+
+
+def assert_same_document(page: Page) -> None:
+    """Fail when the page reloaded since `mark_document` tagged it."""
+    if page.evaluate("() => window.__stillHere") is not True:
+        pytest.fail("the page reloaded, the marked document is gone")
+
+
 def applied_count(page: Page) -> int:
     """Return how many patch applications the bridge has recorded so far."""
     return page.evaluate(

@@ -166,6 +166,7 @@ A backend whose ``dispatch`` drives the pipeline by hand rather than delegating 
 
 The ``render()`` under this call does not see the POST to ``/_next/form/<uid>/``.
 ``next.pages.visits.visit_request`` copies the live request and restates it as a GET of the URL being authorized, rewriting ``method``, ``path``, ``path_info``, ``GET``, ``POST``, ``META`` and ``resolver_match`` while carrying over everything a middleware attached, the user and the session included.
+It drops the dispatch dependency cache from the copy, and the guard resolves ``render()`` with a fresh cache, so no value the dispatch resolved reaches the answer.
 The copy leaves the live request untouched, so the dispatcher reads its own POST afterwards as it always did.
 A page that short-circuits on the request method, on a query parameter, or on a canonical-URL comparison therefore answers a submission exactly as it answers a visit.
 
@@ -290,7 +291,8 @@ Shared dependency cache
 -----------------------
 
 The dispatcher creates a fresh dependency cache on every POST and shares it across each stage of the dispatch.
-``get_initial``, the factory resolution, the handler call, and any re-render after validation failure all read and write the same cache.
+``get_initial``, the factory resolution, the handler call, and any re-render after validation failure, its ``@context``, metadata, and component callables included, all read and write the same cache.
+The authorization of the origin and of a wizard step stays outside it, since the guard resolves ``render()`` against a fresh cache.
 Two consequences flow from this.
 
 - Custom providers are idempotent across the dispatch stages.

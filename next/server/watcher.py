@@ -13,6 +13,7 @@ from next.pages.watch import (
     get_pages_directories_for_watch,
     iter_pages_roots_with_components_folder_names,
 )
+from next.seo.discovery import SOURCE_NAMES
 
 from .signals import watch_specs_ready
 
@@ -50,13 +51,13 @@ def _dedupe_watch_specs(specs: Iterable[tuple[Path, str]]) -> list[tuple[Path, s
 
 
 def _iter_default_autoreload_watch_specs() -> list[tuple[Path, str]]:
-    """Return the default watch specs for pages and filesystem components.
+    """Return the default watch specs for pages, SEO sources and components.
 
     `.djx` is omitted because a template edit needs no process restart.
     """
-    specs: list[tuple[Path, str]] = [
-        (p, "**/page.py") for p in get_pages_directories_for_watch()
-    ]
+    page_roots = get_pages_directories_for_watch()
+    specs: list[tuple[Path, str]] = [(p, "**/page.py") for p in page_roots]
+    specs.extend((p, name) for p in page_roots for name in SOURCE_NAMES)
     specs.extend(
         (root, f"**/{comp_name}/**/component.py")
         for root, comp_name in iter_pages_roots_with_components_folder_names()

@@ -196,6 +196,23 @@ describe("layer flow through the partial surface", () => {
     ).toBe("fresh");
   });
 
+  it("a meta op after layer.close in one envelope keeps its title", async () => {
+    document.title = "Feed";
+    respond = () =>
+      envelopeResponse(zoneMorphBody("z", '<div data-next-zone="z">step</div>'));
+    await partial.layers.open(null, "/w/", "z");
+    partial.apply(envelope([{ op: "meta", title: "Wizard" }]));
+    expect(document.title).toBe("Wizard");
+    partial.apply(
+      envelope([
+        { op: "layer.close", result: 1 },
+        { op: "meta", title: "Saved" },
+      ]),
+    );
+    expect(partial.layers.size()).toBe(0);
+    expect(document.title).toBe("Saved");
+  });
+
   it("a validation-error envelope morphs the master zone and leaves the layer open", async () => {
     respond = () =>
       envelopeResponse(

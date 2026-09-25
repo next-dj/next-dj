@@ -53,6 +53,9 @@ The shape every one of them fits into is the request pipeline below.
 :doc:`partial-pipeline`
    Zones, zone render, patch envelopes, registries.
 
+:doc:`seo-pipeline`
+   Sitemap and robots discovery, the items registry, the URL slot, resets.
+
 :doc:`autoreload`
    Watchers, route reload, signals.
 
@@ -75,6 +78,7 @@ The shape every one of them fits into is the request pipeline below.
    static-pipeline
    action-dispatch
    partial-pipeline
+   seo-pipeline
    autoreload
    contributing-notes
    adding-an-area

@@ -1,7 +1,10 @@
 from flags.models import Flag
 
 from next import context
+from next.pages import MetadataDict
 
+
+metadata: MetadataDict = {"title": "Guard demo"}
 
 DEMO_FLAG_NAMES = ("beta_checkout", "dark_sidebar", "ai_suggestions")
 

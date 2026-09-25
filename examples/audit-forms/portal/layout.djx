@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
-{% component "page_head" title="next.dj — Audit-trail forms" icon="🛂" %}
+{% component "page_head" icon="🛂" %}
 <body class="min-h-screen flex flex-col">
   {% #component "app_shell" brand="next.dj access requests" brand_href="/" brand_icon="🛂" %}
     {% #slot "actions" %}

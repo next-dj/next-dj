@@ -6,23 +6,30 @@
 from __future__ import annotations
 
 import logging
-import sys
 import time
 from dataclasses import dataclass
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, overload
+from typing import TYPE_CHECKING, Any, cast, overload
 
 from django.http.response import HttpResponseBase
 from django.template import Context as DjangoTemplateContext, Origin, Template
 
 from next.conf import next_framework_settings
+from next.deps.cache import shared_dep_cache
 from next.deps.resolver import current_resolver
-from next.introspect import defining_file
+from next.introspect import declared_file, registering_file
 from next.pages.loaders import (
     LayoutTemplateLoader,
     _load_python_module_memo,
     build_registered_loaders,
     load_page_module,
+    reset_module_memo,
+)
+from next.pages.metadata import (
+    MetadataThunk,
+    PageMetadataRegistry,
+    chain_entry,
+    chain_title,
+    forget_metadata_scope,
 )
 from next.pages.paths import clear_page_path_info, forget_page_path_info, page_path_info
 from next.pages.processors import _get_context_processors
@@ -33,6 +40,7 @@ from next.ports import static_assets_slot
 from next.seeding import (
     JS_CONTEXT_KEY,
     JS_SERIALIZERS_KEY,
+    METADATA_KEY,
     PAGE_MODULE_PATH_KEY,
     REQUEST_KEY,
     TEMPLATE_PATH_KEY,
@@ -45,11 +53,13 @@ from .views import create_url_pattern, unified_view
 
 if TYPE_CHECKING:
     import types
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Mapping, MutableMapping
+    from pathlib import Path
 
     from django.http import HttpRequest
     from django.urls import URLPattern
 
+    from next.pages.metadata import Metadata, Text
     from next.pages.registry import ZoneBinding
     from next.static import StaticCollector
     from next.static.serializers import JsContextSerializer
@@ -83,6 +93,7 @@ class Page:
         self._layout_loader = LayoutTemplateLoader()
         self._templates = PageTemplateCache(self._layout_loader)
         self._context_manager = PageContextRegistry()
+        self._metadata_registry = PageMetadataRegistry()
 
     def register_template(self, file_path: Path, template_str: str) -> None:
         """Store rendered template source for `file_path`.
@@ -129,16 +140,12 @@ class Page:
         `serialize=True` publishes the value on `window.Next.context`, `serializer=`
         overrides `JS_CONTEXT_SERIALIZER`, and `zone=` binds the callable to one zone.
         """
-        # Captured here rather than inside the decorator so both spellings see
-        # the page.py that ran `@context`, not this module.
-        registered_from = Path(sys._getframe(1).f_code.co_filename)
+        registered_from = registering_file()
 
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-            declared_in = defining_file(func)
-            if declared_in != registered_from:
-                self._context_manager.note_misattribution(
-                    registered_from, declared_in, func
-                )
+            declared_in = declared_file(
+                func, registered_from, self._context_manager.note_misattribution
+            )
             key = None if callable(func_or_key) else func_or_key
             self._context_manager.register_context(
                 declared_in,
@@ -157,6 +164,68 @@ class Page:
         """Return the zone view of every registered `@context`, keyed by file."""
         return self._context_manager.zone_bindings()
 
+    @overload
+    def metadata[C: Callable[..., Any]](self, func: C, /) -> C: ...
+    @overload
+    def metadata[C: Callable[..., Any]](
+        self, /, *, inherit: bool = False
+    ) -> Callable[[C], C]: ...
+    def metadata(
+        self, func: Callable[..., Any] | None = None, /, *, inherit: bool = False
+    ) -> Callable[..., Any]:
+        """Register the dynamic metadata callable of the `page.py` declaring `func`.
+
+        `inherit=True` runs it for the descendant pages too, ahead of their own.
+        """
+        registered_from = registering_file()
+        registry = self._metadata_registry
+
+        def decorator(target: Callable[..., Any]) -> Callable[..., Any]:
+            declared_in = declared_file(
+                target, registered_from, registry.note_misattribution
+            )
+            registry.register(declared_in, target, inherit=inherit)
+            return target
+
+        return decorator if func is None else decorator(func)
+
+    def static_metadata(self, file_path: Path) -> Metadata:
+        """Return the metadata of `file_path` readable without a request."""
+        return chain_entry(self._metadata_registry, file_path).static
+
+    def templated_title(
+        self,
+        file_path: Path,
+        text: Text,
+        *,
+        absolute: bool = False,
+        request: HttpRequest | None = None,
+        url_kwargs: Mapping[str, object] | None = None,
+        context_data: Callable[[], MutableMapping[str, object]] | None = None,
+    ) -> Text:
+        """Return `text` as the title `file_path` would render it under its chain.
+
+        `context_data` is called only when an inherited callable of an ancestor runs.
+        """
+        if absolute:
+            return text
+        return chain_title(
+            self._metadata_registry,
+            file_path,
+            text,
+            request=request,
+            url_kwargs=url_kwargs,
+            context_data=context_data,
+        )
+
+    def resolve_metadata(
+        self, file_path: Path, request: HttpRequest | None = None, **kwargs
+    ) -> Metadata:
+        """Fold the metadata of `file_path` by building its whole render context."""
+        context_data = self.build_render_context(file_path, request, **kwargs)
+        thunk = cast("MetadataThunk", context_data[METADATA_KEY])
+        return thunk.resolve(context_data)
+
     def build_render_context(
         self,
         file_path: Path,
@@ -170,19 +239,39 @@ class Page:
         `JS_CONTEXT_KEY` carries the `serialize=True` subset, which `render` pops for
         the `StaticCollector`. A `_requested_zones` batch stays out of the dict.
         """
+        return self._render_context(
+            file_path, request, kwargs, _requested_zones, shared_dep_cache(request)
+        )
+
+    def _render_context(
+        self,
+        file_path: Path,
+        request: HttpRequest | None,
+        url_kwargs: dict[str, Any],
+        requested_zones: frozenset[str] | None,
+        dep_cache: dict[str, Any],
+    ) -> dict[str, object]:
+        """Build the render context, resolving through the cache `render()` used."""
         info = page_path_info(file_path)
         context_data: dict[str, object] = {
             TEMPLATE_PATH_KEY: info.template_path,
             PAGE_MODULE_PATH_KEY: info.module_path,
         }
-        context_data.update(kwargs)
+        context_data.update(url_kwargs)
 
         context_result = self._context_manager.collect_context(
-            file_path, request, _requested_zones=_requested_zones, **kwargs
+            file_path,
+            request,
+            dep_cache=dep_cache,
+            _requested_zones=requested_zones,
+            **url_kwargs,
         )
         context_data.update(context_result.context_data)
         context_data[JS_CONTEXT_KEY] = context_result.js_context
         context_data[JS_SERIALIZERS_KEY] = context_result.js_context_serializers
+        context_data[METADATA_KEY] = MetadataThunk(
+            self._metadata_registry, file_path, request, url_kwargs, dep_cache
+        )
 
         if request is not None:
             context_data[REQUEST_KEY] = request
@@ -225,6 +314,8 @@ class Page:
         file_path: Path,
         module: types.ModuleType | None,
         request: HttpRequest | None = None,
+        *,
+        _dep_cache: dict[str, Any],
         **kwargs,
     ) -> _BodyResolution:
         """Resolve the page body per-request.
@@ -236,7 +327,7 @@ class Page:
             render_func = getattr(module, "render", None)
             if callable(render_func):
                 return self._call_render_function(
-                    render_func, file_path, request, **kwargs
+                    render_func, file_path, request, kwargs, _dep_cache
                 )
         return _BodyResolution(body=self._load_static_body(file_path, module))
 
@@ -244,14 +335,13 @@ class Page:
         self,
         render_func: Callable[..., object],
         file_path: Path,
-        request: HttpRequest | None = None,
-        **kwargs,
+        request: HttpRequest | None,
+        url_kwargs: Mapping[str, object],
+        dep_cache: dict[str, Any],
     ) -> _BodyResolution:
         """Invoke `render_func` with DI-resolved arguments and classify the result."""
-        dep_cache: dict[str, Any] = {}
-        dep_stack: list[str] = []
         resolved = current_resolver().resolve_dependencies(
-            render_func, request=request, _cache=dep_cache, _stack=dep_stack, **kwargs
+            render_func, request=request, _cache=dep_cache, _stack=[], **url_kwargs
         )
         result = render_func(**resolved)
         if isinstance(result, HttpResponseBase):
@@ -290,10 +380,13 @@ class Page:
         template: Template | str,
         start: float,
         request: HttpRequest | None = None,
+        *,
+        _dep_cache: dict[str, Any] | None = None,
         **kwargs,
     ) -> str:
         """Build context, render `template`, inject static assets, emit signal."""
-        context_data = self.build_render_context(file_path, request, **kwargs)
+        dep_cache = shared_dep_cache(request) if _dep_cache is None else _dep_cache
+        context_data = self._render_context(file_path, request, kwargs, None, dep_cache)
         result, collector = self.render_with_static_assets(
             file_path, template, context_data, request=request
         )
@@ -310,7 +403,13 @@ class Page:
         return result
 
     def _render_composed(
-        self, file_path: Path, body: str, request: HttpRequest | None = None, **kwargs
+        self,
+        file_path: Path,
+        body: str,
+        request: HttpRequest | None = None,
+        *,
+        _dep_cache: dict[str, Any],
+        **kwargs,
     ) -> str:
         """Compose `body` through layouts and render.
 
@@ -320,7 +419,9 @@ class Page:
         start = time.perf_counter()
         skeleton = self._layout_skeleton_for(file_path)
         composed = self._layout_loader.fill_skeleton(skeleton, body)
-        return self._render_template_str(file_path, composed, start, request, **kwargs)
+        return self._render_template_str(
+            file_path, composed, start, request, _dep_cache=_dep_cache, **kwargs
+        )
 
     def _layout_skeleton_for(self, file_path: Path) -> str:
         """Return the cached layout chain of `file_path` with an empty body slot."""
@@ -397,7 +498,8 @@ class Page:
             render_func,
             file_path,
             visit_request(request, visit_url),
-            **dict(url_kwargs or {}),
+            url_kwargs or {},
+            {},
         )
         return resolution.http_response, resolution.dynamic
 
@@ -441,4 +543,24 @@ def reset_context_registry() -> None:
     page._context_manager.reset()
 
 
-__all__ = ["Page", "context", "page", "reset_context_registry"]
+def reset_metadata_registry() -> None:
+    """Clear the shared page-metadata registry, its chain memo and the settings tier."""
+    page._metadata_registry.reset()
+    forget_metadata_scope()
+
+
+def reset_page_registrations() -> None:
+    """Forget every executed `page.py` and what it registered, to rebuild from disk."""
+    reset_module_memo()
+    reset_context_registry()
+    reset_metadata_registry()
+
+
+__all__ = [
+    "Page",
+    "context",
+    "page",
+    "reset_context_registry",
+    "reset_metadata_registry",
+    "reset_page_registrations",
+]

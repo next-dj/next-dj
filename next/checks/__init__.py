@@ -13,6 +13,9 @@ from typing import TYPE_CHECKING
 NEXT: str = "next"
 """Shared system-check tag that selects every `next-dj` check."""
 
+SEO: str = "seo"
+"""System-check tag selecting the `next.seo` checks and the opt-in SEO audits."""
+
 
 if TYPE_CHECKING:
     from next.apps.checks import (
@@ -59,11 +62,26 @@ if TYPE_CHECKING:
         check_context_reads_foreign_zone,
         check_context_registration_files,
         check_layout_templates,
+        check_metadata_absolute_urls,
+        check_metadata_callable_returns_mapping,
+        check_metadata_hreflang_patterns,
+        check_metadata_noindex_canonical,
+        check_metadata_registration_files,
+        check_metadata_settings_scope,
+        check_metadata_tag_rendered,
+        check_metadata_title_templates,
+        check_metadata_url_schemes,
         check_page_functions,
+        check_page_metadata_shape,
         check_page_module_imports,
         check_pages_structure,
         check_request_in_context,
+        check_seo_alternates,
+        check_seo_canonical,
+        check_seo_description,
+        check_seo_titles,
         check_single_keyless_context,
+        check_single_metadata_callable,
         check_template_loaders,
         check_unrouted_working_directory_pages,
     )
@@ -85,6 +103,22 @@ if TYPE_CHECKING:
         check_zone_name_is_slug,
         check_zone_not_in_if,
         check_zone_not_in_loop,
+    )
+    from next.seo.checks import (
+        check_robots_disallow,
+        check_robots_file,
+        check_robots_single_source,
+        check_seo_module_attributes,
+        check_seo_module_imports,
+        check_seo_route_collisions,
+        check_seo_routes_at_host_root,
+        check_seo_sources_below_root,
+        check_sitemap_dynamic_routes,
+        check_sitemap_items_files,
+        check_sitemap_items_trails,
+        check_sitemap_noindex_items,
+        check_sitemap_section_labels,
+        check_sitemap_templates,
     )
     from next.static.checks import (
         check_app_directories_finder,
@@ -146,11 +180,26 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_context_reads_foreign_zone",
         "check_context_registration_files",
         "check_layout_templates",
+        "check_metadata_absolute_urls",
+        "check_metadata_callable_returns_mapping",
+        "check_metadata_hreflang_patterns",
+        "check_metadata_noindex_canonical",
+        "check_metadata_registration_files",
+        "check_metadata_settings_scope",
+        "check_metadata_tag_rendered",
+        "check_metadata_title_templates",
+        "check_metadata_url_schemes",
         "check_page_functions",
+        "check_page_metadata_shape",
         "check_page_module_imports",
         "check_pages_structure",
         "check_request_in_context",
+        "check_seo_alternates",
+        "check_seo_canonical",
+        "check_seo_description",
+        "check_seo_titles",
         "check_single_keyless_context",
+        "check_single_metadata_callable",
         "check_template_loaders",
         "check_unrouted_working_directory_pages",
     ),
@@ -172,6 +221,22 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_zone_name_is_slug",
         "check_zone_not_in_if",
         "check_zone_not_in_loop",
+    ),
+    "next.seo.checks": (
+        "check_robots_disallow",
+        "check_robots_file",
+        "check_robots_single_source",
+        "check_seo_module_attributes",
+        "check_seo_module_imports",
+        "check_seo_route_collisions",
+        "check_seo_routes_at_host_root",
+        "check_seo_sources_below_root",
+        "check_sitemap_dynamic_routes",
+        "check_sitemap_items_files",
+        "check_sitemap_items_trails",
+        "check_sitemap_noindex_items",
+        "check_sitemap_section_labels",
+        "check_sitemap_templates",
     ),
     "next.static.checks": (
         "check_app_directories_finder",
@@ -195,6 +260,7 @@ _LAZY_ATTRIBUTES: dict[str, str] = {
 
 __all__ = [
     "NEXT",
+    "SEO",
     "check_action_applied_to_class",
     "check_action_guard_permissions",
     "check_app_directories_finder",
@@ -233,12 +299,22 @@ __all__ = [
     "check_layout_templates",
     "check_lazy_zone_has_placeholder",
     "check_manifest_version_has_manifest_storage",
+    "check_metadata_absolute_urls",
+    "check_metadata_callable_returns_mapping",
+    "check_metadata_hreflang_patterns",
+    "check_metadata_noindex_canonical",
+    "check_metadata_registration_files",
+    "check_metadata_settings_scope",
+    "check_metadata_tag_rendered",
+    "check_metadata_title_templates",
+    "check_metadata_url_schemes",
     "check_next_components_configuration",
     "check_next_framework_unknown_top_level_keys",
     "check_next_framework_value_types",
     "check_next_pages_configuration",
     "check_no_zone_in_component",
     "check_page_functions",
+    "check_page_metadata_shape",
     "check_page_module_imports",
     "check_pages_structure",
     "check_partial_backend_names_a_path",
@@ -247,9 +323,28 @@ __all__ = [
     "check_request_in_context",
     "check_reserved_js_context_keys",
     "check_reverse_name_collisions",
+    "check_robots_disallow",
+    "check_robots_file",
+    "check_robots_single_source",
+    "check_seo_alternates",
+    "check_seo_canonical",
+    "check_seo_description",
+    "check_seo_module_attributes",
+    "check_seo_module_imports",
+    "check_seo_route_collisions",
+    "check_seo_routes_at_host_root",
+    "check_seo_sources_below_root",
+    "check_seo_titles",
     "check_shared_action_name_collisions",
     "check_single_keyless_context",
+    "check_single_metadata_callable",
     "check_single_partial_backend",
+    "check_sitemap_dynamic_routes",
+    "check_sitemap_items_files",
+    "check_sitemap_items_trails",
+    "check_sitemap_noindex_items",
+    "check_sitemap_section_labels",
+    "check_sitemap_templates",
     "check_static_backends",
     "check_success_message_framework",
     "check_template_loaders",
@@ -286,12 +381,12 @@ def reset_check_caches() -> None:
     # Reached by name because each of these pulls in an area package that imports
     # its own `checks` module, and that module imports `NEXT` back from here.
     importlib.import_module("next.discovery").reset_router_manager_cache()
+    importlib.import_module("next.checks.common").forget_run_memos()
     sources = importlib.import_module("next.components.sources")
     sources.reset_components_manager_cache()
-    importlib.import_module("next.partial.checks").reset_composed_pages_memo()
     importlib.import_module("next.urls.checks").reset_collected_patterns_cache()
-    importlib.import_module("next.pages.loaders").reset_module_memo()
-    importlib.import_module("next.pages.manager").reset_context_registry()
+    importlib.import_module("next.pages.manager").reset_page_registrations()
+    importlib.import_module("next.seo.manager").reset_seo_sources()
 
 
 def __getattr__(name: str) -> object:

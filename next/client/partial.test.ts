@@ -566,6 +566,40 @@ describe("createPartial surface", () => {
     expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("live");
   });
 
+  it("a host meta from a stream or a zone GET under a layer survives its close", async () => {
+    window.history.replaceState(null, "", "/inbox/");
+    document.title = "Inbox (0)";
+    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    const source = mockSource();
+    const meta = (title: string) =>
+      JSON.stringify({
+        version: "v1",
+        ops: [{ op: "meta", title }],
+        assets: [],
+        form: null,
+      });
+    partial._configure({
+      document,
+      dialog: mockDialog(),
+      source: source.adapter,
+      visibility: manualVisibility(),
+      fetch: async (url) =>
+        patchesResponse(meta(url.endsWith("/inbox/7/") ? "Mail 7" : "Inbox (4)")),
+    });
+    partial.sse.scan(document);
+    await partial.layers.open(null, "/inbox/7/", "mail");
+    expect(document.title).toBe("Mail 7");
+    source.opened[0]!.message(meta("Inbox (3)"));
+    expect(document.title).toBe("Mail 7");
+    partial.layers.close({ result: 1 });
+    expect(document.title).toBe("Inbox (3)");
+    await partial.layers.open(null, "/inbox/7/", "mail");
+    await partial.fetch({ url: "/inbox/", zone: "list" });
+    expect(document.title).toBe("Mail 7");
+    partial.layers.close({ result: 1 });
+    expect(document.title).toBe("Inbox (4)");
+  });
+
   it("an SSE resume re-GETs the bound zones through the wire", async () => {
     document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
     const source = mockSource();

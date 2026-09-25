@@ -1310,3 +1310,31 @@ class TestFlashMessages:
         )
         body = r.content.decode()
         assert "Welcome, admin." in body
+
+
+class TestPageMetadata:
+    """Every page is `noindex, nofollow`, model pages are titled after the model."""
+
+    def test_login_page_carries_the_site_default_and_noindex(self, next_client):
+        body = next_client.get("/admin/login/").content.decode()
+        assert "<title>next.dj admin</title>" in body
+        assert '<meta name="robots" content="noindex, nofollow">' in body
+
+    @pytest.mark.parametrize(
+        "suffix",
+        ["", "add/", "{pk}/change/", "{pk}/delete/", "{pk}/history/"],
+        ids=["changelist", "add", "change", "delete", "history"],
+    )
+    def test_model_pages_are_titled_after_the_model(self, admin_client, book, suffix):
+        path = "/admin/library/book/" + suffix.format(pk=book.pk)
+        body = admin_client.get(path).content.decode()
+        assert "<title>Books · next.dj admin</title>" in body
+        assert '<meta name="robots" content="noindex, nofollow">' in body
+
+    @pytest.mark.parametrize(
+        "path",
+        ["/robots.txt", "/sitemap.xml", "/admin/robots.txt", "/admin/sitemap.xml"],
+        ids=["root-robots", "root-sitemap", "admin-robots", "admin-sitemap"],
+    )
+    def test_no_seo_route_is_mounted(self, admin_client, path):
+        assert admin_client.get(path).status_code == 404

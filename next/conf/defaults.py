@@ -50,6 +50,7 @@ DEFAULTS: dict[str, Any] = {
     ],
     "TEMPLATE_LOADERS": ["next.pages.loaders.DjxTemplateLoader"],
     "NEXT_JS_OPTIONS": {},
+    "METADATA": {"RENDERER": "next.pages.HtmlMetadataRenderer"},
     "STRICT_CONTEXT": False,
     "STRICT_LOADING": False,
     "LAZY_COMPONENT_MODULES": False,

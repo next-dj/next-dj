@@ -22,6 +22,7 @@ from next.checks import NEXT
 from next.components.sources import get_components_manager
 from next.conf import next_framework_settings
 from next.pages import page
+from next.pages.checks.composed import iter_composed_pages
 
 from .codes import (
     E_CONTEXT_ZONE_UNKNOWN,
@@ -34,7 +35,6 @@ from .codes import (
     W_WITH_OVER_ZONE,
 )
 from .nodes import significant, zone_nodes, zones_directly_in_with, zones_under
-from .pages import iter_composed_pages
 
 
 if TYPE_CHECKING:

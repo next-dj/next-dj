@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from django.http import HttpResponseBase
 
     from next.forms.origin import OriginMatch
+    from next.pages.metadata import Text
 
     from .render import ZoneRenderResult
 
@@ -417,6 +418,27 @@ class Patches:
         )
         return self
 
+    def meta(self, title: "Text", *, absolute: bool = False) -> "Patches":
+        """Set the document title the origin page would render for `title`.
+
+        `absolute=True` or a builder without an origin page sends the bare text.
+        """
+        page_path = self._origin_page_path()
+        text = (
+            title
+            if page_path is None
+            else page_manager.templated_title(
+                page_path,
+                title,
+                absolute=absolute,
+                request=self._request,
+                url_kwargs=self._origin_url_kwargs(),
+                context_data=self._title_context,
+            )
+        )
+        self._ops.append(Patch(op="meta", extras={"title": str(text)}))
+        return self
+
     def redirect(self, href: str, *, external: bool = False) -> "Patches":
         """Drive a full client navigation to a server-authored href.
 
@@ -546,11 +568,19 @@ class Patches:
 
     def _resolve_page_path(self) -> "Path":
         """Return the origin page path of the request, raising when it has none."""
-        match = self._origin_match()
-        if match is None or match.page_path is None:
+        self._require_request()
+        page_path = self._origin_page_path()
+        if page_path is None:
             msg = "The request origin does not resolve to a page."
             raise RuntimeError(msg)
-        return match.page_path
+        return page_path
+
+    def _origin_page_path(self) -> "Path | None":
+        """Return the origin page path, or None when the builder cannot know one."""
+        if self._request is None:
+            return None
+        match = self._origin_match()
+        return None if match is None else match.page_path
 
     def _authorize_origin(self) -> None:
         """Re-run the origin page's authorization once per builder.
@@ -570,6 +600,14 @@ class Patches:
         if denial is not None:
             raise ForeignPageNotAuthorizedError(page_path, denial.status_code)
         self._origin_authorized = True
+
+    def _title_context(self) -> dict[str, object]:
+        """Return the origin render context for an inherited metadata callable.
+
+        The callable renders part of the origin page, so its guard runs first.
+        """
+        self._authorize_origin()
+        return self._origin_render_context()
 
     def _origin_url_kwargs(self) -> dict[str, object]:
         """Return the URL kwargs of the origin page for a zone or component render."""

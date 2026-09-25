@@ -2,13 +2,20 @@ from polls.broker import build_snapshot
 from polls.models import Poll
 from polls.providers import DPoll
 
-from next import context
+from next import context, page
+from next.pages import MetadataDict
 
 
 @context("poll", inherit_context=True)
 def poll(active: DPoll[Poll]) -> Poll:
     """Expose the active poll to the layout chain and any nested page."""
     return active
+
+
+@page.metadata
+def poll_meta(poll: Poll) -> MetadataDict:
+    """Title the vote page after the question the `poll` context above resolved."""
+    return {"title": poll.question}
 
 
 @context("live_results", serialize=True)

@@ -162,7 +162,7 @@ Both runs report no errors.
 The development run has ``DEBUG`` on and the production run has it off.
 The production run carries the ``STRICT_CONTEXT`` override, the development run keeps the default.
 
-The production run adds ``--deploy`` so it matches what the deployment script runs, which is where the three framework deployment checks fire and where Django's own hardening warnings appear.
+The production run adds ``--deploy`` so it matches what the deployment script runs, which is where the framework deployment checks and the SEO audits fire and where Django's own hardening warnings appear.
 See :doc:`/content/deployment/checklist` for that script.
 
 See also

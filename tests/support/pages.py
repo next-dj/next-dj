@@ -10,7 +10,7 @@ from tests.support.partial_requests import partial_meta
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     import pytest
     from django.http.response import HttpResponseBase
@@ -50,6 +50,39 @@ def build_nested_page(root: Path, *, body: str = "<h1>{{ title }}</h1>") -> Path
     page_file.write_text("x = 1")
     (leaf / "template.djx").write_text(body)
     return page_file
+
+
+def write_page(
+    root: Path,
+    trail: str = "",
+    source: str = 'template = "ok"\n',
+    *,
+    body: str | None = None,
+) -> Path:
+    """Write one ``page.py`` at ``trail`` under ``root`` and return it.
+
+    A ``body`` also writes the sibling ``template.djx`` the page renders.
+    """
+    directory = root / trail
+    directory.mkdir(parents=True, exist_ok=True)
+    page_file = directory / "page.py"
+    page_file.write_text(source)
+    if body is not None:
+        (directory / "template.djx").write_text(body)
+    return page_file
+
+
+def write_page_chain(root: Path, specs: Sequence[tuple[str, str]]) -> list[Path]:
+    """Write one nested ``page.py`` per spec under ``root`` and return them root first."""
+    directory = root
+    pages: list[Path] = []
+    for name, source in specs:
+        directory = directory / name
+        directory.mkdir(exist_ok=True)
+        page_file = directory / "page.py"
+        page_file.write_text(source)
+        pages.append(page_file)
+    return pages
 
 
 def page_naming_one_style(root: Path, *, directory: str = "named") -> Path:

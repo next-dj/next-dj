@@ -260,6 +260,7 @@ The framework walks up from the current ``page.py`` directory and runs every ``@
 - A page at ``/admin/links/`` sees both layers because it sits below both directories.
 
 When two ancestor directories publish the same inherited key, the value from the outermost ancestor wins.
+Page metadata folds the other way round, the segment nearest to the page wins, so the two rules are not interchangeable, see :doc:`seo/metadata`.
 
 The chain is read from the registry of ``@context`` registrations rather than probed on disk, so a ``page.py`` deleted inside a running process keeps publishing its inherited values until the registry is rebuilt.
 
@@ -351,26 +352,10 @@ Common patterns
 Per page title
 ~~~~~~~~~~~~~~
 
-Publish the page title from each page.
-
-.. code-block:: python
-   :caption: notes/pages/notes/[int:note_id]/page.py
-
-   from notes.models import Note
-
-   from next import context
-   from next.urls import DUrl
-
-   @context("page_title")
-   def page_title(note_id: DUrl[int]) -> str:
-       return Note.objects.get(pk=note_id).title
-
-Render it in the layout.
-
-.. code-block:: jinja
-   :caption: layout
-
-   <title>{{ page_title|default:"Notes" }}</title>
+A page title is metadata rather than context.
+Declare it as a ``metadata`` dict or a ``@page.metadata`` callable in ``page.py`` and let ``{% metadata %}`` in the root layout render it, see :doc:`seo/metadata`.
+The two mechanisms merge in opposite directions.
+An inherited context key keeps the value of the outermost ancestor, while a metadata key takes the value of the segment nearest to the page, which is what a title needs.
 
 Site wide configuration
 ~~~~~~~~~~~~~~~~~~~~~~~

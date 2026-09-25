@@ -7,6 +7,23 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
+from next.pages.errors import PageMetadataShapeError, PageMetadataURLError
+from next.pages.metadata import normalize_metadata, normalize_site_metadata
+from next.pages.metadata.schema import (
+    AlternatesDict,
+    ArticleDict,
+    MetadataDict,
+    OpenGraph,
+    OpenGraphDict,
+    OpenGraphImageDict,
+    Robots,
+    RobotsDict,
+    SiteMetadataDict,
+    SiteTitleDict,
+    TitleDict,
+    TwitterDict,
+    VerificationDict,
+)
 from next.urls import DUrl
 from tests.support.backends import PROJECT_APP_DIRECTORIES_FINDER
 from tests.support.helpers import file_router_config_entry
@@ -18,6 +35,7 @@ if TYPE_CHECKING:
     from django.http import HttpRequest
 
     from next.deps import DependencyResolver
+    from next.pages.metadata import Segment
 
 
 _UUID_TEXT = "12345678-1234-5678-1234-567812345678"
@@ -714,4 +732,619 @@ PAGE_RENDER_CASES: tuple[PageRenderCase, ...] = (
         "no_context", "Hello {{ name }}!", "Hello Test!", kwargs={"name": "Test"}
     ),
     PageRenderCase("empty_context", "Static content", "Static content"),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class MetadataShapeCase:
+    """One raw metadata value `normalize_metadata` rejects, and why."""
+
+    id: str
+    raw: object
+    site: bool
+    detail_fragment: str
+
+
+METADATA_SHAPE_CASES: tuple[MetadataShapeCase, ...] = (
+    MetadataShapeCase(
+        "non_mapping", ["x"], False, "declares metadata as 'list', expected a mapping"
+    ),
+    MetadataShapeCase(
+        "unknown_top_key",
+        {"foo": 1},
+        False,
+        "declares metadata key 'foo', expected one of alternates, base, canonical, "
+        "description, jsonld, og, other, robots, site_name, title, twitter, "
+        "verification",
+    ),
+    MetadataShapeCase(
+        "non_str_top_key", {1: "x"}, False, "declares metadata key '1', expected one of"
+    ),
+    MetadataShapeCase(
+        "description_not_text",
+        {"description": 5},
+        False,
+        "declares metadata key 'description' as 'int', expected text",
+    ),
+    MetadataShapeCase(
+        "base_not_str",
+        {"base": 1},
+        False,
+        "declares metadata key 'base' as 'int', expected a string",
+    ),
+    MetadataShapeCase(
+        "canonical_not_str_or_bool",
+        {"canonical": 1},
+        False,
+        "declares metadata key 'canonical' as 'int', expected a string or a bool",
+    ),
+    MetadataShapeCase(
+        "title_wrong_type",
+        {"title": 5},
+        False,
+        "declares metadata key 'title' as 'int', expected text or a mapping",
+    ),
+    MetadataShapeCase(
+        "title_unknown_key",
+        {"title": {"foo": "x"}},
+        False,
+        "declares metadata key 'title.foo', expected one of absolute, default, "
+        "template",
+    ),
+    MetadataShapeCase(
+        "title_template_not_text",
+        {"title": {"template": 5}},
+        False,
+        "declares metadata key 'title.template' as 'int', expected text",
+    ),
+    MetadataShapeCase(
+        "site_bare_title",
+        {"title": "Acme"},
+        True,
+        "declares metadata key 'title' as 'str', expected a mapping",
+    ),
+    MetadataShapeCase(
+        "site_absolute_title",
+        {"title": {"absolute": "Acme"}},
+        True,
+        "declares metadata key 'title.absolute', expected one of default, template",
+    ),
+    MetadataShapeCase(
+        "robots_wrong_type",
+        {"robots": 1},
+        False,
+        "declares metadata key 'robots' as 'int', expected a string or a mapping",
+    ),
+    MetadataShapeCase(
+        "robots_unknown_key",
+        {"robots": {"foo": True}},
+        False,
+        "declares metadata key 'robots.foo', expected one of follow, googlebot, "
+        "index, max_image_preview, max_snippet, max_video_preview, noarchive, "
+        "noimageindex, nosnippet, notranslate, unavailable_after",
+    ),
+    MetadataShapeCase(
+        "robots_flag_not_bool",
+        {"robots": {"index": "yes"}},
+        False,
+        "declares metadata key 'robots.index' as 'str', expected a bool",
+    ),
+    MetadataShapeCase(
+        "robots_limit_given_bool",
+        {"robots": {"max_snippet": True}},
+        False,
+        "declares metadata key 'robots.max_snippet' as 'bool', expected an int",
+    ),
+    MetadataShapeCase(
+        "googlebot_nests_googlebot",
+        {"robots": {"googlebot": {"googlebot": "none"}}},
+        False,
+        "declares metadata key 'robots.googlebot.googlebot', expected one of",
+    ),
+    MetadataShapeCase(
+        "og_unknown_key",
+        {"og": {"foo": 1}},
+        False,
+        "declares metadata key 'og.foo', expected one of article, description, "
+        "images, locale, site_name, title, type, url",
+    ),
+    MetadataShapeCase(
+        "og_images_not_sequence",
+        {"og": {"images": "/a.png"}},
+        False,
+        "declares metadata key 'og.images' as 'str', expected a sequence where "
+        "each item is a string or a mapping",
+    ),
+    MetadataShapeCase(
+        "og_image_wrong_item",
+        {"og": {"images": [1]}},
+        False,
+        "declares metadata key 'og.images[0]' as 'int', expected a string or a mapping",
+    ),
+    MetadataShapeCase(
+        "og_image_unknown_key",
+        {"og": {"images": [{"src": "/a.png"}]}},
+        False,
+        "declares metadata key 'og.images[0].src', expected one of alt, height, "
+        "url, width",
+    ),
+    MetadataShapeCase(
+        "og_image_width_not_int",
+        {"og": {"images": ["/a.png", {"width": "1"}]}},
+        False,
+        "declares metadata key 'og.images[1].width' as 'str', expected an int",
+    ),
+    MetadataShapeCase(
+        "og_article_unknown_key",
+        {"og": {"article": {"foo": 1}}},
+        False,
+        "declares metadata key 'og.article.foo', expected one of authors, "
+        "modified_time, published_time, section, tags",
+    ),
+    MetadataShapeCase(
+        "og_article_author_not_str",
+        {"og": {"article": {"authors": ["ada", 1]}}},
+        False,
+        "declares metadata key 'og.article.authors[1]' as 'int', expected a string",
+    ),
+    MetadataShapeCase(
+        "og_article_time_wrong_type",
+        {"og": {"article": {"published_time": 1}}},
+        False,
+        "declares metadata key 'og.article.published_time' as 'int', expected a "
+        "datetime or a string",
+    ),
+    MetadataShapeCase(
+        "twitter_unknown_key",
+        {"twitter": {"foo": 1}},
+        False,
+        "declares metadata key 'twitter.foo', expected one of card, creator, "
+        "description, images, site, title",
+    ),
+    MetadataShapeCase(
+        "twitter_images_not_sequence",
+        {"twitter": {"images": 1}},
+        False,
+        "declares metadata key 'twitter.images' as 'int', expected a sequence "
+        "where each item is a string",
+    ),
+    MetadataShapeCase(
+        "alternates_unknown_key",
+        {"alternates": {"foo": 1}},
+        False,
+        "declares metadata key 'alternates.foo', expected one of languages, x_default",
+    ),
+    MetadataShapeCase(
+        "alternates_languages_wrong_values",
+        {"alternates": {"languages": {"en": 1}}},
+        False,
+        "declares metadata key 'alternates.languages' as 'dict', expected a bool "
+        "or a mapping of language codes to URLs",
+    ),
+    MetadataShapeCase(
+        "verification_unknown_engine",
+        {"verification": {"duck": "x"}},
+        False,
+        "declares metadata key 'verification.duck', expected one of bing, google, "
+        "yandex",
+    ),
+    MetadataShapeCase(
+        "verification_wrong_scalar",
+        {"verification": {"google": 1}},
+        False,
+        "declares metadata key 'verification.google' as 'int', expected a string "
+        "or a sequence where each item is a string",
+    ),
+    MetadataShapeCase(
+        "verification_wrong_item",
+        {"verification": {"google": ["a", 1]}},
+        False,
+        "declares metadata key 'verification.google[1]' as 'int', expected a string",
+    ),
+    MetadataShapeCase(
+        "other_not_mapping",
+        {"other": [("a", "b")]},
+        False,
+        "declares metadata key 'other' as 'list', expected a mapping of names to "
+        "text or sequences of text",
+    ),
+    MetadataShapeCase(
+        "other_value_not_text",
+        {"other": {"a": 1}},
+        False,
+        "declares metadata key 'other' as 'dict', expected a mapping of names to "
+        "text or sequences of text",
+    ),
+    MetadataShapeCase(
+        "other_value_bytes",
+        {"other": {"a": b"x"}},
+        False,
+        "declares metadata key 'other' as 'dict', expected a mapping",
+    ),
+    MetadataShapeCase(
+        "other_key_not_str",
+        {"other": {1: "x"}},
+        False,
+        "declares metadata key 'other' as 'dict', expected a mapping",
+    ),
+    MetadataShapeCase(
+        "jsonld_wrong_type",
+        {"jsonld": "x"},
+        False,
+        "declares metadata key 'jsonld' as 'str', expected a mapping or a sequence "
+        "where each item is a mapping",
+    ),
+    MetadataShapeCase(
+        "jsonld_wrong_item",
+        {"jsonld": [{"@type": "Thing"}, 1]},
+        False,
+        "declares metadata key 'jsonld[1]' as 'int', expected a mapping",
+    ),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class MetadataMergeCase:
+    """One chain of raw segments and the folded values it must settle on."""
+
+    id: str
+    segments_raw: tuple[object, ...]
+    expected_title: str | None
+    expected_fields: dict[str, object] = field(default_factory=dict)
+
+
+METADATA_MERGE_CASES: tuple[MetadataMergeCase, ...] = (
+    MetadataMergeCase("empty_chain", (), None),
+    MetadataMergeCase("single_text", ({"title": "Wallet"},), "Wallet"),
+    MetadataMergeCase(
+        "template_wraps_child_text",
+        (
+            {"title": {"template": "{title} · {site_name}"}, "site_name": "Acme"},
+            {"title": "Wallet"},
+        ),
+        "Wallet · Acme",
+    ),
+    MetadataMergeCase(
+        "root_default_stands_bare",
+        ({"title": {"template": "{title} · Acme", "default": "Acme"}},),
+        "Acme",
+    ),
+    MetadataMergeCase(
+        "default_survives_a_child_without_title",
+        (
+            {"title": {"template": "{title} · Acme", "default": "Acme"}},
+            {"description": "Money"},
+        ),
+        "Acme",
+        {"description": "Money"},
+    ),
+    MetadataMergeCase(
+        "absolute_ignores_template",
+        (
+            {"title": {"template": "{title} · Acme"}},
+            {"title": {"absolute": "Just this"}},
+        ),
+        "Just this",
+    ),
+    MetadataMergeCase(
+        "nearer_template_replaces_the_root_one",
+        (
+            {"title": {"template": "{title} · Acme"}},
+            {"title": {"template": "{title} | Wallet"}},
+            {"title": "Cards"},
+        ),
+        "Cards | Wallet",
+    ),
+    MetadataMergeCase(
+        "template_applies_to_the_segment_after_it",
+        (
+            {"title": {"template": "{title} · Acme", "default": "Acme"}},
+            {"title": {"template": "{title} | Wallet"}},
+        ),
+        "Acme",
+    ),
+    MetadataMergeCase(
+        "template_without_title_still_applies",
+        ({"title": {"template": "Only Acme"}}, {"title": "Cards"}),
+        "Only Acme",
+    ),
+    MetadataMergeCase(
+        "site_name_missing_skips_the_template",
+        ({"title": {"template": "{title} · {site_name}"}}, {"title": "Cards"}),
+        "Cards",
+    ),
+    MetadataMergeCase(
+        "site_name_reads_the_final_fold",
+        (
+            {"title": {"template": "{title} · {site_name}"}, "site_name": "Root"},
+            {"title": "Cards", "site_name": "Leaf"},
+        ),
+        "Cards · Leaf",
+        {"site_name": "Leaf"},
+    ),
+    MetadataMergeCase(
+        "site_name_declared_after_the_template",
+        (
+            {"title": {"template": "{title} · {site_name}"}},
+            {"title": "Cards", "site_name": "Leaf"},
+        ),
+        "Cards · Leaf",
+    ),
+    MetadataMergeCase(
+        "later_segment_without_title_keeps_it",
+        ({"title": "Wallet"}, {"description": "Money"}),
+        "Wallet",
+        {"description": "Money"},
+    ),
+    MetadataMergeCase(
+        "nested_block_is_replaced_whole",
+        ({"og": {"type": "website", "title": "Root"}}, {"og": {"title": "Leaf"}}),
+        None,
+        {"og": OpenGraph(title="Leaf")},
+    ),
+    MetadataMergeCase(
+        "robots_string_replaces_the_dict",
+        ({"robots": {"index": False}}, {"robots": "all"}),
+        None,
+        {"robots": "all"},
+    ),
+    MetadataMergeCase(
+        "other_and_jsonld_are_replaced_whole",
+        (
+            {"other": {"a": "1", "b": "2"}, "jsonld": {"@type": "Root"}},
+            {"other": {"c": "3"}, "jsonld": [{"@type": "Leaf"}]},
+        ),
+        None,
+        {"other": (("c", "3"),), "jsonld": ({"@type": "Leaf"},)},
+    ),
+    MetadataMergeCase(
+        "empty_other_does_not_clear_the_parent",
+        ({"other": {"a": "1"}}, {"other": {}}),
+        None,
+        {"other": (("a", "1"),)},
+    ),
+    MetadataMergeCase(
+        "scalars_fold_by_nearest",
+        (
+            {"description": "Root", "base": "https://a.example", "canonical": True},
+            {"description": "Leaf", "canonical": "/leaf/"},
+        ),
+        None,
+        {"description": "Leaf", "base": "https://a.example", "canonical": "/leaf/"},
+    ),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class TitleTemplateCase:
+    """One title template and either its substitution or the error it raises."""
+
+    id: str
+    template: str
+    values: dict[str, object] = field(default_factory=dict)
+    expected: str | None = None
+    error_fragment: str | None = None
+
+
+TITLE_TEMPLATE_CASES: tuple[TitleTemplateCase, ...] = (
+    TitleTemplateCase(
+        "both_placeholders",
+        "{title} · {site_name}",
+        {"title": "Wallet", "site_name": "Acme"},
+        expected="Wallet · Acme",
+    ),
+    TitleTemplateCase("plain_text", "Acme", {"title": "Wallet"}, expected="Acme"),
+    TitleTemplateCase(
+        "escaped_braces",
+        "{{title}} {title}",
+        {"title": "Wallet"},
+        expected="{title} Wallet",
+    ),
+    TitleTemplateCase(
+        "site_name_alone",
+        "{site_name}",
+        {"title": "Wallet", "site_name": "Acme"},
+        expected="Acme",
+    ),
+    TitleTemplateCase(
+        "attribute_access",
+        "{x.__class__}",
+        error_fragment="names the placeholder 'x.__class__', expected one of "
+        "site_name, title",
+    ),
+    TitleTemplateCase(
+        "index_access", "{c[0]}", error_fragment="names the placeholder 'c[0]'"
+    ),
+    TitleTemplateCase("positional", "{0}", error_fragment="names the placeholder '0'"),
+    TitleTemplateCase("auto_numbered", "{}", error_fragment="names the placeholder ''"),
+    TitleTemplateCase(
+        "conversion",
+        "{title!r}",
+        error_fragment="formats the placeholder 'title', expected a bare {title}",
+    ),
+    TitleTemplateCase(
+        "format_spec",
+        "{title:>10}",
+        error_fragment="formats the placeholder 'title', expected a bare {title}",
+    ),
+    TitleTemplateCase(
+        "unbalanced_open",
+        "{title",
+        error_fragment="is malformed, expected '}' before end of string",
+    ),
+    TitleTemplateCase(
+        "unbalanced_close",
+        "}",
+        error_fragment="is malformed, Single '}' encountered in format string",
+    ),
+    TitleTemplateCase(
+        "unknown_name",
+        "{nope}",
+        error_fragment="names the placeholder 'nope', expected one of site_name, title",
+    ),
+    TitleTemplateCase(
+        "missing_value",
+        "{title} · {site_name}",
+        {"title": "Wallet"},
+        error_fragment="needs a value for 'site_name', which the chain did not provide",
+    ),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class RobotsCase:
+    """One robots value and the content its meta folds to."""
+
+    id: str
+    robots: Robots | str
+    expected: str
+
+
+ROBOTS_CASES: tuple[RobotsCase, ...] = (
+    RobotsCase("string_as_is", "noindex, nofollow", "noindex, nofollow"),
+    RobotsCase("empty", Robots(), ""),
+    RobotsCase("index_follow", Robots(index=True, follow=True), "index, follow"),
+    RobotsCase("noindex", Robots(index=False), "noindex"),
+    RobotsCase("nofollow", Robots(follow=False), "nofollow"),
+    RobotsCase(
+        "flags",
+        Robots(noarchive=True, nosnippet=True, noimageindex=True, notranslate=True),
+        "noarchive, nosnippet, noimageindex, notranslate",
+    ),
+    RobotsCase("false_flags_stay_out", Robots(noarchive=False, nosnippet=False), ""),
+    RobotsCase(
+        "limits",
+        Robots(
+            unavailable_after="2026-12-31",
+            max_snippet=20,
+            max_image_preview="large",
+            max_video_preview=-1,
+        ),
+        "unavailable_after: 2026-12-31, max-snippet:20, max-image-preview:large, "
+        "max-video-preview:-1",
+    ),
+    RobotsCase(
+        "everything_in_order",
+        Robots(index=False, follow=True, noarchive=True, max_snippet=0),
+        "noindex, follow, noarchive, max-snippet:0",
+    ),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class AbsoluteUrlCase:
+    """One URL to make absolute, the base and request path it sees, and the outcome.
+
+    A `path` of `None` means no request, and `error` names what raises over `expected`.
+    """
+
+    id: str
+    url: str
+    base: str | None = None
+    path: str | None = None
+    expected: str | None = None
+    error: type[Exception] | None = None
+
+
+ABSOLUTE_URL_CASES: tuple[AbsoluteUrlCase, ...] = (
+    AbsoluteUrlCase(
+        "http_as_is", "http://x.example/a/", expected="http://x.example/a/"
+    ),
+    AbsoluteUrlCase(
+        "https_as_is",
+        "https://x.example/a/?q=1",
+        base="https://acme.example",
+        path="/p/",
+        expected="https://x.example/a/?q=1",
+    ),
+    AbsoluteUrlCase(
+        "root_relative_base_first",
+        "/a/",
+        base="https://acme.example/",
+        path="/p/",
+        expected="https://acme.example/a/",
+    ),
+    AbsoluteUrlCase(
+        "root_relative_request", "/a/", path="/p/", expected="http://testserver/a/"
+    ),
+    AbsoluteUrlCase("root_relative_nothing", "/a/", error=PageMetadataURLError),
+    AbsoluteUrlCase(
+        "dot_relative",
+        "./a",
+        base="https://acme.example",
+        path="/p/q/",
+        expected="https://acme.example/p/q/a",
+    ),
+    AbsoluteUrlCase(
+        "bare_relative", "a", path="/p/q/", expected="http://testserver/p/q/a"
+    ),
+    AbsoluteUrlCase(
+        "parent_relative",
+        "../a",
+        base="https://acme.example",
+        path="/p/q/",
+        expected="https://acme.example/p/a",
+    ),
+    AbsoluteUrlCase(
+        "relative_without_request",
+        "./a",
+        base="https://acme.example",
+        error=PageMetadataURLError,
+    ),
+    AbsoluteUrlCase(
+        "javascript_scheme", "javascript:alert(1)", error=PageMetadataShapeError
+    ),
+    AbsoluteUrlCase(
+        "data_scheme",
+        "data:text/html,x",
+        base="https://acme.example",
+        path="/p/",
+        error=PageMetadataShapeError,
+    ),
+    AbsoluteUrlCase(
+        "ftp_scheme", "ftp://x.example/a", path="/p/", error=PageMetadataShapeError
+    ),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class SchemaParityCase:
+    """One metadata ``TypedDict`` and how a public normaliser reaches its block."""
+
+    id: str
+    typed_dict: type
+    normalize: Callable[..., Segment]
+    nest: Callable[[dict[str, object]], dict[str, object]] = lambda block: block
+
+
+SCHEMA_PARITY_CASES: tuple[SchemaParityCase, ...] = (
+    SchemaParityCase("page", MetadataDict, normalize_metadata),
+    SchemaParityCase("site", SiteMetadataDict, normalize_site_metadata),
+    SchemaParityCase("title", TitleDict, normalize_metadata, lambda b: {"title": b}),
+    SchemaParityCase(
+        "site_title", SiteTitleDict, normalize_site_metadata, lambda b: {"title": b}
+    ),
+    SchemaParityCase("og", OpenGraphDict, normalize_metadata, lambda b: {"og": b}),
+    SchemaParityCase(
+        "og_image",
+        OpenGraphImageDict,
+        normalize_metadata,
+        lambda b: {"og": {"images": [b]}},
+    ),
+    SchemaParityCase(
+        "article", ArticleDict, normalize_metadata, lambda b: {"og": {"article": b}}
+    ),
+    SchemaParityCase(
+        "twitter", TwitterDict, normalize_metadata, lambda b: {"twitter": b}
+    ),
+    SchemaParityCase(
+        "alternates", AlternatesDict, normalize_metadata, lambda b: {"alternates": b}
+    ),
+    SchemaParityCase(
+        "verification",
+        VerificationDict,
+        normalize_metadata,
+        lambda b: {"verification": b},
+    ),
+    SchemaParityCase("robots", RobotsDict, normalize_metadata, lambda b: {"robots": b}),
 )

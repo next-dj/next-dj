@@ -18,6 +18,7 @@ from django.urls.resolvers import RoutePattern
 from next.backends import backend_entries, load_backends, resolve_setting_class
 from next.conf.signals import settings_reloaded
 from next.forms.manager import form_action_manager
+from next.ports import seo_routes_slot
 
 from .backends import RouterBackend
 from .resolver import TrieURLResolver
@@ -165,7 +166,7 @@ setting_changed.connect(_on_setting_changed)
 
 
 class _LazyUrlPatterns(Sequence["URLPattern | URLResolver"]):
-    """Defer expanding router and form patterns until first use.
+    """Defer expanding router, form and SEO patterns until first use.
 
     Skips `list` so `include()` defers materialisation, overrides `__reversed__` to
     avoid a per-index list build, and caches the concat against both manager versions.
@@ -186,10 +187,14 @@ class _LazyUrlPatterns(Sequence["URLPattern | URLResolver"]):
             form_action_manager.version,
         ):
             return cache[2]
+        seo_routes = seo_routes_slot.peek()
         patterns: list[URLPattern | URLResolver] = [
             *router_manager,
             *form_action_manager,
+            *(() if seo_routes is None else seo_routes.patterns()),
         ]
+        if seo_routes is None:
+            return patterns
         # Versions are read after the build because expanding pages can
         # register form actions and bump the forms version mid-build.
         self._cache = (router_manager.version, form_action_manager.version, patterns)

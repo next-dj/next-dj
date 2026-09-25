@@ -3,21 +3,28 @@ import inspect
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpResponse
+from django.template import Template
 from django.test import override_settings
 
+from next.components.ports import ComponentTagsImpl
 from next.pages.ports import PageScanImpl
 from next.partial.ports import PartialShaperImpl
 from next.ports import (
+    ComponentTags,
     PageScan,
     PartialShaper,
     PortSlot,
     RouterAccess,
+    SeoRoutes,
     StaticAssets,
+    component_tags_slot,
     page_scan_slot,
     partial_shaper_slot,
     router_access_slot,
+    seo_routes_slot,
     static_assets_slot,
 )
+from next.seo.ports import SeoRoutesImpl
 from next.static.manager import StaticManager
 from next.static.ports import StaticAssetsImpl
 from next.urls import FileRouterBackend, RouterManager, URLPatternParser
@@ -52,16 +59,20 @@ def _parameter_shape(owner: type, name: str) -> list[tuple[str, object, object]]
 
 
 PROCESS_SLOTS = [
+    pytest.param(component_tags_slot, ComponentTagsImpl, id="component_tags"),
     pytest.param(page_scan_slot, PageScanImpl, id="page_scan"),
     pytest.param(partial_shaper_slot, PartialShaperImpl, id="partial_shaper"),
     pytest.param(router_access_slot, RouterAccessImpl, id="router_access"),
+    pytest.param(seo_routes_slot, SeoRoutesImpl, id="seo_routes"),
     pytest.param(static_assets_slot, StaticAssetsImpl, id="static_assets"),
 ]
 
 SLOT_SUBJECTS = [
+    "component tags port",
     "page scan port",
     "partial shaper",
     "router access port",
+    "seo routes port",
     "static assets port",
 ]
 
@@ -88,6 +99,10 @@ class TestUnboundSlot:
         assert "NextFrameworkConfig.ready()" in str(caught.value)
         assert "never finished starting" in str(caught.value)
 
+    def test_peek_answers_none_before_set(self) -> None:
+        """An early reader can tell the app is not ready without catching an error."""
+        assert PortSlot("seo routes port").peek() is None
+
     def test_a_slot_carries_no_instance_dictionary(self) -> None:
         """Four process-wide singletons, so the slot stays a two-field object."""
         assert not hasattr(PortSlot("partial shaper"), "__dict__")
@@ -101,6 +116,7 @@ class TestBoundSlot:
         shaper = IntentOnlyShaper()
         slot.set(shaper)
         assert slot.get() is shaper
+        assert slot.peek() is shaper
 
     def test_set_replaces_the_previous_binding(self) -> None:
         slot = PortSlot("partial shaper")
@@ -257,6 +273,38 @@ class TestStaticAssetsPort:
         info = component_info(folder, name="card", template="<p>c</p>\n")
 
         assert StaticAssetsImpl().collect_component_assets(info, None) is None
+
+
+class TestSeoRoutesPort:
+    """The SEO port hands the lazy urlpatterns its routes without an import."""
+
+    def test_the_port_declares_the_expected_methods(self) -> None:
+        assert _methods_of(SeoRoutes) == ["patterns"]
+
+    def test_implementation_parameters_match_the_port(self) -> None:
+        assert _call_shape(SeoRoutesImpl, "patterns") == _call_shape(
+            SeoRoutes, "patterns"
+        )
+
+
+class TestComponentTagsPort:
+    """The tags port answers from the node the component tag library compiles to."""
+
+    def test_the_port_declares_the_expected_methods(self) -> None:
+        assert _methods_of(ComponentTags) == ["component_names"]
+
+    def test_implementation_parameters_match_the_port(self) -> None:
+        assert _call_shape(ComponentTagsImpl, "component_names") == _call_shape(
+            ComponentTags, "component_names"
+        )
+
+    def test_component_names_include_a_nested_component(self) -> None:
+        source = '{% #component "card" %}{% component "badge" %}{% /component %}'
+        names = ComponentTagsImpl().component_names(Template(source).nodelist)
+        assert sorted(names) == ["badge", "card"]
+
+    def test_a_template_without_components_names_none(self) -> None:
+        assert ComponentTagsImpl().component_names(Template("<p>x</p>").nodelist) == []
 
 
 class TestSubscriptedSlotSingletons:

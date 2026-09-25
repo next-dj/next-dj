@@ -92,4 +92,13 @@ NEXT_FRAMEWORK = {
         }
     ],
     "STATIC_VERSION": "v1",
+    "METADATA": {
+        "DEFAULTS": {
+            "site_name": "next.dj flags",
+            "title": {
+                "template": "{title} · {site_name}",
+                "default": "next.dj — Feature flags admin",
+            },
+        }
+    },
 }

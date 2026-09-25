@@ -46,10 +46,9 @@ class PageContexts(NamedTuple):
 
 
 def load_routed_pages() -> tuple[list[CheckMessage], list[tuple[str, Path]]]:
-    """Import every routed `page.py`, answering with the ones that loaded.
+    """Import every routed `page.py` once per run, answering with the ones that loaded.
 
-    The pass is the one the form checks run, and it takes the manager these checks
-    resolved so a caller that pointed them at a router tree reaches it here too.
+    The manager is the one these checks resolved, so a patched router tree reaches it.
     """
     router_manager, init_errors = get_router_manager()
     if router_manager is None:
@@ -97,18 +96,24 @@ def _return_annotation(func: Callable[..., Any]) -> object:
         return inspect.Signature.empty
 
 
-def _check_context_function(
-    func_name: str, func: Callable[..., Any], page_path: Path
-) -> CheckMessage | None:
-    """Emit an error when keyless context callables are not annotated dict-like.
+def annotation_mismatch(func: Callable[..., Any]) -> str | None:
+    """Return the name of a return annotation that is not dict-like, else `None`.
 
-    The check is static, because executing user code at ``manage.py check`` time is
-    expensive and can hit databases that have yet to be migrated.
+    Static on purpose, since running user code at check time can hit an unmigrated DB.
     """
     annotation = _return_annotation(func)
     if _annotation_is_dict_like(annotation):
         return None
-    annotation_name = getattr(annotation, "__name__", None) or repr(annotation)
+    return getattr(annotation, "__name__", None) or repr(annotation)
+
+
+def _check_context_function(
+    func_name: str, func: Callable[..., Any], page_path: Path
+) -> CheckMessage | None:
+    """Emit an error when keyless context callables are not annotated dict-like."""
+    annotation_name = annotation_mismatch(func)
+    if annotation_name is None:
+        return None
     return Error(
         f"Context function '{func_name}' in {page_path} "
         "must return a dictionary when registered as a keyless context "
@@ -191,6 +196,7 @@ def check_single_keyless_context(*args, **kwargs) -> list[CheckMessage]:
 
 __all__ = [
     "PageContexts",
+    "annotation_mismatch",
     "check_context_functions",
     "check_context_registration_files",
     "check_single_keyless_context",

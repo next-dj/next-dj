@@ -6,7 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from next.caches import BoundedCache
-from next.deps import get_request_dep_cache
+from next.deps.cache import shared_dep_cache
 from next.deps.resolver import current_resolver
 from next.introspect import MisattributedContext, MisattributionLog, callable_name
 
@@ -209,6 +209,7 @@ class PageContextRegistry:
         file_path: Path,
         request: HttpRequest | None = None,
         *,
+        dep_cache: dict[str, Any] | None = None,
         _requested_zones: frozenset[str] | None = None,
         **kwargs,
     ) -> ContextResult:
@@ -220,10 +221,7 @@ class PageContextRegistry:
         context_data: dict[str, Any] = {}
         js_context: dict[str, Any] = {}
         js_context_serializers: dict[str, JsContextSerializer] = {}
-        # Reuse the dispatch dep_cache on a validation-failure re-render, so a
-        # Depends("name") the form action resolved is not recomputed here.
-        shared = get_request_dep_cache(request)
-        dep_cache: dict[str, Any] = shared if shared is not None else {}
+        dep_cache = shared_dep_cache(request) if dep_cache is None else dep_cache
         dep_stack: list[str] = []
 
         inherited_context = self._collect_inherited_context(

@@ -129,6 +129,14 @@ Pass ``request`` whenever one exists, so the asset URLs of the envelope stay sco
      - A full client navigation to a server-authored href.
        ``external=True`` skips same-host validation, see :ref:`security-overview`.
      - none
+   * - ``meta``
+     - ``meta()``
+     - Set ``document.title`` to the title the origin page would render, the chain template already applied and the text evaluated under the active language.
+       ``absolute=True`` skips the template, and a builder without an origin page sends the bare text.
+       No markup travels, see :doc:`/content/topics/seo/metadata`.
+       An inherited metadata callable of an ancestor runs as in the render, after the guard of the origin page.
+       Under a layer the title belongs to the page whose envelope carried it, see :doc:`layers`.
+     - none
 
 A target carries exactly one address key, and the client resolves ``zone``, then ``form``, then ``field``, then ``css``.
 ``zone`` names a ``data-next-zone`` wrapper and ``form`` names an action uid.

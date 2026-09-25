@@ -107,6 +107,11 @@ export interface ContextPatch {
   data?: unknown;
 }
 
+export interface MetaPatch {
+  op: "meta";
+  title?: string;
+}
+
 export type BuiltinPatch =
   | MorphPatch
   | ReplacePatch
@@ -120,7 +125,8 @@ export type BuiltinPatch =
   | ToastPatch
   | UrlPatch
   | VisitPatch
-  | ContextPatch;
+  | ContextPatch
+  | MetaPatch;
 
 /** A custom op registered through defineOp, its payload open past the op. */
 export interface CustomPatch {
@@ -147,6 +153,7 @@ const BUILTIN_OPS = new Set<string>([
   "url",
   "visit",
   "context",
+  "meta",
 ] satisfies BuiltinPatch["op"][]);
 
 // A predicate, not a boolean check, so #applyBuiltin keeps the per-op narrowing.
@@ -237,6 +244,7 @@ export interface LayerBridge {
   urlFor(el: Element): string;
   open(opener: null, href?: string, zone?: string): unknown;
   close(detail: { result?: unknown; dismiss?: boolean; reason?: string }): void;
+  retitle(title: string, page?: string): void;
   toast(text: string, variant: string): void;
 }
 
@@ -274,9 +282,19 @@ export type ZoneFetch = (request: {
 interface ApplyState {
   isDirty: (field: Element) => boolean;
   requestKey: string | undefined;
-  // The page a safe zone GET fetched, scoping its zone patches to that page.
   page: string | undefined;
+  owner: string | undefined;
   touched: Element[];
+}
+
+/** What an apply knows about the request it answers. */
+export interface ApplyOptions {
+  snapshot?: number | undefined;
+  key?: string | undefined;
+  // The page a safe zone GET fetched, scoping its zone patches to that page.
+  page?: string | undefined;
+  // The page a meta title belongs to, apart from page so a stream never scopes zones.
+  owner?: string | undefined;
 }
 
 export interface ApplyDeps {
@@ -472,7 +490,8 @@ export class Applier {
    * The phases run in a fixed order of version, before-apply, CSS delta, ops, JS delta,
    * mount, then applied. CSS gates the ops, so the rest runs in a continuation.
    */
-  apply(raw: unknown, snapshot?: number, key?: string, page?: string): Envelope {
+  apply(raw: unknown, options: ApplyOptions = {}): Envelope {
+    const { snapshot, key, page, owner = page } = options;
     const envelope = parseEnvelope(raw, this.#dev());
     // A version mismatch is a full visit instead of an apply, guarded against a
     // reload loop inside the bridge. true means the bridge took over.
@@ -487,6 +506,7 @@ export class Applier {
       isDirty: snapshot === undefined ? () => false : this.#dirtySince(snapshot),
       requestKey: key,
       page,
+      owner,
       touched: [],
     };
     const runOps = (): void => this.#runOps(envelope, state);
@@ -628,6 +648,9 @@ export class Applier {
       case "context":
         this.#contextOp(patch);
         return;
+      case "meta":
+        this.#meta(patch, state);
+        return;
       // A verb missing here would be a silent no-op reported as ok, so the never
       // binding turns it into a build error, and this throw is that error at runtime.
       /* v8 ignore next 3 */
@@ -686,6 +709,13 @@ export class Applier {
   // Merging into the client context fires context-updated, so islands react.
   #contextOp(patch: ContextPatch): void {
     if (isRecord(patch.data)) this.#mergeContext(patch.data);
+  }
+
+  #meta(patch: MetaPatch, state: ApplyState): void {
+    if (typeof patch.title !== "string") return;
+    const layers = this.#layers();
+    if (layers === undefined) this.#document.title = patch.title;
+    else layers.retitle(patch.title, state.owner);
   }
 
   // The default verb, parsing and neutralising content then morphing the live

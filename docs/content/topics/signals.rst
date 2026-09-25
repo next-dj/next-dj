@@ -50,6 +50,9 @@ Every signal the framework emits is listed below with the subsystem that emits i
    * - ``context_registered``
      - Pages
      - After a context function is attached to a page module.
+   * - ``metadata_registered``
+     - Pages
+     - After a ``@page.metadata`` callable is attached to a page module.
    * - ``page_rendered``
      - Pages
      - After the page renders to HTML and the static assets are injected.
@@ -134,6 +137,9 @@ Every signal the framework emits is listed below with the subsystem that emits i
    * - ``partial_backend_loaded``
      - Partial
      - After the partial protocol backend is created from its configuration entry.
+   * - ``sitemap_items_registered``
+     - SEO
+     - After ``@sitemap.items`` binds a callable to a route trail under a page root.
    * - ``watch_specs_ready``
      - Server
      - After the reloader resolves the full list of watch specs.

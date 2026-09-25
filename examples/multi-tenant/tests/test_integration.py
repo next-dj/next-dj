@@ -504,3 +504,26 @@ class TestDebugAffordance:
         next_client.cookies["next_tenant"] = "acme"
         response = next_client.get("/notes/")
         assert response.status_code == 400
+
+
+class TestPageMetadata:
+    """The root callable brands every tab with the tenant, pages add their own title."""
+
+    @pytest.mark.parametrize(
+        ("slug", "path", "title"),
+        [
+            ("acme", "/", "Acme Industries"),
+            ("globex", "/", "Globex Corporation"),
+            ("acme", "/notes/", "Notes · Acme Industries"),
+            ("globex", "/notes/new/", "New note · Globex Corporation"),
+            ("acme", "/notes/{pk}/edit/", "Welcome to Acme · Acme Industries"),
+        ],
+        ids=["acme-landing", "globex-landing", "notes", "new", "edit"],
+    )
+    def test_every_page_is_titled_for_its_tenant_and_kept_out_of_the_index(
+        self, next_client: NextClient, acme_note: Note, slug: str, path: str, title: str
+    ) -> None:
+        response = next_client.get(path.format(pk=acme_note.pk), HTTP_X_TENANT=slug)
+        body = response.content.decode()
+        assert f"<title>{title}</title>" in body
+        assert '<meta name="robots" content="noindex">' in body

@@ -16,12 +16,14 @@ The scaffold ships deliberately generic names. Each rename touches more than one
 | `myapp/routes/` | `PAGES_DIR` in `PAGE_BACKENDS`, and `next_pages` in `pytest.ini` |
 | `myapp/routes/_widgets/` | `COMPONENTS_DIR` in `COMPONENT_BACKENDS` |
 | `chrome/` | `PAGE_BACKENDS["DIRS"]` |
+| `next.dj template` and `Next.dj example template` | `site_name` and the `title` default under `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` in `config/settings.py`, the tab title of every page that declares none |
 
 Pick names that fit the domain rather than reusing `routes` and `_widgets`. Every example renames both, which is what shows the naming is yours and not the framework's.
 
 ## Conventions
 
 - Tailwind loads from the Play CDN through the shared `page_head` component. No build step, no Node.
+- The tab title is metadata, not a prop. `page_head` renders `{% metadata %}`, which folds `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` with whatever each `page.py` declares as `metadata = {...}` or under `@page.metadata`. The scaffold sets only `site_name` and a `title` template with its default, so every page shows the default until it declares a title of its own, which then renders as `{title} · {site_name}`.
 - Project-local assets are spelled as staticfiles names, never as `/static/...` literals. `page_head` registers `shared/css/tokens.css`, `shared/css/base.css` and `shared/js/base.mjs` through `{% use_style %}` and `{% use_module %}`, and the `favicon="site/favicon.svg"` prop in `chrome/layout.djx` goes through `{% asset %}`, which returns the URL for a bare `href` and registers nothing. A name follows `STATIC_URL` and carries the storage digest, a literal path does neither.
 - `pytest.ini` is the whole test scaffold. `addopts` opts into the framework's pytest plugin with `-p next.testing.plugin`, `next_pages` points it at the page tree it imports once per session so the router is populated before the first request, `next_clear_cache` empties the cache between tests, and the `next_client` fixture is the test client that speaks the partial protocol.
 - `STATIC_VERSION` names the deploy stamp, and every example serving its assets off disk inherits that line from here. The tag lands on every asset URL as a `v` parameter and on every partial response as the asset version, and the [examples README](../README.md#conventions-every-example-follows) explains what it guards, when to bump it, and which examples derive it from something else.

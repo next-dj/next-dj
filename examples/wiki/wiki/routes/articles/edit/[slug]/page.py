@@ -7,6 +7,10 @@ from wiki.providers import DArticle
 
 from next import context
 from next.forms import ComponentWidget, ModelForm, PermissionOutcome
+from next.pages import MetadataDict
+
+
+metadata: MetadataDict = {"title": "Edit article", "robots": {"index": False}}
 
 
 class ArticleEditForm(ModelForm):

@@ -94,4 +94,13 @@ NEXT_FRAMEWORK = {
         }
     ],
     "STATIC_VERSION": "v1",
+    "METADATA": {
+        "DEFAULTS": {
+            "site_name": "next.dj shortener",
+            "title": {
+                "template": "{title} · {site_name}",
+                "default": "next.dj — URL shortener",
+            },
+        }
+    },
 }

@@ -4,6 +4,10 @@ from catalog.queries import cached_search
 from catalog.zones import LISTING_ZONES, zone_target
 
 from next import context
+from next.pages import MetadataDict
+
+
+metadata: MetadataDict = {"title": "All products", "canonical": True}
 
 
 @context("filter_zones")

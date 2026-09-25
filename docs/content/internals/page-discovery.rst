@@ -74,9 +74,13 @@ Modules
 ``next.pages.paths``.
    Memoises the path facts of one ``page.py``, its module path, its template path, and its ancestor chain, in a bounded cache the composition lifecycle clears.
 
+``next.pages.metadata``.
+   Folds the settings tier and the ``metadata`` dicts and ``@page.metadata`` callables of the ancestor chain into one ``Metadata`` value, see `Metadata resolution`_ below.
+   ``schema`` holds the input shapes and the folded value, ``normalize`` the strict normaliser, ``scope`` the memoised read of the ``METADATA`` scope with its upper-case options and the settings tier, ``placeholders`` the safe title template, ``merge`` the fold, ``chain`` the ancestor walk, ``registry`` the callable per file and the chain memo, ``providers`` the ``Metadata`` parameter provider, ``backends`` the renderer contract, the HTML renderer, and the lookup of the configured one, and ``nodes`` the ``MetadataNode`` that ``{% metadata %}`` compiles to.
+
 ``next.pages.errors``.
-   Defines the two exceptions the area raises.
-   ``PageModuleImportError`` is what a broken ``page.py`` raises on the request path, and ``PageContextShapeError`` is what a keyless ``@context`` answering a non-mapping raises during the context merge.
+   Defines the seven exceptions the area raises.
+   ``PageModuleImportError`` is what a broken ``page.py`` raises on the request path, ``PageContextShapeError`` is what a keyless ``@context`` answering a non-mapping raises during the context merge, and the five ``PageMetadata*`` errors name a metadata declaration the schema, the template, the URL resolution, the one-form rule, or a render without a request refuses.
 
 ``next.pages.ports``.
    Holds ``PageScanImpl``, which binds the page-tree scan to the ``PageScan`` port so discovery reaches the scan without an import that would close the cycle.
@@ -173,9 +177,48 @@ Context resolution
 The dependency resolver shares one cache between the inherited and page-level sub-steps of a single ``collect_context`` call, so a value resolved at an ancestor is not recomputed for the page.
 On a regular GET that cache does not extend to components, and each component render starts its own cache.
 A cache that spans the page and its components exists only on the form-dispatch re-render after a validation failure, where the dispatcher attaches its cache to the request.
+Within one page view a single cache serves ``render()`` when the page has one, the context build, and the metadata thunk, and it never lands on the request, so a ``Depends`` value resolves once across them.
 
 The canonical description is in :doc:`/content/topics/context`.
 This page focuses on which module performs each step.
+
+Metadata resolution
+-------------------
+
+``Page.build_render_context`` ends by placing a ``MetadataThunk`` under the ``_next_metadata`` key of the context dict it returns, the ``METADATA_KEY`` constant of ``next.seeding``.
+The thunk holds the registry, the page path, the request, the URL kwargs, and the dependency cache of the render, keeps no reference to the context, and does nothing until ``{% metadata %}`` reads it.
+The tag hands ``resolve`` the flattened context it renders in, so a value a zone override or a ``{% with %}`` block puts in scope reaches the callables, and a template without the tag runs no callable at all.
+The tag memoises the ``Metadata`` in the render context of the template against the thunk, so a second tag in the same template render pays nothing, while an included template renders under a render context of its own and folds again.
+``Page.resolve_metadata`` builds the same context and resolves the thunk against it at once, for a caller outside a render, so it runs every context callable of the page and pays a full context build for one ``Metadata``.
+
+.. mermaid::
+
+   flowchart LR
+       Site["Settings tier<br/>METADATA.DEFAULTS"] --> Dicts["Ancestor metadata dicts<br/>root first"]
+       Dicts --> Inherited["Inherited callables<br/>inherit=True"]
+       Inherited --> Own["Own dict or callable"]
+       Own --> Thunk["MetadataThunk<br/>in the render context"]
+       Thunk --> Tag["The metadata tag"]
+       Tag --> Head["Head markup"]
+
+The chain of a page is built once and memoised on the ``PageMetadataRegistry`` through its ``chain`` and ``remember`` accessors, keyed by the page path.
+``chain_entry`` walks the ancestors of the page inside its page tree, root first, reads the ``metadata`` attribute of each module through the mtime-keyed module memo, and asks the registry for the callable registered against that file.
+The walk stops at the root of the tree through ``page_tree_depth``, the same bound the layout walk uses, and a page outside every known tree still walks every ancestor up to the depth cap.
+A dict becomes a normalised ``Segment`` at once, a callable is kept as a source with an empty segment, and a file carrying both raises ``PageMetadataConflictError``.
+The entry also stores the static fold, the settings tier plus every dict, which the checks read without a request, and the whole fold when no source is a callable, which the request-time resolve answers with directly.
+
+Three tokens date the memo.
+The registry ``version`` moves on every registration and reset, the module generation of ``next.pages.loaders`` moves when a ``page.py`` is re-executed and when ``forget_page_roots`` drops the page trees the walk was bounded by, and the settings tier is compared by identity, since ``site_segment`` is a ``functools.cache`` that ``settings_reloaded`` clears.
+An entry whose tokens do not match the current three is rebuilt on the next read, and both tokens are read before the walk, so a module the walk itself loads or registers moves them past the entry and the following read rebuilds it settled.
+
+The request-time fold replays the sources in order.
+A dict source appends its segment, and a callable source is resolved through the dependency resolver with the request, the URL kwargs, the shared cache, and a context view that publishes the fold so far under ``_next_metadata_parent``, which is what a parameter annotated ``Metadata`` reads through the ``ParentMetadataProvider`` at priority 25.
+The mapping the callable returns is normalised with the callable and its file as the source name, so a shape error names the function rather than the page.
+``fold_metadata`` then merges the segments root to leaf, the nearer one winning per top-level key, and walks the title through the chain with the template in force, see :doc:`/content/topics/seo/metadata` for the rules that fold implements.
+
+``templated_title`` replays the same sources with the title of the page itself replaced by the given text, so the other fields of the page's own dict, ``site_name`` among them, still apply, and the page's own callable is left out.
+An inherited callable of an ancestor runs as it does in the render, against a context the caller's ``context_data`` factory builds only at that point, which is how ``Patches.meta`` runs the guard of the origin page and builds its render context on demand.
+``absolute=True`` returns the text untouched, and a chain without an inherited callable never calls the factory.
 
 Extension points
 ----------------
@@ -183,6 +226,7 @@ Extension points
 - Register a new template loader in ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]``.
 - Subscribe to ``page_rendered`` to observe every render, and to ``template_loaded`` to observe every composed template written to the registry.
 - Add a context processor for global template variables.
+- Name a ``MetadataRenderer`` subclass in ``NEXT_FRAMEWORK["METADATA"]["RENDERER"]`` to change the head markup ``{% metadata %}`` writes.
 
 ``Page`` is not an extension point.
 ``next.pages.manager`` builds the ``page`` singleton at import time and no settings key swaps the class, so a subclass has no registration path and nothing would route requests through it.

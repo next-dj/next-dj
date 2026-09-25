@@ -26,6 +26,15 @@ def get_request_dep_cache(request: object | None) -> dict[str, Any] | None:
     return cache if isinstance(cache, dict) else None
 
 
+def shared_dep_cache(request: object | None) -> dict[str, Any]:
+    """Return the dispatch cache on `request`, or a fresh dict the request never sees.
+
+    A render publishing its own cache would hand it to every component on the page.
+    """
+    cache = get_request_dep_cache(request)
+    return {} if cache is None else cache
+
+
 class DependencyCache:
     """Store resolved dependency values and detect cycles via in-progress keys.
 

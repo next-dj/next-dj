@@ -111,4 +111,11 @@ NEXT_FRAMEWORK = {
         }
     ],
     "STATIC_VERSION": "v1",
+    "METADATA": {
+        "DEFAULTS": {
+            "site_name": "next.dj admin",
+            "title": {"template": "{title} · {site_name}", "default": "next.dj admin"},
+            "robots": {"index": False, "follow": False},
+        }
+    },
 }

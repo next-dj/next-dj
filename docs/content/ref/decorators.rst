@@ -30,6 +30,15 @@ Decorators
    The callable still runs on a full page render.
    ``zone=`` cannot be combined with ``inherit_context=True``, and the pair raises ``ValueError`` at registration.
 
+@page.metadata
+~~~~~~~~~~~~~~
+
+.. py:decorator:: page.metadata(func=None, /, *, inherit=False)
+
+   Registers the dependency-injected callable that builds the metadata of a page module (``page.py``) per request, and ``inherit=True`` runs it for every descendant page as well.
+   ``next.E108`` expects the return annotation to name a mapping, and ``next.E102`` reports a ``page.py`` that declares a module-level ``metadata`` dict beside the callable.
+   See :doc:`/content/topics/seo/metadata` for the parameters, when the callable runs, and the merge order.
+
 @component.context
 ~~~~~~~~~~~~~~~~~~
 
@@ -124,7 +133,7 @@ DForm
 Type annotation that injects a form instance during action dispatch.
 ``DForm[MyForm]`` names the class directly and ``DForm["MyForm"]`` names it as a string, which keeps a page free of an import it needs for nothing else.
 
-The nine built-in providers are listed with their priorities in :doc:`/content/topics/dependency-injection`.
+The ten built-in providers are listed with their priorities in :doc:`/content/topics/dependency-injection`.
 
 Provider base classes
 ---------------------
@@ -154,6 +163,7 @@ See also
 .. seealso::
 
    :doc:`/content/topics/context` for ``@context`` semantics.
+   :doc:`/content/topics/seo/metadata` for ``@page.metadata``.
    :doc:`/content/topics/components` for ``@component.context``.
    :doc:`/content/topics/forms/actions` for ``@action`` handlers.
    :doc:`/content/topics/dependency-injection` for the resolver and providers.

@@ -1,9 +1,15 @@
 import pytest
 from django.http import HttpRequest
 
-from next.deps import DependencyResolver, Depends, resolver
-from next.deps.cache import _CACHE_MISS, _IN_PROGRESS, DependencyCache
-from tests.support import bound_dependency
+from next.deps import (
+    REQUEST_DEP_CACHE_ATTR,
+    DependencyResolver,
+    Depends,
+    get_request_dep_cache,
+    resolver,
+)
+from next.deps.cache import _CACHE_MISS, _IN_PROGRESS, DependencyCache, shared_dep_cache
+from tests.support import bound_dependency, build_mock_http_request
 
 
 class TestDependencyCache:
@@ -162,3 +168,41 @@ class TestDependencyCacheLayout:
         cache = DependencyCache()
         with pytest.raises(AttributeError):
             cache.extra = 1
+
+
+class TestSharedDepCache:
+    """The dispatch cache on a request when there is one, a private dict otherwise."""
+
+    def test_a_request_without_one_gets_a_fresh_dict_it_never_carries(self) -> None:
+        request = HttpRequest()
+        cache = shared_dep_cache(request)
+        assert cache == {}
+        assert get_request_dep_cache(request) is None
+        assert shared_dep_cache(request) is not cache
+
+    def test_the_dict_already_on_the_request_is_returned(self) -> None:
+        request = HttpRequest()
+        attached: dict[str, object] = {"wallet": "w"}
+        setattr(request, REQUEST_DEP_CACHE_ATTR, attached)
+        assert shared_dep_cache(request) is attached
+
+    def test_an_empty_dispatch_cache_is_shared_rather_than_replaced(self) -> None:
+        request = HttpRequest()
+        attached: dict[str, object] = {}
+        setattr(request, REQUEST_DEP_CACHE_ATTR, attached)
+        assert shared_dep_cache(request) is attached
+
+    def test_without_a_request_every_ask_is_a_fresh_dict(self) -> None:
+        first = shared_dep_cache(None)
+        assert first == {}
+        assert shared_dep_cache(None) is not first
+
+    def test_a_non_dict_attribute_is_ignored(self) -> None:
+        request = HttpRequest()
+        setattr(request, REQUEST_DEP_CACHE_ATTR, "junk")
+        assert shared_dep_cache(request) == {}
+        assert getattr(request, REQUEST_DEP_CACHE_ATTR) == "junk"
+
+    def test_a_spec_mock_request_gets_a_fresh_dict(self) -> None:
+        request = build_mock_http_request()
+        assert shared_dep_cache(request) is not shared_dep_cache(request)

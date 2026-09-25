@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -31,6 +32,21 @@ NAV_CASES: tuple[NavCase, ...] = (
 
 
 WELCOME_POST = Path("blog/screens/posts/welcome/template.md")
+ROBOTS_FILE = Path("blog/screens/robots.txt")
+
+STATIC_ROUTES = ("/", "/about/", "/posts/hello-world/", "/posts/welcome/")
+URL_BLOCK_RE = re.compile(r"<url>(.*?)</url>")
+LOC_RE = re.compile(r"<loc>([^<]+)</loc>")
+ALTERNATE_RE = re.compile(
+    r'<xhtml:link rel="alternate" hreflang="([^"]+)" href="([^"]+)"/>'
+)
+
+
+def _url_blocks(body: str) -> dict[str, str]:
+    """Map every `<loc>` of a sitemap onto the `<url>` block carrying it."""
+    return {
+        LOC_RE.search(block).group(1): block for block in URL_BLOCK_RE.findall(body)
+    }
 
 
 class TestIndex:
@@ -117,3 +133,107 @@ class TestActiveNav:
             find_anchor(body, href=case.inactive_href, text=case.inactive_text),
             "font-semibold",
         )
+
+
+class TestPageMetadata:
+    """`{% metadata %}` in `page_head` renders the folded chain of every page."""
+
+    def test_index_folds_the_root_dict_into_the_site_defaults(
+        self, next_client
+    ) -> None:
+        body = next_client.get("/").content.decode()
+        assert "<title>Latest posts · next.dj blog</title>" in body
+        assert '<link rel="canonical" href="https://blog.example/">' in body
+        assert (
+            '<meta property="og:title" content="Latest posts · next.dj blog">' in body
+        )
+        assert '<meta property="og:type" content="website">' in body
+        assert (
+            '<meta name="description" content="Small posts, plain Markdown, '
+            'zero front-end build.">'
+        ) in body
+
+    def test_about_declares_its_own_title_and_description(self, next_client) -> None:
+        body = next_client.get("/about/").content.decode()
+        assert "<title>About · next.dj blog</title>" in body
+        assert (
+            '<meta name="description" content="A demo blog built on next-dj, '
+            'one Markdown file per post.">'
+        ) in body
+        assert '<link rel="canonical" href="https://blog.example/about/">' in body
+
+    def test_post_reads_its_title_and_excerpt_from_the_markdown(
+        self, next_client
+    ) -> None:
+        body = next_client.get("/posts/welcome/").content.decode()
+        assert "<title>Welcome to the blog · next.dj blog</title>" in body
+        assert (
+            '<meta name="description" content="This is a demo blog built on next-dj.'
+        ) in body
+        assert (
+            '<link rel="canonical" href="https://blog.example/posts/welcome/">'
+        ) in body
+
+    def test_every_page_lists_both_languages_as_alternates(self, next_client) -> None:
+        body = next_client.get("/posts/hello-world/").content.decode()
+        assert body.count('<link rel="alternate" hreflang=') == 3
+        assert (
+            '<link rel="alternate" hreflang="en" '
+            'href="https://blog.example/posts/hello-world/">'
+        ) in body
+        assert (
+            '<link rel="alternate" hreflang="es" '
+            'href="https://blog.example/es/posts/hello-world/">'
+        ) in body
+        assert (
+            '<link rel="alternate" hreflang="x-default" '
+            'href="https://blog.example/posts/hello-world/">'
+        ) in body
+
+    def test_the_spanish_prefix_switches_the_locale_of_the_same_post(
+        self, next_client
+    ) -> None:
+        body = next_client.get("/es/posts/welcome/").content.decode()
+        assert '<html lang="es">' in body
+        assert '<meta property="og:locale" content="es">' in body
+        assert (
+            '<link rel="canonical" href="https://blog.example/es/posts/welcome/">'
+        ) in body
+        assert "<title>Welcome to the blog · next.dj blog</title>" in body
+
+
+class TestSitemapAndRobots:
+    """`sitemap.py` lists the page tree, the static `robots.txt` is served as is."""
+
+    def test_sitemap_lists_every_static_route_in_both_languages(
+        self, next_client
+    ) -> None:
+        response = next_client.get("/sitemap.xml")
+        assert response.status_code == 200
+        assert response["Content-Type"] == "application/xml"
+        english = {f"https://blog.example{path}" for path in STATIC_ROUTES}
+        spanish = {f"https://blog.example/es{path}" for path in STATIC_ROUTES}
+        assert set(_url_blocks(response.content.decode())) == english | spanish
+
+    def test_each_entry_links_its_alternates_and_x_default(self, next_client) -> None:
+        blocks = _url_blocks(next_client.get("/sitemap.xml").content.decode())
+        alternates = dict(
+            ALTERNATE_RE.findall(blocks["https://blog.example/es/posts/welcome/"])
+        )
+        assert alternates == {
+            "en": "https://blog.example/posts/welcome/",
+            "es": "https://blog.example/es/posts/welcome/",
+            "x-default": "https://blog.example/posts/welcome/",
+        }
+
+    def test_the_module_changefreq_applies_to_every_entry(self, next_client) -> None:
+        blocks = _url_blocks(next_client.get("/sitemap.xml").content.decode())
+        assert all(
+            "<changefreq>weekly</changefreq>" in block for block in blocks.values()
+        )
+
+    def test_robots_is_the_static_file_byte_for_byte(self, next_client) -> None:
+        response = next_client.get("/robots.txt")
+        assert response.status_code == 200
+        assert response["Content-Type"] == "text/plain; charset=utf-8"
+        assert response.content == ROBOTS_FILE.read_bytes()

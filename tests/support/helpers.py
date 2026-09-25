@@ -17,7 +17,9 @@ from next.urls import FileRouterBackend, HttpRequestProvider, UrlKwargsProvider
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator
+    from collections.abc import Callable, Generator, Iterable
+
+    from django.core.checks import CheckMessage
 
 
 def build_mock_http_request(*, path: str | None = "/test/", **attrs) -> MagicMock:
@@ -180,3 +182,8 @@ def counting_provider(calls: list[str], name: str) -> Callable[[], str]:
         return f"{name}-value"
 
     return provider
+
+
+def check_ids(messages: Iterable[CheckMessage]) -> list[str]:
+    """Return the ids of system check `messages` in order."""
+    return [message.id for message in messages]

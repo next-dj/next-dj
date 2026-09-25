@@ -49,6 +49,8 @@ interface Layer {
   // The opening page URL, captured at open time. Rides X-Next-Origin so the
   // server resolves the host for an out-of-band render of its zones.
   host: string;
+  // The title restored on close, kept current by a meta op of a page under the layer.
+  title: string;
   // The honest URL pushed on open, absent for a layer that never touched
   // history. A programmatic close replaces it back to the host.
   pushedUrl?: string;
@@ -84,6 +86,8 @@ export interface LayerStack {
   open(opener: HTMLElement | null, href?: string, zone?: string): Promise<void>;
   /** Close the top layer, a result accepts and a dismiss rejects with a reason. */
   close(detail: LayerCloseEvent): void;
+  /** Set a page's meta title, a page under a layer shows it once that layer closes. */
+  retitle(title: string, page?: string): void;
   /** Append a toast as textContent, never parsed as HTML. */
   toast(text: string, variant: string): void;
   /** The number of open layers. */
@@ -212,7 +216,8 @@ export function createLayers(deps: LayerDeps): LayerStack {
     // A browser dismiss gesture (Esc, backdrop, dialog form) reaches the same
     // close path as a server dismiss, so the reason flows through one channel.
     const close = dialogAdapter.open(dialog, (reason) => dismissFrom(dialog, reason));
-    const layer: Layer = { dialog, root, opener, close, returnFocus, host };
+    const title = doc.title;
+    const layer: Layer = { dialog, root, opener, close, returnFocus, host, title };
     stack.push(layer);
     // Both ends go busy before the request, and the opener's flag is what the
     // double-click guard above reads. Nothing awaits before this line.
@@ -293,6 +298,25 @@ export function createLayers(deps: LayerDeps): LayerStack {
     if (layer.pushedUrl !== undefined && currentUrl() === layer.pushedUrl) {
       history.replace(layer.host);
     }
+    // Layers close top-down, so the lowest closed layer sets the title that stays.
+    doc.title = layer.title;
+  }
+
+  function retitle(title: string, page?: string): void {
+    const above = firstLayerAbove(page);
+    const previous = stack[above]?.title ?? doc.title;
+    for (const layer of stack.slice(above)) {
+      if (layer.title !== previous) return;
+      layer.title = title;
+    }
+    if (doc.title === previous) doc.title = title;
+  }
+
+  function firstLayerAbove(page: string | undefined): number {
+    if (page === undefined) return stack.length;
+    const owner = topDown().find((layer) => layer.pushedUrl === page);
+    if (owner !== undefined) return stack.indexOf(owner) + 1;
+    return stack[0]?.host === page ? 0 : stack.length;
   }
 
   // Back past the topmost pushed URL closes that layer and the bare layers above
@@ -367,12 +391,13 @@ export function createLayers(deps: LayerDeps): LayerStack {
     hostFor,
     open,
     close,
+    retitle,
     toast,
     size: () => stack.length,
     busy,
     install,
     _reset() {
-      for (const layer of [...stack]) remove(layer);
+      for (const layer of topDown()) remove(layer);
       if (toastHost !== null) {
         toastHost.remove();
         toastHost = null;

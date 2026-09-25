@@ -8,16 +8,41 @@ from __future__ import annotations
 
 from . import checks, signals
 from .context import Context, ContextResult
-from .errors import PageContextShapeError, PageModuleImportError
+from .errors import (
+    PageContextShapeError,
+    PageMetadataConflictError,
+    PageMetadataRequestError,
+    PageMetadataShapeError,
+    PageMetadataTemplateError,
+    PageMetadataURLError,
+    PageModuleImportError,
+)
 from .manager import Page, context, page
+from .metadata import (
+    HtmlMetadataRenderer,
+    Metadata,
+    MetadataDict,
+    MetadataRenderer,
+    SiteMetadataDict,
+)
 
 
 __all__ = [
     "Context",
     "ContextResult",
+    "HtmlMetadataRenderer",
+    "Metadata",
+    "MetadataDict",
+    "MetadataRenderer",
     "Page",
     "PageContextShapeError",
+    "PageMetadataConflictError",
+    "PageMetadataRequestError",
+    "PageMetadataShapeError",
+    "PageMetadataTemplateError",
+    "PageMetadataURLError",
     "PageModuleImportError",
+    "SiteMetadataDict",
     "checks",
     "context",
     "page",

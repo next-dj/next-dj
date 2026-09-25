@@ -11,11 +11,29 @@ from typing import Any
 from django.conf import settings
 from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register
 
-from next.checks import NEXT, common
+from next.checks import NEXT
 
 from .defaults import USER_SETTING
 from .merge import OPTIONAL_STR_KEYS, UNSET, accepted_value
 from .settings import NextFrameworkSettings
+
+
+def errors_for_unknown_keys(
+    config: dict[str, Any], *, allowed: frozenset[str], prefix: str
+) -> list[CheckMessage]:
+    """Return an `Error` list when `config` contains keys outside `allowed`."""
+    unknown = sorted(k for k in config if k not in allowed)
+    if not unknown:
+        return []
+    unknown_fmt = ", ".join(repr(k) for k in unknown)
+    allowed_fmt = ", ".join(sorted(allowed))
+    return [
+        Error(
+            f"{prefix} has unknown keys {unknown_fmt}. Allowed keys are {allowed_fmt}.",
+            obj=settings,
+            id="next.E035",
+        )
+    ]
 
 
 @register(NEXT)
@@ -25,9 +43,7 @@ def check_next_framework_unknown_top_level_keys(*args, **kwargs) -> list[CheckMe
     if raw is None or not isinstance(raw, dict):
         return []
     allowed = frozenset(NextFrameworkSettings.DEFAULTS.keys())
-    # The module is imported rather than the name, because `next.checks.common`
-    # imports `next.conf` and is still half-executed when this module loads.
-    return common.errors_for_unknown_keys(raw, allowed=allowed, prefix="NEXT_FRAMEWORK")
+    return errors_for_unknown_keys(raw, allowed=allowed, prefix="NEXT_FRAMEWORK")
 
 
 # next.forms and next.partial carry their own raw per-key checks for these.
@@ -41,7 +57,7 @@ _KEY_TYPES: dict[str, type] = (
     dict.fromkeys(sorted(_TYPED_LIST_KEYS), list)
     | dict.fromkeys(sorted(NextFrameworkSettings.STR_KEYS), str)
     | dict.fromkeys(sorted(_TYPED_OPTIONAL_KEYS), str)
-    | {"NEXT_JS_OPTIONS": dict}
+    | {"METADATA": dict, "NEXT_JS_OPTIONS": dict}
 )
 
 _SILENCE_HINT = (
@@ -114,4 +130,5 @@ def _non_bool_warnings(raw: dict[str, Any]) -> list[CheckMessage]:
 __all__ = [
     "check_next_framework_unknown_top_level_keys",
     "check_next_framework_value_types",
+    "errors_for_unknown_keys",
 ]

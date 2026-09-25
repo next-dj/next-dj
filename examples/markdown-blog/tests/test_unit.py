@@ -35,7 +35,7 @@ class TestRenderMarkdown:
 
 
 class TestPostMetadata:
-    """`post_metadata` extracts title and URL name from a post folder."""
+    """`post_metadata` extracts title, URL name and excerpt from a post folder."""
 
     def test_extracts_title_and_url_name(self, tmp_path: Path) -> None:
         post_dir = tmp_path / "my-post"
@@ -46,7 +46,41 @@ class TestPostMetadata:
             "slug": "my-post",
             "url_name": "next:page_posts_my_post",
             "title": "Something",
+            "excerpt": "text",
         }
+
+    @pytest.mark.parametrize(
+        ("source", "excerpt"),
+        [
+            ("# Title\n\nBody text.", "Body text."),
+            ("# Title\n## Sub\nUnder a subheading.", "Under a subheading."),
+            ("\n\n# Title\n\n\nAfter blank lines.", "After blank lines."),
+            (
+                "# T\n\nfirst line\nsecond line\n\nnext paragraph",
+                "first line second line",
+            ),
+            ("# T\n\nSome **bold**, `code` and _em_.", "Some bold, code and em."),
+            ("# T\n\n" + " ".join(["word"] * 24), " ".join(["word"] * 24)),
+            ("# T\n\n" + " ".join(["word"] * 30), " ".join(["word"] * 24) + "…"),
+            ("# Only a heading", ""),
+        ],
+        ids=[
+            "skips-heading",
+            "skips-subheading",
+            "skips-leading-blanks",
+            "stops-at-paragraph-boundary",
+            "strips-inline-markup",
+            "keeps-exact-limit",
+            "truncates-past-limit",
+            "empty-without-paragraph",
+        ],
+    )
+    def test_excerpt_is_the_first_plain_paragraph(
+        self, tmp_path: Path, source: str, excerpt: str
+    ) -> None:
+        post_md = tmp_path / "post.md"
+        post_md.write_text(source)
+        assert post_metadata(post_md)["excerpt"] == excerpt
 
 
 class TestReadPostBody:

@@ -67,22 +67,24 @@ Each one carries an explicit ``priority`` value, the resolver consults them from
    A parameter with default ``Depends(...)`` receives the resolved dependency.
 2. Context by default provider (priority 20).
    A parameter with a ``Context(...)`` default receives the named context value.
-3. Context by name provider (priority 30).
+3. Parent metadata provider (priority 25).
+   A parameter annotated ``Metadata`` inside a ``@page.metadata`` callable receives the fold of every metadata segment before it, and the empty fold anywhere else.
+4. Context by name provider (priority 30).
    A parameter whose name matches a context key receives that context value.
-4. Form provider (priority 40).
+5. Form provider (priority 40).
    A parameter named ``form`` or annotated ``DForm[FormClass]`` receives the bound form during action dispatch.
-5. Cleaned data provider (priority 40).
+6. Cleaned data provider (priority 40).
    A parameter named ``cleaned_data`` receives the merged wizard cleaned data on a wizard ``done()`` handler.
-6. HttpRequest provider (priority 50).
+7. HttpRequest provider (priority 50).
    A parameter annotated ``HttpRequest`` or ``HttpRequest | None`` receives the current request, and one annotated with a concrete subclass receives it only when the request is an instance of that subclass.
-7. URL annotation provider (priority 60).
+8. URL annotation provider (priority 60).
    A parameter annotated ``DUrl[T]`` reads the captured URL segment and coerces it to ``T``.
-8. URL kwargs provider (priority 70).
+9. URL kwargs provider (priority 70).
    A parameter whose name matches a captured URL segment resolves to that value.
    The value is coerced to the parameter annotation when one is present and is left as the captured string otherwise.
    A plain ``note_id: int`` on a ``[note_id]`` route therefore arrives already parsed, so ``DUrl`` is only needed to read a segment under a different name.
-9. Query string provider (priority 80).
-   A parameter annotated ``DQuery[T]`` reads ``request.GET`` by parameter name and coerces to ``T``.
+10. Query string provider (priority 80).
+    A parameter annotated ``DQuery[T]`` reads ``request.GET`` by parameter name and coerces to ``T``.
 
 The order makes the default-driven and marker-driven providers decisive.
 ``Depends`` and ``Context`` look only at the parameter default.
@@ -434,7 +436,7 @@ Import the provider module.
    A class that registers later still joins the provider list by priority, and the plans compiled without it are recompiled.
 
 A custom provider that does not declare ``priority`` inherits the ``RegisteredParameterProvider`` default of ``100``.
-The nine built-in providers occupy the range ``10`` (named dependency) through ``80`` (query string), so the default keeps a custom provider after every built-in.
+The ten built-in providers occupy the range ``10`` (named dependency) through ``80`` (query string), so the default keeps a custom provider after every built-in.
 ``FormProvider`` and ``CleanedDataProvider`` share priority ``40``.
 Set ``priority`` on the subclass when the new provider has to claim a parameter the built-ins would otherwise match, for example a value below ``60`` for an annotation that should outrank ``DUrl``.
 
@@ -461,6 +463,7 @@ Resolution cache
 
 Each resolution pass wraps a per-render dependency cache in a fresh ``DependencyCache``.
 The wrapper is new per call, but the backing store is shared across every ``@context`` callable in one page render, so a ``Depends("name")`` value resolved by one callable is reused by the next.
+The page's ``render()`` function fills the same store before the context runs, and the ``@page.metadata`` callables read it after, so a value any of them resolved is reused by the rest.
 The cache memoises ``Depends("name")`` callables only, keyed by the registered name.
 
 A second context function in the same page render that asks for the same ``Depends("name")`` dependency receives the memoised value, not a fresh call.
