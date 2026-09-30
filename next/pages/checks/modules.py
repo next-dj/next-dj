@@ -1,9 +1,4 @@
-"""System checks for what a routed `page.py` module declares.
-
-The ids are `next.E011` for a walk that fails, `next.E012` and `next.E013` for a
-missing or uncallable body source, `next.W043` for several body sources, and
-`next.E017` for a module that raises while importing.
-"""
+"""System checks for what a routed `page.py` module declares."""
 
 from __future__ import annotations
 

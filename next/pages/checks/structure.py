@@ -1,9 +1,4 @@
-"""System checks for the shape of a routed pages tree on disk.
-
-The ids are `next.E008`, `next.E009` and `next.E087` for bracket syntax, `next.E010`
-for a parameter directory with no page, `next.E030` and `next.E088` for a router that
-cannot report or walk its trees, and `next.W002` for a tree nobody routes.
-"""
+"""System checks for the shape of a routed pages tree on disk."""
 
 from __future__ import annotations
 

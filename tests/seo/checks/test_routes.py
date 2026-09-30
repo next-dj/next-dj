@@ -2,18 +2,19 @@ import pytest
 from django.conf import settings
 
 from next.seo.checks import check_seo_route_collisions, check_seo_routes_at_host_root
-from tests.seo.trees import PREFIXED_URLCONF, USER_URLCONF, routed, write_tree
-from tests.support import check_ids
-
-
-SHADOWED_URLCONF = "tests.seo.urls_shadowed"
-
-
-PREFIX_ONLY_URLCONF = "tests.seo.urls_prefix_only"
+from tests.support import (
+    PREFIX_ONLY_URLCONF,
+    PREFIXED_URLCONF,
+    SHADOWED_URLCONF,
+    USER_URLCONF,
+    check_ids,
+    routed,
+    write_tree,
+)
 
 
 class TestRouteCollisions:
-    """A page or a urlpattern on a served SEO address is an error (`next.E115`)."""
+    """A page on a served SEO address is an error (`next.E115`)."""
 
     def test_a_page_on_a_served_address_is_an_error(self, tmp_path) -> None:
         root = write_tree(
@@ -31,20 +32,6 @@ class TestRouteCollisions:
             str(root / "robots.txt" / "page.py"),
         }
 
-    def test_a_urlpattern_ahead_of_the_include_is_an_error(self, tmp_path) -> None:
-        root = write_tree(tmp_path / "pages", sitemap="", robots="")
-        with routed(root, urlconf=SHADOWED_URLCONF):
-            messages = check_seo_route_collisions()
-        assert check_ids(messages) == ["next.E115", "next.E115"]
-        assert "/sitemap.xml to tests.seo.urls_shadowed.mine" in messages[0].msg
-        assert "/robots.txt to tests.seo.urls_shadowed.mine" in messages[1].msg
-        assert all(m.obj is settings for m in messages)
-
-    def test_a_urlpattern_behind_the_include_passes(self, tmp_path) -> None:
-        root = write_tree(tmp_path / "pages", sitemap="", robots="")
-        with routed(root, urlconf=USER_URLCONF):
-            assert check_seo_route_collisions() == []
-
     def test_a_nested_trail_takes_no_section_address(self, tmp_path) -> None:
         root = write_tree(
             tmp_path / "pages", pages=("sitemap-a/b.xml", "sitemap-.xml"), sitemap=""
@@ -59,7 +46,7 @@ class TestRouteCollisions:
 
 
 class TestRoutesAtHostRoot:
-    """The SEO routes resolve at the host root or warn (`next.W099`)."""
+    """The SEO routes resolve to the framework at the host root or warn (W099)."""
 
     def test_routes_under_a_prefix_warn(self, tmp_path) -> None:
         root = write_tree(tmp_path / "pages", sitemap="", robots="")
@@ -71,14 +58,22 @@ class TestRoutesAtHostRoot:
         assert "include('next.seo.urls')" in messages[0].msg
         assert all(m.obj is settings for m in messages)
 
+    def test_a_urlpattern_ahead_of_the_framework_warns(self, tmp_path) -> None:
+        root = write_tree(tmp_path / "pages", sitemap="", robots="")
+        with routed(root, urlconf=SHADOWED_URLCONF):
+            messages = check_seo_routes_at_host_root()
+        assert check_ids(messages) == ["next.W099", "next.W099"]
+        assert "/sitemap.xml resolves to tests.support.sites.mine" in messages[0].msg
+        assert "/robots.txt resolves to tests.support.sites.mine" in messages[1].msg
+
     @pytest.mark.parametrize(
         "urlconf",
-        [PREFIXED_URLCONF, SHADOWED_URLCONF],
-        ids=["host_root_mount", "shadowing_pattern"],
+        [None, PREFIXED_URLCONF, USER_URLCONF],
+        ids=["next_urls_at_root", "host_root_mount", "pattern_behind_the_include"],
     )
-    def test_a_route_that_resolves_at_the_host_root_passes(
-        self, tmp_path, urlconf: str
+    def test_the_framework_route_at_the_host_root_passes(
+        self, tmp_path, urlconf: str | None
     ) -> None:
         root = write_tree(tmp_path / "pages", sitemap="", robots="")
-        with routed(root, urlconf=urlconf):
+        with routed(root, **({} if urlconf is None else {"urlconf": urlconf})):
             assert check_seo_routes_at_host_root() == []

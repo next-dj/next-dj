@@ -3,6 +3,7 @@ import { createSse } from "./sse";
 import type { EventSourceAdapter, SourceControl, VisibilityAdapter } from "./sse";
 import { manualVisibility } from "./test-doubles";
 import { Wire } from "./wire";
+import { createCsrf } from "./csrf";
 import { CONTENT_TYPE, HEADER_REQUEST_ID } from "./protocol";
 
 interface MockSource {
@@ -194,6 +195,7 @@ describe("createSse", () => {
       navigate: () => undefined,
       dispatch: () => undefined,
       onEnvelope: () => undefined,
+      csrf: createCsrf(),
       rememberRequestId: (id) => sse.remember(id),
     });
     await wire.fetch({ url: "/_next/form/u1/", method: "POST", uid: "u1" });

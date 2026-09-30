@@ -29,8 +29,8 @@ The same gate protects every click-driven trigger, so a prompt fronts a layer op
 Titles under a layer
 --------------------
 
-Every layer keeps the title underneath it and restores that title when it closes, whichever way it closes, by accept, dismiss, Back, or reset.
-A ``meta`` patch retitles the page whose envelope carried it.
+Every layer keeps the head underneath it, the title, the description, the canonical link, and the robots meta, and restores them when it closes, whichever way it closes, by accept, dismiss, Back, or reset.
+A ``meta`` patch syncs the head of the page whose envelope carried it.
 
 A title from the layer's own page, carried by the layer body, a zone GET inside the layer, or a mutation fired from it, lasts as long as the layer.
 A title from the host page or a lower layer, carried by a poll of the base page, a lazy zone GET, or a stream the host subscribed, becomes the title the covering layer restores, so the newest title of the page underneath survives the close.

@@ -591,7 +591,7 @@ class TestWizardStepCache:
     """Step lookups reuse one `get_steps` evaluation until stored data changes."""
 
     def test_repeated_lookups_call_get_steps_once(self) -> None:
-        """`step_names`, `is_first`, `is_last`, and `step_form_class` share one evaluation."""
+        """`step_names`, `is_first`, `is_last` and `step_form_class` share a pass."""
         wizard = CountingStepsWizard(_request())
         wizard.step_names()
         wizard.is_first()

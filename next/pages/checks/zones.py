@@ -1,6 +1,6 @@
 """System check for a `@context` reading a key another callable binds to a zone.
 
-The id is `next.W077`, raised for the reader, which is what silently receives `None`.
+It warns on the reader, which is what silently receives `None`.
 """
 
 from __future__ import annotations

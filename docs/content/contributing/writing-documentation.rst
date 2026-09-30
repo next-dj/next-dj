@@ -214,7 +214,7 @@ The table below lists the public package, its primary narrative page, and its re
      - :doc:`/content/topics/partial-rendering/index`
      - :doc:`/content/ref/partial`
    * - ``next.seo``
-     - :doc:`/content/topics/seo/sitemaps`, :doc:`/content/topics/seo/robots`, :doc:`/content/howto/publish-a-sitemap`
+     - :doc:`/content/topics/seo/quickstart`, :doc:`/content/topics/seo/sitemaps`, :doc:`/content/topics/seo/robots`
      - :doc:`/content/ref/seo`
    * - ``next.deps``
      - :doc:`/content/topics/dependency-injection`

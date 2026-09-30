@@ -9,6 +9,7 @@ from __future__ import annotations
 import contextlib
 import threading
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, override
 
 from django.http import HttpResponse
@@ -17,7 +18,7 @@ from django.template import Context as DjangoTemplateContext, Template
 from django.utils.functional import SimpleLazyObject
 
 from next.caches import DEFAULT_CACHE_SIZE, LruCache
-from next.deps import get_request_dep_cache
+from next.deps import render_dep_cache
 from next.deps.cache import DependencyCache
 from next.deps.resolver import current_resolver
 from next.seeding import (
@@ -35,7 +36,6 @@ from .context import component
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
-    from pathlib import Path
 
     from django.http import HttpRequest
 
@@ -291,8 +291,7 @@ def _inject_component_context(
     collector: StaticCollector | None = context_data.get(COLLECTOR_KEY)
     guarded = _guarded_keys(context_data)
 
-    shared = get_request_dep_cache(request)
-    cache = DependencyCache(backing_dict=shared) if shared else DependencyCache()
+    cache = DependencyCache(backing_dict=render_dep_cache(request))
     stack: list[str] = []
 
     for ctx_func in ctx_funcs:

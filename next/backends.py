@@ -13,6 +13,7 @@ from django.dispatch import Signal
 
 from next.conf import import_class_cached, next_framework_settings
 from next.conf.defaults import DEFAULTS
+from next.conf.scopes import scope_value
 from next.errors import (
     AbstractBackendError,
     BackendImportError,
@@ -57,8 +58,7 @@ def _setting_value(setting: str, scope: str | None) -> tuple[object, str]:
     """Return the value one dotted-path key holds and the default it falls back to."""
     if scope is None:
         return getattr(next_framework_settings, setting), DEFAULTS[setting]
-    default: str = DEFAULTS[scope][setting]
-    return getattr(next_framework_settings, scope).get(setting, default), default
+    return scope_value(scope, setting), DEFAULTS[scope][setting]
 
 
 def resolve_setting_class[T](

@@ -48,6 +48,19 @@ class AuthoredPatchForm(Form):
         return Patches(request).toast("authored", variant="success").response()
 
 
+class MetaSyncForm(Form):
+    """Form whose handler syncs the head of the page it was posted from."""
+
+    name = forms.CharField(max_length=100)
+
+    def on_valid(self, request: HttpRequest) -> PatchResponse:
+        """Return an envelope that retitles the origin under its chain template."""
+        name = self.cleaned_data["name"]
+        return (
+            Patches(request).meta({"title": name, "description": "Synced"}).response()
+        )
+
+
 class RichResponseForm(Form):
     """Form whose handler returns a plain HttpResponse, not a redirect or patch.
 

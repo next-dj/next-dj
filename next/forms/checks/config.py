@@ -1,9 +1,4 @@
-"""System checks for the `NEXT_FRAMEWORK` keys the forms subsystem reads.
-
-The ids are `next.E044`, `next.E058`, `next.E059`, `next.E068` and `next.E045` for
-`FORM_ACTION_BACKENDS`, `next.E051` and `next.E069` to `next.E071` for
-`FORM_WIZARD_BACKEND`, and `next.E052` with `next.E086` for `FORM_ANCHOR_FILES`.
-"""
+"""System checks for the `NEXT_FRAMEWORK` keys the forms subsystem reads."""
 
 from django.conf import settings
 from django.core.checks import CheckMessage, Error, register

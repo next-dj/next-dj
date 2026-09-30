@@ -188,7 +188,7 @@ asset
 .. code-block:: jinja
    :caption: notes/pages/layout.djx
 
-   <link rel="icon" href="{% asset "site/favicon.svg" %}">
+   <img src="{% asset "site/logo.svg" %}" alt="Notes">
 
 The first argument is a staticfiles name, a finished URL, or a context variable holding either.
 An unset or empty variable renders nothing, so a missing value never becomes a link back to the current page.

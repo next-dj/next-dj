@@ -1,3 +1,4 @@
+from django import forms
 from django.http import Http404, HttpRequest, HttpResponse
 from shortener.cache import pending_clicks
 from shortener.models import Link
@@ -23,6 +24,8 @@ def admin_pending_clicks() -> dict[str, int]:
 
 
 class EditLinkForm(ModelForm):
+    url = forms.URLField(max_length=2000, assume_scheme="https")
+
     class Meta:
         model = Link
         fields = ("url",)

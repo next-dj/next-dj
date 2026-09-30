@@ -15,26 +15,26 @@ Check registration
 
 ``next.checks.register_all`` runs during ``AppConfig.ready``.
 It imports each subsystem ``checks`` module so the ``@register`` side effects take effect.
-The imported modules are ``next.apps.checks``, ``next.components.checks``, ``next.conf.checks``, ``next.forms.checks``, ``next.pages.checks``, ``next.partial.checks``, ``next.seo.checks``, ``next.static.checks``, and ``next.urls.checks``.
+The imported modules are ``next.apps.checks``, ``next.components.checks``, ``next.conf.checks``, ``next.consent.checks``, ``next.forms.checks``, ``next.pages.checks``, ``next.partial.checks``, ``next.scripts.checks``, ``next.seo.checks``, ``next.site.checks``, ``next.static.checks``, and ``next.urls.checks``.
 
 Each of these modules registers checks.
 ``next.pages.checks``, ``next.forms.checks``, ``next.partial.checks``, and ``next.seo.checks`` are packages rather than single modules, and importing the package imports every submodule that carries a check.
 ``next.pages.checks.metadata`` is a package inside the pages one and splits the same way.
-The address a project imports stays the same either way, and each submodule opens with the catalogue of codes it owns, which is what the tables under `Check code reference`_ are derived from.
+The address a project imports stays the same either way, and the tables under `Check code reference`_ name the submodule behind each code.
 
 Eight checks are deployment checks and carry ``deploy=True``, so ``manage.py check`` alone never runs them and ``manage.py check --deploy`` does.
 Four of them are ``check_page_module_imports`` (``next.E017``), ``check_component_module_imports`` (``next.E084``), ``check_composed_templates_compile`` (``next.E072``), and ``check_asset_version_moves_between_deploys`` (``next.W083``).
 The first three import or compile every user module of a tree, which costs a full walk that a routine ``manage.py`` command should not pay.
 The fourth describes a configuration every development checkout has, so reporting it outside a deployment audit would warn every project about nothing.
-The other four are the audits, ``next.W089`` to ``next.W096``, emitted by ``check_seo_description``, ``check_seo_titles``, ``check_seo_canonical``, and ``check_seo_alternates``, which grade the folded metadata of every page and carry the ``seo`` tag beside ``deploy=True``, see `SEO`_ below.
+The other four read the settings a deployment runs on, ``check_site_url_for_deploy`` (``next.W119``, ``next.W132``) and ``check_seo_sources_on_closed_site`` (``next.W120``) with the ``seo`` tag, ``check_script_deploy`` (``next.W127``), and ``check_consent_cookie_secure`` (``next.W129``).
 
 Every next.dj check carries the ``next`` tag.
 That tag is the importable string constant ``next.checks.NEXT``, so a project check joins the framework ones by decorating itself with ``@register(NEXT)`` rather than by repeating the literal.
 Run ``uv run python manage.py check --tag next`` to execute only the framework checks and skip the built-in Django and third-party ones.
 Checks that also concern templates or URL patterns keep their :doc:`Django tags <django:ref/checks>` (``templates``, ``urls``) alongside ``next``, so filtering by those tags still reaches them.
 A tagged run reports what a full run reports, and ``--tag next --deploy`` adds the eight deployment checks to it.
-The ``seo`` tag, the importable constant ``next.checks.SEO``, marks every ``next.seo`` check and the four audits.
-``manage.py check --tag seo`` runs the sitemap and robots checks alone, and ``manage.py check --deploy --tag seo`` adds the audits to them.
+The ``seo`` tag, the importable constant ``next.checks.SEO``, marks every ``next.seo`` check and the site deployment check.
+``manage.py check --tag seo`` runs the crawler-document checks alone, and ``manage.py check --deploy --tag seo`` adds the two deployment checks that carry the tag.
 Every check that reads registrations discovers the files declaring them itself, rather than relying on a URL check having expanded the router first.
 
 ``next.checks.reset_check_caches`` drops every per-run check cache so the next run rebuilds from the current sources.
@@ -80,40 +80,60 @@ Pages
 ~~~~~
 
 The package splits by subject, one submodule per group of codes.
-``contexts`` covers the ``@context`` callables of a routed ``page.py``, ``layouts`` the page-body placeholder of a ``layout.djx``, ``loaders`` the ``TEMPLATE_LOADERS`` entries, ``metadata`` the ``METADATA`` settings scope and the metadata of every routed ``page.py``, split further under `SEO`_ below, ``modules`` what a ``page.py`` declares, ``processors`` the context processors a render runs, ``structure`` the shape of a tree on disk, and ``zones`` a ``@context`` reading a key another callable bound to a zone.
+``contexts`` covers the ``@context`` callables of a routed ``page.py``, ``layouts`` the page-body placeholder of a ``layout.djx``, ``loaders`` the ``TEMPLATE_LOADERS`` entries, ``metadata`` the ``METADATA`` settings scope and the metadata of every routed ``page.py``, split further under `Metadata and responses`_ below, ``modules`` what a ``page.py`` declares, ``processors`` the context processors a render runs, ``structure`` the shape of a tree on disk, and ``zones`` a ``@context`` reading a key another callable bound to a zone.
 ``composed`` carries no check and holds the one walk of the composed page templates that ``next.W085`` and the partial checks share, a ``RunMemo`` that ``forget_run_memos`` drops.
 
 .. automodule:: next.pages.checks
    :members:
 
-SEO
-~~~
+Metadata and responses
+~~~~~~~~~~~~~~~~~~~~~~~
 
-The ``metadata`` package of ``next.pages.checks`` carries two tiers.
-The default tier, ``next.E098`` to ``next.E109`` and ``next.W084`` to ``next.W088``, runs on every ``manage.py check`` and reports a declaration the framework cannot render as intended.
-``scope`` owns the ``METADATA`` settings scope, ``titles`` parses every title template under every language, ``shape`` what each routed ``page.py`` declares and folds to, and ``templates`` whether a composed page renders ``{% metadata %}``.
-The audit tier lives in ``audits``, the four audits, ``next.W089`` to ``next.W096``, which grade the folded result the way a search engine would.
-``pages`` and ``links`` carry no check and hold the page pass and the URL predicates the five checking submodules share.
+The ``metadata`` package of ``next.pages.checks`` reports a declaration the framework cannot render as intended, on every ``manage.py check``.
+``scope`` owns the ``METADATA`` settings scope, ``titles`` parses every title template under every language, ``shape`` what each routed ``page.py`` declares and folds to, ``head`` the links, icons, names, and viewport, ``ld`` the JSON-LD graph, and ``templates`` whether a composed page renders ``{% metadata %}``.
+``pages`` and ``links`` carry no check and hold the page pass and the URL predicates the checking submodules share.
+Every check reads the static fold, the settings tier, and the ``metadata`` dicts of the chain, so a ``@page.metadata`` callable is validated for its shape and never called.
 
-The audits are registered with ``deploy=True`` and the ``seo`` tag, so a plain ``manage.py check`` never runs them, ``manage.py check --deploy`` runs them beside the other deployment checks, and ``manage.py check --deploy --tag seo`` narrows the run to the audits and the sitemap and robots checks.
-The thresholds live in ``NEXT_FRAMEWORK["METADATA"]["CHECKS"]``, ``TITLE_MAX`` at 60, ``DESCRIPTION_MAX`` at 160, and ``REQUIRE_DESCRIPTION`` at ``True``, and the description floor of 50 characters is fixed.
-Every check of both tiers reads the static fold, the settings tier plus the ``metadata`` dicts of the chain, so a ``@page.metadata`` callable is validated for its shape and never called, and the title and description audits skip a page whose chain carries one.
-``SILENCED_SYSTEM_CHECKS`` drops an audit by its id and cannot turn one on.
-See :doc:`/content/topics/seo/auditing` for the two tiers from the project side.
+``next.pages.checks.responses`` reads the ``cache`` and ``headers`` of every routed ``page.py``, the ``CSRF_DELIVERY`` setting, and what a page a shared cache may hold renders.
+The shared-page warnings walk the composed templates through the ``composed`` memo the partial checks share, and the two about the forms of such a page live in ``next.forms.checks.csrf``.
+See :doc:`/content/howto/cache-pages-on-a-cdn` for shared pages from the project side.
 
 Sitemap and robots
 ~~~~~~~~~~~~~~~~~~
 
-``next.seo.checks`` reads the ``sitemap.py``, ``robots.py``, and ``robots.txt`` at the top of every page root, loaded through the same discovery the routes run.
-The package splits into ``sources`` for the files themselves, ``sitemaps`` for what a ``sitemap.py`` lists, ``robots`` for the ``/robots.txt`` sources, and ``routes`` for the addresses the routes answer.
+``next.seo.checks`` reads the ``sitemap.py``, ``robots.py``, and ``robots.txt`` at the top of every page root, loaded through the same discovery the routes run, and the ``SEO`` settings scope.
+The package splits into ``sources`` for the files themselves and a site closed to search that still publishes them, ``sitemaps`` for what a ``sitemap.py`` lists, ``robots`` for the robots sources, ``routes`` for the addresses the routes answer, and ``backends`` for ``SEO``.
 ``roots`` carries no check and holds ``loaded_seo_roots``, the one discovery of the routed page trees every check of a run reads.
-Every check is in the default tier, carries the ``seo`` and ``urls`` tags beside ``next``, and needs neither a request nor a database.
-The errors are ``next.E110`` to ``next.E118`` except ``next.E116``, and the warnings ``next.W097`` to ``next.W104``, with every condition in the tables under `Check code reference`_.
-The checks call the helpers the routes call, ``listed_trails``, ``serves_sitemap``, and ``is_excluded`` of ``next.seo.sitemaps``, the ``SitemapOptions`` reader of the same module, and ``declared_rules`` and ``robots_candidates`` of ``next.seo.robots``, so a check reports what the runtime serves.
-See :doc:`seo` for the check callables and :doc:`/content/topics/seo/sitemaps` and :doc:`/content/topics/seo/robots` for the behaviour each one guards.
+Every check carries the ``seo`` tag beside ``next``, and needs neither a request nor a database.
+
+The checks call the helpers the routes call, ``SitemapOptions``, ``listed_trails``, and ``is_excluded`` of ``next.seo.sitemaps`` and ``declared_rules`` and ``robots_candidates`` of ``next.seo.robots``, so a check reports what the runtime serves.
+See :doc:`seo` for the check callables.
 
 .. automodule:: next.seo.checks
    :members:
+
+Site
+~~~~
+
+``next.site.checks`` validates the ``SITE`` scope and warns at deploy about a missing origin, and louder about one ``ALLOWED_HOSTS = ["*"]`` hands to any client.
+
+.. automodule:: next.site.checks
+   :members:
+   :no-index:
+
+Scripts and consent
+~~~~~~~~~~~~~~~~~~~
+
+``next.scripts.checks`` reads every ``scripts.py``, the consent categories, and the composed pages that render ``{% #consented %}``, and ``next.consent.checks`` the rest of the ``CONSENT`` scope.
+``next.static.checks`` owns ``next.W126`` for the tag templates the nonce reaches and ``next.W130`` for the shared pages a nonce takes private, since the nonce is a static option.
+
+.. automodule:: next.scripts.checks
+   :members:
+   :no-index:
+
+.. automodule:: next.consent.checks
+   :members:
+   :no-index:
 
 URLs
 ~~~~
@@ -130,7 +150,7 @@ Components
 Forms
 ~~~~~
 
-The package splits into ``actions`` for the registered form classes and ``@action`` handlers, ``config`` for the ``NEXT_FRAMEWORK`` keys the subsystem reads, ``widgets`` for the ``ComponentWidget`` a field carries, and ``wizards`` for the ``FormWizard`` subclasses.
+The package splits into ``actions`` for the registered form classes and ``@action`` handlers, ``config`` for the ``NEXT_FRAMEWORK`` keys the subsystem reads, ``csrf`` for how a form on a page a shared cache may hold gets its token, ``widgets`` for the ``ComponentWidget`` a field carries, and ``wizards`` for the ``FormWizard`` subclasses.
 ``sources`` carries no check and holds the page-tree pass every reader shares, because a page-scoped registration exists only once its ``page.py`` has run.
 
 .. automodule:: next.forms.checks
@@ -527,7 +547,7 @@ Errors
    * - ``next.E098``
      - ``NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]`` is no mapping, or names a key or a value the metadata schema refuses.
        The keys are the lower-case ones a ``page.py`` declares, and the settings title takes only the ``template`` and ``default`` form.
-       An option of ``METADATA`` outside ``DEFAULTS``, ``NOINDEX``, ``CANONICAL_QUERY``, ``CHECKS``, and ``RENDERER`` is ``next.E035``.
+       ``DEFAULTS`` takes no ``breadcrumb``, and an option of ``METADATA`` outside ``DEFAULTS``, ``CANONICAL_QUERY``, and ``RENDERER`` is ``next.E035``.
      - ``next.pages.checks.metadata.scope``
    * - ``next.E099``
      - A title template, in the settings or in a ``page.py``, names a placeholder outside ``{title}`` and ``{site_name}``, reaches an attribute or an index, carries a conversion or a format spec, or is malformed.
@@ -536,9 +556,6 @@ Errors
    * - ``next.E100``
      - A title template is declared without a ``default``, so a page under it with no title of its own renders none.
      - ``next.pages.checks.metadata.scope``, ``next.pages.checks.metadata.shape``
-   * - ``next.E101``
-     - A ``base`` is not an origin, an absolute http or https URL with a host and no path, query, or fragment.
-     - ``next.pages.checks.metadata.scope``, ``next.pages.checks.metadata.shape``
    * - ``next.E102``
      - A ``page.py`` declares both a ``metadata`` dict and a ``@page.metadata`` callable.
      - ``next.pages.checks.metadata.shape``
@@ -546,7 +563,9 @@ Errors
      - A module-level ``metadata`` is not a mapping.
      - ``next.pages.checks.metadata.shape``
    * - ``next.E104``
-     - A ``metadata`` dict names a key or a value the schema refuses, at the top level or inside ``og``, ``twitter``, ``robots``, ``alternates``, or ``verification``, or a ``twitter.card`` outside ``summary``, ``summary_large_image``, ``app``, and ``player``.
+     - A ``metadata`` dict names a key or a value the schema refuses, at any depth, the key path named in the message.
+       This covers a URL with a scheme outside http and https, ``x-default`` given both in ``languages`` and as ``x_default``, a NaN or a non-string key in raw JSON-LD, ``canonical: False``, an ``og.determiner``, ``viewport_fit``, ``interactive_widget``, or ``color_scheme`` outside its values, a ``twitter.card`` outside ``summary``, ``summary_large_image``, ``app``, and ``player``, and a ``player`` card without ``twitter.player``.
+       A lazy URL passes unforced, and a render that forces it to such a scheme raises ``PageMetadataShapeError`` with the same message.
      - ``next.pages.checks.metadata.shape``
    * - ``next.E105``
      - A title, a title default, or an absolute title is the empty string, which renders an empty ``<title>``.
@@ -554,18 +573,17 @@ Errors
    * - ``next.E106``
      - A ``@page.metadata`` callable is declared in a file no page render collects, an imported helper module or a sibling page.
      - ``next.pages.checks.metadata.shape``
-   * - ``next.E107``
-     - A ``page.py`` registers more than one ``@page.metadata`` callable, and only the last one runs.
-     - ``next.pages.checks.metadata.shape``
    * - ``next.E108``
      - A ``@page.metadata`` callable is not annotated as returning a mapping.
        The check is static, because running the callable at check time could reach an unmigrated database.
      - ``next.pages.checks.metadata.shape``
    * - ``next.E109``
-     - A URL field of the fold, a canonical, an ``og.url``, an alternate, or an image, carries a scheme outside http and https.
+     - A URL field of the fold carries a scheme outside http and https, a canonical, an ``og.url``, an alternate, a feed, an Open Graph or Twitter medium, an icon, the manifest, or a link ``href``.
+       A lazy URL is left out, the render that forces it checks it instead.
      - ``next.pages.checks.metadata.shape``
    * - ``next.E110``
-     - A ``sitemap.py`` or a ``robots.py`` raises on import, or a ``sitemap.py`` opens with ``from __future__ import annotations``, which turns the annotations the dependency resolver reads into strings.
+     - A ``sitemap.py`` or a ``robots.py`` raises on import, the cause named, a ``RobotsRuleError`` among them.
+       The route keeps answering 404 rather than falling back to another source.
      - ``next.seo.checks.sources``
    * - ``next.E111``
      - An ``@sitemap.items`` trail is routed by no page of its tree, so the sitemap raises when built.
@@ -574,15 +592,20 @@ Errors
      - A ``sitemap.py`` exists and ``sitemap.xml`` or ``sitemap_index.xml`` does not load, because ``django.contrib.sitemaps`` is not installed or the template backend has no ``APP_DIRS``.
      - ``next.seo.checks.sitemaps``
    * - ``next.E113``
-     - A module attribute of ``sitemap.py`` or ``robots.py`` is outside its shape, a ``changefreq`` outside the protocol, a ``priority`` outside 0 to 1, a ``limit`` that is not a positive int, a ``cache`` that is not a non-negative int or is a bool, an ``exclude`` or ``languages`` that is not a list of strings, an ``i18n``, ``alternates``, or ``x_default`` that is not a bool, a ``protocol`` outside ``http`` and ``https``, a ``rules`` that is not a list of ``Rule``, or a ``host`` that is not a string.
+     - A module attribute of ``sitemap.py`` or ``robots.py`` is outside its shape, a ``changefreq`` outside the protocol, a ``priority`` outside 0 to 1, a ``limit`` outside 1 to 50000, a ``cache`` that is no int, ``False``, or ``CacheDict``, an ``exclude`` or ``languages`` that is not a list of strings, an ``i18n``, ``alternates``, or ``x_default`` that is not a bool, a ``protocol`` outside ``http`` and ``https``, or a ``section`` that is no slug.
+       In ``robots.py`` it covers a ``rules`` that is neither a list of ``RobotsRule`` nor a callable, and a ``sitemaps`` entry that is no absolute http or https URL on one line.
+       It also covers two ``@sitemap.items`` callables on one trail of one file, where only the later one lists.
      - ``next.seo.checks.sources``
    * - ``next.E114``
-     - More than one robots source exists, a ``robots.py`` beside a ``robots.txt`` or a source in two page roots, and only the first answers ``/robots.txt``.
+     - More than one source serves ``/robots.txt``, a ``robots.py`` beside a ``robots.txt`` or a source in two page roots, and only the first answers.
      - ``next.seo.checks.robots``
    * - ``next.E115``
-     - A page directory is named ``sitemap.xml``, ``sitemap-<section>.xml``, or ``robots.txt`` while a source serves that address, or a urlpattern of ``ROOT_URLCONF`` resolves the address ahead of the framework view.
-       The sitemap addresses count only while the sitemap is served, which ``NOINDEX`` turns off.
+     - A page directory is named after an address the SEO sources serve, ``sitemap.xml``, ``sitemap-<section>.xml``, or ``robots.txt``, so the page and the framework route shadow each other.
+       A urlpattern of the project answering the address first is ``next.W099``.
      - ``next.seo.checks.routes``
+   * - ``next.E116``
+     - Two sources serve one sitemap section name, two page trees, an ``@sitemap.items(section=...)``, or a backend, and only the first is listed.
+     - ``next.seo.checks.sitemaps``
    * - ``next.E117``
      - A static ``robots.txt`` does not decode as UTF-8.
      - ``next.seo.checks.robots``
@@ -590,6 +613,85 @@ Errors
      - ``@sitemap.items`` runs in a file no sitemap build reads, anything other than the ``sitemap.py`` at the top of a routed page tree, such as a nested ``sitemap.py``, a ``page.py``, or a helper module.
        A registration binds to the file running the decorator, so the fix is to run it in the root ``sitemap.py``, which may import the callable from anywhere.
      - ``next.seo.checks.sources``
+   * - ``next.E119``
+     - A ``sitemap.py`` or a ``robots.py`` opens with ``from __future__ import annotations``, which turns the annotations the dependency resolver reads into strings.
+     - ``next.seo.checks.sources``
+   * - ``next.E120``
+     - ``NEXT_FRAMEWORK["SEO"]["SITEMAP_BACKENDS"]`` is no list, or an entry is no mapping with a ``BACKEND`` naming a ``SitemapBackend`` subclass, or carries an ``OPTIONS`` that is no mapping.
+     - ``next.seo.checks.backends``
+   * - ``next.E121``
+     - A ``@page.metadata`` callable annotates a parameter ``Metadata``, which nothing fills since the chain merges the ancestors.
+     - ``next.pages.checks.metadata.shape``
+   * - ``next.E122``
+     - A ``links`` entry names a rel another key renders, ``canonical``, ``alternate``, ``icon``, ``shortcut``, ``apple-touch-icon``, ``mask-icon``, ``manifest``, or ``stylesheet``.
+     - ``next.pages.checks.metadata.head``
+   * - ``next.E123``
+     - A ``preconnect`` or ``dns-prefetch`` link names an ``href`` that is no origin, or a ``preload`` link carries no ``as``.
+       A lazy ``href`` is not forced to be read.
+     - ``next.pages.checks.metadata.head``
+   * - ``next.E124``
+     - An icon declares ``sizes`` other than ``any`` or ``WxH``, a type outside ``image/*``, or is a ``mask-icon`` without a color.
+     - ``next.pages.checks.metadata.head``
+   * - ``next.E125``
+     - ``other`` names a meta a typed key renders, or ``properties`` names an ``og:*``, ``article:*``, ``profile:*``, or ``book:*`` property.
+     - ``next.pages.checks.metadata.head``
+   * - ``next.E126``
+     - A viewport scale is outside 0.1 to 10.
+     - ``next.pages.checks.metadata.head``
+   * - ``next.E127``
+     - A JSON-LD node does not serialise to JSON or holds a naive datetime, or a page folds one ``@id`` under two types.
+     - ``next.pages.checks.metadata.ld``
+   * - ``next.E129``
+     - A ``SITE`` value is unusable, a ``URL`` that is no bare http or https origin, one carrying a path, a query, or a fragment included, or a dotted path that does not import, a ``NAME`` that is no text, or an ``INDEXABLE`` outside ``"auto"``, a bool, and a callable taking the request.
+     - ``next.site.checks``
+   * - ``next.E131``
+     - A ``page.py`` declares a ``cache`` or ``headers`` the response cannot carry as written, an unknown key, a negative age, a flag that is no bool, ``public`` with ``no_store``, a forbidden or invalid header name, or a value with a line break.
+     - ``next.pages.checks.responses``
+   * - ``next.E132``
+     - ``CSRF_DELIVERY`` names no mode, so ``"auto"`` applies.
+     - ``next.pages.checks.responses``
+   * - ``next.E133``
+     - A ``scripts.py`` fails to import, or its ``scripts`` holds anything but ``Script`` values, and its tree runs none of its scripts.
+     - ``next.scripts.checks``
+   * - ``next.E134``
+     - A ``scripts.py`` declares one script name twice.
+     - ``next.scripts.checks``
+   * - ``next.E135``
+     - ``CONSENT["CATEGORIES"]`` is no list of names or lacks ``necessary``.
+     - ``next.scripts.checks``
+   * - ``next.E136``
+     - A script carries neither ``src`` nor ``init``.
+     - ``next.scripts.checks``
+   * - ``next.E137``
+     - ``CONSENT["BACKEND"]`` does not import or is no ``ConsentBackend`` subclass.
+     - ``next.consent.checks``
+   * - ``next.E138``
+     - A script loads through the runtime, by a gated category or an ``IDLE``, ``INTERACTION``, or ``MANUAL`` strategy, while ``NEXT_JS_OPTIONS["policy"]`` keeps the runtime off every page.
+     - ``next.scripts.checks``
+   * - ``next.E140``
+     - A script names a category ``CONSENT["CATEGORIES"]`` does not list, so no visitor can grant it.
+     - ``next.scripts.checks``
+   * - ``next.E141``
+     - A script ``src`` is neither an http or https URL nor a staticfiles name a finder answers, such as another scheme, a scheme-relative URL, an absolute path, or a name that climbs out of the static root.
+     - ``next.scripts.checks``
+   * - ``next.E142``
+     - A script ``init`` holds ``</script``, which closes the element it sits in.
+     - ``next.scripts.checks``
+   * - ``next.E143``
+     - A script carries an attribute outside ``integrity``, ``crossorigin``, ``referrerpolicy``, and the ``data-*`` names.
+     - ``next.scripts.checks``
+   * - ``next.E144``
+     - A script names a strategy outside ``Strategy``.
+     - ``next.scripts.checks``
+   * - ``next.E145``
+     - ``CONSENT["SERVER_RENDER"]`` is outside ``"auto"``, ``True``, and ``False``.
+     - ``next.consent.checks``
+   * - ``next.E146``
+     - A ``CONSENT["CATEGORIES"]`` name holds a character outside letters, digits, ``_``, ``-``, and ``.``, which the consent cookie ``1:<categories>:<seconds>`` cannot carry.
+     - ``next.scripts.checks``
+   * - ``next.E147``
+     - A registered asset kind renders through a method of the rendering backend, the first ``STATIC_BACKENDS`` entry that loads, which is missing or takes no ``request`` and ``nonce`` keywords, so every page holding such an asset fails to render.
+     - ``next.static.checks``
 
 A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.
 
@@ -678,7 +780,7 @@ Warnings
        Partial rendering uses a single protocol backend, so only the first entry runs and the rest are ignored.
      - ``next.partial.checks.backends``
    * - ``next.W072``
-     - A ``NEXT_FRAMEWORK`` bool key, ``STRICT_CONTEXT``, ``STRICT_LOADING``, ``LAZY_COMPONENT_MODULES``, ``FORM_AUTODISCOVER``, or ``STATIC_DISCOVERY_CACHE``, holds a non-bool value.
+     - A ``NEXT_FRAMEWORK`` bool key, ``STRICT_CONTEXT``, ``STRICT_LOADING``, ``LAZY_COMPONENT_MODULES``, ``FORM_AUTODISCOVER``, ``STATIC_DISCOVERY_CACHE``, or ``CSP_NONCE``, holds a non-bool value.
        The ``bool()`` coercion turns a falsy-looking string such as ``'False'`` into ``True``, so the written value can mean the opposite of the intent.
      - ``next.conf.checks``
    * - ``next.W074``
@@ -686,7 +788,7 @@ Warnings
        Assets of that kind reach the browser only on a full page render, never through a patch envelope.
      - ``next.static.checks``
    * - ``next.W075``
-     - A page or a component registers a keyed ``serialize=True`` context under a name the ``next.min.js`` init payload reserves, ``$csrf`` or ``$dev``.
+     - A page or a component registers a keyed ``serialize=True`` context under a name the ``next.min.js`` init payload reserves, ``$csrf``, ``$dev``, ``$chunks``, ``$scripts``, or ``$consent``.
        The framework owns those names on every render, so the registered value never reaches ``window.Next.context`` and no ``context`` patch updates it.
        The message names the declaring ``page.py`` or ``component.py`` and asks for a rename.
        A keyless ``serialize=True`` provider spreads the keys of the dict it returns at render time, so the check never sees them.
@@ -730,80 +832,126 @@ Warnings
        An ``{% include %}`` is followed only when it names its template by a literal string, and one the check cannot follow, a variable or filtered name, a missing or broken template, or an include loop, keeps the page silent.
        A ``render()`` page and a composition ``next.E072`` reports are skipped.
      - ``next.pages.checks.metadata.templates``
-   * - ``next.W086``
-     - A canonical or a social image folds to a root-relative URL while no ``base`` is set, so the absolute form follows the request host.
-       Reported only with ``DEBUG`` off.
-     - ``next.pages.checks.metadata.shape``
    * - ``next.W087``
      - A page asks for hreflang alternates with ``alternates.languages=True``, but ``ROOT_URLCONF`` uses no ``i18n_patterns()``, so every language points at the same URL.
      - ``next.pages.checks.metadata.shape``
    * - ``next.W088``
      - A ``noindex`` page points its canonical at another origin, which passes no signal.
-       Under ``NOINDEX`` every page reads as ``noindex``, so any cross-origin canonical draws it.
+       On a site closed to search every page reads as ``noindex``, so any cross-origin canonical draws it.
      - ``next.pages.checks.metadata.shape``
-   * - ``next.W089``
-     - A page folds to no description while ``METADATA["CHECKS"]["REQUIRE_DESCRIPTION"]`` is on.
-       The check carries ``deploy=True`` and the ``seo`` tag.
-     - ``next.pages.checks.metadata.audits``
-   * - ``next.W090``
-     - Two or more routes fold to the same title under ``LANGUAGE_CODE``, one warning per group.
-       The check carries ``deploy=True`` and the ``seo`` tag.
-     - ``next.pages.checks.metadata.audits``
-   * - ``next.W091``
-     - A title folds to more than ``METADATA["CHECKS"]["TITLE_MAX"]`` characters under ``LANGUAGE_CODE``.
-       The check carries ``deploy=True`` and the ``seo`` tag.
-     - ``next.pages.checks.metadata.audits``
-   * - ``next.W092``
-     - A description folds to fewer than 50 or more than ``METADATA["CHECKS"]["DESCRIPTION_MAX"]`` characters under ``LANGUAGE_CODE``.
-       The check carries ``deploy=True`` and the ``seo`` tag.
-     - ``next.pages.checks.metadata.audits``
-   * - ``next.W093``
-     - A literal same-origin canonical resolves to no URL of the project under the active language or any ``LANGUAGES`` code, so a prefixed canonical under ``i18n_patterns`` counts as routed.
-       The check carries ``deploy=True`` and the ``seo`` tag.
-     - ``next.pages.checks.metadata.audits``
-   * - ``next.W094``
-     - A literal canonical sits on a dynamic route, so every match claims the same URL.
-       The check carries ``deploy=True`` and the ``seo`` tag.
-     - ``next.pages.checks.metadata.audits``
-   * - ``next.W095``
-     - An hreflang mapping names no ``x-default``, neither as a key nor as ``alternates.x_default``.
-       The check carries ``deploy=True`` and the ``seo`` tag.
-     - ``next.pages.checks.metadata.audits``
-   * - ``next.W096``
-     - An hreflang mapping names a language code ``settings.LANGUAGES`` does not list.
-       The check carries ``deploy=True`` and the ``seo`` tag.
-     - ``next.pages.checks.metadata.audits``
    * - ``next.W097``
-     - A dynamic route of a tree with a ``sitemap.py`` has no ``@sitemap.items`` callable and matches no ``exclude`` glob, so the sitemap lists no URL for it.
+     - A dynamic route of a tree with a ``sitemap.py`` has no ``@sitemap.items`` callable, matches no ``exclude`` glob, and is not ``noindex`` by its static metadata, so the sitemap lists no URL for it.
      - ``next.seo.checks.sitemaps``
    * - ``next.W098``
      - An ``@sitemap.items`` trail names a page whose static metadata is ``noindex``, so the sitemap invites crawlers to a page the tag turns away.
-       Silent while ``NOINDEX`` keeps the sitemap unserved.
+       Silent while the site is closed to search, which serves no sitemap.
      - ``next.seo.checks.sitemaps``
    * - ``next.W099``
-     - A served sitemap or a robots source exists and ``/sitemap.xml`` or ``/robots.txt`` does not resolve under ``ROOT_URLCONF``, because ``include("next.urls")`` sits under a prefix or inside ``i18n_patterns``.
+     - A served SEO route, ``/sitemap.xml`` or ``/robots.txt``, does not resolve to the framework view at the host root under ``ROOT_URLCONF``, because ``include("next.urls")`` sits under a prefix or inside ``i18n_patterns``, or a pattern of the project answers the address first.
      - ``next.seo.checks.routes``
    * - ``next.W100``
      - A ``Disallow`` of ``robots.py`` covers a URL the sitemap lists, or ``/sitemap.xml`` itself.
        A dynamic route counts by its URL cut at the first parameter, reversed with placeholder values, so a tree of dynamic routes alone is checked too, and a trail whose converter takes no placeholder, a custom converter for one, is skipped.
-       Silent while ``NOINDEX`` keeps the sitemap unserved.
+       Only the groups of static ``rules`` that name ``*`` are read, since a crawler named in a group of its own follows that group alone, and the check is silent while the site is closed to search.
      - ``next.seo.checks.robots``
    * - ``next.W101``
      - A ``Disallow`` of ``robots.py`` covers a ``noindex`` page, whose tag a crawler kept out never reads.
-       Dynamic routes count as ``next.W100`` describes.
-       Under ``NOINDEX`` every page reads as ``noindex``, so a ``Disallow`` over any routed page draws it.
+       Dynamic routes and the groups read count as ``next.W100`` describes.
      - ``next.seo.checks.robots``
    * - ``next.W102``
      - A ``sitemap.py``, ``robots.py``, or ``robots.txt`` sits below the top of its page tree, where nothing reads it.
      - ``next.seo.checks.sources``
    * - ``next.W103``
      - A static ``robots.txt`` names no ``Sitemap:`` line while the project serves a sitemap, and a static file is served as written.
-       Silent while ``NOINDEX`` keeps the sitemap unserved.
+       Silent while the site is closed to search.
      - ``next.seo.checks.robots``
    * - ``next.W104``
      - Two page roots take the same sitemap section label, so the trees serve as numbered sections in router order, and the message lists the sections actually served.
        Routing them from differently named directories or different apps keeps the section addresses stable.
      - ``next.seo.checks.sitemaps``
+   * - ``next.W105``
+     - The i18n options of a ``sitemap.py`` take no effect as written, ``alternates`` or ``x_default`` without ``i18n``, ``x_default`` without ``alternates``, or a ``languages`` code outside ``settings.LANGUAGES``.
+     - ``next.seo.checks.sitemaps``
+   * - ``next.W106``
+     - A ``sitemap.py`` sets ``i18n = True`` while ``ROOT_URLCONF`` mounts no ``i18n_patterns()``, so every language lists the same URL.
+     - ``next.seo.checks.sitemaps``
+   * - ``next.W107``
+     - An ``@sitemap.items`` trail matches an ``exclude`` glob of the same file, so its URLs are dropped.
+     - ``next.seo.checks.sitemaps``
+   * - ``next.W108``
+     - One segment declares several JSON-LD nodes with the same ``@id``, and only the last renders.
+     - ``next.pages.checks.metadata.scope``
+   * - ``next.W109``
+     - ``DEFAULTS`` wraps a value in ``Replace`` or ``RESET``, which has no inherited value to replace there.
+     - ``next.pages.checks.metadata.scope``
+   * - ``next.W110``
+     - A ``links`` entry names a rel no browser knows.
+     - ``next.pages.checks.metadata.head``
+   * - ``next.W111``
+     - Two icons share their rel, sizes, and media, and the browser picks either.
+     - ``next.pages.checks.metadata.head``
+   * - ``next.W112``
+     - A viewport keeps the page from zooming, through ``user_scalable=False`` or a ``maximum_scale`` below 2.
+     - ``next.pages.checks.metadata.head``
+   * - ``next.W113``
+     - A page folds an ``og:locale`` Open Graph cannot read, or ``locale_alternates=True`` meets a language no ``ll_CC`` locale derives from.
+     - ``next.pages.checks.metadata.head``
+   * - ``next.W118``
+     - A page folds a viewport or a theme color while its composed template writes a literal meta of the same name, so the head carries two that disagree.
+     - ``next.pages.checks.metadata.head``
+   * - ``next.W119``
+     - ``SITE["URL"]`` is unset and no ``django.contrib.sites`` row is pinned through ``SITE_ID``, so canonical, Open Graph, sitemap, and robots URLs follow the ``Host`` header.
+       ``ALLOWED_HOSTS`` holding ``"*"`` raises it to ``next.W132``.
+       The check carries ``deploy=True`` and the ``seo`` tag.
+     - ``next.site.checks``
+   * - ``next.W120``
+     - ``SITE["INDEXABLE"]`` is ``False`` while the site still publishes a ``sitemap.py`` or a robots source for crawlers.
+       A site private by design serves none of them and draws no warning.
+       The check carries ``deploy=True`` and the ``seo`` tag.
+     - ``next.seo.checks.sources``
+   * - ``next.W121``
+     - A page a shared cache may hold renders a ``{% form %}`` or the runtime while ``CSRF_DELIVERY`` is ``"eager"``, so every response sets the CSRF cookie and goes out private.
+     - ``next.forms.checks.csrf``
+   * - ``next.W122``
+     - A page a shared cache may hold renders ``{% csrf_token %}``, which sets the CSRF cookie on every response.
+     - ``next.pages.checks.responses``
+   * - ``next.W123``
+     - A page a shared cache may hold answers several languages at one URL, ``LocaleMiddleware`` active with more than one language and the pages outside ``i18n_patterns()``.
+     - ``next.pages.checks.responses``
+   * - ``next.W124``
+     - A page a shared cache may hold renders a ``{% form %}`` without a CSRF field, so a browser without JavaScript gets 403 on submit.
+       A form naming by a literal an action that declares ``requires_runtime`` does not count, while one naming its action through a variable or naming no registered action still does.
+     - ``next.forms.checks.csrf``
+   * - ``next.W125``
+     - A gated script loads ``BLOCKING`` while consent may render on the client, where it loads after the page and blocks nothing.
+     - ``next.scripts.checks``
+   * - ``next.W126``
+     - A custom ``NEXT_JS_OPTIONS`` or backend tag template holds no ``{nonce_attr}`` while a CSP nonce is active, so the tag it renders is refused.
+     - ``next.static.checks``
+   * - ``next.W127``
+     - A script loads its ``src`` over plain HTTP, which a https page blocks as mixed content.
+       The check carries ``deploy=True``.
+     - ``next.scripts.checks``
+   * - ``next.W129``
+     - The consent cookie's ``secure`` option is ``False`` while ``SESSION_COOKIE_SECURE`` is on.
+       The check carries ``deploy=True``.
+     - ``next.consent.checks``
+   * - ``next.W130``
+     - A CSP nonce is active, ``CSP_NONCE`` on and a nonce-minting middleware installed, while pages declare a ``cache`` a CDN may hold.
+       A nonce belongs to one visitor, so each of those pages goes out private, and the message lists them.
+     - ``next.static.checks``
+   * - ``next.W131``
+     - ``CSRF_USE_SESSIONS`` is on while pages declare a ``cache`` a CDN may hold.
+       The CSRF middleware then reads the session on every request, so each of those pages goes out private, and the message lists them.
+     - ``next.pages.checks.responses``
+   * - ``next.W132``
+     - ``SITE["URL"]`` is unset while ``ALLOWED_HOSTS`` holds ``"*"``, so any client picks the host of the canonical, Open Graph, sitemap, and robots URLs, and a CDN may keep them for everyone.
+       The check carries ``deploy=True`` and the ``seo`` tag.
+     - ``next.site.checks``
+   * - ``next.W133``
+     - ``{% #consented %}`` renders on a composed page while ``NEXT_FRAMEWORK`` holds no ``CONSENT`` entry.
+       A partial response carries no consent state, so a block that reaches a page only through a patch stays hidden there.
+     - ``next.scripts.checks``
 
 Codes are assigned per check and are not contiguous.
 

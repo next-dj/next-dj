@@ -141,6 +141,10 @@ GitHub.sublime-settings
 node_modules
 next/static/next/next.min.js
 next/static/next/next.min.js.map
+next/static/next/next.scripts.min.js
+next/static/next/next.scripts.min.js.map
+next/static/next/next.dev.min.js
+next/static/next/next.dev.min.js.map
 coverage/
 
 # sphinx docs build outputs

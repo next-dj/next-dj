@@ -12,6 +12,7 @@ from next.checks.common import (
     get_router_manager,
     iter_scanned_page_pairs,
 )
+from next.pages.loaders import load_page_module
 from next.pages.manager import page
 
 
@@ -54,7 +55,7 @@ def _iter_router_pages(
 ) -> Iterator[tuple[Path, Template]]:
     """Yield compiled composed templates for one router's scanned pages."""
     for _url_path, page_path in iter_scanned_page_pairs(router):
-        if not first_visit(page_path, seen) or not page.has_template(page_path):
+        if not first_visit(page_path, seen) or not is_templated(page_path):
             continue
         try:
             template = page.composed_template_for(page_path)
@@ -63,4 +64,10 @@ def _iter_router_pages(
         yield page_path, template
 
 
-__all__ = ["iter_composed_pages"]
+def is_templated(page_path: Path) -> bool:
+    """Whether a source supplies the page a template, its own `template` included."""
+    module, _error = load_page_module(page_path)
+    return page.has_template(page_path, module)
+
+
+__all__ = ["is_templated", "iter_composed_pages"]

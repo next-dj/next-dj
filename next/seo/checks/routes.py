@@ -1,7 +1,4 @@
-"""System checks on the addresses the SEO routes answer.
-
-The ids are `next.E115` and `next.W099`.
-"""
+"""System checks on the addresses the SEO routes answer."""
 
 from __future__ import annotations
 
@@ -19,11 +16,10 @@ from django.core.checks import (
 from django.urls import Resolver404, ResolverMatch, resolve
 
 from next.checks import NEXT, SEO
-from next.seo.sitemaps import serves_sitemap
+from next.seo.routes import ROBOTS_ROUTE, SITEMAP_ROUTE
 from next.seo.views import robots_view, sitemap_view
 
-from .robots import SITEMAP_URL
-from .roots import loaded_seo_roots, serves_robots
+from .roots import loaded_seo_roots, serves_robots, serves_sitemap
 
 
 if TYPE_CHECKING:
@@ -32,7 +28,6 @@ if TYPE_CHECKING:
     from next.seo.discovery import SeoRoot
 
 
-_ROBOTS_URL: Final = "/robots.txt"
 _SECTION_TRAIL: Final = re.compile(r"sitemap-[-a-zA-Z0-9_]+\.xml")
 
 
@@ -45,36 +40,33 @@ def _resolved(url: str) -> ResolverMatch | None:
 
 
 def _served(roots: tuple[SeoRoot, ...]) -> list[tuple[str, Callable[..., Any], str]]:
-    """Return the URLs the sources call for, each with its view and its source."""
+    """Return the addresses the sources call for, each with its view and its source."""
     served: list[tuple[str, Callable[..., Any], str]] = []
     if serves_sitemap(roots):
-        served.append((SITEMAP_URL, sitemap_view, "a sitemap.py"))
+        served.append((SITEMAP_ROUTE, sitemap_view, "a sitemap backend"))
     if serves_robots(roots):
-        served.append((_ROBOTS_URL, robots_view, "a robots source"))
+        served.append((ROBOTS_ROUTE, robots_view, "a robots source"))
     return served
 
 
 def _trail_address(trail: str, served: list[str]) -> str | None:
     """Return the served address a page trail takes, or `None` when it takes none."""
-    if SITEMAP_URL in served and (
-        trail == "sitemap.xml" or _SECTION_TRAIL.fullmatch(trail) is not None
-    ):
+    if trail in served:
         return f"/{trail}"
-    if trail == "robots.txt" and _ROBOTS_URL in served:
-        return _ROBOTS_URL
+    if SITEMAP_ROUTE in served and _SECTION_TRAIL.fullmatch(trail) is not None:
+        return f"/{trail}"
     return None
 
 
 @register(Tags.urls, NEXT, SEO)
 def check_seo_route_collisions(*args, **kwargs) -> list[CheckMessage]:
-    """Flag a page or a urlpattern on an address the sources serve (`next.E115`)."""
+    """Flag a page routed at an address the SEO sources serve (`next.E115`)."""
     init_errors, roots = loaded_seo_roots()
     errors = list(init_errors)
-    served = _served(roots)
-    urls = [url for url, _view, _source in served]
+    routes = [route for route, _view, _source in _served(roots)]
     for root in roots:
         for trail, page_path in root.trails.items():
-            address = _trail_address(trail, urls)
+            address = _trail_address(trail, routes)
             if address is None:
                 continue
             errors.append(
@@ -86,41 +78,32 @@ def check_seo_route_collisions(*args, **kwargs) -> list[CheckMessage]:
                     id="next.E115",
                 )
             )
-    urlconf = str(getattr(settings, "ROOT_URLCONF", ""))
-    for url, view, _source in served:
-        match = _resolved(url)
-        if match is None or match.func is view:
-            continue
-        errors.append(
-            Error(
-                f"ROOT_URLCONF {urlconf!r} resolves {url} to {match.view_name}, "
-                "ahead of the route the framework serves it at. Move that pattern "
-                "below include('next.urls'), or drop it.",
-                obj=settings,
-                id="next.E115",
-            )
-        )
     return errors
 
 
 @register(Tags.urls, NEXT, SEO)
 def check_seo_routes_at_host_root(*args, **kwargs) -> list[CheckMessage]:
-    """Warn when a declared SEO route is not at the host root (`next.W099`).
+    """Warn when a declared SEO route is not the framework's at the host root (W099).
 
     A `next.urls` include under a prefix or `i18n_patterns()` moves the routes with it.
     """
     init_errors, roots = loaded_seo_roots()
     warnings = list(init_errors)
     urlconf = str(getattr(settings, "ROOT_URLCONF", ""))
-    for url, _view, source in _served(roots):
-        if _resolved(url) is not None:
+    for route, view, source in _served(roots):
+        match = _resolved(f"/{route}")
+        if match is not None and match.func is view:
             continue
+        found = (
+            "does not resolve" if match is None else f"resolves to {match.view_name}"
+        )
         warnings.append(
             DjangoWarning(
-                f"{url} does not resolve under ROOT_URLCONF {urlconf!r} although "
-                f"{source} declares it, so crawlers find nothing at the host root. "
-                "Mount include('next.seo.urls') at the root of the URLconf, outside "
-                "any prefix and i18n_patterns().",
+                f"/{route} {found} under ROOT_URLCONF {urlconf!r} although {source} "
+                "declares it, so crawlers never reach the framework route there. "
+                "Mount include('next.urls') at the root of the URLconf, or "
+                "include('next.seo.urls') there when it sits under a prefix or "
+                "i18n_patterns(), ahead of any pattern of your own at that address.",
                 obj=settings,
                 id="next.W099",
             )

@@ -110,9 +110,16 @@ NEXT_FRAMEWORK = {
         "OPTIONS": {"CACHE_ALIAS": "wizards", "TIMEOUT": 1800},
     },
     "STATIC_VERSION": "v1",
+    "SITE": {"URL": "https://access.example", "NAME": "next.dj audit"},
     "METADATA": {
         "DEFAULTS": {
-            "site_name": "next.dj audit",
+            "viewport": "width=device-width, initial-scale=1",
+            "icons": {
+                "icon": {"url": "/static/access/icon.svg", "type": "image/svg+xml"}
+            },
+            "description": (
+                "Access requests through a multi-step wizard with a dual audit trail."
+            ),
             "title": {
                 "template": "{title} · {site_name}",
                 "default": "next.dj — Audit-trail forms",

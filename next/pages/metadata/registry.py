@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 
 from next.caches import BoundedCache
 from next.introspect import MisattributedContext, MisattributionLog, callable_name
+from next.pages.errors import PageMetadataConflictError
 from next.pages.signals import metadata_registered
 
 
@@ -23,33 +24,65 @@ class PageMetadataEntry(NamedTuple):
     inherit: bool
 
 
+class MetadataRegistrations(NamedTuple):
+    """What the registry holds for the diagnostics, read in one call."""
+
+    names: dict[Path, tuple[str, ...]]
+    misattributed: tuple[MisattributedContext, ...]
+
+
+def _one_run(first: Callable[..., Any], second: Callable[..., Any]) -> bool:
+    """Whether two distinct callables were defined by one run of the same module.
+
+    A re-executed `page.py` runs in a fresh namespace, so its callable replaces the old.
+    """
+    held = getattr(first, "__globals__", None)
+    return (
+        first is not second
+        and held is not None
+        and held is getattr(second, "__globals__", None)
+    )
+
+
 class PageMetadataRegistry:
-    """Register the metadata callable of each `page.py` and memoise the chains."""
+    """Register the metadata callable of each `page.py` and memoise the chains.
+
+    A per-file stamp moves only when a registration changes what the chain runs.
+    """
 
     def __init__(self) -> None:
         """Start with an empty registry and no memoised chain."""
         self._entries: dict[Path, PageMetadataEntry] = {}
-        self._conflicts: dict[Path, list[str]] = {}
         self._misattributions = MisattributionLog()
         self._version = 0
+        self._stamps: dict[Path, int] = {}
         self._chains: BoundedCache[Path, ChainEntry] = BoundedCache()
 
     @property
     def version(self) -> int:
-        """Monotonic counter bumped on every write, which the chain memo keys off."""
+        """Monotonic counter bumped on every write."""
         return self._version
 
     def _bump(self) -> None:
-        """Mark the registry as moved so every memoised chain rebuilds."""
+        """Move the version every write moves."""
         self._version += 1
+
+    def _stamp(self, file_path: Path) -> None:
+        """Move the stamp of `file_path` past every stamp handed out so far."""
+        self._stamps[file_path] = self._version + 1
 
     def reset(self) -> None:
         """Drop every registration and memoised chain for a re-executed `page.py`."""
         self._entries.clear()
-        self._conflicts.clear()
         self._misattributions.clear()
+        self._stamps.clear()
         self._chains.clear()
         self._bump()
+
+    def stamps(self, paths: tuple[Path, ...]) -> tuple[int | None, ...]:
+        """Return the registration stamp of each path, `None` where none registered."""
+        stamps = self._stamps
+        return tuple(stamps.get(path) for path in paths)
 
     def chain(self, file_path: Path) -> ChainEntry | None:
         """Return the memoised chain of `file_path`, whatever tokens it was built at."""
@@ -76,9 +109,9 @@ class PageMetadataRegistry:
             for file_path, entry in self._entries.items()
         }
 
-    def conflicts(self) -> dict[Path, tuple[str, ...]]:
-        """Return the differently named callables that overwrote one another."""
-        return {file_path: tuple(names) for file_path, names in self._conflicts.items()}
+    def registrations(self) -> MetadataRegistrations:
+        """Return the names and the misattributions together."""
+        return MetadataRegistrations(self.registered_names(), self.misattributed())
 
     def entry(self, file_path: Path) -> PageMetadataEntry | None:
         """Return the callable registered for `file_path`, if any."""
@@ -87,16 +120,23 @@ class PageMetadataRegistry:
     def register(
         self, file_path: Path, func: Callable[..., Any], *, inherit: bool = False
     ) -> None:
-        """Bind `func` to `file_path`, the last registration winning.
+        """Bind `func` to `file_path`, refusing a second callable from the same run.
 
-        A re-executed module registers the same name again, which is no conflict.
+        A re-executed module registers the same name again, which keeps the stamp.
         """
         existing = self._entries.get(file_path)
-        if existing is not None:
-            existing_name = callable_name(existing.func)
-            new_name = callable_name(func)
-            if existing_name != new_name:
-                self._conflicts.setdefault(file_path, [existing_name]).append(new_name)
+        if existing is not None and _one_run(existing.func, func):
+            detail = (
+                "two @page.metadata callables, "
+                f"{callable_name(existing.func)!r} and {callable_name(func)!r}"
+            )
+            raise PageMetadataConflictError(file_path, detail)
+        if (
+            existing is None
+            or callable_name(existing.func) != callable_name(func)
+            or existing.inherit != inherit
+        ):
+            self._stamp(file_path)
         self._entries[file_path] = PageMetadataEntry(func=func, inherit=inherit)
         self._bump()
         metadata_registered.send(
@@ -104,4 +144,4 @@ class PageMetadataRegistry:
         )
 
 
-__all__ = ["PageMetadataEntry", "PageMetadataRegistry"]
+__all__ = ["MetadataRegistrations", "PageMetadataEntry", "PageMetadataRegistry"]

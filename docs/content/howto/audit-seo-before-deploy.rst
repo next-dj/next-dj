@@ -6,89 +6,100 @@ Audit SEO before deploy
 Problem
 -------
 
-A page shipped without a description, two pages sharing a title, or a canonical pointing at a URL the project does not serve should fail the pipeline rather than reach a crawler.
+A metadata key of the wrong shape, a sitemap route the tree no longer serves, a deployment without its public origin, or a page that silently turned ``noindex`` should fail the pipeline rather than reach a crawler.
 
 Solution
 --------
 
-Run the opt-in content audits with ``manage.py check --deploy --tag seo`` in CI and in the deploy script, tune the thresholds under ``NEXT_FRAMEWORK["METADATA"]["CHECKS"]``, and silence the one or two warnings that describe a deliberate shape by their id.
+Run ``manage.py check --deploy --tag seo`` against the production settings in CI, pin the head of the pages that matter with ``next.testing.assert_metadata``, read the sitemap back with ``parse_sitemap``, and reach for ``manage.py showmetadata`` when a key comes out other than expected.
 
 Walkthrough
 -----------
 
-Run the audit locally
-~~~~~~~~~~~~~~~~~~~~~
+Run the checks against the deploy settings
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The ``seo`` tag narrows the run to the SEO checks, and ``--deploy`` adds the audits to them.
+The ``seo`` tag narrows the run to the metadata, sitemap, robots, and site checks, and ``--deploy`` adds the site checks a deployment needs.
 
 .. code-block:: bash
    :caption: shell
 
-   uv run python manage.py check --deploy --tag seo
+   uv run python manage.py check --deploy --tag seo --settings=config.settings.prod
 
-The command runs the four audits, ``next.W089`` to ``next.W096``, beside the sitemap and robots checks that carry the tag too, so its output is the SEO report alone.
+Run it against the settings the deployment uses, since the site checks read its ``SITE`` scope and ``DEBUG``.
 Every message names the file it concerns and the fix it expects.
 
-Set the thresholds
-~~~~~~~~~~~~~~~~~~
+Pin the head in a test
+~~~~~~~~~~~~~~~~~~~~~~
 
-The audits compare titles and descriptions against the numbers the site works to.
-
-.. code-block:: python
-   :caption: config/settings.py
-
-   NEXT_FRAMEWORK = {
-       "METADATA": {
-           "CHECKS": {
-               "TITLE_MAX": 70,
-               "DESCRIPTION_MAX": 155,
-               "REQUIRE_DESCRIPTION": True,
-           },
-       },
-   }
-
-Silence a deliberate warning
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-A warning that names an intended shape is dropped by its id.
+The checks read the static metadata alone, so what a ``@page.metadata`` callable builds per row belongs to a test.
 
 .. code-block:: python
-   :caption: config/settings.py
+   :caption: notes/tests/test_seo.py
 
-   SILENCED_SYSTEM_CHECKS = ["next.W090"]
+   from django.test import override_settings
 
-The setting drops the message and still counts it in the closing line of the run, so the fact that the project overrides a check stays visible.
+   from next.testing import NextClient, assert_metadata, parse_sitemap
+
+   @override_settings(DEBUG=False)
+   def test_note_head(note):
+       response = NextClient().get(f"/notes/{note.pk}/")
+       assert_metadata(
+           response,
+           title=f"{note.title} · Notes",
+           description=note.summary,
+           canonical=f"https://notes.example/notes/{note.pk}/",
+           robots=None,
+       )
+
+   @override_settings(DEBUG=False)
+   def test_draft_stays_out(draft):
+       response = NextClient().get(f"/notes/{draft.pk}/")
+       assert_metadata(response, robots="noindex, follow")
+       urls = parse_sitemap(NextClient().get("/sitemap.xml"))
+       assert f"https://notes.example/notes/{draft.pk}/" not in {url.loc for url in urls}
+
+The second test covers a draft whose callable answers ``"robots": {"index": False}``, which the items callable of the sitemap has to leave out as well.
+``DEBUG=False`` opens the site to search, so the robots meta shows what the pages declare rather than the ``noindex, nofollow`` of development.
 
 Gate the pipeline
 ~~~~~~~~~~~~~~~~~
 
-The deploy fails on any warning the audit raises.
-
-.. code-block:: bash
+.. code-block:: yaml
    :caption: .github/workflows/ci.yml
 
-   uv run python manage.py check --deploy --fail-level WARNING
+   - name: SEO
+     run: |
+       uv run python manage.py check --deploy --tag seo --fail-level WARNING
+       uv run pytest notes/tests/test_seo.py
+     env:
+       DJANGO_SETTINGS_MODULE: config.settings.ci
 
-The ``--fail-level WARNING`` flag makes the command exit non-zero on a warning, and dropping ``--tag seo`` runs Django's own deployment checks and the other framework deployment checks in the same pass.
+The ``--tag seo`` narrowing matters, because without it ``--fail-level WARNING`` also fails on Django's own ``security.W0xx`` deployment warnings, which a CI settings module usually triggers on purpose.
+Run Django's deployment checks in a separate step against the production settings.
+
+Explain a surprising key
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+``showmetadata`` prints which layer settles each key of a page, ``DEFAULTS`` or a ``page.py``, and lists the callables after them.
+
+.. code-block:: bash
+   :caption: shell
+
+   uv run python manage.py showmetadata /notes/42/
 
 Verification
 ------------
 
-Add a page with no description and run the tagged audit.
-
-.. code-block:: python
-   :caption: notes/pages/scratch/page.py
-
-   metadata = {"title": "Scratch"}
-
-The run reports ``next.W089`` for ``notes/pages/scratch/page.py``.
-Declare a description of at least 50 characters, or a site-wide one in ``DEFAULTS``, and the run reports nothing.
+Unset ``SITE["URL"]`` in the CI settings and run the checks.
+The run warns that canonical, Open Graph, sitemap, and robots URLs follow the ``Host`` header, and fails the step.
+Set ``SITE["INDEXABLE"]`` to ``False`` on a tree that serves a ``sitemap.py``, and the run warns about a deployment that would drop out of every search index while still inviting crawlers.
 
 See also
 --------
 
 .. seealso::
 
-   :doc:`/content/topics/seo/auditing` for the two tiers of checks and what they can see.
+   :doc:`/content/topics/seo/auditing` for the checks, ``showmetadata``, and the test helpers.
    :doc:`/content/ref/system-checks` for every code and its condition.
    :doc:`/content/deployment/checklist` for the rest of the deploy script.

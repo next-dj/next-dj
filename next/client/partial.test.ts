@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPartial } from "./partial";
+import { createDiagnostics } from "./diagnostics";
 import type { PartialAdapters, PartialSurface } from "./partial";
 import type { DialogAdapter } from "./layers";
 import type { EventSourceAdapter, SourceControl } from "./sse";
@@ -124,6 +125,16 @@ describe("createPartial surface", () => {
       form: null,
     });
     expect(seen).toEqual(["btn"]);
+  });
+
+  it("fires a wire error on the document as well as the bus", async () => {
+    const onDocument = vi.fn();
+    document.addEventListener("partial:error", onDocument);
+    await partial.fetch({ url: "https://attacker.example/x/" });
+    document.removeEventListener("partial:error", onDocument);
+    expect((onDocument.mock.calls[0]![0] as CustomEvent).detail).toMatchObject({
+      kind: "network",
+    });
   });
 
   it("fetch sends the CSRF token set through setCsrf on unsafe methods", async () => {
@@ -639,7 +650,7 @@ describe("createPartial surface", () => {
     ).toBe(true);
   });
 
-  it("the dev flag reaches the applier's boundary diagnostics", () => {
+  it("the dev channel reaches the applier's boundary diagnostics", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.spyOn(console, "debug").mockImplementation(() => {});
     document.body.innerHTML = '<div data-next-zone="z">old</div>';
@@ -649,7 +660,7 @@ describe("createPartial surface", () => {
       assets: [],
       form: null,
     };
-    partial._configure({ document, dev: true });
+    partial._configure({ document, dev: true, diagnostics: createDiagnostics() });
     partial.apply(wire);
     expect(warn).toHaveBeenCalledWith("[next] dropped malformed ops: 1");
     warn.mockClear();
@@ -664,7 +675,7 @@ describe("createPartial surface", () => {
     const seen: unknown[] = [];
     // A verb registered before the dev channel opens must survive it.
     partial.defineOp("confetti", (patch) => seen.push(patch.origin));
-    partial._configure({ dev: true });
+    partial._configure({ dev: true, diagnostics: createDiagnostics() });
     partial.apply({
       version: "v1",
       ops: [null, { op: "confetti", origin: "btn" }],
@@ -727,10 +738,10 @@ describe("createPartial surface", () => {
     made.partial._reset();
   });
 
-  it("the dev flag reaches the trigger attribute diagnostics", () => {
+  it("the dev channel reaches the trigger attribute diagnostics", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     document.body.innerHTML = '<div data-next-zone="t" data-next-poll="soon"></div>';
-    partial._configure({ document, dev: true });
+    partial._configure({ document, dev: true, diagnostics: createDiagnostics() });
     partial.ready();
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining('data-next-poll="soon" is not a whole number'),
@@ -739,6 +750,19 @@ describe("createPartial surface", () => {
     partial._configure({ document });
     partial.ready();
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("a dev chunk landing after ready validates the mounted page once", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    document.body.innerHTML = '<div data-next-zone="t" data-next-lazy="soon"></div>';
+    partial._configure({ document, dev: true });
+    partial.ready();
+    expect(warn).not.toHaveBeenCalled();
+    const diagnostics = createDiagnostics();
+    partial._configure({ dev: true, diagnostics });
+    partial._configure({ dev: true });
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn.mock.calls[0]![0]).toContain('data-next-lazy="soon"');
   });
 
   it("onMount returns a teardown that unregisters the callback", () => {

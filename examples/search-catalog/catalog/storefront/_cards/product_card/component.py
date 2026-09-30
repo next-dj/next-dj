@@ -1,5 +1,4 @@
 from catalog.models import Product
-from django.urls import reverse
 
 from next import component
 
@@ -7,10 +6,7 @@ from next import component
 @component.context("detail_url")
 def detail_url(product: Product) -> str:
     """Return the canonical detail URL for the product card."""
-    return reverse(
-        "next:page_catalog_category_slug",
-        kwargs={"category": product.category.slug, "slug": product.slug},
-    )
+    return product.get_absolute_url()
 
 
 @component.context("price_label")

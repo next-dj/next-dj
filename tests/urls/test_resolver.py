@@ -10,7 +10,7 @@ from next.forms.uid import URL_NAME_FORM_ACTION
 from next.testing import override_form_action, override_next_settings
 from next.urls import TrieURLResolver, page_reverse, router_manager
 from next.urls.manager import urlpatterns
-from tests.support import write_page
+from tests.support import NAMESPACED_URLCONF, write_page
 
 
 _RESOLVE_CASES = (
@@ -172,12 +172,12 @@ class TestReverseOverTrieUrlpatterns:
 
     def test_namespaced_reverse(self, page_tree) -> None:
         """The `next` namespace reverses through the TrieURLResolver."""
-        url = reverse("next:page_home", urlconf="tests.urls.urls_namespaced")
+        url = reverse("next:page_home", urlconf=NAMESPACED_URLCONF)
         assert url == "/home/"
 
     def test_page_reverse_and_kwargs(self, page_tree) -> None:
         """page_reverse builds page URLs from route templates."""
-        with override_settings(ROOT_URLCONF="tests.urls.urls_namespaced"):
+        with override_settings(ROOT_URLCONF=NAMESPACED_URLCONF):
             assert page_reverse("home") == "/home/"
             assert page_reverse("items/[int:id]", id=3) == "/items/3/"
 
@@ -191,7 +191,7 @@ class TestTrieOverPlainPatternList:
             path("p/<val>/", _plain_view, name="typed"),
         ]
         resolver = TrieURLResolver(RoutePattern(""), patterns)
-        assert resolver._current_token() == (0, 0)
+        assert resolver._current_token() == ()
         first = resolver.resolve("one/")
         cached = resolver._index_cache
         second = resolver.resolve("p/x/")

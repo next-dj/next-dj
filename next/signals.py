@@ -10,6 +10,7 @@ from next.components.signals import (
     components_registered,
 )
 from next.conf.signals import settings_reloaded
+from next.consent.signals import consent_backend_loaded
 from next.deps.signals import provider_registered
 from next.forms.signals import (
     action_dispatched,
@@ -36,7 +37,8 @@ from next.partial.signals import (
     zone_registered,
     zone_rendered,
 )
-from next.seo.signals import sitemap_items_registered
+from next.scripts.signals import scripts_registered
+from next.seo.signals import sitemap_backend_loaded, sitemap_items_registered
 from next.server.signals import watch_specs_ready
 from next.static.signals import (
     asset_registered,
@@ -56,6 +58,7 @@ __all__ = [
     "component_registered",
     "component_rendered",
     "components_registered",
+    "consent_backend_loaded",
     "context_registered",
     "field_validated",
     "form_access_denied",
@@ -70,7 +73,9 @@ __all__ = [
     "route_registered",
     "router_backend_loaded",
     "router_reloaded",
+    "scripts_registered",
     "settings_reloaded",
+    "sitemap_backend_loaded",
     "sitemap_items_registered",
     "sse_stream_closed",
     "sse_stream_opened",

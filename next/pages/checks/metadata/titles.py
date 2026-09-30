@@ -1,7 +1,4 @@
-"""The system check that parses every title template under every language.
-
-The ids are `next.E099` for a parse failure and `next.W084` for a missing `{title}`.
-"""
+"""The system check that parses every title template under every language."""
 
 from __future__ import annotations
 
@@ -19,14 +16,16 @@ from django.utils import translation
 
 from next.checks import NEXT
 from next.pages.errors import PageMetadataTemplateError
-from next.pages.metadata import SITE_SOURCE, template_has_title
+from next.pages.metadata.scope import SITE_SOURCE
+from next.pages.metadata.titles import template_has_title
 
 from .pages import loaded_metadata_pages
 from .scope import raw_metadata_scope, site_defaults
 
 
 if TYPE_CHECKING:
-    from next.pages.metadata import Segment, Text
+    from next.pages.metadata import Text
+    from next.pages.metadata.markers import Segment
 
     from .pages import MetadataPage
 

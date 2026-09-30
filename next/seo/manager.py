@@ -1,134 +1,236 @@
-"""The `sitemap` declaration object and the façade over the discovered SEO sources."""
+"""The façade over the sitemap backends and the SEO sources of the page trees."""
 
 from __future__ import annotations
 
-import enum
-import itertools
+import hashlib
 import logging
-import sys
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from collections.abc import Mapping
+from dataclasses import fields, is_dataclass
+from typing import TYPE_CHECKING, Any, Final, Literal, override
 
-from next.urls.manager import router_manager
+from django.urls import clear_url_caches
+from django.utils.functional import Promise
 
-from .discovery import SeoRoot, discover_seo_roots
+from next.backends import BackendListManager, load_backends
+from next.conf.defaults import DEFAULTS
+from next.conf.scopes import scope_value
+from next.conf.signals import settings_reloaded
+from next.site import site_config, site_indexable
+from next.site.config import debug_closed
+from next.urls.manager import seo_routes_version
+from next.utils import UNSET, Unset, template_edits_watched
+
+from .backends import SitemapBackend, shortest_cache
+from .discovery import SOURCE_NAMES, forget_page_tree_roots, page_tree_roots
 from .registry import sitemap_items_registry
 from .robots import RobotsSource, robots_candidates
-from .sitemaps import RouteSitemap, SitemapOptions, serves_sitemap
+from .signals import sitemap_backend_loaded
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Sequence
+    from pathlib import Path
 
+    from django.contrib.sitemaps import Sitemap
     from django.http import HttpRequest
+
+    from next.pages.responses import CacheControl
+
+    from .discovery import SeoRoot
 
 
 logger = logging.getLogger(__name__)
 
-_version_counter = itertools.count(1)
-"""Process-wide source of manager versions, so no two managers share one."""
+SEO_SCOPE: Final = "SEO"
+SITEMAP_BACKENDS: Final = "SITEMAP_BACKENDS"
+SEO_KEYS: Final = frozenset(DEFAULTS[SEO_SCOPE])
+"""The keys a `NEXT_FRAMEWORK["SEO"]` mapping may carry."""
+
+_DEFAULT_ENTRIES: Final[list[Mapping[str, Any]]] = DEFAULTS[SEO_SCOPE][SITEMAP_BACKENDS]
+_DEFAULT_BACKEND: Final = str(_DEFAULT_ENTRIES[0]["BACKEND"])
+_FINGERPRINT_WIDTH: Final = 12
 
 
-class SitemapDeclaration:
-    """The `sitemap` object a `sitemap.py` decorates its items callables with."""
-
-    def items[F: Callable[..., Any]](self, trail: str) -> Callable[[F], F]:
-        """Register the decorated callable as the entries of `trail` in this tree.
-
-        The tree is the one of the running `sitemap.py`, wherever the callable lives.
-        """
-        registered_from = Path(sys._getframe(1).f_code.co_filename)
-
-        def register(func: F) -> F:
-            sitemap_items_registry.register(registered_from, trail, func)
-            return func
-
-        return register
+def sitemap_backend_entries() -> list[Mapping[str, Any]]:
+    """Return the `SITEMAP_BACKENDS` entries, the default list for a non-list value."""
+    raw = scope_value(SEO_SCOPE, SITEMAP_BACKENDS)
+    entries = raw if isinstance(raw, list) else _DEFAULT_ENTRIES
+    return [entry for entry in entries if isinstance(entry, Mapping)]
 
 
-sitemap = SitemapDeclaration()
+def _first_served[P: tuple[Path, object]](
+    kind: str, candidates: Sequence[P]
+) -> P | None:
+    """Return the first candidate that serves, warning once about every other one."""
+    served = next((pair for pair in candidates if pair[1] is not None), None)
+    if served is not None and len(candidates) > 1:
+        logger.warning(
+            "%s has %d sources and %s serves it, the rest are ignored: %s",
+            kind,
+            len(candidates),
+            served[0],
+            ", ".join(str(pair[0]) for pair in candidates if pair is not served),
+        )
+    return served
 
 
-class _Unset(enum.Enum):
-    UNSET = enum.auto()
+def _source_bytes(roots: Sequence[SeoRoot]) -> bytes:
+    """Return the bytes of every SEO source file, in router order."""
+    chunks: list[bytes] = []
+    for root in roots:
+        for name in SOURCE_NAMES:
+            try:
+                chunks.append((root.path / name).read_bytes())
+            except OSError:
+                chunks.append(b"")
+    return b"\0".join(chunks)
 
 
-class SeoManager:
-    """Memoise the SEO sources of the routed page trees until a reset."""
+def _spelled_collection(value: object) -> str | None:
+    """Spell a mapping or a set in sorted order, a sequence in its own."""
+    if isinstance(value, Mapping):
+        pairs = (f"{stable_repr(key)}:{stable_repr(val)}" for key, val in value.items())
+        return "{" + ",".join(sorted(pairs)) + "}"
+    if isinstance(value, set | frozenset):
+        return "{" + ",".join(sorted(map(stable_repr, value))) + "}"
+    if isinstance(value, list | tuple):
+        return "[" + ",".join(map(stable_repr, value)) + "]"
+    return None
+
+
+def stable_repr(value: object) -> str:
+    """Spell `value` alike in every process, whatever its set order or its address.
+
+    Collections sort, a callable reads as its dotted name, a lazy string as its text.
+    """
+    if isinstance(value, Promise):
+        return repr(str(value))
+    spelled = _spelled_collection(value)
+    if spelled is not None:
+        return spelled
+    if is_dataclass(value) and not isinstance(value, type):
+        named = {field.name: getattr(value, field.name) for field in fields(value)}
+        return type(value).__qualname__ + stable_repr(named)
+    if callable(value):
+        owner = value if hasattr(value, "__qualname__") else type(value)
+        return f"{owner.__module__}.{owner.__qualname__}"
+    return repr(value)
+
+
+class SeoManager(BackendListManager[SitemapBackend]):
+    """Load the sitemap backends and memoise the robots source."""
 
     def __init__(self) -> None:
-        """Start with nothing discovered."""
-        self._version = next(_version_counter)
-        self._roots: tuple[SeoRoot, ...] | None = None
-        self._robots: RobotsSource | Literal[_Unset.UNSET] | None = _Unset.UNSET
+        """Start with nothing loaded or discovered."""
+        super().__init__()
+        self._robots: RobotsSource | Literal[Unset.UNSET] | None = UNSET
+        self._fingerprint: str | None = None
 
     @property
     def version(self) -> int:
-        """Cache token moved by every reset, keying the wrapped sitemap view."""
-        return self._version
+        """Return the routes token every reset moves, keying the cached views too."""
+        return seo_routes_version.value
+
+    @override
+    def reload(self) -> None:
+        """Rebuild the backends from `SEO["SITEMAP_BACKENDS"]`."""
+        self._backends = load_backends(
+            sitemap_backend_entries(),
+            base=SitemapBackend,
+            default=_DEFAULT_BACKEND,
+            signal=sitemap_backend_loaded,
+        )
+        self._mark_loaded()
+
+    @property
+    def backends(self) -> tuple[SitemapBackend, ...]:
+        """Return the loaded backends in the order their sections merge."""
+        self._ensure_backends()
+        return tuple(self._backends)
 
     def reset(self, **kwargs) -> None:
-        """Drop the discovered roots and the robots source, moving the version.
+        """Drop the backends and every discovered source, moving the version.
 
-        The items registry stays, as a reload never re-runs a memoised `sitemap.py`.
+        The route set may follow the sources, so the URL caches go and the token moves.
         """
-        self._version = next(_version_counter)
-        self._roots = None
-        self._robots = _Unset.UNSET
+        with self._lock:
+            seo_routes_version.move()
+            self._backends = []
+            self._loaded = False
+            self._robots = UNSET
+            self._fingerprint = None
+            forget_page_tree_roots()
+        clear_url_caches()
+
+    def refresh(self) -> None:
+        """Under a watch, drop every source once a file of one moved on disk.
+
+        Every entry point asks first, so an edit shows without a reload, as for scripts.
+        """
+        if template_edits_watched() and any(root.stale() for root in self.roots()):
+            self.reset()
 
     def roots(self) -> tuple[SeoRoot, ...]:
         """Return every routed page tree with its SEO sources loaded."""
-        roots = self._roots
-        if roots is None:
-            roots = self._roots = discover_seo_roots(router_manager)
-        return roots
+        return page_tree_roots()
 
-    def has_sitemap(self) -> bool:
-        """Whether the project serves a sitemap, which `NOINDEX` turns off."""
-        return serves_sitemap(self.roots())
+    def serves_sitemap(self) -> bool:
+        """Whether a backend has sections, which routes `/sitemap.xml`."""
+        return any(backend.serves() for backend in self.backends)
 
-    def sitemaps(self, request: HttpRequest | None = None) -> dict[str, RouteSitemap]:
-        """Return a fresh `RouteSitemap` per declaring tree, keyed by section."""
-        if not self.has_sitemap():
+    def sections(self, request: HttpRequest | None) -> dict[str, Sitemap[Any]]:
+        """Return the sections of every backend, the first one winning a shared name.
+
+        A closed site lists none, save one only `DEBUG` closes, previewed under noindex.
+        """
+        if not site_indexable(request) and not debug_closed():
             return {}
-        return {
-            root.section: RouteSitemap(root, module, request=request)
-            for root in self.roots()
-            if (module := root.sitemap_module) is not None
-        }
+        merged: dict[str, Sitemap[Any]] = {}
+        for backend in self.backends:
+            for name, section in backend.sections(request).items():
+                merged.setdefault(name, section)
+        return merged
 
-    def cache_seconds(self) -> int | None:
-        """Return the shortest `cache` a `sitemap.py` declares, `None` without one."""
-        declared = [
-            seconds
-            for root in self.roots()
-            if (module := root.sitemap_module) is not None
-            and (seconds := SitemapOptions.read(module).cache) is not None
-        ]
-        return min(declared, default=None)
+    def cache_control(self) -> CacheControl | None:
+        """Return the cache of the backend asking for the shortest, `None` if none asks.
+
+        A backend asking for no store at all wins, since a shared copy would leak it.
+        """
+        return shortest_cache(backend.cache_control() for backend in self.backends)
 
     def robots_source(self) -> RobotsSource | None:
         """Return the one `/robots.txt` source, warning once about the rest."""
         held = self._robots
-        if held is _Unset.UNSET:
-            held = self._robots = self._select_robots()
-        return held
+        if held is not UNSET:
+            return held
+        served = _first_served("/robots.txt", robots_candidates(self.roots()))
+        found = None if served is None else served[1]
+        self._robots = found
+        return found
 
-    def _select_robots(self) -> RobotsSource | None:
-        candidates = robots_candidates(self.roots())
-        if len(candidates) > 1:
-            logger.warning(
-                "/robots.txt has %d sources and %s serves it, the rest are ignored: %s",
-                len(candidates),
-                candidates[0][0],
-                ", ".join(str(path) for path, _served in candidates[1:]),
-            )
-        return next(
-            (served for _path, served in candidates if served is not None), None
-        )
+    def fingerprint(self) -> str:
+        """Return a digest of the sources and the settings the SEO responses read.
+
+        It prefixes the cache keys, so an edit never serves a response built before.
+        """
+        held = self._fingerprint
+        if held is None:
+            digest = hashlib.sha256(_source_bytes(self.roots()))
+            digest.update(stable_repr(sitemap_backend_entries()).encode())
+            digest.update(stable_repr(site_config()).encode())
+            held = self._fingerprint = digest.hexdigest()[:_FINGERPRINT_WIDTH]
+        return held
 
 
 seo_manager = SeoManager()
+
+
+def forget_seo_sources(**kwargs) -> None:
+    """Drop the backends and every discovered source, so a reload takes effect."""
+    seo_manager.reset()
+
+
+settings_reloaded.connect(forget_seo_sources)
 
 
 def reset_seo_sources() -> None:
@@ -138,9 +240,13 @@ def reset_seo_sources() -> None:
 
 
 __all__ = [
+    "SEO_KEYS",
+    "SEO_SCOPE",
+    "SITEMAP_BACKENDS",
     "SeoManager",
-    "SitemapDeclaration",
+    "forget_seo_sources",
     "reset_seo_sources",
     "seo_manager",
-    "sitemap",
+    "sitemap_backend_entries",
+    "stable_repr",
 ]

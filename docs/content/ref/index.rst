@@ -76,8 +76,20 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
 :doc:`partial`
    ``next.partial`` for the patch builder, zones, SSE streams, and the protocol backend.
 
+:doc:`metadata`
+   ``next.pages.metadata`` for the metadata dicts, value objects, renderer, and ``ld`` nodes.
+
 :doc:`seo`
-   ``next.seo`` for the sitemap and robots served from the page roots.
+   ``next.seo`` for the sitemap and robots files served from the page roots and the sitemap backends.
+
+:doc:`site`
+   ``next.site`` for the site origin and indexability.
+
+:doc:`csrf`
+   ``next.csrf`` for the CSRF delivery and the token endpoint.
+
+:doc:`scripts`
+   ``next.scripts`` and ``next.consent`` for third-party scripts and consent.
 
 :doc:`deps`
    ``next.deps`` for the dependency resolver and providers.
@@ -112,7 +124,10 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
 .. rubric:: Client runtime
 
 :doc:`client`
-   The ``window.Next`` runtime, its events, and the ``data-next-*`` attribute contract, the one reference page that documents no Python module.
+   The ``window.Next`` runtime, its events, and the ``data-next-*`` attribute contract.
+
+:doc:`client-extras`
+   ``Next.ready("scripts")``, ``Next.consent``, ``Next.scripts``, ``Next.navigation``, and their events.
 
 .. rubric:: Configuration
 
@@ -121,6 +136,9 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
 
 :doc:`system-checks`
    Django system checks that the framework contributes.
+
+:doc:`management`
+   The ``showmetadata`` management command.
 
 .. rubric:: Templates and decorators
 
@@ -140,7 +158,11 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
    forms
    static
    partial
+   metadata
    seo
+   site
+   csrf
+   scripts
    deps
    conf
    server
@@ -152,7 +174,9 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
    backends
    ports
    client
+   client-extras
    settings
    system-checks
+   management
    template-tags
    decorators

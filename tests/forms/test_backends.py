@@ -1049,10 +1049,10 @@ class TestFormActionManagerLoadedFlag:
 
 
 class TestGetActionUrlNoReverseMatchFallback:
-    """get_action_url falls back to URL_NAME_FORM_ACTION when FORM_ACTION_REVERSE_NAME fails."""
+    """get_action_url falls back to URL_NAME_FORM_ACTION if the reverse fails."""
 
     def test_fallback_when_named_url_fails(self, tmp_path) -> None:
-        """When FORM_ACTION_REVERSE_NAME raises NoReverseMatch, falls back to URL_NAME_FORM_ACTION."""
+        """A NoReverseMatch on the named reverse falls back to URL_NAME_FORM_ACTION."""
         backend = RegistryFormActionBackend()
         page_path = str(tmp_path / "page.py")
 
@@ -1164,8 +1164,7 @@ class TestManagerClearRegistries:
 class TestFormActionManagerVersion:
     """The `version` cache token moves on every registry mutation.
 
-    The counter behind it is process-wide, so a test pins that the token moved
-    rather than what it landed on.
+    The counter is process-wide, so a test pins that the token moved, not its value.
     """
 
     def test_register_action_bumps_version(self) -> None:

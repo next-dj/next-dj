@@ -35,7 +35,7 @@ class TestComponentContextManager:
     """Tests for ComponentContextManager."""
 
     def test_component_context_injected_on_render(self, tmp_path: Path) -> None:
-        """When component has context registered, _inject_component_context adds it to render."""
+        """A component with registered context gets it injected into its render."""
         (tmp_path / "comp").mkdir()
         (tmp_path / "comp" / "component.djx").write_text("<span>{{ injected }}</span>")
         (tmp_path / "comp" / "component.py").write_text("# empty\n")

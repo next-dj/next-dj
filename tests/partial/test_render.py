@@ -230,8 +230,19 @@ class TestRenderZoneNestedContext:
         render_zone(page_file, ("away",), _request())
         assert sorted(calls) == ["away", "plain"]
 
-    def test_batch_of_nesting_zones_widens_once(self, nested_zone_page) -> None:
+    @pytest.mark.parametrize("batch", [("outer", "inner"), ("inner", "outer")])
+    def test_a_nested_name_renders_once_inside_its_outer_zone(
+        self, nested_zone_page, batch: tuple[str, ...]
+    ) -> None:
         page_file, calls = nested_zone_page
-        result = render_zone(page_file, ("outer", "inner"), _request())
+        result = render_zone(page_file, batch, _request())
         assert sorted(calls) == ["deep", "inner", "outer", "plain"]
-        assert "deep-value" in result.html["inner"]
+        assert list(result.html) == ["outer"]
+        assert list(result.bodies) == ["outer"]
+        assert result.html["outer"].count("inner-value") == 1
+        assert "deep-value" in result.html["outer"]
+
+    def test_a_sibling_keeps_its_own_render(self, nested_zone_page) -> None:
+        page_file, _calls = nested_zone_page
+        result = render_zone(page_file, ("deep", "away", "inner"), _request())
+        assert list(result.html) == ["away", "inner"]

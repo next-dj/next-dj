@@ -140,6 +140,15 @@ Every signal the framework emits is listed below with the subsystem that emits i
    * - ``sitemap_items_registered``
      - SEO
      - After ``@sitemap.items`` binds a callable to a route trail under a page root.
+   * - ``sitemap_backend_loaded``
+     - SEO
+     - After a sitemap backend is created from its configuration entry.
+   * - ``scripts_registered``
+     - Scripts
+     - When the ``scripts.py`` of a page tree is registered.
+   * - ``consent_backend_loaded``
+     - Consent
+     - After the consent backend is created from its configuration entry.
    * - ``watch_specs_ready``
      - Server
      - After the reloader resolves the full list of watch specs.

@@ -20,6 +20,7 @@ from next.testing import (
     NextClient,
     PartialEnvelope,
     SignalRecorder,
+    assert_metadata,
     build_form_for,
     envelope_of,
     init_payload,
@@ -620,5 +621,4 @@ class TestPageMetadata:
     def test_each_page_carries_its_title(
         self, next_client: NextClient, poll: Poll, path: str, title: str
     ) -> None:
-        body = next_client.get(path.format(pk=poll.pk)).content.decode()
-        assert f"<title>{title}</title>" in body
+        assert_metadata(next_client.get(path.format(pk=poll.pk)), title=title)

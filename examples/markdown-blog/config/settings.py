@@ -24,7 +24,6 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
-    "django.middleware.locale.LocaleMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -56,7 +55,6 @@ DATABASES = {
 }
 
 LANGUAGE_CODE = "en"
-LANGUAGES = [("en", "English"), ("es", "Spanish")]
 TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
@@ -80,7 +78,6 @@ NEXT_FRAMEWORK = {
             "OPTIONS": {
                 "context_processors": [
                     "django.template.context_processors.request",
-                    "django.template.context_processors.i18n",
                     "blog.context_processors.site_nav",
                 ]
             },
@@ -102,10 +99,13 @@ NEXT_FRAMEWORK = {
         "next.pages.loaders.DjxTemplateLoader",
     ],
     "STATIC_VERSION": "v1",
+    "SITE": {"URL": "https://blog.example", "NAME": "next.dj blog", "INDEXABLE": True},
     "METADATA": {
         "DEFAULTS": {
-            "base": "https://blog.example",
-            "site_name": "next.dj blog",
+            "viewport": "width=device-width, initial-scale=1",
+            "icons": {
+                "icon": {"url": "/static/blog/icon.svg", "type": "image/svg+xml"}
+            },
             "description": "Small posts, plain Markdown, zero front-end build.",
             "title": {
                 "template": "{title} · {site_name}",

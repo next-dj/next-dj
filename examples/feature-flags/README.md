@@ -304,7 +304,7 @@ The bulk-toggle action is mounted at the framework's action URL. Tests use `Next
 
 ### 11. Tab titles and a `noindex` admin
 
-[`frame/layout.djx`](frame/layout.djx) calls the shared `page_head` component without a title, and the component renders the builtin `{% metadata %}` tag. `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` in [`config/settings.py`](config/settings.py) supplies the `site_name`, the template `{title} · {site_name}` and the `default` that the flag board at `/` renders as-is. Every other panel names itself with a one-line dict in its `page.py`, and [`panels/admin/page.py`](flags/panels/admin/page.py) adds a robots directive to it:
+[`frame/layout.djx`](frame/layout.djx) calls the shared `page_head` component without a title, and the component renders the builtin `{% metadata %}` tag. `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` in [`config/settings.py`](config/settings.py) supplies the template `{title} · {site_name}` and the `default` that the flag board at `/` renders as-is, and `NEXT_FRAMEWORK["SITE"]["NAME"]` fills `{site_name}`. Every other panel names itself with a one-line dict in its `page.py`, and [`panels/admin/page.py`](flags/panels/admin/page.py) adds a robots directive to it:
 
 ```python
 metadata: MetadataDict = {"title": "Flag admin", "robots": {"index": False}}

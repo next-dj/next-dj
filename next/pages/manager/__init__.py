@@ -14,7 +14,7 @@ from django.http.response import HttpResponseBase
 from django.template import Context as DjangoTemplateContext, Origin, Template
 
 from next.conf import next_framework_settings
-from next.deps.cache import shared_dep_cache
+from next.deps.cache import render_dep_cache
 from next.deps.resolver import current_resolver
 from next.introspect import declared_file, registering_file
 from next.pages.loaders import (
@@ -24,13 +24,16 @@ from next.pages.loaders import (
     load_page_module,
     reset_module_memo,
 )
-from next.pages.metadata import (
+from next.pages.metadata.chain import (
+    ChainEntry,
+    MetadataDeclaration,
     MetadataThunk,
-    PageMetadataRegistry,
     chain_entry,
-    chain_title,
-    forget_metadata_scope,
+    declared_metadata,
+    fold_chain,
 )
+from next.pages.metadata.registry import MetadataRegistrations, PageMetadataRegistry
+from next.pages.metadata.scope import forget_metadata_scope
 from next.pages.paths import clear_page_path_info, forget_page_path_info, page_path_info
 from next.pages.processors import _get_context_processors
 from next.pages.registry import PageContextRegistry
@@ -59,7 +62,8 @@ if TYPE_CHECKING:
     from django.http import HttpRequest
     from django.urls import URLPattern
 
-    from next.pages.metadata import Metadata, Text
+    from next.pages.metadata import Metadata
+    from next.pages.metadata.markers import Segment
     from next.pages.registry import ZoneBinding
     from next.static import StaticCollector
     from next.static.serializers import JsContextSerializer
@@ -189,42 +193,44 @@ class Page:
 
         return decorator if func is None else decorator(func)
 
+    def metadata_declaration(self, file_path: Path) -> MetadataDeclaration:
+        """Return what the `page.py` at `file_path` declares, dict or callable."""
+        return declared_metadata(self._metadata_registry, file_path)
+
+    def metadata_chain(self, file_path: Path) -> ChainEntry:
+        """Return the memoised metadata chain of `file_path`."""
+        return chain_entry(self._metadata_registry, file_path)
+
+    def metadata_registrations(self) -> MetadataRegistrations:
+        """Return the registered callables and their misattributions."""
+        return self._metadata_registry.registrations()
+
     def static_metadata(self, file_path: Path) -> Metadata:
         """Return the metadata of `file_path` readable without a request."""
         return chain_entry(self._metadata_registry, file_path).static
 
-    def templated_title(
+    def fold_metadata(
         self,
         file_path: Path,
-        text: Text,
         *,
-        absolute: bool = False,
+        overlay: Segment | None = None,
         request: HttpRequest | None = None,
         url_kwargs: Mapping[str, object] | None = None,
         context_data: Callable[[], MutableMapping[str, object]] | None = None,
-    ) -> Text:
-        """Return `text` as the title `file_path` would render it under its chain.
+    ) -> Metadata:
+        """Fold the chain of `file_path`, `overlay` standing in for its own callable.
 
         `context_data` is called only when an inherited callable of an ancestor runs.
         """
-        if absolute:
-            return text
-        return chain_title(
+        return fold_chain(
             self._metadata_registry,
             file_path,
-            text,
+            dep_cache=render_dep_cache(request),
+            overlay=overlay,
             request=request,
             url_kwargs=url_kwargs,
             context_data=context_data,
         )
-
-    def resolve_metadata(
-        self, file_path: Path, request: HttpRequest | None = None, **kwargs
-    ) -> Metadata:
-        """Fold the metadata of `file_path` by building its whole render context."""
-        context_data = self.build_render_context(file_path, request, **kwargs)
-        thunk = cast("MetadataThunk", context_data[METADATA_KEY])
-        return thunk.resolve(context_data)
 
     def build_render_context(
         self,
@@ -240,7 +246,7 @@ class Page:
         the `StaticCollector`. A `_requested_zones` batch stays out of the dict.
         """
         return self._render_context(
-            file_path, request, kwargs, _requested_zones, shared_dep_cache(request)
+            file_path, request, kwargs, _requested_zones, render_dep_cache(request)
         )
 
     def _render_context(
@@ -385,7 +391,7 @@ class Page:
         **kwargs,
     ) -> str:
         """Build context, render `template`, inject static assets, emit signal."""
-        dep_cache = shared_dep_cache(request) if _dep_cache is None else _dep_cache
+        dep_cache = render_dep_cache(request) if _dep_cache is None else _dep_cache
         context_data = self._render_context(file_path, request, kwargs, None, dep_cache)
         result, collector = self.render_with_static_assets(
             file_path, template, context_data, request=request

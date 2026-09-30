@@ -1,60 +1,51 @@
 from collections.abc import Callable
-from dataclasses import FrozenInstanceError
 
 import pytest
-from django.test import override_settings
+from django.http import HttpRequest
+from django.test import RequestFactory, override_settings
 from django.utils.functional import Promise
 from django.utils.translation import gettext_lazy
 
 from next.checks import reset_check_caches
 from next.conf import next_framework_settings
+from next.pages import ld
 from next.pages.errors import PageMetadataShapeError
-from next.pages.metadata import (
+from next.pages.metadata import Metadata, Robots, noindexed
+from next.pages.metadata.markers import Segment, TitleSpec
+from next.pages.metadata.scope import (
     SITE_SOURCE,
-    Metadata,
-    Segment,
+    MetadataOptions,
     forget_metadata_scope,
     metadata_options,
-    page_noindex,
     site_segment,
 )
-from next.pages.metadata.schema import Robots, TitleSpec
-from next.pages.metadata.scope import MetadataOptions
 from tests.support import next_framework_settings_stand_in
+
+
+def _live_only(request: HttpRequest | None) -> bool:
+    return request is None or request.get_host() == "acme.example"
 
 
 class TestMetadataOptions:
     """The upper-case options are read leniently beside the defaults."""
 
     def test_default_options(self) -> None:
-        assert metadata_options() == MetadataOptions(
-            noindex=False, canonical_query=(), checks={}
-        )
+        assert metadata_options() == MetadataOptions(canonical_query=())
 
     def test_options_are_read_from_the_scope(self) -> None:
-        scope = {
-            "NOINDEX": True,
-            "CANONICAL_QUERY": ["page", 1, "sort"],
-            "CHECKS": {"TITLE_MAX": 60},
-        }
+        scope = {"CANONICAL_QUERY": ["page", 1, "sort"]}
         with override_settings(NEXT_FRAMEWORK={"METADATA": scope}):
             options = metadata_options()
-        assert options == MetadataOptions(
-            noindex=True, canonical_query=("page", "sort"), checks={"TITLE_MAX": 60}
-        )
+        assert options == MetadataOptions(canonical_query=("page", "sort"))
 
     @pytest.mark.parametrize(
         "scope",
-        [{"CANONICAL_QUERY": "page"}, {"CANONICAL_QUERY": 1}, {"CHECKS": "x"}],
-        ids=["query_is_a_string", "query_is_an_int", "checks_is_a_string"],
+        [{"CANONICAL_QUERY": "page"}, {"CANONICAL_QUERY": 1}],
+        ids=["query_is_a_string", "query_is_an_int"],
     )
     def test_unusable_values_fall_back(self, scope: dict[str, object]) -> None:
         with override_settings(NEXT_FRAMEWORK={"METADATA": scope}):
             assert metadata_options() == MetadataOptions()
-
-    def test_options_are_frozen(self) -> None:
-        with pytest.raises(FrozenInstanceError):
-            MetadataOptions().noindex = True  # type: ignore[misc]
 
 
 class TestSiteSegment:
@@ -75,10 +66,21 @@ class TestSiteSegment:
         assert segment.title == TitleSpec(
             template="{title} · {site_name}", default="Acme"
         )
-        assert segment.site_name is site_name
-        assert isinstance(segment.site_name, Promise)
-        assert segment.robots is not None
-        assert segment.robots.index is True
+        meta = segment.metadata
+        assert meta.site_name is site_name
+        assert isinstance(meta.site_name, Promise)
+        assert meta.robots is not None
+        assert meta.robots.index is True
+
+    def test_typed_nodes_survive_the_frozen_settings(self) -> None:
+        organization = ld.Node(
+            id="#org", type="Organization", extra={"foundingDate": "2020"}
+        )
+        item = ld.ListItem(name="Acme", position=1, item="/")
+        defaults = {"jsonld": [organization, item]}
+        with override_settings(NEXT_FRAMEWORK={"METADATA": {"DEFAULTS": defaults}}):
+            segment = site_segment()
+        assert segment.metadata.jsonld == (organization, item)
 
     def test_the_segment_is_memoised_until_the_settings_reload(self) -> None:
         first = site_segment()
@@ -109,6 +111,18 @@ class TestSiteSegment:
             site_segment()
         assert excinfo.value.source == SITE_SOURCE
 
+    def test_the_site_name_falls_back_to_the_site_scope(self) -> None:
+        with override_settings(NEXT_FRAMEWORK={"SITE": {"NAME": "Acme"}}):
+            assert site_segment().metadata.site_name == "Acme"
+        defaults = {"site_name": "Own"}
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "SITE": {"NAME": "Acme"},
+                "METADATA": {"DEFAULTS": defaults},
+            }
+        ):
+            assert site_segment().metadata.site_name == "Own"
+
     def test_a_non_mapping_defaults_value_folds_to_an_empty_segment(self) -> None:
         with override_settings(NEXT_FRAMEWORK={"METADATA": {"DEFAULTS": "x"}}):
             assert site_segment() == Segment(SITE_SOURCE)
@@ -117,30 +131,39 @@ class TestSiteSegment:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         stand_in = next_framework_settings_stand_in(METADATA="x")
-        monkeypatch.setattr(
-            "next.pages.metadata.scope.next_framework_settings", stand_in
-        )
+        monkeypatch.setattr("next.conf.scopes.next_framework_settings", stand_in)
         assert site_segment() == Segment(SITE_SOURCE)
         assert metadata_options() == MetadataOptions()
 
 
-class TestPageNoindex:
-    """A page stays out of the index by its robots or by the `NOINDEX` switch."""
+class TestNoindexed:
+    """A page stays out of the index by its robots or by the site rule."""
 
     @pytest.mark.parametrize(
         ("robots", "expected"),
-        [(None, False), (Robots(index=False), True), ("noindex", True)],
-        ids=["none", "robots_noindex", "text_noindex"],
+        [(None, False), (Robots(index=False), True), ("none", True)],
+        ids=["none", "robots_noindex", "text_none"],
     )
-    def test_the_robots_decide_without_the_switch(
+    def test_the_robots_decide_on_an_open_site(
         self, robots: Robots | str | None, *, expected: bool
     ) -> None:
-        assert page_noindex(Metadata(robots=robots)) is expected
+        assert noindexed(Metadata(robots=robots)) is expected
 
-    @override_settings(NEXT_FRAMEWORK={"METADATA": {"NOINDEX": True}})
-    def test_the_switch_keeps_every_page_out(self) -> None:
-        assert page_noindex(Metadata(robots=Robots(index=True))) is True
-        assert page_noindex(Metadata()) is True
+    @override_settings(NEXT_FRAMEWORK={"SITE": {"INDEXABLE": False}})
+    def test_a_closed_site_keeps_every_page_out(self) -> None:
+        assert noindexed(Metadata(robots=Robots(index=True))) is True
+        assert noindexed(Metadata()) is True
+
+    @override_settings(
+        ALLOWED_HOSTS=["*"], NEXT_FRAMEWORK={"SITE": {"INDEXABLE": _live_only}}
+    )
+    def test_the_request_names_the_host_the_rule_reads(self) -> None:
+        factory = RequestFactory()
+        preview = factory.get("/", HTTP_HOST="preview.acme.example")
+        live = factory.get("/", HTTP_HOST="acme.example")
+        assert noindexed(Metadata(), request=preview) is True
+        assert noindexed(Metadata(), request=live) is False
+        assert noindexed(Metadata()) is False
 
 
 class TestForgetMetadataScope:

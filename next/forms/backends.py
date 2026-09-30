@@ -139,6 +139,7 @@ class ActionMeta(_ActionIdentity, total=False):
     form_class: "type[django_forms.Form] | Callable[..., Any] | None"
     wizard_class: "type[FormWizard] | None"
     guard: ActionGuard | None
+    requires_runtime: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,6 +166,8 @@ class ActionRegistration:
     form_class: "type[django_forms.Form] | Callable[..., Any] | None" = None
     wizard_class: "type[FormWizard] | None" = None
     guard: ActionGuard | None = None
+    requires_runtime: bool = False
+    """Whether every form posting here submits through the client runtime."""
     claims_name_binding: bool = False
     """Whether this registration takes over lookups that carry no page scope.
 
@@ -275,6 +278,30 @@ def _make_uid_for_action(scope_key: str, name: str) -> str:
 _url_caching_backends: "WeakSet[RegistryFormActionBackend]" = WeakSet()
 
 
+def _action_meta(registration: ActionRegistration, uid: str) -> ActionMeta:
+    """Return the registry entry of one registration, its unset keys omitted.
+
+    Every reader goes through `.get()`, and a slim meta keeps teardown proportional.
+    """
+    meta: ActionMeta = {
+        "name": registration.name,
+        "uid": uid,
+        "file_path": registration.file_path,
+        "scope": registration.scope,
+    }
+    if registration.handler is not None:
+        meta["handler"] = registration.handler
+    if registration.form_class is not None:
+        meta["form_class"] = registration.form_class
+    if registration.wizard_class is not None:
+        meta["wizard_class"] = registration.wizard_class
+    if registration.guard is not None:
+        meta["guard"] = registration.guard
+    if registration.requires_runtime:
+        meta["requires_runtime"] = True
+    return meta
+
+
 def _on_setting_changed(*, setting: str, **kwargs) -> None:
     """Drop cached action URLs when the URLconf is swapped under override_settings."""
     if setting == "ROOT_URLCONF":
@@ -371,23 +398,7 @@ class RegistryFormActionBackend(FormActionBackend):
             if old_obj is not None and new_obj is not None:
                 record_possible_collision(f"{scope_key}:{name}", old_obj, new_obj)
 
-        # None-valued target and guard keys are omitted, because every reader
-        # goes through .get() and a slim meta keeps teardown proportional.
-        meta: ActionMeta = {
-            "name": name,
-            "uid": uid,
-            "file_path": file_path,
-            "scope": scope,
-        }
-        if handler is not None:
-            meta["handler"] = handler
-        if form_class is not None:
-            meta["form_class"] = form_class
-        if wizard_class is not None:
-            meta["wizard_class"] = wizard_class
-        if registration.guard is not None:
-            meta["guard"] = registration.guard
-        self._registry[key] = meta
+        self._registry[key] = _action_meta(registration, uid)
         if registration.claims_name_binding:
             bound_key = self._name_index.get(name, key)
             self._name_index[name] = key

@@ -367,10 +367,12 @@ def _on_action_dispatched(action_name: str, **kwargs) -> None:
 [`shortener/routes/robots.py`](shortener/routes/robots.py) is one line beside the root `page.py`:
 
 ```python
-rules = [Rule(user_agent="*", disallow=["/s/"])]
+rules = [RobotsRule(user_agent="*", disallow=["/s/"])]
 ```
 
-The file's presence switches `/robots.txt` on, served as `text/plain; charset=utf-8` with one group per `Rule`. `/s/<slug>/` is the plain Django view of section 11, a redirect that bumps the click counter of section 12 on every hit, so a crawler chasing short links would count as traffic, and there is nothing at those URLs to index anyway. `/admin/` is left open on purpose. Its [`page.py`](shortener/routes/admin/page.py) declares `"robots": {"index": False}`, a crawler has to fetch a page to see that tag, and `manage.py check` reports a `Disallow` that would hide it. There is no `sitemap.py` here, the one public page is `/` and a document listing it would add nothing, so `/sitemap.xml` stays a 404 and the rendered robots carries no `Sitemap:` line. Drop a `sitemap.py` into the root and both appear, the [markdown-blog](../markdown-blog/) and the [wiki](../wiki/) show the two ways to fill one.
+The file's presence switches `/robots.txt` on, served as `text/plain; charset=utf-8` with one group per `RobotsRule`. `/s/<slug>/` is the plain Django view of section 11, a redirect that bumps the click counter of section 12 on every hit, so a crawler chasing short links would count as traffic, and there is nothing at those URLs to index anyway. `/admin/` is left open on purpose. Its [`page.py`](shortener/routes/admin/page.py) declares `"robots": {"index": False}`, a crawler has to fetch a page to see that tag, and `manage.py check` reports a `Disallow` that would hide it. There is no `sitemap.py` here, the one public page is `/` and a document listing it would add nothing, so `/sitemap.xml` stays a 404 and the rendered robots carries no `Sitemap:` line. Drop a `sitemap.py` into the root and both appear, the [markdown-blog](../markdown-blog/) and the [wiki](../wiki/) show the two ways to fill one.
+
+`NEXT_FRAMEWORK["SITE"]` in [`config/settings.py`](config/settings.py) names `https://short.example` as the origin and pins `INDEXABLE` to `True`. The default `"auto"` follows `DEBUG`, so the dev server would put `noindex` on every page and answer `/robots.txt` with a bare allow-all group instead of the rules above, leaving crawlers free to fetch the pages and read that tag. The pinned value shows the file a deploy serves.
 
 ## Gotchas
 
@@ -395,4 +397,4 @@ Two rules:
 - [next/components/context.py](../../next/components/context.py) — `@component.context` mechanics.
 - [next/pages/loaders.py](../../next/pages/loaders.py) — layout composition logic.
 - [next/partial/](../../next/partial/) — zones, patch envelopes, and the fallback contract used in section 6.
-- [next/seo/](../../next/seo/) — the `Rule` marker and the robots view behind section 14.
+- [next/seo/](../../next/seo/) — the `RobotsRule` marker and the robots view behind section 14.

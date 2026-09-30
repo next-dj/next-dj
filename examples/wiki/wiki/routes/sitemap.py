@@ -1,15 +1,15 @@
-from collections.abc import Iterator
-
+from django.db.models import QuerySet
 from wiki.models import Article
 
-from next.seo import Entry, sitemap
+from next.seo import sitemap
 
 
-exclude = ["search", "articles/**"]
+exclude = ["search"]
 
 
-@sitemap.items("wiki/[slug]")
-def articles() -> Iterator[Entry]:
-    """List every article row, stamped with the time it was last saved."""
-    for article in Article.objects.only("slug", "updated_at"):
-        yield Entry(kwargs={"slug": article.slug}, lastmod=article.updated_at)
+@sitemap.items(
+    "wiki/[slug]", kwargs=lambda article: {"slug": article.slug}, lastmod="updated_at"
+)
+def articles() -> QuerySet[Article]:
+    """List every article row, paged by the database instead of loaded at once."""
+    return Article.objects.only("slug", "updated_at").order_by("pk")

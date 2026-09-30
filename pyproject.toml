@@ -90,7 +90,11 @@ path = "build_hooks.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["next"]
-artifacts = ["next/static/next/next.min.js"]
+artifacts = [
+    "next/static/next/next.min.js",
+    "next/static/next/next.scripts.min.js",
+    "next/static/next/next.dev.min.js",
+]
 exclude = [
     "next/client/",
     "next/static/next/next.meta.json",
@@ -107,7 +111,11 @@ include = [
     "package.json",
     "package-lock.json",
 ]
-artifacts = ["next/static/next/next.min.js"]
+artifacts = [
+    "next/static/next/next.min.js",
+    "next/static/next/next.scripts.min.js",
+    "next/static/next/next.dev.min.js",
+]
 exclude = [
     "next/client/*.test.ts",
     "next/static/next/next.meta.json",
@@ -160,6 +168,9 @@ omit = [
     "*/next/partial/checks/*",
     "*/next/apps/checks.py",
     "*/next/seo/checks/*",
+    "*/next/site/checks.py",
+    "*/next/consent/checks.py",
+    "*/next/scripts/checks.py",
 ]
 
 # Collapse source-tree and site-packages paths so coverage reports, omits, and

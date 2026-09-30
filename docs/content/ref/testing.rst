@@ -47,6 +47,7 @@ Isolation
 
 ``reset_registries`` and its narrower variants clear the framework registries between tests.
 ``reset_form_registration_state`` additionally clears the registration diagnostics and the cached wizard backend.
+``reset_scripts`` drops every discovered ``scripts.py`` and ``reset_seo`` the discovered SEO sources and the ``@sitemap.items`` registrations, for a test that rewrites a source, since outside ``DEBUG`` each one is read once.
 
 .. automodule:: next.testing.isolation
    :members:
@@ -95,6 +96,24 @@ The ``override_*`` context managers and ``patch_static_collector`` swap framewor
 
 .. automodule:: next.testing.patching
    :members:
+
+Metadata and SEO
+~~~~~~~~~~~~~~~~
+
+``assert_metadata(response, **expected)`` parses the head of a response or an HTML string and compares the tags it names, ``title``, ``description``, ``keywords``, ``viewport``, ``robots``, ``googlebot``, ``canonical``, ``alternates``, ``jsonld``, ``og``, and ``twitter``.
+``None`` expects a tag to be absent, ``og`` and ``twitter`` take a dict of property suffixes, and ``jsonld`` lists every node, the members of the ``@graph`` flattened in.
+An unknown key raises ``TypeError``, and every mismatch lands in one ``AssertionError``.
+The head is read by ``head_tags(html)`` of ``next.pages.metadata.head``, re-exported from ``next.testing.metadata`` with its ``HeadTags`` result.
+``parse_sitemap`` answers the ``SitemapUrl`` values of a sitemap or an index response, each with ``loc``, ``lastmod``, and ``alternates``, both exported from ``next.testing``.
+A robots file is plain text, so a test reads ``response.content`` directly.
+``reset_seo`` in the isolation helpers drops the discovered SEO sources and the ``@sitemap.items`` registrations.
+
+.. automodule:: next.testing.metadata
+   :members:
+
+.. automodule:: next.testing.seo
+   :members:
+   :exclude-members: SitemapUrl
 
 Dependencies
 ~~~~~~~~~~~~

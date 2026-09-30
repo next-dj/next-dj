@@ -2,7 +2,7 @@
 
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from django.template import Context as DjangoTemplateContext
 
@@ -25,6 +25,9 @@ if TYPE_CHECKING:
     from next.static import StaticCollector
 
     from .registry import ZoneInfo
+
+
+_NESTABLE_BATCH: Final = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,13 +114,16 @@ def _renderable_zone_names(
 ) -> tuple[str, ...]:
     """Return the declared names of a batch, deduplicated in request order.
 
-    An undeclared name is dropped, so one stale name never poisons the batch, while a
-    batch left with nothing declared raises on the first unknown.
+    An undeclared name is dropped and so is one nested in another name of the batch,
+    whose body renders once inside it. A batch with nothing declared raises.
     """
-    rendered = tuple(name for name in dict.fromkeys(zone_names) if name in zones)
-    if zone_names and not rendered:
+    declared = tuple(name for name in dict.fromkeys(zone_names) if name in zones)
+    if zone_names and not declared:
         raise UnknownZoneError(zone_names[0], tuple(sorted(zones)))
-    return rendered
+    if len(declared) < _NESTABLE_BATCH:
+        return declared
+    covered = frozenset[str]().union(*(zones[name].nested for name in declared))
+    return tuple(name for name in declared if name not in covered)
 
 
 def _context_zone_names(

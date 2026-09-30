@@ -118,12 +118,14 @@ A custom kind reuses one of these methods, or a custom backend can add a new met
    from django.utils.html import escape
 
    from next.static import StaticFilesBackend
+   from next.static.runtime import nonce_attr
 
    class BabelBackend(StaticFilesBackend):
-       def render_babel_tag(self, url: str, *, request=None) -> str:
-           return f'<script type="text/babel" src="{escape(url)}"></script>'
+       def render_babel_tag(self, url: str, *, request=None, nonce=None) -> str:
+           return f'<script type="text/babel" src="{escape(url)}"{nonce_attr(nonce)}></script>'
 
 A renderer method builds markup the template engine never sees, so an override escapes the URL itself rather than relying on the engine to do it.
+The injector calls every renderer with ``request`` and ``nonce`` keywords, and ``nonce_attr(nonce)`` writes the CSP nonce of the request, or nothing without one.
 
 .. code-block:: python
    :caption: notes/apps.py

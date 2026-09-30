@@ -1,6 +1,6 @@
 """System checks for the forms subsystem.
 
-Importing the package registers every check, and each submodule names the ids it owns.
+Importing the package registers every check.
 """
 
 from .actions import (
@@ -19,6 +19,7 @@ from .config import (
     check_form_anchor_files,
     check_form_wizard_backend,
 )
+from .csrf import check_shared_page_forms
 from .widgets import (
     check_component_widget_components,
     check_component_widget_field_types,
@@ -49,6 +50,7 @@ __all__ = [
     "check_instance_from_url_unknown_field",
     "check_invalid_form_meta_scope",
     "check_shared_action_name_collisions",
+    "check_shared_page_forms",
     "check_success_message_framework",
     "check_wizard_step_actions",
     "check_wizard_step_field_collisions",

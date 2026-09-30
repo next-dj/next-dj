@@ -24,7 +24,7 @@ from next.static.finders import (
     _ScanRoots,
     discover_colocated_static_assets,
 )
-from next.static.scripts import NEXT_JS_STATIC_PATH
+from next.static.runtime import NEXT_JS_STATIC_PATH
 from tests.support import (
     TEMPLATE_AND_COMPONENT_SOURCES,
     MalformedRootsRouter,
@@ -584,6 +584,20 @@ class TestRuntimeBundleMapping:
             "next/next.min.js": root / "next" / "next.min.js",
             "next/next.min.js.map": root / "next" / "next.min.js.map",
         }
+
+    def test_every_built_chunk_maps_with_its_sourcemap(self, tmp_path: Path) -> None:
+        names = ("next.scripts.min.js", "next.dev.min.js")
+        root = _bundle_root(tmp_path, *names, *(f"{name}.map" for name in names))
+
+        with mock.patch("next.static.finders._RUNTIME_BUNDLE_ROOT", root):
+            mapping = _runtime_bundle_static_files()
+
+        assert sorted(mapping) == [
+            "next/next.dev.min.js",
+            "next/next.dev.min.js.map",
+            "next/next.scripts.min.js",
+            "next/next.scripts.min.js.map",
+        ]
 
     def test_a_missing_sourcemap_is_left_out_of_the_mapping(
         self, tmp_path: Path

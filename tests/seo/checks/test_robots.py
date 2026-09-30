@@ -6,58 +6,74 @@ from django.urls import NoReverseMatch
 
 from next.seo.checks import (
     check_robots_disallow,
-    check_robots_file,
-    check_robots_single_source,
+    check_seo_single_sources,
+    check_seo_text_files,
 )
 from next.seo.checks.robots import route_paths
 from next.seo.checks.roots import loaded_seo_roots
-from tests.seo.trees import (
+from tests.support import (
     NAMESPACED_URLCONF,
     NOINDEX,
     POSTS_ITEMS,
     PREFIXED_URLCONF,
+    check_ids,
     routed,
+    write_page,
     write_tree,
 )
-from tests.support import check_ids, write_page
 
 
 def _disallow(*prefixes: str) -> str:
     listed = ", ".join(repr(prefix) for prefix in prefixes)
-    return f"from next.seo import Rule\n\nrules = [Rule(disallow=[{listed}])]\n"
+    return f"from next.seo import RobotsRule\n\nrules = [RobotsRule(disallow=[{listed}])]\n"
 
 
-class TestRobotsSingleSource:
+_BOTS_DISALLOW_ALL = (
+    "from next.seo import RobotsRule\n\n"
+    "rules = [\n"
+    '    RobotsRule(user_agent=("GPTBot", "CCBot"), disallow="/"),\n'
+    '    RobotsRule(disallow="/private/"),\n'
+    "]\n"
+)
+_EVERY_CRAWLER_AMONG_BOTS = (
+    "from next.seo import RobotsRule\n\n"
+    'rules = [RobotsRule(user_agent=("Bingbot", "*"), disallow="/hidden/")]\n'
+)
+
+
+class TestSingleSources:
     """`/robots.txt` takes one source across every tree (`next.E114`)."""
 
     def test_both_forms_in_one_tree_are_an_error(self, tmp_path) -> None:
         root = write_tree(tmp_path / "pages", robots="", robots_txt=b"User-agent: *\n")
         with routed(root):
-            messages = check_robots_single_source()
+            messages = check_seo_single_sources()
         assert check_ids(messages) == ["next.E114"]
         assert f"{root / 'robots.py'}, {root / 'robots.txt'}" in messages[0].msg
+
         assert messages[0].obj == str(root / "robots.py")
 
     def test_a_source_in_two_trees_is_an_error(self, tmp_path) -> None:
         first = write_tree(tmp_path / "a", robots_txt=b"User-agent: *\n")
         second = write_tree(tmp_path / "b", robots="")
         with routed(first, second):
-            messages = check_robots_single_source()
+            messages = check_seo_single_sources()
         assert check_ids(messages) == ["next.E114"]
-        assert f"only {first / 'robots.txt'} answers" in messages[0].msg
+        assert "/robots.txt has 2 sources" in messages[0].msg
+        assert messages[0].obj == str(first / "robots.txt")
 
     def test_one_source_passes(self, tmp_path) -> None:
         with routed(write_tree(tmp_path / "pages", robots="")):
-            assert check_robots_single_source() == []
+            assert check_seo_single_sources() == []
 
 
-class TestRobotsFile:
-    """A static `robots.txt` decodes as UTF-8 and names a served sitemap."""
+class TestTextFiles:
+    """A static `robots.txt` decodes as UTF-8 and names a sitemap."""
 
     def test_a_file_that_is_not_utf8_is_an_error(self, tmp_path) -> None:
         root = write_tree(tmp_path / "pages", robots_txt=b"User-agent: \xff\xfe\n")
         with routed(root):
-            messages = check_robots_file()
+            messages = check_seo_text_files()
         assert check_ids(messages) == ["next.E117"]
         assert "does not decode as UTF-8" in messages[0].msg
         assert messages[0].obj == str(root / "robots.txt")
@@ -67,7 +83,7 @@ class TestRobotsFile:
     ) -> None:
         root = write_tree(tmp_path / "pages", sitemap="", robots_txt=b"User-agent: *\n")
         with routed(root):
-            messages = check_robots_file()
+            messages = check_seo_text_files()
         assert check_ids(messages) == ["next.W103"]
         assert "names no Sitemap: line" in messages[0].msg
         assert messages[0].obj == str(root / "robots.txt")
@@ -85,7 +101,7 @@ class TestRobotsFile:
     ) -> None:
         root = write_tree(tmp_path / "pages", sitemap=sitemap, robots_txt=content)
         with routed(root):
-            assert check_robots_file() == []
+            assert check_seo_text_files() == []
 
 
 class TestRobotsDisallow:
@@ -176,6 +192,25 @@ class TestRobotsDisallow:
         assert check_ids(messages) == ["next.W101"]
         assert "covers the noindex pages /hidden/" in messages[0].msg
         assert messages[0].obj == str(root / "robots.py")
+
+    def test_a_group_naming_other_bots_alone_passes(self, tmp_path) -> None:
+        root = write_tree(
+            tmp_path / "pages",
+            pages=("", "about"),
+            sitemap="",
+            robots=_BOTS_DISALLOW_ALL,
+        )
+        write_page(root, "hidden", NOINDEX)
+        with routed(root):
+            assert check_robots_disallow() == []
+
+    def test_a_group_naming_every_crawler_among_bots_warns(self, tmp_path) -> None:
+        root = write_tree(tmp_path / "pages", robots=_EVERY_CRAWLER_AMONG_BOTS)
+        write_page(root, "hidden", NOINDEX)
+        with routed(root):
+            messages = check_robots_disallow()
+        assert check_ids(messages) == ["next.W101"]
+        assert "covers the noindex pages /hidden/" in messages[0].msg
 
     def test_a_disallow_over_an_excluded_or_indexed_page_passes(self, tmp_path) -> None:
         root = write_tree(

@@ -48,25 +48,16 @@ class PageMetadataShapeError(TypeError):
 
 
 class PageMetadataConflictError(ValueError):
-    """A `page.py` declared metadata both as a dict and as a callable."""
+    """A `page.py` declared its metadata twice, in both forms or in two callables."""
 
-    def __init__(self, file_path: Path) -> None:
-        """Compose the message from the page that carries both forms."""
-        super().__init__(
-            f"{file_path} declares both a metadata dict and an @page.metadata callable"
-        )
+    def __init__(
+        self,
+        file_path: Path,
+        detail: str = "both a metadata dict and an @page.metadata callable",
+    ) -> None:
+        """Compose the message from the page and the two declarations it carries."""
+        super().__init__(f"{file_path} declares {detail}")
         self.file_path = file_path
-
-
-class PageMetadataURLError(ValueError):
-    """A relative metadata URL had neither a request nor a base to resolve against."""
-
-    def __init__(self, url: str) -> None:
-        """Compose the message from the URL that stayed relative."""
-        super().__init__(
-            f"cannot make {url!r} absolute without a request or a metadata base"
-        )
-        self.url = url
 
 
 class PageMetadataRequestError(ValueError):
@@ -94,6 +85,5 @@ __all__ = [
     "PageMetadataRequestError",
     "PageMetadataShapeError",
     "PageMetadataTemplateError",
-    "PageMetadataURLError",
     "PageModuleImportError",
 ]

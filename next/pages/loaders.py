@@ -7,11 +7,10 @@ from __future__ import annotations
 
 import contextlib
 import functools
-import importlib.util
 import logging
 import threading
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, ClassVar, override
 
 from django.core.signals import setting_changed
@@ -24,10 +23,13 @@ from next.pages.errors import PageModuleImportError
 from next.utils import (
     MAX_ANCESTOR_WALK_DEPTH,
     classify_dirs_entries,
+    exec_module_file,
     resolve_base_dir,
     stat_mtime_ns,
+    template_edits_watched,
 )
 
+from .paths import page_path_info
 from .placeholder import PLACEHOLDER_CLOSE, PLACEHOLDER_OPEN, placeholder_spans
 from .watch import get_pages_directories_for_watch
 
@@ -61,23 +63,104 @@ _MODULE_MEMO: BoundedCache[Path, _PageLoad] = BoundedCache()
 _FAILED_PATHS: set[Path] = set()
 _MEMO_WRITE_LOCK = threading.Lock()
 
+# The mtime of the live load per path, success or failure. An eviction from the memo
+# leaves it, since re-executing the same file at the same mtime changes nothing.
+_stamps: dict[Path, int] = {}
+
 
 @dataclass(slots=True)
-class _Generation:
-    """A counter every module memo write and every page tree reload moves."""
+class _Version:
+    """A monotonic counter of the module memo."""
 
     value: int = 0
 
 
-_GENERATION = _Generation()
+_version = _Version()
+"""Moved only by a whole-memo reset and a page tree reload."""
+
+_generation = _Version()
+"""Moved by every load, forget and reset, once the stamps it covers are written."""
+
+
+def module_version() -> int:
+    """Return the version of the module memo, moved by a reset and a tree reload."""
+    return _version.value
 
 
 def module_generation() -> int:
-    """Return the generation of the module memo, moved by every write and tree reload.
+    """Return a counter every load, forget and reset moves.
 
-    A chain memo keys off it, so it never has to stat an ancestor to learn of a reload.
+    A memo holding stamps compares it first and reads the stamps only once it moved.
     """
-    return _GENERATION.value
+    return _generation.value
+
+
+def module_stamps(paths: tuple[Path, ...]) -> tuple[int | None, ...]:
+    """Return the mtime each path was last loaded at, `None` for one never loaded.
+
+    A chain memo compares them, so a load elsewhere in the tree leaves it valid.
+    """
+    return tuple(map(_stamps.get, paths))
+
+
+def _load_stamps(loads: Iterable[_PageLoad | None]) -> tuple[int | None, ...]:
+    """Return the mtime each load ran against, `None` for a file that did not stat."""
+    return tuple(None if load is None else load.mtime_ns for load in loads)
+
+
+@dataclass(frozen=True, slots=True)
+class AncestorStamps:
+    """The `page.py` files above one page, root first, and the loads a memo read.
+
+    A memo over them rebuilds once one loaded again, and a load elsewhere costs nothing.
+    """
+
+    paths: tuple[Path, ...]
+    version: int
+    watched: bool
+    generation: int = -1
+    stamps: tuple[int | None, ...] = ()
+
+    @classmethod
+    def begin(cls, file_path: Path) -> AncestorStamps:
+        """Walk the ancestors of `file_path` inside its page tree, before any load."""
+        depth = page_tree_depth(file_path.parent)
+        return cls(
+            paths=tuple(reversed(page_path_info(file_path).ancestors[:depth])),
+            version=_version.value,
+            watched=template_edits_watched(),
+        )
+
+    def loaded(self) -> tuple[AncestorStamps, tuple[types.ModuleType | None, ...]]:
+        """Load each ancestor once, returning the stamps of those loads and the modules.
+
+        A build folds only these modules, so a load landing after them fails the stamps.
+        """
+        loads = tuple(map(_page_load, self.paths))
+        stamps = _load_stamps(loads)
+        generation = _generation.value
+        if module_stamps(self.paths) != stamps:
+            generation = -1
+        modules = tuple(None if load is None else load.module for load in loads)
+        return replace(self, generation=generation, stamps=stamps), modules
+
+    def revalidated(self) -> AncestorStamps | None:
+        """Return the stamps while no ancestor loaded again, `None` once one did.
+
+        Under a watch each ancestor loads again, so an edit on disk shows at once.
+        """
+        watched = template_edits_watched()
+        if self.version != _version.value or self.watched is not watched:
+            return None
+        if watched:
+            loads = tuple(map(_page_load, self.paths))
+            return self if _load_stamps(loads) == self.stamps else None
+        generation = _generation.value
+        if self.generation == generation:
+            return self
+        if module_stamps(self.paths) != self.stamps:
+            return None
+        return replace(self, generation=generation)
 
 
 def has_load_errors() -> bool:
@@ -112,31 +195,27 @@ def load_page_module(
 
 
 def _load_python_module(file_path: Path) -> types.ModuleType | None:
-    """Execute `file_path` as a fresh module, raising whatever its body raises.
-
-    `None` means importlib knows no loader for the suffix of `file_path`.
-    """
-    spec = importlib.util.spec_from_file_location("page_module", file_path)
-    if spec is None or spec.loader is None:
-        return None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    """Execute `file_path` as a fresh page module, raising whatever its body raises."""
+    return exec_module_file(file_path, "page_module")
 
 
 def _remember(file_path: Path, load: _PageLoad) -> None:
-    """Store `load` and keep the failure index in step with it.
+    """Store `load` unless the file moved on since its stat, the failure index in step.
 
-    Ordered so a lock-free read never finds a memoised failure missing from the index.
+    A slower load of an older mtime would otherwise land over the load that replaced it.
     """
     with _MEMO_WRITE_LOCK:
+        if stat_mtime_ns(file_path) != load.mtime_ns:
+            return
+        # Ordered so a lock-free read never finds a failure missing from the index.
         if load.error is None:
             _MODULE_MEMO[file_path] = load
             _FAILED_PATHS.discard(file_path)
         else:
             _FAILED_PATHS.add(file_path)
             _MODULE_MEMO[file_path] = load
-        _GENERATION.value += 1
+        _stamps[file_path] = load.mtime_ns
+        _generation.value += 1
 
 
 def _forget(file_path: Path) -> None:
@@ -144,7 +223,8 @@ def _forget(file_path: Path) -> None:
     with _MEMO_WRITE_LOCK:
         _MODULE_MEMO.pop(file_path)
         _FAILED_PATHS.discard(file_path)
-        _GENERATION.value += 1
+        _stamps.pop(file_path, None)
+        _generation.value += 1
 
 
 def _page_load(file_path: Path) -> _PageLoad | None:
@@ -154,7 +234,12 @@ def _page_load(file_path: Path) -> _PageLoad | None:
     """
     mtime_ns = stat_mtime_ns(file_path)
     if mtime_ns is None:
-        if file_path in _MODULE_MEMO or file_path in _FAILED_PATHS:
+        # The stamp outlives an eviction, so it too says the path was loaded.
+        if (
+            file_path in _stamps
+            or file_path in _MODULE_MEMO
+            or file_path in _FAILED_PATHS
+        ):
             _forget(file_path)
         return None
 
@@ -193,7 +278,9 @@ def reset_module_memo() -> None:
     with _MEMO_WRITE_LOCK:
         _MODULE_MEMO.clear()
         _FAILED_PATHS.clear()
-        _GENERATION.value += 1
+        _stamps.clear()
+        _version.value += 1
+        _generation.value += 1
 
 
 def _pages_dirs_for_config(config: dict) -> list[Path]:
@@ -242,7 +329,7 @@ def forget_page_roots(**kwargs) -> None:
     """Drop the memoised page trees so the next walk asks the routers again."""
     _page_roots.cache_clear()
     with _MEMO_WRITE_LOCK:
-        _GENERATION.value += 1
+        _version.value += 1
 
 
 def _on_setting_changed(*, setting: str, **kwargs) -> None:

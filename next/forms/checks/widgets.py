@@ -1,7 +1,4 @@
-"""System checks for the `ComponentWidget` a form field carries.
-
-The ids are `next.W054` for an unknown component and `next.W055` for a field pairing.
-"""
+"""System checks for the `ComponentWidget` a form field carries."""
 
 from pathlib import Path
 

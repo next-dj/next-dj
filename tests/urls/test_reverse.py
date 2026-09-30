@@ -4,9 +4,9 @@ from django.urls import NoReverseMatch
 
 from next.testing import override_next_settings
 from next.urls import page_reverse, page_reverse_lazy, with_query
+from tests.support import NAMESPACED_URLCONF
 
 
-NAMESPACED_URLCONF = "tests.urls.urls_namespaced"
 CUSTOM_NAMESPACE_URLCONF = "tests.urls.urls_custom_namespace"
 
 

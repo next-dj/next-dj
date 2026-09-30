@@ -1,9 +1,4 @@
-"""System checks for the `PARTIAL_BACKENDS` entries and what they ask of staticfiles.
-
-The ids are `next.E067` for a non-list setting, `next.E073` for an entry with no
-`BACKEND`, `next.W071` for a second entry, `next.W069` for a missing manifest, and
-`next.W083` for an asset version that no deploy can move.
-"""
+"""System checks for the `PARTIAL_BACKENDS` entries and what they ask of staticfiles."""
 
 from typing import Final
 

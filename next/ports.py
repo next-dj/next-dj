@@ -8,11 +8,11 @@ from django.core.exceptions import ImproperlyConfigured
 
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
 
     from django.forms import BaseForm, BaseFormSet
     from django.http import HttpRequest, HttpResponse
-    from django.template.base import NodeList
     from django.urls import URLPattern
 
     from next.components.info import ComponentInfo
@@ -177,17 +177,6 @@ class StaticAssets(Protocol):
         ...
 
 
-class ComponentTags(Protocol):
-    """What the component tag library answers about a compiled template.
-
-    The library imports `next.pages`, so a pages check asks it through this.
-    """
-
-    def component_names(self, nodelist: NodeList) -> list[str]:
-        """Return the name of every `{% component %}` tag the nodes hold."""
-        ...
-
-
 class SeoRoutes(Protocol):
     """The routes the seo area adds to the lazy urlpatterns.
 
@@ -195,28 +184,46 @@ class SeoRoutes(Protocol):
     """
 
     def patterns(self) -> list[URLPattern]:
-        """Return the sitemap and robots routes, spliced after every page route."""
+        """Return the SEO routes a source backs, spliced after every page route."""
         ...
 
 
-component_tags_slot = PortSlot["ComponentTags"]("component tags port")
+class PageScripts(Protocol):
+    """The third-party scripts one page render adds to its head and init payload.
+
+    `next.scripts` reads the static manager, so the injector reaches it through this.
+    """
+
+    def render(
+        self,
+        collector: StaticCollector,
+        *,
+        page_path: Path | None,
+        request: HttpRequest | None,
+        nonce: str | None,
+    ) -> tuple[str, Mapping[str, object]]:
+        """Return the head tags and the reserved payload entries of one render."""
+        ...
+
+
 page_scan_slot = PortSlot["PageScan"]("page scan port")
 partial_shaper_slot = PortSlot["PartialShaper"]("partial shaper")
 router_access_slot = PortSlot["RouterAccess"]("router access port")
+page_scripts_slot = PortSlot["PageScripts"]("page scripts port")
 seo_routes_slot = PortSlot["SeoRoutes"]("seo routes port")
 static_assets_slot = PortSlot["StaticAssets"]("static assets port")
 
 
 __all__ = [
-    "ComponentTags",
     "PageScan",
+    "PageScripts",
     "PartialShaper",
     "PortSlot",
     "RouterAccess",
     "SeoRoutes",
     "StaticAssets",
-    "component_tags_slot",
     "page_scan_slot",
+    "page_scripts_slot",
     "partial_shaper_slot",
     "router_access_slot",
     "seo_routes_slot",

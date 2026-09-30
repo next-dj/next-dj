@@ -33,13 +33,14 @@ They read ``router_access_slot`` instead, at watch time and at check time.
 ``collect_component_assets`` folds the co-located assets of one composite component into a caller-supplied collector, which is how a component render reaches the static pipeline from the same side.
 Every method resolves the manager when it is called rather than when the slot is bound, so a settings reload that drops the wrapped manager still reaches every later render.
 
-``SeoRoutes`` answers the sitemap and robots routes the lazy urlpatterns of ``next.urls`` append as their third pattern source.
+``SeoRoutes`` answers the SEO routes the lazy urlpatterns of ``next.urls`` append as their third pattern source.
 ``next.seo`` imports ``next.urls`` for the router manager and the reverse helper, so the pattern concat reads ``seo_routes_slot`` rather than importing the seo area back.
-``patterns`` answers the two sitemap routes while a page tree declares a ``sitemap.py`` and the robots route while a robots source exists.
-The sources change only through a router reload, which moves the router version, so the concat stays cached against the router and form-action versions alone.
+``patterns`` answers the routes whose source exists.
+The port carries no version.
+The concat's cache token reads ``seo_routes_version`` in ``next.urls.manager``, the counter of the spliced SEO routes that ``NextFrameworkConfig.ready()`` moves right after it binds the slot and the seo manager moves on every reset of its sources, so a resolve reads the token without a call across the port.
 
-``ComponentTags`` answers the name of every ``{% component %}`` tag a compiled node list holds.
-The component tag library imports ``next.pages``, so the pages checks read ``component_tags_slot`` rather than importing the node class back.
+``PageScripts`` answers the head tags and the reserved payload entries, ``$scripts`` and ``$consent``, the third-party scripts add to one render.
+``next.scripts`` reads the static manager to resolve a script's ``src``, so the injector of ``next.static`` reads ``page_scripts_slot`` through ``peek`` rather than importing it back.
 
 ``PortSlot.peek`` answers the bound implementation, or ``None`` before the app is ready.
 The lazy urlpatterns read the seo slot through it, so a concat built before ``NextFrameworkConfig.ready()`` leaves the seo routes out and caches nothing, and a URL resolved or reversed from an earlier ``ready()`` still works.
@@ -57,9 +58,6 @@ Every implementation lives in the ``ports`` module of its area.
    * - Port
      - Implementation
      - Slot
-   * - ``ComponentTags``
-     - ``next.components.ports.ComponentTagsImpl``
-     - ``component_tags_slot``
    * - ``PageScan``
      - ``next.pages.ports.PageScanImpl``
      - ``page_scan_slot``
@@ -75,6 +73,9 @@ Every implementation lives in the ``ports`` module of its area.
    * - ``StaticAssets``
      - ``next.static.ports.StaticAssetsImpl``
      - ``static_assets_slot``
+   * - ``PageScripts``
+     - ``next.scripts.ports.PageScriptsImpl``
+     - ``page_scripts_slot``
 
 ``next.apps`` binds all six in ``NextFrameworkConfig.ready()``, ahead of every step that imports user code.
 A project that replaces one subclasses the shipped implementation and calls ``set`` on the slot from the ``ready()`` of an application listed after ``next`` in ``INSTALLED_APPS``, since the slot holds one implementation and the last binding wins.

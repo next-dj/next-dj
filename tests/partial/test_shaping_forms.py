@@ -1,3 +1,5 @@
+import pytest
+
 from next.partial.headers import CONTENT_TYPE
 from next.testing import NextClient, envelope_of
 from tests.support import action_uid
@@ -148,6 +150,29 @@ class TestResultAuthoredPatchPassesThrough:
         )
         assert envelope_of(response).op_verbs() == ["toast"]
         assert envelope_of(response).toasts()[0]["text"] == "authored"
+
+
+class TestResultMetaSyncsTheOriginHead:
+    """A handler's `meta` resolves against the page the form was posted from."""
+
+    @pytest.mark.parametrize("name", ["Wallets", "Set {title} {0}"])
+    def test_the_title_is_templated_by_the_origin_chain(
+        self, next_client: NextClient, name: str
+    ) -> None:
+        response = next_client.post_action(
+            "meta_sync_form", {"name": name}, origin="/titled/leaf/", partial=True
+        )
+        assert response.status_code == 200
+        assert response["Content-Type"] == CONTENT_TYPE
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["meta"]
+        assert envelope.ops[0] == {
+            "op": "meta",
+            "title": f"{name} · Site",
+            "description": "Synced",
+            "canonical": None,
+            "robots": None,
+        }
 
 
 class TestResultRichResponseFallsThrough:

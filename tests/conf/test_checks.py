@@ -26,8 +26,12 @@ VALID_TYPED_VALUES: dict[str, object] = {
     "URL_RESOLVER": "next.urls.TrieURLResolver",
     "DEPENDENCY_RESOLVER": "next.deps.DependencyResolver",
     "COMPONENT_TEMPLATE_LOADER": "next.components.CachedComponentTemplateLoader",
+    "CSRF_DELIVERY": "auto",
     "NEXT_JS_OPTIONS": {},
     "METADATA": {},
+    "SITE": {},
+    "SEO": {},
+    "CONSENT": {},
     "STATIC_VERSION": "2026.9.19",
 }
 
@@ -49,8 +53,10 @@ class TestValueTypeErrors:
             ("URL_RESOLVER", []),
             ("DEPENDENCY_RESOLVER", []),
             ("COMPONENT_TEMPLATE_LOADER", []),
+            ("CSRF_DELIVERY", False),
             ("NEXT_JS_OPTIONS", []),
             ("METADATA", []),
+            ("SEO", []),
             ("STATIC_VERSION", 42),
         ],
         ids=[
@@ -62,8 +68,10 @@ class TestValueTypeErrors:
             "str_key_given_list_resolver",
             "str_key_given_list_deps_resolver",
             "str_key_given_list_template_loader",
+            "str_key_given_bool_csrf_delivery",
             "dict_key_given_list",
             "dict_key_given_list_metadata",
+            "dict_key_given_list_seo",
             "optional_str_key_given_int",
         ],
     )

@@ -35,7 +35,7 @@ from next.static.signals import (
     html_injected,
     static_backend_loaded,
 )
-from next.testing import SignalRecorder, envelope_of, init_payload
+from next.testing import SignalRecorder, assert_metadata, envelope_of, init_payload
 from next.urls.signals import route_registered, router_backend_loaded, router_reloaded
 
 
@@ -184,11 +184,15 @@ class TestLiveStatsSerializerOverride:
         body = response.content.decode()
         assert '"totals_chart":{"v":1,"data":{' in body
 
+    @pytest.mark.parametrize(
+        "path",
+        ["/stats/", "/stats/pages/", "/stats/static/"],
+        ids=["declaring-page", "pages-tab", "static-tab"],
+    )
     def test_window_querystring_propagates_to_inherit_context(
-        self, next_client
+        self, next_client, path: str
     ) -> None:
-        response = next_client.get("/stats/?window=1h")
-        body = response.content.decode()
+        body = next_client.get(f"{path}?window=1h").content.decode()
         assert "Window: 1h" in body
 
 
@@ -574,6 +578,4 @@ class TestPageMetadata:
     def test_each_page_carries_its_title_and_noindex(
         self, next_client, url: str, title: str
     ) -> None:
-        body = next_client.get(url).content.decode()
-        assert f"<title>{title}</title>" in body
-        assert '<meta name="robots" content="noindex">' in body
+        assert_metadata(next_client.get(url), title=title, robots="noindex")

@@ -1,14 +1,24 @@
+import json
 import re
 from decimal import Decimal
 
 import pytest
 from catalog import queries as catalog_queries
 from catalog.demo import CATEGORIES
-from catalog.models import Category, Product
+from catalog.landing import FAQ, LEAD_ZONE
+from catalog.models import Category, Lead, Product
 from catalog.zones import CATEGORY_ZONES, LISTING_ZONES, zone_target
 from django.core.cache import cache
 
-from next.testing import envelope_of
+from next.testing import (
+    NextClient,
+    assert_metadata,
+    envelope_of,
+    find_anchor,
+    find_form,
+    init_payload,
+    parse_sitemap,
+)
 
 
 pytestmark = pytest.mark.django_db
@@ -16,12 +26,12 @@ pytestmark = pytest.mark.django_db
 
 PRODUCT_CARD_PATTERN = re.compile(r"data-product-card[\s\S]*?</article>")
 PRODUCT_SLUG_PATTERN = re.compile(r'data-product-slug="([^"]+)"')
+JSONLD_PATTERN = re.compile(r'<script type="application/ld\+json">(.*?)</script>')
 KEY_PATTERN = re.compile(r'data-next-key="([^"]+)"')
 FILTER_FORM_PATTERN = re.compile(r"<form method=\"get\"[\s\S]*?>")
 MORE_ZONE_PATTERN = re.compile(
     r'<div data-next-zone="catalog-more"[^>]*>([\s\S]*?)</div>'
 )
-LOC_PATTERN = re.compile(r"<loc>([^<]+)</loc>")
 
 LISTING_TARGET = zone_target(LISTING_ZONES)
 CATEGORY_TARGET = zone_target(CATEGORY_ZONES)
@@ -598,43 +608,46 @@ class TestPageMetadata:
     """One title template spans the landing, the listings and the product page."""
 
     def test_landing_uses_the_site_default(self, next_client, demo_data) -> None:
-        body = next_client.get("/").content.decode()
-        assert "<title>next.dj — Search catalog</title>" in body
-        assert '<link rel="canonical"' not in body
+        assert_metadata(
+            next_client.get("/"),
+            title="next.dj — Search catalog",
+            description="Faceted search over a demo storefront, built on next.dj.",
+            canonical=None,
+            robots=None,
+        )
 
     def test_listing_declares_a_static_title_and_a_self_canonical(
         self, next_client, demo_data
     ) -> None:
-        body = next_client.get("/catalog/?q=item&sort=price_asc").content.decode()
-        assert "<title>All products · next.dj catalog</title>" in body
-        assert '<link rel="canonical" href="https://catalog.example/catalog/">' in body
+        assert_metadata(
+            next_client.get("/catalog/?q=item&sort=price_asc"),
+            title="All products · next.dj catalog",
+            canonical="https://catalog.example/catalog/",
+        )
 
     def test_category_title_comes_from_the_inherited_category(
         self, next_client, demo_data
     ) -> None:
-        body = next_client.get("/catalog/electronics/?brand=Acme&page=2")
-        body = body.content.decode()
-        assert "<title>Electronics · next.dj catalog</title>" in body
-        assert (
-            '<link rel="canonical" '
-            'href="https://catalog.example/catalog/electronics/?page=2">'
-        ) in body
+        assert_metadata(
+            next_client.get("/catalog/electronics/?brand=Acme&page=2"),
+            title="Electronics · next.dj catalog",
+            canonical="https://catalog.example/catalog/electronics/?page=2",
+        )
 
     def test_the_canonical_drops_the_first_page(self, next_client, demo_data) -> None:
-        body = next_client.get("/catalog/electronics/?page=1").content.decode()
-        assert (
-            '<link rel="canonical" href="https://catalog.example/catalog/electronics/">'
-        ) in body
+        assert_metadata(
+            next_client.get("/catalog/electronics/?page=1"),
+            canonical="https://catalog.example/catalog/electronics/",
+        )
 
     def test_product_title_and_description_come_from_the_product(
         self, next_client, demo_data
     ) -> None:
-        body = next_client.get("/catalog/electronics/iphone-15/").content.decode()
-        assert "<title>iPhone 15 · next.dj catalog</title>" in body
-        assert (
-            '<meta name="description" content="Flagship handset used by routing '
-            'tests.">'
-        ) in body
+        assert_metadata(
+            next_client.get("/catalog/electronics/iphone-15/"),
+            title="iPhone 15 · next.dj catalog",
+            description="Flagship handset used by routing tests.",
+        )
 
     def test_a_preset_renames_the_tab_through_the_page_template(
         self, next_client, demo_data
@@ -652,28 +665,32 @@ class TestPageMetadata:
         assert meta_op["title"] == "Cheapest first · next.dj catalog"
 
 
+def _locs(response) -> set[str]:
+    return {url.loc for url in parse_sitemap(response)}
+
+
 class TestSitemap:
     """`sitemap.py` lists the listings over the rows and caches the document."""
 
-    def test_sitemap_lists_static_routes_categories_and_products(
+    def test_sitemap_lists_static_routes_landings_categories_and_products(
         self, next_client, demo_data
     ) -> None:
         response = next_client.get("/sitemap.xml")
         assert response.status_code == 200
         assert response["Content-Type"] == "application/xml"
-        locs = set(LOC_PATTERN.findall(response.content.decode()))
+        locs = _locs(response)
         assert {"https://catalog.example/", "https://catalog.example/catalog/"} <= locs
-        assert {
-            f"https://catalog.example/catalog/{slug}/" for slug, _ in CATEGORIES
-        } <= locs
+        slugs = [slug for slug, _name, _tagline in CATEGORIES]
+        assert {f"https://catalog.example/catalog/{slug}/" for slug in slugs} <= locs
+        assert {f"https://catalog.example/shop/{slug}/" for slug in slugs} <= locs
         assert "https://catalog.example/catalog/electronics/iphone-15/" in locs
-        assert len(locs) == 2 + Category.objects.count() + Product.objects.count()
+        assert len(locs) == 2 + 2 * Category.objects.count() + Product.objects.count()
 
     def test_the_document_is_cached_for_five_minutes(
         self, next_client, demo_data
     ) -> None:
         first = next_client.get("/sitemap.xml")
-        assert first["Cache-Control"] == "max-age=300"
+        assert first["Cache-Control"] == "public, max-age=300"
         Product.objects.create(
             category=Category.objects.get(slug="books"),
             slug="late-arrival",
@@ -686,8 +703,229 @@ class TestSitemap:
         assert "late-arrival" not in second.content.decode()
 
     def test_an_empty_catalog_still_lists_the_static_routes(self, next_client) -> None:
-        locs = LOC_PATTERN.findall(next_client.get("/sitemap.xml").content.decode())
-        assert sorted(locs) == [
+        assert _locs(next_client.get("/sitemap.xml")) == {
             "https://catalog.example/",
             "https://catalog.example/catalog/",
+        }
+
+
+GRANT_ALL = "1:analytics,marketing:1700000000"
+FAQ_NODE = {
+    "@type": "FAQPage",
+    "mainEntity": [
+        {
+            "@type": "Question",
+            "name": name,
+            "acceptedAnswer": {"@type": "Answer", "text": answer},
+        }
+        for name, answer in FAQ
+    ],
+}
+
+
+def _script_names(body: str) -> list[str]:
+    return [entry["name"] for entry in init_payload(body).get("$scripts", [])]
+
+
+def _product_node(body: str) -> dict[str, object]:
+    graph = json.loads(JSONLD_PATTERN.search(body).group(1))["@graph"]
+    return next(node for node in graph if node["@type"] == "Product")
+
+
+def _head(body: str) -> str:
+    return body[: body.index("</head>")]
+
+
+@pytest.fixture()
+def lamps() -> Category:
+    """Seed a category with two lamps on sale and one sold out."""
+    category = Category.objects.create(
+        slug="lamps", name="Lamps", tagline="Warm light for every corner of the house."
+    )
+    for slug, name, price, in_stock in (
+        ("desk", "Desk lamp", "40.00", True),
+        ("floor", "Floor lamp", "90.00", True),
+        ("wall", "Wall lamp", "10.00", False),
+    ):
+        Product.objects.create(
+            category=category,
+            slug=slug,
+            name=name,
+            brand="Lumen",
+            price=Decimal(price),
+            in_stock=in_stock,
+        )
+    return category
+
+
+class TestProductStructuredData:
+    """The product page publishes the product and its offer as a plain dict."""
+
+    def test_an_offer_carries_price_currency_and_stock(
+        self, next_client, lamps
+    ) -> None:
+        body = next_client.get("/catalog/lamps/desk/").content.decode()
+        assert _product_node(body) == {
+            "@type": "Product",
+            "@id": "https://catalog.example/catalog/lamps/desk/#product",
+            "name": "Desk lamp",
+            "sku": "lamps-desk",
+            "brand": {"@type": "Brand", "name": "Lumen"},
+            "offers": {
+                "@type": "Offer",
+                "price": "40.00",
+                "priceCurrency": "USD",
+                "availability": "https://schema.org/InStock",
+            },
+        }
+
+    def test_a_sold_out_product_says_so(self, next_client, lamps) -> None:
+        body = next_client.get("/catalog/lamps/wall/").content.decode()
+        offer = _product_node(body)["offers"]
+        assert offer["availability"] == "https://schema.org/OutOfStock"
+
+
+class TestLanding:
+    """A category landing sells its cheapest stock and is cached for everyone."""
+
+    def test_the_landing_offers_the_cheapest_stock_and_answers_questions(
+        self, next_client, lamps
+    ) -> None:
+        response = next_client.get("/shop/lamps/")
+        body = response.content.decode()
+        assert response.status_code == 200
+        assert _slug_set(body) == {"desk", "floor"}
+        assert all(question in body for question, _answer in FAQ)
+        assert find_anchor(body, href="/catalog/lamps/", text="Shop the range")
+
+    def test_the_head_publishes_its_answers_as_structured_data(
+        self, next_client, lamps
+    ) -> None:
+        assert_metadata(
+            next_client.get("/shop/lamps/"),
+            title="Lamps deals · next.dj catalog",
+            description="Warm light for every corner of the house.",
+            canonical="https://catalog.example/shop/lamps/",
+            robots=None,
+            jsonld=[FAQ_NODE],
+        )
+
+    def test_a_category_without_tagline_keeps_the_site_description(
+        self, next_client
+    ) -> None:
+        Category.objects.create(slug="garden", name="Garden")
+        assert_metadata(
+            next_client.get("/shop/garden/"),
+            description="Faceted search over a demo storefront, built on next.dj.",
+        )
+
+    def test_an_unknown_category_is_not_found(self, next_client) -> None:
+        assert next_client.get("/shop/nothing/").status_code == 404
+
+    def test_a_cdn_may_hold_the_landing(self, next_client, lamps) -> None:
+        response = next_client.get("/shop/lamps/")
+        assert response["Cache-Control"] == (
+            "public, max-age=300, stale-while-revalidate=60"
+        )
+        assert "csrftoken" not in response.cookies
+        assert "Cookie" not in response["Vary"]
+        assert init_payload(response.content.decode())["$csrf"] == {
+            "header": "X-Csrftoken",
+            "url": "/_next/csrf/",
+        }
+
+
+class TestScriptsBehindConsent:
+    """`scripts.py` declares the two tags, and consent decides who renders them."""
+
+    def test_an_undecided_visitor_gets_them_through_the_manifest(
+        self, next_client, lamps
+    ) -> None:
+        body = next_client.get("/shop/lamps/").content.decode()
+        assert 'data-next-script="google-analytics"' not in body
+        assert _script_names(body) == ["google-analytics", "meta-pixel"]
+        entry = init_payload(body)["$scripts"][0]
+        assert entry["src"] == "/static/catalog/tags/ga4.js?v=v1"
+        assert entry["category"] == "analytics"
+        assert entry["attrs"] == {"data-measurement-id": "G-DEMO0000"}
+
+    def test_a_granted_visitor_gets_the_tags_from_the_server(
+        self, next_client, lamps
+    ) -> None:
+        next_client.cookies["next_consent"] = GRANT_ALL
+        response = next_client.get("/catalog/")
+        head = _head(response.content.decode())
+        assert '<script src="/static/catalog/tags/ga4.js?v=v1" defer' in head
+        assert 'data-measurement-id="G-DEMO0000"' in head
+        assert "Cookie" in response["Vary"]
+
+    def test_the_cached_landing_ignores_a_granted_cookie(
+        self, next_client, lamps
+    ) -> None:
+        next_client.cookies["next_consent"] = GRANT_ALL
+        body = next_client.get("/shop/lamps/").content.decode()
+        assert 'data-next-script="google-analytics"' not in body
+        assert _script_names(body) == ["google-analytics", "meta-pixel"]
+        assert '<template data-next-consented="marketing">' in body
+        assert "data-landing-video-placeholder" in body
+
+    def test_only_the_landing_loads_the_pixel(self, next_client, lamps) -> None:
+        listing = next_client.get("/catalog/").content.decode()
+        assert _script_names(listing) == ["google-analytics"]
+
+    def test_the_banner_ships_hidden_with_its_script(self, next_client, lamps) -> None:
+        body = next_client.get("/shop/lamps/").content.decode()
+        assert "<section data-consent-banner hidden" in body
+        assert '<script src="/static/next/components/consent_banner.js?v=v1">' in body
+        assert init_payload(body)["$consent"]["categories"] == [
+            "necessary",
+            "analytics",
+            "marketing",
         ]
+
+
+class TestLandingSignup:
+    """The cached landing signs visitors up through a runtime-only form."""
+
+    def _submit(self, next_client, email: str, *, partial: bool = True):
+        return next_client.post_action(
+            "launch_code_form",
+            {"email": email},
+            origin="/shop/lamps/",
+            partial=partial,
+            zones=LEAD_ZONE,
+        )
+
+    def test_the_form_renders_without_a_csrf_token(self, next_client, lamps) -> None:
+        body = next_client.get("/shop/lamps/").content.decode()
+        form = find_form(body, action=next_client.get_action_url("launch_code_form"))
+        assert "csrfmiddlewaretoken" not in form
+        assert "This sign-up needs JavaScript." in body
+
+    def test_a_bare_submit_without_the_token_is_refused(self, lamps) -> None:
+        client = NextClient(enforce_csrf_checks=True)
+        response = client.post_action(
+            "launch_code_form", {"email": "ada@example.com"}, origin="/shop/lamps/"
+        )
+        assert response.status_code == 403
+        assert not Lead.objects.exists()
+
+    def test_a_runtime_submit_thanks_in_place(self, next_client, lamps) -> None:
+        envelope = envelope_of(self._submit(next_client, "ada@example.com"))
+        lead = Lead.objects.get()
+        assert (lead.email, lead.category) == ("ada@example.com", lamps)
+        morph = next(op for op in envelope.ops if op["op"] == "morph")
+        assert "Thanks, the code is on its way to ada@example.com." in morph["html"]
+
+    def test_a_submit_without_the_partial_switch_redirects_back(
+        self, next_client, lamps
+    ) -> None:
+        response = self._submit(next_client, "bob@example.com", partial=False)
+        assert response.status_code == 303
+        assert response["Location"] == "/shop/lamps/"
+        assert Lead.objects.get().email == "bob@example.com"
+
+    def test_an_invalid_email_stores_nothing(self, next_client, lamps) -> None:
+        response = self._submit(next_client, "not-an-email")
+        assert response.status_code == 200
+        assert not Lead.objects.exists()

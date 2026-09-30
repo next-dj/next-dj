@@ -5,7 +5,6 @@ from next.pages.errors import (
     PageMetadataRequestError,
     PageMetadataShapeError,
     PageMetadataTemplateError,
-    PageMetadataURLError,
 )
 
 
@@ -29,14 +28,6 @@ class TestMetadataErrors:
         assert error.file_path == path
         assert isinstance(error, ValueError)
 
-    def test_a_url_error_names_the_url(self) -> None:
-        error = PageMetadataURLError("/wallet/")
-        assert str(error) == (
-            "cannot make '/wallet/' absolute without a request or a metadata base"
-        )
-        assert error.url == "/wallet/"
-        assert isinstance(error, ValueError)
-
     def test_a_request_error_names_the_key(self) -> None:
         error = PageMetadataRequestError("canonical")
         assert (
@@ -44,7 +35,6 @@ class TestMetadataErrors:
         )
         assert error.key == "canonical"
         assert isinstance(error, ValueError)
-        assert not isinstance(error, PageMetadataURLError)
 
     def test_a_template_error_names_the_template_and_the_detail(self) -> None:
         error = PageMetadataTemplateError("{nope}", "names the placeholder 'nope'")

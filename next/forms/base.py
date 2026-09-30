@@ -236,6 +236,11 @@ def _meta_guard(cls: type) -> ActionGuard | None:
     )
 
 
+def _meta_requires_runtime(cls: type) -> bool:
+    """Return Meta.requires_runtime, inherited like the guard."""
+    return bool(getattr(getattr(cls, "Meta", None), "requires_runtime", False))
+
+
 def _declared_success_url(cls: type) -> str | None:
     """Return the evaluated Meta.success_url, or None when undeclared."""
     value = getattr(getattr(cls, "Meta", None), "success_url", None)
@@ -274,6 +279,7 @@ def _auto_register_form_class(cls: type) -> None:
             scope=scope,
             form_class=cls,
             guard=_meta_guard(cls),
+            requires_runtime=_meta_requires_runtime(cls),
         )
     )
 

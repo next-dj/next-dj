@@ -1,4 +1,7 @@
-from next.seo import Rule
+from next.seo import RobotsRule
 
 
-rules = [Rule(user_agent="*", disallow=["/search/"])]
+rules = [
+    RobotsRule(disallow="/search/"),
+    RobotsRule(user_agent=("GPTBot", "CCBot"), disallow="/"),
+]

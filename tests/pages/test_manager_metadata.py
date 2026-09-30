@@ -1,5 +1,4 @@
 import gc
-import os
 import weakref
 from pathlib import Path
 from typing import Any
@@ -7,23 +6,31 @@ from typing import Any
 import pytest
 from django.http import Http404, HttpRequest, HttpResponse
 from django.template.response import TemplateResponse
-from django.test import RequestFactory, override_settings
+from django.test import Client, RequestFactory, override_settings
 
 from next.checks import reset_check_caches
-from next.deps import REQUEST_DEP_CACHE_ATTR, Depends, get_request_dep_cache
-from next.pages import Page, page
-from next.pages.loaders import _load_python_module_memo
+from next.deps import REQUEST_DEP_CACHE_ATTR
+from next.pages import Page, PageMetadataConflictError, page
+from next.pages.loaders import load_page_module
 from next.pages.manager import reset_metadata_registry
-from next.pages.metadata import MetadataThunk
+from next.pages.metadata import ResolvedMetadata
+from next.pages.metadata.chain import MetadataThunk
+from next.pages.metadata.markers import Segment, TitleSpec
+from next.pages.metadata.registry import MetadataRegistrations
 from next.seeding import METADATA_KEY
+from next.testing import assert_metadata, override_next_settings
 from tests.support import (
+    WITH_BASE,
     attribution,
     bound_dependency,
     build_page_request,
     build_zone_request,
     handler_declared_here,
-    record_calls,
+    resolve_page_metadata,
+    routed,
+    touch_later,
     unified_view,
+    write_page,
     write_page_chain,
 )
 
@@ -33,7 +40,6 @@ PLAIN = "x = 1\n"
 COUNTED = """
 from next.deps import Depends
 from next.pages import page
-from next.pages.metadata import Metadata
 
 
 @page.context("seen")
@@ -42,11 +48,11 @@ def seen(counter=Depends("counter")):
 
 
 def render(request, counter=Depends("counter")):
-    return "<p>body</p>"
+    return "<p>body</p>{% metadata %}"
 
 
 @page.metadata
-def meta(parent: Metadata, seen, counter=Depends("counter")):
+def meta(seen, counter=Depends("counter")):
     return {"title": f"n{counter}/{seen}"}
 """
 DYNAMIC = """
@@ -94,6 +100,48 @@ def meta():
     raise Http404
 """
 
+TWICE = (
+    DYNAMIC
+    + """
+
+@page.metadata
+def other():
+    return {"title": "Other"}
+"""
+)
+
+ROOT_CALLABLE = """
+from next.pages import page
+
+
+@page.metadata{spelling}
+def meta():
+    return {{"description": "Root"}}
+"""
+LEAF_CALLABLE = """
+from next.deps import Depends
+from next.pages import page
+
+calls = []
+
+
+@page.metadata
+def leaf_meta({parameters}):
+    calls.append(1)
+    return {{"title": {title}}}
+"""
+
+
+def _leaf_callable(parameters: str = "", title: str = '"Own"') -> str:
+    return LEAF_CALLABLE.format(parameters=parameters, title=title)
+
+
+def _calls(page_file: Path) -> list[int]:
+    module, _error = load_page_module(page_file)
+    assert module is not None
+    return module.calls
+
+
 HEADED = Path(__file__).resolve().parent.parent / "site_pages" / "headed" / "page.py"
 PAGED = {"METADATA": {"CANONICAL_QUERY": ("page",)}}
 
@@ -115,7 +163,8 @@ def _counter() -> tuple[list[int], Any]:
 
 
 def _render(query: str = "") -> str:
-    response = unified_view(page, HEADED)(RequestFactory().get(f"/headed/{query}"))
+    with override_next_settings(**WITH_BASE):
+        response = unified_view(page, HEADED)(RequestFactory().get(f"/headed/{query}"))
     assert isinstance(response, HttpResponse | TemplateResponse)
     assert response.status_code == 200
     return response.content.decode()
@@ -129,28 +178,20 @@ def html() -> str:
 class TestDecorator:
     """`Page.metadata` registers the callable under the file that declared it."""
 
-    def test_bare_spelling_registers_without_inherit(self) -> None:
-        instance = Page()
-
-        @instance.metadata
-        def meta() -> dict[str, str]:
-            return {}
-
-        entry = instance._metadata_registry.entry(Path(__file__))
-        assert entry is not None
-        assert entry.func is meta
-        assert entry.inherit is False
-
-    def test_called_spelling_carries_inherit(self) -> None:
-        instance = Page()
-
-        @instance.metadata(inherit=True)
-        def meta() -> dict[str, str]:
-            return {}
-
-        entry = instance._metadata_registry.entry(Path(__file__))
-        assert entry is not None
-        assert entry.inherit is True
+    @pytest.mark.parametrize(
+        ("spelling", "inherited"),
+        [("", None), ("()", None), ("(inherit=True)", "Root")],
+        ids=["bare", "called", "inherit"],
+    )
+    def test_only_an_inherited_callable_runs_for_a_descendant(
+        self, tmp_path: Path, spelling: str, inherited: str | None
+    ) -> None:
+        root, leaf = write_page_chain(
+            tmp_path,
+            [("root", ROOT_CALLABLE.format(spelling=spelling)), ("leaf", PLAIN)],
+        )
+        assert resolve_page_metadata(page, root).description == "Root"
+        assert resolve_page_metadata(page, leaf).description == inherited
 
     def test_the_decorator_hands_the_callable_back(self) -> None:
         instance = Page()
@@ -160,6 +201,7 @@ class TestDecorator:
 
         assert instance.metadata(meta) is meta
         assert instance.metadata()(meta) is meta
+        assert instance.metadata_registrations().names == {Path(__file__): ("meta",)}
 
     def test_a_local_callable_is_no_misattribution(self) -> None:
         instance = Page()
@@ -168,30 +210,35 @@ class TestDecorator:
         def meta() -> dict[str, str]:
             return {}
 
-        assert instance._metadata_registry.misattributed() == ()
+        assert instance.metadata_registrations().misattributed == ()
 
     def test_a_helper_from_another_module_is_recorded(self) -> None:
         instance = Page()
         instance.metadata(handler_declared_here)
-        records = instance._metadata_registry.misattributed()
+        records = instance.metadata_registrations().misattributed
         assert [(r.registered_from, r.declared_in, r.name) for r in records] == [
             (Path(__file__), Path(attribution.__file__), "handler_declared_here")
         ]
 
-    def test_two_names_in_one_file_are_a_conflict(self) -> None:
-        instance = Page()
+    def test_two_callables_in_one_page_py_refuse_to_load(self, tmp_path: Path) -> None:
+        (leaf,) = write_page_chain(tmp_path, [("leaf", TWICE)])
+        module, error = load_page_module(leaf)
+        assert module is None
+        assert error is not None
+        assert isinstance(error.__cause__, PageMetadataConflictError)
+        assert "'meta' and 'other'" in str(error.__cause__)
 
-        @instance.metadata
-        def first() -> dict[str, str]:
-            return {}
-
-        @instance.metadata
-        def second() -> dict[str, str]:
-            return {}
-
-        assert instance._metadata_registry.conflicts() == {
-            Path(__file__): ("first", "second")
-        }
+    @override_settings(DEBUG=True)
+    def test_an_edited_page_py_registers_again_without_a_conflict(
+        self, tmp_path: Path
+    ) -> None:
+        (leaf,) = write_page_chain(tmp_path, [("leaf", DYNAMIC)])
+        load_page_module(leaf)
+        touch_later(leaf, DYNAMIC.replace("def meta", "def renamed"))
+        module, error = load_page_module(leaf)
+        assert module is not None
+        assert error is None
+        assert page.metadata_registrations().names == {leaf: ("renamed",)}
 
 
 class TestStaticReads:
@@ -206,38 +253,55 @@ class TestStaticReads:
         assert str(meta.title) == "Leaf | Root"
         assert meta.description == "Root"
 
-    def test_templated_title_applies_the_chain_template(self, tmp_path: Path) -> None:
+    def test_the_declaration_the_chain_and_the_registrations_read_through(
+        self, tmp_path: Path
+    ) -> None:
+        root, leaf = write_page_chain(
+            tmp_path, [("root", ROOT), ("leaf", _leaf_callable())]
+        )
+        assert page.metadata_declaration(root).raw == {
+            "title": {"template": "{title} | Root"},
+            "description": "Root",
+        }
+        declaration = page.metadata_declaration(leaf)
+        assert declaration.raw is None
+        assert declaration.entry is not None
+        assert declaration.entry.inherit is False
+        assert [s.file_path for s in page.metadata_chain(leaf).sources] == [root, leaf]
+        assert page.metadata_registrations() == MetadataRegistrations(
+            names={leaf: ("leaf_meta",)}, misattributed=()
+        )
+
+    def test_fold_metadata_lays_an_overlay_under_the_chain_template(
+        self, tmp_path: Path
+    ) -> None:
         instance = Page()
         _root, leaf = write_page_chain(tmp_path, [("root", ROOT), ("leaf", PLAIN)])
-        assert str(instance.templated_title(leaf, "Post")) == "Post | Root"
-        assert instance.templated_title(leaf, "Post", absolute=True) == "Post"
+        overlay = Segment("overlay", title=TitleSpec(text="Post"))
+        assert str(instance.fold_metadata(leaf, overlay=overlay).title) == (
+            "Post | Root"
+        )
+        assert instance.fold_metadata(leaf).description == "Root"
 
-    def test_an_absolute_title_runs_no_inherited_callable(self, tmp_path: Path) -> None:
-        instance = Page()
-        root, leaf = write_page_chain(tmp_path, [("root", PLAIN), ("leaf", PLAIN)])
-        calls: list[int] = []
-
-        def root_meta() -> dict[str, object]:
-            calls.append(1)
-            return {"title": {"template": "{title} | Dyn"}}
-
-        instance._metadata_registry.register(root, root_meta, inherit=True)
-        assert instance.templated_title(leaf, "Post", absolute=True) == "Post"
-        assert calls == []
+    def test_an_absolute_overlay_runs_no_inherited_callable_of_its_own_page(
+        self, tmp_path: Path
+    ) -> None:
+        (leaf,) = write_page_chain(tmp_path, [("leaf", _leaf_callable())])
+        overlay = Segment("overlay", title=TitleSpec(absolute="Post"))
+        assert page.fold_metadata(leaf, overlay=overlay).title == "Post"
+        assert _calls(leaf) == []
 
 
 class TestRenderContext:
     """`build_render_context` seeds a thunk that reads the context it is handed."""
 
     def test_the_thunk_sees_the_finished_context(self, tmp_path: Path) -> None:
-        instance = Page()
-        (leaf,) = write_page_chain(tmp_path, [("leaf", PLAIN)])
-        instance._metadata_registry.register(leaf, lambda late: {"title": late})
+        (leaf,) = write_page_chain(tmp_path, [("leaf", _leaf_callable("late", "late"))])
 
-        context_data = instance.build_render_context(leaf)
+        context_data = page.build_render_context(leaf)
         context_data["late"] = "Late"
 
-        assert _thunk(context_data).resolve(context_data).title == "Late"
+        assert _thunk(context_data).fold(context_data).title == "Late"
 
     def test_a_static_chain_resolves_the_same_object_twice(
         self, tmp_path: Path
@@ -246,9 +310,9 @@ class TestRenderContext:
         _root, leaf = write_page_chain(tmp_path, [("root", ROOT), ("leaf", PLAIN)])
         context_data = instance.build_render_context(leaf)
         thunk = _thunk(context_data)
-        thunk.resolve(context_data)
-        first = thunk.resolve(context_data)
-        assert thunk.resolve(context_data) is first
+        thunk.fold(context_data)
+        first = thunk.fold(context_data)
+        assert thunk.fold(context_data) is first
         assert first.description == "Root"
 
     def test_a_render_context_is_freed_without_the_cycle_collector(
@@ -275,10 +339,10 @@ class TestRenderContext:
         assert isinstance(context_data[METADATA_KEY], MetadataThunk)
 
     def test_url_kwargs_reach_the_callable(self, tmp_path: Path) -> None:
-        instance = Page()
-        (leaf,) = write_page_chain(tmp_path, [("leaf", PLAIN)])
-        instance._metadata_registry.register(leaf, lambda slug: {"title": slug})
-        assert instance.resolve_metadata(leaf, slug="wallet").title == "wallet"
+        (leaf,) = write_page_chain(tmp_path, [("leaf", _leaf_callable("slug", "slug"))])
+        resolved = resolve_page_metadata(page, leaf, slug="wallet")
+        assert isinstance(resolved, ResolvedMetadata)
+        assert resolved.title == "wallet"
 
     def test_resolve_metadata_raises_what_the_callable_raises(
         self, tmp_path: Path
@@ -286,27 +350,24 @@ class TestRenderContext:
         (leaf,) = write_page_chain(tmp_path, [("leaf", GONE)])
         unified_view(page, leaf)
         with pytest.raises(Http404):
-            page.resolve_metadata(leaf)
+            resolve_page_metadata(page, leaf)
 
 
 class TestOneDependencyCachePerRender:
     """`render()`, the context merge and the metadata callable share one cache."""
 
     def test_a_dependency_is_resolved_once_across_the_unified_view(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path
     ) -> None:
         (leaf,) = write_page_chain(tmp_path, [("leaf", COUNTED)])
         view = unified_view(page, leaf)
-        built = record_calls(monkeypatch, page, "_render_context")
         calls, counter = _counter()
         with bound_dependency("counter", counter):
             response = view(build_page_request())
-            context_data = built[0].result
-            meta = _thunk(context_data).resolve(context_data)
 
         assert response.status_code == 200
         assert calls == [1]
-        assert meta.title == "n1/1"
+        assert "<title>n1/1</title>" in response.content.decode()
 
     def test_the_request_never_carries_the_cache_of_the_render(
         self, tmp_path: Path
@@ -317,19 +378,16 @@ class TestOneDependencyCachePerRender:
         with bound_dependency("counter", counter):
             unified_view(page, leaf)(request)
             page.build_render_context(leaf, request)
-        assert get_request_dep_cache(request) is None
+        assert not hasattr(request, REQUEST_DEP_CACHE_ATTR)
         assert calls == [1, 1]
 
     def test_a_cache_already_on_the_request_is_reused(self, tmp_path: Path) -> None:
-        instance = Page()
-        (leaf,) = write_page_chain(tmp_path, [("leaf", PLAIN)])
-        instance._metadata_registry.register(
-            leaf, lambda wallet=Depends("wallet"): {"title": wallet}
-        )
+        source = _leaf_callable('wallet=Depends("wallet")', "wallet")
+        (leaf,) = write_page_chain(tmp_path, [("leaf", source)])
         request = HttpRequest()
         setattr(request, REQUEST_DEP_CACHE_ATTR, {"wallet": "preloaded"})
         with bound_dependency("wallet", lambda: "fresh"):
-            meta = instance.resolve_metadata(leaf, request)
+            meta = resolve_page_metadata(page, leaf, request)
         assert meta.title == "preloaded"
 
 
@@ -380,9 +438,7 @@ class TestNothingRunsWithoutAReader:
         view = unified_view(page, leaf)
         response = view(build_zone_request("z"))
         assert response.status_code == 200
-        module = _load_python_module_memo(leaf)
-        assert module is not None
-        assert module.calls == []
+        assert _calls(leaf) == []
 
     def test_an_http_response_from_render_never_runs_the_callable(
         self, tmp_path: Path
@@ -391,9 +447,7 @@ class TestNothingRunsWithoutAReader:
         view = unified_view(page, leaf)
         response = view(build_page_request())
         assert response.content == b"short-circuit"
-        module = _load_python_module_memo(leaf)
-        assert module is not None
-        assert module.calls == []
+        assert _calls(leaf) == []
 
 
 class TestReset:
@@ -402,29 +456,28 @@ class TestReset:
     def test_reset_metadata_registry_drops_registrations_and_chains(
         self, tmp_path: Path
     ) -> None:
-        (leaf,) = write_page_chain(tmp_path, [("leaf", PLAIN)])
-        page._metadata_registry.register(leaf, lambda: {"title": "Dynamic"})
-        page.resolve_metadata(leaf)
-        assert page._metadata_registry.chain(leaf) is not None
+        (leaf,) = write_page_chain(tmp_path, [("leaf", DYNAMIC)])
+        chain = page.metadata_chain(leaf)
+        assert page.metadata_chain(leaf) is chain
+        assert page.metadata_registrations().names == {leaf: ("meta",)}
 
         reset_metadata_registry()
 
-        assert page._metadata_registry.entry(leaf) is None
-        assert page._metadata_registry.chain(leaf) is None
+        assert page.metadata_registrations() == MetadataRegistrations({}, ())
+        assert page.metadata_declaration(leaf).entry is None
+        assert page.metadata_chain(leaf) is not chain
 
     def test_a_removed_callable_is_gone_after_a_check_reset(
         self, tmp_path: Path
     ) -> None:
         (leaf,) = write_page_chain(tmp_path, [("leaf", DYNAMIC)])
         unified_view(page, leaf)
-        assert page.resolve_metadata(leaf).title == "Dynamic"
+        assert resolve_page_metadata(page, leaf).title == "Dynamic"
 
-        stamp = leaf.stat().st_mtime + 10
-        leaf.write_text(PLAIN)
-        os.utime(leaf, (stamp, stamp))
+        touch_later(leaf, PLAIN)
         reset_check_caches()
 
-        assert page.resolve_metadata(leaf).title is None
+        assert resolve_page_metadata(page, leaf).title is None
 
 
 class TestUnifiedViewRendersTheHead:
@@ -441,8 +494,9 @@ class TestUnifiedViewRendersTheHead:
     def test_jsonld_never_closes_the_script(self, html: str) -> None:
         assert "</script><!--" not in html
         assert (
-            '<script type="application/ld+json">{"@type": "WebPage", '
-            '"name": "\\u003C/script\\u003E\\u003C!--"}</script>' in html
+            '<script type="application/ld+json">{"@context": "https://schema.org", '
+            '"@graph": [{"@type": "WebPage", "name": "\\u003C/script\\u003E\\u003C!--"}]}'
+            "</script>" in html
         )
 
     def test_og_is_derived_from_the_page(self, html: str) -> None:
@@ -465,3 +519,43 @@ class TestUnifiedViewRendersTheHead:
         assert '<link rel="canonical" href="https://acme.example/headed/?page=3">' in (
             third
         )
+
+
+HEAD = "<head>{% metadata %}</head>"
+
+
+class TestTheHeadThroughARequest:
+    """What a visitor receives follows the page tree on disk, braces and all."""
+
+    @override_settings(DEBUG=True)
+    def test_an_edited_ancestor_reaches_the_next_request_under_debug(
+        self, tmp_path: Path
+    ) -> None:
+        root = tmp_path / "pages"
+        ancestor = write_page(root, "", ROOT, body=HEAD)
+        write_page(root, "leaf", 'metadata = {"title": "Leaf"}\n', body=HEAD)
+        with routed(root):
+            first = Client().get("/leaf/")
+            touch_later(ancestor, ROOT.replace("Root", "Edited"))
+            second = Client().get("/leaf/")
+        assert_metadata(first, title="Leaf | Root", description="Root")
+        assert_metadata(second, title="Leaf | Edited", description="Edited")
+
+    def test_braces_in_a_title_and_a_site_name_stay_literal(
+        self, tmp_path: Path
+    ) -> None:
+        root = tmp_path / "pages"
+        write_page(
+            root,
+            "",
+            'metadata = {"title": {"template": "{title} | {site_name}"}, '
+            '"site_name": "Acme {Co}"}\n',
+            body=HEAD,
+        )
+        write_page(
+            root, "deals", 'metadata = {"title": "Deals {50%} {title}"}\n', body=HEAD
+        )
+        with routed(root):
+            response = Client().get("/deals/")
+        assert response.status_code == 200
+        assert_metadata(response, title="Deals {50%} {title} | Acme {Co}")

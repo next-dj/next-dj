@@ -16,7 +16,7 @@ Forms
 
    Renders a form bound to a registered action.
    The first argument is the action name, a quoted string or a context variable that resolves to a string.
-   Injects the ``csrfmiddlewaretoken`` CSRF field, and the ``_next_form_origin`` field carrying the URL of the rendering page, query string included, when an origin is available.
+   Injects the ``csrfmiddlewaretoken`` CSRF field unless the page defers its token, see :doc:`/content/security/csrf-and-forms`, and the ``_next_form_origin`` field carrying the URL of the rendering page, query string included, when an origin is available.
    The query string rides along so a redirect back to the origin lands on the same filtered, searched, or paginated view the visitor submitted from.
    The block body has access to the bound or unbound form through ``{{ form }}``.
 
@@ -145,7 +145,7 @@ Multiline tag bodies
 The framework adds one line-spanning branch to Django's template tag pattern during ``AppConfig.ready``, so a framework block tag may carry its arguments over several lines.
 That allows readable block components and slots when the argument list is long.
 
-The added branch matches fourteen literal tag names, ``action_url``, ``asset``, ``collect_scripts``, ``collect_styles``, ``component``, ``form``, ``metadata``, ``set_slot``, ``slot``, ``template``, ``use_module``, ``use_script``, ``use_style``, and ``zone``, in the void form and in the ``{% #name %}`` opening form alike.
+The added branch matches eighteen literal tag names, ``action_url``, ``asset``, ``breadcrumbs``, ``collect_head``, ``collect_scripts``, ``collect_styles``, ``component``, ``consented``, ``form``, ``metadata``, ``script``, ``set_slot``, ``slot``, ``template``, ``use_module``, ``use_script``, ``use_style``, and ``zone``, in the void form and in the ``{% #name %}`` opening form alike.
 Django's own block-tag branch stays behind it untouched, so every other tag lexes exactly as stock Django lexes it, in a DJX file and in a plain Django template alike.
 A newline inside ``{% if x %}`` still ends the tag, a third-party tag keeps its stock lexing, and a stray ``{%`` inside inline JavaScript swallows no more text than it does without next.dj installed.
 ``{{ ... }}`` and ``{# ... #}`` are outside the rebind entirely, so a newline still ends a variable or a comment.
@@ -164,6 +164,12 @@ Static pipeline
 
    Marks the placeholder slot where collected JS and module tags are injected.
    Takes no arguments.
+
+.. describe:: {% collect_head %}
+
+   Marks where the head scripts of ``scripts.py`` go, the ones the page may run at once.
+   Takes no arguments.
+   Without the tag the scripts are placed right before ``</head>``, see :doc:`/content/topics/scripts/declaring`.
 
 .. describe:: {% use_style "<reference>" %}
 
@@ -274,6 +280,30 @@ Metadata
    A page that declares metadata while nothing its composition renders carries the tag, the layouts, the components they reach, and the templates they include by a literal name, is reported as ``next.W085``.
    See :doc:`/content/topics/seo/metadata` for the declaration forms.
 
+.. describe:: {% breadcrumbs %}
+              {% breadcrumbs as <name> %}
+
+   Renders the breadcrumb trail of the page as ``<nav aria-label="Breadcrumb"><ol>...</ol></nav>``, one ``<li>`` per crumb, a link where the crumb has a URL and ``aria-current="page"`` on the current one.
+   The ``as`` form binds the tuple of ``Breadcrumb`` values, each with ``label``, ``url``, and ``current``, and renders nothing.
+   The trail reuses the resolve ``{% metadata %}`` ran for the same render, and a render without crumbs renders nothing.
+   Any other argument raises ``TemplateSyntaxError`` at parse time.
+   See :doc:`/content/topics/seo/breadcrumbs`.
+
+Scripts and consent
+-------------------
+
+.. describe:: {% script "<name>" %}
+
+   Runs the script ``name`` of the tree's ``scripts.py`` on this page, for a script declared with ``auto=False``.
+   Renders nothing where it stands, and a name the tree does not declare logs one warning per page.
+
+.. describe:: {% #consented "<category>" %}...{% else %}...{% /consented %}
+
+   Renders its body for a visitor who granted ``category`` and the optional ``else`` branch for everyone else.
+   When the server renders consent it renders one branch, and when the runtime decides it writes the body inert in ``<template data-next-consented="<category>">`` followed by the ``else`` branch and an end marker, and the runtime swaps them once the category is granted.
+   The category is one argument, a literal or a variable, and any other count raises ``TemplateSyntaxError``.
+   A block that reaches a page only through a patch is revealed on a page that loaded with the consent state, which setting ``CONSENT`` guarantees, see :doc:`/content/topics/scripts/consent`.
+
 Tag loading
 -----------
 
@@ -292,4 +322,5 @@ See also
    :doc:`/content/topics/components` for ``{% component %}`` and slots.
    :doc:`/content/topics/static-assets/template-tags` for the static tags.
    :doc:`/content/topics/partial-rendering/zones` for the ``{% zone %}`` tag.
-   :doc:`/content/topics/seo/metadata` for the ``{% metadata %}`` tag.
+   :doc:`/content/topics/seo/metadata` for the ``{% metadata %}`` tag and :doc:`/content/topics/seo/breadcrumbs` for ``{% breadcrumbs %}``.
+   :doc:`/content/topics/scripts/index` for ``{% collect_head %}``, ``{% script %}``, and ``{% #consented %}``.

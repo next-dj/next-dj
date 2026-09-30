@@ -3,17 +3,7 @@ from pathlib import Path
 from tests.support import file_router_config_entry, write_page
 
 
-BASE = "https://acme.example"
-
-
 DESCRIPTION = "A description long enough to pass the audit without any complaint."
-
-
-I18N = {
-    "USE_I18N": True,
-    "LANGUAGES": [("en", "English"), ("de", "German")],
-    "LANGUAGE_CODE": "en",
-}
 
 
 COMPONENTS = [
@@ -46,7 +36,7 @@ def meta() -> dict:
 
 
 def templated_page(directory: Path, source: str, body: str | None = "<p>x</p>") -> Path:
-    """Write a `page.py` of `source` in `directory` beside a `template.djx` of `body`."""
+    """Write a `page.py` of `source` in `directory` beside a `body` template."""
     return write_page(directory, source=source, body=body)
 
 

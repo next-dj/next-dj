@@ -1,7 +1,4 @@
-"""System checks on the `/robots.txt` sources of the page trees.
-
-The ids are `next.E114`, `next.E117`, `next.W100`, `next.W101` and `next.W103`.
-"""
+"""System checks on the `/robots.txt` sources."""
 
 from __future__ import annotations
 
@@ -19,13 +16,9 @@ from django.urls import NoReverseMatch
 from django.urls.converters import get_converters
 
 from next.checks import NEXT, SEO
-from next.seo.robots import declared_rules
-from next.seo.sitemaps import (
-    SitemapOptions,
-    listed_trails,
-    serves_sitemap,
-    static_noindex,
-)
+from next.seo.robots import declared_rules, robots_candidates, rule_pattern
+from next.seo.sitemaps import SitemapOptions, listed_trails, static_noindex
+from next.site import site_indexable
 from next.urls.errors import URLParameterError
 from next.urls.parser import default_url_parser
 from next.urls.reverse import page_reverse
@@ -34,13 +27,14 @@ from .roots import (
     items_trails,
     loaded_seo_roots,
     robots_modules,
-    robots_paths,
+    serves_sitemap,
     sitemap_roots,
 )
 
 
 if TYPE_CHECKING:
     import types
+    from collections.abc import Sequence
     from pathlib import Path
 
     from next.seo.discovery import SeoRoot
@@ -51,27 +45,33 @@ _PARAMETER: Final = re.compile(r"<(?P<converter>[^>:]+):(?P<name>[^>]+)>")
 _PLACEHOLDERS: Final = ("0", "x", "00000000-0000-0000-0000-000000000000")
 
 
+def _single_source(url: str, paths: Sequence[Path]) -> list[CheckMessage]:
+    if len(paths) <= 1:
+        return []
+    listed = ", ".join(str(path) for path in paths)
+    return [
+        Error(
+            f"{url} has {len(paths)} sources and only one answers it: {listed}. "
+            "Keep one source across the page trees.",
+            obj=str(paths[0]),
+            id="next.E114",
+        )
+    ]
+
+
 @register(Tags.urls, NEXT, SEO)
-def check_robots_single_source(*args, **kwargs) -> list[CheckMessage]:
-    """Require one source for `/robots.txt` across every page tree (`next.E114`)."""
+def check_seo_single_sources(*args, **kwargs) -> list[CheckMessage]:
+    """Require one `/robots.txt` source across every page tree (`next.E114`)."""
     init_errors, roots = loaded_seo_roots()
     errors = list(init_errors)
-    paths = robots_paths(roots)
-    if len(paths) > 1:
-        listed = ", ".join(str(path) for path in paths)
-        errors.append(
-            Error(
-                f"/robots.txt has {len(paths)} sources and only {paths[0]} answers "
-                f"it: {listed}. Keep one robots.py or robots.txt in one page tree.",
-                obj=str(paths[0]),
-                id="next.E114",
-            )
-        )
+    errors.extend(
+        _single_source("/robots.txt", [path for path, _s in robots_candidates(roots)])
+    )
     return errors
 
 
-def _robots_text(file_path: Path) -> tuple[str | None, CheckMessage | None]:
-    """Decode a static `robots.txt`, answering `next.E117` when it is not UTF-8."""
+def _file_text(file_path: Path) -> tuple[str | None, CheckMessage | None]:
+    """Decode a static text file, answering `next.E117` when it is not UTF-8."""
     try:
         text = file_path.read_bytes().decode("utf-8")
     except OSError:
@@ -92,10 +92,10 @@ def _names_sitemap(text: str) -> bool:
 
 
 @register(Tags.urls, NEXT, SEO)
-def check_robots_file(*args, **kwargs) -> list[CheckMessage]:
+def check_seo_text_files(*args, **kwargs) -> list[CheckMessage]:
     """Read every static `robots.txt` (`next.E117`, `next.W103`).
 
-    The file is served byte for byte, so a missing `Sitemap:` line stays missing.
+    The files are served byte for byte, so a missing `Sitemap:` line stays missing.
     """
     init_errors, roots = loaded_seo_roots()
     messages = list(init_errors)
@@ -103,9 +103,8 @@ def check_robots_file(*args, **kwargs) -> list[CheckMessage]:
     for root in roots:
         if root.robots_file is None:
             continue
-        text, error = _robots_text(root.robots_file)
-        if error is not None:
-            messages.append(error)
+        text, error = _file_text(root.robots_file)
+        messages.extend(() if error is None else (error,))
         if text is None or not served or _names_sitemap(text):
             continue
         messages.append(
@@ -189,25 +188,21 @@ def _sitemap_paths(root: SeoRoot, module: types.ModuleType) -> set[str]:
     return {path for trail, path in route_paths(root).items() if trail in listed}
 
 
-def _disallow_regex(prefix: str) -> re.Pattern[str]:
-    """Compile a `Disallow` value, `*` matching anything and a final `$` anchoring."""
-    anchored = prefix.endswith("$")
-    body = ".*".join(re.escape(part) for part in prefix.removesuffix("$").split("*"))
-    return re.compile(body + ("$" if anchored else ""))
-
-
 def _disallows(module: types.ModuleType) -> list[str]:
-    """Return every non-empty `Disallow` value the rules declare, in order."""
+    """Return every `Disallow` value of the static groups that apply to `*`, in order.
+
+    A crawler named in a group of its own follows that group alone and skips `*`.
+    """
     return [
         prefix
         for rule in declared_rules(module)
+        if "*" in rule.user_agents
         for prefix in rule.disallow
-        if isinstance(prefix, str) and prefix
     ]
 
 
 def _covered(prefix: str, paths: set[str]) -> list[str]:
-    regex = _disallow_regex(prefix)
+    regex = rule_pattern(prefix)
     return sorted(path for path in paths if regex.match(path))
 
 
@@ -223,7 +218,7 @@ def _noindex_paths(roots: tuple[SeoRoot, ...]) -> set[str]:
 
 def _listed_paths(roots: tuple[SeoRoot, ...]) -> set[str]:
     """Return every URL path the served sitemaps list, with `/sitemap.xml` itself."""
-    if not serves_sitemap(roots):
+    if not serves_sitemap(roots) or not site_indexable():
         return set()
     found = {SITEMAP_URL}
     for root, module in sitemap_roots(roots):
@@ -233,7 +228,7 @@ def _listed_paths(roots: tuple[SeoRoot, ...]) -> set[str]:
 
 @register(Tags.urls, NEXT, SEO)
 def check_robots_disallow(*args, **kwargs) -> list[CheckMessage]:
-    """Read every `Disallow` against the sitemap and the noindex pages.
+    """Read every static `*` group `Disallow` against the sitemap and noindex pages.
 
     `next.W100` flags a listed URL, `next.W101` a noindex page whose tag goes unread.
     """
@@ -279,7 +274,7 @@ def check_robots_disallow(*args, **kwargs) -> list[CheckMessage]:
 __all__ = [
     "SITEMAP_URL",
     "check_robots_disallow",
-    "check_robots_file",
-    "check_robots_single_source",
+    "check_seo_single_sources",
+    "check_seo_text_files",
     "route_paths",
 ]

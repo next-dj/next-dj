@@ -26,6 +26,7 @@ from django.template.base import (
 from django.utils.safestring import SafeString
 
 from next.components import collect_visible_components, get_component, render_component
+from next.components.nodes import ComponentTagNode
 from next.components.renderers import COMPONENT_PROPS_CONTEXT_KEY, SLOT_KEY_PREFIX
 from next.conf import fail_loudly, next_framework_settings
 from next.seeding import COLLECTOR_KEY, REQUEST_KEY, TEMPLATE_PATH_KEY
@@ -186,7 +187,7 @@ class SlotNode(Node):
         return self.nodelist.render(context)
 
 
-class ComponentNode(Node):
+class ComponentNode(ComponentTagNode):
     """Looks up the component, gathers slots and free children, then renders HTML."""
 
     def __init__(

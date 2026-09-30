@@ -36,7 +36,8 @@ Decorators
 .. py:decorator:: page.metadata(func=None, /, *, inherit=False)
 
    Registers the dependency-injected callable that builds the metadata of a page module (``page.py``) per request, and ``inherit=True`` runs it for every descendant page as well.
-   ``next.E108`` expects the return annotation to name a mapping, and ``next.E102`` reports a ``page.py`` that declares a module-level ``metadata`` dict beside the callable.
+   ``next.E108`` expects the return annotation to name a mapping, ``next.E102`` reports a ``page.py`` that declares a module-level ``metadata`` dict beside the callable, and ``next.E121`` a parameter annotated ``Metadata``, since the chain merges the ancestors rather than injecting them.
+   A key the callable returns as ``None`` counts as unset and keeps the inherited value.
    See :doc:`/content/topics/seo/metadata` for the parameters, when the callable runs, and the merge order.
 
 @component.context
@@ -59,7 +60,7 @@ Decorators
 @action
 ~~~~~~~
 
-.. py:decorator:: action(name=None, *, form_class=None, scope=None, login_required=False, permission_required=None)
+.. py:decorator:: action(name=None, *, form_class=None, scope=None, login_required=False, permission_required=None, requires_runtime=False)
 
    Registers a plain callable as a named form action.
    The name is optional.
@@ -74,6 +75,7 @@ Decorators
    Pass ``scope="page"`` or ``scope="shared"`` to override the scope derived from the declaring file.
    Any other value is reported as the ``next.E085`` system check and the action is not registered, while the same mistake spelled as ``Meta.scope`` on a form class is reported as ``next.E047``.
    Pass ``login_required=True`` or ``permission_required=`` to guard the dispatch endpoint, see :ref:`topics-forms-actions-guards` for the semantics.
+   Pass ``requires_runtime=True`` for an action that posts only through the client runtime, which silences ``next.W124`` for it, see :ref:`topics-forms-actions-requires-runtime`.
    Applying ``@action`` to a class registers no action and returns the class unchanged.
    The misuse is recorded and reported as the ``next.E053`` system check by ``manage.py check``.
 

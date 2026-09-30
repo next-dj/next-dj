@@ -1,20 +1,20 @@
 # Markdown blog
 
-A blog whose articles are plain `template.md` files on disk. A custom `MarkdownTemplateLoader` registered under `NEXT_FRAMEWORK["TEMPLATE_LOADERS"]` teaches the framework to read those files as page bodies and renders them to HTML on request.
+A blog whose articles are plain Markdown files on disk, each opened by a few lines of front matter. One dynamic route at `screens/posts/[slug]/` serves every post, and the front matter feeds the page head: the description, the keywords, the Open Graph article block and the `BlogPosting` structured data. A custom `MarkdownTemplateLoader` registered under `NEXT_FRAMEWORK["TEMPLATE_LOADERS"]` shows the other road for a static page, a sibling `template.md` read as the page body.
 
-The example covers the reading side of the framework: a custom `TemplateLoader` plug-in, the `template_loaded` signal, a two-root page layout, `@context(serialize=True)` feeding `window.Next.context` for a share button, a co-located `component.js`, a Django context processor wired through the router, and virtual pages.
+The example covers the reading side of the framework: a custom `TemplateLoader` plug-in, the `template_loaded` signal, a two-root page layout, `@context(serialize=True)` feeding `window.Next.context` for a share button, a co-located `component.js`, a Django context processor wired through the router, page metadata with JSON-LD, breadcrumbs, an RSS feed, a social image, a sitemap and a `robots.py`.
 
 ## What you will see
 
 | URL | Description |
 | --- | --- |
-| `/` | Latest posts, one entry per folder under `screens/posts/`. |
-| `/posts/welcome/` | A longer post. Headings, lists, and reading-time meta. |
-| `/posts/hello-world/` | A minimal post with a fenced code block. |
-| `/es/posts/welcome/` | The same post under the Spanish prefix. Same body, `lang="es"`, its own canonical. |
-| `/about/` | Static page. A `template.djx` body and a `page.py` that only declares metadata. |
-| `/sitemap.xml` | Every static route once per language with hreflang alternates, from a four-line `sitemap.py`. |
-| `/robots.txt` | The static `robots.txt` at the page root, served byte for byte. |
+| `/` | Latest posts, one entry per Markdown file under `blog/posts/`, the newest first. |
+| `/posts/welcome/` | A longer post. Headings, lists, breadcrumbs and reading-time meta. |
+| `/posts/hello-world/` | A minimal post with a fenced code block and no `description` of its own. |
+| `/about/` | Static page. A `template.md` body read by the custom loader, and a `page.py` that only declares metadata. |
+| `/feed.xml` | RSS over every post, advertised in the head of every page. |
+| `/sitemap.xml` | Every route, each post dated by its last edit. |
+| `/robots.txt` | Built from `robots.py` at the page root, its `Sitemap:` line written by the framework. |
 
 ## How to run
 
@@ -74,9 +74,42 @@ The component backend gets `site/_parts` as a second `DIRS` entry. A component r
 
 `TEMPLATE_LOADERS` is a list of dotted paths to `next.pages.loaders.TemplateLoader` subclasses. Supplying the key **replaces** the default `["next.pages.loaders.DjxTemplateLoader"]`, so the djx loader is listed explicitly to keep `template.djx` support.
 
-### 2. Custom `MarkdownTemplateLoader`
+### 2. One route for every post
 
-[`blog/loaders.py`](blog/loaders.py) subclasses `TemplateLoader` and treats a sibling `template.md` as the page body:
+A post is a file, not a folder. [`blog/posts/welcome.md`](blog/posts/welcome.md) opens with its front matter:
+
+```markdown
+---
+title: Welcome to the blog
+author: Ada Lovelace
+date: 2026-01-12
+updated: 2026-03-02
+description: A tour of the blog, where every post is a Markdown file and one dynamic route serves them all.
+keywords: next.dj, markdown, django
+---
+This is a demo blog built on **next-dj**. ...
+```
+
+[`blog/posts.py`](blog/posts.py) reads it into a frozen `Post`. `parse_post` splits the block off the top, reads `key: value` lines, and keeps the rest as Markdown source. `description` is optional, [`hello-world.md`](blog/posts/hello-world.md) leaves it out and `excerpt` stands in, the first paragraph that is not a heading with inline markup stripped and cut to 24 words. `updated` is optional too, and `Post.modified` answers the publication day for a post never edited. `load_post(slug)` raises `Http404` for a slug without a file, `all_posts()` lists every file the newest first, and `Post.html` renders the body through [`blog/markdown_template.py`](blog/markdown_template.py), whose `fenced_code` extension turns the code block in `hello-world` into `<pre><code class="language-python">`.
+
+[`screens/posts/[slug]/page.py`](blog/screens/posts/%5Bslug%5D/page.py) is the only post page there is:
+
+```python
+@context("article")
+def article(slug: str) -> Post:
+    return load_post(slug)
+
+
+@context("post", serialize=True)
+def post(article: Post) -> dict[str, str]:
+    return {"slug": article.slug, "title": article.title}
+```
+
+`article` reads the file the URL names once per request. `post` names the `article` key as its parameter and receives the value the first callable produced, the way section 8 does for the head, and hands the share button the two fields it reads through `window.Next.context.post`. Everything else stays on the server. [`template.djx`](blog/screens/posts/%5Bslug%5D/template.djx) beside it is one line, `{{ article.html }}`. Adding a post means adding one `.md` file, the route, the index, the feed and the sitemap pick it up.
+
+### 3. Custom `MarkdownTemplateLoader` for a static page
+
+[`blog/loaders.py`](blog/loaders.py) subclasses `TemplateLoader` and treats a sibling `template.md` as the page body. [`screens/about/`](blog/screens/about/) holds a `page.py` that only declares metadata and a `template.md` the loader reads:
 
 ```python
 class MarkdownTemplateLoader(TemplateLoader):
@@ -88,9 +121,10 @@ class MarkdownTemplateLoader(TemplateLoader):
     def load_template(self, file_path: Path) -> str | None:
         md_file = file_path.parent / "template.md"
         try:
-            return render_markdown(md_file.read_text(encoding="utf-8"))
+            html = render_markdown(md_file.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError):
             return None
+        return format_html(PROSE, SafeString(html))
 
     def source_path(self, file_path: Path) -> Path | None:
         md_file = file_path.parent / "template.md"
@@ -100,50 +134,32 @@ class MarkdownTemplateLoader(TemplateLoader):
 Three methods, three responsibilities:
 
 - **`can_load`** — cheap existence check, so the chain can skip this loader without touching the disk twice.
-- **`load_template`** — reads the file and returns the rendered body string. Returning `None` on a read error lets the chain fall through to the next loader instead of raising mid-request.
+- **`load_template`** — reads the file and returns the rendered body string inside a `prose` article, since Markdown carries no classes of its own. Returning `None` on a read error lets the chain fall through to the next loader instead of raising mid-request.
 - **`source_path`** — points at the on-disk file for the stale-cache detector, so editing a `.md` file recomposes the template on the next request without a server restart.
 
-`source_name = "template.md"` is the label the framework prints in `next.W043` when a page declares this source alongside a higher-priority one.
+`source_name = "template.md"` is the label the framework prints in `next.W043` when a page declares this source alongside a higher-priority one. A loader fits a page whose body is one file of its own. It is the wrong tool for the posts, since a loader sees the `page.py` path and never the URL, so a dynamic route reads its content in a `@context` instead.
 
-### 3. Markdown helpers
+### 4. Nested layout, breadcrumbs and the meta bar
 
-[`blog/markdown_template.py`](blog/markdown_template.py) holds what the loader does not. `render_markdown` runs the `markdown` package with the `fenced_code` extension, which is what turns the code block in `hello-world` into `<pre><code class="language-python">`. `post_metadata` scans the body for the first line starting with `# ` and falls back to the title-cased folder name when there is none, so a post without a heading still lists correctly on the index. `reading_minutes` counts whitespace-separated words at 200 wpm and never returns less than one minute.
+[`screens/posts/layout.djx`](blog/screens/posts/layout.djx) wraps every post. It renders the breadcrumb trail, the title, the publication date, the reading time and the share button, and a `prose` container that receives the article HTML through `{% template %}`. The outer [`site/layout.djx`](site/layout.djx) wraps that article in turn, which makes the post pages a two-level layout composition across two page roots.
 
-The URL name is derived, not stored. `post_metadata` builds `next:page_posts_<slug>` with hyphens replaced by underscores, matching the name the file router generates for the folder.
+The trail is not spelled by hand:
 
-### 4. Per-post `page.py`
-
-Each post module registers context and page metadata and nothing else, because the loader owns the body:
-
-```python
-_POST = Path(__file__).parent / "template.md"
-
-
-@context("post", serialize=True)
-def post() -> dict[str, str]:
-    return post_metadata(_POST)
-
-
-@context("reading_minutes")
-def read() -> int:
-    return reading_minutes(read_post_body(_POST))
-
-
-@page.metadata
-def post_meta(post: dict[str, str]) -> MetadataDict:
-    """Title and describe the post from its Markdown heading and first paragraph."""
-    return {"title": post["title"], "description": post["excerpt"]}
+```django
+{% breadcrumbs as crumbs %}
+<nav aria-label="Breadcrumb">
+  <ol>
+    {% for crumb in crumbs %}
+      <li>{% if crumb.current %}<span aria-current="page">{{ crumb.label }}</span>
+          {% else %}<a href="{{ crumb.url }}">{{ crumb.label }}</a>{% endif %}</li>
+    {% endfor %}
+  </ol>
+</nav>
 ```
 
-No `template = "..."`, no `render()`, no `render_markdown` call. `post` carries `serialize=True` so `{slug, url_name, title, excerpt}` lands in `window.Next.context.post` for the share button. `reading_minutes` stays server-only and feeds the meta bar. `post_meta` names the `post` context key as a parameter and receives the dict the first callable produced, so the Markdown is read once per request even though two callables want it. Section 12 covers what the tab and the crawlers see. Import time computes a `Path` and nothing more, the file is read when a request arrives.
+Each `page.py` from the root down adds one crumb, labelled by its `breadcrumb` key or by its own title. The root [`screens/page.py`](blog/screens/page.py) declares `"breadcrumb": "Home"`, a key that is never inherited, `screens/posts/` holds no `page.py` and adds nothing, and the post adds its title. The bare `{% breadcrumbs %}` renders the same trail as a plain `<nav>`, the `as` form hands the crumbs to a template that styles them. The head gets the trail as well: a `BreadcrumbList` joins the JSON-LD graph of every page two crumbs deep, the one section 8 shows beside the `BlogPosting`.
 
-### 5. Nested layout wraps the rendered Markdown
-
-[`screens/posts/layout.djx`](blog/screens/posts/layout.djx) adds the back link, the meta bar with the reading time and the share button, and a `prose` container that receives the article HTML through `{% template %}`. The loader returns the body with no wrapper of its own, so the chrome lives entirely in the layout and every post under `screens/posts/` inherits it.
-
-The outer [`site/layout.djx`](site/layout.djx) wraps that article in turn, which makes the post pages a two-level layout composition across two page roots.
-
-### 6. Page body priority
+### 5. Page body priority
 
 next.dj resolves the page body in this order:
 
@@ -151,9 +167,9 @@ next.dj resolves the page body in this order:
 2. A `template = "..."` module attribute on the page.
 3. The first registered `TemplateLoader` whose `can_load(page)` returns `True`.
 
-Only step 3 is used here, and both loaders take part. `MarkdownTemplateLoader` backs the two posts, `DjxTemplateLoader` backs the index (`screens/page.py` beside `screens/template.djx`) and the virtual `/about/` page. The highest-priority present source wins, and a page declaring more than one gets [`next.W043`](../../docs/content/ref/system-checks.rst) at `manage.py check` time naming the winner. A `TEMPLATE_LOADERS` entry that is not a string surfaces as `next.E042`, one that cannot be imported as `next.E043`, and one that resolves to a class that is no `TemplateLoader` as `next.E089`.
+Only step 3 is used here, and both loaders take part. `MarkdownTemplateLoader` backs `/about/`, `DjxTemplateLoader` backs the index (`screens/page.py` beside `screens/template.djx`) and the post route. The highest-priority present source wins, and a page declaring more than one gets [`next.W043`](../../docs/content/ref/system-checks.rst) at `manage.py check` time naming the winner. A `TEMPLATE_LOADERS` entry that is not a string surfaces as `next.E042`, one that cannot be imported as `next.E043`, and one that resolves to a class that is no `TemplateLoader` as `next.E089`.
 
-### 7. Tracing which loader won through `template_loaded`
+### 6. Tracing which loader won through `template_loaded`
 
 The framework sends `next.pages.signals.template_loaded` after a page registers its template source, with the page `file_path` as the only payload. [`blog/receivers.py`](blog/receivers.py) uses it to answer the question the priority list above raises in practice — which source actually backed a given page:
 
@@ -166,23 +182,11 @@ def _on_template_loaded(file_path: Path, **kwargs) -> None:
 
 `_detect_source` looks for a sibling `template.md`, then a sibling `template.djx`, and reports `page.py` when neither is present. The map is guarded by a `threading.Lock` because pages load lazily on first request and the dev server serves those requests on several threads. `loader_hits()` returns a copy, so a caller never iterates the live dictionary while another thread writes to it. [`BlogConfig.ready`](blog/apps.py) imports the module so the connection exists before the first page loads.
 
-### 8. `{% url %}` with a variable name
-
-The index links each post through the derived name rather than a hard-coded path:
-
-```djx
-{% for post in posts %}
-  <a href="{% url post.url_name %}">{{ post.title }}</a>
-{% endfor %}
-```
-
-Django's `{% url %}` accepts an unquoted variable as the name. Renaming a post folder changes the route, the generated URL name, and `post.url_name` together, so no template edit follows.
-
-### 9. Share button, a component with no Python side
+### 7. Share button, a component with no Python side
 
 [`_parts/share_button/`](blog/screens/_parts/share_button/) is a directory with `component.djx` and `component.js` and no `component.py`. A directory holding a `component.djx` is already a component, so nothing has to be added to make the framework find it.
 
-The click handler reads the serialized post metadata the page put on the window:
+The click handler reads the serialized post the page put on the window:
 
 ```js
 const post = window.Next?.context?.post;
@@ -191,65 +195,126 @@ await navigator.clipboard.writeText(`${post.title} — ${location.href}`);
 
 `component.js` is collected by `{% collect_scripts %}` in the root layout only on pages that render the component. The index and `/about/` never call `share_button`, so its script is absent from their HTML. The handler bails out when `window.Next.context.post` is missing, which is what happens if the component is ever rendered outside a post page, and it reports a failed `navigator.clipboard` write on the button itself rather than throwing.
 
-### 10. Context processor for site-wide chrome
-
-[`blog/context_processors.py`](blog/context_processors.py) returns `site_tagline`, `site_year`, and `site_path` for every template rendered through the router. `site_path` is read straight off `request.path` and rendered by the footer, so the processor uses the argument the `next.E040` check requires it to accept instead of ignoring it.
-
-### 11. URL names from the file router
-
-| File | URL | Name |
-| --- | --- | --- |
-| `screens/page.py` + `screens/template.djx` | `/` | `next:page_` |
-| `screens/about/page.py` + `screens/about/template.djx` | `/about/` | `next:page_about` |
-| `screens/posts/welcome/page.py` + `template.md` | `/posts/welcome/` | `next:page_posts_welcome` |
-| `screens/posts/hello-world/page.py` + `template.md` | `/posts/hello-world/` | `next:page_posts_hello_world` |
-
-Hyphens in folder names become underscores in the name, so `hello-world` routes as `/posts/hello-world/` and reverses as `page_posts_hello_world`. `screens/posts/` itself holds only `layout.djx`, so it contributes chrome without becoming a route. Every name resolves under the Spanish prefix too, because [`config/urls.py`](config/urls.py) wraps `include("next.urls")` in `i18n_patterns(..., prefix_default_language=False)`: `/posts/welcome/` stays the English URL and `/es/posts/welcome/` serves the same page with Spanish active. The blog ships no translations, Spanish is there only as a second language for the hreflang alternates and the sitemap to point at.
-
-### 12. Page metadata from the post source
+### 8. Page metadata from the front matter
 
 The `<title>` is not in any template. [`site/layout.djx`](site/layout.djx) calls the shared `page_head` component and that component renders `{% metadata %}`, the builtin tag that writes the head tags of the page being rendered. What it writes is the fold of three tiers, outermost first.
 
-The settings tier is `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` in [`config/settings.py`](config/settings.py). `base` is the canonical origin of the site, `https://blog.example` here, and every relative URL the tag emits is made absolute against it, so the canonical and the hreflang links point at the published domain rather than at whatever host served the request. `site_name`, a site-wide `description`, `og: {"type": "website"}` and the `title` template `{title} · {site_name}` with its `default` sit beside it. The template applies to every page below, the default is what a page without a title of its own renders.
+The settings tier is `NEXT_FRAMEWORK["SITE"]` beside `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` in [`config/settings.py`](config/settings.py). `SITE["URL"]` is the published origin, `https://blog.example` here, and every relative URL the tag emits is made absolute against it, so the canonical, the feed and the social image point at the published domain rather than at whatever host served the request. `SITE["NAME"]` fills `{site_name}` and `og:site_name`. `SITE["INDEXABLE"]` is pinned to `True`, the default `"auto"` follows `DEBUG` and would put `noindex` on every page of the dev server. The defaults hold the viewport, the tab icon, a site-wide `description`, `og: {"type": "website"}` and the `title` template `{title} · {site_name}` with its `default`.
 
-The root [`screens/page.py`](blog/screens/page.py) declares the static tier as a module dict, and a dict is inherited by every descendant:
+The root [`screens/page.py`](blog/screens/page.py) declares the tier every page shares, a module dict every descendant inherits ahead of its own metadata:
 
 ```python
 metadata: MetadataDict = {
     "title": "Latest posts",
+    "breadcrumb": "Home",
     "canonical": True,
-    "alternates": {"languages": True},
+    "og": {
+        "images": [
+            {
+                "url": SOCIAL_IMAGE,
+                "type": "image/png",
+                "width": 1200,
+                "height": 630,
+                "alt": "A white band with an indigo mark on a slate background",
+            }
+        ]
+    },
+    "alternates": {
+        "feeds": [{"url": reverse_lazy("feed"), "type": "rss", "title": "next.dj blog"}]
+    },
 }
 ```
 
-`canonical: True` means the page's own path, so `/posts/welcome/` emits `https://blog.example/posts/welcome/` without anyone spelling it. `alternates.languages: True` reads `LANGUAGES` and the `i18n_patterns` URLconf and emits one `<link rel="alternate" hreflang>` per language plus `x-default`, each URL translated through Django's `translate_url`. The `LocaleMiddleware` activates Spanish under `/es/`, and the `i18n` context processor registered on the page backend hands `LANGUAGE_CODE` to the layout, so `<html lang>` follows the prefix and `og:locale` follows the active language. [`screens/about/page.py`](blog/screens/about/page.py) is the smallest possible `page.py`, a dict with a title and a description, and it exists only so `/about/` names itself instead of inheriting `Latest posts`.
+The dict folds once, not per request, and the feed address comes from its URL name rather than being spelled twice, since `reverse_lazy("feed")` waits for the URLconf and reverses when a page renders. `canonical: True` means the page's own path, so `/posts/welcome/` emits `https://blog.example/posts/welcome/` without anyone spelling it. `alternates.feeds` adds `<link rel="alternate" type="application/rss+xml">`, so a feed reader pointed at any page finds section 9. `og.images` is the social card of section 10. [`screens/about/page.py`](blog/screens/about/page.py) is the smallest possible `page.py`, a dict with a title and a description.
 
-A post cannot be a dict because its title lives in the Markdown. The `post_meta` callable from section 4 is the dynamic tier, `@page.metadata` runs it for that page only, and its return value is the same `MetadataDict` shape. [`blog/markdown_template.py`](blog/markdown_template.py) supplies the `excerpt` it uses, the first paragraph after the heading with inline markup stripped and cut to a description-sized length. Static and dynamic are one form per file, a `page.py` declares either the dict or the callable. The callable may take any name, `metadata` included, and a decorated function under that name still counts as the callable rather than the dict.
+A post cannot be a dict, its head lives in its front matter. `post_meta` in [`[slug]/page.py`](blog/screens/posts/%5Bslug%5D/page.py) is the dynamic tier:
 
-The integration tests read the rendered head straight off the response. `manage.py check` covers the structural half at import time, a template without `{title}`, a template without a default, a `page.py` declaring both forms, metadata without `{% metadata %}` anywhere in the composition, and `manage.py check --deploy --tag seo` audits the content of the static tier before a deploy.
+```python
+@page.metadata
+def post_meta(article: Post) -> MetadataDict:
+    return {
+        "title": article.title,
+        "description": article.description,
+        "keywords": list(article.keywords),
+        "og": {
+            "type": "article",
+            "article": {
+                "published_time": article.published,
+                "modified_time": article.modified,
+                "authors": [article.author],
+                "tags": list(article.keywords),
+            },
+        },
+        "jsonld": [
+            {
+                "@type": "BlogPosting",
+                "headline": article.title,
+                "datePublished": article.published,
+                "dateModified": article.modified,
+                "image": [absolute_url(SOCIAL_IMAGE)],
+                "author": [{"@type": "Person", "name": article.author}],
+            }
+        ],
+    }
+```
+
+It names the `article` context key and reads the `Post` that callable already parsed. `keywords` takes a list and renders one `<meta name="keywords">` joined by commas. The `og` block merges into the one the settings and the root declare, so `og:type` turns to `article` while `og:site_name` and the social image stay. The structured data is a plain schema.org dict, the dates serialise as ISO days, and every node of the fold lands in one `@graph`, so a post carries the `BlogPosting` and the `BreadcrumbList` of section 4 in a single script. The framework makes an `@id` absolute but leaves the other values as written, so `image` goes through `next.pages.metadata.absolute_url`, the helper the head resolves its own URLs with, and names the same card the Open Graph tags use, since an article earns its rich result only with an image.
+
+The integration tests read the head back through `next.testing.assert_metadata`, which parses the tags of a response and compares only the keys a test names. `manage.py check` validates every metadata dict and the sources of the page root at startup.
+
+### 9. An RSS feed beside the pages
+
+[`blog/feeds.py`](blog/feeds.py) is a stock `django.contrib.syndication` `Feed` over `all_posts()`, mounted at `/feed.xml` under the name `feed` in [`config/urls.py`](config/urls.py). Its `link`, `feed_url` and `item_link` go through `next.pages.metadata.absolute_url`, so the feed says `https://blog.example` whichever host served it.
+
+### 10. A social image and a tab icon from staticfiles
+
+[`blog/static/blog/opengraph-image.png`](blog/static/blog/opengraph-image.png) and [`icon.svg`](blog/static/blog/icon.svg) beside it are ordinary app static files, so `collectstatic` and a hashed storage apply to them like to any other asset. `SOCIAL_IMAGE` in [`blog/posts.py`](blog/posts.py) is `static("blog/opengraph-image.png")`, and the root metadata of section 8 declares it under `og.images` with its type, its 1200 by 630 size and its alt text, so every page renders the full `og:image` block. The tab icon is declared once under `icons` in `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]`, where the settings module can only spell its URL, `/static/blog/icon.svg`.
+
+### 11. Context processor for site-wide chrome
+
+[`blog/context_processors.py`](blog/context_processors.py) returns `site_tagline`, `site_year`, and `site_path` for every template rendered through the router. `site_path` is read straight off `request.path` and rendered by the footer, so the processor uses the argument the `next.E040` check requires it to accept instead of ignoring it.
+
+### 12. URL names from the file router
+
+| File | URL | Name |
+| --- | --- | --- |
+| `screens/page.py` + `screens/template.djx` | `/` | `next:page_` |
+| `screens/about/page.py` + `screens/about/template.md` | `/about/` | `next:page_about` |
+| `screens/posts/[slug]/page.py` + `template.djx` | `/posts/<slug>/` | `next:page_posts_slug` |
+
+The index links each post with `{% url 'next:page_posts_slug' slug=post.slug %}`. `screens/posts/` itself holds only `layout.djx`, so it contributes chrome without becoming a route.
 
 ### 13. Sitemap and robots from the page root
 
-A `sitemap.py` at the top of a page root switches `/sitemap.xml` on for that tree. The blog's is [`blog/screens/sitemap.py`](blog/screens/sitemap.py), four lines and no code:
+A `sitemap.py` at the top of a page root switches `/sitemap.xml` on for that tree. The blog's is [`blog/screens/sitemap.py`](blog/screens/sitemap.py):
 
 ```python
-i18n = True
-alternates = True
-x_default = True
 changefreq = "weekly"
+
+
+@sitemap.items("posts/[slug]")
+def posts() -> Iterator[SitemapEntry]:
+    for post in all_posts():
+        yield SitemapEntry(kwargs={"slug": post.slug}, lastmod=post.modified)
 ```
 
-Every route without a `[param]` segment is listed on its own, so `/`, `/about/` and the two posts are in the document because they are directories, and nothing has to enumerate them. A route whose static metadata says `noindex` is left out, a dynamic route needs an `@sitemap.items` callable, which the [wiki](../wiki/) shows, and `exclude = ["drafts/**"]` drops whole trails by glob. The module attributes are the ones Django's `Sitemap` class reads, `i18n`, `languages`, `alternates`, `x_default`, `changefreq`, `priority`, `protocol`, `limit`, plus `cache` for a `cache_page` wrapper. `i18n = True` lists every URL once per entry of `LANGUAGES`, reversed under `translation.override`, so the `i18n_patterns` prefix of section 12 lands in the path, `/posts/welcome/` and `/es/posts/welcome/` are two `<url>` entries. `alternates` and `x_default` add the `<xhtml:link hreflang>` block to each of them, the same set the `<head>` already carries. Every `<loc>` is absolute on `base`, so the document says `https://blog.example` whichever host served it. The XML comes from the templates of `django.contrib.sitemaps`, which is why that app joins `INSTALLED_APPS` in [`config/settings.py`](config/settings.py).
+Every route without a `[param]` segment is listed on its own, so `/` and `/about/` are in the document because they are directories. The post route has a parameter, so `@sitemap.items` names its URLs, one `SitemapEntry` per file with the kwargs that reverse the route and the day of its last edit as `lastmod`. The module attributes are the ones Django's `Sitemap` class reads, `changefreq` here, plus `cache` for a `cache_page` wrapper. Every `<loc>` is absolute on `SITE["URL"]`. The XML comes from the templates of `django.contrib.sitemaps`, which is why that app joins `INSTALLED_APPS` in [`config/settings.py`](config/settings.py). The tests read the document back through `next.testing.parse_sitemap`.
 
-The sitemap and the robots file belong at the host root, and [`config/urls.py`](config/urls.py) has `next.urls` inside `i18n_patterns`, so the routes that include mounts answer at `/sitemap.xml` only through the prefix-free default language, and `/es/sitemap.xml` and `/es/robots.txt` serve a second copy of each. The line `path("", include("next.seo.urls"))` above the language block mounts `sitemap.xml`, `sitemap-<section>.xml` and `robots.txt` at the root outright, and the copies under the language prefix then answer 404, so each document has one address. `/sitemap-blog.xml` is the section of this one root, labelled after the app, and with a single root `/sitemap.xml` is the same document. An index takes its place on its own once a second root declares a `sitemap.py` or a section grows past `limit`.
+`include("next.urls")` sits at the root of [`config/urls.py`](config/urls.py), so it mounts `/sitemap.xml`, `/sitemap-<section>.xml` and `/robots.txt` at the host root with no URL of their own. `/sitemap-blog.xml` is the section of this one root, labelled after the app, and with a single root `/sitemap.xml` is the same document. An index takes its place on its own once a second root declares a `sitemap.py` or a section grows past `limit`.
 
-Robots has two forms and the blog uses the static one, [`blog/screens/robots.txt`](blog/screens/robots.txt). A `robots.txt` at the page root is served byte for byte as `text/plain; charset=utf-8`, nothing is appended, so the `Sitemap:` line is written by hand with the absolute URL, and the check warns when a sitemap exists and the file does not name it. The other form is a `robots.py` declaring `rules = [Rule(...)]`, the [wiki](../wiki/) and the [shortener](../shortener/) show it, and that form gets the `Sitemap:` line from the framework. A site has one source for `/robots.txt`, both files in one root or robots in two roots is an error at check time.
+Robots comes from [`blog/screens/robots.py`](blog/screens/robots.py), one `RobotsRule` that allows everything:
+
+```python
+rules = [RobotsRule(allow="/")]
+```
+
+The framework renders the group and appends the `Sitemap:` line itself, absolute on `SITE["URL"]`, so no host is written into a file. `rules` may also be a callable building the groups per request. A static `robots.txt` at the page root is served byte for byte instead, which suits a file handed over by someone else. A site has one source for `/robots.txt`, both files in one root or robots in two roots is an error at check time.
 
 ## Gotchas
 
 ### A page needs a body source, and a sibling layout counts
 
-`next.E012` fails when a `page.py` has none of a `render()` function, a `template` attribute, a loader that can load it, or a sibling `layout.djx`. An _ancestor_ layout does not satisfy it. Every post directory here passes through its `template.md`.
+`next.E012` fails when a `page.py` has none of a `render()` function, a `template` attribute, a loader that can load it, or a sibling `layout.djx`. An _ancestor_ layout does not satisfy it. `/about/` passes through its `template.md`, the post route through its `template.djx`.
 
 ### The nav components resolve against `resolver_match`
 
@@ -261,16 +326,15 @@ The example sets `STATIC_VERSION` and the partial asset version derives from it,
 
 ### Loader output is a template body, not a variable
 
-`MarkdownTemplateLoader.load_template` returns HTML and the framework splices it into the composed template source, which Django's engine then parses. There is no `|safe` and no double escaping, and by the same token a loader must never return user-supplied HTML unsanitised. This example trusts the files in its own repository.
+`MarkdownTemplateLoader.load_template` returns HTML and the framework splices it into the composed template source, which Django's engine then parses. There is no `|safe` and no double escaping, and by the same token a loader must never return user-supplied HTML unsanitised. This example trusts the files in its own repository, the post bodies included, which `Post.html` marks safe for the same reason.
 
 ## Further reading
 
 - [`next/pages/loaders.py`](../../next/pages/loaders.py) — the `TemplateLoader` ABC, `build_registered_loaders`, `compose_body`, and layout discovery.
-- [`next/pages/manager/__init__.py`](../../next/pages/manager/__init__.py) — `_resolve_page_body` and the layout composition entry point.
-- [`next/pages/signals.py`](../../next/pages/signals.py) — the `template_loaded` payload contract used in section 7.
+- [`next/pages/signals.py`](../../next/pages/signals.py) — the `template_loaded` payload contract used in section 6.
 - [`next/pages/processors.py`](../../next/pages/processors.py) — context-processor discovery across the router and Django `TEMPLATES`.
-- [`next/pages/metadata/`](../../next/pages/metadata/) — the metadata chain of section 12: the `MetadataDict` schema, the fold, and the `{% metadata %}` renderer.
-- [`next/seo/`](../../next/seo/) — the sitemap and robots of section 13: `RouteSitemap` over the page tree, the two robots sources, and the `next.seo.urls` include.
+- [`next/pages/metadata/`](../../next/pages/metadata/) — the metadata chain of section 8: the `MetadataDict` schema, `absolute_url`, the breadcrumbs and the `{% metadata %}` renderer.
+- [`next/seo/`](../../next/seo/) — the sitemap and robots of section 13 and `RobotsRule`.
 - [`next/static/serializers.py`](../../next/static/serializers.py) — how `@context(serialize=True)` values reach `window.Next.context`.
 - [`docs/content/topics/pages.rst`](../../docs/content/topics/pages.rst) — the "Custom template loaders" section this example anchors.
 - [`docs/content/ref/system-checks.rst`](../../docs/content/ref/system-checks.rst) — `next.E012`, `next.E040`, `next.E042`, `next.E043`, `next.E089`, and `next.W043`.

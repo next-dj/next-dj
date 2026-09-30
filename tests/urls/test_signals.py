@@ -247,7 +247,7 @@ class TestRouterBackendLoadedSignal:
     def test_a_quiet_reload_announces_nothing(
         self, capture_router_backend_loaded: SignalRecorder
     ) -> None:
-        """`notify=False` withholds the per-backend announcement too, not just the reload."""
+        """`notify=False` withholds the per-backend announcement too."""
         manager = RouterManager()
         manager.reload(notify=False)
 

@@ -16,7 +16,6 @@ from django.utils.autoreload import (
 
 from next.apps import autoreload as next_autoreload, components as next_components
 from next.components import FileComponentsBackend, components_manager
-from next.components.ports import ComponentTagsImpl
 from next.deps import resolver
 from next.deps.introspect import _signature_cache
 from next.pages import loaders as pages_loaders
@@ -25,19 +24,21 @@ from next.pages.watch import get_pages_directories_for_watch
 from next.partial.ports import PartialShaperImpl
 from next.ports import (
     PortSlot,
-    component_tags_slot,
     page_scan_slot,
+    page_scripts_slot,
     partial_shaper_slot,
     router_access_slot,
     seo_routes_slot,
     static_assets_slot,
 )
+from next.scripts.ports import PageScriptsImpl
 from next.seo.manager import seo_manager
 from next.seo.ports import SeoRoutesImpl
 from next.server import NextStatReloader
 from next.static import get_static_manager
 from next.static.ports import StaticAssetsImpl
 from next.urls import RouterFactory, router_manager
+from next.urls.manager import seo_routes_version
 from next.urls.ports import RouterAccessImpl
 from next.urls.signals import router_reloaded
 from tests.support import (
@@ -54,8 +55,8 @@ if TYPE_CHECKING:
 
 
 _PROCESS_SLOTS = (
-    component_tags_slot,
     page_scan_slot,
+    page_scripts_slot,
     partial_shaper_slot,
     router_access_slot,
     seo_routes_slot,
@@ -133,7 +134,7 @@ class TestNextFrameworkConfig:
     def test_autoreload_started_leaves_an_unrouted_app_tree_alone(
         self, mock_autoreload_sender, tmp_path, settings
     ) -> None:
-        """Without ``APP_DIRS`` the app tree routes nothing, so it never reaches watch_dir."""
+        """Without ``APP_DIRS`` the app tree routes nothing and reaches no watch_dir."""
         app_pages = tmp_path / "shop" / "pages"
         app_pages.mkdir(parents=True)
         (tmp_path / "shop" / "__init__.py").write_text("")
@@ -316,7 +317,7 @@ class TestStaticfilesInstall:
     """``next.apps.staticfiles.install`` wires the static files finder."""
 
     def test_next_static_files_finder_in_finders(self) -> None:
-        """``NextStaticFilesFinder`` is present in ``STATICFILES_FINDERS`` after ready()."""
+        """``NextStaticFilesFinder`` sits in ``STATICFILES_FINDERS`` after ready()."""
         finders = getattr(settings, "STATICFILES_FINDERS", [])
         assert "next.static.NextStaticFilesFinder" in finders
 
@@ -394,11 +395,12 @@ class TestDependencyResolverInstall:
     STEPS: ClassVar[tuple[str, ...]] = (
         "_register_checks",
         "apply_resolver_setting",
-        "component_tags_slot",
         "page_scan_slot",
         "partial_shaper_slot",
         "router_access_slot",
+        "page_scripts_slot",
         "seo_routes_slot",
+        "seo_routes_version",
         "static_assets_slot",
         "autoreload",
         "templates",
@@ -421,11 +423,12 @@ class TestDependencyResolverInstall:
         assert made == [
             "_register_checks",
             "apply_resolver_setting",
-            "component_tags_slot.set",
             "page_scan_slot.set",
             "partial_shaper_slot.set",
             "router_access_slot.set",
+            "page_scripts_slot.set",
             "seo_routes_slot.set",
+            "seo_routes_version.move",
             "static_assets_slot.set",
             "autoreload.install",
             "templates.install",
@@ -437,12 +440,6 @@ class TestDependencyResolverInstall:
     @pytest.mark.parametrize(
         ("slot_name", "subject", "implementation"),
         [
-            pytest.param(
-                "component_tags_slot",
-                "component tags port",
-                ComponentTagsImpl,
-                id="tags",
-            ),
             pytest.param("page_scan_slot", "page scan port", PageScanImpl, id="scan"),
             pytest.param(
                 "partial_shaper_slot", "partial shaper", PartialShaperImpl, id="shaper"
@@ -452,6 +449,9 @@ class TestDependencyResolverInstall:
                 "router access port",
                 RouterAccessImpl,
                 id="router",
+            ),
+            pytest.param(
+                "page_scripts_slot", "page scripts port", PageScriptsImpl, id="scripts"
             ),
             pytest.param("seo_routes_slot", "seo routes port", SeoRoutesImpl, id="seo"),
             pytest.param(
@@ -485,13 +485,19 @@ class TestDependencyResolverInstall:
 
         assert len(router_reloaded.receivers) == connected
         assert [type(slot.get()) for slot in _PROCESS_SLOTS] == [
-            ComponentTagsImpl,
             PageScanImpl,
+            PageScriptsImpl,
             PartialShaperImpl,
             RouterAccessImpl,
             SeoRoutesImpl,
             StaticAssetsImpl,
         ]
+
+    def test_ready_moves_the_token_of_the_spliced_routes(self) -> None:
+        """A resolve made before the port bound built without the SEO routes."""
+        before = seo_routes_version.value
+        apps.get_app_config("next").ready()
+        assert seo_routes_version.value not in {0, before}
 
     def test_a_router_reload_resets_the_seo_manager(self) -> None:
         """The SEO routes follow the routers, so their memo goes with a reload."""

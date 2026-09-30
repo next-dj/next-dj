@@ -6,10 +6,13 @@ imports the rest of the framework, so the configuration layer has no dependencie
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Final
 
 
 USER_SETTING: str = "NEXT_FRAMEWORK"
+
+AUTO: Final = "auto"
+"""The value of every setting whose mode the framework picks per request."""
 
 DEFAULTS: dict[str, Any] = {
     "PAGE_BACKENDS": [
@@ -50,7 +53,32 @@ DEFAULTS: dict[str, Any] = {
     ],
     "TEMPLATE_LOADERS": ["next.pages.loaders.DjxTemplateLoader"],
     "NEXT_JS_OPTIONS": {},
-    "METADATA": {"RENDERER": "next.pages.HtmlMetadataRenderer"},
+    "METADATA": {
+        "RENDERER": "next.pages.HtmlMetadataRenderer",
+        "DEFAULTS": {},
+        "CANONICAL_QUERY": [],
+    },
+    "SITE": {"URL": None, "NAME": None, "INDEXABLE": AUTO},
+    "SEO": {
+        "SITEMAP_BACKENDS": [
+            {"BACKEND": "next.seo.PageTreeSitemapBackend", "OPTIONS": {}}
+        ]
+    },
+    "CSRF_DELIVERY": AUTO,
+    "CSP_NONCE": True,
+    "CONSENT": {
+        "BACKEND": "next.consent.CookieConsentBackend",
+        "CATEGORIES": ["necessary"],
+        "SERVER_RENDER": AUTO,
+        "OPTIONS": {
+            "cookie_name": "next_consent",
+            "max_age": 15552000,
+            "samesite": "Lax",
+            "secure": None,
+            "domain": None,
+            "path": "/",
+        },
+    },
     "STRICT_CONTEXT": False,
     "STRICT_LOADING": False,
     "LAZY_COMPONENT_MODULES": False,

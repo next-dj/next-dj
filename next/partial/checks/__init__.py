@@ -1,6 +1,6 @@
 """System checks for the partial-rendering subsystem.
 
-Importing the package registers every check, and each submodule names the ids it owns.
+Importing the package registers every check.
 """
 
 from .backends import (

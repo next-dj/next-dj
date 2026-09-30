@@ -6,7 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from next.caches import BoundedCache
-from next.deps.cache import shared_dep_cache
+from next.deps.cache import render_dep_cache
 from next.deps.resolver import current_resolver
 from next.introspect import MisattributedContext, MisattributionLog, callable_name
 
@@ -17,7 +17,7 @@ from .signals import context_registered
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
     from pathlib import Path
 
     from django.http import HttpRequest
@@ -57,11 +57,62 @@ logger = logging.getLogger(__name__)
 type _OrderedEntries = tuple[tuple[str | None, PageContextEntry], ...]
 
 
+def _merge_rank(item: tuple[str | None, PageContextEntry]) -> tuple[bool, str]:
+    """Rank one callable of a file, keyless first and keyed by the key string."""
+    return item[0] is not None, item[0] or ""
+
+
+def _in_merge_order(entries: dict[str | None, PageContextEntry]) -> _OrderedEntries:
+    """Order the callables of one file the way its merge consumes them."""
+    return tuple(sorted(entries.items(), key=_merge_rank))
+
+
+class _PageOrder(NamedTuple):
+    """The callables of the page itself in run order, with the keys its merge spares.
+
+    `shielded` names the keyed values set ahead of the dict merge, which spares them.
+    """
+
+    entries: _OrderedEntries
+    shielded: frozenset[str]
+
+
+def _page_order(entries: dict[str | None, PageContextEntry]) -> _PageOrder:
+    """Order the page callables, the inheritable ones first and as the file lists them.
+
+    Descendants run those in declaration order too, so the page sees what they see.
+    """
+    inherited = tuple(item for item in entries.items() if item[1].inherit_context)
+    if not inherited:
+        return _PageOrder(_in_merge_order(entries), frozenset())
+    rest = _in_merge_order(
+        {key: entry for key, entry in entries.items() if not entry.inherit_context}
+    )
+    ordered = inherited + rest
+    before: list[str] = []
+    for key, _entry in ordered:
+        if key is None:
+            return _PageOrder(ordered, frozenset(before))
+        before.append(key)
+    return _PageOrder(ordered, frozenset())
+
+
 def _keyless_shape_error(
     func: Callable[..., Any], file_path: Path
 ) -> PageContextShapeError:
     """Return the error a keyless `@context` returning a non-mapping raises."""
     return PageContextShapeError(callable_name(func), file_path)
+
+
+def _keyless_result(
+    result: object, entry: PageContextEntry, file_path: Path, shielded: frozenset[str]
+) -> dict[str, Any]:
+    """Return the mapping a keyless callable answered, less the shielded keys."""
+    if not isinstance(result, dict):
+        raise _keyless_shape_error(entry.func, file_path)
+    if not shielded:
+        return result
+    return {name: value for name, value in result.items() if name not in shielded}
 
 
 class PageContextRegistry:
@@ -78,8 +129,10 @@ class PageContextRegistry:
         self._memo_version = 0
         # Bounded, because a router is free to name page paths without end while
         # the registry itself only ever holds the files a `@context` ran in.
-        self._merge_order: BoundedCache[Path, _OrderedEntries] = BoundedCache()
-        self._inheritable: BoundedCache[Path, _OrderedEntries] = BoundedCache()
+        self._merge_order: BoundedCache[Path, _PageOrder] = BoundedCache()
+        self._inheritable: BoundedCache[Path, tuple[_OrderedEntries, ...]] = (
+            BoundedCache()
+        )
 
     @property
     def version(self) -> int:
@@ -221,7 +274,7 @@ class PageContextRegistry:
         context_data: dict[str, Any] = {}
         js_context: dict[str, Any] = {}
         js_context_serializers: dict[str, JsContextSerializer] = {}
-        dep_cache = shared_dep_cache(request) if dep_cache is None else dep_cache
+        dep_cache = render_dep_cache(request) if dep_cache is None else dep_cache
         dep_stack: list[str] = []
 
         inherited_context = self._collect_inherited_context(
@@ -232,7 +285,8 @@ class PageContextRegistry:
         # Read once for the whole merge, because every attribute taken off the
         # shared holder is a call forwarded to the object behind it.
         active = current_resolver()
-        for key, entry in self._entries_in_merge_order(file_path):
+        order = self._page_order(file_path)
+        for key, entry in order.entries:
             # `isdisjoint` tests the batch without allocating an intersection.
             if (
                 _requested_zones is not None
@@ -250,11 +304,10 @@ class PageContextRegistry:
             )
             result = entry.func(**resolved)
             if key is None:
-                if not isinstance(result, dict):
-                    raise _keyless_shape_error(entry.func, file_path)
+                result = _keyless_result(result, entry, file_path, order.shielded)
                 context_data.update(result)
                 if entry.serialize:
-                    # The one keyless callable opens the merge, so js_context is empty.
+                    # Only a shielded key can precede the one keyless callable.
                     js_context.update(result)
                     if entry.serializer is not None:
                         for k in result:
@@ -282,29 +335,35 @@ class PageContextRegistry:
     ) -> dict[str, Any]:
         """Return values from ancestor `page.py` callables marked `inherit_context`.
 
-        No sibling `layout.djx` is required, so the envelope under
-        ``PAGE_BACKENDS["DIRS"]`` reaches descendant routes.
+        Outer files run first and keep their keys, each file in declaration order.
         """
         inherited_context: dict[str, Any] = {}
-        entries = self._inheritable_entries(file_path)
-        if not entries:
+        groups = self._inheritable_groups(file_path)
+        if not groups:
             return inherited_context
         active = current_resolver()
-        for key, entry in entries:
-            resolved = active.resolve_dependencies(
-                entry.func,
-                request=request,
-                _cache=dep_cache,
-                _stack=dep_stack,
-                **url_kwargs,
-            )
-            if key is None:
-                inherited = entry.func(**resolved)
-                if not isinstance(inherited, dict):
+        for group in groups:
+            merged: tuple[str, ...] = ()
+            for key, entry in group:
+                if key is not None and key in inherited_context and key not in merged:
+                    continue
+                resolved = active.resolve_dependencies(
+                    entry.func,
+                    request=request,
+                    _cache=dep_cache,
+                    _stack=dep_stack,
+                    _context_data=inherited_context,
+                    **url_kwargs,
+                )
+                result = entry.func(**resolved)
+                if key is not None:
+                    inherited_context[key] = result
+                    continue
+                if not isinstance(result, dict):
                     raise _keyless_shape_error(entry.func, file_path)
-                inherited_context.update(inherited)
-            else:
-                inherited_context[key] = entry.func(**resolved)
+                merged = tuple(name for name in result if name not in inherited_context)
+                for name in merged:
+                    inherited_context[name] = result[name]
         return inherited_context
 
     def _sync_memos(self) -> None:
@@ -314,37 +373,38 @@ class PageContextRegistry:
             self._inheritable.clear()
             self._memo_version = self._version
 
-    def _entries_in_merge_order(self, file_path: Path) -> _OrderedEntries:
-        """Return this file's callables in the order the merge consumes them.
+    def _page_order(self, file_path: Path) -> _PageOrder:
+        """Return this file's callables in the order its own merge consumes them."""
+        self._sync_memos()
+        order = self._merge_order.get(file_path)
+        if order is None:
+            order = _page_order(self._context_registry.get(file_path, {}))
+            self._merge_order[file_path] = order
+        return order
 
-        Keyless callables come first, so a dict merge never overwrites a keyed value.
+    def _inheritable_groups(self, file_path: Path) -> tuple[_OrderedEntries, ...]:
+        """Return the inheritable callables of every ancestor file, outermost first.
+
+        The page itself is left out, because its own merge runs those callables.
         """
         self._sync_memos()
-        entries = self._merge_order.get(file_path)
-        if entries is None:
-            entries = tuple(
-                sorted(
-                    self._context_registry.get(file_path, {}).items(),
-                    key=lambda item: (item[0] is not None, str(item[0] or "")),
-                )
-            )
-            self._merge_order[file_path] = entries
-        return entries
+        groups = self._inheritable.get(file_path)
+        if groups is None:
+            groups = tuple(self._build_inheritable_groups(file_path))
+            self._inheritable[file_path] = groups
+        return groups
 
-    def _inheritable_entries(self, file_path: Path) -> _OrderedEntries:
-        """Return the inheritable callables of the ancestor chain, nearest first.
+    def _build_inheritable_groups(self, file_path: Path) -> Iterator[_OrderedEntries]:
+        """Yield the inheritable callables of each ancestor file off the registry.
 
-        The chain is read out of the registry by path, so a render probes no
-        directory and a deleted `page.py` contributes until a reload.
+        No directory is probed, so a deleted `page.py` contributes until a reload.
         """
-        self._sync_memos()
-        entries = self._inheritable.get(file_path)
-        if entries is None:
-            entries = tuple(
-                (key, entry)
-                for ancestor in page_path_info(file_path).ancestors
-                for key, entry in self._context_registry.get(ancestor, {}).items()
-                if entry.inherit_context
+        for ancestor in reversed(page_path_info(file_path).ancestors):
+            entries = self._context_registry.get(ancestor)
+            if ancestor == file_path or not entries:
+                continue
+            group = tuple(
+                (key, entry) for key, entry in entries.items() if entry.inherit_context
             )
-            self._inheritable[file_path] = entries
-        return entries
+            if group:
+                yield group

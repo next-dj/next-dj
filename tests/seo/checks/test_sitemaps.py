@@ -1,16 +1,30 @@
 from django.conf import settings
+from django.contrib.sitemaps import Sitemap
 from django.core.checks import WARNING
 from django.test import override_settings
 
+from next.seo import SitemapBackend
 from next.seo.checks import (
     check_sitemap_dynamic_routes,
+    check_sitemap_excluded_items,
+    check_sitemap_i18n_options,
     check_sitemap_items_trails,
     check_sitemap_noindex_items,
+    check_sitemap_section_collisions,
     check_sitemap_section_labels,
     check_sitemap_templates,
 )
-from tests.seo.trees import NOINDEX, POSTS_ITEMS, routed, write_tree
-from tests.support import check_ids, write_page
+from tests.support import (
+    CLOSED_SITE,
+    I18N,
+    I18N_URLCONF,
+    NOINDEX,
+    POSTS_ITEMS,
+    check_ids,
+    routed,
+    write_page,
+    write_tree,
+)
 
 
 NO_APP_DIRS = [
@@ -151,6 +165,12 @@ class TestDynamicRoutes:
         with routed(root):
             assert check_sitemap_dynamic_routes() == []
 
+    def test_a_statically_noindex_route_passes(self, tmp_path) -> None:
+        root = write_tree(tmp_path / "pages", sitemap="")
+        write_page(root, "posts/[slug]", NOINDEX)
+        with routed(root):
+            assert check_sitemap_dynamic_routes() == []
+
 
 class TestNoindexItems:
     """Items listed for a noindex page warn (`next.W098`)."""
@@ -170,3 +190,128 @@ class TestNoindexItems:
         )
         with routed(root):
             assert check_sitemap_noindex_items() == []
+
+    def test_a_closed_site_is_silent(self, tmp_path) -> None:
+        root = write_tree(tmp_path / "pages", sitemap=POSTS_ITEMS)
+        write_page(root, "posts/[slug]", NOINDEX)
+        with routed(root, **CLOSED_SITE):
+            assert check_sitemap_noindex_items() == []
+
+
+class TestI18nOptions:
+    """i18n options that take no effect warn (`next.W105`, `next.W106`)."""
+
+    @override_settings(**I18N)
+    def test_every_inconsistent_option_is_named(self, tmp_path) -> None:
+        root = write_tree(
+            tmp_path / "pages", sitemap="x_default = True\nlanguages = ['en', 'fr']\n"
+        )
+        with routed(root, urlconf=I18N_URLCONF):
+            messages = check_sitemap_i18n_options()
+        assert check_ids(messages) == ["next.W105"] * 3
+        assert "take effect only with i18n = True" in messages[0].msg
+        assert "only with alternates = True" in messages[1].msg
+        assert "languages names 'fr'" in messages[2].msg
+
+    def test_i18n_without_language_prefixes_warns(self, tmp_path) -> None:
+        root = write_tree(tmp_path / "pages", sitemap="i18n = True\n")
+        with routed(root):
+            messages = check_sitemap_i18n_options()
+        assert check_ids(messages) == ["next.W106"]
+        assert messages[0].obj == str(root / "sitemap.py")
+
+    @override_settings(**I18N)
+    def test_consistent_options_under_prefixes_pass(self, tmp_path) -> None:
+        root = write_tree(
+            tmp_path / "pages",
+            sitemap="i18n = True\nalternates = True\nx_default = True\n",
+        )
+        with routed(root, urlconf=I18N_URLCONF):
+            assert check_sitemap_i18n_options() == []
+
+
+class TestExcludedItems:
+    """`@sitemap.items` on a trail `exclude` covers lists nothing (`next.W107`)."""
+
+    def test_an_excluded_items_trail_warns(self, tmp_path) -> None:
+        root = write_tree(
+            tmp_path / "pages",
+            pages=("posts/[slug]",),
+            sitemap="exclude = ['posts/*']\n" + POSTS_ITEMS,
+        )
+        with routed(root):
+            messages = check_sitemap_excluded_items()
+        assert check_ids(messages) == ["next.W107"]
+        assert "@sitemap.items('posts/[slug]')" in messages[0].msg
+
+    def test_an_items_trail_outside_exclude_passes(self, tmp_path) -> None:
+        root = write_tree(
+            tmp_path / "pages",
+            pages=("posts/[slug]",),
+            sitemap="exclude = ['admin/*']\n" + POSTS_ITEMS,
+        )
+        with routed(root):
+            assert check_sitemap_excluded_items() == []
+
+
+class ExtraBackend(SitemapBackend):
+    """A backend serving a section named `pages`, and one failing to list."""
+
+    def sections(self, request):
+        """Answer the section the page tree names too."""
+        return {"pages": Sitemap()}
+
+
+class FailingBackend(SitemapBackend):
+    """A backend whose sections raise."""
+
+    def sections(self, request):
+        """Raise, as a backend reading a missing table would."""
+        raise RuntimeError
+
+
+class TestSectionCollisions:
+    """Two sources naming one section is an error (`next.E116`)."""
+
+    def test_an_items_section_taken_by_another_tree_is_an_error(self, tmp_path) -> None:
+        first = write_tree(tmp_path / "a", pages=("one",), sitemap="section = 'x'\n")
+        second = write_tree(
+            tmp_path / "b",
+            pages=("two/[slug]",),
+            sitemap="from next.seo import sitemap\n\n"
+            "@sitemap.items('two/[slug]', section='x')\n"
+            "def two():\n    return []\n",
+        )
+        with routed(first, second):
+            messages = check_sitemap_section_collisions()
+        assert check_ids(messages) == ["next.E116"]
+        assert f"@sitemap.items(section='x') in {second / 'sitemap.py'}" in (
+            messages[0].msg
+        )
+        assert f"which {first / 'sitemap.py'} already serves" in messages[0].msg
+
+    def test_a_backend_section_taken_by_a_tree_is_an_error(
+        self, tmp_path, caplog
+    ) -> None:
+        root = write_tree(tmp_path / "pages", sitemap="")
+        backends = [
+            {"BACKEND": "next.seo.PageTreeSitemapBackend"},
+            {"BACKEND": "tests.seo.checks.test_sitemaps.FailingBackend"},
+            {"BACKEND": "tests.seo.checks.test_sitemaps.ExtraBackend"},
+        ]
+        with routed(root, SEO={"SITEMAP_BACKENDS": backends}):
+            messages = check_sitemap_section_collisions()
+        assert check_ids(messages) == ["next.E116"]
+        assert messages[0].obj == "ExtraBackend"
+        assert "FailingBackend failed to list its sections" in caplog.text
+
+    def test_distinct_sections_pass(self, tmp_path) -> None:
+        root = write_tree(
+            tmp_path / "pages",
+            pages=("posts/[slug]",),
+            sitemap="from next.seo import sitemap\n\n"
+            "@sitemap.items('posts/[slug]', section='posts')\n"
+            "def posts():\n    return []\n",
+        )
+        with routed(root):
+            assert check_sitemap_section_collisions() == []

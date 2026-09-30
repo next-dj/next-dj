@@ -1,103 +1,83 @@
 .. _topics-seo-auditing:
 
-Auditing metadata
-=================
+Checking and testing SEO
+========================
 
-Two tiers of system checks read the metadata of a project.
-The default tier runs on every ``manage.py check`` and reports a declaration the framework cannot render as intended.
-The content audits run only on request and grade the folded result the way a search engine would.
-This page covers what each tier reads, how to turn the audits on, and where the thresholds live.
+Three tools tell what a project hands search engines before a crawler does.
+The system checks read the declarations without a request, ``manage.py showmetadata`` prints where each key of a page comes from, and ``next.testing`` asserts the head and the sitemap inside a test.
+This page covers each of them.
 
 .. contents::
    :local:
    :depth: 2
 
-What the checks can see
------------------------
+The system checks
+-----------------
 
-Every check reads the static fold of a page, the settings tier plus every ``metadata`` dict along its chain.
-A ``@page.metadata`` callable contributes nothing to that fold, because running user code at check time could reach a database the deploy has yet to migrate, so the checks validate the callable's shape and leave its values to the request.
-The title and description audits, ``next.W089`` to ``next.W092``, skip every page whose chain carries a callable, since the static tier of such a page is not what it renders.
-A duplicate title two rows produce at runtime is therefore a matter for the test suite rather than for the audit.
-
-The default tier
-----------------
-
-The default tier is the set of ``next.E098`` to ``next.E109`` and ``next.W084`` to ``next.W088``, from the settings scope and the title templates to the shape of every ``page.py`` declaration and the layout that renders ``{% metadata %}``.
-
-.. code-block:: bash
-   :caption: shell
-
-   uv run python manage.py check
-
-The sitemap and robots checks, ``next.E110`` to ``next.E118`` and ``next.W097`` to ``next.W104``, belong to the same default tier, read the files at the top of every page root without a request, and carry the ``seo`` and ``urls`` tags beside ``next``.
-:doc:`sitemaps` and :doc:`robots` name each code where the behaviour it guards is described.
-
-The conditions and the emitting module of every code are tabulated in :doc:`/content/ref/system-checks`.
-
-The content audits
-------------------
-
-The audits are ``next.W089`` to ``next.W096``.
-They carry ``deploy=True`` and the ``seo`` tag, so a plain ``manage.py check`` never runs them, ``manage.py check --deploy`` runs them beside the other deployment checks, and the tag narrows a run to the audits and the sitemap and robots checks, which carry it as well.
+Every ``manage.py check`` validates the ``METADATA``, ``SITE``, and ``SEO`` scopes, the ``metadata`` of every page, and the ``sitemap.py`` and ``robots.py`` of every tree.
+It reports a declaration the framework cannot serve as intended, a key of the wrong shape, a title template without a default, a route the sitemap cannot reverse, or a ``Disallow`` covering a ``noindex`` page.
+The crawler checks carry the ``seo`` tag beside ``next``, so ``--tag seo`` narrows a run to them.
 
 .. code-block:: bash
    :caption: shell
 
    uv run python manage.py check --deploy --tag seo
 
-The audits grade the description, the title, the canonical, and the hreflang mapping of every page, and :doc:`/content/ref/system-checks` holds the condition of each code.
-Titles and descriptions are measured under ``LANGUAGE_CODE``, so a translation that runs long in another language is not caught here.
+``--deploy`` adds the deployment checks of the site scope, a missing ``SITE["URL"]`` and a site closed by ``INDEXABLE`` that still publishes a sitemap or a robots source.
+:doc:`/content/ref/system-checks` holds every code and its condition.
 
-.. mermaid::
+What the checks can see
+~~~~~~~~~~~~~~~~~~~~~~~
 
-   flowchart LR
-       Plain["manage.py check"] --> Default["E098 to E118, W084 to W088, W097 to W104"]
-       Deploy["manage.py check --deploy"] --> Default
-       Deploy --> Audits["W089 to W096"]
-       Tag["manage.py check --tag seo"] --> Seo["E110 to E118, W097 to W104"]
-       Tagged["manage.py check --deploy --tag seo"] --> Seo
-       Tagged --> Audits
+The checks read the static metadata of a page, ``DEFAULTS`` and every ``metadata`` dict from the page root down.
+A ``@page.metadata`` callable contributes nothing there, because running user code at check time could reach a database the deploy has yet to migrate, so its values belong to the tests.
+The checks run without a request, so the indexability rule reads as it does for a static caller, see :doc:`site`.
 
-Thresholds
-----------
+Where a key comes from
+----------------------
 
-``NEXT_FRAMEWORK["METADATA"]["CHECKS"]`` holds the numbers the audits compare against.
+``manage.py showmetadata`` resolves a URL path to its page and prints which layer settles each key of its static metadata, ``DEFAULTS`` or a ``page.py``, with every ``@page.metadata`` callable of the page listed after them.
 
-.. code-block:: python
-   :caption: config/settings.py
+.. code-block:: bash
+   :caption: shell
 
-   NEXT_FRAMEWORK = {
-       "METADATA": {
-           "CHECKS": {
-               "TITLE_MAX": 60,
-               "DESCRIPTION_MAX": 160,
-               "REQUIRE_DESCRIPTION": True,
-           },
-       },
-   }
+   uv run python manage.py showmetadata /notes/42/
 
-The values shown are the defaults.
-``REQUIRE_DESCRIPTION`` set to ``False`` silences ``next.W089`` for a project whose pages describe themselves through their body, and the length audit still runs on every description that is declared.
-A threshold holding anything but an integer falls back to its default.
+Testing the head
+----------------
 
-Opting out
-----------
-
-A warning that names a deliberate shape is silenced by its id through Django's ``SILENCED_SYSTEM_CHECKS``, which drops the message and keeps counting it.
-A landing page and its ``/index/`` alias sharing one title, for instance, silence ``next.W090`` and nothing else.
-The setting can only drop a check, so the audits are turned on by the ``--deploy`` flag and by nothing in ``NEXT_FRAMEWORK``.
+``next.testing.assert_metadata`` parses a response and compares the head tags it names, ``None`` expecting a tag to be absent.
+``og`` and ``twitter`` take property suffixes, and ``alternates`` and ``jsonld`` whole values, the members of the ``@graph`` listed as nodes.
+A test is the place for everything a callable decides per row, the title of a note or the ``noindex`` of a draft.
 
 .. code-block:: python
-   :caption: config/settings.py
+   :caption: notes/tests/test_seo.py
 
-   SILENCED_SYSTEM_CHECKS = ["next.W090"]
+   from next.testing import NextClient, assert_metadata, parse_sitemap
+
+   def test_note_head(note):
+       response = NextClient().get(f"/notes/{note.pk}/")
+       assert_metadata(
+           response,
+           title=f"{note.title} · Notes",
+           canonical=f"https://notes.example/notes/{note.pk}/",
+           robots=None,
+           og={"type": "article", "title": f"{note.title} · Notes"},
+       )
+
+   def test_sitemap_lists_the_note(note):
+       urls = parse_sitemap(NextClient().get("/sitemap.xml"))
+       assert f"https://notes.example/notes/{note.pk}/" in {url.loc for url in urls}
+
+``parse_sitemap`` answers the ``SitemapUrl`` values of a document, each with ``loc``, ``lastmod``, and ``alternates``.
+A robots file is plain text, so a test asserts on ``response.content`` directly.
+``reset_seo`` drops the discovered sources and the ``@sitemap.items`` registrations, for a test that writes a ``sitemap.py`` of its own.
 
 See also
 --------
 
 .. seealso::
 
-   :doc:`/content/howto/audit-seo-before-deploy` for wiring the audit into CI and the deploy script.
-   :doc:`/content/ref/system-checks` for every code, its condition, and the ``seo`` tag mechanics.
-   :doc:`/content/ref/settings` for the ``METADATA`` scope.
+   :doc:`/content/howto/audit-seo-before-deploy` for the checks and the tests in CI.
+   :doc:`/content/ref/system-checks` for every code and the ``seo`` tag.
+   :doc:`/content/ref/testing` for the test helpers.
